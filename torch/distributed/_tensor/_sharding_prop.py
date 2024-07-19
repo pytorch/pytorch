@@ -655,14 +655,12 @@ class ShardingPropagator:
             )
             if graph_output_specs is not None:
                 input_placements: PlacementList = [
-                    item.placements[0]
+                    item.placements[0] if isinstance(item, DTensorSpec) else None
                     for item in graph_input_specs
-                    if isinstance(item, DTensorSpec)
                 ]
                 output_placements: PlacementList = [
-                    item.placements[0]
+                    item.placements[0] if isinstance(item, DTensorSpec) else None
                     for item in graph_output_specs
-                    if isinstance(item, DTensorSpec)
                 ]
                 output_input_placements: PlacementList = (
                     output_placements + input_placements

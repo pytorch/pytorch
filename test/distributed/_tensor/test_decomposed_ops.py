@@ -2,9 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-
-from torch.distributed._tensor import distribute_tensor
-from torch.distributed._tensor.api import DTensor
+from torch.distributed._tensor import distribute_tensor, DTensor
 from torch.distributed._tensor.ops.decomposed_ops import register_op_decomposition
 from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
 from torch.testing._internal.common_utils import run_tests
@@ -12,6 +10,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+
 
 aten = torch.ops.aten
 
