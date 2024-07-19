@@ -18,7 +18,6 @@ import typing
 import weakref
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
-from dataclasses import dataclass
 
 from torch._utils_internal import maybe_upload_prof_stats_to_manifold
 
@@ -46,7 +45,6 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils._python_dispatch import _disable_current_modes
 from torch.utils._traceback import format_traceback_short
-import torch.distributed as dist
 
 from . import config, exc, trace_rules
 from .backends.registry import CompilerFn
@@ -82,7 +80,12 @@ from .guards import (
 )
 from .hooks import Hooks
 from .replay_record import ExecutionRecord
-from .symbolic_convert import InstructionTranslator, SpeculationLog, DistributedState, LocalState
+from .symbolic_convert import (
+    DistributedState,
+    InstructionTranslator,
+    LocalState,
+    SpeculationLog,
+)
 from .trace_rules import is_numpy
 from .types import BytecodeHook
 from .utils import (

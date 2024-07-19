@@ -15,6 +15,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.logging
 import torch._dynamo.test_case
+import torch.optim as optim
 from torch import nn
 from torch._C import FileCheck
 from torch._dynamo import config
@@ -678,6 +679,73 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                     opt_model, opt_outputs.logits, opt_loss, inputs_flat
                 )
                 self.assertTrue(same(correct_results, opt_results))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @config.patch(enable_compiler_collectives=True)
+    def test_compiler_collectives_automatic_dynamic_tensor(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+
+            class SimpleModel(nn.Module):
+                def __init__(self, input_size, output_size):
+                    super().__init__()
+                    self.linear = nn.Linear(input_size, output_size)
+
+                def forward(self, x):
+                    return self.linear(x)
+
+            torch._dynamo.utils.clear_compilation_metrics()
+
+            model = SimpleModel(10, 2).to(self.rank)
+            model.forward = torch.compile(model.forward)
+            ddp_model = DDP(model, device_ids=[self.rank])
+
+            loss_fn = nn.CrossEntropyLoss()
+            optimizer = optim.SGD(ddp_model.parameters(), lr=0.001)
+
+            def B(s):
+                return [torch.randn(s, 10), torch.randint(0, 2, (s,))]
+
+            if self.rank == 0:
+                dataloader = [B(5), B(8), B(6)]
+            else:
+                dataloader = [B(6), B(6), B(3)]
+
+            for data, labels in dataloader:
+                data, labels = data.to(self.rank), labels.to(self.rank)
+                optimizer.zero_grad()
+                output = ddp_model(data)
+                loss = loss_fn(output, labels)
+                loss.backward()
+                optimizer.step()
+
+            metrics = torch._dynamo.utils.get_compilation_metrics()
+            # fwd + bwd = 2 (the important thing is it's the same on all nodes)
+            self.assertEqual(len(metrics), 2)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @config.patch(enable_compiler_collectives=True)
+    def test_compiler_collectives_automatic_dynamic_scalar(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            torch._dynamo.utils.clear_compilation_metrics()
+
+            # TODO: This should be possible to do inside the function, but
+            device = f"cuda:{self.rank}"
+
+            @torch.compile()
+            def f(x, y):
+                return x + torch.ones(y, device=device).sum()
+
+            if self.rank == 0:
+                dataloader = [3, 3, 7]
+            else:
+                dataloader = [3, 4, 9]
+
+            for data in dataloader:
+                f(torch.randn(5, device=self.rank), data)
+
+            metrics = torch._dynamo.utils.get_compilation_metrics()
+            # one static, one dynamic
+            self.assertEqual(len(metrics), 2)
 
 
 @requires_nccl()
