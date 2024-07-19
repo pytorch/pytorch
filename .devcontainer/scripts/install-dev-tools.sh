@@ -5,7 +5,7 @@ git submodule sync
 git submodule update --init --recursive
 
 # This takes some time
-make setup_lint
+make setup-lint
 
 # Add CMAKE_PREFIX_PATH to bashrc
 echo 'export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}' >> ~/.bashrc
