@@ -218,7 +218,7 @@ def set_logs(
     trace_source: bool = False,
     trace_call: bool = False,
     trace_bytecode: bool = False,
-    output_code: bool = False,
+    output_code: bool = True,
     kernel_code: bool = False,
     schedule: bool = False,
     perf_hints: bool = False,
