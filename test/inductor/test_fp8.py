@@ -507,6 +507,7 @@ class TestFP8Lowering(TestCase):
     @parametrize("K", (16, 1024))
     @parametrize("N", (16, 2048))
     def test_tensorwise_scaling_acceptable_input_dims(self, M: int, K: int, N: int):
+        # alignment requirements: K and N divisible by 16
         dtype: torch.dtype = torch.bfloat16
         use_fast_accum = True
         device = "cuda"
@@ -597,6 +598,82 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=5e-1, atol=5e-1)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
+    @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
+    def test_unacceptable_input_dims(self):
+        # for compiled ops, type checking is in torch/_meta_registrations.py
+        dtype: torch.dtype = torch.bfloat16
+        device = "cuda"
+        dtype_float8 = torch.float8_e4m3fn
+        M, K, N = 64, 15, 2048  # K needs to be a multiple of 16
+        x = torch.rand(M, K, dtype=dtype, device=device)
+        w = torch.rand(N, K, dtype=dtype, device=device)
+        bias = torch.rand(N, device=device, dtype=torch.bfloat16)
+        w_fp8, w_inverse_scale = _quantize_tensorwise(w, dtype_float8)
+        w_t_fp8 = w_fp8.t()
+
+        def linear(x, w_t_fp8, w_inverse_scale, bias):
+            x_fp8, x_inverse_scale = _quantize_tensorwise(x, dtype_float8)
+            y = torch._scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                x_inverse_scale,
+                w_inverse_scale,
+                bias,
+                out_dtype=dtype,
+                use_fast_accum=True,
+            )
+            return y
+
+        linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
+        with self.assertRaises(torch._dynamo.exc.TorchRuntimeError) as cm:
+            y_compiled = linear_compiled(
+                x,
+                w_t_fp8,
+                w_inverse_scale,
+                bias,
+            )
+        self.assertTrue(
+            f"Expected self.size(1) to be divisible by 16, but got self.size(1)={K}"
+            in str(cm.exception)
+        )
+
+    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
+    @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
+    def test_unacceptable_scale_dims_rowwise_scaling(self):
+        dtype: torch.dtype = torch.bfloat16
+        device = "cuda"
+        dtype_float8 = torch.float8_e4m3fn
+        M, K, N = 233, 32, 128
+        x = torch.rand(M, K, dtype=dtype, device=device)
+        w = torch.rand(N, K, dtype=dtype, device=device)
+        bias = torch.rand(N, device=device, dtype=torch.bfloat16)
+        w_fp8, w_inverse_scale = _quantize_rowwise(w, dtype_float8)
+        w_t_fp8 = w_fp8.t()
+
+        def linear(x, w_t_fp8, w_inverse_scale, bias):
+            x_fp8, x_inverse_scale = _quantize_rowwise(x, dtype_float8)
+            y = torch._scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                w_inverse_scale.t(),  # testing with w and x scales switched
+                x_inverse_scale,
+                bias,
+                out_dtype=dtype,
+                use_fast_accum=True,
+            )
+            return y
+
+        linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
+        with self.assertRaises(torch._dynamo.exc.TorchRuntimeError) as cm:
+            y_compiled = linear_compiled(
+                x,
+                w_t_fp8,
+                w_inverse_scale,
+                bias,
+            )
+        self.assertTrue("Invalid scaling configuration." in str(cm.exception))
 
 
 if __name__ == "__main__":
