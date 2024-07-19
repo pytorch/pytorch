@@ -2253,71 +2253,78 @@ def _automatic_dynamic(
         )
 
     # Prep for automatic dynamic
-    frame_state_entry = None
-    if name not in tx.output.frame_state:
-        # If there is no entry for this source, add the tensor to frame state with its current static size.
-        # E.g., {} -> {"x": [2, 4]}
-        frame_state_entry = FrameStateSizeEntry(None, None, None)
-        frame_state_entry.size = list(e.size())
-        frame_state_entry.stride = list(e.stride())
-    else:
-        frame_state_entry = tx.output.frame_state[name]
-        if frame_state_entry.size is not None:
-            if e.ndim != len(frame_state_entry.size):
-                # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
-                # E.g. {"x": [2, 3, 4]} -> {"x": None}
-                log.debug(
-                    "automatic dynamic %s dim %s != %s",
-                    name,
-                    e.ndim,
-                    frame_state_entry.size,
-                )
-                frame_state_entry.size = None
-                frame_state_entry.stride = None
-            else:
-                # If there is already an entry, and the dim matches, for every size/stride in the frame state which
-                # disagrees with the current static size/stride, replace it with None.
-                # E.g., {"x": [2, 3]} -> {"x": [2, # None]}
+    def update_frame_state(size, stride):
+        frame_state_entry = None
+        if name not in tx.output.frame_state:
+            # If there is no entry for this source, add the tensor to frame state with its current static size.
+            # E.g., {} -> {"x": [2, 4]}
+            frame_state_entry = FrameStateSizeEntry(None, None, None)
+            frame_state_entry.size = list(size)
+            frame_state_entry.stride = list(stride)
+        else:
+            frame_state_entry = tx.output.frame_state[name]
+            if frame_state_entry.size is not None:
+                if e.ndim != len(frame_state_entry.size):
+                    # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
+                    # E.g. {"x": [2, 3, 4]} -> {"x": None}
+                    log.debug(
+                        "automatic dynamic %s dim %s != %s",
+                        name,
+                        e.ndim,
+                        frame_state_entry.size,
+                    )
+                    frame_state_entry.size = None
+                    frame_state_entry.stride = None
+                else:
+                    # If there is already an entry, and the dim matches, for every size/stride in the frame state which
+                    # disagrees with the current static size/stride, replace it with None.
+                    # E.g., {"x": [2, 3]} -> {"x": [2, # None]}
 
-                has_size_changed = False
-                for i, dim in enumerate(frame_state_entry.size):
-                    if dim is not None and e.size()[i] != dim:
-                        log.debug(
-                            "automatic dynamic %s size(%s) %s != %s",
-                            name,
-                            i,
-                            e.size(i),
-                            dim,
-                        )
-                        has_size_changed = True
-                        frame_state_entry.size[i] = None
-
-                # We want to trigger automatic dynamism when strides change, but we have to think whether stride should
-                # be INFER_STRIDE or DYNAMIC.
-                #
-                # Case 1: if strides change because of size changes, we might not want to allocate a new symbol for
-                # stride. Lets say we have a tensor (10, 20) and we mark the dim=1 dynamic for size. Resulting size will
-                # be (10, s0) and stride can be either (s0, 1) or (s1, 1). In most cases, (s0, 1) is preferred because
-                # users are not changing both size and stride.
-                #
-                # Case 2: But for another case, lets suppose the size remains same between the two invocations but stride
-                # change. In this case, we definitely want to mark the changing stride to be DYNAMIC.
-
-                # Here, we use a hueristic to simplify determination of dynamic stride. For case 1, we will always
-                # assume that stride will be inferred (INFER_STRIDE). This might be suboptimal, where user is doing something
-                # arbitrary size and stride resizing, and we fail to trigger dynamism, but we have not seen any cases
-                # yet. For case 2, we will mark the changing dimensions DYNAMIC.
-                if not has_size_changed:
-                    for i, dim in enumerate(frame_state_entry.stride):
-                        if dim is not None and e.stride()[i] != dim:
+                    has_size_changed = False
+                    for i, dim in enumerate(frame_state_entry.size):
+                        if dim is not None and size[i] != dim:
                             log.debug(
-                                "automatic dynamic %s stride(%s) %s != %s",
+                                "automatic dynamic %s size(%s) %s != %s",
                                 name,
                                 i,
-                                e.stride(i),
+                                e.size(i),
                                 dim,
                             )
-                            frame_state_entry.stride[i] = None
+                            has_size_changed = True
+                            frame_state_entry.size[i] = None
+                        elif dim is None:
+                            has_size_changed = True
+
+                    # We want to trigger automatic dynamism when strides change, but we have to think whether stride should
+                    # be INFER_STRIDE or DYNAMIC.
+                    #
+                    # Case 1: if strides change because of size changes, we might not want to allocate a new symbol for
+                    # stride. Lets say we have a tensor (10, 20) and we mark the dim=1 dynamic for size. Resulting size will
+                    # be (10, s0) and stride can be either (s0, 1) or (s1, 1). In most cases, (s0, 1) is preferred because
+                    # users are not changing both size and stride.
+                    #
+                    # Case 2: But for another case, lets suppose the size remains same between the two invocations but stride
+                    # change. In this case, we definitely want to mark the changing stride to be DYNAMIC.
+
+                    # Here, we use a hueristic to simplify determination of dynamic stride. For case 1, we will always
+                    # assume that stride will be inferred (INFER_STRIDE). This might be suboptimal, where user is doing something
+                    # arbitrary size and stride resizing, and we fail to trigger dynamism, but we have not seen any cases
+                    # yet. For case 2, we will mark the changing dimensions DYNAMIC.
+                    if not has_size_changed:
+                        for i, dim in enumerate(frame_state_entry.stride):
+                            if dim is not None and stride[i] != dim:
+                                log.debug(
+                                    "automatic dynamic %s stride(%s) %s != %s",
+                                    name,
+                                    i,
+                                    e.stride(i),
+                                    dim,
+                                )
+                                frame_state_entry.stride[i] = None
+        tx.output.frame_state[name] = frame_state_entry
+
+    update_frame_state(e.size(), e.stride())
+    frame_state_entry = tx.output.frame_state[name]
 
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
@@ -2460,8 +2467,6 @@ def _automatic_dynamic(
 
         dynamic_sizes.append(dynamic_size)
         dynamic_strides.append(dynamic_stride)
-
-    tx.output.frame_state[name] = frame_state_entry
 
     return StatefulSymbolicContext(
         dynamic_sizes=dynamic_sizes,
