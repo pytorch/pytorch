@@ -671,7 +671,7 @@ void propagate_xla_data_direct(const ITensorListRef tensor,
   auto tensor_it = tensor.begin();
   auto other_it = other.begin();
   for (C10_UNUSED const auto i : c10::irange(tensor.size())) {
-    propagate_xla_data(*tensor_it++, *other_it++);
+    propagate_xla_data_direct(*tensor_it++, *other_it++);
   }
 }
 
