@@ -145,7 +145,6 @@ TORCH_API void THP_decodeDoubleBuffer(
     const uint8_t* src,
     THPByteOrder order,
     size_t len);
-TORCH_API void THP_decodeBoolBuffer(bool* dst, const uint8_t* src, size_t len);
 TORCH_API void THP_decodeBFloat16Buffer(
     at::BFloat16* dst,
     const uint8_t* src,
