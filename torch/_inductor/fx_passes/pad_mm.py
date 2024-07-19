@@ -558,7 +558,7 @@ def should_pad_bench(
 
         if ori_time is None:
             ori_time = benchmarker.lazy_benchmark_gpu(orig_bench_fn)
-            
+
         pad_time = benchmarker.lazy_benchmark_gpu(pad_bench_fn)
         set_cached_base_mm_benchmark_time(ori_time_key, float(ori_time))
         return should_pad(key, ori_time, pad_time)

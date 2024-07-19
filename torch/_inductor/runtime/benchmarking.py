@@ -41,27 +41,27 @@ class LazyBenchmark:
         del self.benchmark
         return timing_ms
 
-    __float__ = lambda self: self.timing_ms
-    __format__ = lambda self, format_spec: format(self.timing_ms, format_spec)
-    __str__ = lambda self: str(self.timing_ms)
+    __float__ = lambda self: self.timing_ms  # noqa: E731
+    __format__ = lambda self, format_spec: format(self.timing_ms, format_spec)  # noqa: E731
+    __str__ = lambda self: str(self.timing_ms)  # noqa: E731
 
-    __lt__ = lambda self, other: other > self.timing_ms
-    __le__ = lambda self, other: other >= self.timing_ms
+    __lt__ = lambda self, other: other > self.timing_ms  # noqa: E731
+    __le__ = lambda self, other: other >= self.timing_ms  # noqa: E731
 
-    __gt__ = lambda self, other: other < self.timing_ms
-    __ge__ = lambda self, other: other <= self.timing_ms
+    __gt__ = lambda self, other: other < self.timing_ms  # noqa: E731
+    __ge__ = lambda self, other: other <= self.timing_ms  # noqa: E731
 
-    __add__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms + other)
-    __radd__ = lambda self, other: LazyBenchmark(lambda: other + self.timing_ms)
+    __add__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms + other)  # noqa: E731
+    __radd__ = lambda self, other: LazyBenchmark(lambda: other + self.timing_ms)  # noqa: E731
 
-    __sub__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms - other)
-    __rsub__ = lambda self, other: LazyBenchmark(lambda: other - self.timing_ms)
+    __sub__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms - other)  # noqa: E731
+    __rsub__ = lambda self, other: LazyBenchmark(lambda: other - self.timing_ms)  # noqa: E731
 
-    __mul__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms * other)
-    __rmul__ = lambda self, other: LazyBenchmark(lambda: other * self.timing_ms)
+    __mul__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms * other)  # noqa: E731
+    __rmul__ = lambda self, other: LazyBenchmark(lambda: other * self.timing_ms)  # noqa: E731
 
-    __truediv__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms / other)
-    __rtruediv__ = lambda self, other: LazyBenchmark(lambda: other / self.timing_ms)
+    __truediv__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms / other)  # noqa: E731
+    __rtruediv__ = lambda self, other: LazyBenchmark(lambda: other / self.timing_ms)  # noqa: E731
 
 
 class Benchmarker:
@@ -179,7 +179,7 @@ class Benchmarker:
         **kwargs: Dict[str, Any]
     ) -> float:
         counters["inductor"]["benchmarking_benchmark"] += 1
-        _callable = lambda: fn(*fn_args, **fn_kwargs)
+        _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
         fn_args_and_kwargs = list(fn_args) + list(fn_kwargs.values())
         # should we be checking if all args and kwargs are on the same device?
         if is_cpu_device(fn_args_and_kwargs):
@@ -478,10 +478,10 @@ class Benchmarker:
         **kwargs: Dict[str, Any]
     ) -> LazyBenchmark:
         counters["inductor"]["benchmarking_lazy_benchmark"] += 1
+        _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
         if not benchmarking_config.enable_lazy_benchmarking:
             log.debug("Lazy benchmarking is disabled. Immediately proceeding to CPU benchmarking.")
             return self.benchmark_cpu(_callable, **kwargs)
-        _callable = lambda: fn(*fn_args, **fn_kwargs)
         fn_args_and_kwargs = list(fn_args) + list(fn_kwargs.values())
         if is_cpu_device(fn_args_and_kwargs):
             return self.lazy_benchmark_cpu(_callable, **kwargs)

@@ -1053,7 +1053,7 @@ class trace:
 
     log_autotuning_results: bool = False
 
-	
+
 class benchmarking:
     enable_lazy_benchmarking = os.environ.get("TORCHINDUCTOR_ENABLE_LAZY_BENCHMARKING", "1") == "1"
 
