@@ -1147,7 +1147,7 @@ def load(
     def _get_wo_message(message: str) -> str:
         unsafe_global_pattern = r"GLOBAL (\S+) was not an allowed global by default."
         has_unsafe_global = re.search(unsafe_global_pattern, message) is not None
-        blocklist_pattern = r"whose module (\S+) is blocklisted"
+        blocklist_pattern = r"whose module (\S+) is blocked"
         has_blocklist = re.search(blocklist_pattern, message) is not None
         if has_unsafe_global:
             updated_message = (
