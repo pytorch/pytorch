@@ -129,6 +129,8 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   void releasePool(c10::DeviceIndex device, c10::cuda::MempoolId_t mempool_id)
       override;
   std::shared_ptr<void> getIpcDevPtr(std::string handle) override;
+  c10::cuda::CUDACachingAllocator::ShareableHandle shareIpcHandle(
+      void*) override;
   void recordHistory(
       bool enabled,
       c10::cuda::CUDACachingAllocator::CreateContextFn context_recorder,
