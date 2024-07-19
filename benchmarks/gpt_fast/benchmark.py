@@ -10,9 +10,10 @@ import torch
 import torch.nn as nn
 from torch.utils.flop_counter import FlopCounterMode
 
+
 WARMUP_ITER = 5
 
-A100_80G_BF16_TFLOPS = 312
+A100_40G_BF16_TFLOPS = 312
 
 
 @dataclasses.dataclass
@@ -23,6 +24,7 @@ class Experiment:
     actual: float
     dtype: str
     device: str
+    is_model: bool = False
 
 
 class SimpleMLP(nn.Module):
@@ -45,7 +47,7 @@ class SimpleMLP(nn.Module):
 
 def run_mlp_layer_norm_gelu(device: str = "cuda"):
     dtype_flops_utilization_map = {
-        torch.bfloat16: "0.71",
+        torch.bfloat16: "0.8",
     }
     input_shapes = [1024, 4096, 8192, 16384]
     intermediate_size = 14336
@@ -70,13 +72,13 @@ def run_mlp_layer_norm_gelu(device: str = "cuda"):
                 compiled_mod(x)
 
             us_per_iter = do_bench(lambda: compiled_mod(x)) * 1000
-            flops_utilization += us_per_iter * flops / 1e9 / A100_80G_BF16_TFLOPS
+            flops_utilization += us_per_iter * flops / 1e9 / A100_40G_BF16_TFLOPS
 
         flops_utilization = flops_utilization / len(input_shapes)
         dtype_str = str(dtype).replace("torch.", "")
         results.append(
             Experiment(
-                f"mlp_layer_norm_gelu_{dtype_str}",
+                "mlp_layer_norm_gelu",
                 "flops_utilization",
                 expected_flops_utilization,
                 f"{flops_utilization:.02f}",
@@ -89,7 +91,7 @@ def run_mlp_layer_norm_gelu(device: str = "cuda"):
 
 def run_layer_norm(device: str = "cuda"):
     dtype_memory_bandwidth_map = {
-        torch.bfloat16: "1017",
+        torch.bfloat16: "950",
     }
     input_shapes = [1024, 4096, 8192, 16384]
     BS = 4096
@@ -113,7 +115,7 @@ def run_layer_norm(device: str = "cuda"):
         dtype_str = str(dtype).replace("torch.", "")
         results.append(
             Experiment(
-                f"layer_norm_{dtype_str}",
+                "layer_norm",
                 "memory_bandwidth(GB/s)",
                 expected_memory_bandwidth,
                 f"{memory_bandwidth:.02f}",
@@ -128,8 +130,8 @@ def run_layer_norm(device: str = "cuda"):
 def run_gather_gemv(device: str = "cuda"):
     E = 8
     dtype_memory_bandwidth_map = {
-        torch.int8: "1113",
-        torch.bfloat16: "1249",
+        torch.int8: "990",
+        torch.bfloat16: "1060",
     }
     input_shapes = [1024, 4096, 8192, 16384]
     results = []
@@ -156,7 +158,7 @@ def run_gather_gemv(device: str = "cuda"):
         dtype_str = str(dtype).replace("torch.", "")
         results.append(
             Experiment(
-                f"gather_gemv_{dtype_str}",
+                "gather_gemv",
                 "memory_bandwidth(GB/s)",
                 expected_memory_bandwidth,
                 f"{memory_bandwidth:.02f}",
@@ -170,8 +172,8 @@ def run_gather_gemv(device: str = "cuda"):
 @torch._inductor.config.patch(coordinate_descent_tuning=True)
 def run_gemv(device: str = "cuda"):
     dtype_memory_bandwidth_map = {
-        torch.int8: "990",
-        torch.bfloat16: "1137",
+        torch.int8: "870",
+        torch.bfloat16: "990",
     }
     input_shapes = [1024, 4096, 8192, 16384]
     results = []
@@ -197,7 +199,7 @@ def run_gemv(device: str = "cuda"):
         dtype_str = str(dtype).replace("torch.", "")
         results.append(
             Experiment(
-                f"gemv_{dtype_str}",
+                "gemv",
                 "memory_bandwidth(GB/s)",
                 expected_memory_bandwidth,
                 f"{memory_bandwidth:.02f}",

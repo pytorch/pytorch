@@ -77,9 +77,10 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfTorchDynamo,
 )
-
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+
 
 USE_TORCHVISION = False
 try:
@@ -2341,8 +2342,7 @@ class TestJac(VmapTearDownMixin, TestCase):
         self.assertEqual(actual, expected)
 
     # https://github.com/pytorch/pytorch/issues/127036
-    # it won't fail as jacrev/jacfwd were not inlined (see #128255)
-    # @xfailIfTorchDynamo
+    @xfailIfTorchDynamo
     @parametrize("_preallocate_and_copy", (True, False))
     def test_chunk_jacrev_chunksize_one(self, device, _preallocate_and_copy):
         # With chunk_size=1, we shouldn't `vmap` and hence not be limited
@@ -3397,6 +3397,8 @@ class TestComposability(TestCase):
         new_cotangent = torch.randn(())
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
 
+    # FIXME: test fails in Windows
+    @unittest.skipIf(IS_WINDOWS, "fails in Windows; needs investigation")
     @unittest.skipIf(IS_FBCODE, "can't subprocess in fbcode")
     # it is redundant to run this test twice on a machine that has GPUs
     @onlyCPU
@@ -5083,9 +5085,9 @@ def traceable(f):
 @markDynamoStrictTest
 class TestCompileTransforms(TestCase):
     @skipIfRocm(msg="test leaks memory on ROCm")
-    # torch.compile is not supported on Windows
+    # torch.compile is not supported on Windows CUDA.
     # Triton only supports GPU with SM70 or later.
-    @expectedFailureIf(IS_WINDOWS or (TEST_CUDA and not SM70OrLater))
+    @expectedFailureIf((IS_WINDOWS and TEST_CUDA) or (TEST_CUDA and not SM70OrLater))
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:

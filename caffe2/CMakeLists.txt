@@ -42,10 +42,10 @@ endif()
 
 # ---[ ATen build
 if(INTERN_BUILD_ATEN_OPS)
-  set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
+  set(__torch_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   add_subdirectory(../aten aten)
-  set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
+  set(CMAKE_POSITION_INDEPENDENT_CODE ${__torch_CMAKE_POSITION_INDEPENDENT_CODE})
 
   # Generate the headers wrapped by our operator
   file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
@@ -548,7 +548,7 @@ if(USE_CUDA)
     set(DELAY_LOAD_FLAGS "")
   endif()
 
-  target_link_libraries(caffe2_nvrtc ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB} ${DELAY_LOAD_FLAGS})
+  target_link_libraries(caffe2_nvrtc PRIVATE caffe2::nvrtc ${DELAY_LOAD_FLAGS})
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   if(USE_NCCL)
     list(APPEND Caffe2_GPU_SRCS
@@ -560,6 +560,7 @@ if(USE_CUDA)
       append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_GPU_SRCS)
       set_source_files_properties(
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/CudaDMAConnectivity.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemory.cu
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
@@ -571,15 +572,6 @@ if(USE_CUDA)
   )
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
-endif()
-
-if(USE_FLASH_ATTENTION AND NOT MSVC)
-  # Cutlass contains a sign-compare violation in its codebase to be fixed by https://github.com/NVIDIA/cutlass/pull/869
-  set_source_files_properties(
-    "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/nested/cuda/NestedTensorMatmul.cu"
-    "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/nested/cuda/NestedTensorTransformerFunctions.cu"
-    "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/transformers/cuda/flash_attn/fmha_bwd_hdim128.cu"
-    PROPERTIES COMPILE_FLAGS "-Wno-sign-compare")
 endif()
 
 if(BUILD_ONEDNN_GRAPH)
@@ -750,6 +742,9 @@ if(BUILD_LIBTORCHLESS)
     find_library(TORCH_XPU_LIB torch_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
   endif()
   add_subdirectory(../torch torch)
+  # ---[ Torch python bindings build
+  set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
+  set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
 else()
   set(TORCH_LIB torch)
   set(TORCH_CPU_LIB torch_cpu)
@@ -769,7 +764,6 @@ torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
 # Ignore Wdeprecated-XXX errors from third-party libraries
 if(NOT MSVC)
-  set_source_files_properties(${PROJECT_SOURCE_DIR}/aten/src/ATen/native/QuantizedLinear.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
   set_source_files_properties(${PROJECT_SOURCE_DIR}/torch/csrc/distributed/c10d/socket.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
 endif()
 
@@ -932,7 +926,6 @@ elseif(USE_CUDA)
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
-  target_compile_options_if_supported(torch_cuda "-Wno-deprecated-copy")  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
 
   if(USE_CUSPARSELT)
@@ -1014,7 +1007,6 @@ endif()
 if(USE_XPU)
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
-  target_compile_options_if_supported(torch_xpu "-Wno-deprecated-copy")  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
 
   # ATen XPU implementation
@@ -1190,6 +1182,9 @@ endif()
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/cpp-httplib)
 
+target_include_directories(torch_cpu PRIVATE
+  ${TORCH_ROOT}/third_party/nlohmann/include)
+
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
@@ -1270,12 +1265,10 @@ install(FILES
   ${PROJECT_BINARY_DIR}/TorchConfig.cmake
   DESTINATION share/cmake/Torch)
 
-
 # ---[ Torch python bindings build
 add_subdirectory(../torch torch)
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
 set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
-
 # ==========================================================
 # END formerly-libtorch flags
 # ==========================================================
@@ -1442,75 +1435,6 @@ if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
   target_compile_definitions(torch_cpu PUBLIC "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
 endif()
 
-if(MSVC AND NOT BUILD_SHARED_LIBS)
-  # Note [Supporting both static and dynamic libraries on Windows]
-  # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  # A Windows library may be distributed as either a static or dynamic
-  # library.  The chosen distribution mechanism affects how you setup
-  # the headers for the library: if you statically link a function,
-  # all you need is an ordinary signature:
-  #
-  #     void f();
-  #
-  # But if you *dynamically* link it, then you must provide a __declspec
-  # specifying that it should be imported from a DLL:
-  #
-  #     __declspec(dllimport) void f();
-  #
-  # Mixing the two situations will not work: if you specify dllimport
-  # while statically linking, the linker will complain it cannot find
-  # the __imp_f symbol (which serve as the DLL entrypoint); if you
-  # fail to specify dllimport for a symbol that's coming from a DLL,
-  # the linker will complain that it can't find f.  Joy!
-  #
-  # Most places on the Internet, you will find people have written
-  # their headers under the assumption that the application will
-  # only ever be dynamically linked, as they define a macro which
-  # tags a function as __declspec(dllexport) if you are actually
-  # building the library, and __declspec(dllimport) otherwise.  But
-  # if you want these headers to also work if you are linking against
-  # a static library, you need a way to avoid adding these __declspec's
-  # at all.  And that "mechanism" needs to apply to any downstream
-  # libraries/executables which are going to link against your library.
-  #
-  #   As an aside, why do we need to support both modes?
-  #   For historical reasons, PyTorch ATen on Windows is built dynamically,
-  #   while Caffe2 on Windows is built statically (mostly because if
-  #   we build it dynamically, we are over the DLL exported symbol limit--and
-  #   that is because Caffe2 hasn't comprehensively annotated all symbols
-  #   which cross the DLL boundary with CAFFE_API).  So any code
-  #   which is used by both PyTorch and Caffe2 needs to support both
-  #   modes of linking.
-  #
-  # So, you have a macro (call it AT_CORE_STATIC_WINDOWS) which you need to have
-  # set for any downstream library/executable that transitively includes your
-  # headers.  How are you going to do this?  You have two options:
-  #
-  #   1. Write out a config.h header which stores whether or not
-  #      you are linking statically or dynamically.
-  #
-  #   2. Force all of users to set the macro themselves.  If they
-  #      use cmake, you can set -DAT_CORE_STATIC_WINDOWS=1 as a PUBLIC
-  #      compile option, in which case cmake will automatically
-  #      add the macro for you.
-  #
-  # Which one is better? Well, it depends: they trade off implementor
-  # ease versus user ease: (1) is more work for the library author
-  # but the user doesn't have to worry about it; (2) requires the user
-  # to set the macro themselves... but only if they don't use cmake.
-  #
-  # So, which is appropriate in our situation?  In my mind, here is
-  # the distinguishing factor: it is more common to distribute
-  # DLLs, since they don't require you to line up the CRT version
-  # (/MD, /MDd, /MT, /MTd) and MSVC version at the use site.  So,
-  # if a user is already in the business of static linkage, they're
-  # already in "expert user" realm.  So, I've decided that at this
-  # point in time, the simplicity of implementation of (2) wins out.
-  #
-  # NB: This must be target_compile_definitions, not target_compile_options,
-  # as the latter is not respected by nvcc
-  target_compile_definitions(torch_cpu PUBLIC "AT_CORE_STATIC_WINDOWS=1")
-endif()
 if(MSVC AND BUILD_SHARED_LIBS)
   # ONNX is linked statically and needs to be exported from this library
   # to be used externally. Make sure that references match the export.
@@ -1735,7 +1659,7 @@ if(BUILD_TEST)
         if(NOT MSVC)
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/AffineQuantizerBase.cpp)
           # TODO: Get rid of c10 dependency (which is only needed for the implementation of AT_ERROR)
-          target_link_libraries(${test_name}_${CPU_CAPABILITY} c10 sleef gtest_main)
+          target_link_libraries(${test_name}_${CPU_CAPABILITY} c10 sleef gtest_main nlohmann)
           if(USE_FBGEMM)
             target_link_libraries(${test_name}_${CPU_CAPABILITY} fbgemm)
           endif()
@@ -1889,35 +1813,4 @@ if(MSVC)
     set_source_files_properties(${tmp_path} PROPERTIES COMPILE_FLAGS "-Xcompiler /Zc:lambda")
   endforeach()
 endif()
-endif()
-
-# Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
-# This is because the build rules here written in such a way that they always
-# appear to need to be re-run generating >600 pieces of work during the pytorch
-# rebuild step. The long-term fix should be to clean up these rules so they
-# only rerun when needed.
-
-if(BUILD_PYTHON)
-  # ---[ Options.
-  set(PYTHON_LIB_REL_PATH "${Python_SITELIB}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
-  message(STATUS "Using ${PYTHON_LIB_REL_PATH} as python relative installation path")
-
-
-  set(build_files)
-  foreach(python_src ${PYTHON_SRCS})
-    add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/${python_src}
-                       DEPENDS ${PROJECT_SOURCE_DIR}/${python_src}
-                       COMMAND ${CMAKE_COMMAND} -E copy
-                       ${PROJECT_SOURCE_DIR}/${python_src}
-                       ${CMAKE_BINARY_DIR}/${python_src})
-    list(APPEND build_files ${CMAKE_BINARY_DIR}/${python_src})
-  endforeach()
-
-  add_custom_target(python_copy_files ALL DEPENDS ${build_files})
-
-
-  # Install commands
-  # Pick up static python files
-  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
-          FILES_MATCHING PATTERN "*.py")
 endif()

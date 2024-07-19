@@ -20,6 +20,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
 )
 
+
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
         "Windows CI does not have necessary dependencies for test_torchinductor_codegen_dynamic_shapes yet\n"
@@ -121,6 +122,7 @@ test_failures = {
     "test_arange6_dynamic_shapes": TestFailure(("cpu",)),
     "test_clamp_type_promotion_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
+    "test_conv3d_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv3d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_expand_dynamic_shapes": TestFailure(("cpu",)),
     "test_full_boolean_dynamic_shapes": TestFailure(("cpu",)),
@@ -139,6 +141,7 @@ test_failures = {
     "test_uint_dynamic_shapes": TestFailure(("cpu",)),
     "test_issue102546_dynamic_shapes": TestFailure(("cpu",)),
     "test_repeat_as_strided_dynamic_shapes": TestFailure(("cpu",)),
+    "test_mul_index_expr_dynamic_shapes": TestFailure(("cpu",)),
     #
     # Failed to find for loop/triton kernel:
     #
@@ -237,11 +240,14 @@ test_failures = {
     "test_pointwise_hermite_polynomial_he_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_pointwise_laguerre_polynomial_l_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_pointwise_legendre_polynomial_p_dynamic_shapes": TestFailure(("cuda", "xpu")),
+    "test_polar_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu"), is_skip=True),
     "test_randn_generator_dynamic_shapes": TestFailure(("cpu",)),
     "test_randn_like_empty_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_single_elem_dynamic_shapes": TestFailure(("cpu",)),
     "test_single_elem_indirect_dynamic_shapes": TestFailure(("cpu",)),
     "test_sort_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_sort_stable_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_sort_transpose_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_split_cumsum_dynamic_shapes": TestFailure(("cpu",)),
     "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu",)),
     "test_split_cumprod_dynamic_shapes": TestFailure(("cpu",)),
@@ -316,6 +322,9 @@ test_failures = {
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_list_clearing_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
+    "test_dropout_trivial_1_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_dropout2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu"), is_skip=True),

@@ -383,12 +383,14 @@ struct ExpandableSegment {
   ExpandableSegment(
       c10::DeviceIndex device,
       cudaStream_t stream,
-      size_t size,
+      size_t address_space_size,
+      size_t segment_size,
       std::vector<c10::DeviceIndex> peers)
       : device_(device),
         stream_(stream),
         // 2MB for small pool, 20MB for large pool
-        segment_size_(size),
+        segment_size_(segment_size),
+        max_handles_(numSegments(address_space_size)),
         peers_(std::move(peers)) {
     cudaDeviceProp prop{};
     C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
@@ -411,7 +413,7 @@ struct ExpandableSegment {
       return rangeFromHandles(begin, end);
     }
     while (end > handles_.size()) {
-      handles_.emplace_back(c10::nullopt);
+      handles_.emplace_back(std::nullopt);
     }
     for (auto i : c10::irange(begin, end)) {
       TORCH_INTERNAL_ASSERT(!handles_.at(i));
@@ -426,7 +428,7 @@ struct ExpandableSegment {
       if (status == CUDA_ERROR_OUT_OF_MEMORY) {
         for (auto j : c10::irange(begin, i)) {
           auto h = handles_.at(j).value();
-          handles_.at(j) = c10::nullopt;
+          handles_.at(j) = std::nullopt;
           C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h));
         }
         trimHandles();
@@ -435,19 +437,7 @@ struct ExpandableSegment {
       C10_CUDA_DRIVER_CHECK(status);
       handles_.at(i) = handle;
     }
-    for (auto i : c10::irange(begin, end)) {
-      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemMap_(
-          ptr_ + i * segment_size_,
-          segment_size_,
-          0,
-          handles_.at(i).value(),
-          0ULL));
-    }
-
-    setAccess(device_, begin, end);
-    for (auto p : peers_) {
-      setAccess(p, begin, end);
-    }
+    mapAndSetAccess(begin, end);
     return rangeFromHandles(begin, end);
   }
 
@@ -496,6 +486,21 @@ struct ExpandableSegment {
         ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
   }
 
+  void mapAndSetAccess(size_t begin, size_t end) {
+    for (auto i : c10::irange(begin, end)) {
+      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemMap_(
+          ptr_ + i * segment_size_,
+          segment_size_,
+          0,
+          handles_.at(i).value(),
+          0ULL));
+    }
+    setAccess(device_, begin, end);
+    for (auto p : peers_) {
+      setAccess(p, begin, end);
+    }
+  }
+
   void unmapHandles(size_t begin, size_t end) {
     // note: unlike cudaFree, MemUnmap and MemRelease do
     // not appear to synchronize in all cases, so we have to wait for the
@@ -507,7 +512,7 @@ struct ExpandableSegment {
     C10_CUDA_CHECK(cudaStreamSynchronize(stream_));
     for (auto i : c10::irange(begin, end)) {
       CUmemGenericAllocationHandle h = handles_.at(i).value();
-      handles_.at(i) = c10::nullopt;
+      handles_.at(i) = std::nullopt;
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
           ptr_ + segment_size_ * i, segment_size_));
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h));
@@ -548,8 +553,8 @@ struct ExpandableSegment {
   c10::DeviceIndex device_;
   cudaStream_t stream_;
   CUdeviceptr ptr_{};
-  size_t max_handles_{0};
   size_t segment_size_;
+  size_t max_handles_;
   std::vector<std::optional<CUmemGenericAllocationHandle>> handles_;
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
@@ -560,8 +565,9 @@ struct ExpandableSegment {
   ExpandableSegment(
       c10::DeviceIndex device,
       cudaStream_t stream,
-      size_t size,
-      const std::vector<c10::DeviceIndex>& peers) {
+      size_t address_space_size,
+      size_t segment_size,
+      std::vector<c10::DeviceIndex> peers) {
     TORCH_INTERNAL_ASSERT(false, "expandable segment not supported");
   }
   SegmentRange map(SegmentRange range) {
@@ -792,6 +798,69 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
   }
 }
 
+class TraceEntryRingBuffer {
+ public:
+  TraceEntryRingBuffer() {
+    // alloc_trace is a pointer because we need to intentionally
+    // leak this on deallocation it can hold references to Python
+    // state which will already be destroyed when we are in exit handlers
+    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
+    alloc_trace = new std::vector<TraceEntry>();
+  }
+
+  void setMaxEntries(size_t size) {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    alloc_trace_max_entries_ = std::max(size_t(1), size);
+  }
+
+  void insertTraceEntries(const TraceEntry& te) {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    if (alloc_trace->size() < alloc_trace_max_entries_) {
+      alloc_trace->emplace_back(te);
+    } else {
+      (*alloc_trace)[alloc_trace_next++] = te;
+      if (alloc_trace_next == alloc_trace_max_entries_) {
+        alloc_trace_next = 0;
+      }
+    }
+  }
+
+  void getTraceEntries(std::vector<TraceEntry>& result) {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    result.reserve(alloc_trace->size());
+    result.insert(
+        result.end(),
+        alloc_trace->begin() +
+            static_cast<std::vector<TraceEntry>::difference_type>(
+                alloc_trace_next),
+        alloc_trace->end());
+    result.insert(
+        result.end(),
+        alloc_trace->begin(),
+        alloc_trace->begin() +
+            static_cast<std::vector<TraceEntry>::difference_type>(
+                alloc_trace_next));
+  }
+
+  void clear() {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    alloc_trace_next = 0;
+    alloc_trace->clear();
+  }
+
+ private:
+  size_t alloc_trace_max_entries_ = 1;
+
+  // Both alloc_trace and alloc_trace_next needs to be used
+  // under alloc_trace_lock.
+  std::mutex alloc_trace_lock;
+  size_t alloc_trace_next = 0;
+  std::vector<TraceEntry>*
+      alloc_trace; // pointer because we need to intentionally leak this on
+                   // deallocation it can hold references to Python state which
+                   // will already be destroyed when we are in exit handlers
+};
+
 } // anonymous namespace
 } // namespace Native
 
@@ -901,13 +970,10 @@ class DeviceCachingAllocator {
   bool record_history = false;
 
   std::atomic<CreateContextFn> context_recorder_;
-  size_t alloc_trace_next = 0;
   RecordContext record_context_ = RecordContext::NEVER;
-  size_t alloc_trace_max_entries_ = 1;
-  std::vector<TraceEntry>*
-      alloc_trace; // pointer because we need to intentionally leak this on
-                   // deallocation it can hold references to Python state which
-                   // will already be destroyed when we are in exit handlers
+
+  // Ring buffer for memory snapshot TraceEntry's
+  TraceEntryRingBuffer alloc_buffer;
 
   // Members specific to CUDA graphs
 
@@ -933,9 +999,7 @@ class DeviceCachingAllocator {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   DeviceCachingAllocator()
-      : large_blocks(/*small=*/false),
-        small_blocks(/*small=*/true),
-        alloc_trace(new std::vector<TraceEntry>()) {
+      : large_blocks(/*small=*/false), small_blocks(/*small=*/true) {
     stats.max_split_size =
         static_cast<int64_t>(CUDAAllocatorConfig::max_split_size());
     context_recorder_.store(nullptr);
@@ -944,18 +1008,21 @@ class DeviceCachingAllocator {
   void recordHistory(
       bool enabled,
       CreateContextFn context_recorder,
-      size_t alloc_trace_max_entries,
+      size_t alloc_buffer_max_entries,
       RecordContext when) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     TORCH_CHECK(when == RecordContext::NEVER || context_recorder);
     record_history = enabled;
     context_recorder_.store(record_history ? context_recorder : nullptr);
-    alloc_trace_max_entries_ = std::max(size_t(1), alloc_trace_max_entries);
+    alloc_buffer.setMaxEntries(alloc_buffer_max_entries);
     record_context_ = enabled ? when : RecordContext::NEVER;
     if (!enabled) {
-      alloc_trace_next = 0;
-      alloc_trace->clear();
+      alloc_buffer.clear();
     }
+  }
+
+  void recordAnnotation(const std::shared_ptr<GatheredContext>& name) {
+    record_trace(TraceEntry::USER_DEFINED, 0, 0, nullptr, 0, name);
   }
 
   bool isHistoryEnabled() {
@@ -1177,6 +1244,7 @@ class DeviceCachingAllocator {
           format_size(device_free),
           " is free. ",
           proc_info,
+          allowed_info,
           "Of the allocated memory ",
           format_size(allocated_bytes + allocated_in_private_pools),
           " is allocated by PyTorch, ",
@@ -1359,6 +1427,17 @@ class DeviceCachingAllocator {
     return basePtr;
   }
 
+  ShareableHandle shareIpcHandle(Block* block) {
+    size_t outSize = 0;
+    void* base = getBaseAllocation(block, &outSize);
+    auto offset = (char*)block->ptr - (char*)base;
+    cudaIpcMemHandle_t handle;
+    C10_CUDA_CHECK(cudaIpcGetMemHandle(&handle, base));
+    return ShareableHandle{
+        offset,
+        std::string((char*)&handle, (char*)&handle + CUDA_IPC_HANDLE_SIZE)};
+  }
+
   void recordStream(Block* block, cuda::CUDAStream stream) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     if (stream.stream() == block->stream) {
@@ -1531,6 +1610,16 @@ class DeviceCachingAllocator {
 
     // allocate all blocks in the segment
     for (size_t i = 0; i < segment_len; ++i) {
+      // The last block in every expandable segment is the remaining amount of
+      // available unmapped virtual address space. We shouldn't change it but
+      // instead check it is correctly formed then skip over allocating it.
+      if (i == segment_len - 1 && curr_block->expandable_segment_) {
+        TORCH_CHECK(curr_block->next == nullptr);
+        TORCH_CHECK(!curr_block->mapped);
+        TORCH_CHECK(curr_block->allocated == false);
+        continue;
+      }
+
       auto& block_state = segment.blocks.at(i);
       AllocParams params(
           block_state.device,
@@ -1545,8 +1634,11 @@ class DeviceCachingAllocator {
 
       // splitting a block depends on `max_split_size`, which may have changed
       // between whe checkpoint was taken and now, so we make sure to recreate
-      // the behavior from the checkpoint.
-      bool split = (i + 1) < segment.blocks.size();
+      // the behavior from the checkpoint. Keep splitting as long as there is
+      // space left in the block because the block is already the size of how it
+      // appears in the segment, so any leftover space belongs to the next
+      // block.
+      bool split = curr_block->size - block_state.size > 0;
 
       // curr_block will become next pointer if it is split, so reassign with
       // the returned value
@@ -1569,6 +1661,13 @@ class DeviceCachingAllocator {
     curr_block = last_block;
 
     for (size_t i = 0; i < segment_len; ++i, curr_block = curr_block->next) {
+      if (i == segment_len - 1 && curr_block->expandable_segment_) {
+        TORCH_CHECK(curr_block->next == nullptr);
+        TORCH_CHECK(!curr_block->mapped);
+        TORCH_CHECK(curr_block->allocated == false);
+        continue;
+      }
+
       auto& block_state = segment.blocks.at(i);
       TORCH_INTERNAL_ASSERT(curr_block != nullptr);
 
@@ -1760,19 +1859,7 @@ class DeviceCachingAllocator {
       const std::function<time_t(approx_time_t)>& tsc_to_us) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     std::vector<TraceEntry> result;
-    result.reserve(alloc_trace->size());
-    result.insert(
-        result.end(),
-        alloc_trace->begin() +
-            static_cast<std::vector<TraceEntry>::difference_type>(
-                alloc_trace_next),
-        alloc_trace->end());
-    result.insert(
-        result.end(),
-        alloc_trace->begin(),
-        alloc_trace->begin() +
-            static_cast<std::vector<TraceEntry>::difference_type>(
-                alloc_trace_next));
+    alloc_buffer.getTraceEntries(result);
 
     // Convert all the timestamps from tsc to epoch time in microseconds.
     for (auto& te : result) {
@@ -1988,8 +2075,19 @@ class DeviceCachingAllocator {
       }
     }
     auto segment_size = pool->is_small ? kSmallBuffer : kLargeBuffer;
+    cudaDeviceProp prop{};
+    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+    // we allocate enough address space for 1 1/8 the total memory on the GPU.
+    // This allows for some cases where we have to unmap pages earlier in the
+    // segment to put them at the end.
+    size_t address_space_size = prop.totalGlobalMem + prop.totalGlobalMem / 8;
+
     expandable_segments_.emplace_back(new ExpandableSegment(
-        device, stream, segment_size, devices_with_peer_access_));
+        device,
+        stream,
+        address_space_size,
+        segment_size,
+        devices_with_peer_access_));
 
     ExpandableSegment* es = expandable_segments_.back();
     Block* candidate = new Block(device, stream, es->size(), pool, es->ptr());
@@ -2414,15 +2512,15 @@ class DeviceCachingAllocator {
         total_allocated_memory + size > allowed_memory_maximum) {
       p.err = cudaErrorMemoryAllocation;
       return false;
-    } else if (
-        CUDAAllocatorConfig::expandable_segments() &&
-        // our checkpointing logic for private pools doesn't support
-        // the expandable_segments_ structure yet
-        !p.pool->owner_PrivatePool) {
+    } else if (CUDAAllocatorConfig::expandable_segments()) {
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
       if (p.block) {
         p.err = cudaSuccess;
+        if (p.pool->owner_PrivatePool) {
+          // The block is for a CUDA graph's PrivatePool.
+          p.pool->owner_PrivatePool->cudaMalloc_count++;
+        }
       } else {
         p.err = cudaErrorMemoryAllocation;
       }
@@ -2665,6 +2763,13 @@ class DeviceCachingAllocator {
       decrease_stat(stats.reserved_bytes[stat_type], unmapped.size);
     });
 
+    if (block->pool->owner_PrivatePool) {
+      // The cudaFreed block belonged to a CUDA graph's PrivatePool.
+      TORCH_INTERNAL_ASSERT(
+          block->pool->owner_PrivatePool->cudaMalloc_count > 0);
+      block->pool->owner_PrivatePool->cudaMalloc_count--;
+    }
+
     stats.num_device_free++;
     record_trace(
         TraceEntry::SEGMENT_UNMAP,
@@ -2867,14 +2972,7 @@ class DeviceCachingAllocator {
     }
 
     if (record_history) {
-      if (alloc_trace->size() < alloc_trace_max_entries_) {
-        alloc_trace->emplace_back(te);
-      } else {
-        (*alloc_trace)[alloc_trace_next++] = te;
-        if (alloc_trace_next == alloc_trace_max_entries_) {
-          alloc_trace_next = 0;
-        }
-      }
+      alloc_buffer.insertTraceEntries(te);
     }
   }
 };
@@ -3018,12 +3116,18 @@ class NativeCachingAllocator : public CUDAAllocator {
   void recordHistory(
       bool enabled,
       CreateContextFn context_recorder,
-      size_t alloc_trace_max_entries,
+      size_t alloc_buffer_max_entries,
       RecordContext when) override {
     for (auto& allocator : device_allocator) {
       allocator->recordHistory(
-          enabled, context_recorder, alloc_trace_max_entries, when);
+          enabled, context_recorder, alloc_buffer_max_entries, when);
     }
+  }
+
+  void recordAnnotation(const std::shared_ptr<GatheredContext>& name) override {
+    c10::DeviceIndex device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    device_allocator[device]->recordAnnotation(name);
   }
 
   bool isHistoryEnabled() override {
@@ -3063,6 +3167,14 @@ class NativeCachingAllocator : public CUDAAllocator {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
     return device_allocator[block->device]->getBaseAllocation(block, outSize);
+  }
+
+  ShareableHandle shareIpcHandle(void* ptr) override {
+    Block* block = get_allocated_block(ptr);
+    if (!block) {
+      TORCH_CHECK(false, "invalid device pointer: ", ptr);
+    }
+    return device_allocator[block->device]->shareIpcHandle(block);
   }
 
   void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) override {
