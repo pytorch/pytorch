@@ -6,9 +6,7 @@ from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
-
 import torch._inductor.test_case
-
 from torch._higher_order_ops.triton_kernel_wrap import (
     generate_ttir,
     triton_kernel_wrapper_functional,
@@ -19,10 +17,11 @@ from torch._inductor.utils import run_and_get_code
 from torch._library import capture_triton
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu, TEST_WITH_ROCM
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
+
 
 if HAS_GPU:
     import triton
