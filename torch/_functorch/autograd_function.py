@@ -275,6 +275,16 @@ def validate_vmap_returns_tuple_of_two_elements(result):
 
 @custom_function_call.py_impl(TransformType.Vmap)
 def custom_function_call_vmap(interpreter, autograd_function, *operands, **kwargs):
+    if any(
+        isinstance(val, torch.Tensor)
+        for val in torch.utils._pytree.tree_flatten(kwargs)[0]
+    ):
+        raise NotImplementedError(
+            f"Run vmap on autograd.Function with kwarg-only Tensor args. In the original "
+            f"definition of the op, please make your tensors not kwarg-only. "
+            f"Got: {kwargs}"
+        )
+
     if autograd_function.generate_vmap_rule:
         if has_overriden_vmap_rule(autograd_function):
             # TODO: Update link to stable once that's out
