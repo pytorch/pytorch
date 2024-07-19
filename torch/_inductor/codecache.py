@@ -386,7 +386,7 @@ def get_path(
 def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
     if hash_type == "code":
         return code_hash(content, extra)
-    if hash_type in ["cubin", "hsaco"]:
+    if hash_type in ["cubin", "hsaco", "spv"]:
         return code_hash(repr(content))
     raise AssertionError(f"Unknown hash type {hash_type}")
 
@@ -1582,8 +1582,7 @@ class CudaKernelParamCache:
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
-    def set(cls, key: str, params: Dict[str, str], cubin: str) -> None:
-        bin_type = "cubin" if torch.version.hip is None else "hsaco"
+    def set(cls, key: str, params: Dict[str, str], cubin: str, bin_type: str) -> None:
         _, path = write(
             cubin,
             bin_type,
