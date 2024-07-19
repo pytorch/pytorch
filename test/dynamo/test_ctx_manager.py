@@ -1098,7 +1098,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self):
-        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
         x: "f32[1]" = torch.ones(1)
 
@@ -1106,7 +1106,7 @@ class GraphModule(torch.nn.Module):
 
         add: "f32[1]" = x + y;  x = y = None
 
-        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
         return (add,)
 """,
         )
@@ -1138,7 +1138,7 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self):
-        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
         x: "f32[1]" = torch.ones(1)
 
@@ -1146,7 +1146,7 @@ class GraphModule(torch.nn.Module):
 
         add: "f32[1]" = x + y;  x = y = None
 
-        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message')
+        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message');  _saved_tensors_hooks_disable_1 = None
         return (add,)
 """,
         )
@@ -1184,21 +1184,21 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self):
-        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
         x: "f32[1]" = torch.ones(1)
 
         y: "f32[1]" = torch.zeros(1)
 
-        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported inner')
+        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported inner');  _saved_tensors_hooks_disable_1 = None
 
         add: "f32[1]" = x + y;  y = None
 
-        _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+        _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable_2 = None
 
         add_1: "f32[1]" = add + x;  add = x = None
 
-        _saved_tensors_hooks_disable_3 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message')
+        _saved_tensors_hooks_disable_3 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message');  _saved_tensors_hooks_disable_3 = None
         return (add_1,)
 """,
         )
@@ -1227,11 +1227,11 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[]"):
         l_x_ = L_x_
 
-        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
         y: "f32[]" = l_x_ + 1;  l_x_ = None
 
-        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
         return (y,)
 """,
         )
@@ -1245,11 +1245,11 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_y_: "f32[]"):
         l_y_ = L_y_
 
-        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
         mul: "f32[]" = l_y_ * 2;  l_y_ = None
 
-        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
         return (mul,)
 """,
         )

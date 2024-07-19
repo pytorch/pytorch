@@ -641,8 +641,8 @@ def forward(self, primals_1):
 def forward(self, primals_1, primals_2):
     mul = torch.ops.aten.mul.Tensor(primals_2, 2)
     add = torch.ops.aten.add.Tensor(mul, mul)
-    set_ = torch.ops.aten.set_.source_Tensor(primals_1, mul);  primals_1 = None
-    copy_ = torch.ops.aten.copy_.default(primals_2, mul);  primals_2 = mul = None
+    set_ = torch.ops.aten.set_.source_Tensor(primals_1, mul);  primals_1 = set_ = None
+    copy_ = torch.ops.aten.copy_.default(primals_2, mul);  primals_2 = mul = copy_ = None
     return (add,)""",
         )
 
@@ -766,11 +766,11 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(arange, [3, 3]);  arange = None
     arange_1 = torch.ops.aten.arange.default(9, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     view_1 = torch.ops.aten.view.default(arange_1, [3, 3]);  arange_1 = None
-    set_ = torch.ops.fsdp.set_.default(primals_1, view);  view = None
+    set_ = torch.ops.fsdp.set_.default(primals_1, view);  view = set_ = None
     mul = torch.ops.aten.mul.Tensor(primals_1, primals_1)
-    set__1 = torch.ops.fsdp.set_.default(primals_1, view_1)
+    set__1 = torch.ops.fsdp.set_.default(primals_1, view_1);  set__1 = None
     mul_1 = torch.ops.aten.mul.Tensor(primals_1, primals_1)
-    set__2 = torch.ops.fsdp.set_.default(primals_1, view_1);  view_1 = None
+    set__2 = torch.ops.fsdp.set_.default(primals_1, view_1);  view_1 = set__2 = None
     mul_2 = torch.ops.aten.mul.Tensor(primals_1, primals_1)
     add = torch.ops.aten.add.Tensor(mul, mul_1);  mul = mul_1 = None
     add_1 = torch.ops.aten.add.Tensor(add, mul_2);  add = mul_2 = None
@@ -1166,11 +1166,11 @@ def forward(self, arg0_1, arg1_1):
             fw_graph_cell[0].code.strip(),
             """\
 def forward(self, primals_1):
-    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 32)
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 32);  resize_storage_bytes_ = None
     ones = torch.ops.aten.ones.default([8], device = device(type='cpu'), pin_memory = False)
     copy = torch.ops.aten.copy.default(primals_1, ones);  ones = None
     add = torch.ops.aten.add.Tensor(copy, 1)
-    copy_ = torch.ops.aten.copy_.default(primals_1, copy);  primals_1 = copy = None
+    copy_ = torch.ops.aten.copy_.default(primals_1, copy);  primals_1 = copy = copy_ = None
     return (add,)""",
         )
 
@@ -1203,7 +1203,7 @@ def forward(self, primals_1):
             """\
 def forward(self, primals_1):
     sin = torch.ops.aten.sin.default(primals_1)
-    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 0)
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 0);  resize_storage_bytes_ = None
     return (sin, primals_1)""",
         )
 
@@ -1303,8 +1303,8 @@ def forward(self, primals_1):
 def forward(self, primals_1, primals_2):
     cat = torch.ops.aten.cat.default([primals_2, primals_2]);  primals_2 = None
     sin = torch.ops.aten.sin.default(cat)
-    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(cat, 0)
-    set_ = torch.ops.aten.set_.source_Tensor(primals_1, cat);  primals_1 = None
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(cat, 0);  resize_storage_bytes_ = None
+    set_ = torch.ops.aten.set_.source_Tensor(primals_1, cat);  primals_1 = set_ = None
     return (sin, cat)""",
         )
 
@@ -1400,7 +1400,7 @@ def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(view, 2);  view = None
     view_1 = torch.ops.aten.view.default(mul, [4]);  mul = None
     add = torch.ops.aten.add.Tensor(view_1, 1)
-    copy_ = torch.ops.aten.copy_.default(primals_1, view_1);  primals_1 = view_1 = None
+    copy_ = torch.ops.aten.copy_.default(primals_1, view_1);  primals_1 = view_1 = copy_ = None
     return (add,)""",
         )
 
@@ -1422,7 +1422,7 @@ def forward(self, primals_1):
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 2)
     add = torch.ops.aten.add.Tensor(mul, 3)
-    copy_ = torch.ops.aten.copy_.default(primals_1, mul);  primals_1 = mul = None
+    copy_ = torch.ops.aten.copy_.default(primals_1, mul);  primals_1 = mul = copy_ = None
     return (add,)""",
         )
 
@@ -1444,7 +1444,7 @@ def forward(self, primals_1):
 def forward(self, arg0_1):
     mul = torch.ops.aten.mul.Tensor(arg0_1, 2)
     add = torch.ops.aten.add.Tensor(mul, 3)
-    copy_ = torch.ops.aten.copy_.default(arg0_1, mul);  arg0_1 = mul = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, mul);  arg0_1 = mul = copy_ = None
     return (add,)""",
         )
 
@@ -3623,7 +3623,7 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
     sum_1 = torch.ops.aten.sum.default(mul_1);  mul_1 = None
     sum_2 = torch.ops.aten.sum.default(add)
     add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
-    copy_ = torch.ops.aten.copy_.default(primals_3, add);  primals_3 = add = None
+    copy_ = torch.ops.aten.copy_.default(primals_3, add);  primals_3 = add = copy_ = None
     return (add_1, primals_1, primals_2, primals_4, mul)""",
         )
 
@@ -3678,7 +3678,7 @@ def forward(self, primals_1, primals_2, primals_3):
     sum_1 = torch.ops.aten.sum.default(mm);  mm = None
     sum_2 = torch.ops.aten.sum.default(add)
     add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
-    copy_ = torch.ops.aten.copy_.default(primals_2, add);  primals_2 = add = None
+    copy_ = torch.ops.aten.copy_.default(primals_2, add);  primals_2 = add = copy_ = None
     return (add_1, primals_1, primals_3)""",
         )
         self.assertEqual(out_ref, out_test)
@@ -3734,9 +3734,9 @@ def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals
     getitem_2 = _native_batch_norm_legit_functional[2]
     getitem_3 = _native_batch_norm_legit_functional[3]
     getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-    copy_ = torch.ops.aten.copy_.default(primals_3, getitem_3);  primals_3 = None
-    copy__1 = torch.ops.aten.copy_.default(primals_4, getitem_4);  primals_4 = None
-    copy__2 = torch.ops.aten.copy_.default(primals_5, add);  primals_5 = add = None
+    copy_ = torch.ops.aten.copy_.default(primals_3, getitem_3);  primals_3 = copy_ = None
+    copy__1 = torch.ops.aten.copy_.default(primals_4, getitem_4);  primals_4 = copy__1 = None
+    copy__2 = torch.ops.aten.copy_.default(primals_5, add);  primals_5 = add = copy__2 = None
     return (getitem, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4)""",  # noqa: B950
         )
 
@@ -4090,9 +4090,9 @@ def forward(self, arg0_1, arg1_1):
             """\
 def forward(self, arg0_1, arg1_1):
     add = torch.ops.aten.add.Tensor(arg1_1, 2)
-    _set_grad_enabled = torch._C._set_grad_enabled(False)
+    _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
     add_1 = torch.ops.aten.add.Tensor(add, 2);  add = None
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False);  _set_grad_enabled_1 = None
     mul = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
     add_2 = torch.ops.aten.add.Tensor(mul, add_1);  mul = add_1 = None
     return (add_2,)""",
@@ -4114,9 +4114,9 @@ def forward(self, arg0_1, arg1_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    _set_grad_enabled = torch._C._set_grad_enabled(True);  _set_grad_enabled = None
     matmul = torch.ops.aten.matmul.default(arg1_1, arg1_1)
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False);  _set_grad_enabled_1 = None
     add = torch.ops.aten.add.Tensor(matmul, 2);  matmul = None
     sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
     sum_2 = torch.ops.aten.sum.default(add);  add = None
@@ -4185,9 +4185,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    _set_grad_enabled = torch._C._set_grad_enabled(True);  _set_grad_enabled = None
     mm = torch.ops.aten.mm.default(arg1_1, arg1_1)
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False);  _set_grad_enabled_1 = None
     add = torch.ops.aten.add.Tensor(mm, 2);  mm = None
     sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
     sum_2 = torch.ops.aten.sum.default(add);  add = None
@@ -4271,14 +4271,14 @@ def forward(self, arg0_1, arg1_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    _set_grad_enabled = torch._C._set_grad_enabled(True);  _set_grad_enabled = None
     add = torch.ops.aten.add.Tensor(arg1_1, 5)
     add_1 = torch.ops.aten.add.Tensor(add, 5);  add = None
     add_2 = torch.ops.aten.add.Tensor(add_1, 7);  add_1 = None
     cos = torch.ops.aten.cos.default(arg1_1);  arg1_1 = None
     sin = torch.ops.aten.sin.default(add_2);  add_2 = None
     add_3 = torch.ops.aten.add.Tensor(cos, sin);  cos = sin = None
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False);  _set_grad_enabled_1 = None
     return (add_3,)""",
         )
 
@@ -4424,13 +4424,13 @@ def forward(self, arg0_1, arg1_1):
             """\
 def forward(self, arg0_1, arg1_1):
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
-    select = torch.ops.aten.select.int(cos, 0, 0)
+    select = torch.ops.aten.select.int(cos, 0, 0);  select = None
     body_graph_0 = self.body_graph_0
     map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = None
     getitem = map_impl[0];  map_impl = None
     sum_1 = torch.ops.aten.sum.default(getitem);  getitem = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  sum_1 = None
-    select_1 = torch.ops.aten.select.int(cos, 0, 0)
+    select_1 = torch.ops.aten.select.int(cos, 0, 0);  select_1 = None
     body_graph_1 = self.body_graph_1
     map_impl_1 = torch.ops.higher_order.map_impl(body_graph_1, [cos], [arg1_1]);  body_graph_1 = cos = arg1_1 = None
     getitem_1 = map_impl_1[0];  map_impl_1 = None
@@ -4647,7 +4647,7 @@ class <lambda>(torch.nn.Module):
         getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
         getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
         relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
-        detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
+        detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  detach = None
         detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
         detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
         detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
@@ -4671,7 +4671,7 @@ class <lambda>(torch.nn.Module):
         getitem_6: "f32[3]" = native_batch_norm_backward[1]
         getitem_7: "f32[3]" = native_batch_norm_backward[2];  native_batch_norm_backward = None
         convolution_backward = torch.ops.aten.convolution_backward.default(getitem_5, arg7_1, arg0_1, [3], [1, 1], [0, 0], [1, 1], False, [0, 0], 1, [False, True, True]);  getitem_5 = arg7_1 = arg0_1 = None
-        getitem_8 = convolution_backward[0]
+        getitem_8 = convolution_backward[0];  getitem_8 = None
         getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
         getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
         return (getitem_3, getitem_4, add, sum_1, detach_10, getitem_9, getitem_10, getitem_6, getitem_7)
@@ -4968,7 +4968,7 @@ def forward(self, arg0_1):
             """\
 def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(arg0_1, 4)
-    add_1 = torch.ops.aten.add.Tensor(add, 5);  add = None
+    add_1 = torch.ops.aten.add.Tensor(add, 5);  add = add_1 = None
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
     return (cos,)""",
         )
@@ -4978,7 +4978,7 @@ def forward(self, arg0_1):
             """\
 def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(arg0_1, 5)
-    add_1 = torch.ops.aten.add.Tensor(add, 6);  add = None
+    add_1 = torch.ops.aten.add.Tensor(add, 6);  add = add_1 = None
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
     return (sin,)""",
         )

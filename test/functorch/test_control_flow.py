@@ -1893,7 +1893,7 @@ def forward(self, x_1):
     view_2 = torch.ops.aten.view.default(view_1, [4, 5])
     sin = torch.ops.aten.sin.default(view_2);  view_2 = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
-    copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = view_1 = None
+    copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = view_1 = copy_ = None
     return sum_1""",
         )
 
@@ -1934,7 +1934,7 @@ def forward(self, x_1):
     view_2 = torch.ops.aten.view.default(view_1, [5, 5])
     cos = torch.ops.aten.cos.default(view_2);  view_2 = None
     sum_1 = torch.ops.aten.sum.default(cos);  cos = None
-    copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = view_1 = None
+    copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = view_1 = copy_ = None
     return sum_1""",
         )
 
@@ -3495,10 +3495,10 @@ def forward(self, l_inp_, l_tmp_):
     a = l_inp__1.clone();  l_inp__1 = None
     a_view = a.view(-1)
     tmp = l_tmp__1.clone();  l_tmp__1 = None
-    _set_grad_enabled = torch._C._set_grad_enabled(False)
-    set_ = a.set_(tmp)
-    mul_ = a_view.mul_(2);  a_view = None
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
+    _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+    set_ = a.set_(tmp);  set_ = None
+    mul_ = a_view.mul_(2);  a_view = mul_ = None
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
     add = a + tmp;  a = tmp = None
     return (add,)
     """,
