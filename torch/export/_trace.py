@@ -34,7 +34,11 @@ from torch._export.passes.lift_constants_pass import (
     lift_constants_pass,
     rewrite_script_object_meta,
 )
-from torch._export.utils import placeholder_naming_pass, placeholder_prefixes
+from torch._export.utils import (
+    _detect_fake_mode_from_gm,
+    placeholder_naming_pass,
+    placeholder_prefixes,
+)
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch._aot_autograd.traced_function_transforms import (
@@ -181,27 +185,23 @@ def _rewrite_node(gm):
                     gm.graph.erase_node(node)
 
 
-def _convert_input_to_fake(gm, args, kwargs):
+def _convert_input_to_fake(
+    gm: torch.fx.GraphModule, args: Tuple[Any], kwargs: Dict[Any, Any]
+):
     params_buffers = _get_params_buffers(gm)
-    fake_inps: List[torch.Tensor] = []
-    fake_vals: List[torch.Tensor] = []
-    for node in gm.graph.nodes:
-        if node.op == "placeholder" and "val" in node.meta:
-            fake_val = node.meta["val"]
-            if fake_val is not None and isinstance(fake_val, torch.Tensor):
-                fake_inps.append(fake_val)
-        elif len(fake_inps) == 0 and "example_value" in node.meta:
-            fake_val = node.meta["example_value"]
-            if fake_val is not None and isinstance(fake_val, torch.Tensor):
-                fake_vals.append(fake_val)
+    fake_inps = [
+        node.meta["val"]
+        for node in gm.graph.nodes
+        if node.op == "placeholder" and "val" in node.meta
+    ]
+    fake_mode = _detect_fake_mode_from_gm(gm)
 
-    if detected_fake_mode := detect_fake_mode(fake_inps + fake_vals):
-        fake_mode = detected_fake_mode
-    else:
+    # create a new fake mode if we cannot detect any fake modes
+    if fake_mode is None:
         fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
 
-    if len(args) == 0 and len(kwargs) == 0:
-        return (), {}, params_buffers, fake_mode
+    if len(args) == 0 and len(kwargs) == 0 and len(params_buffers) == 0:
+        return (), {}, {}, fake_mode
 
     count = 0
 
@@ -632,7 +632,6 @@ def _export_to_aten_ir(
         gm.meta.update(mod.meta)
 
     from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
-    from torch._guards import detect_fake_mode
 
     # Run produce guards before we handle runtime asserts.
     # This means we run the export solver before the runtime asserts pass.
@@ -649,7 +648,8 @@ def _export_to_aten_ir(
     # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
     # Overwrite output specs afterwards.
     flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    fake_mode = detect_fake_mode(flat_fake_args)
+    fake_mode = torch._export.utils._detect_fake_mode_from_gm(gm)
+    assert fake_mode is not None, "Cannot detect fake mode from graph"
 
     if not torch._dynamo.config.do_not_emit_runtime_asserts:
         stack_trace = (
@@ -1490,8 +1490,6 @@ def _export_to_aten_ir_make_fx(
             produce_guards_callback(gm)
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
-
-    from torch._guards import detect_fake_mode
 
     fake_mode = detect_fake_mode(flat_args)
 
