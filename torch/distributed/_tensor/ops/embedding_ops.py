@@ -31,21 +31,29 @@ aten = torch.ops.aten
 @dataclass
 class MaskBuffer:
     data: Optional[torch.Tensor] = None
+    # user_cnt allows shared usage of the MaskBuffer, as long as all users have the same data
+    user_cnt: int = 0
 
     def materialize_mask(self, mask):
-        if self.data is not None:
-            raise RuntimeError("MaskBuffer has already been materialized")
-        self.data = mask
+        if self.user_cnt == 0:
+            self.data = mask
+        else:
+            assert self.data is not None
+            if not torch.equal(self.data, mask):
+                raise RuntimeError(
+                    "MaskBuffer has been materialized with conflicting data"
+                )
+        self.user_cnt += 1
 
     def release_mask(self):
-        # TODO: evaluate if we need to release the mask buffer or the buffer
-        # can just have the same lifetime as the Partial placement
-        if self.data is None:
+        if self.user_cnt == 0 or self.data is None:
             raise RuntimeError("MaskBuffer has not been materialized")
-        self.data = None
+        self.user_cnt -= 1
+        if self.user_cnt == 0:
+            self.data = None
 
     def apply_mask(self, tensor):
-        if self.data is None:
+        if self.user_cnt == 0 or self.data is None:
             raise RuntimeError("MaskBuffer has not been materialized")
 
         # NOTE: _MaskPartial is being used by the embedding op and the gather op.
@@ -71,6 +79,9 @@ class _MaskPartial(Partial):
 
     logical_dim_size: int = -1
     mask_buffer: MaskBuffer = field(default_factory=MaskBuffer)
+
+    # an optional field to differentiate _MaskPartial objects created for different embeddings
+    logical_shape: Optional[torch.Size] = None
 
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
@@ -146,18 +157,23 @@ class _MaskPartial(Partial):
         return (
             self.reduce_op == other.reduce_op
             and self.logical_dim_size == other.logical_dim_size
+            and self.logical_shape == other.logical_shape
         )
 
     def __hash__(self) -> int:
         return 1 + hash(
-            (self.logical_dim_size, id(self.mask_buffer.data), self.reduce_op)
+            (
+                self.logical_dim_size,
+                self.reduce_op,
+                self.logical_shape,
+            )
         )
 
     def __repr__(self) -> str:
         """
         machine readable representation of the MaskPartial placement
         """
-        return f"_MaskPartial(logical_dim_size={self.logical_dim_size})"
+        return f"_MaskPartial(logical_dim_size={self.logical_dim_size}, logical_shape={self.logical_shape})"
 
     def __str__(self) -> str:
         """
@@ -191,7 +207,9 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     single_mesh_dim_strategies.append(colwise_sharding)
 
     # rowwise sharding, output is embedding partial, weight shard on dim 0, input accepts embedding partial
-    embedding_partial_placement = _MaskPartial(logical_dim_size=weight_shape[0])
+    embedding_partial_placement = _MaskPartial(
+        logical_dim_size=weight_shape[0], logical_shape=weight_shape
+    )
 
     # NOTE we want to reuse the same mask partial placement so that we can reuse the same mask that generates
     # from the input indices and use it for output reduction
