@@ -494,8 +494,8 @@ struct ExpandableSegment {
     auto segment = std::make_unique<ExpandableSegment>(
         device,
         std::nullopt,
-        header.num_handles * header.segement_size,
-        header.segement_size,
+        header.num_handles * header.segment_size,
+        header.segment_size,
         std::move(peers));
 // older build setups (e.g. multiwheels) do not have this syscall, added 2020
 // but the kernel on the system might still support it.
@@ -508,7 +508,7 @@ struct ExpandableSegment {
     auto pidfd = syscall(SYS_pidfd_open, header.pid, 0);
     TORCH_CHECK(
         pidfd != -1 || errno != ENOSYS,
-        "The kernel on this machine does not support the pidfd_getfd syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
+        "The kernel on this machine does not support the pidfd_open syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
         "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
     TORCH_CHECK(pidfd != -1, "pidfd_open:", std::strerror(errno));
     for (auto i : c10::irange(header.num_handles)) {
@@ -660,7 +660,7 @@ struct ExpandableSegment {
   };
   struct ShareHeader {
     pid_t pid;
-    size_t segement_size;
+    size_t segment_size;
     size_t num_handles;
   };
   std::vector<std::optional<Handle>> handles_;
@@ -3511,21 +3511,30 @@ class NativeCachingAllocator : public CUDAAllocator {
     this->free(ptr);
   }
 
-  // In CUDA IPC, sender sends a tensor to receiver, getIpcDevPtr
-  // is called by the receiving process to map the CUDA memory from the sending
-  // process into its own address space.
-  //
-  // CUDA IPC only allows sharing a big memory block associated with a
+  // In CUDA IPC, sender sends a tensor to receiver via shareIPCHandle,
+  // getIpcDevPtr is called by the receiving process to map the CUDA memory from
+  // the sending process into its own address space.
+
+  // When allocated with cudaMalloc we use the cudaIPCMemHandle_t APIs.
+  // These APIs only allow sharing a big memory block associated with a
   // cudaIpcMemHandle_t and it can be opened only **once** per context per
   // process. There can be multiple types of storage in the same IPC mem block,
   // so we must cache the device ptr to construct typed storage as it comes.
-  //
-  // ipcMemHandle_to_devptr maps a cudaIpcMemHandle_t to a device pointer in the
-  // process that can be used to access the memory block in the sender process.
-  // It only saves a weak_ptr of the device pointer in the map, the shared_ptr
-  // will be used to reconstruct all storages in this CudaMalloc allocation. And
-  // it will deleted in cudaIpcCloseMemHandle when its reference count is 0.
-  //
+
+  // When using cuMemCreate, via expandable segments, we use c
+  // MemExportToShareableHandle
+  // create a file descriptor that can be sent t
+  //  the other process to
+  // ort the object. Then we recreate part of the ex
+  // andable segment necessary to
+  // the allocation.
+
+  // ipcMemHandle_to_devptr caches the mapping from shareable handle to
+
+  // This process' memory mapping information for that share to ensure we do not
+  // create it twice. When the shared_ptr is no longer in use we clean up the
+  // cache.
+
   std::mutex IpcMutex;
   struct MemHandleCacheEntry {
     MemHandleCacheEntry(
