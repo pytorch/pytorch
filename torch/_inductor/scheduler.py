@@ -2765,6 +2765,10 @@ class Scheduler:
         }
         names_to_remove = []
         for out_buf in V.kernel.store_buffer_names:
+            if out_buf not in self.name_to_buf:
+                # Aux buffers created during kernel codegen
+                names_to_remove.append(out_buf)
+                continue
             users = self.name_to_buf[out_buf].users
             assert users is not None
             users = {user.get_name() for user in users if not user.is_weak}
