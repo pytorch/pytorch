@@ -8432,7 +8432,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
-        if torch.cuda.is_available():
+        if not torch.cuda.is_available():
+            self.assertRaises(RuntimeError, lambda: x.pin_memory())
+        else:
             pinned = x.pin_memory()
             self.assertTrue(pinned.is_pinned())
             self.assertEqual(pinned, x)
