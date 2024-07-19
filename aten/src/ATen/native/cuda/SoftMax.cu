@@ -16,6 +16,7 @@
 #include <ATen/native/cuda/PersistentSoftmax.cuh>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/cuda/block_reduce.cuh>
+#include <ATen/native/cpu/SoftmaxKernel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1114,121 +1115,107 @@ TORCH_IMPL_FUNC(softmax_backward_cuda_out)
 }
 
 Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const std::optional<int64_t> dim_, const std::optional<int64_t> mask_type_) {
-    /*
-     * [NOTE] SDPA + mask_type 3
-     * This is a specialized path for Scaled Dot Product Attention (SDPA) with boolean masks.
-     * The key semantic requirement in SDPA is that fully masked-out rows in the attention
-     * matrix must result in all zeros, regardless of the input values.
-     *
-     * The process:
-     * 1. Compute softmax normally along the specified dimension.
-     * 2. Apply the mask by setting all masked positions to zero.
-     *
-     * This approach ensures:
-     * - Fully masked-out rows correctly result in all zeros, which is crucial for
-     *   the proper functioning of attention mechanisms in transformer architectures.
-     *
-     * Note: This method is specifically designed to meet the semantic requirements of
-     * SDPA with boolean masks. And is not inteded for other uses cases. The semantics in fact
-     * are opposite for the boolean mask_ compared to how its typically called
-     */
-  if (mask_type_ == 3){
-    TORCH_CHECK(dim_.has_value(), "dim must be specified for mask_type == 3");
-    TORCH_CHECK(mask_.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
-    auto out = at::softmax(input_, dim_.value());
-    return out.masked_fill(~mask_, 0);
-  }
-  Tensor output = at::empty_like(input_, input_.options());
-  TORCH_CHECK(mask_.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
+    auto maskTypeOpt = mask_type_.has_value()
+        ? c10::make_optional(toMaskType(mask_type_.value()))
+        : c10::nullopt;
 
-  TORCH_CHECK(mask_type_.has_value(), "Mask Type should be defined");
-  int64_t mask_type = mask_type_.value();
-  TORCH_CHECK((mask_type == 0) || (mask_type == 1) || (mask_type == 2), "Mask Type should be 0 (src_mask), 1 (src_key_padding_mask), or 2 (default_mask)");
-
-  // If input is [B, H, T, T] and mask is [B, T]
-  // we have special fast kernel
-  // mask_type == 1 => mask_ is a src_key_padding_mask
-  bool is_BxT_mask = (mask_type == 1) && (input_.dim() == 4 && mask_.dim() == 2 && input_.size(0) == mask_.size(0) && input_.size(2) == mask_.size(1) && input_.size(3) == mask_.size(1));
-
-  // If input is [B, H, T, T] and mask is [T, T]
-  // expand mask to [B, H, T, T] and treat it like regular mask
-  // TODO We should have special fast kernel for TxT mask as well
-  // mask_type == 0 => mask_ is a src_mask
-  bool is_TxT_mask = (mask_type == 0) && input_.dim() == 4 && mask_.dim() == 2 && input_.size(3) == mask_.size(1) && input_.size(2) == mask_.size(0) && mask_.size(0) == mask_.size(1);
-  // If mask_type == 2, then mask_.sizes() must equal input_.sizes()
-  TORCH_CHECK(mask_.sizes() == input_.sizes() || is_BxT_mask || is_TxT_mask, "Mask shape should match input. mask: ", mask_.sizes(), " input: ", input_.sizes());
-
-  auto input = input_.dim() == 0 ? input_.view(1) : input_;
-  auto mask = mask_.dim() == 0 ? mask_.view(1) : mask_;
-  if (is_TxT_mask) {
-    mask = mask.expand(input.sizes());
-  }
-  int64_t dim = dim_.has_value() ? dim_.value() : input.dim() - 1;
-
-  int softmax_elements = input.size(dim);
-  // Persistent softmax is only supported when all of the conditions are held:
-  //     1) softmax_elements <= 1024
-  //     2) softmax_elements * input.element_size() <= 4096
-  //     3) mask.is_contiguous()
-  //     4) dim == input.dim() - 1
-  // Otherwise, we fallback to vanilla softmax (where we do not support transformer_mask since converting the mask is expensive)
-  if (softmax_elements > 1024 || softmax_elements * input.element_size() > 4096 || !mask.is_contiguous() || dim < input.dim()-1) {
-    if (is_BxT_mask) {
-      mask = mask.view({mask_.size(0), 1, 1, mask_.size(1)}).expand(input.sizes());
+    // See [NOTE] SDPA + SDPA_BOOL_MASK
+    if (maskTypeOpt == MaskType::SDPA_BOOL_MASK) {
+        TORCH_CHECK(dim_.has_value(), "dim must be specified for SDPA_BOOL_MASK");
+        TORCH_CHECK(mask_.scalar_type() == at::ScalarType::Bool, "Mask should be a boolean tensor");
+        auto out = at::softmax(input_, dim_.value());
+        return out.masked_fill(~mask_, 0);
     }
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::Half,
-      ScalarType::BFloat16,
-      input.scalar_type(),
-      "masked_softmax",
-      [&] {
-        output = at::softmax(input.masked_fill(mask, -std::numeric_limits<scalar_t>::infinity()), dim);
-      });
-    return output;
-  }
-  int batch_count = input.numel() / softmax_elements;
-  int chunk_size = input.numel() / input.size(0);
-  if (is_BxT_mask) {
-    // Only support when num_heads is even in transformer
-    TORCH_CHECK(input.size(1) % 2 == 0, "Only support when num_heads is even in transformer");
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::Half,
-      ScalarType::BFloat16,
-      input.scalar_type(),
-      "masked_softmax",
-      [&] {
-        using accscalar_t = acc_type<scalar_t, true>;
-        dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, false/* is_log_softmax */, true/* is_masked */>(
-          output.mutable_data_ptr<scalar_t>(),    // dst
-          input.const_data_ptr<scalar_t>(),       // src
-          softmax_elements,
-          softmax_elements,
-          batch_count,
-          mask.const_data_ptr<bool>(),
-          chunk_size,
-          true // is_transformer_mask
-        );
-      });
 
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::Half,
-      ScalarType::BFloat16,
-      input.scalar_type(),
-      "masked_softmax",
-      [&] {
-        using accscalar_t = acc_type<scalar_t, true>;
-        dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, false/* is_log_softmax */, true/* is_masked */>(
-          output.mutable_data_ptr<scalar_t>(),    // dst
-          input.const_data_ptr<scalar_t>(),       // src
-          softmax_elements,
-          softmax_elements,
-          batch_count,
-          mask.const_data_ptr<bool>()
-        );
-      });
-  }
-  return output;
+    Tensor output = at::empty_like(input_, input_.options());
+    TORCH_CHECK(mask_.scalar_type() == at::ScalarType::Bool, "Mask should be a boolean tensor");
+
+    TORCH_CHECK(maskTypeOpt.has_value(), "Mask Type should be defined");
+    TORCH_CHECK(maskTypeOpt != MaskType::ERROR, "Invalid Mask Type provided");
+
+    // If input is [B, H, T, T] and mask is [B, T]
+    // we have special fast kernel
+    // mask_type == 1 => mask_ is a src_key_padding_mask
+    bool is_BxT_mask = (maskTypeOpt == MaskType::PADDING_MASK) && (input_.dim() == 4 && mask_.dim() == 2 && input_.size(0) == mask_.size(0) && input_.size(2) == mask_.size(1) && input_.size(3) == mask_.size(1));
+
+    // If input is [B, H, T, T] and mask is [T, T]
+    // expand mask to [B, H, T, T] and treat it like regular mask
+    // TODO We should have special fast kernel for TxT mask as well
+    // mask_type == 0 => mask_ is a src_mask
+    bool is_TxT_mask = (maskTypeOpt == MaskType::SRC_MASK) && input_.dim() == 4 && mask_.dim() == 2 && input_.size(3) == mask_.size(1) && input_.size(2) == mask_.size(0) && mask_.size(0) == mask_.size(1);
+
+    TORCH_CHECK(mask_.sizes() == input_.sizes() || is_BxT_mask || is_TxT_mask, "Mask shape should match input. mask: ", mask_.sizes(), " input: ", input_.sizes());
+
+    auto input = input_.dim() == 0 ? input_.view(1) : input_;
+    auto mask = mask_.dim() == 0 ? mask_.view(1) : mask_;
+    if (is_TxT_mask) {
+        mask = mask.expand(input.sizes());
+    }
+    int64_t dim = dim_.has_value() ? dim_.value() : input.dim() - 1;
+
+    int softmax_elements = input.size(dim);
+    // Persistent softmax is only supported when all of the conditions are held:
+    //     1) softmax_elements <= 1024
+    //     2) softmax_elements * input.element_size() <= 4096
+    //     3) mask.is_contiguous()
+    //     4) dim == input.dim() - 1
+    // Otherwise, we fallback to vanilla softmax (where we do not support transformer_mask since converting the mask is expensive)
+    if (softmax_elements > 1024 || softmax_elements * input.element_size() > 4096 || !mask.is_contiguous() || dim < input.dim()-1) {
+        if (is_BxT_mask) {
+            mask = mask.view({mask_.size(0), 1, 1, mask_.size(1)}).expand(input.sizes());
+        }
+        AT_DISPATCH_FLOATING_TYPES_AND2(
+            at::ScalarType::Half,
+            at::ScalarType::BFloat16,
+            input.scalar_type(),
+            "masked_softmax",
+            [&] {
+                output = at::softmax(input.masked_fill(mask, -std::numeric_limits<scalar_t>::infinity()), dim);
+            });
+        return output;
+    }
+    int batch_count = input.numel() / softmax_elements;
+    int chunk_size = input.numel() / input.size(0);
+    if (is_BxT_mask) {
+        // Only support when num_heads is even in transformer
+        TORCH_CHECK(input.size(1) % 2 == 0, "Only support when num_heads is even in transformer");
+        AT_DISPATCH_FLOATING_TYPES_AND2(
+            at::ScalarType::Half,
+            at::ScalarType::BFloat16,
+            input.scalar_type(),
+            "masked_softmax",
+            [&] {
+                using accscalar_t = acc_type<scalar_t, true>;
+                dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, false/* is_log_softmax */, true/* is_masked */>(
+                    output.mutable_data_ptr<scalar_t>(),    // dst
+                    input.const_data_ptr<scalar_t>(),       // src
+                    softmax_elements,
+                    softmax_elements,
+                    batch_count,
+                    mask.const_data_ptr<bool>(),
+                    chunk_size,
+                    true // is_transformer_mask
+                );
+            });
+    } else {
+        AT_DISPATCH_FLOATING_TYPES_AND2(
+            at::ScalarType::Half,
+            at::ScalarType::BFloat16,
+            input.scalar_type(),
+            "masked_softmax",
+            [&] {
+                using accscalar_t = acc_type<scalar_t, true>;
+                dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, false/* is_log_softmax */, true/* is_masked */>(
+                    output.mutable_data_ptr<scalar_t>(),    // dst
+                    input.const_data_ptr<scalar_t>(),       // src
+                    softmax_elements,
+                    softmax_elements,
+                    batch_count,
+                    mask.const_data_ptr<bool>()
+                );
+            });
+    }
+    return output;
 }
 
 Tensor masked_softmax_backward_cuda(
@@ -1242,14 +1229,18 @@ Tensor masked_softmax_backward_cuda(
   if (grad_.numel() == 0) {
     return grad_input;
   }
-  // See [NOTE] SDPA + mask_type 3
-  if (mask_type_.has_value() && mask_type_.value() == 3){
-    TORCH_CHECK(dim_.has_value(), "dim must be specified for mask_type == 3");
-    TORCH_CHECK(mask_.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
-    auto grad_input = grad_ * output_;
-    auto grad_sum = grad_input.sum(dim_.value(), /*keepdim=*/true);
-    grad_input -= output_ * grad_sum;
-    return grad_input;
+
+  auto maskTypeOpt = mask_type_.has_value()
+      ? c10::make_optional(toMaskType(mask_type_.value()))
+      : c10::nullopt;
+
+  // See [NOTE] SDPA + SDPA_BOOL_MASK
+  if (maskTypeOpt == MaskType::SDPA_BOOL_MASK) {
+      TORCH_CHECK(dim_.has_value(), "dim must be specified for SDPA_BOOL_MASK");
+      auto grad_input = grad_.mul(output_);
+      auto grad_sum = grad_input.sum(dim_.value(), /*keepdim=*/true);
+      grad_input -= output_.mul(grad_sum);
+      return grad_input;
   }
 
   auto grad = grad_.contiguous();
