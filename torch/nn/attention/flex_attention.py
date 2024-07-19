@@ -439,6 +439,10 @@ def _broadcast_to_dim(x, dim):
     return x
 
 
+def round_up_to_multiple(x, multiple):
+    return (x + multiple - 1) // multiple * multiple
+
+
 def _convert_mask_to_block_mask(
     mask: Tensor,
     KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
@@ -620,7 +624,8 @@ def create_block_mask(
         mod_type == _ModificationType.MASK_MOD
     ), "create-block_mask requires a mask_mod function!"
     inner_func = _create_block_mask_inner
-    # Temporary work around see: _create_block_mask_inner for more details
+    Q_LEN = round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
+    KV_LEN = round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
     with TransformGetItemToIndex():
@@ -637,8 +642,8 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     of the query and key tensors.
     """
     device = query.device
-    kv_len: int = key.size()[-2]
-    q_len: int = query.size()[-2]
+    kv_len = round_up_to_multiple(key.size()[-2], 128)
+    q_len = round_up_to_multiple(query.size()[-2], 128)
     return BlockMask(
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
@@ -708,6 +713,8 @@ def flex_attention(
     """
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
+    if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
+        raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
     if query.size(-2) >= 32:  # use Attention Kernel
         if query.size(-2) >= 128 and query.size(-2) % 128 != 0:
             raise NotImplementedError("NYI: S must be <128 or a multiple of 128")
