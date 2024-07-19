@@ -1164,7 +1164,8 @@ def load(
                     "Please file an issue with the following so that we can make "
                     "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
                 )
-        return updated_message + message + DOCS_MESSAGE
+            updated_message += message
+        return updated_message + DOCS_MESSAGE
 
     if weights_only is None:
         weights_only, warn_weights_only = False, True
