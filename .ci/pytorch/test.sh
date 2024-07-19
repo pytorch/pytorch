@@ -275,11 +275,15 @@ test_python_shard() {
 
   # Bare --include flag is not supported and quoting for lint ends up with flag not being interpreted correctly
   # shellcheck disable=SC2086
-
-  # modify LD_LIBRARY_PATH to ensure it has the conda env.
-  # This set of tests has been shown to be buggy without it for the split-build
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
-
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    # modify LD_LIBRARY_PATH to ensure it has the conda env.
+    # This set of tests has been shown to be buggy without it for the split-build
+    time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
+  else
+    # Temporarily disable test_torchinductor_opinfo tests on ROCm due to ongoing KeyboardInterrupt
+    # timeout issues on the CI. Disabled in the test shard so we can continue to test in a periodic
+    # inductor workflow
+    time python test/run_test.py -x inductor/test_torchinductor_opinfo --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
   assert_git_not_dirty
 }
 
