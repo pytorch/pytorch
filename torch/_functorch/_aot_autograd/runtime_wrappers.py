@@ -649,6 +649,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 subclass_metas=subclass_metas,
                 num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
                 is_runtime=True,
+                num_tokens=len(runtime_metadata.tokens),
             )
             return wrapped_outs
 
@@ -905,6 +906,7 @@ class AOTDedupeWrapper(CompilerWrapper):
         if config.debug_assert:
             ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
                 wrapped_flat_fn,
+                static_input_indices=aot_config.static_input_indices,
                 keep_input_mutations=fw_metadata.keep_input_mutations,
                 is_train=fw_metadata.is_train,
             )(*deduped_flat_args)
@@ -1094,6 +1096,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         if config.debug_assert:
             ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
                 wrapped_flat_fn,
+                static_input_indices=aot_config.static_input_indices,
                 keep_input_mutations=fw_metadata.keep_input_mutations,
                 is_train=fw_metadata.is_train,
             )(*flat_args_with_synthetic_bases)

@@ -23,7 +23,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 from torch.utils.hooks import RemovableHandle  # noqa: TCH001
 
@@ -390,7 +389,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             class DoubleTensor(torch.Tensor):
                 @staticmethod
                 def __new__(cls, inner):
-                    outer_shape = (inner.shape[0] * 2,) + inner.shape[1:]
+                    outer_shape = inner.shape
+                    if inner.ndim > 0:
+                        outer_shape = (inner.shape[0] * 2,) + inner.shape[1:]
                     return torch.Tensor._make_wrapper_subclass(
                         cls,
                         outer_shape,
@@ -432,15 +433,21 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
                     out_inner = func(*args_inner, **kwargs_inner)
 
+                    if not isinstance(out_inner, torch.Tensor):
+                        return out_inner
+
                     return DoubleTensor(out_inner)
 
             def fn(x):
                 return torch.ops._mylib.foo(x)
 
-            compiled_fn = torch.compile(fn, backend="aot_eager")
-            subclass_x = DoubleTensor(torch.tensor([1.0, 2.0, 3.0]))
+            ins = (DoubleTensor(torch.tensor([1.0, 2.0, 3.0])),)
+            ref_out = fn(*ins)
 
-            out = compiled_fn(subclass_x)
+            compiled_fn = torch.compile(fn, backend="aot_eager")
+            out = compiled_fn(*ins)
+
+            self.assertEqual(ref_out, out)
 
 
 if __name__ == "__main__":

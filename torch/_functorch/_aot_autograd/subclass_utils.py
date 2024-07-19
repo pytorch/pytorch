@@ -136,6 +136,24 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
     return unwrapped_args
 
 
+def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
+    static_input_indices = set(static_input_indices)
+    new_ind = 0
+    remapped_static_indices = []
+    for i, arg in enumerate(wrapped_args):
+        num_indices = 1
+        if is_traceable_wrapper_subclass(arg):
+            num_indices = len(get_plain_tensors(typing.cast(Tensor, arg)))
+
+        for _ in range(num_indices):
+            if i in static_input_indices:
+                remapped_static_indices.append(new_ind)
+
+            new_ind += 1
+
+    return remapped_static_indices
+
+
 # Turns a flattened list of tensor arguments into (maybe) subclass tensors.
 # This function is used both at trace time and runtime, so we have an is_runtime flag telling us which context we're in.
 def wrap_tensor_subclasses(
@@ -144,17 +162,20 @@ def wrap_tensor_subclasses(
     subclass_metas: List[Union[int, SubclassCreationMeta]],
     num_fw_outs_saved_for_bw: Optional[int] = None,
     is_runtime: bool = False,
+    num_tokens: int = 0,
 ) -> Tuple[Any, ...]:
-    wrapped_args = []
+    wrapped_args = list(unwrapped_args[:num_tokens])
     num_args_tallied = 0
     for subclass_meta in subclass_metas:
         if isinstance(subclass_meta, int):
-            wrapped_args.append(unwrapped_args[subclass_meta])
+            wrapped_args.append(num_tokens + unwrapped_args[subclass_meta])
             num_args_tallied += 1
         else:
             assert isinstance(subclass_meta, SubclassCreationMeta)
             wrapped_args.append(
-                subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
+                subclass_meta.creation_fn(
+                    unwrapped_args[num_tokens:], is_runtime=is_runtime
+                )
             )
             num_args_tallied += subclass_meta.arg_count
 
@@ -182,7 +203,10 @@ def wrap_tensor_subclasses(
     # but `subclass_metas` will only correspond to subclass metatadata on `user_fw_outs`.
     # We then need to make sure that we return (*wrapped_user_fw_outs, *activations).
     if num_fw_outs_saved_for_bw is not None:
-        assert len(unwrapped_args) == num_args_tallied + num_fw_outs_saved_for_bw, (
+        assert (
+            len(unwrapped_args)
+            == num_tokens + num_args_tallied + num_fw_outs_saved_for_bw
+        ), (
             f"Expected the number actual unwrapped-subclass outputs {len(unwrapped_args)} to equal "
             f"the number of args calculated from subclasses ({num_args_tallied}) plus the number of "
             f"additional activations saved for the backward pass ({num_fw_outs_saved_for_bw})"
@@ -192,7 +216,7 @@ def wrap_tensor_subclasses(
             return wrapped_args + activations
         return tuple(list(wrapped_args) + list(activations))
     else:
-        assert len(unwrapped_args) == num_args_tallied
+        assert len(unwrapped_args) == num_tokens + num_args_tallied
         return tuple(wrapped_args)
 
 
@@ -211,7 +235,9 @@ def wrap_tensor_subclasses_maybe_joint(
         )
         primals, tangents = unwrapped_args[0], unwrapped_args[1]
         wrapped_primals = wrap_tensor_subclasses(
-            primals, subclass_metas=meta.subclass_inp_meta
+            primals,
+            subclass_metas=meta.subclass_inp_meta,
+            num_tokens=len(meta.tokens),
         )
         wrapped_tangents = wrap_tensor_subclasses(
             tangents, subclass_metas=meta.subclass_tangent_meta
@@ -219,7 +245,9 @@ def wrap_tensor_subclasses_maybe_joint(
         return (wrapped_primals, wrapped_tangents)
     else:
         wrapped_args = wrap_tensor_subclasses(
-            unwrapped_args, subclass_metas=meta.subclass_inp_meta
+            unwrapped_args,
+            subclass_metas=meta.subclass_inp_meta,
+            num_tokens=len(meta.tokens),
         )
         return wrapped_args
 
