@@ -2490,6 +2490,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         args = [torch.randn(1, 2)]
         self.assertTrue(same_two_models(mod, opt_mod, args))
 
+    def test_udf_deepcopy(self):
+        class Foo:
+            def __init__(self):
+                self.x = 5
+
+        foo = Foo()
+
+        def fn(x):
+            foo_copy = copy.deepcopy(foo)
+            return x * foo_copy.x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_class_member(self):
         class Foo(torch.nn.Module):
             a = 4
