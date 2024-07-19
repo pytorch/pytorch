@@ -284,6 +284,7 @@ test_python_shard() {
     # timeout issues on the CI. Disabled in the test shard so we can continue to test in a periodic
     # inductor workflow
     time python test/run_test.py -x inductor/test_torchinductor_opinfo --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
+  fi
   assert_git_not_dirty
 }
 
