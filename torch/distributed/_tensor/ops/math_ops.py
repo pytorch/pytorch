@@ -305,6 +305,8 @@ def common_reduction_strategy(
 LINEAR_REDUCTION_OP_MAP = {
     aten.all.default: "sum",
     aten.all.dim: "sum",
+    aten.amax.default: "max",
+    aten.amin.default: "min",
     aten.sum.default: "sum",
     aten.sum.dim_IntList: "sum",
     aten.prod.default: "product",
