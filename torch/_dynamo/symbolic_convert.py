@@ -2285,6 +2285,10 @@ class InstructionTranslatorBase(
         self._store_fast(inst.argval[0])
         self._store_fast(inst.argval[1])
 
+    def STORE_FAST_LOAD_FAST(self, inst):
+        self._store_fast(inst.argval[0])
+        self._load_fast(inst.argval[1])
+
     @break_graph_if_unsupported(push=1)
     def CALL_KW(self, inst):
         self._call(inst, call_kw=True)
