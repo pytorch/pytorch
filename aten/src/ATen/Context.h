@@ -416,73 +416,73 @@ class TORCH_API Context {
 
 TORCH_API Context& globalContext();
 
-static inline void init() {
+inline void init() {
   globalContext();
 }
 
 TORCH_API Allocator* getCPUAllocator();
 
-static inline DeprecatedTypeProperties& getDeprecatedTypeProperties(
+inline DeprecatedTypeProperties& getDeprecatedTypeProperties(
     Backend p,
     ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
       p, s);
 }
 
-static inline DeprecatedTypeProperties& CPU(ScalarType s) {
+inline DeprecatedTypeProperties& CPU(ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
       Backend::CPU, s);
 }
 
-static inline DeprecatedTypeProperties& CUDA(ScalarType s) {
+inline DeprecatedTypeProperties& CUDA(ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
       Backend::CUDA, s);
 }
 
-static inline DeprecatedTypeProperties& HIP(ScalarType s) {
+inline DeprecatedTypeProperties& HIP(ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
       Backend::HIP, s);
 }
 
-static inline DeprecatedTypeProperties& MPS(ScalarType s) {
+inline DeprecatedTypeProperties& MPS(ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
       Backend::MPS, s);
 }
 
-static inline bool hasCUDA() {
+inline bool hasCUDA() {
   return globalContext().hasCUDA();
 }
 
-static inline bool hasMTIA() {
+inline bool hasMTIA() {
   return globalContext().hasMTIA();
 }
 
-static inline bool hasHIP() {
+inline bool hasHIP() {
   return globalContext().hasHIP();
 }
 
-static inline bool hasIPU() {
+inline bool hasIPU() {
   return globalContext().hasIPU();
 }
 
-static inline bool hasXLA() {
+inline bool hasXLA() {
   return globalContext().hasXLA();
 }
 
-static inline bool hasMPS() {
+inline bool hasMPS() {
   return globalContext().hasMPS();
 }
 
-static inline bool hasMAIA() {
+inline bool hasMAIA() {
   return globalContext().hasMAIA();
 }
 
-static inline bool hasXPU() {
+inline bool hasXPU() {
   return globalContext().hasXPU();
 }
 
 // Despite its name, this function returns the number of *CUDA* GPUs.
-static inline size_t getNumGPUs() {
+inline size_t getNumGPUs() {
   // WARNING: DO NOT ADD LOGIC TO HANDLE OTHER DEVICE TYPES TO THIS
   // FUNCTION.  If you are interested in interrogating the number of
   // devices for a specific device type, add that function to the
@@ -501,27 +501,27 @@ static inline size_t getNumGPUs() {
   }
 }
 
-static inline bool hasOpenMP() {
+inline bool hasOpenMP() {
   return globalContext().hasOpenMP();
 }
 
-static inline bool hasMKL() {
+inline bool hasMKL() {
   return globalContext().hasMKL();
 }
 
-static inline bool hasLAPACK() {
+inline bool hasLAPACK() {
   return globalContext().hasLAPACK();
 }
 
-static inline bool hasMAGMA() {
+inline bool hasMAGMA() {
   return globalContext().hasMAGMA();
 }
 
-static inline bool hasMKLDNN() {
+inline bool hasMKLDNN() {
   return globalContext().hasMKLDNN();
 }
 
-static inline void manual_seed(uint64_t seed) {
+inline void manual_seed(uint64_t seed) {
   auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
   {
     // See Note [Acquire lock when using random generators]
