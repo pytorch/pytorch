@@ -1322,6 +1322,50 @@ SeqNr|OrigAten|SrcFn
         # `le` is a donated buffer but primals_1 is not.
         FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
 
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer_with_retain_or_create_graph(self):
+        # Gives non-empty bw_donated_idxs
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.zeros([3, 3]))
+
+            def forward(self, x):
+                return torch.nn.functional.relu(x) + self.param
+
+        inp = torch.randn(3, 3, requires_grad=True)
+
+        mod = torch.compile(Mod())
+        for _ in range(5):
+            mod(inp).sum().backward()
+
+        mod = torch.compile(Mod())
+        out = mod(inp).sum()
+        for _ in range(5):
+            out.backward(retain_graph=True)
+        out.backward()
+
+        mod = torch.compile(Mod())
+        mod(inp).sum().backward(create_graph=True)
+        out = mod(inp).sum()
+        for _ in range(5):
+            out.backward(retain_graph=True)
+        out.backward()
+
+        mod = torch.compile(Mod())
+        mod(inp).sum().backward()
+        out = mod(inp).sum()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"This backward function was compiled with non-empty donated "
+            r"buffers which requires create_graph=False and retain_graph=False. "
+            r"Please keep backward\(create_graph=False, retain_graph=False\) "
+            r"across all backward\(\) function calls, or set "
+            r"torch._functorch.config.donated_buffer=False to disable "
+            r"donated buffer.",
+        ):
+            out.backward(retain_graph=True)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

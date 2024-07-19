@@ -1894,8 +1894,24 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         not backward_state_indices
                     ), "BackwardState requires CompiledAutograd"
                     ctx.maybe_clear_saved_tensors()
+
+                    saved_tensors_use_once = not (
+                        torch.is_grad_enabled() or ctx.is_retain_graph()
+                    )
+
                     if CompiledFunction.compiled_bw is None:
+                        # Only callsite is aot_dispatch_autograd which guarantees existence of
+                        # lazy_backward_info.saved_context.fw_metadata
                         assert lazy_backward_info is not None
+                        assert lazy_backward_info.saved_context is not None
+                        assert lazy_backward_info.saved_context.fw_metadata is not None
+
+                        if not saved_tensors_use_once:
+                            lazy_backward_info.saved_context.fw_metadata.bw_donated_idxs = (
+                                []
+                            )
+                            fw_metadata.bw_donated_idxs = []
+
                         bw_module = lazy_backward_info.bw_module
                         placeholder_list = lazy_backward_info.placeholder_list
                         saved_context = lazy_backward_info.saved_context
@@ -1913,6 +1929,23 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             # Maybe save cache entry
                             if try_save_cache_entry is not None:
                                 try_save_cache_entry(CompiledFunction.compiled_bw)
+
+                    if (
+                        torch._functorch.config.donated_buffer
+                        and not saved_tensors_use_once
+                        and fw_metadata.bw_donated_idxs != []
+                    ):
+                        torch._check(
+                            False,
+                            lambda: (
+                                "This backward function was compiled with non-empty donated "
+                                "buffers which requires create_graph=False and retain_graph=False. "
+                                "Please keep backward(create_graph=False, retain_graph=False) "
+                                "across all backward() function calls, or set "
+                                "torch._functorch.config.donated_buffer=False to disable "
+                                "donated buffer."
+                            ),
+                        )
 
                     out = call_func_at_runtime_with_args(
                         CompiledFunction.compiled_bw,
