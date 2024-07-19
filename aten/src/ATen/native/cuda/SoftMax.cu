@@ -1115,6 +1115,7 @@ TORCH_IMPL_FUNC(softmax_backward_cuda_out)
 
 Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const std::optional<int64_t> dim_, const std::optional<int64_t> mask_type_) {
     /*
+     * [NOTE] SDPA + mask_type 3
      * This is a specialized path for Scaled Dot Product Attention (SDPA) with boolean masks.
      * The key semantic requirement in SDPA is that fully masked-out rows in the attention
      * matrix must result in all zeros, regardless of the input values.
@@ -1234,9 +1235,20 @@ Tensor masked_softmax_backward_cuda(
     const Tensor& grad_,
     const Tensor& output_,
     const Tensor& mask_,
-    const std::optional<int64_t> dim_) {
+    const std::optional<int64_t> dim_,
+    const std::optional<int64_t> mask_type_) {
+
   Tensor grad_input = at::empty_like(grad_, grad_.options());
   if (grad_.numel() == 0) {
+    return grad_input;
+  }
+  // See [NOTE] SDPA + mask_type 3
+  if (mask_type_.has_value() && mask_type_.value() == 3){
+    TORCH_CHECK(dim_.has_value(), "dim must be specified for mask_type == 3");
+    TORCH_CHECK(mask_.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
+    auto grad_input = grad_ * output_;
+    auto grad_sum = grad_input.sum(dim_.value(), /*keepdim=*/true);
+    grad_input -= output_ * grad_sum;
     return grad_input;
   }
 

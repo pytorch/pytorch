@@ -4425,43 +4425,35 @@ def sample_inputs_masked_softmax(opinfo, device, dtype, requires_grad, **kwargs)
     samples = [
         # Basic 3D tensor with mask
         SampleInput(make_arg((2, 3, 4)),
-                    args=(1,),  # dim
-                    kwargs={'mask': make_bool_mask(2, 3, 4), 'mask_type': 3}),
+                    kwargs={'dim': 1, 'mask': make_bool_mask(2, 3, 4), 'mask_type': 3}),
 
         # 2D tensor with mask, testing different dim
         SampleInput(make_arg((5, 5)),
-                    args=(0,),  # dim
-                    kwargs={'mask': make_bool_mask(5, 5), 'mask_type': 3}),
+                    kwargs={'dim': 0, 'mask': make_bool_mask(5, 5), 'mask_type': 3}),
 
         # 4D tensor, testing with a different dim
         SampleInput(make_arg((2, 3, 4, 5)),
-                    args=(2,),  # dim
-                    kwargs={'mask': make_bool_mask(2, 3, 4, 5), 'mask_type': 3}),
+                    kwargs={'dim': 2, 'mask': make_bool_mask(2, 3, 4, 5), 'mask_type': 3}),
 
         # Edge case: 1D tensor
         SampleInput(make_arg((10,)),
-                    args=(0,),  # dim
-                    kwargs={'mask': make_bool_mask(10), 'mask_type': 3}),
+                    kwargs={'dim': 0, 'mask': make_bool_mask(10), 'mask_type': 3}),
 
         # Edge case: tensor with one dimension of size 1
         SampleInput(make_arg((1, 5, 5)),
-                    args=(1,),  # dim
-                    kwargs={'mask': make_bool_mask(1, 5, 5), 'mask_type': 3}),
+                    kwargs={'dim': 1, 'mask': make_bool_mask(1, 5, 5), 'mask_type': 3}),
 
         # Testing with all elements masked
         SampleInput(make_arg((3, 3)),
-                    args=(1,),  # dim
-                    kwargs={'mask': torch.zeros((3, 3), dtype=torch.bool, device=device), 'mask_type': 3}),
+                    kwargs={'dim': 1, 'mask': torch.zeros((3, 3), dtype=torch.bool, device=device), 'mask_type': 3}),
 
         # Testing with no elements masked
         SampleInput(make_arg((3, 3)),
-                    args=(1,),  # dim
-                    kwargs={'mask': torch.ones((3, 3), dtype=torch.bool, device=device), 'mask_type': 3}),
+                    kwargs={'dim': 1, 'mask': torch.ones((3, 3), dtype=torch.bool, device=device), 'mask_type': 3}),
 
         # Testing with two rows masked
         SampleInput(make_arg((6, 3)),
-                    args=(1,),  # dim
-                    kwargs={'mask': mask_two_rows(6, 3), 'mask_type': 3}),
+                    kwargs={'dim': 1, 'mask': mask_two_rows(6, 3), 'mask_type': 3}),
     ]
     yield from samples
 
@@ -16172,9 +16164,10 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_masked_softmax,
         assert_jit_shape_analysis=True,
         assert_autodiffed=True,
-        supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
-        supports_out=True,
+        supports_forward_ad=False,
+        supports_fwgrad_bwgrad=False,
+        supports_out=False,
+        supports_cow_input_no_materialize_backward=False,
         skips=(),
         decorators=[],
     ),

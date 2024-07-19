@@ -2144,7 +2144,7 @@
   self: _sparse_log_softmax_backward_data(grad, result, dim, self)
 
 - name: _masked_softmax(Tensor self, Tensor mask, int? dim=None, int? mask_type=None) -> Tensor
-  self: _masked_softmax_backward(grad, result, mask, dim)
+  self: _masked_softmax_backward(grad, result, mask, dim, mask_type)
   mask: non_differentiable
 
 - name: _prelu_kernel(Tensor self, Tensor weight) -> Tensor

@@ -8013,7 +8013,7 @@
     CPU: masked_softmax_cpu
   autogen: _masked_softmax.out
 
-- func: _masked_softmax_backward(Tensor grad_output, Tensor output, Tensor mask, int? dim=None) -> Tensor
+- func: _masked_softmax_backward(Tensor grad_output, Tensor output, Tensor mask, int? dim=None, int? mask_type=None) -> Tensor
   dispatch:
     CUDA: masked_softmax_backward_cuda
     CPU: masked_softmax_backward_cpu
