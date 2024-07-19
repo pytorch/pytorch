@@ -7,6 +7,7 @@ with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
 import collections
 import contextlib
 import copy
+import dataclasses
 import functools
 import gc
 import inspect
@@ -3523,6 +3524,35 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f(torch.zeros(6, 4), torch.tensor(2)),
             gm(torch.zeros(6, 4), torch.tensor(2)),
         )
+
+    def test_dataclass_init_with_default_factory_with_inputs(self):
+        @dataclasses.dataclass
+        class DClass:
+            sharding_contexts: Any = dataclasses.field(default_factory=list)
+            a: int = 1
+
+        def fn(x, inp_list):
+            d = DClass(inp_list)
+            d.sharding_contexts.append(x.sin() + d.a)
+            return d
+
+        x = torch.randn(4)
+        inp_list1 = [1, 2, 3]
+        inp_list2 = [2, 3, 4]
+        inp_list3 = [1, 2]
+        ref1 = fn(x, inp_list1)
+        ref2 = fn(x, inp_list2)
+        ref3 = fn(x, inp_list3)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, fullgraph=True)
+
+        opt_ret1 = opt_fn(x, inp_list1)
+        opt_ret2 = opt_fn(x, inp_list2)
+        opt_ret3 = opt_fn(x, inp_list3)
+        self.assertEqual(ref1.sharding_contexts, opt_ret1.sharding_contexts)
+        self.assertEqual(ref2.sharding_contexts, opt_ret2.sharding_contexts)
+        self.assertEqual(ref3.sharding_contexts, opt_ret3.sharding_contexts)
 
     def test_list_index(self):
         for i, list_type in enumerate(

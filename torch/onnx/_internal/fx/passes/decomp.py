@@ -11,6 +11,7 @@ import torch.fx
 from torch._dispatch import python as python_dispatch
 from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
+from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.onnx._internal.fx.passes import _utils
 
@@ -29,6 +30,7 @@ class Decompose(_pass.Transform):
         self.enable_dynamic_axes = enable_dynamic_axes
         self.allow_fake_constant = allow_fake_constant
 
+    @_beartype.beartype
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
         assert not kwargs, "kwargs is not supported in Decompose."
 
