@@ -272,6 +272,8 @@ class ValueRanges(Generic[_T]):
         if ValueRanges.unknown() in (self, other):
             return ValueRanges.unknown()
         assert self.is_bool == other.is_bool, (self, other)
+        assert self.is_int == other.is_int, (self, other)
+        assert self.is_float == other.is_float, (self, other)
         if self.is_bool:
             return ValueRanges(
                 sympy.And(self.lower, other.lower), sympy.Or(self.upper, other.upper)

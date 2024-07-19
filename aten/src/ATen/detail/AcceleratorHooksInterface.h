@@ -2,6 +2,7 @@
 
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
+#include <c10/core/Allocator.h>
 namespace at {
 
 // AcceleratorHooksInterface is a shared interface provided by all
@@ -38,6 +39,15 @@ struct TORCH_API AcceleratorHooksInterface {
   virtual DeviceIndex maybeExchangeDevice(DeviceIndex device) const {
     TORCH_CHECK(false, "Backend doesn't support maybeExchangeDevice()");
     return -1;
+  }
+
+  virtual bool isPinnedPtr(const void* data) const {
+    return false;
+  }
+
+  virtual Allocator* getPinnedMemoryAllocator() const {
+    TORCH_CHECK(false, "Backend doesn't support getPinnedMemoryAllocator()");
+    return nullptr;
   }
 };
 
