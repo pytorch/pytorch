@@ -709,7 +709,7 @@ class triton:
     slow_path_cudagraph_asserts = True
 
     # TODO - need to debug why this prevents cleanup
-    cudagraph_trees_history_recording = False
+    cudagraph_trees_history_recording = True
 
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
     cudagraph_support_input_mutation = False if is_fbcode() else True
