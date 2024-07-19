@@ -1051,6 +1051,13 @@ def register_vmap(
     assert isinstance(op, str)
     qualname = op
     op = torch._library.utils.lookup_op(qualname)
+    schema = op._schema
+    if _library.utils.has_kwarg_only_tensors(schema):
+        raise NotImplementedError(
+            f"register_vmap with kwarg-only Tensor args. In the original "
+            f"definition of the op, please make your tensors not kwarg-only. "
+            f"Got: {schema}"
+        )
 
     def register(func):
         nonlocal op, lib
