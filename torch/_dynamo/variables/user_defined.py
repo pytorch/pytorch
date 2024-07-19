@@ -110,8 +110,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return self.value in self._constant_fold_classes()
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
+        from .. import trace_rules
         from . import ConstantVariable, EnumVariable
-        from .builder import SourcelessBuilder, VariableBuilder
+        from .builder import VariableBuilder
 
         if name == "__name__":
             return ConstantVariable.create(self.value.__name__)
@@ -127,9 +128,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if isinstance(obj, staticmethod):
             func = obj.__get__(self.value)
             if source is not None:
-                return VariableBuilder(tx, source)(func)
+                return trace_rules.lookup(func).create_with_source(func, source=source)
             else:
-                return SourcelessBuilder(tx)(func)
+                return trace_rules.lookup(func)(func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source:
