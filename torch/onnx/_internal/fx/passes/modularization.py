@@ -23,7 +23,6 @@ from typing import (
 
 import torch
 import torch.fx
-from torch.onnx._internal import _beartype
 
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.utils import _pytree as pytree
@@ -59,7 +58,6 @@ class _ModuleMeta:
     _module_name: Final[str]  # type: ignore[misc]
     _raw_meta: Final[Tuple[Any, Any]]  # type: ignore[misc]
 
-    @_beartype.beartype
     def __init__(
         self,
         module_name: str,
@@ -213,7 +211,6 @@ class _ModuleStackMeta:
 
     _module_stack: Final[List[_ModuleMeta]]  # type: ignore[misc]
 
-    @_beartype.beartype
     def __init__(
         self,
         nn_module_stack_meta: Optional[
@@ -233,7 +230,7 @@ class _ModuleStackMeta:
             if is_exported_program:
                 is_exported_program = False
                 continue
-            self.push(_ModuleMeta.from_raw_meta(item))
+            self.push(_ModuleMeta.from_raw_meta(item))  # type: ignore[arg-type]
 
     def __len__(self) -> int:
         return len(self._module_stack)
@@ -262,7 +259,6 @@ class _ModuleStackMeta:
             return _ModuleMeta.create_root()
         return self._module_stack[-1]
 
-    @_beartype.beartype
     def is_superset_of(
         self,
         module_stack: _ModuleStackMeta,
@@ -306,7 +302,6 @@ class _ModuleStackMeta:
         """Pushes a module meta to the stack."""
         self._module_stack.append(module_meta)
 
-    @_beartype.beartype
     def __eq__(self, __value: object) -> bool:
         if not isinstance(__value, _ModuleStackMeta):
             return False
@@ -843,7 +838,6 @@ class Modularize(_pass.Transform):
 
     """
 
-    @_beartype.beartype
     def __init__(
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
@@ -854,7 +848,6 @@ class Modularize(_pass.Transform):
         self.module = module
         self.is_exported_program = is_exported_program
 
-    @_beartype.beartype
     def _run(self) -> torch.fx.GraphModule:
         # DCE to remove unused nodes.
         # If a submodule is unused, it is hard to analyze which nodes constitutes the submodule
