@@ -216,7 +216,7 @@ hop_db = [
             # TODO (yidi): figure out window test failures
             DecorateInfo(
                 unittest.expectedFailure,
-                "TestBwdGradientsCPU",
+                "TestBwdGradients",
                 "test_fn_grad",
                 active_if=IS_WINDOWS,
             ),
