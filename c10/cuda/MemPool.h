@@ -4,12 +4,9 @@
 #include <functional>
 
 #include <c10/cuda/CUDAFunctions.h>
-#include <c10/cuda/CUDAMacros.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 
 namespace c10::cuda {
-
-using CaptureId_t = unsigned long long;
-using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
 
 // forward declare CUDAAllocator
 namespace CUDACachingAllocator {
