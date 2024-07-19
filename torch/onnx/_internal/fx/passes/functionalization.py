@@ -126,7 +126,7 @@ class Functionalize(_pass.Transform):
                 decomposition_table={},
                 tracing_mode=tracing_mode,
                 _allow_non_fake_inputs=True,
-                _allow_fake_constant=self.allow_fake_constant,
+                _allow_fake_constant=bool(self.allow_fake_constant),
             )(*maybe_fake_args)
 
         # Rename placeholder targets to match the original module's signature since

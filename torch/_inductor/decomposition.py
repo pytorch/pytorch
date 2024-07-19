@@ -300,7 +300,13 @@ def cat(tensors, dim=0):
         # runtime assert forcing u0 to be zero.  So if this hasn't happened,
         # we know that the unbacked SymInt has appropriate size and there are
         # no problems.
-        return len(x.shape) != 1 or guard_size_oblivious(x.shape[0] > 0)
+        if len(x.shape) == 1 and guard_size_oblivious(x.shape[0] == 0):
+            return False
+
+        if dim < len(x.shape) and guard_size_oblivious(x.shape[dim] == 0):
+            return False
+
+        return True
 
     filtered_tensors = list(filter(non_empty_tensor, tensors))
 
@@ -414,6 +420,11 @@ def amin(self, dim=None, keepdim=False):
 @register_decomposition([aten.narrow_copy])
 def narrow_copy(self, dim, start, length):
     return torch.narrow(self, dim, start, length).clone()
+
+
+@register_decomposition([aten.expand_copy])
+def expand_copy(self, size, *, implicit=False):
+    return aten.expand(self, size, implicit=implicit).clone()
 
 
 @register_decomposition([aten.view_copy.default])

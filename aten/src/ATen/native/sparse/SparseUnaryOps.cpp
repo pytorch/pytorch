@@ -71,6 +71,8 @@
 #include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/trunc.h>
 #include <ATen/ops/trunc_native.h>
+#include <ATen/ops/is_pinned_native.h>
+#include <ATen/ops/_pin_memory_native.h>
 #endif
 
 namespace at::native {
@@ -278,6 +280,25 @@ Tensor& nan_to_num_sparse_(
     std::optional<double> posinf, std::optional<double> neginf) {
   TORCH_CHECK(self.is_coalesced(), "nan_to_num_ requires coalesced input");
   return nan_to_num_sparse_out(self, nan, posinf, neginf, self);
+}
+
+bool is_pinned_sparse(const Tensor& self, std::optional<Device> device) {
+  if (device.has_value()) {
+    TORCH_WARN_DEPRECATION(
+        "The argument 'device' of Tensor.is_pinned() ",
+        "is deprecated. Please do not pass this argument.")
+  }
+  // Currently, we don't support pin memory for sparse tensor.
+  // so always return false
+  return false;
+}
+
+Tensor _pin_memory_sparse(const Tensor& self, std::optional<Device> device) {
+  // Here, we throw an error rather than return self tensor. This
+  // is because we always return the pinned memory tensor, while
+  // giving unpinned tensor might mislead users.
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false, "'aten::_pin_memory' is not implemented for sparse tensor.");
 }
 
 }  // namespace at::native
