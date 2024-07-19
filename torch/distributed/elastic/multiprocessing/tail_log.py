@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -9,26 +10,28 @@
 import logging
 import os
 import time
-from concurrent.futures._base import Future
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Event
-from typing import Dict, List, Optional, TextIO
+from typing import Dict, List, Optional, TextIO, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from concurrent.futures._base import Future
 
 __all__ = ["tail_logfile", "TailLog"]
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def tail_logfile(
     header: str, file: str, dst: TextIO, finished: Event, interval_sec: float
 ):
-
     while not os.path.exists(file):
         if finished.is_set():
             return
         time.sleep(interval_sec)
 
-    with open(file) as fp:
+    with open(file, errors="replace") as fp:
         while True:
             line = fp.readline()
 
@@ -138,10 +141,12 @@ class TailLog:
             try:
                 f.result()
             except Exception as e:
-                log.error(
+                logger.error(
                     "error in log tailor for %s%s. %s: %s",
-                    self._name, local_rank,
-                    e.__class__.__qualname__, e,
+                    self._name,
+                    local_rank,
+                    e.__class__.__qualname__,
+                    e,
                 )
 
         if self._threadpool:

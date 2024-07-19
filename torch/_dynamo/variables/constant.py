@@ -39,7 +39,7 @@ class ConstantVariable(VariableTracker):
                 assert not isinstance(value, disallowed_type), reason
 
         # Routing for list and tuple literals.
-        if is_literal and isinstance(value, (list, tuple)):
+        if is_literal and isinstance(value, (list, tuple, set, frozenset)):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
@@ -51,7 +51,11 @@ class ConstantVariable(VariableTracker):
                         source=item_source,
                     )
                 )
-            return variables.BaseListVariable.cls_for(type(value))(items, **kwargs)
+            if isinstance(value, (list, tuple)):
+                return variables.BaseListVariable.cls_for(type(value))(items, **kwargs)
+            else:
+                assert isinstance(value, (set, frozenset)), type(value)
+                return variables.SetVariable(items)
 
         return ConstantVariable(value, **kwargs)
 
@@ -80,6 +84,9 @@ class ConstantVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
+
+    def is_python_constant(self):
+        return True
 
     @property
     def items(self):
@@ -119,7 +126,7 @@ class ConstantVariable(VariableTracker):
             )
         member = getattr(self.value, name)
         if callable(member):
-            raise NotImplementedError()
+            raise NotImplementedError
         return member
 
     def call_method(
@@ -148,33 +155,31 @@ class ConstantVariable(VariableTracker):
         except NotImplementedError:
             return super().call_method(tx, name, args, kwargs)
 
-        def has_arith_binop(num_ty):
-            return (
-                isinstance(self.value, num_ty)
-                and hasattr(operator, name)
-                and len(args) == 1
-                and args[0].is_python_constant()
-            )
-
         if isinstance(self.value, str) and name in str.__dict__.keys():
             method = getattr(self.value, name)
             return ConstantVariable.create(method(*const_args, **const_kwargs))
-        elif has_arith_binop(int) or has_arith_binop(float):
-            op = getattr(operator, name)
-            add_target = const_args[0]
-            if isinstance(add_target, (torch.SymInt, torch.SymFloat)):
-                from .tensor import SymNodeVariable
+        elif isinstance(self.value, (float, int)):
+            if not (args or kwargs):
+                return ConstantVariable.create(getattr(self.value, name)())
+            if (
+                hasattr(operator, name)
+                and len(args) == 1
+                and args[0].is_python_constant()
+            ):
+                add_target = const_args[0]
+                op = getattr(operator, name)
+                if isinstance(
+                    add_target, (torch.SymBool, torch.SymFloat, torch.SymInt)
+                ):
+                    # Addition between a non sym and sym makes a sym
+                    proxy = tx.output.create_proxy(
+                        "call_function", op, (self.value, add_target), {}
+                    )
+                    return SymNodeVariable.create(tx, proxy, add_target)
+                else:
+                    return ConstantVariable.create(op(self.value, add_target))
 
-                # Addition between a non sym and sym makes a sym
-                # sym_num = tx.output.register_attr_or_module(
-                #     add_target, f"sym_shape_{add_target}", source=None
-                # )
-                proxy = tx.output.create_proxy(
-                    "call_function", op, (self.value, add_target), {}
-                )
-                return SymNodeVariable.create(tx, proxy, add_target)
-            return ConstantVariable.create(op(self.value, add_target))
-        elif name == "__len__" and not (args or kwargs):
+        if name == "__len__" and not (args or kwargs):
             return ConstantVariable.create(len(self.value))
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
@@ -194,6 +199,14 @@ class EnumVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
+    @classmethod
+    def create(cls, cls_type, value_vt, options):
+        if isinstance(value_vt, variables.ConstantVariable):
+            for member in list(cls_type):
+                if member.value == value_vt.as_python_constant():
+                    return cls(member, **options)
+        unimplemented("Enum variable is constructed with non constant values")
+
     def as_proxy(self):
         return self.value
 
@@ -209,5 +222,5 @@ class EnumVariable(VariableTracker):
     def const_getattr(self, tx, name):
         member = getattr(self.value, name)
         if callable(member):
-            raise NotImplementedError()
+            raise NotImplementedError
         return member

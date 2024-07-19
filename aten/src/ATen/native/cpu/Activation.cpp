@@ -30,14 +30,13 @@ static void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const
     using Vec = Vectorized<scalar_t>;
     scalar_t* output_data = output.data_ptr<scalar_t>();
     scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
-    scalar_t* input_data = input.data_ptr<scalar_t>();
+    const scalar_t* input_data = input.const_data_ptr<scalar_t>();
     parallel_for(0, input.numel(), 1, [&] (int64_t begin, int64_t end) {
       int64_t size = end - begin;
       int64_t d = 0;
       for (; d < size - (size % Vec::size()); d += Vec::size()) {
         Vec data_vec = Vec::loadu(input_data + begin+ d);
-        Vectorized<float> data_vec0, data_vec1;
-        std::tie(data_vec0, data_vec1) = convert_to_float<scalar_t>(data_vec);
+        auto [data_vec0, data_vec1] = convert_to_float<scalar_t>(data_vec);
         Vectorized<float> min_vec = minimum(data_vec0, Vectorized<float>(float(0)));
         Vectorized<float> buffer_vec0 = data_vec0.abs().neg().exp();
         Vectorized<float> output_vec0 = min_vec - buffer_vec0.log1p();
@@ -49,8 +48,7 @@ static void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const
       }
       if (size - d > 0) {
         Vec data_vec = Vec::loadu(input_data + begin + d, size - d);
-        Vectorized<float> data_vec0, data_vec1;
-        std::tie(data_vec0, data_vec1) = convert_to_float<scalar_t>(data_vec);
+        auto [data_vec0, data_vec1] = convert_to_float<scalar_t>(data_vec);
         Vectorized<float> min_vec = minimum(data_vec0, Vectorized<float>(float(0)));
         Vectorized<float> buffer_vec0 = data_vec0.abs().neg().exp();
         Vectorized<float> output_vec0 = min_vec - buffer_vec0.log1p();
@@ -67,7 +65,7 @@ static void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const
       using Vec = Vectorized<scalar_t>;
       scalar_t* output_data = output.data_ptr<scalar_t>();
       scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
-      scalar_t* input_data = input.data_ptr<scalar_t>();
+      const scalar_t* input_data = input.const_data_ptr<scalar_t>();
       parallel_for(0, input.numel(), 1, [&] (int64_t begin, int64_t end) {
         int64_t size = end - begin;
         int64_t d = 0;
@@ -108,10 +106,9 @@ static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
           return (max_deriv - sign * (float(b) / (float(1) + b))) * float(c);
         },
         [=](Vec a, Vec b, Vec c) -> Vec {
-          Vectorized<float> a0, a1, b0, b1, c0, c1;
-          std::tie(a0, a1) = convert_to_float<scalar_t>(a);
-          std::tie(b0, b1) = convert_to_float<scalar_t>(b);
-          std::tie(c0, c1) = convert_to_float<scalar_t>(c);
+          auto [a0, a1] = convert_to_float<scalar_t>(a);
+          auto [b0, b1] = convert_to_float<scalar_t>(b);
+          auto [c0, c1] = convert_to_float<scalar_t>(c);
           auto mask = a0 < zero_vec;
           auto max_deriv_vec = Vectorized<float>::blendv(zero_vec, one_vec, mask);
           auto sign_vec = Vectorized<float>::blendv(one_vec.neg(), one_vec, mask);
@@ -164,9 +161,8 @@ static void threshold_kernel(
             return float(x) <= threshold ? value : other;
           },
           [&](Vectorized<scalar_t> x, Vectorized<scalar_t> other) -> Vectorized<scalar_t> {
-            Vec x0, x1, other0, other1;
-            std::tie(x0, x1) = convert_to_float<scalar_t>(x);
-            std::tie(other0, other1) = convert_to_float<scalar_t>(other);
+            auto [x0, x1] = convert_to_float<scalar_t>(x);
+            auto [other0, other1] = convert_to_float<scalar_t>(other);
             return convert_from_float<scalar_t>(Vec::blendv(other0, value_v, x0 <= threshold_v),
                                                 Vec::blendv(other1, value_v, x1 <= threshold_v));
           });
@@ -207,16 +203,15 @@ void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale
           return float(a) <= float(0) ? (std::exp(float(a) * negiptcoef) - float(1)) * negcoef : float(a) * poscoef;
         },
         [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &one_vec, &zero_vec](Vectorized<scalar_t> a) -> Vectorized<scalar_t> {
-          Vectorized<float> a0, a1, res0, res1;
-          std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+          auto [a0, a1] = convert_to_float<scalar_t>(a);
           auto cmp0 = (a0 > zero_vec);
           auto cmp1 = (a1 > zero_vec);
           auto get_res_masked = [&](Vectorized<float>& cmp, Vectorized<float>& a) {
             return !cmp.zero_mask() ? a * poscoef_vec :
               Vectorized<float>::blendv(((a * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a * poscoef_vec, cmp);
           };
-          res0 = get_res_masked(cmp0, a0);
-          res1 = get_res_masked(cmp1, a1);
+          auto res0 = get_res_masked(cmp0, a0);
+          auto res1 = get_res_masked(cmp1, a1);
           return convert_from_float<scalar_t>(res0, res1);
         });
     });
@@ -268,10 +263,8 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
           }
         },
         [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec, is_result](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
-          Vectorized<float> a0, a1, res0, res1;
-          std::tie(a0, a1) = convert_to_float<scalar_t>(a);
-          Vectorized<float> b0, b1;
-          std::tie(b0, b1) = convert_to_float<scalar_t>(b);
+          auto [a0, a1] = convert_to_float<scalar_t>(a);
+          auto [b0, b1] = convert_to_float<scalar_t>(b);
           auto cmp0 = (b0 > zero_vec);
           auto cmp1 = (b1 > zero_vec);
           auto get_res_masked = [&](Vectorized<float>& cmp, Vectorized<float>& a, Vectorized<float>& b) {
@@ -282,8 +275,8 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
               return Vectorized<float>::blendv(a * negiptcoef_vec * negcoef_vec * (b * negiptcoef_vec).exp(), a * poscoef_vec, cmp);
             }
           };
-          res0 = get_res_masked(cmp0, a0, b0);
-          res1 = get_res_masked(cmp1, a1, b1);
+          auto res0 = get_res_masked(cmp0, a0, b0);
+          auto res1 = get_res_masked(cmp1, a1, b1);
           return convert_from_float<scalar_t>(res0, res1);
         });
     });
@@ -364,8 +357,7 @@ void GeluKernelImpl(TensorIteratorBase& it, GeluType approximate) {
               return float(0.5) * float(x) * (float(1) + std::tanh(inner));
             },
             [&](Vectorized<scalar_t> x) -> Vectorized<scalar_t> {
-              Vectorized<float> x0, x1;
-              std::tie(x0, x1) = convert_to_float<scalar_t>(x);
+              auto [x0, x1] = convert_to_float<scalar_t>(x);
               auto x0_cube = x0 * x0 * x0;
               auto x1_cube = x1 * x1 * x1;
               auto inner_vec0 = kBetaVec * (x0 + kKappaVec * x0_cube);
@@ -414,8 +406,7 @@ void GeluKernelImpl(TensorIteratorBase& it, GeluType approximate) {
               return float(x) * float(0.5) * (float(1) + std::erf(float(x) * kAlpha));
             },
             [&](Vectorized<scalar_t> x) -> Vectorized<scalar_t> {
-              Vectorized<float> x0, x1;
-              std::tie(x0, x1) = convert_to_float<scalar_t>(x);
+              auto [x0, x1] = convert_to_float<scalar_t>(x);
               auto res0 = x0 * kPointFiveVec * (kOneVec + (x0 * kAlphaVec).erf());
               auto res1 = x1 * kPointFiveVec * (kOneVec + (x1 * kAlphaVec).erf());
               return convert_from_float<scalar_t>(res0, res1);
@@ -477,10 +468,8 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
             return float(dy) * (left_derivative + right_derivative);
           },
           [&](Vectorized<scalar_t> dy_vec, Vectorized<scalar_t> x_vec) -> Vectorized<scalar_t> {
-            Vectorized<float> x0_vec, x1_vec;
-            std::tie(x0_vec, x1_vec) = convert_to_float<scalar_t>(x_vec);
-            Vectorized<float> dy0_vec, dy1_vec;
-            std::tie(dy0_vec, dy1_vec) = convert_to_float<scalar_t>(dy_vec);
+            auto [x0_vec, x1_vec] = convert_to_float<scalar_t>(x_vec);
+            auto [dy0_vec, dy1_vec] = convert_to_float<scalar_t>(dy_vec);
             auto x0_sq = x0_vec * x0_vec;
             auto x1_sq = x1_vec * x1_vec;
             auto x0_cube = x0_vec * x0_vec * x0_vec;
@@ -583,10 +572,8 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
               return float(dy) * (cdf + float(x) * pdf);
           },
           [&](Vectorized<scalar_t> dy, Vectorized<scalar_t> x) -> Vectorized<scalar_t> {
-              Vectorized<float> x0, x1;
-              std::tie(x0, x1) = convert_to_float<scalar_t>(x);
-              Vectorized<float> dy0, dy1;
-              std::tie(dy0, dy1) = convert_to_float<scalar_t>(dy);
+              auto [x0, x1] = convert_to_float<scalar_t>(x);
+              auto [dy0, dy1] = convert_to_float<scalar_t>(dy);
               auto cdf_vec0 = kPointFiveVec * (kOneVec + (x0 * kAlphaVec).erf());
               auto cdf_vec1 = kPointFiveVec * (kOneVec + (x1 * kAlphaVec).erf());
               auto pdf_vec0 = kBetaVec * (x0 * x0 * kMinusPointFiveVec).exp();
@@ -643,8 +630,7 @@ void hardsigmoid_kernel(TensorIteratorBase& iter) {
           return std::min(std::max(float(self_val) + three, zero), six) / six;
         },
         [&](vec::Vectorized<scalar_t> self_val) -> vec::Vectorized<scalar_t> {
-          Vectorized<float> self_val0, self_val1;
-          std::tie(self_val0, self_val1) = convert_to_float<scalar_t>(self_val);
+          auto [self_val0, self_val1] = convert_to_float<scalar_t>(self_val);
           self_val0 = minimum(
             maximum(self_val0 + kThreeVec, kZeroVec),
             kSixVec
@@ -698,9 +684,8 @@ void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
             : zero;
         },
         [=](Vectorized<scalar_t> grad_val, Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
-          Vec self_val0, self_val1, grad_val0, grad_val1;
-          std::tie(self_val0, self_val1) = convert_to_float<scalar_t>(self_val);
-          std::tie(grad_val0, grad_val1) = convert_to_float<scalar_t>(grad_val);
+          auto [self_val0, self_val1] = convert_to_float<scalar_t>(self_val);
+          auto [grad_val0, grad_val1] = convert_to_float<scalar_t>(grad_val);
           Vec gradNonZeroMask = (self_val0 > neg_three) & (self_val0 < three);
           self_val0 = Vec::blendv(kZeroVec, grad_val0 * kOneSixthVec, gradNonZeroMask);
           gradNonZeroMask = (self_val1 > neg_three) & (self_val1 < three);
@@ -759,11 +744,9 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
         return float(a) > lambd_val ? a - lambd_val : (float(a) < -lambd_val ? a + lambd_val : float(0));
       },
       [=](Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
-          Vectorized<float> self_val0, self_val1;
-          Vectorized<scalar_t> self_val_t0, self_val_t1;
-          std::tie(self_val0, self_val1) = convert_to_float<scalar_t>(self_val);
-          self_val_t0 = convert_from_float<scalar_t>((self_val0 > lambdVec) & (self_val0 - lambdVec), (self_val1 > lambdVec) & (self_val1 - lambdVec));
-          self_val_t1 = convert_from_float<scalar_t>((self_val0 < -lambd_val) & (self_val0 + lambdVec), (self_val1 < -lambd_val) & (self_val1 + lambdVec));
+          auto [self_val0, self_val1] = convert_to_float<scalar_t>(self_val);
+          auto self_val_t0 = convert_from_float<scalar_t>((self_val0 > lambdVec) & (self_val0 - lambdVec), (self_val1 > lambdVec) & (self_val1 - lambdVec));
+          auto self_val_t1 = convert_from_float<scalar_t>((self_val0 < -lambd_val) & (self_val0 + lambdVec), (self_val1 < -lambd_val) & (self_val1 + lambdVec));
           return (self_val_t0 | self_val_t1);
       });
     });
@@ -812,9 +795,8 @@ void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Sca
             return (float(self_val) <= min_val || float(self_val) >= max_val) ? scalar_t(0) : grad_val;
           },
           [=](Vectorized<scalar_t> grad_val, Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
-            Vectorized<float> grad_val0, grad_val1, self_val0, self_val1;
-            std::tie(grad_val0, grad_val1) = convert_to_float<scalar_t>(grad_val);
-            std::tie(self_val0, self_val1) = convert_to_float<scalar_t>(self_val);
+            auto [grad_val0, grad_val1] = convert_to_float<scalar_t>(grad_val);
+            auto [self_val0, self_val1] = convert_to_float<scalar_t>(self_val);
             return convert_from_float<scalar_t>(
               ((self_val0 > min_val) & (self_val0 < max_val)) & grad_val0,
               ((self_val1 > min_val) & (self_val1 < max_val)) & grad_val1
@@ -853,8 +835,7 @@ void hardswish_kernel(TensorIterator& iter) {
         return float(x) * std::min(std::max(float(x) + three, zero), six) / six;
       },
       [&](vec::Vectorized<scalar_t> x_vec) {
-        Vectorized<float> x_vec0, x_vec1;
-        std::tie(x_vec0, x_vec1) = convert_to_float<scalar_t>(x_vec);
+        auto [x_vec0, x_vec1] = convert_to_float<scalar_t>(x_vec);
         x_vec0 = x_vec0 * minimum(
           maximum(x_vec0 + kThreeVec, kZeroVec),
           kSixVec
@@ -915,9 +896,8 @@ void hardswish_backward_kernel(TensorIterator& iter) {
         }
       },
       [&](vec::Vectorized<scalar_t> grad_val, vec::Vectorized<scalar_t> self_val) {
-        Vectorized<float> self_val0, self_val1, grad_val0, grad_val1;
-        std::tie(self_val0, self_val1) = convert_to_float<scalar_t>(self_val);
-        std::tie(grad_val0, grad_val1) = convert_to_float<scalar_t>(grad_val);
+        auto [self_val0, self_val1] = convert_to_float<scalar_t>(self_val);
+        auto [grad_val0, grad_val1] = convert_to_float<scalar_t>(grad_val);
         self_val0 = Vec::blendv(
           Vec::blendv(
             grad_val0 * ((self_val0 / kThreeVec) + kOneHalfVec),
@@ -990,8 +970,7 @@ static void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
           return float(a) > float(0) ? float(a) : float(a) * negval;
         },
         [&](Vectorized<scalar_t> a) -> Vectorized<scalar_t> {
-          Vectorized<float> a0, a1;
-          std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+          auto [a0, a1] = convert_to_float<scalar_t>(a);
           auto res0 = a0 * (Vectorized<float>::blendv(negval_v, one_vec, a0 > zero_vec));
           auto res1 = a1 * (Vectorized<float>::blendv(negval_v, one_vec, a1 > zero_vec));
           return convert_from_float<scalar_t>(res0, res1);
@@ -1030,9 +1009,8 @@ static void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& n
         return float(a) > float(0) ? float(b) : float(b) * negval;
       },
       [&](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
-        Vectorized<float> a0, a1, b0, b1;
-        std::tie(a0, a1) = convert_to_float<scalar_t>(a);
-        std::tie(b0, b1) = convert_to_float<scalar_t>(b);
+        auto [a0, a1] = convert_to_float<scalar_t>(a);
+        auto [b0, b1] = convert_to_float<scalar_t>(b);
         auto res0 = b0 * (Vectorized<float>::blendv(negval_v, one_vec, a0 > zero_vec));
         auto res1 = b1 * (Vectorized<float>::blendv(negval_v, one_vec, a1 > zero_vec));
         return convert_from_float<scalar_t>(res0, res1);
@@ -1073,8 +1051,7 @@ void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar
               : static_cast<scalar_t>((std::log1p(std::exp(float(a) * beta))) / beta);
           },
           [beta_vec, threshold_vec](Vectorized<scalar_t> a) -> Vectorized<scalar_t> {
-            Vectorized<float> a0, a1;
-            std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+            auto [a0, a1] = convert_to_float<scalar_t>(a);
             a0 = Vec::blendv((a0 * beta_vec).exp().log1p() / beta_vec, a0, (a0 * beta_vec) > threshold_vec);
             a1 = Vec::blendv((a1 * beta_vec).exp().log1p() / beta_vec, a1, (a1 * beta_vec) > threshold_vec);
             return convert_from_float<scalar_t>(a0, a1);
@@ -1118,9 +1095,8 @@ void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, con
           return (float(b) * beta) > threshold ? a : static_cast<scalar_t>(float(a) * z / (z + float(1.)));
         },
         [beta_vec, one_vec, threshold_vec](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
-          Vectorized<float> a0, a1, b0, b1;
-          std::tie(a0, a1) = convert_to_float<scalar_t>(a);
-          std::tie(b0, b1) = convert_to_float<scalar_t>(b);
+          auto [a0, a1] = convert_to_float<scalar_t>(a);
+          auto [b0, b1] = convert_to_float<scalar_t>(b);
           Vec z = (b0 * beta_vec).exp();
           a0 = Vec::blendv(a0 * z / (z + one_vec), a0, (b0 * beta_vec) > threshold_vec);
           z = (b1 * beta_vec).exp();
@@ -1162,9 +1138,8 @@ void glu_kernel(TensorIteratorBase& iter) {
         return float(a) * (float_one_val / (float_one_val + std::exp(- float(b))));
       },
       [float_one_vec](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
-        Vectorized<float> a0, a1, b0, b1;
-        std::tie(a0, a1) = convert_to_float<scalar_t>(a);
-        std::tie(b0, b1) = convert_to_float<scalar_t>(b);
+        auto [a0, a1] = convert_to_float<scalar_t>(a);
+        auto [b0, b1] = convert_to_float<scalar_t>(b);
         return convert_from_float<scalar_t>(a0 * (float_one_vec / (float_one_vec + b0.neg().exp())),
                                             a1 * (float_one_vec / (float_one_vec + b1.neg().exp())));
       });
@@ -1217,10 +1192,9 @@ void glu_backward_kernel(TensorIterator& iter) {
         return  (float_one_val - float(a)) * float(a) * float(b) * float(c);
       },
       [float_one_vec](Vectorized<scalar_t> a, Vectorized<scalar_t> b, Vectorized<scalar_t> c) -> Vectorized<scalar_t> {
-        Vectorized<float> a0, a1, b0, b1, c0, c1;
-        std::tie(a0, a1) = convert_to_float<scalar_t>(a);
-        std::tie(b0, b1) = convert_to_float<scalar_t>(b);
-        std::tie(c0, c1) = convert_to_float<scalar_t>(c);
+        auto [a0, a1] = convert_to_float<scalar_t>(a);
+        auto [b0, b1] = convert_to_float<scalar_t>(b);
+        auto [c0, c1] = convert_to_float<scalar_t>(c);
         a0 = (float_one_vec - a0) * a0 * b0 * c0;
         a1 = (float_one_vec - a1) * a1 * b1 * c1;
         return convert_from_float<scalar_t>(a0, a1);
@@ -1254,8 +1228,7 @@ void silu_kernel(TensorIteratorBase& iter) {
             return float(x) / (1.0f + std::exp(-float(x)));
           },
           [kOneVec](Vectorized<scalar_t> x_vec) -> Vectorized<scalar_t> {
-            Vectorized<float> x_vec0, x_vec1;
-            std::tie(x_vec0, x_vec1) = convert_to_float<scalar_t>(x_vec);
+            auto [x_vec0, x_vec1] = convert_to_float<scalar_t>(x_vec);
             return convert_from_float<scalar_t>(
               x_vec0 / (kOneVec + x_vec0.neg().exp()),
               x_vec1 / (kOneVec + x_vec1.neg().exp()));
@@ -1289,9 +1262,8 @@ void silu_backward_kernel(TensorIteratorBase& iter) {
           return dy * sigmoid * (1.0f + x * (1.0f - sigmoid));
         },
         [kOneVec](Vectorized<scalar_t> dy_vec, Vectorized<scalar_t> x_vec) -> Vectorized<scalar_t> {
-          Vectorized<float> x_vec0, x_vec1, dy_vec0, dy_vec1;
-          std::tie(x_vec0, x_vec1) = convert_to_float<scalar_t>(x_vec);
-          std::tie(dy_vec0, dy_vec1) = convert_to_float<scalar_t>(dy_vec);
+          auto [x_vec0, x_vec1] = convert_to_float<scalar_t>(x_vec);
+          auto [dy_vec0, dy_vec1] = convert_to_float<scalar_t>(dy_vec);
           const Vectorized<float> sigmoid0 =
               kOneVec / (kOneVec + x_vec0.neg().exp());
           const Vectorized<float> sigmoid1 =
@@ -1330,8 +1302,7 @@ void mish_kernel(TensorIteratorBase& iter) {
           return static_cast<scalar_t>(float(x) * std::tanh(std::log1p(std::exp(float(x)))));
         },
         [](Vectorized<scalar_t> x_vec) -> Vectorized<scalar_t> {
-          Vectorized<float> x_vec0, x_vec1;
-          std::tie(x_vec0, x_vec1) = convert_to_float<scalar_t>(x_vec);
+          auto [x_vec0, x_vec1] = convert_to_float<scalar_t>(x_vec);
           return convert_from_float<scalar_t>(
             x_vec0 * x_vec0.exp().log1p().tanh(),
             x_vec1 * x_vec1.exp().log1p().tanh()
@@ -1367,9 +1338,8 @@ void mish_backward_kernel(TensorIterator& iter) {
           return dy * (tanh_softplus + x * sigmoid * (1.0f - tanh_softplus * tanh_softplus));
         },
         [kOneVec](Vectorized<scalar_t> dy_vec, Vectorized<scalar_t> x_vec) -> Vectorized<scalar_t> {
-          Vectorized<float> x_vec0, x_vec1, dy_vec0, dy_vec1;
-          std::tie(x_vec0, x_vec1) = convert_to_float<scalar_t>(x_vec);
-          std::tie(dy_vec0, dy_vec1) = convert_to_float<scalar_t>(dy_vec);
+          auto [x_vec0, x_vec1] = convert_to_float<scalar_t>(x_vec);
+          auto [dy_vec0, dy_vec1] = convert_to_float<scalar_t>(dy_vec);
           const Vec sigmoid0 = kOneVec / (kOneVec + x_vec0.neg().exp());
           const Vec sigmoid1 = kOneVec / (kOneVec + x_vec1.neg().exp());
           const Vec tanh_softplus0 = x_vec0.exp().log1p().tanh();

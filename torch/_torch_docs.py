@@ -1,6 +1,8 @@
+# mypy: allow-untyped-defs
 """Adds docstrings to functions defined in the torch._C module."""
 
 import re
+from typing import Dict
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
@@ -168,7 +170,7 @@ rocm_fp16_notes = {
 :ref:`different precision<fp16_on_mi200>` for backward."""
 }
 
-reproducibility_notes = {
+reproducibility_notes: Dict[str, str] = {
     "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
 a CUDA device. See :doc:`/notes/randomness` for more information.""",
     "backward_reproducibility_note": """This operation may produce nondeterministic gradients when given tensors on \
@@ -1743,11 +1745,49 @@ All tensors need to be of the same size.
 
 Arguments:
     tensors (sequence of Tensors): sequence of tensors to concatenate
-    dim (int): dimension to insert. Has to be between 0 and the number
-        of dimensions of concatenated tensors (inclusive)
+    dim (int, optional): dimension to insert. Has to be between 0 and the number
+        of dimensions of concatenated tensors (inclusive). Default: 0
 
 Keyword args:
     {out}
+
+Example::
+
+    >>> x = torch.randn(2, 3)
+    >>> x
+    tensor([[ 0.3367,  0.1288,  0.2345],
+            [ 0.2303, -1.1229, -0.1863]])
+    >>> x = torch.stack((x, x)) # same as torch.stack((x, x), dim=0)
+    >>> x
+    tensor([[[ 0.3367,  0.1288,  0.2345],
+             [ 0.2303, -1.1229, -0.1863]],
+
+            [[ 0.3367,  0.1288,  0.2345],
+             [ 0.2303, -1.1229, -0.1863]]])
+    >>> x.size()
+    torch.Size([2, 2, 3])
+    >>> x = torch.stack((x, x), dim=1)
+    tensor([[[ 0.3367,  0.1288,  0.2345],
+             [ 0.3367,  0.1288,  0.2345]],
+
+            [[ 0.2303, -1.1229, -0.1863],
+             [ 0.2303, -1.1229, -0.1863]]])
+    >>> x = torch.stack((x, x), dim=2)
+    tensor([[[ 0.3367,  0.3367],
+             [ 0.1288,  0.1288],
+             [ 0.2345,  0.2345]],
+
+            [[ 0.2303,  0.2303],
+             [-1.1229, -1.1229],
+             [-0.1863, -0.1863]]])
+    >>> x = torch.stack((x, x), dim=-1)
+    tensor([[[ 0.3367,  0.3367],
+             [ 0.1288,  0.1288],
+             [ 0.2345,  0.2345]],
+
+            [[ 0.2303,  0.2303],
+             [-1.1229, -1.1229],
+             [-0.1863, -0.1863]]])
 """.format(
         **common_args
     ),
@@ -2157,13 +2197,13 @@ Example::
 add_docstr(
     torch.can_cast,
     r"""
-can_cast(from, to) -> bool
+can_cast(from_, to) -> bool
 
 Determines if a type conversion is allowed under PyTorch casting rules
 described in the type promotion :ref:`documentation <type-promotion-doc>`.
 
 Args:
-    from (dtype): The original :class:`torch.dtype`.
+    from\_ (dtype): The original :class:`torch.dtype`.
     to (dtype): The target :class:`torch.dtype`.
 
 Example::
@@ -2267,8 +2307,8 @@ Keyword Args:
         times each observation should be repeated. Its numel must equal the number of columns of :attr:`input`.
         Must have integral dtype. Ignored if ``None``. Defaults to ``None``.
     aweights (tensor, optional): A Scalar or 1D array of observation vector weights.
-        These relative weights are typically large for observations considered “important” and smaller for
-        observations considered less “important”. Its numel must equal the number of columns of :attr:`input`.
+        These relative weights are typically large for observations considered "important" and smaller for
+        observations considered less "important". Its numel must equal the number of columns of :attr:`input`.
         Must have floating point dtype. Ignored if ``None``. Defaults to ``None``.
 
 Returns:
@@ -2308,7 +2348,7 @@ cat(tensors, dim=0, *, out=None) -> Tensor
 
 Concatenates the given sequence of :attr:`seq` tensors in the given dimension.
 All tensors must either have the same shape (except in the concatenating
-dimension) or be empty.
+dimension) or be a 1-D empty tensor with size ``(0,)``.
 
 :func:`torch.cat` can be seen as an inverse operation for :func:`torch.split`
 and :func:`torch.chunk`.
@@ -3415,13 +3455,11 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.randn(10)
+    >>> a = torch.randint(1, 20, (10,))
     >>> a
-    tensor([-0.8286, -0.4890,  0.5155,  0.8443,  0.1865, -0.1752, -2.0595,
-             0.1850, -1.1571, -0.4243])
+    tensor([13,  7,  3, 10, 13,  3, 15, 10,  9, 10])
     >>> torch.cumsum(a, dim=0)
-    tensor([-0.8286, -1.3175, -0.8020,  0.0423,  0.2289,  0.0537, -2.0058,
-            -1.8209, -2.9780, -3.4022])
+    tensor([13, 20, 23, 33, 46, 49, 64, 74, 83, 93])
 """.format(
         **reduceops_common_args
     ),
@@ -3985,7 +4023,7 @@ Alias for :func:`torch.div`.
 add_docstr(
     torch.dot,
     r"""
-dot(input, other, *, out=None) -> Tensor
+dot(input, tensor, *, out=None) -> Tensor
 
 Computes the dot product of two 1D tensors.
 
@@ -3996,7 +4034,7 @@ Computes the dot product of two 1D tensors.
 
 Args:
     input (Tensor): first tensor in the dot product, must be 1D.
-    other (Tensor): second tensor in the dot product, must be 1D.
+    tensor (Tensor): second tensor in the dot product, must be 1D.
 
 Keyword args:
     {out}
@@ -4005,6 +4043,10 @@ Example::
 
     >>> torch.dot(torch.tensor([2, 3]), torch.tensor([2, 1]))
     tensor(7)
+
+    >>> t1, t2 = torch.tensor([0, 1]), torch.tensor([2, 3])
+    >>> torch.dot(t1, t2)
+    tensor(3)
 """.format(
         **common_args
     ),
@@ -4430,7 +4472,7 @@ elements.
 Note that either of the following must be true:
 
 1. :attr:`count` is a positive non-zero number, and the total number of bytes
-in the buffer is less than :attr:`offset` plus :attr:`count` times the size
+in the buffer is more than :attr:`offset` plus :attr:`count` times the size
 (in bytes) of :attr:`dtype`.
 
 2. :attr:`count` is negative, and the length (number of bytes) of the buffer
@@ -4737,7 +4779,7 @@ This is detailed in the "Keyword Arguments" section below.
 The gradient is estimated by estimating each partial derivative of :math:`g` independently. This estimation is
 accurate if :math:`g` is in :math:`C^3` (it has at least 3 continuous derivatives), and the estimation can be
 improved by providing closer samples. Mathematically, the value at each interior point of a partial derivative
-is estimated using `Taylor’s theorem with remainder <https://en.wikipedia.org/wiki/Taylor%27s_theorem>`_.
+is estimated using `Taylor's theorem with remainder <https://en.wikipedia.org/wiki/Taylor%27s_theorem>`_.
 Letting :math:`x` be an interior point with :math:`x-h_l` and :math:`x+h_r` be points neighboring
 it to the left and right respectively, :math:`f(x+h_r)` and :math:`f(x-h_l)` can be estimated using:
 
@@ -6904,10 +6946,11 @@ add_docstr(
     r"""
 mean(input, *, dtype=None) -> Tensor
 
-Returns the mean value of all elements in the :attr:`input` tensor.
+Returns the mean value of all elements in the :attr:`input` tensor. Input must be floating point or complex.
 
 Args:
-    {input}
+    input (Tensor):
+      the input tensor, either of floating point or complex dtype
 
 Keyword args:
     {dtype}
@@ -6968,6 +7011,7 @@ add_docstr(
 nanmean(input, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes the mean of all `non-NaN` elements along the specified dimensions.
+Input must be floating point or complex.
 
 This function is identical to :func:`torch.mean` when there are no `NaN` values
 in the :attr:`input` tensor. In the presence of `NaN`, :func:`torch.mean` will
@@ -6977,7 +7021,7 @@ propagate the `NaN` to the output whereas :func:`torch.nanmean` will ignore the
 {keepdim_details}
 
 Args:
-    {input}
+    input (Tensor): the input tensor, either of floating point or complex dtype
     {opt_dim}
     {keepdim}
 
@@ -7550,7 +7594,7 @@ Supports strided and sparse 2-D tensors as inputs, autograd with
 respect to strided inputs.
 
 This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`.
-If :attr:`out` is provided it's layout will be used. Otherwise, the result
+If :attr:`out` is provided its layout will be used. Otherwise, the result
 layout will be deduced from that of :attr:`input`.
 
 {sparse_beta_warning}
@@ -7714,12 +7758,11 @@ Keyword args:
 
 Example::
 
-    >>> b = torch.tensor(
-           [[0, 0, 0, 2, 0, 0, 2],
-            [0, 3, 0, 0, 2, 0, 1],
-            [2, 2, 2, 0, 0, 0, 3],
-            [2, 2, 3, 0, 1, 1, 0],
-            [1, 1, 0, 0, 2, 0, 2]])
+    >>> b = torch.tensor([[0, 0, 0, 2, 0, 0, 2],
+    ...                   [0, 3, 0, 0, 2, 0, 1],
+    ...                   [2, 2, 2, 0, 0, 0, 3],
+    ...                   [2, 2, 3, 0, 1, 1, 0],
+    ...                   [1, 1, 0, 0, 2, 0, 2]])
     >>> torch.mode(b, 0)
     torch.return_types.mode(
     values=tensor([0, 2, 0, 0, 0, 0, 2]),
@@ -7836,9 +7879,8 @@ Example::
     >>> weights = torch.tensor([0, 10, 3, 0], dtype=torch.float) # create a tensor of weights
     >>> torch.multinomial(weights, 2)
     tensor([1, 2])
-    >>> torch.multinomial(weights, 4) # ERROR!
-    RuntimeError: invalid argument 2: invalid multinomial distribution (with replacement=False,
-    not enough non-negative category to sample) at ../aten/src/TH/generic/THTensorRandom.cpp:320
+    >>> torch.multinomial(weights, 5) # ERROR!
+    RuntimeError: cannot sample n_sample > prob_dist.size(-1) samples without replacement
     >>> torch.multinomial(weights, 4, replacement=True)
     tensor([ 2,  1,  1,  1])
 """.format(
@@ -9401,7 +9443,7 @@ Args:
 Keyword args:
     {out}
     {dtype} If `dtype` is not given, infer the data type from the other input
-        arguments. If any of `start`, `end`, or `stop` are floating-point, the
+        arguments. If any of `start`, `end`, or `step` are floating-point, the
         `dtype` is inferred to be the default dtype, see
         :meth:`~torch.get_default_dtype`. Otherwise, the `dtype` is inferred to
         be `torch.int64`.
@@ -9872,7 +9914,7 @@ Disables denormal floating numbers on CPU.
 
 Returns ``True`` if your system supports flushing denormal numbers and it
 successfully configures flush denormal mode.  :meth:`~torch.set_flush_denormal`
-is only supported on x86 architectures supporting SSE3.
+is supported on x86 architectures supporting SSE3 and AArch64 architecture.
 
 Args:
     mode (bool): Controls whether to enable flush denormal mode or not
@@ -11382,7 +11424,7 @@ Example::
 add_docstr(
     torch.rot90,
     r"""
-rot90(input, k=1, dims=[0,1]) -> Tensor
+rot90(input, k=1, dims=(0, 1)) -> Tensor
 
 Rotate an n-D tensor by 90 degrees in the plane specified by dims axis.
 Rotation direction is from the first towards the second axis if k > 0, and from the second towards the first for k < 0.
@@ -13625,6 +13667,265 @@ Example::
 
 
 add_docstr(
+    torch.Stream,
+    r"""
+Stream(device, *, priority) -> Stream
+
+An in-order queue of executing the respective tasks asynchronously in first in first out (FIFO) order.
+It can control or synchronize the execution of other Stream or block the current host thread to ensure
+the correct task sequencing.
+
+See in-depth description of the CUDA behavior at :ref:`cuda-semantics` for details
+on the exact semantic that applies to all devices.
+
+Arguments:
+    device (:class:`torch.device`, optional): the desired device for the Stream.
+        If not given, the current :ref:`accelerator<accelerators>` type will be used.
+    priority (int, optional): priority of the stream, should be 0 or negative, where negative
+        numbers indicate higher priority. By default, streams have priority 0.
+
+Returns:
+    Stream: An torch.Stream object.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+""",
+)
+
+
+add_docstr(
+    torch.Stream.query,
+    r"""
+Stream.query() -> bool
+
+Check if all the work submitted has been completed.
+
+Returns:
+    bool: A boolean indicating if all kernels in this stream are completed.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+    >>> s_cuda.query()
+    True
+""",
+)
+
+
+add_docstr(
+    torch.Stream.record_event,
+    r"""
+Stream.record_event(event) -> Event
+
+Record an event. En-queuing it into the Stream to allow further synchronization from the current point in the FIFO queue.
+
+Arguments:
+    event (:class:`torch.Event`, optional): event to record. If not given, a new one will be allocated.
+
+Returns:
+    Event: Recorded event.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+    >>> e_cuda = s_cuda.record_event()
+""",
+)
+
+
+add_docstr(
+    torch.Stream.synchronize,
+    r"""
+Stream.synchronize() -> None
+
+Wait for all the kernels in this stream to complete.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+    >>> s_cuda.synchronize()
+""",
+)
+
+
+add_docstr(
+    torch.Stream.wait_event,
+    r"""
+Stream.wait_event(event) -> None
+
+Make all future work submitted to the stream wait for an event.
+
+Arguments:
+    event (:class:`torch.Event`): an event to wait for.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s1_cuda = torch.Stream(device='cuda')
+    >>> s2_cuda = torch.Stream(device='cuda')
+    >>> e_cuda = s1_cuda.record_event()
+    >>> s2_cuda.wait_event(e_cuda)
+""",
+)
+
+
+add_docstr(
+    torch.Stream.wait_stream,
+    r"""
+Stream.wait_stream(stream) -> None
+
+Synchronize with another stream. All future work submitted to this stream will wait until all kernels
+already submitted to the given stream are completed.
+
+Arguments:
+    stream (:class:`torch.Stream`): a stream to synchronize.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s1_cuda = torch.Stream(device='cuda')
+    >>> s2_cuda = torch.Stream(device='cuda')
+    >>> s2_cuda.wait_stream(s1_cuda)
+""",
+)
+
+
+add_docstr(
+    torch.Event,
+    r"""
+Event(device, *, enable_timing) -> Event
+
+Query and record Stream status to identify or control dependencies across Stream and measure timing.
+
+Arguments:
+    device (:class:`torch.device`, optional): the desired device for the Event.
+        If not given, the current :ref:`accelerator<accelerators>` type will be used.
+    enable_timing (bool, optional): indicates if the event should measure time (default: ``False``).
+
+Returns:
+    Event: An torch.Event object.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> e_cuda = torch.Event(device='cuda')
+""",
+)
+
+
+add_docstr(
+    torch.Event.elapsed_time,
+    r"""
+Event.elapsed_time(end_event) -> float
+
+Returns the elapsed time in milliseconds between when this event and the :attr:`end_event` are
+each recorded via :func:`torch.Stream.record_event`.
+
+Arguments:
+    end_event (:class:`torch.Event`): The ending event has been recorded.
+
+Returns:
+    float: Time between starting and ending event in milliseconds.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+    >>> e1_cuda = s_cuda.record_event()
+    >>> e2_cuda = s_cuda.record_event()
+    >>> ms = e1_cuda.elapsed_time(e2_cuda)
+""",
+)
+
+
+add_docstr(
+    torch.Event.query,
+    r"""
+Event.query() -> bool
+
+Check if the stream where this event was recorded already moved past the point where the event was recorded.
+Always returns ``True`` if the Event was not recorded.
+
+Returns:
+    bool: A boolean indicating if all work currently captured by event has completed.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+    >>> e_cuda = s_cuda.record_event()
+    >>> e_cuda.query()
+    True
+""",
+)
+
+
+add_docstr(
+    torch.Event.record,
+    r"""
+Event.record(stream) -> None
+
+Record the event in a given stream. The stream's device must match the event's device.
+This function is equivalent to ``stream.record_event(self)``.
+
+Arguments:
+    stream (:class:`torch.Stream`, optional): A stream to be recorded.
+    If not given, the current stream will be used.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> e_cuda = torch.Event(device='cuda')
+    >>> e_cuda.record()
+""",
+)
+
+
+add_docstr(
+    torch.Event.synchronize,
+    r"""
+Event.synchronize() -> None
+
+Wait for the event to complete. This prevents the CPU thread from proceeding until the event completes.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+    >>> e_cuda = s_cuda.record_event()
+    >>> e_cuda.synchronize()
+""",
+)
+
+
+add_docstr(
+    torch.Event.wait,
+    r"""
+Event.wait(stream) -> None
+
+Make all future work submitted to the given stream wait for this event.
+
+Arguments:
+    stream (:class:`torch.Stream`, optional): A stream to synchronize.
+    If not given, the current stream will be used.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s1_cuda = torch.Stream(device='cuda')
+    >>> s2_cuda = torch.Stream(device='cuda')
+    >>> e_cuda = s1_cuda.record()
+    >>> e_cuda.wait(s2)
+""",
+)
+
+
+add_docstr(
     torch.Generator,
     r"""
 Generator(device='cpu') -> Generator
@@ -13685,6 +13986,58 @@ Example::
 """,
 )
 
+add_docstr(
+    torch.Generator.graphsafe_set_state,
+    r"""
+Generator.graphsafe_set_state(state) -> None
+
+Sets the state of the generator to the specified state in a manner that is safe for use in graph capture.
+This method is crucial for ensuring that the generator's state can be captured in the CUDA graph.
+
+Arguments:
+    state (torch.Generator): A Generator point to the new state for the generator, typically obtained from `graphsafe_get_state`.
+
+Example:
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> g_cuda_other = torch.Generator(device='cuda')
+    >>> current_state = g_cuda_other.graphsafe_get_state()
+    >>> g_cuda.graphsafe_set_state(current_state)
+""",
+)
+
+add_docstr(
+    torch.Generator.graphsafe_get_state,
+    r"""
+Generator.graphsafe_get_state() -> torch.Generator
+
+Retrieves the current state of the generator in a manner that is safe for graph capture.
+This method is crucial for ensuring that the generator's state can be captured in the CUDA graph.
+
+Returns:
+    torch.Generator: A Generator point to the current state of the generator
+
+Example:
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> current_state = g_cuda.graphsafe_get_state()
+""",
+)
+
+add_docstr(
+    torch.Generator.clone_state,
+    r"""
+Generator.clone_state() -> torch.Generator
+
+Clones the current state of the generator and returns a new generator pointing to this cloned state.
+This method is beneficial for preserving a particular state of a generator to restore at a later point.
+
+Returns:
+    torch.Generator: A Generator pointing to the newly cloned state.
+
+Example:
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> cloned_state = g_cuda.clone_state()
+""",
+)
 
 add_docstr(
     torch.Generator.manual_seed,
@@ -13781,7 +14134,7 @@ Args:
 add_docstr(
     torch.searchsorted,
     r"""
-searchsorted(sorted_sequence, values, *, out_int32=False, right=False, side='left', out=None, sorter=None) -> Tensor
+searchsorted(sorted_sequence, values, *, out_int32=False, right=False, side=None, out=None, sorter=None) -> Tensor
 
 Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the
 corresponding values in :attr:`values` were inserted before the indices, when sorted, the order
@@ -13828,7 +14181,7 @@ Keyword args:
                             preferred. It will error if :attr:`side` is set to "left" while this is True.
     side (str, optional): the same as :attr:`right` but preferred. "left" corresponds to False for :attr:`right`
                             and "right" corresponds to True for :attr:`right`. It will error if this is set to
-                            "left" while :attr:`right` is True.
+                            "left" while :attr:`right` is True. Default value is None.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`values` if provided.
     sorter (LongTensor, optional): if provided, a tensor matching the shape of the unsorted
                             :attr:`sorted_sequence` containing a sequence of indices that sort it in the

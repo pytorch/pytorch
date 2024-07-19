@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """A context manager that disables the decomposition of certain ops during dynamo tracing.
 
 The approach is to temporarily hijack the operator callable with PT2 custom operator.
@@ -18,6 +19,7 @@ import contextlib
 from typing import Callable, Sequence, Type
 
 from onnxscript.function_libs.torch_lib.ops import (  # type: ignore[import-not-found]
+    core as torchlib_core,
     nn as torchlib_nn,
 )
 
@@ -70,7 +72,7 @@ class DecompSkip(abc.ABC):
         new_op_qualname = f"{_NEW_OP_NAMESPACE}::{cls.new_op_name}"
         torch.library.define(new_op_qualname, cls.new_op_schema)
         torch.library.impl(new_op_qualname, "default", cls.replacement)
-        torch.library.impl_abstract(new_op_qualname, cls.abstract)
+        torch.library.register_fake(new_op_qualname, cls.abstract)
 
     @classmethod
     def replacement(cls, *args, **kwargs):
@@ -119,8 +121,100 @@ class UpsampleBilinear2DDecompSkip(DecompSkip):
         )
 
 
+class UpsampleTrilinear3DDecompSkip(DecompSkip):
+    op_callable = torch._C._nn.upsample_trilinear3d  # type: ignore[attr-defined]
+    onnxscript_function = torchlib_nn.aten_upsample_trilinear3d_vec  # type: ignore[attr-defined]
+    new_op_name = "upsample_trilinear3d"
+    new_op_schema = "(Tensor self, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> (Tensor)"
+
+    @classmethod
+    def register(cls, export_options: torch.onnx.ExportOptions):
+        if not hasattr(torch.ops, _NEW_OP_NAMESPACE) or not hasattr(
+            torch.ops.onnx_export, cls.new_op_name
+        ):
+            cls.register_custom_op()
+        torch._C._nn.upsample_trilinear3d = torch.ops.onnx_export.upsample_trilinear3d  # type: ignore[attr-defined]
+        if export_options.onnx_registry is None:
+            export_options.onnx_registry = torch.onnx.OnnxRegistry()
+        registry = export_options.onnx_registry
+        registry.register_op(
+            function=cls.onnxscript_function,
+            namespace=_NEW_OP_NAMESPACE,
+            op_name=cls.new_op_name,
+        )
+
+    @classmethod
+    def unregister(cls):
+        torch._C._nn.upsample_trilinear3d = cls.op_callable  # type: ignore[attr-defined]
+
+    @classmethod
+    def abstract(cls, input, output_size, align_corners, scale_factors):
+        osize = decompositions.upsample_compute_output_size(
+            input.size(), output_size, scale_factors
+        )
+        return torch.empty(
+            (input.size(0), input.size(1), input.size(2), *osize),
+            dtype=input.dtype,
+            device=input.device,
+        )
+
+
+class InstanceNormDecompSkip(DecompSkip):
+    op_callable = torch.instance_norm  # type: ignore[attr-defined]
+    onnxscript_function = torchlib_core.aten_instance_norm  # type: ignore[attr-defined]
+    new_op_name = "instance_norm"
+    new_op_schema = (
+        "(Tensor input, Tensor? weight, Tensor? bias, "
+        "Tensor? running_mean, Tensor? running_var, "
+        "bool use_input_stats, float momentum, float eps, "
+        "bool cudnn_enabled) -> Tensor"
+    )
+
+    @classmethod
+    def register(cls, export_options: torch.onnx.ExportOptions):
+        if not hasattr(torch.ops, _NEW_OP_NAMESPACE) or not hasattr(
+            torch.ops.onnx_export, cls.new_op_name
+        ):
+            cls.register_custom_op()
+
+        torch.instance_norm = torch.ops.onnx_export.instance_norm  # type: ignore[attr-defined]
+        if export_options.onnx_registry is None:
+            export_options.onnx_registry = torch.onnx.OnnxRegistry()
+        registry = export_options.onnx_registry
+        registry.register_op(
+            function=cls.onnxscript_function,
+            namespace=_NEW_OP_NAMESPACE,
+            op_name=cls.new_op_name,
+        )
+
+    @classmethod
+    def unregister(cls):
+        torch.instance_norm = cls.op_callable  # type: ignore[attr-defined]
+
+    @classmethod
+    def abstract(
+        cls,
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        use_input_stats: bool,
+        momentum: float,
+        eps: float,
+        cudnn_enabled: bool,
+    ):
+        return torch.empty(
+            input.size(),
+            dtype=input.dtype,
+            device=input.device,
+        )
+
+
 _DEFAULT_SKIP_LIST = [
     UpsampleBilinear2DDecompSkip,
+    InstanceNormDecompSkip,
+    UpsampleTrilinear3DDecompSkip,
 ]
 
 

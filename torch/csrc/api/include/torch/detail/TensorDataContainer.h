@@ -28,15 +28,6 @@ inline std::ostream& operator<<(
     std::ostream& stream,
     const TensorDataContainer& tensor_data_container);
 
-// FIXME: There is no `operator<<` overload for `at::kBFloat16` type,
-// and we need to convert it to `float` type using `operator float()` function
-// defined in `c10/util/BFloat16.h`.
-// Tracking issue: https://github.com/pytorch/pytorch/issues/28845
-inline std::ostream& operator<<(std::ostream& stream, c10::BFloat16 value) {
-  stream << static_cast<float>(value);
-  return stream;
-}
-
 inline c10::ScalarType compute_desired_dtype(c10::ScalarType scalar_type) {
   if (scalar_type == at::kInt || scalar_type == at::kLong) {
     // C++ `torch::tensor` with an integer type or an `at::ArrayRef` /

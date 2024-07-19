@@ -10,13 +10,12 @@ from torch._dynamo.testing import reset_rng_state
 
 from torch._inductor import config, test_operators
 from torch._inductor.codegen.multi_kernel import MultiKernelCall
+from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
-    TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -60,7 +59,7 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
         # the kernel with cpp_wrapper enabled.
         from torch._inductor import codecache
 
-        codecache.PyCodeCache.clear()
+        codecache.PyCodeCache.cache_clear()
         return orig_test(self, **extra_args)
 
     return fn
@@ -132,8 +131,8 @@ class MultiKernelTest(TestCase):
     def test_softmax_warn_mixed_layout(self):
         self.test_softmax()
 
-    test_softmax_cpp_wrapper = skipIfRocm(
-        make_cpp_wrapper_test(test_softmax, expect_multi_kernel=False)
+    test_softmax_cpp_wrapper = make_cpp_wrapper_test(
+        test_softmax, expect_multi_kernel=False
     )
 
     def test_layernorm(self):
@@ -279,7 +278,7 @@ class MultiKernelTest(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CUDA:
         run_tests()

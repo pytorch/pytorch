@@ -253,6 +253,27 @@ class TestLazyGraphModule(TestCase):
         input = torch.rand(2, 3)
         self.assertEqual(loaded_traced(input), traced(input))
 
+    def test_dynamo_innermost_fn(self):
+        """
+        Repro for https://github.com/pytorch/pytorch/issues/121198 .
+        """
+
+        def f(x):
+            return x * 2
+
+        gm = torch.fx.symbolic_trace(f)
+        lazy_gm = torch.fx._lazy_graph_module._LazyGraphModule.from_graphmodule(gm)
+
+        wrapped_forward = torch._dynamo.disable(gm.forward)
+        got_inner_forward = torch._dynamo.eval_frame.innermost_fn(wrapped_forward)
+        assert hasattr(got_inner_forward, "__self__")
+
+        wrapped_lazy_forward = torch._dynamo.disable(lazy_gm.forward)
+        got_lazy_inner_forward = torch._dynamo.eval_frame.innermost_fn(
+            wrapped_lazy_forward
+        )
+        assert hasattr(got_lazy_inner_forward, "__self__")
+
 
 if __name__ == "__main__":
     run_tests()

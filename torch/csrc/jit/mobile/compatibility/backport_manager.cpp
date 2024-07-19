@@ -187,10 +187,10 @@ std::stringstream update_bytecode_version(
       "bytecode",
   };
 
-  std::stringstream ouput_model_stream;
+  std::stringstream output_model_stream;
   auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-    ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
-    return !ouput_model_stream ? 0 : nbytes;
+    output_model_stream.write(static_cast<const char*>(buf), nbytes);
+    return !output_model_stream ? 0 : nbytes;
   };
 
   PyTorchStreamWriter writer_bytecode(writer_func);
@@ -218,7 +218,7 @@ std::stringstream update_bytecode_version(
       /*use_storage_context=*/true,
       storage_context);
 
-  return ouput_model_stream;
+  return output_model_stream;
 }
 } // namespace
 
@@ -307,10 +307,10 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
       "bytecode",
   };
 
-  std::stringstream ouput_model_stream;
+  std::stringstream output_model_stream;
   auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-    ouput_model_stream.write(static_cast<const char*>(buf), nbytes);
-    return !ouput_model_stream ? 0 : nbytes;
+    output_model_stream.write(static_cast<const char*>(buf), nbytes);
+    return !output_model_stream ? 0 : nbytes;
   };
 
   PyTorchStreamWriter writer(writer_func);
@@ -348,7 +348,7 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
 
     for (const auto& td : data_pickle.tensorData()) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
-      std::string fname = prefix + c10::to_string(i++);
+      std::string fname = prefix + std::to_string(i++);
       writer.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
     }
     std::string fname = archive_name + ".pkl";
@@ -361,7 +361,7 @@ std::stringstream backport_v5_to_v4(std::stringstream& input_model_stream) {
   auto constants_tuple =
       c10::ivalue::Tuple::create(std::move(constants_values));
   writeArchiveV4(writer, kArchiveNameConstants, constants_tuple);
-  return ouput_model_stream;
+  return output_model_stream;
 }
 
 /*
@@ -408,7 +408,7 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   }
   // Loading the TS module is required for this backport, because bytecode needs
   // to be re-emitted (refer to the comments below)
-  Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
+  Module torch_script = torch::jit::load(rai, std::nullopt, extra_files);
 
   // The RAII guard to change the flag, emitBytecodeDefaultInputs, to true, so
   // that TS stores the default argument values in the constant table, and emits
@@ -476,7 +476,7 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
   }
   // Loading the TS module is required for this backport, because bytecode needs
   // to be re-emitted (refer to the comments below)
-  Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
+  Module torch_script = torch::jit::load(rai, std::nullopt, extra_files);
 
   // The RAII guard to change the flag, emit_default_input_instructions, to
   // false to keep the same behavior in bytecode version 6. Change the flag,
@@ -502,7 +502,7 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
 std::stringstream backport_v9_to_v8(std::stringstream& input_model_stream) {
   ExtraFilesMap extra_files;
   Module torch_script =
-      torch::jit::load(input_model_stream, c10::nullopt, extra_files);
+      torch::jit::load(input_model_stream, std::nullopt, extra_files);
   std::stringstream intermediate_model_stream;
   // TODO(@pavithran) : Check if debug info is available and use load/save while
   // backporting hardcode debaug info to be false untill supported.
@@ -540,7 +540,7 @@ std::stringstream backport_v8_to_v7(std::stringstream& input_model_stream) {
       extra_files.emplace(record.substr(found + 1), "");
     }
   }
-  Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
+  Module torch_script = torch::jit::load(rai, std::nullopt, extra_files);
   std::stringstream intermediate_model_stream;
   {
     BytecodeEmitModeGuard argNumGuard(

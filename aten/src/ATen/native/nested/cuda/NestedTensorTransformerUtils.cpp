@@ -78,8 +78,8 @@ int64_t get_nnz(Tensor nestedtensor) {
    * use with the flash-attention and efficient_attention kernels without
    * needing to call contiguous on the nested tensor input.
    * It checks that the storage offsets' adjacent_differences are a constant
-   * mutiple of the previous tensor in the nested tensor and that the strides
-   * are monitonically decreasing. This check is done after calling transpose on
+   * multiple of the previous tensor in the nested tensor and that the strides
+   * are monotonically decreasing. This check is done after calling transpose on
    * the nested tensor. Resulting in a Nt of shape [bsz, {seq_len}, num_heads, dim]
    *
    * @return A boolean indicating of contiguous needs to be called for input
@@ -133,8 +133,8 @@ int64_t get_nnz(Tensor nestedtensor) {
     }
 
     // Check the offsets are a constant multiple from the previous numels
-    const int64_t* tensor_size_ptr = tensor_sizes.data_ptr<int64_t>();
-    const int64_t* tensor_stride_ptr = tensor_strides.data_ptr<int64_t>();
+    const int64_t* tensor_size_ptr = tensor_sizes.const_data_ptr<int64_t>();
+    const int64_t* tensor_stride_ptr = tensor_strides.const_data_ptr<int64_t>();
 
     int64_t numel_0 = (tensor_size_ptr[0] * tensor_stride_ptr[0]);
     TORCH_INTERNAL_ASSERT(numel_0 > 0, "numels must be positive!");
@@ -412,24 +412,8 @@ sdpa_nested_preprocessing(
   Tensor k_t = key.transpose(1, 2);
   Tensor v_t = value.transpose(1, 2);
 
-  auto cumulative_and_max_q_and_nnz_q = cumulative_and_max_seq_len_nnz(q_t);
-  auto cumulative_and_max_kv_and_nnz_kv = cumulative_and_max_seq_len_nnz(k_t);
-
-  // [TODO] K and V have to have the same Nnz, should probably torch_check
-  // assume in order to not iterate over v
-
-  Tensor cumulative_sequence_length_q =
-      std::get<0>(cumulative_and_max_q_and_nnz_q);
-  Tensor cumulative_sequence_length_kv =
-      std::get<0>(cumulative_and_max_kv_and_nnz_kv);
-
-  const int64_t max_seqlen_batch_q =
-      std::get<1>(cumulative_and_max_q_and_nnz_q);
-  const int64_t max_seqlen_batch_kv =
-      std::get<1>(cumulative_and_max_kv_and_nnz_kv);
-
-  const int64_t Nnz_q = std::get<2>(cumulative_and_max_q_and_nnz_q);
-  const int64_t Nnz_kv = std::get<2>(cumulative_and_max_kv_and_nnz_kv);
+  auto [cumulative_sequence_length_q, max_seqlen_batch_q, Nnz_q] = cumulative_and_max_seq_len_nnz(q_t);
+  auto [cumulative_sequence_length_kv, max_seqlen_batch_kv, Nnz_kv]= cumulative_and_max_seq_len_nnz(k_t);
 
   Tensor query_buffer_reshaped;
   Tensor key_buffer_reshaped;

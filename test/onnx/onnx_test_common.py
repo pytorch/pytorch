@@ -30,6 +30,7 @@ import numpy as np
 import onnxruntime
 import pytest
 import pytorch_test_common
+
 import torch
 from torch import export as torch_export
 from torch.onnx import _constants, verification
@@ -248,6 +249,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 This is needed because Torch Dynamo uses the dynamic_shapes flag as a hint, only.
 
         """
+        from torch._dynamo import config as _dynamo_config
 
         # avoid mutable data structure
         if input_kwargs is None:
@@ -274,7 +276,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             self.model_type
             == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
         ):
-            ref_model = torch.export.export(ref_model, args=ref_input_args)
+            with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
+                ref_model = torch.export.export(ref_model, args=ref_input_args)
             if (
                 self.dynamic_shapes
             ):  # TODO: Support dynamic shapes for torch.export.ExportedProgram
@@ -288,18 +291,19 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         # since ONNX doesn't represent kwargs.
         export_error: Optional[torch.onnx.OnnxExporterError] = None
         try:
-            onnx_program = torch.onnx.dynamo_export(
-                ref_model,
-                *ref_input_args,
-                **ref_input_kwargs,
-                export_options=torch.onnx.ExportOptions(
-                    op_level_debug=self.op_level_debug,
-                    dynamic_shapes=self.dynamic_shapes,
-                    diagnostic_options=torch.onnx.DiagnosticOptions(
-                        verbosity_level=logging.DEBUG
+            with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
+                onnx_program = torch.onnx.dynamo_export(
+                    ref_model,
+                    *ref_input_args,
+                    **ref_input_kwargs,
+                    export_options=torch.onnx.ExportOptions(
+                        op_level_debug=self.op_level_debug,
+                        dynamic_shapes=self.dynamic_shapes,
+                        diagnostic_options=torch.onnx.DiagnosticOptions(
+                            verbosity_level=logging.DEBUG
+                        ),
                     ),
-                ),
-            )
+                )
         except torch.onnx.OnnxExporterError as e:
             export_error = e
             onnx_program = e.onnx_program
@@ -309,6 +313,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 f"test_report_{self._testMethodName}"
                 f"_op_level_debug_{self.op_level_debug}"
                 f"_dynamic_axes_{self.dynamic_shapes}"
+                f"_model_type_{self.model_type}"
                 ".sarif"
             )
 
@@ -317,6 +322,9 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
 
         if not skip_dynamic_shapes_check:
             assert_dynamic_shapes(onnx_program, self.dynamic_shapes)
+
+        if isinstance(ref_model, torch.export.ExportedProgram):
+            ref_model = ref_model.module()
 
         _compare_pytorch_onnx_with_ort(
             onnx_program,
@@ -685,6 +693,11 @@ def add_decorate_info(
         assert (
             opinfo is not None
         ), f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
+        assert decorate_meta.model_type is None, (
+            f"Tested op: {decorate_meta.op_name} in wrong position! "
+            "If model_type needs to be specified, it should be "
+            "put under SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE."
+        )
         decorators = list(opinfo.decorators)
         new_decorator = opinfo_core.DecorateInfo(
             decorate_meta.decorator,

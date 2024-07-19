@@ -113,7 +113,7 @@ public:
     /// Shape describing the number of warps filling the CTA
     using WarpCount = GemmShape<Shape::kM / WarpGemm::kM, Shape::kN / WarpGemm::kN, Shape::kK / WarpGemm::kK>;
 
-    /// Number of warp-level GEMM oeprations
+    /// Number of warp-level GEMM operations
     static int const kWarpGemmIterations = (WarpGemm::kK / Operator::Policy::MmaShape::kK);
 
     static constexpr int kNumKIterationsPerWarpBLoad =

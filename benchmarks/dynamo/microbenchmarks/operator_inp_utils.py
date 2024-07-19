@@ -12,6 +12,7 @@ from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
+
 log = logging.getLogger(__name__)
 
 OP_INP_DIRECTORY = os.path.join(os.path.dirname(__file__), "operator_inp_logs")
@@ -80,7 +81,7 @@ def serialize_sparse_tensor(e):
 
 
 def deserialize_sparse_tensor(size, dtype, layout, is_coalesced, nnz=None):
-    raise NotImplementedError()
+    raise NotImplementedError
 
 
 def deserialize_tensor(size, dtype, stride=None):

@@ -7,8 +7,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_numbers.h>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 template <typename T>
 inline T unpackIntegral(PyObject* obj, const char* type) {
@@ -101,7 +100,7 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
   }
 }
 
-inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
+inline PyObject* load_scalar(const void* data, at::ScalarType scalarType) {
   switch (scalarType) {
     case at::kByte:
       return THPUtils_packInt64(*(uint8_t*)data);
@@ -127,11 +126,11 @@ inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
     case at::kDouble:
       return PyFloat_FromDouble(*(double*)data);
     case at::kComplexHalf: {
-      auto data_ = reinterpret_cast<c10::complex<at::Half>*>(data);
+      auto data_ = reinterpret_cast<const c10::complex<at::Half>*>(data);
       return PyComplex_FromDoubles(data_->real(), data_->imag());
     }
     case at::kComplexFloat: {
-      auto data_ = reinterpret_cast<c10::complex<float>*>(data);
+      auto data_ = reinterpret_cast<const c10::complex<float>*>(data);
       return PyComplex_FromDoubles(data_->real(), data_->imag());
     }
     case at::kComplexDouble:
@@ -159,5 +158,4 @@ inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
   }
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

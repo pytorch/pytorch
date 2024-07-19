@@ -17,7 +17,7 @@ namespace c10 {
 
 struct C10_API DefaultCPUAllocator final : at::Allocator {
   DefaultCPUAllocator() = default;
-  at::DataPtr allocate(size_t nbytes) const override {
+  at::DataPtr allocate(size_t nbytes) override {
     void* data = nullptr;
     try {
       data = c10::alloc_cpu(nbytes);
@@ -103,7 +103,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
   }
 
-  DataPtr allocate(const size_t nbytes) const override {
+  DataPtr allocate(const size_t nbytes) override {
     if (C10_UNLIKELY(0u == nbytes)) {
       return {
           nullptr,

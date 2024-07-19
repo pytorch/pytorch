@@ -86,7 +86,7 @@ Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
 """ + fr"""
-.. note:: {common_notes["sync_note"]}
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.cholesky_ex")}
 """ + r"""
 
 .. seealso::
@@ -222,7 +222,7 @@ Also supports batches of matrices, and if :attr:`A` is a batch of matrices
 then the output has the same batch dimensions.
 
 """ + fr"""
-.. note:: {common_notes["sync_note"]}
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.inv_ex")}
 """ + r"""
 
 .. note::
@@ -457,6 +457,8 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
+The returned eigenvalues are not guaranteed to be in any specific order.
+
 .. note:: The eigenvalues and eigenvectors of a real matrix may be complex.
 
 """ + fr"""
@@ -558,6 +560,8 @@ where :math:`\mathrm{I}_n` is the `n`-dimensional identity matrix.
 Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
+
+The returned eigenvalues are not guaranteed to be in any specific order.
 
 .. note:: The eigenvalues of a real matrix may be complex, as the roots of a real polynomial may be complex.
 
@@ -1115,7 +1119,7 @@ Examples::
     tensor([2])
 
 .. _condition number:
-    https://pytorch.org/docs/master/linalg.html#torch.linalg.cond
+    https://pytorch.org/docs/main/linalg.html#torch.linalg.cond
 .. _full description of these drivers:
     https://www.netlib.org/lapack/lug/node27.html
 """)
@@ -1450,7 +1454,7 @@ Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
     dtype (:class:`torch.dtype`, optional): type used to perform the accumulation and the return.
         If specified, :attr:`x` is cast to :attr:`dtype` before performing the operation,
-        and the returned tensor’s type will be :attr:`dtype` if real and of its real counterpart if complex.
+        and the returned tensor's type will be :attr:`dtype` if real and of its real counterpart if complex.
         :attr:`dtype` may be complex if :attr:`x` is complex, otherwise it must be real.
         :attr:`x` should be convertible without narrowing to :attr:`dtype`. Default: None
 
@@ -1773,7 +1777,7 @@ Examples::
     tensor(3.0957e-06)
 
 .. _condition number:
-    https://pytorch.org/docs/master/linalg.html#torch.linalg.cond
+    https://pytorch.org/docs/main/linalg.html#torch.linalg.cond
 .. _the resulting vectors will span the same subspace:
     https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD
 """)
@@ -2131,7 +2135,7 @@ Letting `*` be zero or more batch dimensions,
     :attr:`A` and :attr:`B` transposed and transposing the output returned by this function.
 
 """ + fr"""
-.. note:: {common_notes["sync_note"]}
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.solve_ex")}
 """ + r"""
 
 .. seealso::
@@ -2332,9 +2336,9 @@ Examples::
     >>> A = torch.randn(2, 3, 3)
     >>> B1 = torch.randn(2, 3, 4)
     >>> B2 = torch.randn(2, 3, 7)
-    >>> A_factor = torch.linalg.lu_factor(A)
-    >>> X1 = torch.linalg.lu_solve(A_factor, B1)
-    >>> X2 = torch.linalg.lu_solve(A_factor, B2)
+    >>> LU, pivots = torch.linalg.lu_factor(A)
+    >>> X1 = torch.linalg.lu_solve(LU, pivots, B1)
+    >>> X2 = torch.linalg.lu_solve(LU, pivots, B2)
     >>> torch.allclose(A @ X1, B1)
     True
     >>> torch.allclose(A @ X2, B2)
@@ -2392,7 +2396,7 @@ If :attr:`left`\ `= False`, this function returns the matrix :math:`X \in \mathb
 
     XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
 
-If  :attr:`adjoint`\ `= True` (and :attr:`left`\ `= True), given an LU factorization of :math:`A`
+If  :attr:`adjoint`\ `= True` (and :attr:`left`\ `= True`), given an LU factorization of :math:`A`
 this function function returns the :math:`X \in \mathbb{K}^{n \times k}` that solves the system
 
 .. math::

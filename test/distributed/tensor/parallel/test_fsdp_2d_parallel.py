@@ -5,7 +5,6 @@ from copy import deepcopy
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-
 import torch.nn.functional as F
 from torch.distributed._tensor import DTensor as DT, init_device_mesh, Replicate, Shard
 from torch.distributed.checkpoint.state_dict import (
@@ -26,17 +25,16 @@ from torch.distributed.tensor.parallel import (
 from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
 )
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+
 
 # Tensor-Parallel degree
 TP_DEGREE = 2
@@ -61,8 +59,6 @@ class SimpleModel(nn.Module):
         return torch.rand(4, 5, device="cuda")
 
 
-# TODO: Temporarily disabled tests related SimpleModelUneven due to size mismatch problem.
-# TODO: Let's change back the tests after corresponding fixes are made.
 class SimpleModelUneven(nn.Module):
     def __init__(self):
         super().__init__()
@@ -246,9 +242,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    # TODO: See the TODO item for SimpleModelUneven.
-    # @parametrize("is_even_sharded_model", [True, False])
-    @parametrize("is_even_sharded_model", [True])
+    @parametrize("is_even_sharded_model", [True, False])
     def test_2d_state_dict(self, is_even_sharded_model):
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
@@ -302,9 +296,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    # TODO: See the TODO item for SimpleModelUneven.
-    # @parametrize("is_even_sharded_model", [True, False])
-    @parametrize("is_even_sharded_model", [True])
+    @parametrize("is_even_sharded_model", [True, False])
     def test_2d_load_state_dict(self, is_even_sharded_model):
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
@@ -357,9 +349,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    # TODO: See the TODO item for SimpleModelUneven.
-    # @parametrize("is_even_sharded_model", [True, False])
-    @parametrize("is_even_sharded_model", [True])
+    @parametrize("is_even_sharded_model", [True, False])
     def test_2d_optim_state_dict(self, is_even_sharded_model):
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
@@ -381,7 +371,9 @@ class TestNew2dParallelStateDict(DTensorTestBase):
             "net1": ColwiseParallel(),
             "net2": RowwiseParallel(),
         }
-        model_2d = parallelize_module(simple_model().cuda(), mesh_2d["tp"], parallelize_plan)
+        model_2d = parallelize_module(
+            simple_model().cuda(), mesh_2d["tp"], parallelize_plan
+        )
         model_2d = FSDP(model_2d, device_mesh=mesh_2d["dp"], use_orig_params=True)
         FSDP.set_state_dict_type(
             model_2d,

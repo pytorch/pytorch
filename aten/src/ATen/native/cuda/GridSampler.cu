@@ -25,8 +25,8 @@ namespace {
   C10_LAUNCH_BOUNDS_1(256)
   __global__ void grid_sampler_2d_kernel(
       const index_t nthreads,
-      TensorInfo<scalar_t, index_t> input,
-      TensorInfo<scalar_t, index_t> grid,
+      TensorInfo<const scalar_t, index_t> input,
+      TensorInfo<const scalar_t, index_t> grid,
       TensorInfo<scalar_t, index_t> output,
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
@@ -104,7 +104,7 @@ namespace {
         index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
         index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
 
-        // assign nearest neighor pixel value to output pixel
+        // assign nearest neighbour pixel value to output pixel
         auto inp_ptr_NC = input.data + n * inp_sN;
         auto out_ptr_NCHW = output.data + n * out_sN + h * out_sH + w * out_sW;
         for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCHW += out_sC) {
@@ -155,8 +155,8 @@ namespace {
   C10_LAUNCH_BOUNDS_1(512)
   __global__ void grid_sampler_3d_kernel(
       const index_t nthreads,
-      TensorInfo<scalar_t, index_t> input,
-      TensorInfo<scalar_t, index_t> grid,
+      TensorInfo<const scalar_t, index_t> input,
+      TensorInfo<const scalar_t, index_t> grid,
       TensorInfo<scalar_t, index_t> output,
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
@@ -287,7 +287,7 @@ namespace {
         index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
         index_t iz_nearest = static_cast<index_t>(std::nearbyint(iz));
 
-        // assign nearest neighor pixel value to output pixel
+        // assign nearest neighbour pixel value to output pixel
         auto inp_ptr_NC = input.data + n * inp_sN;
         auto out_ptr_NCDHW = output.data + n * out_sN + d * out_sD + h * out_sH + w * out_sW;
         for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCDHW += out_sC) {
@@ -311,9 +311,9 @@ namespace {
   C10_LAUNCH_BOUNDS_1(256)
   __global__ void grid_sampler_2d_backward_kernel(
       const index_t nthreads,
-      TensorInfo<scalar_t, index_t> grad_output,
-      TensorInfo<scalar_t, index_t> input,
-      TensorInfo<scalar_t, index_t> grid,
+      TensorInfo<const scalar_t, index_t> grad_output,
+      TensorInfo<const scalar_t, index_t> input,
+      TensorInfo<const scalar_t, index_t> grid,
       TensorInfo<scalar_t, index_t> grad_input,  // initialized to zeros (or unused if input_requires_grad is false)
       TensorInfo<scalar_t, index_t> grad_grid,   // initialized to empty
       const GridSamplerInterpolation interpolation_mode,
@@ -385,11 +385,11 @@ namespace {
         scalar_t se = (ix    - ix_nw) * (iy    - iy_nw);
 
         scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0);
-        scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+        const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
         index_t NC_offset = n * gInp_sN;
-        scalar_t *inp_ptr_NC = input.data + n * inp_sN;
+        const scalar_t *inp_ptr_NC = input.data + n * inp_sN;
         for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
-          scalar_t gOut = *gOut_ptr_NCHW;
+          const scalar_t gOut = *gOut_ptr_NCHW;
 
           if (input_requires_grad) {
             // calculate and set grad_input. See Note [Passing pointer and offset to fastAtomicAdd].
@@ -434,8 +434,8 @@ namespace {
           index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
           index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
 
-          // assign nearest neighor pixel value to output pixel
-          scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+          // assign nearest neighbour pixel value to output pixel
+          const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
           index_t NC_offset = n * gInp_sN;
           for (index_t c = 0; c < C; ++c, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
             // calculate and set grad_input. See Note [Passing pointer and offset to fastAtomicAdd].
@@ -474,12 +474,12 @@ namespace {
         scalar_t gix = static_cast<scalar_t>(0);
         scalar_t giy = static_cast<scalar_t>(0);
 
-        scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+        const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
         index_t NC_offset = n * gInp_sN;
-        scalar_t *inp_ptr_NC = input.data + n * inp_sN;
+        const scalar_t *inp_ptr_NC = input.data + n * inp_sN;
 
         for (index_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, NC_offset += gInp_sC, inp_ptr_NC+= inp_sC) {
-          scalar_t gOut = *gOut_ptr_NCHW;
+          const scalar_t gOut = *gOut_ptr_NCHW;
 
           #pragma unroll 4
           for (index_t i = 0; i < 4; ++i) {
@@ -517,9 +517,9 @@ namespace {
   C10_LAUNCH_BOUNDS_1(256)
   __global__ void grid_sampler_3d_backward_kernel(
       const index_t nthreads,
-      TensorInfo<scalar_t, index_t> grad_output,
-      TensorInfo<scalar_t, index_t> input,
-      TensorInfo<scalar_t, index_t> grid,
+      TensorInfo<const scalar_t, index_t> grad_output,
+      TensorInfo<const scalar_t, index_t> input,
+      TensorInfo<const scalar_t, index_t> grid,
       TensorInfo<scalar_t, index_t> grad_input,  // initialized to zeros (or unused if input_requires_grad is false)
       TensorInfo<scalar_t, index_t> grad_grid,   // initialized to empty
       const GridSamplerInterpolation interpolation_mode,
@@ -630,12 +630,12 @@ namespace {
         scalar_t bse = (ix    - ix_tnw) * (iy    - iy_tnw) * (iz - iz_tnw);
 
         scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0), giz = static_cast<scalar_t>(0);
-        scalar_t *gOut_ptr_NCDHW = grad_output.data + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
+        const scalar_t *gOut_ptr_NCDHW = grad_output.data + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
         index_t NC_offset;
         if (input_requires_grad) {
           NC_offset = n * gInp_sN;
         }
-        scalar_t *inp_ptr_NC = input.data + n * inp_sN;
+        const scalar_t *inp_ptr_NC = input.data + n * inp_sN;
         // calculate bilinear weighted pixel value and set output pixel
         for (index_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, NC_offset += gInp_sC, inp_ptr_NC += inp_sC) {
           scalar_t gOut = *gOut_ptr_NCDHW;
@@ -724,8 +724,8 @@ namespace {
           auto iy_nearest = static_cast<index_t>(std::nearbyint(iy));
           auto iz_nearest = static_cast<index_t>(std::nearbyint(iz));
 
-          // assign nearest neighor pixel value to output pixel
-          scalar_t *gOut_ptr_NCDHW = grad_output.data + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
+          // assign nearest neighbour pixel value to output pixel
+          const scalar_t *gOut_ptr_NCDHW = grad_output.data + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
           index_t NC_offset = n * gInp_sN;
           for (index_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, NC_offset += gInp_sC) {
             // calculate and set grad_input. See Note [Passing pointer and offset to fastAtomicAdd].
@@ -768,8 +768,8 @@ void launch_grid_sampler_2d_forward_kernel(
         grid_sampler_2d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<int>(count),
-            getTensorInfo<scalar_t, int>(input),
-            getTensorInfo<scalar_t, int>(grid),
+            getTensorInfo<const scalar_t, int>(input),
+            getTensorInfo<const scalar_t, int>(grid),
             getTensorInfo<scalar_t, int>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
@@ -779,8 +779,8 @@ void launch_grid_sampler_2d_forward_kernel(
         grid_sampler_2d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             count,
-            getTensorInfo<scalar_t, int64_t>(input),
-            getTensorInfo<scalar_t, int64_t>(grid),
+            getTensorInfo<const scalar_t, int64_t>(input),
+            getTensorInfo<const scalar_t, int64_t>(grid),
             getTensorInfo<scalar_t, int64_t>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
@@ -813,8 +813,8 @@ void launch_grid_sampler_3d_forward_kernel(
         grid_sampler_3d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 512), 512, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<int>(count),
-            getTensorInfo<scalar_t, int>(input),
-            getTensorInfo<scalar_t, int>(grid),
+            getTensorInfo<const scalar_t, int>(input),
+            getTensorInfo<const scalar_t, int>(grid),
             getTensorInfo<scalar_t, int>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
@@ -824,8 +824,8 @@ void launch_grid_sampler_3d_forward_kernel(
         grid_sampler_3d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 512), 512, 0, at::cuda::getCurrentCUDAStream()>>>(
             count,
-            getTensorInfo<scalar_t, int64_t>(input),
-            getTensorInfo<scalar_t, int64_t>(grid),
+            getTensorInfo<const scalar_t, int64_t>(input),
+            getTensorInfo<const scalar_t, int64_t>(grid),
             getTensorInfo<scalar_t, int64_t>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
@@ -868,9 +868,9 @@ void launch_grid_sampler_2d_backward_kernel(
         grid_sampler_2d_backward_kernel<scalar_t>
           <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<int>(count),
-            getTensorInfo<scalar_t, int>(grad_output),
-            getTensorInfo<scalar_t, int>(input),
-            getTensorInfo<scalar_t, int>(grid),
+            getTensorInfo<const scalar_t, int>(grad_output),
+            getTensorInfo<const scalar_t, int>(input),
+            getTensorInfo<const scalar_t, int>(grid),
             input_requires_grad ? getTensorInfo<scalar_t, int>(grad_input) : TensorInfo<scalar_t, int>(),
             getTensorInfo<scalar_t, int>(grad_grid),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
@@ -883,9 +883,9 @@ void launch_grid_sampler_2d_backward_kernel(
         grid_sampler_2d_backward_kernel<scalar_t>
           <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             count,
-            getTensorInfo<scalar_t, int64_t>(grad_output),
-            getTensorInfo<scalar_t, int64_t>(input),
-            getTensorInfo<scalar_t, int64_t>(grid),
+            getTensorInfo<const scalar_t, int64_t>(grad_output),
+            getTensorInfo<const scalar_t, int64_t>(input),
+            getTensorInfo<const scalar_t, int64_t>(grid),
             input_requires_grad ? getTensorInfo<scalar_t, int64_t>(grad_input) : TensorInfo<scalar_t, int64_t>(),
             getTensorInfo<scalar_t, int64_t>(grad_grid),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
@@ -927,9 +927,9 @@ void launch_grid_sampler_3d_backward_kernel(
         grid_sampler_3d_backward_kernel<scalar_t>
           <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<int>(count),
-            getTensorInfo<scalar_t, int>(grad_output),
-            getTensorInfo<scalar_t, int>(input),
-            getTensorInfo<scalar_t, int>(grid),
+            getTensorInfo<const scalar_t, int>(grad_output),
+            getTensorInfo<const scalar_t, int>(input),
+            getTensorInfo<const scalar_t, int>(grid),
             input_requires_grad ? getTensorInfo<scalar_t, int>(grad_input) : TensorInfo<scalar_t, int>(),
             getTensorInfo<scalar_t, int>(grad_grid),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
@@ -942,9 +942,9 @@ void launch_grid_sampler_3d_backward_kernel(
         grid_sampler_3d_backward_kernel<scalar_t>
           <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             count,
-            getTensorInfo<scalar_t, int64_t>(grad_output),
-            getTensorInfo<scalar_t, int64_t>(input),
-            getTensorInfo<scalar_t, int64_t>(grid),
+            getTensorInfo<const scalar_t, int64_t>(grad_output),
+            getTensorInfo<const scalar_t, int64_t>(input),
+            getTensorInfo<const scalar_t, int64_t>(grid),
             input_requires_grad ? getTensorInfo<scalar_t, int64_t>(grad_input) : TensorInfo<scalar_t, int64_t>(),
             getTensorInfo<scalar_t, int64_t>(grad_grid),
             static_cast<GridSamplerInterpolation>(interpolation_mode),

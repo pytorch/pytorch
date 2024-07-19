@@ -24,11 +24,11 @@ std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
 }
 
-c10::optional<StrongFunctionPtr> as_function(const py::object& obj) {
+std::optional<StrongFunctionPtr> as_function(const py::object& obj) {
   if (py::isinstance<StrongFunctionPtr>(obj)) {
     return py::cast<StrongFunctionPtr>(obj);
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 FunctionSchema PythonValue::getSchema(
@@ -66,8 +66,8 @@ FunctionSchema PythonValue::getSchema(
       args.emplace_back(
           /*name=*/*names_it,
           /*type=*/TensorType::get(),
-          /*N=*/c10::nullopt,
-          /*default_value=*/c10::nullopt,
+          /*N=*/std::nullopt,
+          /*default_value=*/std::nullopt,
           /*kwarg_only=*/false);
     }
 
@@ -82,9 +82,7 @@ FunctionSchema PythonValue::getSchema(
     rets.emplace_back(Argument("0", ret_type, {}, {}, false));
   } else {
     // Use the provided type signature
-    std::vector<TypePtr> arg_types;
-    TypePtr ret_type;
-    std::tie(arg_types, ret_type) =
+    auto [arg_types, ret_type] =
         py::cast<std::pair<std::vector<TypePtr>, TypePtr>>(signature);
 
     // arg_types does not include self but param_names does, so adjust for that
@@ -97,8 +95,8 @@ FunctionSchema PythonValue::getSchema(
       args.emplace_back(
           /*name=*/*names_it,
           /*type=*/std::move(*types_it),
-          /*N=*/c10::nullopt,
-          /*default_value=*/c10::nullopt,
+          /*N=*/std::nullopt,
+          /*default_value=*/std::nullopt,
           /*kwarg_only=*/false);
     }
     rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
@@ -171,7 +169,7 @@ std::string PythonValue::kind() const {
 std::vector<std::shared_ptr<SugaredValue>> PythonValue::asTuple(
     const SourceRange& loc,
     GraphFunction& m,
-    const c10::optional<size_t>& size_hint) {
+    const std::optional<size_t>& size_hint) {
   const std::string type_str = typeString(self);
   std::stringstream ss;
   ss << kind() << " cannot be used as a tuple";
@@ -242,10 +240,10 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     // these APIs.
     if (field == "current_device" || field == "set_device") {
       return std::make_shared<BuiltinFunction>(
-          Symbol::cuda("_" + field), c10::nullopt);
+          Symbol::cuda("_" + field), std::nullopt);
     } else {
       return std::make_shared<BuiltinFunction>(
-          Symbol::cuda(field), c10::nullopt);
+          Symbol::cuda(field), std::nullopt);
     }
   }
 
@@ -675,7 +673,7 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
   if (const auto fnAttr = concreteType_->findFunctionAttribute(field)) {
     return std::make_shared<FunctionValue>(*fnAttr);
   } else if (const auto builtin = concreteType_->findBuiltinFunction(field)) {
-    return std::make_shared<BuiltinFunction>(*builtin, /*self=*/c10::nullopt);
+    return std::make_shared<BuiltinFunction>(*builtin, /*self=*/std::nullopt);
   }
 
   // 5. Check if it's an attribute of the original Python class that this
@@ -929,7 +927,7 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
-  c10::optional<bool> result;
+  std::optional<bool> result;
   Graph& graph = *(caller.graph());
 
   auto index = py::cast<size_t>(dispatched_fn_["index"]);
@@ -1022,12 +1020,7 @@ TypePtr registerNamedTuple(
       py::module::import("torch._jit_internal")
           .attr("_get_named_tuple_properties")(obj, loc, py::cpp_function(rcb));
 
-  std::string unqualName;
-  std::vector<std::string> field_names;
-  std::vector<TypePtr> field_types;
-  std::vector<py::object> objects;
-
-  std::tie(unqualName, field_names, field_types, objects) = py::cast<std::tuple<
+  auto [unqualName, field_names, field_types, objects] = py::cast<std::tuple<
       std::string,
       std::vector<std::string>,
       std::vector<TypePtr>,
@@ -1270,7 +1263,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       py::module::import("torch.jit._builtins").attr("_find_builtin")(obj);
   if (!builtin_name.is_none()) {
     return std::make_shared<BuiltinFunction>(
-        Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
+        Symbol::fromQualString(py::str(builtin_name)), std::nullopt);
   }
 
   if (py::cast<bool>(py::module::import("torch._jit_internal")

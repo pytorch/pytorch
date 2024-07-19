@@ -88,7 +88,7 @@ struct TORCH_API EnumType : public NamedType {
         cu_(std::move(cu)) {}
 
   std::string annotation_str_impl(
-      C10_UNUSED TypePrinter printer = nullptr) const override {
+      C10_UNUSED const TypePrinter& printer = nullptr) const override {
     const auto& n = name().value();
     return n.qualifiedName();
   }

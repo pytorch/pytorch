@@ -37,6 +37,7 @@ WRAPPER_SRC_NAMES = {
     "PROD_AVX512SKX_MICROKERNEL_SRCS": "defined(__i386__) || defined(__i686__) || defined(__x86_64__)",
     "PROD_AVX512VBMI_MICROKERNEL_SRCS": "defined(__i386__) || defined(__i686__) || defined(__x86_64__)",
     "PROD_AVX512VNNI_MICROKERNEL_SRCS": "defined(__i386__) || defined(__i686__) || defined(__x86_64__)",
+    "PROD_AVX512VNNIGFNI_MICROKERNEL_SRCS": "defined(__i386__) || defined(__i686__) || defined(__x86_64__)",
     "PROD_RVV_MICROKERNEL_SRCS": "defined(__riscv) || defined(__riscv__)",
     "PROD_AVXVNNI_MICROKERNEL_SRCS": "defined(__i386__) || defined(__i686__) || defined(__x86_64__)",
     "AARCH32_ASM_MICROKERNEL_SRCS": "defined(__arm__)",
@@ -45,7 +46,7 @@ WRAPPER_SRC_NAMES = {
     # add non-prod microkernel sources here:
 }
 
-SRC_NAMES = set([
+SRC_NAMES = {
     "OPERATOR_SRCS",
     "SUBGRAPH_SRCS",
     "LOGGING_SRCS",
@@ -81,20 +82,21 @@ SRC_NAMES = set([
     "PROD_AVX512SKX_MICROKERNEL_SRCS",
     "PROD_AVX512VBMI_MICROKERNEL_SRCS",
     "PROD_AVX512VNNI_MICROKERNEL_SRCS",
+    "PROD_AVX512VNNIGFNI_MICROKERNEL_SRCS",
     "PROD_RVV_MICROKERNEL_SRCS",
     "PROD_AVXVNNI_MICROKERNEL_SRCS",
     "AARCH32_ASM_MICROKERNEL_SRCS",
     "AARCH64_ASM_MICROKERNEL_SRCS",
 
     # add non-prod microkernel sources here:
-])
+}
 
 def handle_singleline_parse(line):
     start_index = line.find("(")
     end_index = line.find(")")
     line = line[start_index+1:end_index]
     key_val = line.split(" ")
-    return key_val[0], list(map(lambda x: x[4:], key_val[1:]))
+    return key_val[0], [x[4:] for x in key_val[1:]]
 
 def update_sources(xnnpack_path, cmakefile = "XNNPACK/CMakeLists.txt"):
     sources = collections.defaultdict(list)
