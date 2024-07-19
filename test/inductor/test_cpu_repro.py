@@ -3184,6 +3184,7 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         check_metrics_vec_kernel_count(2)
 
+    @config.patch("cpp.disable_tiling_select_heuristic_flag", True)
     def test_transpose_sum_outer(self):
         # https://github.com/pytorch/pytorch/issues/98573
         def fn(a):
