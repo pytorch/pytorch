@@ -207,6 +207,14 @@ def get_overloads(aten_fn):
     return aten_fn
 
 
+def in_namespace(op, namespace):
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        return namespace in op._qualified_op_name
+    elif isinstance(op, torch._ops.OpOverload):
+        return namespace in op.name()
+    return False
+
+
 def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
     indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
     if (type_promotion_kind or convert_input_to_bool) and indices:
@@ -293,7 +301,9 @@ def _register_lowering(
             args = args[0]
 
         # kwargs tensors not supported yet unless it's a fallback op
-        if not all(fn in fallbacks for fn in aten_fn):
+        if not all(
+            (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
+        ):
             assert not any(isinstance(x, TensorBox) for x in kwargs.values())
             # explicitly assert for "out=" ops for better error messages
             assert not any(
@@ -1419,11 +1429,17 @@ def cat(inputs, dim=0):
     MAX_COMPLEX_POINTWISE_CAT = 8
     MAX_SIMPLE_OP_COUNT = 2
 
+    def additional_pointwise_ops(op: torch._ops.OpOverload):
+        return op in (aten.cat.default, aten.constant_pad_nd.default)
+
     if len(inputs) <= MAX_COMPLEX_POINTWISE_CAT or (
         (len(inputs) <= config.max_pointwise_cat_inputs)
         and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
     ):
-        pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
+        pointwise_uses = all(
+            is_pointwise_use(use, additional_pointwise_ops)
+            for use in V.current_node.users
+        )
         # fuse in case we will be used in a pointwise node, and there are any inputs we
         # we can prevent materialization of.
         fuse_pointwise_use = (
@@ -5299,6 +5315,9 @@ def fill_(x, fill_value):
 
 @register_lowering(aten.copy_, type_promotion_kind=None)
 def copy_(dst, src, non_blocking=False):
+    if dst is src:
+        # dst.copy_(dst) can happen from the reinplacing pass
+        return dst
     src = to_device(src, dst.get_device())
     src = to_dtype(src, dst.get_dtype())
     src = expand(src, dst.get_size())
@@ -6005,6 +6024,15 @@ def set__source_tensor(self, source_tensor):
     return TensorBox.create(ir.SetSourceTensorKernel(self, source_tensor))
 
 
+if hasattr(torch.ops.fsdp, "set_"):
+
+    @register_lowering(torch.ops.fsdp.set_.default)
+    def fsdp_set_(self, source_tensor):
+        self.realize()
+        source_tensor.realize()
+        ir.SetSourceTensorKernel(self, source_tensor)
+
+
 @register_lowering(torch.ops.aten.resize)
 def resize(x, size, *, memory_format=None):
     assert isinstance(x, TensorBox)
@@ -6266,6 +6294,17 @@ try:
                 group_name,
             ),
         )
+
+    @register_lowering(_c10d_functional.all_gather_into_tensor_out)
+    def _all_gather_into_tensor_out(inp, group_size, group_name, *, out):
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.all_gather_into_tensor_out.default,
+            inp,
+            group_size,
+            group_name,
+            out=out,
+        )
+        return out
 
     @register_lowering(_c10d_functional.reduce_scatter_tensor)
     def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name):
