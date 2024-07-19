@@ -68,11 +68,6 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
     return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
 
-  Stream getNewStream(Device, int priority = 0) const override {
-    (void)priority;
-    return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
-  }
-
   Stream getDefaultStream(Device d) const override {
     return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
