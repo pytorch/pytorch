@@ -1292,7 +1292,25 @@ def _simulate_comms_compute(
 
     return schedule
 
-_dump_chrometrace(schedule):
+def _dump_chrometrace(schedule, filename):
+
+    events = []
+    for rank in sorted(schedule):
+        for timestep, action in enumerate(schedule[rank]):
+            if action is None:
+                continue
+            events.append({
+                "name": str(action),
+                "cat": "computation" if action.computation_type in (F, B, W) else "communication",
+                "ph": "X",
+                "pid": rank,
+                "tid": rank,
+                "ts": timestep,
+                "dur": 1
+            })
+    import json
+    with open(filename, "w") as f:
+        json.dump({"traceEvents": events}, f)
 
 
 class PipelineScheduleMulti(_PipelineSchedule):

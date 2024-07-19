@@ -13,6 +13,7 @@ from torch.distributed.pipelining.schedules import (
     _Action,
     _add_send_recv,
     _add_unshard_reshard,
+    _dump_chrometrace,
     _format_pipeline_order,
     _simulate_comms_compute,
     _validate_pipeline_order,
@@ -304,6 +305,7 @@ class TestScheduleLowering(TestCase):
             stage_to_rank=lambda s: s % pipeline_parallel_size,
             num_stages=num_stages,
         )
+        _dump_chrometrace(simulated_schedule, "lowered_comms.json")
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
         print(_format_pipeline_order(simulated_schedule))
         self.assertEqual(num_steps, 336)
