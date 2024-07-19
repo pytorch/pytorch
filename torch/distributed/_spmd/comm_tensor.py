@@ -7,6 +7,7 @@ import torch
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import (
     _ProxyTensor,
+    _ProxyTracer,
     fetch_object_proxy,
     get_innermost_proxy_mode,
     get_proxy_slot,
@@ -48,7 +49,7 @@ def _wrap_comm_result(result: Tuple[Any, Any]) -> Tuple[Any, Any]:
     return (tree_map(partial(wrap, work), result[0]), work)
 
 
-def _get_tracer() -> Optional[torch.fx.Tracer]:
+def _get_tracer() -> Optional[_ProxyTracer]:
     mode = get_innermost_proxy_mode()
     if mode is None:
         return None
@@ -129,7 +130,7 @@ class CommTensor(torch.Tensor):
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         # shared states when unwrapping args
-        tracer: Optional[torch.fx.Tracer] = None
+        tracer: Optional[_ProxyTracer] = None
         work: Optional[torch.distributed._Work] = None
 
         # wrapped ._tensor if this is a CommTensor, and insert/call wait()
@@ -194,7 +195,7 @@ class CommTensor(torch.Tensor):
                     lambda e: e.proxy,
                     tree_map_only(
                         torch.Tensor,
-                        fetch_object_proxy(tracer),
+                        lambda x: fetch_object_proxy(tracer, x),
                         (unwrapped_args, unwrapped_kwargs),
                     ),
                 )

@@ -1539,6 +1539,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         for e in p.events():
             if e.name == "add_test_fast_rf1":
                 self.assertTrue(e.input_shapes == [])
+                self.assertTrue(e.kwinputs == {})
         with profile(record_shapes=True) as p:
             # add optional args
             cm = torch._C._profiler._RecordFunctionFast(
@@ -1555,6 +1556,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         for e in p.events():
             if e.name == "add_test_fast_rf2":
                 self.assertTrue(e.input_shapes == [[4, 4], [4, 4]])
+                self.assertTrue(e.kwinputs == {"stream": 0, "grid": "lambda x : x + 1"})
 
         with profile(record_shapes=True) as p:
             cm = torch._C._profiler._RecordFunctionFast(
@@ -1619,6 +1621,34 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         for e in p.events():
             if e.name == "add_test_fast_rf6":
                 self.assertTrue(e.input_shapes == [[4, 4], [4, 4]])
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_profiler_op_event_kwargs(self):
+        x, y = (torch.rand((4, 4)) for _ in range(2))
+        with profile(record_shapes=True) as p:
+            cm = torch._C._profiler._RecordFunctionFast(
+                "add_test_kwinputs",
+                [x, y],
+                {"stream": 0, "grid": "lambda x : x + 1", "debug": 'debug"'},
+            )
+            for _ in range(4):
+                with cm:
+                    x.add(y)
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+                op_events = [
+                    e for e in j["traceEvents"] if e.get("cat", "") == "cpu_op"
+                ]
+                for e in op_events:
+                    if e["name"] == "add_test_kwinputs":
+                        args = e["args"]
+                        self.assertTrue("stream" in args)
+                        self.assertTrue("grid" in args)
+                        self.assertTrue(args["stream"] == "0")
+                        self.assertTrue(args["grid"] == "lambda x : x + 1")
+                        self.assertTrue(args["debug"] == "None")
 
     def test_is_profiler_enabled(self):
         self.assertFalse(torch.autograd.profiler._is_profiler_enabled)

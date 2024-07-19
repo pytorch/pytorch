@@ -86,10 +86,14 @@ class PartialRender:
         self.code = code
         self.replacement_hooks = replacement_hooks
 
-    def finalize_hook(self, hook_key: str) -> None:
-        assert (
-            hook_key in self.replacement_hooks
-        ), f"{hook_key} not registered in self.replacement_hooks"
+    def finalize_hook(self, hook_key: str, strict=True) -> None:
+        if hook_key not in self.replacement_hooks:
+            if strict:
+                raise RuntimeError(
+                    f"{hook_key} not registered in self.replacement_hooks"
+                )
+            else:
+                return
         assert (
             self.replacement_hooks[hook_key] is not None
         ), "hook_key can only be called once"
@@ -242,6 +246,15 @@ class TritonTemplateKernel(TritonKernel):
             )
             @triton.jit
         """
+
+    def gen_argdefs(self):
+        def hook():
+            # python_argdefs() cannot be run until after the rest of the template lazily adds more args
+            arg_defs, *_ = self.args.python_argdefs()
+            return f"{', '.join(arg_defs)}"
+
+        self.render_hooks["<ARGDEFS>"] = hook
+        return "<ARGDEFS>"
 
     def def_kernel(self, *argnames):
         """
@@ -501,6 +514,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.store_output,
                 self.make_load,
                 self.modification,
+                self.gen_argdefs,
             ]
         }
 
