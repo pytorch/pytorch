@@ -57,7 +57,6 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
-from .misc import GetAttrVariable
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
@@ -1527,6 +1526,7 @@ class BuiltinVariable(VariableTracker):
         from .. import trace_rules
         from . import (
             ConstantVariable,
+            GetAttrVariable,
             PythonModuleVariable,
             TorchInGraphFunctionVariable,
             UserFunctionVariable,
