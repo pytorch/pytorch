@@ -5,8 +5,9 @@ import weakref
 from dataclasses import dataclass
 from typing import Tuple
 
-from . import config
 from torch._guards import CompileId
+
+from . import config
 
 log = logging.getLogger(__name__)
 """
@@ -163,7 +164,9 @@ def is_recompilation(cache_size: CacheSizeRelevantForFrame) -> bool:
     return cache_size.will_compilation_exceed(1)
 
 
-def exceeds_cache_size_limit(cache_size: CacheSizeRelevantForFrame, compile_id: CompileId) -> Tuple[bool, str]:
+def exceeds_cache_size_limit(
+    cache_size: CacheSizeRelevantForFrame, compile_id: CompileId
+) -> Tuple[bool, str]:
     """
     Checks if we are exceeding the cache size limit.
     """
