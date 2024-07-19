@@ -54,6 +54,7 @@ jobs:
       # Hardcoding below is temporary for testing ALI runners
       # This file below should match the script found in .github/scripts/runner_determinator.py
       - name: Hardcode runner-determinator script
+        id: hardcode-script
         run: |
           cat <<EOF > runner_determinator.py
           # flake8: noqa: G004
