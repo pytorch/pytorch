@@ -22,7 +22,14 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.nn.attention._utils import _validate_sdpa_input
 
-__all__ = ["BlockMask", "flex_attention", "create_block_mask", "create_mask"]
+__all__ = [
+    "BlockMask",
+    "flex_attention",
+    "create_block_mask",
+    "create_mask",
+    "or_masks",
+    "and_masks",
+]
 
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
@@ -37,6 +44,7 @@ class _ModificationType(Enum):
 
     SCORE_MOD = 1
     MASK_MOD = 2
+    UNKNOWN = 3
 
 
 @torch._dynamo.assume_constant_result
@@ -58,7 +66,7 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
     elif num_positional_args == 4:
         return _ModificationType.MASK_MOD
     else:
-        raise AssertionError
+        return _ModificationType.UNKNOWN
 
 
 # Need to define it here so that Dynamo doesn't skip it
@@ -108,13 +116,13 @@ def _identity(
     return score
 
 
-def _no_mask(
+def noop_mask(
     batch: Tensor,
     head: Tensor,
     token_q: Tensor,
     token_kv: Tensor,
 ) -> Tensor:
-    return token_q.new_ones(size=(), dtype=torch.bool, device=batch.device)
+    return batch.new_ones(size=(), dtype=torch.bool, device=batch.device)
 
 
 _DEFAULT_SPARSE_BLOCK_SIZE = 128
@@ -266,7 +274,7 @@ class BlockMask:
             BLOCK_SIZE = (BLOCK_SIZE, BLOCK_SIZE)
         self.BLOCK_SIZE = BLOCK_SIZE
         if mask_mod is None:
-            mask_mod = _no_mask
+            mask_mod = noop_mask
         self.mask_mod = mask_mod
 
     def as_tuple(self):
@@ -476,6 +484,34 @@ def _convert_mask_to_block_mask(
         return partial_blocks, None
 
 
+def or_masks(*mask_mods: _mask_mod_signature) -> _mask_mod_signature:
+    """Returns a mask_mod that's the union of provided mask_mods"""
+    if not all(callable(arg) for arg in mask_mods):
+        raise RuntimeError(f"All inputs should be callable mask_mods: {mask_mods}")
+
+    def or_mask(b, h, q_idx, kv_idx):
+        result = b.new_zeros((), dtype=torch.bool)
+        for mask in mask_mods:
+            result = result | mask(b, h, q_idx, kv_idx)
+        return result
+
+    return or_mask
+
+
+def and_masks(*mask_mods: _mask_mod_signature) -> _mask_mod_signature:
+    """Returns a mask_mod that's the intersection of provided mask_mods"""
+    if not all(callable(arg) for arg in mask_mods):
+        raise RuntimeError(f"All inputs should be callable mask_mods: {mask_mods}")
+
+    def and_mask(b, h, q_idx, kv_idx):
+        result = b.new_ones((), dtype=torch.bool)
+        for mask in mask_mods:
+            result = result & mask(b, h, q_idx, kv_idx)
+        return result
+
+    return and_mask
+
+
 def _convert_block_mask_to_mask(
     block_mask,
     KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
@@ -640,7 +676,7 @@ def create_block_mask(
     mod_type = _get_mod_type(mask_mod)
     assert (
         mod_type == _ModificationType.MASK_MOD
-    ), "create-block_mask requires a mask_mod function!"
+    ), f"create-block_mask requires a mask_mod function! Got {mask_mod}"
     inner_func = _create_block_mask_inner
     Q_LEN = round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
     KV_LEN = round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
