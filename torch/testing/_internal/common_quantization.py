@@ -1306,6 +1306,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             self.checkGraphModuleNodes(m_fx, expected_node_occurrence=node_occurrence)
             fx_quant_output = m_fx(*example_inputs)
             self.assertEqual(fx_quant_output, pt2_quant_output)
+        return m
 
     def _quantize(self, m, quantizer, example_inputs, is_qat: bool = False):
         # resetting dynamo cache
