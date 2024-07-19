@@ -96,6 +96,9 @@ _nested_int_registry = NestedIntRegistry()
 @contextmanager
 def branch_nested_int_registry(merge_on_exit=False):
     global _nested_int_registry
+    # NB: Weird things happen if the dummy instance is instantiated with a branched nested int
+    # registry, so ensure its entry exists before branching.
+    _nt_view_dummy()
     orig_registry = _nested_int_registry
     _nested_int_registry = _nested_int_registry.branch()
     try:
@@ -583,12 +586,6 @@ def _nt_view_dummy() -> torch.Tensor:
             offsets=torch.zeros(3, device="meta", dtype=torch.int64),
         ).detach()
     return _dummy_instance
-
-
-# Instantiate the dummy to ensure its entry in the nested int registry
-# We no longer need this to be lazy now that there is no randomness involved
-# in its construction (see https://github.com/pytorch/pytorch/pull/122902).
-_nt_view_dummy()
 
 
 def nested_view_from_values_offsets(

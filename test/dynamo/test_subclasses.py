@@ -1807,12 +1807,6 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             for compile_grad, ref_grad in zip(compile_grads, ref_grads):
                 self.assertEqual(compile_grad, ref_grad)
 
-        from torch.nested._internal.nested_tensor import _nt_view_dummy
-
-        # ensure the dummy is instantiated with an entry in the nested int registry
-        # for consistency amongst test cases
-        _nt_view_dummy()
-
         # === Basic case ===
         def fn(values, offsets):
             return torch.nested.nested_tensor_from_jagged(values * 2, offsets) * 2

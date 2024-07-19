@@ -3554,7 +3554,7 @@ class TestNestedTensorSubclass(TestCase):
         ):
             torch.ops.aten.size.default(nt)
 
-        nested_int = torch.nested._internal.nested_tensor.get_tensor_symint(
+        nested_int = torch.nested._internal.nested_tensor._nested_int_registry.get(
             _offsets, coeff=1
         )
         self.assertEqual(nt.size(), (3, nested_int, 3))
