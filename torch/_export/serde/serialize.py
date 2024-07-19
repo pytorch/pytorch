@@ -370,11 +370,11 @@ def _get_schema_from_target(target):
     if isinstance(target, torch._ops.OpOverload):
         return target._schema
     elif type(target) in _serialization_registry:
-        return _serialization_registry[type(target)].op_schema(type(target))
+        return _serialization_registry[type(target)].op_schema(target)
     raise RuntimeError(f"Cannot find schema for {type(target)}")
 
 
-def _is_single_tensor_return(target: torch._ops.OpOverload) -> bool:
+def _is_single_tensor_return(target) -> bool:
     schema = _get_schema_from_target(target)
     returns = schema.returns
     return len(returns) == 1 and isinstance(returns[0].real_type, torch.TensorType)
@@ -529,14 +529,16 @@ class GraphModuleSerializer(metaclass=Final):
                 metadata=self.serialize_metadata(node),
             )
         elif type(node.target) in _serialization_registry:
-            custom_op_handler = node.target
-
             # Sanity check for unhandled serialization.
-            assert type(node.target) in _serialization_registry, f"Miss {type(node.target)} CustomOpHandler"
+            assert type(node.target) in _serialization_registry, f"{type(node.target)} is not supported in export serialization."
 
             handler = _serialization_registry[type(node.target)]
+            namespace = handler.namespace()
+            op_name = handler.to_op_name(node.target)
+            assert isinstance(namespace, str) and isinstance(op_name, str)
+            assert ":" not in namespace and ":" not in op_name
             ex_node = Node(
-                target=f"${handler.namespace()}:{handler.op_name(node.target)}",
+                target=f"#{namespace}:{op_name}",
                 inputs=self.serialize_inputs(node.target, node.args, node.kwargs),
                 outputs=self.serialize_outputs(node),
                 metadata=self.serialize_metadata(node),
@@ -622,7 +624,7 @@ class GraphModuleSerializer(metaclass=Final):
         args,
         kwargs=None
     ) -> List[NamedArgument]:
-        assert isinstance(target, (torch._ops.OpOverload, *allowed_registered_op_types()))
+        assert isinstance(target, (torch._ops.OpOverload, *_registered_extension_types()))
         kwargs = kwargs or {}
         serialized_args = []
 
@@ -1122,7 +1124,7 @@ class GraphModuleSerializer(metaclass=Final):
         mostly reuse the names coming from FX. This function computes a mapping from
         the FX representation to our representation, preserving the names.
         """
-        assert node.op == "call_function" and isinstance(node.target, (torch._ops.OpOverload, *allowed_registered_op_types()))
+        assert node.op == "call_function" and isinstance(node.target, (torch._ops.OpOverload, *_registered_extension_types()))
 
         schema = _get_schema_from_target(node.target)
         returns = schema.returns
@@ -1441,6 +1443,12 @@ class GraphModuleDeserializer(metaclass=Final):
                 self.serialized_name_to_meta,
             ) = saved
 
+    def deserialize_extension_operator(self, serialized_target: str):
+        namespace, op_name = serialized_target.split(":")
+        namespace = namespace[1:]  # starting with #
+        handler = _deserialization_registry[namespace]
+        return handler.from_op_name(op_name)
+
     def deserialize_operator(self, serialized_target: str):
         if serialized_target.startswith(
             "_operator"
@@ -1450,6 +1458,8 @@ class GraphModuleDeserializer(metaclass=Final):
         elif serialized_target.startswith("torch"):
             module = torch  # type: ignore[misc]
             serialized_target_names = serialized_target.split(".")[1:]
+        elif serialized_target.startswith("#"):
+            return self.deserialize_extension_operator(serialized_target)
         else:  # TODO(zhxchen17) Don't catch all here.
             return serialized_target
 
@@ -1677,7 +1687,7 @@ class GraphModuleDeserializer(metaclass=Final):
             self.deserialize_outputs(serialized_node, fx_node)
             fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
 
-        elif isinstance(target, torch._ops.OpOverload):
+        elif isinstance(target, (torch._ops.OpOverload, *_registered_extension_types())):
             # For convenience: if this node returns a single tensor, name the
             # newly-created node after it. This ensures that these tensor values
             # have names that are consistent with serialized.
@@ -1871,8 +1881,8 @@ class GraphModuleDeserializer(metaclass=Final):
     def deserialize_sym_op_inputs(self, inputs):
         return tuple(self.deserialize_input(input.arg) for input in inputs)
 
-    def deserialize_inputs(self, target: torch._ops.OpOverload, serialized_node: Node):
-        schema_args = target._schema.arguments
+    def deserialize_inputs(self, target, serialized_node: Node):
+        schema_args = _get_schema_from_target(target).arguments
         actual_args = {
             input.name: self.deserialize_input(input.arg)
             for input in serialized_node.inputs
@@ -2841,39 +2851,42 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
     )
 
 
-class CustomOpHandler:
+class ExtensionHandler:
     """
-    Base class for handling custom operators.
+    Base class for handling extension operators.
     """
     @classmethod
-    def namespace(cls):
+    def namespace(cls) -> str:
         raise NotImplementedError(f"{cls.__class__} namespace() must be implemented")
 
     @classmethod
-    def op_name(cls, op_type):
+    def to_op_name(cls, op) -> str:
         raise NotImplementedError(f"{cls.__class__} op_name() must be implemented")
 
     @classmethod
-    def op_type(cls, op_name):
-        raise NotImplementedError(f"{cls.__class__} op_type() must be implemented")
+    def from_op_name(cls, name: str):
+        raise NotImplementedError(f"{cls.__class__} op_name() must be implemented")
 
     @classmethod
-    def op_schema(cls, op_type):
+    def op_schema(cls, op) -> torch.FunctionSchema:
         raise NotImplementedError(f"{cls.__class__} op_schema() must be implemented")
 
 
-def register_custom_op_handler(
-    op_handler: CustomOpHandler,
+def register_extension(
     op_type: Type[Any],
+    extension_handler: Type[ExtensionHandler],
 ):
-    """Register custom de/serialization method for a node."""
-    assert isinstance(op_handler, CustomOpHandler), f"Expected CustomOpHandler, got {type(op_handler)}."
-    _serialization_registry[op_type] = op_handler
-    # FIXME: handles deserialization later.
-    _deserialization_registry[op_handler.namespace()] = op_handler
+    """Register custom de/serialization method for a node with non-standard type."""
+    assert issubclass(extension_handler, ExtensionHandler), f"Expected ExtensionHandler, got {extension_handler}."
+    assert op_type not in _serialization_registry, f"{op_type} is already registered."
+    assert isinstance(op_type, type)  # Maybe a good idea to enforce this first.
+    assert not (op_type.__module__.startswith("torch") or op_type.__module__.startswith("builtins"))
+    assert extension_handler.namespace() not in _deserialization_registry
+    _serialization_registry[op_type] = extension_handler
+    _deserialization_registry[extension_handler.namespace()] = extension_handler
 
 
-def allowed_registered_op_types():
+def _registered_extension_types():
     return tuple(
         _serialization_registry.keys()
     )
@@ -2884,5 +2897,5 @@ def allowed_registered_op_types():
 # namespace to avoid conflicts.
 # Serialization: Op type --> custom handler.
 # De-serialization: Namespace --> custom handler.
-_serialization_registry: Dict[Type[Any], CustomOpHandler] = {}
-_deserialization_registry: Dict[str, CustomOpHandler] = {}
+_serialization_registry: Dict[Type[Any], Type[ExtensionHandler]] = {}
+_deserialization_registry: Dict[str, Type[ExtensionHandler]] = {}
