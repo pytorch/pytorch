@@ -2762,6 +2762,7 @@ class Scheduler:
         fused_node_names = {
             self.name_to_buf[buf].defining_op.get_name()
             for buf in V.kernel.store_buffer_names
+            if buf in self.name_to_buf
         }
         names_to_remove = []
         for out_buf in V.kernel.store_buffer_names:
