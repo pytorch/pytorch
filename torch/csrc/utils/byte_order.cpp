@@ -319,13 +319,6 @@ void THP_decodeBFloat16Buffer(
   THP_decodeBFloat16Buffer(dst, src, (order != THP_nativeByteOrder()), len);
 }
 
-void THP_decodeBoolBuffer(
-    bool* dst,
-    const uint8_t* src,
-    size_t len) {
-  THP_decodeBoolBuffer(dst, src, len);
-}
-
 void THP_decodeFloatBuffer(
     float* dst,
     const uint8_t* src,
