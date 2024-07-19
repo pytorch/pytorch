@@ -498,11 +498,18 @@ Tensor& index_put__plumbing(Tensor & self, const List<optional<Tensor>> & indice
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "index_put__plumbing");
   int64_t cur_level = maybe_layer->layerId();
-  if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values, cur_level)) {
-    return self.index_put_(indices, values, accumulate);
+
+  // on device mismatch, we can move 0d tensors to self device
+  auto values_ = values;
+  if (values.device() != self.device() && values.numel() == 1 && values.dim() == 0) {
+    values_ = values.to(self.device());
+  }
+
+  if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values_, cur_level)) {
+    return self.index_put_(indices, values_, accumulate);
   }
   auto [self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim] =
-      unpackSelfAndIndicesAndValuesAtCurrentLevel(self, indices, values, cur_level);
+      unpackSelfAndIndicesAndValuesAtCurrentLevel(self, indices, values_, cur_level);
   index_put__batch_rule(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim, accumulate);
   return self;
 }
@@ -645,11 +652,18 @@ Tensor index_put_plumbing(const Tensor & self, const List<optional<Tensor>> & in
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "index_put_plumbing");
   int64_t cur_level = maybe_layer->layerId();
-  if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values, cur_level)) {
-    return self.index_put(indices, values, accumulate);
+
+  // on device mismatch, we can move 0d tensors to self device
+  auto values_ = values;
+  if (values.device() != self.device() && values.numel() == 1 && values.dim() == 0) {
+    values_ = values.to(self.device());
+  }
+
+  if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values_, cur_level)) {
+    return self.index_put(indices, values_, accumulate);
   }
   auto [self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim] =
-      unpackSelfAndIndicesAndValuesAtCurrentLevel(self, indices, values, cur_level);
+      unpackSelfAndIndicesAndValuesAtCurrentLevel(self, indices, values_, cur_level);
   auto results = index_put_batch_rule(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim, accumulate);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }

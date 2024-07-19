@@ -9,14 +9,9 @@ import torch
 import torch._ops
 import torch.fx
 
-from torch.onnx._internal import _beartype
-
 from torch.onnx._internal.fx import registration
 
 
-# NOTE: OnnxRegistry annotation: beartype is a runtime type checker for python3,
-# so it doesn't work with TYPE_CHECKING
-@_beartype.beartype
 def _create_onnx_supports_op_overload_table(
     registry,
 ) -> Set[Union[torch._ops.OperatorBase, Callable]]:
@@ -76,7 +71,6 @@ def _create_onnx_supports_op_overload_table(
     return table
 
 
-@_beartype.beartype
 def create_onnx_friendly_decomposition_table(
     registry,
 ) -> Dict[torch._ops.OperatorBase, Callable]:
