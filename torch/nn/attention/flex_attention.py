@@ -500,6 +500,7 @@ def or_masks(*mask_mods: _mask_mod_signature) -> _mask_mod_signature:
 
 
 def and_masks(*mask_mods: _mask_mod_signature) -> _mask_mod_signature:
+    """Returns a mask_mod that's the intersection of provided mask_mods"""
     if not all(callable(arg) for arg in mask_mods):
         raise RuntimeError(f"All inputs should be callable mask_mods: {mask_mods}")
 
