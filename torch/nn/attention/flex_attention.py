@@ -29,7 +29,6 @@ __all__ = [
     "create_mask",
     "or_masks",
     "and_masks",
-    "noop_mask",
 ]
 
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
