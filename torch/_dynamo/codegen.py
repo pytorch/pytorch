@@ -463,7 +463,13 @@ class PyCodegen:
         self(AttrSource(self.tx.import_source(module_name), object_name))
 
     def create_call_function_kw(self, nargs, kw_names, push_null) -> List[Instruction]:
-        if sys.version_info >= (3, 11):
+        if sys.version_info >= (3, 13):
+            output = create_call_function(nargs, push_null)
+            assert output[-1].opname == "CALL"
+            output.insert(-1, self.create_load_const(kw_names))
+            output[-1] = create_instruction("CALL_KW", arg=nargs)
+            return output
+        elif sys.version_info >= (3, 11):
             output = create_call_function(nargs, push_null)
             if sys.version_info >= (3, 12):
                 idx = -1
