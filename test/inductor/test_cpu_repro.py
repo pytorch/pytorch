@@ -2498,7 +2498,7 @@ class CPUReproTests(TestCase):
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
-    @config.patch("cpp.disable_tiling_select_heuristic_flag", True)
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_maxpool2d_with_pre_loop_collapse_cpu_only(self):
         x1 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
         x2 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
@@ -2898,7 +2898,7 @@ class CPUReproTests(TestCase):
                         check_metrics_vec_kernel_count(8)
 
     @requires_vectorization
-    @config.patch("cpp.disable_tiling_select_heuristic_flag", True)
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_transpose_copy(self):
         def fn(a):
             return a.t().contiguous()
@@ -3004,7 +3004,7 @@ class CPUReproTests(TestCase):
             assert metrics.cpp_to_dtype_count == 0
             check_metrics_vec_kernel_count(1)
 
-    @config.patch("cpp.disable_tiling_select_heuristic_flag", True)
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_transpose_non_contiguous(self):
         def fn(a):
             # From part of timm HaloAttn:
@@ -3155,7 +3155,7 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         check_metrics_vec_kernel_count(2)
 
-    @config.patch("cpp.disable_tiling_select_heuristic_flag", True)
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_transpose_sum_outer(self):
         # https://github.com/pytorch/pytorch/issues/98573
         def fn(a):
@@ -3608,7 +3608,7 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         check_metrics_vec_kernel_count(3)
 
-    @config.patch("cpp.disable_tiling_select_heuristic_flag", True)
+    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_expr_vec_non_contiguous(self):
         def fn(x):
             # the pattern from sebotnet33ts_256
