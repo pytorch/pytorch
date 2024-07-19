@@ -1260,7 +1260,6 @@ def _nested_get_max_seqlen(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     return inp._metadata_cache.get("max_seqlen", None)
 
-
 @register_jagged_func(torch.ops.aten.masked_select.default, "self: jt, mask: jt")
 def masked_select_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -1289,7 +1288,6 @@ def masked_select_default(func, *args, **kwargs):
     res_offsets = mask_cumsum[inp._offsets]
 
     return NestedTensor(values=res_values, offsets=res_offsets)
-
 
 # Make the dummy available on the C++ side.
 @register_jagged_func(torch.ops.aten._nested_get_jagged_dummy.default, "self: any")
