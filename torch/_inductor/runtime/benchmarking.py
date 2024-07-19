@@ -3,7 +3,7 @@ import time
 from collections import defaultdict
 from functools import cached_property
 from statistics import median
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, assert_never
 
 import torch
 from torch._dynamo.utils import counters
@@ -19,7 +19,7 @@ def time_and_log(fn: Callable[..., Any]) -> Callable[..., Any]:
         return fn
 
     @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         start_time = time.perf_counter()
         result = fn(*args, **kwargs)
         log.debug(f"{fn.__name__} took {time.perf_counter() - start_time} seconds.")
@@ -66,9 +66,9 @@ class LazyBenchmark:
 
 class Benchmarker:
     def __init__(self) -> None:
-        self.memory_cache: Dict[str, float] = defaultdict(lambda: None)
+        self.memory_cache: Dict[str, float] = {}
         self.kwargs_hash_to_futures_gpu: Dict[
-            str, Tuple[LazyBenchmark, Callable[..., Any]]
+            str, Tuple[Callable[[], Any], str]
         ] = {}
 
     @cached_property
@@ -174,9 +174,9 @@ class Benchmarker:
     def benchmark(
         self,
         fn: Callable[..., Any],
-        fn_args: List[Any],
+        fn_args: Tuple[Any],
         fn_kwargs: Dict[str, Any],
-        **kwargs: Dict[str, Any]
+        **kwargs: Any
     ) -> float:
         counters["inductor"]["benchmarking_benchmark"] += 1
         _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
@@ -473,9 +473,9 @@ class Benchmarker:
     def lazy_benchmark(
         self,
         fn: Callable[..., Any],
-        fn_args: List[Any],
+        fn_args: Tuple[Any],
         fn_kwargs: Dict[str, Any],
-        **kwargs: Dict[str, Any]
+        **kwargs: Any
     ) -> LazyBenchmark:
         counters["inductor"]["benchmarking_lazy_benchmark"] += 1
         _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
@@ -494,7 +494,7 @@ class Benchmarker:
         _callable: Callable[[], Any],
         ranking_key: Optional[str] = None,
         pruning_key: Optional[str] = None,
-        **kwargs: Dict[str, Any]
+        **kwargs: Any
     ) -> Union[LazyBenchmark, float]:
         counters["inductor"]["benchmarking_lazy_benchmark_cpu"] += 1
         if not benchmarking_config.enable_lazy_benchmarking:
@@ -509,7 +509,7 @@ class Benchmarker:
         _callable: Callable[[], Any],
         ranking_key: Optional[str] = None,
         pruning_key: Optional[str] = None,
-        **kwargs: Dict[str, Any]
+        **kwargs: Any
     ) -> LazyBenchmark:
         counters["inductor"]["benchmarking_lazy_benchmark_gpu"] += 1
 
@@ -549,6 +549,8 @@ class Benchmarker:
             # we may or may not have to delete the callables explicitly to
             # cleanup the memory, just do it now for safety
             del callables
+            if key not in self.memory_cache:
+                assert_never("Callable timing not cached after benchmarking.")
             return self.memory_cache[key]
 
         return LazyBenchmark(benchmark)
