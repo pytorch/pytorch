@@ -19,9 +19,12 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     _identity,
+    and_masks,
     BlockMask,
     create_block_mask,
     flex_attention,
+    noop_mask,
+    or_masks,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -1010,6 +1013,35 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertEqual(block_mask_a.kv_num_blocks, block_mask_b.kv_num_blocks)
         self.assertEqual(block_mask_a.kv_indices, block_mask_b.kv_indices)
         self.assertEqual(block_mask_a.q_num_blocks, block_mask_b.q_num_blocks)
+
+    @supported_platform
+    def test_mask_mod_combiners(self):
+        def causal_mask(b, h, q, kv):
+            return q >= kv
+
+        def neg_causal_mask(b, h, q, kv):
+            return q < kv
+
+        def sliding_window(b, h, q, kv):
+            return (q - kv) <= 512
+
+        block_mask = create_block_mask(
+            and_masks(causal_mask, sliding_window), 1, 1, S, S
+        )
+        self.assertExpectedInline(block_mask.kv_num_blocks.sum().item(), """28""")
+        attention = functools.partial(flex_attention, block_mask=block_mask)
+        self.run_test_with_call(attention)
+
+        block_mask = create_block_mask(
+            and_masks(causal_mask, neg_causal_mask), 1, 1, S, S
+        )
+        self.assertEqual(block_mask.kv_num_blocks.sum(), 0)
+
+        block_mask1 = create_block_mask(
+            or_masks(causal_mask, neg_causal_mask), 1, 1, S, S
+        )
+        block_mask2 = create_block_mask(noop_mask, 1, 1, S, S)
+        self.assertEqual(block_mask1.sparsity(), block_mask2.sparsity())
 
     @supported_platform
     def test_epilogue_fused(self):
