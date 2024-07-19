@@ -2322,6 +2322,21 @@ class InstructionTranslatorBase(
 
         self.push(fn)
 
+    def _format_value_313(self, fmt_spec):
+        value = self.pop()
+        if isinstance(value, SymNodeVariable):
+            value = ConstantVariable.create(str(value.sym_num))
+
+        fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
+
+        self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
+
+    def FORMAT_SIMPLE(self, inst):
+        self._format_value_313(ConstantVariable.create(""))
+
+    def FORMAT_WITH_SPEC(self, inst):
+        self._format_value_313(self.pop())
+
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
             # perf optimization only
