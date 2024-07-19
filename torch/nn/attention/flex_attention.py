@@ -123,7 +123,7 @@ def noop_mask(
     token_q: Tensor,
     token_kv: Tensor,
 ) -> Tensor:
-    return token_q.new_ones(size=(), dtype=torch.bool)
+    return batch.new_ones(size=(), dtype=torch.bool, device=batch.device)
 
 
 _DEFAULT_SPARSE_BLOCK_SIZE = 128
