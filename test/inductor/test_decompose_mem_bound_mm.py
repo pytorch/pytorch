@@ -9,12 +9,12 @@ from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
