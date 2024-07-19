@@ -16,5 +16,6 @@ void THCPMemPool_init(PyObject* module) {
       .def_property_readonly("allocator", &::c10::cuda::MemPool::allocator);
   shared_ptr_class_<::c10::cuda::MemPoolContext>(torch_C_m, "_MemPoolContext")
       .def(py::init<c10::cuda::MemPool*>())
-      .def_static("active_pool", &::c10::cuda::MemPoolContext::getActiveMemPool);
+      .def_static(
+          "active_pool", &::c10::cuda::MemPoolContext::getActiveMemPool);
 }

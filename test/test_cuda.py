@@ -5035,7 +5035,7 @@ class TestMemPool(TestCase):
                 "dummy_alloc",
                 "dummy_free",
             )
-            pool = torch.cuda.MemPool(allocator)
+            pool = torch.cuda.MemPool(allocator.allocator())
 
             # pool should point to the same allocator as the one passed into it
             self.assertEqual(allocator.allocator(), pool.allocator)
