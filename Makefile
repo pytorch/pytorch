@@ -25,7 +25,7 @@ linecount:
 
 ensure-branch-clean:
 	@if [ -n "$(shell git status --porcelain)" ]; then \
-		echo "Please commit all changes before running this script"; \
+		echo "Please commit or stash all changes before running this script"; \
 		exit 1; \
 	fi
 
