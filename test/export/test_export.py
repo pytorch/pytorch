@@ -27,6 +27,7 @@ from torch._export.utils import (
     is_param,
     register_dataclass_as_pytree_node,
 )
+from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
 from torch.export import Dim, dynamic_dim, export, unflatten
 from torch.export._trace import (
@@ -6235,6 +6236,49 @@ def forward(self, x, y):
             r"Runtime assertion failed for expression \(s0//2\) \<\= s1",
         ):
             ep.module()(torch.ones(10), torch.ones(4))
+
+    def test_split_const_gm_with_lifted_constants(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4)
+                self.b = torch.randn(4)
+
+            def forward(self, x):
+                w_transpose = torch.transpose(self.w_pre, 0, 1)
+                w_relu = torch.nn.functional.relu(w_transpose)
+                w = w_relu + self.b
+                return torch.matmul(x, w)
+
+        example_inputs = (torch.randn(4, 4),)
+        mod = Model()
+        ep = torch.export.export(mod, example_inputs)
+        new_gm = copy.deepcopy(ep.graph_module)
+        new_sig = copy.deepcopy(ep.graph_signature)
+        placeholder_nodes = [
+            node for node in new_gm.graph.nodes if node.op == "placeholder"
+        ]
+        constants = {**ep.state_dict, **ep.constants}
+        lifted_constants = {
+            n.name: constants[spec.target]
+            for n, spec in zip(placeholder_nodes, new_sig.input_specs)
+            if spec.target is not None
+        }
+        const_gm, _ = split_const_gm(new_gm, lifted_constants)
+        counter = 0
+        for node in const_gm.graph.nodes:
+            if node.op == "call_function":
+                counter += 1
+        self.assertTrue(counter > 0)
+        test_input = torch.randn(4, 4)
+        expected = new_gm(None, None, test_input)[0]
+        actual = mod(test_input)
+        self.assertEqual(actual, expected)
+        const_gm, _ = split_const_gm(ep.graph_module, lifted_constants, lambda x: True)
+        counter = 0
+        for node in const_gm.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(False)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
