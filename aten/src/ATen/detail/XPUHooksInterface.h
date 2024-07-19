@@ -7,11 +7,12 @@
 #include <ATen/core/Generator.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
 namespace at {
 
 struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
-  virtual ~XPUHooksInterface() = default;
+  ~XPUHooksInterface() override = default;
 
   virtual void initXPU() const {
     TORCH_CHECK(
@@ -80,3 +81,4 @@ namespace detail {
 TORCH_API const XPUHooksInterface& getXPUHooks();
 } // namespace detail
 } // namespace at
+C10_CLANG_DIAGNOSTIC_POP()

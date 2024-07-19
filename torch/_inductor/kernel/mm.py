@@ -474,7 +474,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
 
     if not skip_triton:
         b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
-        if inductor_config.mixed_mm_choice == "heuristic":
+        if static_shape and inductor_config.mixed_mm_choice == "heuristic":
             choices = []
             config = try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout)
             if config is not None:

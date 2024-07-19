@@ -1731,7 +1731,7 @@ static std::optional<std::string> printType(
   if (namedType && namedType->name()) {
     return type_name_uniquer.getUniqueName(namedType).qualifiedName();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 void jitModuleToPythonCodeAndConstants(

@@ -2,6 +2,7 @@
 
 import torch
 import torch._dynamo.test_case
+from torch._guards import CompileId
 
 
 def target_with_varkwargs(arg1, /, positional_only_arg, *, keyword_only_arg, **kwargs):
@@ -89,7 +90,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
             if frame.f_code in code_map1:
                 transformed_code = code_map1[frame.f_code]
                 return torch._dynamo.types.GuardedCode(
-                    transformed_code, lambda f_locals: True
+                    transformed_code, lambda f_locals: True, CompileId(0, 0)
                 )
             return None
 
@@ -97,7 +98,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
             if frame.f_code in code_map2:
                 transformed_code = code_map2[frame.f_code]
                 return torch._dynamo.types.GuardedCode(
-                    transformed_code, lambda f_locals: True
+                    transformed_code, lambda f_locals: True, CompileId(0, 0)
                 )
             return None
 
