@@ -10,7 +10,8 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.runtime.benchmarking import Benchmarker, LazyBenchmark
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU, GPU_TYPE
+from torch._inductor.utils import is_big_gpu
+from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_CPU
 
 
 log = logging.getLogger(__name__)
@@ -60,7 +61,6 @@ class TestBenchmarking(TestCase):
         torch.cuda.synchronize()
         return start_event.elapsed_time(end_event) / 10
     
-    @unittest.skipIf(not HAS_CPU, "Skipping CPU tests.")
     @patches
     def test_benchmarker_basics_cpu(self):
         benchmarker = Benchmarker()
@@ -95,7 +95,6 @@ class TestBenchmarking(TestCase):
         self.assertEqual(counters["inductor"]["benchmarking_benchmark_cpu"], 10)
         counters.clear()
     
-    @unittest.skipIf(not HAS_GPU, "Skipping GPU tests.")
     @patches
     def test_benchmarker_basics_gpu(self):
         benchmarker = Benchmarker()
@@ -151,7 +150,6 @@ class TestBenchmarking(TestCase):
         self.assertEqual(counters["inductor"]["benchmarking_callable_initialization_failed"], 1)
         counters.clear()
     
-    @unittest.skipIf(not HAS_GPU, "Skipping GPU tests.")
     @patches
     def test_benchmarker_early_ranking(self):
         benchmarker = Benchmarker()
@@ -160,7 +158,6 @@ class TestBenchmarking(TestCase):
         self.assertEqual(counters["inductor"]["benchmarking_early_ranking"], 1)
         counters.clear()
     
-    @unittest.skipIf(not HAS_GPU, "Skipping GPU tests.")
     @patches
     def test_benchmarker_early_pruning(self):
         benchmarker = Benchmarker()
@@ -169,7 +166,6 @@ class TestBenchmarking(TestCase):
         self.assertEqual(counters["inductor"]["benchmarking_early_pruning"], 1)
         counters.clear()
 
-    @unittest.skipIf(not HAS_CPU, "Skipping CPU tests.")
     @patches
     def test_benchmarker_properties_cpu(self):
         benchmarker = Benchmarker()
@@ -181,7 +177,6 @@ class TestBenchmarking(TestCase):
         self.assertEqual(counters["inductor"]["benchmarking_gpu_time_per_gpu_cache_clear"], 0)
         counters.clear()
     
-    @unittest.skipIf(not HAS_GPU, "Skipping GPU tests.")
     @patches
     def test_benchmarker_properties_gpu(self):
         benchmarker = Benchmarker()
@@ -279,4 +274,5 @@ class TestBenchmarking(TestCase):
         counters.clear()
 
 if __name__ == "__main__":
-    run_tests("cuda")
+    if HAS_CUDA and HAS_CPU and is_big_gpu(0):
+        run_tests()
