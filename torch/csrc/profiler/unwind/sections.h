@@ -57,10 +57,7 @@ struct Sections {
   Section symtab;
   Section strtab;
 
-  const char* readString(
-      CheckedLexer& data,
-      uint64_t encoding,
-      bool is_64bit) {
+  const char* readString(CheckedLexer& data, uint64_t encoding, bool is_64bit) {
     switch (encoding) {
       case DW_FORM_string: {
         return data.readCString();

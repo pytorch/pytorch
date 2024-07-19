@@ -183,10 +183,7 @@ void THP_decodeBFloat16Buffer(
   }
 }
 
-void THP_decodeBoolBuffer(
-    bool* dst,
-    const uint8_t* src,
-    size_t len) {
+void THP_decodeBoolBuffer(bool* dst, const uint8_t* src, size_t len) {
   for (const auto i : c10::irange(len)) {
     dst[i] = (int)src[i] != 0 ? true : false;
   }
