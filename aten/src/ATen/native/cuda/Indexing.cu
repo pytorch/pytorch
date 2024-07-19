@@ -900,11 +900,11 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   // total size of the tensor ignoring dimension `dim`;
   // -the number of index we are choosing, which is the total size
   // of the tensor `index`.
-  const size_t sliceSize = getSliceSize(self_, dim, index, source_);
-  const long sourceTotalSize = source.numel();
-  const int64_t selfAddDimSize = self_.size(dim);
-  const long numIndex = index.numel();
-  const int64_t selfNumel = self_.numel();
+  const uint64_t sliceSize = getSliceSize(self_, dim, index, source_);
+  const uint64_t sourceTotalSize = source.numel();
+  const uint64_t selfAddDimSize = self_.size(dim);
+  const uint64_t numIndex = index.numel();
+  const uint64_t selfNumel = self_.numel();
 
   if (sliceSize == 0) {
     return;
@@ -933,11 +933,11 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
       selfAddDimSize, selfNumel, reduce_add, alpha_value);                  \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  const dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (size_t)128), (size_t)(mpc * 8)));
-  const dim3 smallIndexBlock(std::min(sliceSize, (size_t)128));
+  const dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (uint64_t)128), (uint64_t)(mpc * 8)));
+  const dim3 smallIndexBlock(std::min(sliceSize, (uint64_t)128));
 
-  const dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (size_t)128), (size_t)(mpc * 8)));
-  const dim3 largeIndexBlock(std::min(sourceTotalSize, (size_t)128));
+  const dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (uint64_t)128), (uint64_t)(mpc * 8)));
+  const dim3 largeIndexBlock(std::min(sourceTotalSize, (uint64_t)128));
 
   if (cuda::detail::canUse32BitIndexMath(result) &&
       cuda::detail::canUse32BitIndexMath(source) &&
@@ -1073,11 +1073,11 @@ void index_reduce_func_cuda_impl(
   // total size of the tensor ignoring dimension `dim`;
   // -the number of index we are choosing, which is the total size
   // of the tensor `index`.
-  size_t sliceSize = getSliceSize(self_, dim, index, source_);
-  int64_t sourceTotalSize = source.numel();
-  int64_t selfReduceDimSize = self_.size(dim);
-  int64_t numIndex = index.numel();
-  int64_t selfNumel = self_.numel();
+  uint64_t sliceSize = getSliceSize(self_, dim, index, source_);
+  uint64_t sourceTotalSize = source.numel();
+  uint64_t selfReduceDimSize = self_.size(dim);
+  uint64_t numIndex = index.numel();
+  uint64_t selfNumel = self_.numel();
 
   if (sliceSize == 0) {
     return;
@@ -1106,11 +1106,11 @@ void index_reduce_func_cuda_impl(
       selfReduceDimSize, selfNumel, reduce_func, alpha_value);                           \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (size_t)128), (size_t)(mpc * 8)));
-  dim3 smallIndexBlock(std::min(sliceSize, (size_t)128));
+  dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (uint64_t)128), (uint64_t)(mpc * 8)));
+  dim3 smallIndexBlock(std::min(sliceSize, (uint64_t)128));
 
-  dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (size_t)128), (size_t)(mpc * 8)));
-  dim3 largeIndexBlock(std::min(sourceTotalSize, (size_t)128));
+  dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (uint64_t)128), (uint64_t)(mpc * 8)));
+  dim3 largeIndexBlock(std::min(sourceTotalSize, (uint64_t)128));
 
   if (cuda::detail::canUse32BitIndexMath(result) &&
       cuda::detail::canUse32BitIndexMath(source) &&
@@ -1342,8 +1342,8 @@ void index_select_out_cuda_impl(
     const Tensor& self,
     long dim,
     const Tensor& index) {
-  long numIndices = index.numel();
-  int selfDims = self.dim() == 0 ? 1 : self.dim();
+  uint64_t numIndices = index.numel();
+  uint64_t selfDims = self.dim() == 0 ? 1 : self.dim();
 
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -1364,7 +1364,7 @@ void index_select_out_cuda_impl(
     at::native::resize_output(out, newSize);
   }
 
-  long outTotalSize = out.numel();
+  uint64_t outTotalSize = out.numel();
   if (outTotalSize == 0) {
     return;
   }
@@ -1376,8 +1376,8 @@ void index_select_out_cuda_impl(
   // total size of the tensor ignoring dimension `dim`;
   // -the number of indices we are choosing, which is the total size
   // of the tensor `indices`.
-  int64_t selfSelectDimSize = self.dim() == 0 ? 1 : self.size(dim);
-  long sliceSize = outTotalSize / numIndices;
+  uint64_t selfSelectDimSize = self.dim() == 0 ? 1 : self.size(dim);
+  uint64_t sliceSize = outTotalSize / numIndices;
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
@@ -1400,10 +1400,10 @@ void index_select_out_cuda_impl(
       selfSelectDimSize);                                                      \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (long)128), (long) (mpc * 8)));
-  dim3 smallIndexBlock(std::min(sliceSize, (long)128));
+  dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (uint64_t)128), (uint64_t) (mpc * 8)));
+  dim3 smallIndexBlock(std::min(sliceSize, (uint64_t)128));
 
-  dim3 largeIndexGrid(std::min(ceil_div(outTotalSize, (long)128), (long) (mpc * 8)));
+  dim3 largeIndexGrid(std::min(ceil_div(outTotalSize, (uint64_t)128), (uint64_t) (mpc * 8)));
   // for issue https://github.com/pytorch/pytorch/issues/130806 there are two problems
   // 1: ptrdiff_t was used but it is signed int,  outTotalSize of 2147483648 can cause overflow
   // 2: On ROCm, std::min -> ::min did not work as expected on when outTotalSize>=2147483648
