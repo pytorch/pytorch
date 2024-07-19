@@ -1290,7 +1290,6 @@ at::Tensor _convert_weight_to_int4pack_cuda(
 
   TORCH_CHECK(in.dim() == 2);
   TORCH_CHECK(in.dtype() == at::kByte);
-  TORCH_CHECK(in.is_contiguous());
 
   // At least 2 k-tiles need to be packed back to back in the innermost
   // dimension, as the m16n8k16 tensor core tile presents 4 scalar values for

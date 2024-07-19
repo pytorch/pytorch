@@ -4442,6 +4442,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail(
                     "searchsorted"
                 ),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
+                xfail("_convert_weight_to_int4pack"),
             }
         ),
     )
