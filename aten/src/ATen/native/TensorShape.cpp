@@ -27,7 +27,7 @@
 #include <ATen/native/cpu/StackKernel.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <c10/util/SmallVector.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
@@ -227,7 +227,7 @@ inline void cat_check_no_zero_dim(const MaterializedITensorListRef& tensors) {
 }
 
 inline c10::MemoryFormat cat_compute_output_memory_format(const MaterializedITensorListRef& inputs) {
-  std::optional<c10::MemoryFormat> format = c10::nullopt;
+  std::optional<c10::MemoryFormat> format = std::nullopt;
   for (const Tensor& t : inputs) {
     auto f = t.suggest_memory_format();
     if (f == c10::MemoryFormat::Contiguous) {
@@ -381,7 +381,7 @@ Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset
 
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
   at::OptionalIntArrayRef stride_opt = stride.data() != nullptr ?
-                                          at::OptionalIntArrayRef(stride) : c10::nullopt;
+                                          at::OptionalIntArrayRef(stride) : std::nullopt;
   // We can re-use this kernel for the meta device.
   // We just need to make sure we don't actually try to resize the (null) storage.
   at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(), size, stride_opt, /*resize_storage=*/!result.is_meta());
@@ -1172,7 +1172,7 @@ static Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef str
   return result;
 }
 
-Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
+Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, std::optional<int64_t> storage_offset_) {
   TORCH_INTERNAL_ASSERT(!self.is_mps(), "as_strided_tensorimpl does not work with MPS; call self.as_strided(...) instead");
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto result = at::detail::make_tensor<TensorImpl>(
@@ -1188,10 +1188,10 @@ inline void setStridedUnchecked(
     ArrayRef<T> stride,
     T&& storage_offset) {
   auto* self_ = self.unsafeGetTensorImpl();
-  self_->set_sizes_and_strides(size, stride, c10::make_optional(std::forward<T>(storage_offset)));
+  self_->set_sizes_and_strides(size, stride, std::make_optional(std::forward<T>(storage_offset)));
 }
 
-Tensor as_strided_tensorimpl_meta_symint(const Tensor& self, SymIntArrayRef sym_size, SymIntArrayRef sym_stride, optional<c10::SymInt> sym_storage_offset_) {
+Tensor as_strided_tensorimpl_meta_symint(const Tensor& self, SymIntArrayRef sym_size, SymIntArrayRef sym_stride, std::optional<c10::SymInt> sym_storage_offset_) {
   auto sym_storage_offset = sym_storage_offset_.value_or(self.sym_storage_offset());
   auto result = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
@@ -1205,7 +1205,7 @@ Tensor as_strided_tensorimpl_meta_symint(const Tensor& self, SymIntArrayRef sym_
   return result;
 }
 
-Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
+Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, std::optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(
@@ -1218,11 +1218,11 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
 }
 
 // This is an overloaded function similar to
-// Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_)
+// Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, std::optional<int64_t> storage_offset_)
 // and is currently not available through the dispatcher. The additional
 // input, quantizer, is called by the select & slice methods.
 // TODO: Make this function compatible with the dispatcher
-static Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_,
+static Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, std::optional<int64_t> storage_offset_,
   QuantizerPtr quantizer) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   TORCH_CHECK(
@@ -1235,7 +1235,7 @@ static Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntAr
   return result;
 }
 
-const Tensor &as_strided__symint(const Tensor& self, SymIntArrayRef size, SymIntArrayRef stride, optional<c10::SymInt> storage_offset_) {
+const Tensor &as_strided__symint(const Tensor& self, SymIntArrayRef size, SymIntArrayRef stride, std::optional<c10::SymInt> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.sym_storage_offset());
   setStrided(self, size, stride, std::move(storage_offset));
   return self;
@@ -1619,7 +1619,7 @@ Tensor alias_with_sizes_and_strides(
 
 Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   if (self.is_sparse()) {
-    AT_ERROR("reshape is not implemented for sparse tensors");
+    TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
 
   if (self.is_contiguous() && !self.is_mkldnn()) {
@@ -1682,7 +1682,7 @@ Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_sha
 // minimize breakages.
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
-    AT_ERROR("reshape is not implemented for sparse tensors");
+    TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
   DimVector shape = infer_size_dv(proposed_shape, self.numel());
 
@@ -1756,10 +1756,10 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
       auto dimIndices = (arange(
                              0,
                              sparse_dim,
-                             c10::nullopt /* dtype */,
-                             c10::nullopt /* layout */,
+                             std::nullopt /* dtype */,
+                             std::nullopt /* layout */,
                              self.device(),
-                             c10::nullopt /* pin_memory */) != dim)
+                             std::nullopt /* pin_memory */) != dim)
                             .nonzero()
                             .view(-1);
       auto new_indices = indices.index_select(1, nzIndices).index_select(0, dimIndices);
@@ -3026,6 +3026,7 @@ static inline Tensor sparse_compressed_transpose(
 
   const auto transpose_type = classify_dim(dim0);
   {
+#ifndef STRIP_ERROR_MESSAGES
     auto dim_type_name = [](const TransposeDim dim) {
       switch (dim) {
         case TransposeDim::Batch:
@@ -3041,6 +3042,7 @@ static inline Tensor sparse_compressed_transpose(
               static_cast<std::underlying_type_t<TransposeDim>>(dim));
       }
     };
+#endif
     const auto dim1_type = classify_dim(dim1);
     TORCH_CHECK(
         dim1_type == transpose_type,
@@ -3288,7 +3290,7 @@ Tensor squeeze(const Tensor& self) {
 }
 
 Tensor squeeze_quantized(const Tensor& self) {
-  return squeeze_qtensor(self, c10::nullopt);
+  return squeeze_qtensor(self, std::nullopt);
 }
 
 Tensor squeeze(const Tensor& self, int64_t dim) {
@@ -3564,7 +3566,7 @@ static Tensor unflatten_impl(const Tensor& self, int64_t dim, SymIntArrayRef siz
 }
 
 Tensor unflatten_symint(const Tensor& self, int64_t dim, SymIntArrayRef sizes) {
-  return native::unflatten_impl(self, dim, sizes, c10::nullopt);
+  return native::unflatten_impl(self, dim, sizes, std::nullopt);
 }
 
 Tensor unflatten_dimname_symint(const Tensor& self, Dimname dim, SymIntArrayRef sizes, DimnameList names) {

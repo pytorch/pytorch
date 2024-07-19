@@ -151,13 +151,6 @@ ParameterMetadata::ParameterMetadata(
   value_ = scalar;
 }
 
-ParameterMetadata::ParameterMetadata(
-    const std::string& str,
-    uint64_t input_order)
-    : tag_(STRING), order_(input_order) {
-  value_ = str;
-}
-
 bool ParameterMetadata::operator==(const ParameterMetadata& other) const {
   // Same type
   if (tag_ != other.tag_) {
@@ -181,9 +174,6 @@ bool ParameterMetadata::operator==(const ParameterMetadata& other) const {
           std::get<c10::Scalar>(other.value_).isFloatingPoint() ||
           std::get<c10::Scalar>(other.value_).isIntegral(true /*includeBool*/));
       return equal_to(std::get<c10::Scalar>(other.value_));
-    case STRING:
-      return std::get<std::string>(value_) ==
-          std::get<std::string>(other.value_);
     default:
       return false;
   }
