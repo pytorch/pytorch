@@ -1134,7 +1134,9 @@ def get_env_num_workers() -> Optional[int]:
 
 
 # keeps track of the situations where autotuning results should be transfered to AutoHeuristic
-autoheuristic_registry: Dict[str, Callable[[List[Tuple[str, float]]], None]] = {}
+autoheuristic_registry: Dict[
+    str, Callable[[List[Tuple[ChoiceCaller, float]]], None]
+] = {}
 
 
 def create_inputs_key(input_nodes):
@@ -1349,7 +1351,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 if precompile_key in autoheuristic_registry:
                     ah_feedback = []
                     for choice, timing in timings.items():
-                        ah_feedback.append((choice.autoheuristic_id(), timing))
+                        ah_feedback.append((choice, timing))
                     autoheuristic_registry[precompile_key](ah_feedback)
 
             return timings

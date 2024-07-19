@@ -4,7 +4,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import torch
-from torch._inductor.autoheuristic.autoheuristic import AutoHeuristic, GlobalFeedback
+from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
     context_add_strides,
@@ -486,23 +486,17 @@ def mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes):
         return context
 
     def fallback():
-        return "unsure"
+        return None
 
-    choicestr2choice: Dict[str, Any] = {"unsure": None}
-    for choice in choices:
-        choicestr2choice[choice.autoheuristic_id()] = choice
-    choices_str = list(choicestr2choice.keys())
-    feedback = GlobalFeedback(inputs=input_nodes, choices=choices)
     context = get_context(m, k, n, mat1, mat2)
-    autoheuristic = AutoHeuristic(
+    autoheuristic = AutoHeuristicSelectAlgorithm(
         fallback=fallback,
-        choices=choices_str,
-        feedback=feedback,
+        choices=choices,
+        input_nodes=input_nodes,
         context=context,
         name=name,
     )
-    choice_str = autoheuristic.get_choice()
-    return choicestr2choice.get(choice_str, None)
+    return autoheuristic.get_choice_caller()
 
 
 def get_size_hints(mat1, mat2, m, n, k):
