@@ -35,16 +35,15 @@ void checkForNan(const at::Tensor& tensor) {
       (tensor.numel() + numThreadsPerBlock - 1) / numThreadsPerBlock);
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
-    at::ScalarType::Half,
-    at::ScalarType::BFloat16,
-    tensor.scalar_type(),
-    "checkForNaN",
-    [&] {
-    checkForNaN<scalar_t><<<numBlocks, numThreadsPerBlock>>>(
-        tensor.data_ptr<scalar_t>(), tensor.numel());
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-  });
-
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      tensor.scalar_type(),
+      "checkForNaN",
+      [&] {
+        checkForNaN<scalar_t><<<numBlocks, numThreadsPerBlock>>>(
+            tensor.data_ptr<scalar_t>(), tensor.numel());
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      });
 }
 
 } // namespace c10d
