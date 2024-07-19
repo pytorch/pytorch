@@ -74,7 +74,7 @@ from torch._utils import IMPORT_MAPPING, NAME_MAPPING
 
 # modules in this list are never allowed, even if the user attempts to allowlist
 # functions/classes from them
-_blacklisted_modules = [
+_blocklisted_modules = [
     "sys",
     "os",
     "posix",
@@ -229,9 +229,9 @@ class Unpickler:
                     elif module in IMPORT_MAPPING:
                         module = IMPORT_MAPPING[module]
                 full_path = f"{module}.{name}"
-                if module in _blacklisted_modules:
+                if module in _blocklisted_modules:
                     raise RuntimeError(
-                        f"Trying to load unsupported GLOBAL {full_path} whose module {module} is blacklisted."
+                        f"Trying to load unsupported GLOBAL {full_path} whose module {module} is blocked."
                     )
                 if full_path in _get_allowed_globals():
                     self.append(_get_allowed_globals()[full_path])
