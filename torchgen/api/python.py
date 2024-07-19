@@ -236,7 +236,6 @@ class PythonArgument:
         if self.default is not None:
             default = {
                 "nullptr": "None",
-                "c10::nullopt": "None",
                 "::std::nullopt": "None",
                 "std::nullopt": "None",
                 "{}": "None",
@@ -285,7 +284,6 @@ class PythonArgument:
             else:
                 default = {
                     "nullptr": "None",
-                    "c10::nullopt": "None",
                     "::std::nullopt": "None",
                     "std::nullopt": "None",
                     "{}": "None",
@@ -1320,7 +1318,6 @@ def arg_parser_unpack_method(
         elif not has_default_init and default in (
             None,
             "None",
-            "c10::nullopt",
             "::std::nullopt",
             "std::nullopt",
         ):
