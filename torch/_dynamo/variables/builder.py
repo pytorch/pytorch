@@ -67,7 +67,6 @@ from ..source import (
     is_constant_source,
     is_from_defaults,
     is_from_optimizer_source,
-    is_unspecialized_builtin_nnmodule_attr,
     LocalSource,
     NumpyTensorSource,
     OptimizerSource,
@@ -177,11 +176,7 @@ from .misc import (
     TorchVersionVariable,
     TypingVariable,
 )
-from .nn_module import (
-    FSDPManagedNNModuleVariable,
-    UnspecializedBuiltinNNModuleVariable,
-    UnspecializedNNModuleVariable,
-)
+from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
 
@@ -1091,16 +1086,6 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
 
-        if (
-            self.source
-            and is_unspecialized_builtin_nnmodule_attr(self.source)
-            and type(value) is tuple
-            and all(ConstantVariable.is_literal(x) for x in value)
-        ):
-            # Heuristic to speedup up guards coming from conv2d attrs like dilation and padding.
-            self.install_guards(GuardBuilder.CONSTANT_MATCH)
-            return TupleVariable([ConstantVariable.create(x) for x in value])
-
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
         self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -1278,12 +1263,7 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            if value.__module__.startswith(
-                ("torch.nn.", "torch.ao.")
-            ) and not value.__module__.startswith("torch.nn.modules.container"):
-                result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
-            else:
-                result = UnspecializedNNModuleVariable(value, source=self.source)
+            result = UnspecializedNNModuleVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
@@ -1488,6 +1468,7 @@ class VariableBuilder:
         # We install TYPE_MATCH guards for traceable wrapper subclass object,
         # and recursively install corresponding guard for each inner attribute.
         if is_traceable_wrapper_subclass(value):
+            self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
             self.install_guards(GuardBuilder.TYPE_MATCH)
             install_guard(
                 SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
@@ -2122,21 +2103,29 @@ def wrap_fx_proxy_cls(
     ):
         set_example_value(proxy.node, example_value)
         return EventVariable(proxy, example_value, **options)
-    elif isinstance(example_value, int) and proxy.node.target in [
-        torch.sym_int,
-        getattr,
-        operator.getitem,
-        torch._utils._element_size,
-        torch.seed,
-        operator.mod,
-        torch._functorch.vmap._validate_and_get_batch_size,
-        # some mac builds are missing torch.distributed.get_rank()
-        getattr(torch.distributed, "get_rank", _missing),
-        getattr(torch.distributed, "get_world_size", _missing),
-        # This always wants to be in the graph, even if the constraint
-        # results in a constant int
-        torch._constrain_as_size,
-    ]:
+    elif isinstance(example_value, int) and (
+        proxy.node.target
+        in [
+            torch.sym_int,
+            getattr,
+            operator.getitem,
+            torch._utils._element_size,
+            torch.seed,
+            operator.mod,
+            torch._functorch.vmap._validate_and_get_batch_size,
+            # some mac builds are missing torch.distributed.get_rank()
+            getattr(torch.distributed, "get_rank", _missing),
+            getattr(torch.distributed, "get_world_size", _missing),
+            # This always wants to be in the graph, even if the constraint
+            # results in a constant int
+            torch._constrain_as_size,
+        ]
+        or (
+            # TODO: this is a little sus, because we didn't check what the self is
+            proxy.node.op == "call_method"
+            and proxy.node.target in ["bit_length"]
+        )
+    ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     elif isinstance(example_value, torch.backends.cuda.SDPAParams):

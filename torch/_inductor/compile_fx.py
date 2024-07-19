@@ -277,12 +277,20 @@ def _recursive_post_grad_passes(gm, is_inference: bool = False):
 
 def split_const_gm(
     gm: torch.fx.GraphModule,
+    lifted_constants: Optional[Dict[str, Any]] = None,
+    skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> Tuple[torch.fx.GraphModule, Dict[str, int]]:
     """
     This function takes an GraphModule input "gm".
     The gm will be split into 2 components,
       1) const_gm, which consists the subgraph of gm that can be constant folded.
       2) gm (being inplace modified,) which returns the graph after constant folding.
+
+    If an additional "lifted_constants" argument is passed in, we will assume the gm has
+    been lifted and run the transformation accordingly.
+
+    When a "skip_folding_node_fn" callback is passed, we will skip constant folding on
+    the nodes for which the callback returns True.
 
     const_output_index is a mapping of corresponding node name from gm to the
     output index of const_gm.
@@ -296,8 +304,9 @@ def split_const_gm(
         run_and_get_constant_graph,
     )
 
-    const_gm = run_and_get_constant_graph(gm)
-    const_result = const_gm()
+    const_gm, const_result = run_and_get_constant_graph(
+        gm, lifted_constants, skip_folding_node_fn
+    )
 
     const_outputs = {
         x.name: idx for idx, x in enumerate(tuple(const_gm.graph.nodes)[-1].args[0])
@@ -309,7 +318,7 @@ def split_const_gm(
     for node in gm.graph.nodes:
         if node.name in const_outputs:
             to_replace_node.append(node)
-        elif node.meta[META_TAG] == CONST_MODULE_TAG:
+        elif node.meta[META_TAG] == CONST_MODULE_TAG and node.op != "placeholder":
             to_erase_node.append(node)
 
     for node in to_replace_node:
@@ -726,6 +735,8 @@ def fx_codegen_and_compile(
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
 
+    inductor_counters = counters["inductor"].copy()
+
     # lift the maximum depth of the Python interpreter stack
     # to adapt large/deep models
     sys.setrecursionlimit(max(sys.getrecursionlimit(), 2000))
@@ -912,6 +923,7 @@ def fx_codegen_and_compile(
                 output_strides,
                 V.graph.disable_cudagraphs_reason,
                 metrics_helper.get_deltas(),
+                counters["inductor"] - inductor_counters,
             )
 
     return compiled_graph
@@ -1051,13 +1063,7 @@ def static_input(x: torch.Tensor):
     """
     Copy and input while preserving strides
     """
-    # TODO(jansel): figure out why this version doesn't work:
-    # return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
-    needed_size = (
-        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
-    )
-    buffer = torch.empty(needed_size, dtype=x.dtype, device=x.device)
-    return torch.as_strided(buffer, x.size(), x.stride())
+    return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
 
 
 def index_expanded_dims_and_copy_(

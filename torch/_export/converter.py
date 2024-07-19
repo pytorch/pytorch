@@ -107,6 +107,12 @@ kind_to_standard_operators = {
     "aten::__contains__": operator.contains,
     "prim::dtype": get_dtype_as_int,
     "aten::len": len,
+    # Mapping from specialized op to its symbolic counterpart.
+    # They currently do not have any other overrides.
+    "aten::numel": torch.ops.aten.sym_numel,
+    "aten::size": torch.ops.aten.sym_size,
+    "aten::storage_offset": torch.ops.aten.sym_storage_offset,
+    "aten::stride": torch.ops.aten.sym_stride,
 }
 
 
@@ -251,14 +257,14 @@ class TS2FXGraphConverter:
     def __init__(
         self,
         ts_graph: Union[torch._C.Graph, torch._C.Block],
-        name_to_param_map: Dict[str, torch.Tensor],
-        name_to_buffer_map: Dict[str, torch.Tensor],
+        name_to_param: Dict[str, torch.Tensor],
+        name_to_buffer: Dict[str, torch.Tensor],
         blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
         name_to_non_tensor_attribute: Dict[str, Any],
     ):
         self.ts_graph = ts_graph
-        self.name_to_param_map = name_to_param_map
-        self.name_to_buffer_map = name_to_buffer_map
+        self.name_to_param = name_to_param
+        self.name_to_buffer = name_to_buffer
 
         self.fx_graph: torch.fx.Graph = torch.fx.Graph()
         self.input_specs: List[InputSpec] = []
@@ -346,8 +352,8 @@ class TS2FXGraphConverter:
         gm = torch.fx.GraphModule(
             {
                 **self.subgraphs,
-                **self.name_to_param_map,
-                **self.name_to_buffer_map,
+                **self.name_to_param,
+                **self.name_to_buffer,
                 **self.name_to_tensor_constants,
                 **self.name_to_non_tensor_attribute,
             },
@@ -364,7 +370,7 @@ class TS2FXGraphConverter:
         for graph_input in self.ts_graph.inputs():
             name = graph_input.debugName()
 
-            if name in self.name_to_param_map:
+            if name in self.name_to_param:
                 normalized_name = normalize_name(name)
                 self.input_specs.append(
                     InputSpec(
@@ -376,7 +382,7 @@ class TS2FXGraphConverter:
                 fx_node = get_node_for_param_and_buffer(
                     self.fx_graph, name, self.is_top_level_graph()
                 )
-            elif name in self.name_to_buffer_map:
+            elif name in self.name_to_buffer:
                 normalized_name = normalize_name(name)
                 self.input_specs.append(
                     InputSpec(
@@ -497,9 +503,6 @@ class TS2FXGraphConverter:
     def convert_call_function_op(self, node: torch._C.Node):
         target = get_op_overload(node)
 
-        if target is torch.ops.aten.size.int:
-            target = torch.ops.aten.sym_size.int
-
         args, kwargs = self.get_args_kwargs(node, target._schema)
 
         fx_node = self.fx_graph.call_function(target, args, kwargs)
@@ -507,8 +510,16 @@ class TS2FXGraphConverter:
         # TODO: covnert sourceRange() into stack_trace
         # fx_node.meta["stack_trace"] = node.sourceRange()
 
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = fx_node
+        if node.outputsSize() == 1:
+            output_name = node.output().debugName()
+            self.name_to_node[output_name] = fx_node
+        else:
+            for i, outp in enumerate(node.outputs()):
+                output_name = outp.debugName()
+                next_fx_node = self.fx_graph.call_function(
+                    operator.getitem, (fx_node, i)
+                )
+                self.name_to_node[output_name] = next_fx_node
 
     def convert_prim_TupleConstruct(self, node: torch._C.Node):
         self._convert_prim_iterator(node)
@@ -679,7 +690,11 @@ class TS2FXGraphConverter:
             for block in entry.blocks():
                 for block_node in block.nodes():
                     for block_node_in in block_node.inputs():
-                        if block_node_in.debugName() in self.name_to_node:
+                        if (
+                            block_node_in.debugName() in self.name_to_node
+                            and block_node_in.debugName()
+                            not in self.name_to_attribute_fqn
+                        ):
                             arguments.add(block_node_in.debugName())
                     arguments = arguments.union(
                         _identify_inputs_as_arguments(block_node)
@@ -740,11 +755,24 @@ class TS2FXGraphConverter:
 
         cond_node = self.fx_graph.call_function(torch.cond, args, {})
 
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = cond_node
+        # prim::If can also have zero output.
+        if node.outputsSize() == 1:
+            output_name = node.output().debugName()
+            self.name_to_node[output_name] = cond_node
 
     def convert_aten_Bool(self, node: torch._C.Node):
         self._convert_as_noop(node)
+
+    def convert_prim_Enter(self, node: torch._C.Node):
+        # export generally treats prim::Enter as noop
+        # The only context manager export supports is aten::enable_grad.
+        # Unfortunately, TorchScript does not support aten::enable_grad yet.
+        # TODO: support aten::enable_grad in both TorchScript and Converter.
+        return
+
+    def convert_prim_Exit(self, node: torch._C.Node):
+        # export treats prim::Exit as noop
+        return
 
     def _convert_as_noop(self, node: torch._C.Node):
         # Converts the node as a no-op by mapping its output node as arg[0]
@@ -756,13 +784,6 @@ class TS2FXGraphConverter:
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = args[0]
-
-    def convert_profiler__record_function_enter_new(self, node: torch._C.Node):
-        target = torch.ops.profiler._record_function_enter_new
-        args = tuple(self.get_fx_value(input) for input in node.inputs())
-        fx_node = self.fx_graph.call_function(target, args)
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = fx_node
 
     def convert_profiler__record_function_exit(self, node: torch._C.Node):
         # _record_function_exit has side effect so we keep it in fx.graph
@@ -780,6 +801,14 @@ class TS2FXGraphConverter:
         fx_node = self.fx_graph.call_method(target, args)
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
+
+    def convert_prim_Uninitialized(self, node: torch._C.Node):
+        # `prim::Uninitialized` is inserted by the compiler when it can prove
+        # the value will never be used. It can be introduced by exceptions,
+        # breaks, continues, and returns.
+        # So we add a dummy constant to the graph.
+        output_name = node.output().debugName()
+        self.constant_map[output_name] = torch.Tensor()
 
     def _convert_standard_operators(self, node: torch._C.Node):
         target = kind_to_standard_operators[node.kind()]
@@ -834,9 +863,13 @@ class TS2FXGraphConverter:
             else:
                 raise ValueError(f"Output {output_name} not found")
 
-        self.fx_graph.output(
-            args[0]
-        )  # Get rid of an extra list wrapped around final output.
+        if len(args) == 1:
+            self.fx_graph.output(
+                args[0]
+            )  # Get rid of an extra list wrapped around final output.
+        else:
+            # Sub-block of prim::If can have zero output.
+            self.fx_graph.output([])
 
 
 class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
@@ -867,15 +900,15 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
     def __init__(
         self,
         ts_graph: Union[torch._C.Graph, torch._C.Block],
-        name_to_param_map: Dict[str, torch.Tensor],
-        name_to_buffer_map: Dict[str, torch.Tensor],
+        name_to_param: Dict[str, torch.Tensor],
+        name_to_buffer: Dict[str, torch.Tensor],
         blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
         name_to_non_tensor_attribute: Dict[str, Any],
     ):
         super().__init__(
             ts_graph,
-            name_to_param_map,
-            name_to_buffer_map,
+            name_to_param,
+            name_to_buffer,
             blocks_to_lifted_attrs,
             name_to_non_tensor_attribute,
         )
@@ -925,7 +958,7 @@ TS2EPConverter logging starts from here.
 INFO: (TORCH_LOGS="export" <cmd>)
     * Log TorchScript IR.
 
-DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
+DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
     * Log conversion IR by IR in a format of [<conversion handler name>] converts [<IR>].
         """
         )
@@ -937,33 +970,58 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
 
-        self.name_to_param_map: Dict[str, torch.Tensor] = (
-            dict(ts_model.named_parameters())
-            if isinstance(ts_model, torch.jit.ScriptModule)
-            else {}
+        self.name_to_param: Dict[str, torch.Tensor] = {}
+        self.name_to_buffer: Dict[str, torch.Tensor] = {}
+        param_list = (
+            list(self.ts_model.parameters())
+            if not isinstance(self.ts_model, torch._C.ScriptFunction)
+            else []
         )
-        self.name_to_buffer_map: Dict[str, torch.Tensor] = (
-            dict(ts_model.named_buffers())
-            if isinstance(ts_model, torch.jit.ScriptModule)
-            else {}
-        )
+        if not isinstance(self.ts_model, torch._C.ScriptFunction):
+            for k, tensor in self.ts_model.state_dict().items():  # type: ignore[union-attr]
+                # Check if tensor belongs to any parameter.
+                if any(
+                    (tensor == param).all()
+                    for param in param_list
+                    if tensor.shape == param.shape
+                ):
+                    self.name_to_param[k] = tensor
+                else:
+                    self.name_to_buffer[k] = tensor
+
         self.name_to_non_tensor_attributes: Dict[str, Any] = {}
 
         self.lift_tensor_constants_to_buffer()
 
     def convert(self) -> ExportedProgram:
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
+
         graph_converter = TS2FXGraphConverter(
             self.ts_graph,
-            self.name_to_param_map,
-            self.name_to_buffer_map,
+            self.name_to_param,
+            self.name_to_buffer,
             blocks_to_lifted_attrs,
             self.name_to_non_tensor_attributes,
         )
         gm = graph_converter.convert()
+        log.info(f"GraphModule: {gm.print_readable(print_output=False)}")  # noqa: G004
+
         ep = self.retrace_as_exported_program(
             gm, graph_converter.name_to_tensor_constants
         )
+        log.info(f"{ep}")  # noqa: G004
+
+        # Post-processing step to ensure ExportedProgram has the same state_dict as
+        # the original TorchScript model. Throw warnings for additionally populated
+        # state_dict entries.
+        if not isinstance(self.ts_model, torch._C.ScriptFunction):
+            for k, tensor in self.ts_model.state_dict().items():  # type: ignore[union-attr]
+                if k not in ep.state_dict:
+                    warnings.warn(
+                        f"Manually populate {k} into state_dict ExportedProgram, but it is never used by the ExportedProgram."
+                    )
+                    ep.state_dict[k] = tensor
+
         return ep
 
     def explain(self):
@@ -971,8 +1029,8 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
 
         graph_converter = ExplainTS2FXGraphConverter(
             self.ts_graph,
-            self.name_to_param_map,
-            self.name_to_buffer_map,
+            self.name_to_param,
+            self.name_to_buffer,
             blocks_to_lifted_attrs,
             self.name_to_non_tensor_attributes,
         )
@@ -1022,7 +1080,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
         # This function should happen in TS2EPConverter instead of
         # TS2FXGraphConverter since it gets attributes from self.ts_model
         # which is not accessable in TS2FXGraphConverter. It is similar to where
-        # we collect self.name_to_param_map and self.name_to_buffer_map.
+        # we collect self.name_to_param and self.name_to_buffer.
         name_to_attribute_fqn: Dict[str, str] = {}
 
         def get_attr(fqn: str):
@@ -1051,12 +1109,12 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
                     output_name = node.output().debugName()
                     name_to_attribute_fqn[output_name] = attr_fqn
                     if isinstance(value, torch.Tensor):
-                        if attr_fqn not in self.name_to_buffer_map:
+                        if attr_fqn not in self.name_to_buffer:
                             # Lift tensor constants to be a buffer
                             warnings.warn(
                                 f"ts converter lifted tensor constant {attr_fqn} to be a buffer"
                             )
-                            self.name_to_buffer_map[attr_fqn] = value
+                            self.name_to_buffer[attr_fqn] = value
                     else:
                         self.name_to_non_tensor_attributes[attr_fqn] = value
 
