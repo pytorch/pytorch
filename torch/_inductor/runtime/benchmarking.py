@@ -66,7 +66,7 @@ class LazyBenchmark:
 
 class Benchmarker:
     def __init__(self) -> None:
-        self.memory_cache: Dict[str, Optional[float]] = defaultdict(lambda: None)
+        self.memory_cache: Dict[str, float] = defaultdict(lambda: None)
         self.kwargs_hash_to_futures_gpu: Dict[
             str, Tuple[LazyBenchmark, Callable[..., Any]]
         ] = {}
@@ -79,7 +79,7 @@ class Benchmarker:
         return properties.L2_cache_size
 
     @cached_property
-    def gpu_queue_limit(self) -> List[float]:
+    def gpu_queue_limit(self) -> int:
         counters["inductor"]["benchmarking_gpu_queue_limit"] += 1
         # ensures the queue is empty
         torch.cuda.synchronize()
@@ -330,7 +330,7 @@ class Benchmarker:
         max_benchmark_duration_ms: int = 25,
         ranking_key: Optional[str] = None,
         pruning_key: Optional[str] = None,
-        pruning_factor: Optional[float] = 1.25,
+        pruning_factor: float = 1.25,
     ) -> List[float]:
         counters["inductor"]["benchmarking_benchmark_many_gpu"] += 1
         # we don't want any outside errors propagating into benchmarking
@@ -527,8 +527,8 @@ class Benchmarker:
         # grouping benchmarks by ranking keys and pruning keys, and also ensures
         # that we only benchmark callables that should run under the same conditions
         # with respect to warmup, benchmarking, etc.
-        kwargs_hash = hash(tuple(sorted(kwargs.items())))
-        key = hash(_callable) + kwargs_hash
+        kwargs_hash = str(hash(tuple(sorted(kwargs.items()))))
+        key = str(hash(_callable)) + kwargs_hash
         self.kwargs_hash_to_futures_gpu[
             kwargs_hash
         ] = self.kwargs_hash_to_futures_gpu.get(kwargs_hash, []) + [(_callable, key)]
@@ -648,7 +648,7 @@ class Benchmarker:
         interleaved_event_pairs: List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]],
     ) -> List[float]:
         return [
-            self.get_min_timing_ms(event_pairs)
+            self.get_min_timing_ms(event_pairs)  # type: ignore
             for event_pairs in zip(*interleaved_event_pairs)
         ]
 
