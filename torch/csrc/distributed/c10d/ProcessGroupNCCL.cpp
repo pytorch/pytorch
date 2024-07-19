@@ -575,6 +575,11 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
 
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   // Checking the work's corresponding CUDA event's status
+  // It calls `cudaEventQuery` eventually. Although this seems to be a
+  // non-blocking call, but we did notice hangs in the past. It can
+  // hang if another thread is holding the CUDA global context lock. For
+  // example, when doing a `cudaDeviceSynchronize` or even
+  // `cudaStreamSynchronize`.
   if (!ncclEndEvent_->query()) {
     return false;
   }
@@ -2117,7 +2122,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   gpuGuard.set_index(deviceIndex);
 
 #ifdef NCCL_HAS_COMM_SPLIT
-  options_->config.splitShare = 1;
   if (options_->split_from) {
     TORCH_CHECK(
         options_->split_color != 0,
@@ -2179,8 +2183,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       size_); // worldSize
 
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
-            << ncclComm->ncclComm_
-            << " on CUDA device: " << static_cast<int>(deviceIndex);
+            << ncclComm->ncclComm_ << " on CUDA device: " << deviceIndex;
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file

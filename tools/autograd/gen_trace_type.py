@@ -255,17 +255,17 @@ def format_trace_inputs(f: NativeFunction) -> str:
 RENAME_TRACE_ADD_ARGS = {
     "fill": """\
     jit::tracer::addInputs(node, "options", c10::optional<ScalarType>());
-    jit::tracer::addInputs(node, "options", layout_or_default(c10::nullopt));
-    jit::tracer::addInputs(node, "options", device_or_default(c10::nullopt));
-    jit::tracer::addInputs(node, "options", pinned_memory_or_default(c10::nullopt));
+    jit::tracer::addInputs(node, "options", layout_or_default(::std::nullopt));
+    jit::tracer::addInputs(node, "options", device_or_default(::std::nullopt));
+    jit::tracer::addInputs(node, "options", pinned_memory_or_default(::std::nullopt));
     c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 """,
     "zero": """\
     jit::tracer::addInputs(node, "options", c10::optional<ScalarType>());
-    jit::tracer::addInputs(node, "options", layout_or_default(c10::nullopt));
-    jit::tracer::addInputs(node, "options", device_or_default(c10::nullopt));
-    jit::tracer::addInputs(node, "options", pinned_memory_or_default(c10::nullopt));
+    jit::tracer::addInputs(node, "options", layout_or_default(::std::nullopt));
+    jit::tracer::addInputs(node, "options", device_or_default(::std::nullopt));
+    jit::tracer::addInputs(node, "options", pinned_memory_or_default(::std::nullopt));
     c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 """,
