@@ -1140,7 +1140,6 @@ def bwd_dkdv_inner(
         Di = tl.load(DELTA + offs_m1)
         # Compute dP and dS.
         dpT = tl.dot(v, tl.trans(do))
-        # dpT = tl.where(offs_m1[None, :] < Q_LEN, dpT, 0.0)
         dsT = pT * (dpT - Di[None, :])
         # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m1[None, :]
