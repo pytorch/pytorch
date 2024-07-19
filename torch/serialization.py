@@ -1149,7 +1149,8 @@ def load(
         has_unsafe_global = re.search(pattern, message) is not None
         if has_unsafe_global:
             updated_message = (
-                "Weights only load failed. This file can still be loaded, to do so you have two options "
+                "Weights only load failed. This file can still be loaded, to do so you have two options, "
+                "\033[1mdo those steps only if you trust the source of the checkpoint\033[0m. "
                 f"\n\t(1) {UNSAFE_MESSAGE}\n\t(2) Alternatively, to load with `weights_only=True` please check "
                 "the recommended steps in the following error message.\n\tWeightsUnpickler error: "
                 + message
