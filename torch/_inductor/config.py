@@ -680,9 +680,8 @@ class cpp:
     )
 
     # Disable the tiling select heuristic
-    disable_tiling_select_heuristic_flag = (
-        os.environ.get("TORCHINDUCTOR_CPP_DISABLE_TILING_SELECT_HEURISTIC_FLAG", "0")
-        == "1"
+    enable_tiling_heuristics = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_TILING_SELECT_HEURISTIC", "1") == "1"
     )
 
 
