@@ -917,6 +917,7 @@ def wait_for_process(p, timeout=None):
         # Give `p` a chance to handle KeyboardInterrupt. Without this,
         # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
         exit_status = p.wait(timeout=5)
+        print("KeyboardInterrupt received. Terminating the process.", flush=True)
         if exit_status is not None:
             return exit_status
         else:
@@ -924,15 +925,20 @@ def wait_for_process(p, timeout=None):
             raise
     except subprocess.TimeoutExpired:
         # send SIGINT to give pytest a chance to make xml
+        print("TimeoutExpired received. Sending SIGINT to the process.", flush=True)
         p.send_signal(signal.SIGINT)
         exit_status = None
+        print(f"exit_status: {exit_status}", flush=True)
         try:
             exit_status = p.wait(timeout=5)
+            print(f"exit_status: {exit_status}", flush=True)
         # try to handle the case where p.wait(timeout=5) times out as well as
         # otherwise the wait() call in the finally block can potentially hang
         except subprocess.TimeoutExpired:
+            print("Another TimeoutExpired received. Passing.", flush=True)
             pass
         if exit_status is not None:
+            print(f"exit_status1: {exit_status}", flush=True)
             return exit_status
         else:
             p.kill()
@@ -942,7 +948,8 @@ def wait_for_process(p, timeout=None):
         raise
     finally:
         # Always call p.wait() to ensure exit
-        p.wait()
+        exit_status = p.wait()
+        print(f"exit_status2: {exit_status}", flush=True)
 
 def shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None):
     sys.stdout.flush()
@@ -956,7 +963,9 @@ def shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None):
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
     assert not isinstance(command, str), "Command to shell should be a list or tuple of tokens"
     p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env, stdout=stdout, stderr=stderr)
-    return wait_for_process(p, timeout=timeout)
+    c = wait_for_process(p, timeout=timeout)
+    print(f"Command {command} finished with exit code {c}", flush=True)
+    return c
 
 
 def retry_shell(
@@ -977,6 +986,7 @@ def retry_shell(
         exit_code = shell(
             command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout
         )
+        print(f"Got exit code {exit_code}", file=stdout, flush=True)
         if exit_code == 0 or retries == 0:
             return exit_code, was_rerun
         print(
