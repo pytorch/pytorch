@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Dict, List, Sequence, Tuple, Union
 
 import torch
-from torch.onnx._internal import _beartype
+
 from torch.onnx._internal.fx import _pass, diagnostics
 
 
@@ -30,7 +30,6 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         super().__init__(diagnostic_context, fx_module)
         self.original_nn_module = original_nn_module
 
-    @_beartype.beartype
     def _rename_param_and_buffer(
         self,
         diagnostic: diagnostics.Diagnostic,

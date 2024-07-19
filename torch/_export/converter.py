@@ -510,8 +510,16 @@ class TS2FXGraphConverter:
         # TODO: covnert sourceRange() into stack_trace
         # fx_node.meta["stack_trace"] = node.sourceRange()
 
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = fx_node
+        if node.outputsSize() == 1:
+            output_name = node.output().debugName()
+            self.name_to_node[output_name] = fx_node
+        else:
+            for i, outp in enumerate(node.outputs()):
+                output_name = outp.debugName()
+                next_fx_node = self.fx_graph.call_function(
+                    operator.getitem, (fx_node, i)
+                )
+                self.name_to_node[output_name] = next_fx_node
 
     def convert_prim_TupleConstruct(self, node: torch._C.Node):
         self._convert_prim_iterator(node)
@@ -743,11 +751,24 @@ class TS2FXGraphConverter:
 
         cond_node = self.fx_graph.call_function(torch.cond, args, {})
 
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = cond_node
+        # prim::If can also have zero output.
+        if node.outputsSize() == 1:
+            output_name = node.output().debugName()
+            self.name_to_node[output_name] = cond_node
 
     def convert_aten_Bool(self, node: torch._C.Node):
         self._convert_as_noop(node)
+
+    def convert_prim_Enter(self, node: torch._C.Node):
+        # export generally treats prim::Enter as noop
+        # The only context manager export supports is aten::enable_grad.
+        # Unfortunately, TorchScript does not support aten::enable_grad yet.
+        # TODO: support aten::enable_grad in both TorchScript and Converter.
+        return
+
+    def convert_prim_Exit(self, node: torch._C.Node):
+        # export treats prim::Exit as noop
+        return
 
     def _convert_as_noop(self, node: torch._C.Node):
         # Converts the node as a no-op by mapping its output node as arg[0]
@@ -759,13 +780,6 @@ class TS2FXGraphConverter:
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = args[0]
-
-    def convert_profiler__record_function_enter_new(self, node: torch._C.Node):
-        target = torch.ops.profiler._record_function_enter_new
-        args = tuple(self.get_fx_value(input) for input in node.inputs())
-        fx_node = self.fx_graph.call_function(target, args)
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = fx_node
 
     def convert_profiler__record_function_exit(self, node: torch._C.Node):
         # _record_function_exit has side effect so we keep it in fx.graph
@@ -783,6 +797,14 @@ class TS2FXGraphConverter:
         fx_node = self.fx_graph.call_method(target, args)
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
+
+    def convert_prim_Uninitialized(self, node: torch._C.Node):
+        # `prim::Uninitialized` is inserted by the compiler when it can prove
+        # the value will never be used. It can be introduced by exceptions,
+        # breaks, continues, and returns.
+        # So we add a dummy constant to the graph.
+        output_name = node.output().debugName()
+        self.constant_map[output_name] = torch.Tensor()
 
     def _convert_standard_operators(self, node: torch._C.Node):
         target = kind_to_standard_operators[node.kind()]
@@ -837,9 +859,13 @@ class TS2FXGraphConverter:
             else:
                 raise ValueError(f"Output {output_name} not found")
 
-        self.fx_graph.output(
-            args[0]
-        )  # Get rid of an extra list wrapped around final output.
+        if len(args) == 1:
+            self.fx_graph.output(
+                args[0]
+            )  # Get rid of an extra list wrapped around final output.
+        else:
+            # Sub-block of prim::If can have zero output.
+            self.fx_graph.output([])
 
 
 class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
