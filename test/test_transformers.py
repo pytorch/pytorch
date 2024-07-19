@@ -1089,8 +1089,28 @@ class TestTransformers(NNTestCase):
                 else:
                     actual = torch.nn.functional.scaled_dot_product_attention(
                         query, key, value, attn_mask, dropout_p, is_causal)
+                # This test the fully masked out rows case
+                if torch.isnan(expected).any():
+                    row_sums = attn_mask.sum(dim=-1)
+                    masked_out_rows = (row_sums == 0)
+
+                    for _ in range((input_dim - attn_mask_dim) - 1):
+                        masked_out_rows = masked_out_rows.unsqueeze(0)
+
+                    masked_out_rows = masked_out_rows.expand(expected.shape[:-1])
+                    # Slice out the fully masked rows from expected and actual
+                    expected_masked_out = expected[masked_out_rows]
+                    actual_masked_out = actual[masked_out_rows]
+
+                    expected_all_nan = torch.isnan(expected_masked_out).all()
+                    actual_all_zero = (actual_masked_out.abs().sum() == 0)
+
+                    self.assertTrue(expected_all_nan)
+                    self.assertTrue(actual_all_zero)
+                    return
 
                 self.assertEqual(actual, expected)
+
 
         if attn_mask_dim is None:
             q = q.double().clone()

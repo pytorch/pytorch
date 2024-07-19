@@ -746,7 +746,15 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     if (attn_mask.has_value()) {
       if (attn_mask->dtype() == at::kBool) {
         // See [NOTE] SDPA + mask_type 3
-        attn = at::_masked_softmax(attn, *attn_mask, -1, 3);
+        // We still need to add the float version of the attn_mask to the attention matrix
+        // If we had a simple [2,2] score with a mask
+        // [T, F]
+        // [F, T]
+        // If we calculate softmax over [score_1, score_2] instead of [score_1, -inf]
+        // which will result in the post sofmax scores not being [1, 0] for the top row.
+        auto attn_mask_float = convert_boolean_attn_mask(attn_mask, attn.dtype());
+        TORCH_INTERNAL_ASSERT(attn_mask_float.has_value(), "attn_mask_float should be set if attn_mask is set");
+        attn = at::_masked_softmax(attn + attn_mask_float.value() , *attn_mask, -1, 3);
       } else {
         // Existing logic for non-boolean masks
         if (at::areAnyTensorSubclassLike({attn, *attn_mask})) {
