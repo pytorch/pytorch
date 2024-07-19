@@ -575,7 +575,11 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     input_nodes = [mat1, mat2]
     if torch._inductor.config.run_autoheuristic(name):
         choice = mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes)
-        if choice is not None:
+        if (
+            not skip_triton
+            and inductor_config.mixed_mm_choice == "heuristic"
+            and choice is not None
+        ):
             choices.insert(0, choice)
     return autotune_select_algorithm(name, choices, input_nodes, layout)
 

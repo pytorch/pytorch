@@ -550,9 +550,7 @@ class AHTrainDecisionTree(AHTrain):
         return f"{indent}return {self.best_probas_and_indices(class_probas)}"
 
     def gen_predict_fn_def(self):
-        return (
-            "def get_best_choices(self, context: AHContext) -> List[Tuple[float, int]]:"
-        )
+        return "def get_best_choices(self, context: AHContext) -> Optional[List[Tuple[float, int]]]:"
 
     def codegen_boilerplate(
         self, heuristic_name, opt_name, threshold, shared_memory, device_capa, dt
@@ -572,7 +570,7 @@ from torch._inductor.autoheuristic.learnedheuristic_interface import (
 class {heuristic_name}(LearnedHeuristicDecision):
 
     def __init__(self) -> None:
-        self.choices = []
+        self.choices: List[Choice] = []
         self.fill_choices()
 
 {self.gen_precondition(opt_name, shared_memory, device_capa)}
