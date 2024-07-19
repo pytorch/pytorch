@@ -6,7 +6,7 @@ import datetime
 _COMPILE_PG = None
 
 def get_compile_pg() -> Optional[dist.ProcessGroup]:
-    if config.enable_compile_pg and dist.is_available() and dist.is_initialized():
+    if config.enable_compiler_collectives and dist.is_available() and dist.is_initialized():
         from torch._C._distributed_c10d import ProcessGroupNCCL
 
         global _COMPILE_PG

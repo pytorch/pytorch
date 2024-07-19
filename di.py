@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
 import torch._dynamo.config
 
-torch._dynamo.config.enable_compile_pg = True
+torch._dynamo.config.enable_compiler_collectives = True
 
 class SimpleModel(nn.Module):
     def __init__(self, input_size, output_size):

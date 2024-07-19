@@ -399,7 +399,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     """
 
     @skip_if_lt_x_gpu(2)
-    @patch.object(config, "optimize_ddp", False)
+    @config.patch(optimize_ddp=False, enable_compiler_collectives=True)
     def test_ddp_baseline_aot_eager_multiprocess(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             self.assertFalse(config.optimize_ddp)
@@ -418,7 +418,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @patch.object(config, "optimize_ddp", True)
+    @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_ddp_inductor(self):
         self._test_hf_bert_ddp_inductor(static_graph=False)
@@ -426,7 +426,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @patch.object(config, "optimize_ddp", True)
+    @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_ddp_inductor_static_graph(self):
         self._test_hf_bert_ddp_inductor(static_graph=True)
@@ -439,19 +439,19 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
-    @patch.object(config, "optimize_ddp", True)
+    @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
     def test_hf_bert_ddp_aot_eager(self):
         self._test_hf_bert_aot_eager(static_graph=False)
 
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
-    @patch.object(config, "optimize_ddp", True)
+    @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
     def test_hf_bert_ddp_aot_eager_static_graph(self):
         self._test_hf_bert_aot_eager(static_graph=True)
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @patch.object(config, "optimize_ddp", False)
+    @config.patch(optimize_ddp=False, enable_compiler_collectives=True)
     def test_ddp_activation_checkpointing(self):
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
             apply_activation_checkpointing,
@@ -493,6 +493,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             outputs = opt_model(x)
             self.assertTrue(same(correct_outputs, outputs))
 
+    @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     def test_fsdp_aot_eager(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
@@ -516,6 +517,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
+    @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     def test_fsdp_setattr(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
@@ -536,6 +538,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 prof.report()
             )
 
+    @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_fsdp_inductor(self):
@@ -560,6 +563,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
+    @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_fsdp_activation_checkpointing(self):
@@ -586,6 +590,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
     @patch.object(torch._inductor.config.triton, "cudagraphs", False)
     @patch.object(torch._inductor.config, "fallback_random", True)
+    @config.patch(enable_compiler_collectives=True)
     @unittest.skipIf(
         PLATFORM_SUPPORTS_FLASH_ATTENTION or PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Inaccurate results with fused SDPA kernels",
@@ -630,7 +635,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
     @patch.object(torch._inductor.config.triton, "cudagraphs", False)
     @patch.object(torch._inductor.config, "fallback_random", True)
-    @patch.object(torch._dynamo.config, "guard_nn_modules", True)
+    @config.patch(guard_nn_modules=True, enable_compiler_collectives=True)
     def test_hf_bert_fsdp_activation_checkpointing(self):
         from transformers.models.bert.modeling_bert import BertLayer
 

@@ -454,7 +454,7 @@ fake_tensor_cache_crosscheck_enabled = (
 # Note: AOT Autograd will still trace joint graphs.
 compiled_autograd = False
 
-enable_compile_pg = False
+enable_compiler_collectives = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

@@ -968,15 +968,6 @@ class OutputGraph:
         """
         assert reason is not None
 
-        if (ds := tx.distributed_state) is not None and ds.all_states is None:
-            compile_pg = ds.compile_pg
-            log.info("compile_pg %s", ds.local_state)
-            with torch.cuda.device(compile_pg.rank()):
-                all_states = [None] * compile_pg.size()
-                dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
-                ds.all_states = all_states
-            raise exc.CompileCollectiveRestartAnalysis()
-
         from .decorators import disable
 
         self.partial_convert = partial_convert
@@ -1265,6 +1256,15 @@ class OutputGraph:
         call that generated code.
         """
         from .decorators import disable
+
+        if (ds := tx.distributed_state) is not None and ds.all_states is None:
+            compile_pg = ds.compile_pg
+            log.info("compile_pg %s", ds.local_state)
+            with torch.cuda.device(compile_pg.rank()):
+                all_states = [None] * compile_pg.size()
+                dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
+                ds.all_states = all_states
+            raise exc.CompileCollectiveRestartAnalysis()
 
         assert self.should_exit
 
