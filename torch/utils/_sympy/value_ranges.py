@@ -519,10 +519,10 @@ class SymPyValueRangeAnalysis:
             return cls.and_(a, b)
 
         def safe_mul(a, b):
-            # Make unknown() * wrap(0) == wrap(0)
-            if a == 0:
+            # Make unknown() * wrap(0.0) == wrap(0.0)
+            if a == 0.0:
                 return a
-            elif b == 0:
+            elif b == 0.0:
                 return b
             else:
                 return a * b
