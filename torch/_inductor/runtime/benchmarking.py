@@ -297,14 +297,15 @@ class Benchmarker:
         torch.cuda.synchronize()
         event_pairs = self.get_event_pairs(benchmark_iters)
         for block_idx in range(benchmark_blocks):
+            block_start = block_idx * benchmark_iters_per_block
+            if block_idx == (benchmark_blocks - 1):
+                block_end = benchmark_iters
+            else:
+                block_end = (block_idx + 1) * benchmark_iters_per_block
             torch.cuda._sleep(required_gpu_sleep_cycles_per_block)
             for _ in range(memory_warmup_iters_per_block):
                 buffer.zero_()
-            for start_event, end_event in event_pairs[
-                block_idx
-                * benchmark_iters_per_block : (block_idx + 1)
-                * benchmark_iters_per_block
-            ]:
+            for start_event, end_event in event_pairs[block_start:block_end]:
                 buffer.zero_()
                 start_event.record()
                 _callable()
@@ -439,14 +440,15 @@ class Benchmarker:
             len(callables_to_benchmark), benchmark_iters
         )
         for block_idx in range(benchmark_blocks):
+            block_start = block_idx * benchmark_iters_per_block
+            if block_idx == (benchmark_blocks - 1):
+                block_end = benchmark_iters
+            else:
+                block_end = (block_idx + 1) * benchmark_iters_per_block
             torch.cuda._sleep(required_gpu_sleep_cycles_per_block)
             for _ in range(memory_warmup_iters_per_block):
                 buffer.zero_()
-            for event_pairs in interleaved_event_pairs[
-                block_idx
-                * benchmark_iters_per_block : (block_idx + 1)
-                * benchmark_iters_per_block
-            ]:
+            for event_pairs in interleaved_event_pairs[block_start:block_end]:
                 for _callable, (start_event, end_event) in zip(
                     callables_to_benchmark, event_pairs
                 ):
