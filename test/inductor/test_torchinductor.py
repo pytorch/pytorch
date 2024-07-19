@@ -96,14 +96,6 @@ from torch.utils.weak import WeakTensorKeyDictionary
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
-
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
