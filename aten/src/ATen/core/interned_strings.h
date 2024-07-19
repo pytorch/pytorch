@@ -1,9 +1,4 @@
 #pragma once
-#include <vector>
-#include <cstdint>
-#include <string>
-#include <unordered_map>
-#include <algorithm>
 
 #include <c10/macros/Macros.h>
 
@@ -232,6 +227,7 @@ namespace c10 {
   _(aten, is_autocast_enabled)       \
   _(aten, is_autocast_cpu_enabled)   \
   _(aten, is_autocast_xla_enabled)   \
+  _(aten, get_autocast_dtype)        \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \

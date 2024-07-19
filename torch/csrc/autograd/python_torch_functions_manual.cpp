@@ -9,7 +9,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/frontend/tracer.h>
-#include <torch/csrc/utils/cuda_lazy_init.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/out_types.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -61,7 +61,7 @@ inline Tensor dispatch_range(
     const Scalar& end,
     const Scalar& step,
     const TensorOptions& options) {
-  torch::utils::maybe_initialize_cuda(options);
+  torch::utils::maybe_initialize_device(options);
   pybind11::gil_scoped_release no_gil;
   DeviceGuard device_guard(options.device());
   return torch::range(start, end, step, options);
@@ -483,6 +483,27 @@ static PyObject* THPVariable__functionalize_was_storage_changed(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__functionalize_get_storage_size(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_get_storage_size(Tensor t, bool before)"},
+      /*traceable=*/true);
+
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  auto before = r.toBool(1);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(self_);
+  auto size = wrapper->get_storage_size(/*before=*/before);
+  return toPyObject(size);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable__functionalize_has_data_mutation(
     PyObject* self,
     PyObject* args,
@@ -664,6 +685,48 @@ static PyObject* THPVariable__functionalize_sync(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__functionalize_is_symbolic(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_is_symbolic(Tensor tensor)"},
+      /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto tensor = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(
+      at::functionalization::impl::isFunctionalTensor(tensor));
+  auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+  if (impl->is_symbolic()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPVariable__functionalize_apply_view_metas(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_apply_view_metas(Tensor tensor, Tensor base)"},
+      /*traceable=*/true);
+
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto tensor = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(
+      at::functionalization::impl::isFunctionalTensor(tensor));
+  auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+  return wrap(impl->apply_view_metas(r.tensor(1)));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable__functionalize_mark_mutation_hidden_from_autograd(
     PyObject* self,
     PyObject* args,
@@ -698,6 +761,29 @@ THPVariable__functionalize_are_all_mutations_hidden_from_autograd(
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
   if (at::functionalization::impl::are_all_mutations_hidden_from_autograd(
           self_)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPVariable__functionalize_was_inductor_storage_resized(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_was_inductor_storage_resized(Tensor t)"},
+      /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  auto functional_impl =
+      at::functionalization::impl::unsafeGetFunctionalWrapper(self_);
+  if (functional_impl->was_inductor_storage_resized()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -777,6 +863,14 @@ static PyMethodDef torch_functions_manual[] = {
      castPyCFunctionWithKeywords(THPVariable__functionalize_sync),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
+    {"_functionalize_is_symbolic",
+     castPyCFunctionWithKeywords(THPVariable__functionalize_is_symbolic),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_apply_view_metas",
+     castPyCFunctionWithKeywords(THPVariable__functionalize_apply_view_metas),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
     {"_enable_functionalization",
      castPyCFunctionWithKeywords(THPVariable__enable_functionalization),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
@@ -800,6 +894,11 @@ static PyMethodDef torch_functions_manual[] = {
          THPVariable__functionalize_are_all_mutations_hidden_from_autograd),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
+    {"_functionalize_was_inductor_storage_resized",
+     castPyCFunctionWithKeywords(
+         THPVariable__functionalize_was_inductor_storage_resized),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
     {"_functionalize_are_all_mutations_under_no_grad_or_inference_mode",
      castPyCFunctionWithKeywords(
          THPVariable__functionalize_are_all_mutations_under_no_grad_or_inference_mode),
@@ -817,6 +916,10 @@ static PyMethodDef torch_functions_manual[] = {
     {"_functionalize_was_storage_changed",
      castPyCFunctionWithKeywords(
          THPVariable__functionalize_was_storage_changed),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_get_storage_size",
+     castPyCFunctionWithKeywords(THPVariable__functionalize_get_storage_size),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_functionalize_enable_reapply_views",

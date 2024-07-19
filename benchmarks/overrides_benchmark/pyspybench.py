@@ -1,7 +1,9 @@
 import argparse
 
-import torch
 from common import SubTensor, SubWithTorchFunction, WithTorchFunction  # noqa: F401
+
+import torch
+
 
 Tensor = torch.tensor
 

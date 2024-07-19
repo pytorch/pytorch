@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 from typing import Any, Callable, Dict, Optional
 
@@ -59,7 +60,22 @@ class ConstantFolder(torch.fx.Interpreter):
         # is the output
         self.user_to_last_uses = self.node_to_last_non_output_use()
 
+    def _support_dynamic_shape(self):
+        # ConstantFolder not support dynamic shape now
+        return False
+
+    def _deduce_value(self, node):
+        return super().run_node(node)
+
     def is_impure(self, node: torch.fx.node.Node):
+        if (
+            node.target == torch.ops.prims.convert_element_type.default
+            and node.args[0].op == "get_attr"  # type: ignore[union-attr]
+            and node.args[0].meta["val"].dtype == torch.int8  # type: ignore[union-attr]
+            and node.args[1] == torch.bfloat16
+        ):
+            # For int8_weight -> dq -> bf16_weight
+            return True
         if node.target in [
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
@@ -87,7 +103,8 @@ class ConstantFolder(torch.fx.Interpreter):
                 seen_uses.add(inp)
                 last_non_output_use[node].append(inp)
 
-            pytree.tree_map_only(torch.fx.Node, add_use, (node.args, node.kwargs))
+            # In-place is fine since we don't mutate
+            pytree.tree_map_only_(torch.fx.Node, add_use, (node.args, node.kwargs))
 
             # if this node is only used in output, we want to gc it right away
             if len(node.users) == 1 and output_node in node.users:
@@ -102,13 +119,20 @@ class ConstantFolder(torch.fx.Interpreter):
             def set_env(arg):
                 self.env[arg] = self.unknown_value
 
-            pytree.tree_map_only(torch.fx.Node, set_env, node.args)
+            # In-place is fine since we don't mutate
+            pytree.tree_map_only_(torch.fx.Node, set_env, node.args)
             return super().run_node(node)
 
         args, kwargs = self.fetch_args_kwargs_from_env(node)
         flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
 
-        if self.unknown_value in flattened_inputs:
+        # We need to do this weird thing because in cases where flattened_inputs
+        # contains a ScriptObject, equality checking results in a type error if
+        # the types are different.
+        if any(
+            type(self.unknown_value) == type(input_) and self.unknown_value == input_
+            for input_ in flattened_inputs
+        ):
             return self.unknown_value
 
         # TODO - fix errors with this
@@ -142,9 +166,14 @@ class ConstantFolder(torch.fx.Interpreter):
         ):
             return self.unknown_value
 
-        out = super().run_node(node)
+        out = self._deduce_value(node)
+        if out == self.unknown_value:
+            return self.unknown_value
 
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
+            if out.device.type == "meta":
+                return out
+
             if not self.insertable_tensor_check(out):
                 return out
 
@@ -174,11 +203,13 @@ class ConstantFolder(torch.fx.Interpreter):
         self.node_replacements[node] = tensor
 
     def run(self):
-        env = {}
-        for n in self.module.graph.nodes:
-            if n.op == "placeholder":
-                env[n] = self.unknown_value
+        env: Dict[torch.fx.Node, Any] = {}
+        self.insert_placerholder_values(env)
         return super().run(initial_env=env)
+
+    def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
+        for n in self.module.graph.find_nodes(op="placeholder"):
+            env[n] = self.unknown_value
 
 
 @torch.utils._python_dispatch._disable_current_modes()
@@ -192,8 +223,8 @@ def constant_fold(gm, constraint_fn: Optional[Callable[[torch.fx.Node], bool]] =
         replace_node_with_constant(gm, node, constant)
 
     erased_params = []
-    for node in gm.graph.nodes:
-        if node.op == "get_attr" and len(node.users) == 0:
+    for node in gm.graph.find_nodes(op="get_attr"):
+        if len(node.users) == 0:
             if hasattr(gm, node.target):
                 delattr(gm, node.target)
             erased_params.append(node)
@@ -231,15 +262,14 @@ def run_and_get_constant_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule
     constant_graph_tag(gm)
     # We rewrite the tags, if it's a constant being directly consumed, without
     # any folding opportunity, we keep it in main gm.
-    for node in gm.graph.nodes:
-        if node.op == "get_attr":
-            used_to_fold = False
-            for u in node.users:
-                if u.meta[META_TAG] == CONST_MODULE_TAG:
-                    used_to_fold = True
-                    break
-            if not used_to_fold:
-                node.meta[META_TAG] = MODULE_TAG
+    for node in gm.graph.find_nodes(op="get_attr"):
+        used_to_fold = False
+        for u in node.users:
+            if u.meta[META_TAG] == CONST_MODULE_TAG:
+                used_to_fold = True
+                break
+        if not used_to_fold:
+            node.meta[META_TAG] = MODULE_TAG
 
     new_graph = torch.fx.Graph()
 

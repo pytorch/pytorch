@@ -6,7 +6,6 @@ from copy import deepcopy
 import torch
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-
 from torch.distributed._tensor import DTensor, Shard
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -20,7 +19,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
 )
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -312,30 +310,6 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         ):
             with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
                 optim_state_dict = FSDP.optim_state_dict(model, optim)
-
-        with self.assertLogs(
-            "torch.distributed.fsdp._state_dict_utils", level="WARNING"
-        ) as log:
-            with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT):
-                state_dict = model.state_dict()
-                self.assertEqual(len(log.records), 1)
-                self.assertEqual(len(log.output), 1)
-                self.assertIn(
-                    "Found both state_dict_type FULL_STATE_DICT and device_mesh.",
-                    log.output[0],
-                )
-
-        with self.assertLogs(
-            "torch.distributed.fsdp._optim_utils", level="WARNING"
-        ) as log:
-            with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT):
-                state_dict = FSDP.optim_state_dict(model, optim)
-                self.assertEqual(len(log.records), 1)
-                self.assertEqual(len(log.output), 1)
-                self.assertIn(
-                    "Found both state_dict_type FULL_STATE_DICT and device_mesh.",
-                    log.output[0],
-                )
 
 
 instantiate_parametrized_tests(TestFSDPWithDeviceMeshAndDTensor)

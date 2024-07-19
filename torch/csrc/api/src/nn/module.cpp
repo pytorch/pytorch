@@ -66,7 +66,8 @@ const std::string& Module::name() const noexcept {
   return *name_;
 }
 
-std::shared_ptr<Module> Module::clone(const optional<Device>& device) const {
+std::shared_ptr<Module> Module::clone(
+    const std::optional<Device>& device) const {
   AT_ERROR(
       "clone() has not been implemented for ",
       name(),
@@ -364,7 +365,7 @@ void Module::pretty_print_recursive(
   }
 }
 
-void Module::clone_(Module& other, const optional<Device>& device) {}
+void Module::clone_(Module& other, const std::optional<Device>& device) {}
 
 void Module::apply_to_submodules(
     const NamedModulePointerApplyFunction& function,
@@ -380,7 +381,7 @@ std::shared_ptr<Module> Module::shared_from_this_checked() const {
   std::shared_ptr<const Module> ptr;
   try {
     ptr = shared_from_this();
-  } catch (const std::bad_weak_ptr& e) {
+  } catch (const std::bad_weak_ptr&) {
     AT_ERROR(
         "It looks like you attempted to retrieve your top-level module "
         "as a shared_ptr, but it is not stored in a shared_ptr. "

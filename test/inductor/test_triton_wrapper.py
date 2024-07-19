@@ -4,8 +4,9 @@ import subprocess
 import sys
 
 import torch
-from torch._dynamo.test_case import run_tests, TestCase
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._inductor.codecache import PyCodeCache
+from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 

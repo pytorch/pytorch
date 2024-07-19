@@ -109,20 +109,16 @@ const auto C10_UNUSED torchBindInitializer = initBindings();
 namespace profiling {
 
 InstructionSpan::InstructionSpan(Node& node) {
-  if (getProfilesRegistry().empty()) {
-    return;
-  }
-
   datapoint_ = std::make_unique<Datapoint>(node.sourceRange());
 }
 
 InstructionSpan::~InstructionSpan() {
-  if (!datapoint_) {
-    return;
-  }
-
   datapoint_->end = std::chrono::steady_clock::now();
   getProfilesRegistry().send(std::move(datapoint_));
+}
+
+bool isProfilingOngoing() {
+  return !getProfilesRegistry().empty();
 }
 
 } // namespace profiling

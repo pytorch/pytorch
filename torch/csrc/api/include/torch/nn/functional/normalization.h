@@ -16,8 +16,8 @@ inline Tensor normalize(
     double p,
     int64_t dim,
     double eps,
-    c10::optional<Tensor> out) {
-  if (out == c10::nullopt) {
+    std::optional<Tensor> out) {
+  if (out == std::nullopt) {
     auto denom = input.norm(p, dim, true).clamp_min(eps).expand_as(input);
     return input / denom;
   } else {
@@ -29,7 +29,7 @@ inline Tensor normalize(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.normalize
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.normalize
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::NormalizeFuncOptions`
@@ -63,7 +63,7 @@ inline Tensor layer_norm(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.layer_norm
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.layer_norm
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::LayerNormFuncOptions`
@@ -115,7 +115,7 @@ inline Tensor local_response_norm(
               /*padding=*/0,
               /*ceil_mode=*/false,
               /*count_include_pad=*/true,
-              /*divisor_override=*/c10::nullopt)
+              /*divisor_override=*/std::nullopt)
               .squeeze(1);
   } else {
     auto sizes = input.sizes();
@@ -132,7 +132,7 @@ inline Tensor local_response_norm(
               /*padding=*/0,
               /*ceil_mode=*/false,
               /*count_include_pad=*/true,
-              /*divisor_override=*/c10::nullopt)
+              /*divisor_override=*/std::nullopt)
               .squeeze(1);
     div = div.view(sizes);
   }
@@ -143,7 +143,7 @@ inline Tensor local_response_norm(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.local_response_norm
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.local_response_norm
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -184,7 +184,7 @@ inline Tensor group_norm(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.group_norm
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.group_norm
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::GroupNormFuncOptions`

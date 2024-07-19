@@ -56,6 +56,11 @@ class TestSubclass(TestCase):
         self.assertNotIsInstance(x, nn.Parameter)
         self.assertEqual(x.requires_grad, tensor_requires_grad)
 
+        class UninitializedParam(nn.Parameter):
+            pass
+
+        self.assertNotIsInstance(param, UninitializedParam)
+
     @skipIfTorchDynamo()
     @parametrize_tensor_cls
     @parametrize("as_param", [False, True])
@@ -234,8 +239,6 @@ class TestSubclass(TestCase):
 
             def __init__(self, t) -> None:
                 self.tensor: torch.Tensor = t
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):

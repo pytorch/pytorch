@@ -55,6 +55,10 @@ class TORCH_API MapAllocator {
     return base_ptr_;
   }
 
+  int flags() const {
+    return flags_;
+  }
+
   static MapAllocator* fromDataPtr(const at::DataPtr&);
   static at::DataPtr makeDataPtr(
       c10::string_view filename,
@@ -128,7 +132,7 @@ class TORCH_API RefcountedMapAllocator : private RefcountedMapAllocatorArgCheck,
   void close() override;
 
   ~RefcountedMapAllocator() override {
-    close();
+    RefcountedMapAllocator::close();
   }
 
  protected:

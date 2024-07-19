@@ -1,7 +1,20 @@
+import functools
 import os
-import xml.etree.ElementTree as ET
+import warnings
 
-from download_reports import download_reports
+
+try:
+    import lxml.etree
+
+    p = lxml.etree.XMLParser(huge_tree=True)
+    parse = functools.partial(lxml.etree.parse, parser=p)
+except ImportError:
+    import xml.etree.ElementTree as ET
+
+    parse = ET.parse
+    warnings.warn(
+        "lxml was not found. `pip install lxml` to make this script run much faster"
+    )
 
 
 def open_test_results(directory):
@@ -9,7 +22,7 @@ def open_test_results(directory):
     for root, _, files in os.walk(directory):
         for file in files:
             if file.endswith(".xml"):
-                tree = ET.parse(f"{root}/{file}")
+                tree = parse(f"{root}/{file}")
                 xmls.append(tree)
     return xmls
 
@@ -31,10 +44,7 @@ def find(testcase, condition):
 
 def skipped_test(testcase):
     def condition(children):
-        tags = [child.tag for child in children]
-        if "skipped" in tags:
-            return True
-        return False
+        return "skipped" in {child.tag for child in children}
 
     return find(testcase, condition)
 
@@ -43,12 +53,8 @@ def passed_test(testcase):
     def condition(children):
         if len(children) == 0:
             return True
-        tags = [child.tag for child in children]
-        if "skipped" in tags:
-            return False
-        if "failed" in tags:
-            return False
-        return True
+        tags = {child.tag for child in children}
+        return "skipped" not in tags and "failed" not in tags
 
     return find(testcase, condition)
 

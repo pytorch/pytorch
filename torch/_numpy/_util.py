@@ -90,7 +90,7 @@ def normalize_axis_tuple(axis, ndim, argname=None, allow_duplicate=False):
             pass
     # Going via an iterator directly is slower than via list comprehension.
     axis = tuple([normalize_axis_index(ax, ndim, argname) for ax in axis])
-    if not allow_duplicate and len(set(axis)) != len(axis):
+    if not allow_duplicate and len(set(map(int, axis))) != len(axis):
         if argname:
             raise ValueError(f"repeated axis in `{argname}` argument")
         else:
@@ -178,7 +178,7 @@ def _try_convert_to_tensor(obj):
         tensor = torch.as_tensor(obj)
     except Exception as e:
         mesg = f"failed to convert {obj} to ndarray. \nInternal error is: {str(e)}."
-        raise NotImplementedError(mesg)  # noqa: TRY200
+        raise NotImplementedError(mesg)  # noqa: B904
     return tensor
 
 

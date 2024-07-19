@@ -3,23 +3,20 @@
 #define C10_UTIL_CPP17_H_
 
 #include <c10/macros/Macros.h>
-#include <cstdlib>
 #include <functional>
 #include <memory>
-#include <sstream>
-#include <string>
 #include <type_traits>
 #include <utility>
 
 #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
-    __GNUC__ < 5
+    __GNUC__ < 9
 #error \
-    "You're trying to build PyTorch with a too old version of GCC. We need GCC 5 or later."
+    "You're trying to build PyTorch with a too old version of GCC. We need GCC 9 or later."
 #endif
 
-#if defined(__clang__) && __clang_major__ < 4
+#if defined(__clang__) && __clang_major__ < 9
 #error \
-    "You're trying to build PyTorch with a too old version of Clang. We need Clang 4 or later."
+    "You're trying to build PyTorch with a too old version of Clang. We need Clang 9 or later."
 #endif
 
 #if (defined(_MSC_VER) && (!defined(_MSVC_LANG) || _MSVC_LANG < 201703L)) || \
@@ -37,27 +34,11 @@
 
 namespace c10 {
 
-// in c++17 std::result_of has been superseded by std::invoke_result.  Since
-// c++20, std::result_of is removed.
-template <typename F, typename... args>
-#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
-using invoke_result = typename std::invoke_result<F, args...>;
-#else
-using invoke_result = typename std::result_of<F && (args && ...)>;
-#endif
-
-template <typename F, typename... args>
-using invoke_result_t = typename invoke_result<F, args...>::type;
-
 // std::is_pod is deprecated in C++20, std::is_standard_layout and
 // std::is_trivial are introduced in C++11, std::conjunction has been introduced
 // in C++17.
 template <typename T>
-#if defined(__cpp_lib_logical_traits) && __cpp_lib_logical_traits >= 201510L
 using is_pod = std::conjunction<std::is_standard_layout<T>, std::is_trivial<T>>;
-#else
-using is_pod = std::is_pod<T>;
-#endif
 
 template <typename T>
 constexpr bool is_pod_v = is_pod<T>::value;
@@ -73,29 +54,10 @@ make_unique_base(Args&&... args) {
   return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
 }
 
-template <class... B>
-using conjunction = std::conjunction<B...>;
-template <class... B>
-using disjunction = std::disjunction<B...>;
-template <bool B>
-using bool_constant = std::bool_constant<B>;
-template <class B>
-using negation = std::negation<B>;
-
-template <class T>
-using void_t = std::void_t<T>;
-
-#if defined(USE_ROCM)
-// rocm doesn't like the C10_HOST_DEVICE
-#define CUDA_HOST_DEVICE
-#else
-#define CUDA_HOST_DEVICE C10_HOST_DEVICE
-#endif
-
-#if defined(__cpp_lib_apply) && !defined(__CUDA_ARCH__)
+#if defined(__cpp_lib_apply) && !defined(__CUDA_ARCH__) && !defined(__HIP__)
 
 template <class F, class Tuple>
-CUDA_HOST_DEVICE inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
+C10_HOST_DEVICE inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
   return std::apply(std::forward<F>(f), std::forward<Tuple>(t));
 }
 
@@ -116,7 +78,7 @@ C10_HOST_DEVICE constexpr auto apply_impl(
     std::index_sequence<INDEX...>)
 #else
 // GCC/Clang need the decltype() return type
-CUDA_HOST_DEVICE constexpr decltype(auto) apply_impl(
+C10_HOST_DEVICE constexpr decltype(auto) apply_impl(
     F&& f,
     Tuple&& t,
     std::index_sequence<INDEX...>)
@@ -127,7 +89,7 @@ CUDA_HOST_DEVICE constexpr decltype(auto) apply_impl(
 } // namespace detail
 
 template <class F, class Tuple>
-CUDA_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
+C10_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
   return detail::apply_impl(
       std::forward<F>(f),
       std::forward<Tuple>(t),
@@ -137,12 +99,10 @@ CUDA_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
 
 #endif
 
-#undef CUDA_HOST_DEVICE
-
 template <typename Functor, typename... Args>
 std::enable_if_t<
     std::is_member_pointer_v<std::decay_t<Functor>>,
-    typename c10::invoke_result_t<Functor, Args...>>
+    typename std::invoke_result_t<Functor, Args...>>
 invoke(Functor&& f, Args&&... args) {
   return std::mem_fn(std::forward<Functor>(f))(std::forward<Args>(args)...);
 }
@@ -150,7 +110,7 @@ invoke(Functor&& f, Args&&... args) {
 template <typename Functor, typename... Args>
 std::enable_if_t<
     !std::is_member_pointer_v<std::decay_t<Functor>>,
-    typename c10::invoke_result_t<Functor, Args...>>
+    typename std::invoke_result_t<Functor, Args...>>
 invoke(Functor&& f, Args&&... args) {
   return std::forward<Functor>(f)(std::forward<Args>(args)...);
 }

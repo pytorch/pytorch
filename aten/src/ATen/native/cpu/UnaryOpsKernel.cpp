@@ -44,8 +44,7 @@ static void sigmoid_kernel(TensorIteratorBase& iter) {
             return static_cast<float>(1) / (static_cast<float>(1) + std::exp((-a0)));
           },
           [=](Vectorized<scalar_t> a) {
-            Vectorized<float> a0, a1;
-            std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+            auto [a0, a1] = convert_to_float<scalar_t>(a);
             a0 = (Vectorized<float>(static_cast<float>(1)) + a0.neg().exp()).reciprocal();
             a1 = (Vectorized<float>(static_cast<float>(1)) + a1.neg().exp()).reciprocal();
             return convert_from_float<scalar_t>(a0, a1);
@@ -144,6 +143,7 @@ static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
         const scalar_t eps = eps_scalar.to<scalar_t>();
         if (at::hasMKL() && iter.is_contiguous()) {
           LogitMKLKernel<scalar_t>(eps, &iter);
+          iter.cast_outputs();
         } else if (eps < scalar_t(0)) {
           const Vectorized<scalar_t> kOneVec(scalar_t(1));
           cpu_kernel_vec(
@@ -355,8 +355,9 @@ static void sinc_kernel(TensorIteratorBase& iter) {
           if (a == scalar_t(0)) {
             return scalar_t(1);
           } else {
-            scalar_t product = c10::pi<scalar_t> * a;
-            return std::sin(product) / product;
+            using opmath_t = at::opmath_type<scalar_t>;
+            opmath_t product = c10::pi<opmath_t> * opmath_t{a};
+            return static_cast<scalar_t>(std::sin(product) / product);
           }
         });
   });
@@ -495,9 +496,9 @@ inline Vectorized<c10::complex<scalar_t>> _nan_to_num_replace(
 
 static void nan_to_num_kernel(
     TensorIteratorBase& iter,
-    c10::optional<double> nan,
-    c10::optional<double> pos_inf,
-    c10::optional<double> neg_inf) {
+    std::optional<double> nan,
+    std::optional<double> pos_inf,
+    std::optional<double> neg_inf) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "nan_to_num", [&]() {
     using value_t = c10::scalar_value_type<scalar_t>::type;
     value_t nan_replacement = static_cast<value_t>(nan.value_or(0.));

@@ -131,24 +131,24 @@ void ConcretePythonOp::cloneFrom(Node* other_) {
 // recover the autograd.Function instance, if this PythonOp's function
 // was originally SomeFunction.apply
 // used in ONNX for discovering symbolics
-c10::optional<THPObjectPtr> ConcretePythonOp::autogradFunction() const {
+std::optional<THPObjectPtr> ConcretePythonOp::autogradFunction() const {
   pybind11::gil_scoped_acquire gil;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   py::handle obj = const_cast<PyObject*>(pyobj.get());
 
   auto r = py::getattr(obj, "__self__", py::none());
   if (r.is_none())
-    return c10::nullopt;
+    return std::nullopt;
 
   auto apply = py::getattr(r, "apply", py::none());
   if (apply.is_none())
-    return c10::nullopt;
+    return std::nullopt;
 
   auto c = PyObject_RichCompareBool(apply.ptr(), obj.ptr(), Py_NE);
   if (PyErr_Occurred())
     throw py::error_already_set();
   if (c)
-    return c10::nullopt;
+    return std::nullopt;
 
   return THPObjectPtr(r.release().ptr());
 }
@@ -259,31 +259,26 @@ void initPythonIRBindings(PyObject* module_) {
              const std::string& onnx_file_path,
              const NodeAttrNameMap& node_attr_to_name) {
             std::string graph;
-            std::shared_ptr<::ONNX_NAMESPACE::ModelProto> model_proto;
-            RawDataExportMap export_map;
-            SymbolDimMap symbol_map;
-            bool val_use_external_data_format = false;
-            NodeNameMap onnx_node_names;
-            std::tie(
-                model_proto,
-                export_map,
-                symbol_map,
-                val_use_external_data_format,
-                onnx_node_names) =
-                export_onnx(
-                    g,
-                    initializers,
-                    onnx_opset_version,
-                    dynamic_axes,
-                    defer_weight_export,
-                    operator_export_type,
-                    strip_doc_string,
-                    keep_initializers_as_inputs,
-                    custom_opsets,
-                    add_node_names,
-                    val_use_external_data_format,
-                    onnx_file_path,
-                    node_attr_to_name);
+            auto
+                [model_proto,
+                 export_map,
+                 symbol_map,
+                 val_use_external_data_format,
+                 onnx_node_names] =
+                    export_onnx(
+                        g,
+                        initializers,
+                        onnx_opset_version,
+                        dynamic_axes,
+                        defer_weight_export,
+                        operator_export_type,
+                        strip_doc_string,
+                        keep_initializers_as_inputs,
+                        custom_opsets,
+                        add_node_names,
+                        false,
+                        onnx_file_path,
+                        node_attr_to_name);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -870,7 +865,7 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def(
           "with_sizes",
-          [](Type& t, c10::optional<std::vector<c10::optional<int64_t>>> sizes)
+          [](Type& t, std::optional<std::vector<std::optional<int64_t>>> sizes)
               -> py::object {
             auto ptt = t.expect<TensorType>();
             if (!ptt) {

@@ -228,7 +228,7 @@ bool within_bounds_3d(int d, int h, int w, int D, int H, int W) {
 template<typename scalar_t>
 static __forceinline__ __device__
 scalar_t get_value_bounded(
-    scalar_t *data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
+    const scalar_t *data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
     GridSamplerPadding padding_mode,
     bool align_corners) {
 

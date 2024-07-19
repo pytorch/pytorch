@@ -1,10 +1,10 @@
+# mypy: allow-untyped-defs
 """
 The following example contains a simple MLP model that uses
 different DTensor layouts, and use the checkpointing API to
 checkpoint save/load the model.
 """
 import os
-
 from typing import cast, List
 
 import torch
@@ -12,7 +12,6 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.distributed._tensor import (
     DeviceMesh,
     distribute_module,
@@ -76,10 +75,10 @@ def gen_partial_replicate_2d(model: nn.Module, mesh: DeviceMesh) -> nn.Module:
                 module.register_parameter(name, dist_param)
 
     # mark input replicating on mesh
-    def input_fn(inputs, device_mesh):
+    def input_fn(mod, inputs, device_mesh):
         return DTensor.from_local(inputs[0], device_mesh, [Replicate(), Replicate()])
 
-    def output_fn(outputs, device_mesh):
+    def output_fn(mod, outputs, device_mesh):
         assert isinstance(outputs, DTensor)
         return outputs.to_local()
 
@@ -117,10 +116,10 @@ def gen_model_param_in_submesh(model: nn.Module, sub_mesh: DeviceMesh) -> nn.Mod
                 module.register_parameter(name, dist_param)
 
     # mark input replicating on mesh
-    def input_fn(inputs, device_mesh):
+    def input_fn(mod, inputs, device_mesh):
         return DTensor.from_local(inputs[0], device_mesh, [Replicate()])
 
-    def output_fn(outputs, device_mesh):
+    def output_fn(mod, outputs, device_mesh):
         assert isinstance(outputs, DTensor)
         return outputs.to_local()
 

@@ -11,11 +11,14 @@ The name uses underscore `_test_bazel.py` to avoid globbing into other non-bazel
 
 import torch
 
+
 def test_sum() -> None:
-    assert torch.eq(torch.tensor([[1, 2, 3]]) + torch.tensor([[4, 5, 6]]), torch.tensor([[5, 7, 9]])).all()
+    assert torch.eq(
+        torch.tensor([[1, 2, 3]]) + torch.tensor([[4, 5, 6]]), torch.tensor([[5, 7, 9]])
+    ).all()
+
 
 def test_simple_compile_eager() -> None:
-
     def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         a = torch.sin(x)
         b = torch.cos(y)

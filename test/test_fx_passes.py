@@ -234,6 +234,11 @@ class TestPartitionFunctions:
         a2 = e + f
         return a0, a1, a2
 
+    @staticmethod
+    def forward18(a, b, c):
+        a0, a1 = torch.ops.aten.var_mean(a)
+        return a0
+
 # A mock OperatorSupport class, where only operator.add is supported
 class MockOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
@@ -277,6 +282,8 @@ class TestFXGraphPasses(JitTestCase):
         (TestPartitionFunctions.forward15, [['add_1', 'add', 'permute_1', 'view', 'permute_2', 'permute_3', 'permute']], False),
         (TestPartitionFunctions.forward16, [["permute_1", "add_1", "add"]], True),
         (TestPartitionFunctions.forward16, [['add_1', 'add', 'permute_1', 'view', 'permute_2', 'permute_3', 'permute']], False),
+        # should be empty partition, not a partiton with empty nodes
+        (TestPartitionFunctions.forward18, [], False),
     ])
     def test_partitioner(self, fn, expected_partition, bookend_non_compute_pass):
         traced = symbolic_trace(fn)
@@ -743,7 +750,7 @@ class MultiOutputWithWithInvalidMatches:
 class QuantizationFp8Pattern:
     @classmethod
     def setup(cls):
-        cls.quantization = torch.library.Library("fp8_quantization", "DEF")
+        cls.quantization = torch.library.Library("fp8_quantization", "DEF")  # noqa: TOR901
         cls.quantization.define("quantize_per_tensor_affine_fp8(Tensor self, int dtype, float scale) -> Tensor")
         cls.quantization.define("dequantize_per_tensor_affine_fp8(Tensor self, int dtype, float scale) -> Tensor")
 

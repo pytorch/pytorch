@@ -3,8 +3,8 @@ torch.utils.checkpoint
 
 .. note::
     Checkpointing is implemented by rerunning a forward-pass segment for
-    each checkpointed segment during backward.  This can cause persistent
-    states like the RNG state to be advanced than they would without
+    each checkpointed segment during backward propagation.  This can cause persistent
+    states like the RNG state to be more advanced than they would without
     checkpointing.  By default, checkpointing includes logic to juggle
     the RNG state such that checkpointed passes making use of RNG
     (through dropout for example) have deterministic output as
@@ -35,3 +35,6 @@ torch.utils.checkpoint
 .. autofunction:: checkpoint
 .. autofunction:: checkpoint_sequential
 .. autofunction:: set_checkpoint_debug_enabled
+.. autoclass:: CheckpointPolicy
+.. autoclass:: SelectiveCheckpointContext
+.. autofunction:: create_selective_checkpoint_contexts

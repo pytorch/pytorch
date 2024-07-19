@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # NOTE: This file is referenced by name at
 #       /opt/pytorch/torch/_dynamo/eval_frame.py::DONT_WRAP_FILES.
 #       introduced by https://github.com/pytorch/pytorch/pull/98894.
@@ -116,9 +117,10 @@ class TorchExport(exporter.FXGraphExtractor):
             diagnostic_context, fx_module, options.onnxfunction_dispatcher
         ).analyze(infra.levels.ERROR)
 
-        # TODO: Disabled this pass until "Segmentation fault (core dumped)" is fixed
         # This operation should be invoked as the last pre export pass.
         # See [NOTE: Modularize pass ordering]
-        # fx_module = passes.Modularize(diagnostic_context, fx_module).run()
+        fx_module = passes.Modularize(
+            diagnostic_context, fx_module, is_exported_program=True
+        ).run()
 
         return fx_module
