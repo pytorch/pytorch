@@ -34,6 +34,10 @@ static CPUCapability compute_cpu_capability() {
     if (strcmp(envar, "zvector") == 0) {
       return CPUCapability::ZVECTOR;
     }
+#elif defined(HAVE_RVV_CPU_DEFINITION)
+    if (strcmp(envar, "rvv") == 0) {
+      return CPUCapability::RVV;
+    }
 #else
 #ifdef HAVE_AVX512_CPU_DEFINITION
     if (strcmp(envar, "avx512") == 0) {
@@ -67,6 +71,11 @@ static CPUCapability compute_cpu_capability() {
 #ifdef HAVE_AVX2_CPU_DEFINITION
     if (cpuinfo_has_x86_avx2() && cpuinfo_has_x86_fma3()) {
       return CPUCapability::AVX2;
+    }
+#endif
+#ifdef HAVE_RVV_CPU_DEFINITION
+    if (cpuinfo_has_riscv_v()) {
+      return CPUCapability::RVV;
     }
 #endif
   }
@@ -106,6 +115,9 @@ DispatchResult DispatchStubImpl::try_get_call_ptr(
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
   , void *ZVECTOR
 #endif
+#ifdef HAVE_RVV_CPU_DEFINITION
+  , void *RVV
+#endif
 ) {
   constexpr auto supported_devices = c10::array_of<c10::DeviceType>(
         c10::DeviceType::CPU,
@@ -137,6 +149,9 @@ DispatchResult DispatchStubImpl::try_get_call_ptr(
 #endif
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
           , ZVECTOR
+#endif
+#ifdef HAVE_RVV_CPU_DEFINITION
+          , RVV
 #endif
         );
         if (!std::holds_alternative<ErrorType>(result)) {
@@ -182,6 +197,9 @@ void* DispatchStubImpl::get_call_ptr(
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
   , void *ZVECTOR
 #endif
+#ifdef HAVE_RVV_CPU_DEFINITION
+  , void *RVV
+#endif
 ) {
 
   auto result = try_get_call_ptr(
@@ -202,6 +220,10 @@ void* DispatchStubImpl::get_call_ptr(
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
       ,
       ZVECTOR
+#endif
+#ifdef HAVE_RVV_CPU_DEFINITION
+      ,
+      RVV
 #endif
   );
   if (std::holds_alternative<ErrorType>(result)) {
@@ -233,6 +255,9 @@ DispatchResult DispatchStubImpl::try_choose_cpu_impl(
 #endif
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
     , void *ZVECTOR
+#endif
+#ifdef HAVE_RVV_CPU_DEFINITION
+    , void *RVV
 #endif
   ){
 
@@ -266,6 +291,11 @@ DispatchResult DispatchStubImpl::try_choose_cpu_impl(
     return ZVECTOR != nullptr ? DispatchResult(ZVECTOR) : ErrorType::MissingDeviceKernel;
   }
 #endif
+#ifdef HAVE_RVV_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::RVV)) {
+    return RVV != nullptr ? DispatchResult(RVV) : ErrorType::MissingDeviceKernel;
+  }
+#endif
   return DEFAULT != nullptr ? DispatchResult(DEFAULT) : ErrorType::MissingDeviceKernel;
 }
 
@@ -282,6 +312,9 @@ void* DispatchStubImpl::choose_cpu_impl(
 #endif
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
   , void *ZVECTOR
+#endif
+#ifdef HAVE_RVV_CPU_DEFINITION
+  , void *RVV
 #endif
 ) {
   auto capability = static_cast<int>(get_cpu_capability());
@@ -316,6 +349,12 @@ void* DispatchStubImpl::choose_cpu_impl(
   if (capability >= static_cast<int>(CPUCapability::ZVECTOR)) {
     TORCH_INTERNAL_ASSERT(ZVECTOR, "DispatchStub: missing ZVECTOR kernel");
     return ZVECTOR;
+  }
+#endif
+#ifdef HAVE_RVV_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::RVV)) {
+    TORCH_INTERNAL_ASSERT(RVV, "DispatchStub: missing RVV kernel");
+    return RVV;
   }
 #endif
   TORCH_INTERNAL_ASSERT(DEFAULT, "DispatchStub: missing default kernel");
