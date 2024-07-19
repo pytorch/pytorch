@@ -398,23 +398,37 @@ class RedistributeTest(DTensorTestBase):
             ([Shard(0), Shard(1)], [Shard(1), Shard(0)]),
             ([Shard(0), Shard(0)], [Shard(1), Shard(1)]),
         ]
+        comm_counts_2d = [
+            1,  # 1: S1 -> S0
+            2,  # 1: S1 -> R, 0: S0 -> S1, 1: R -> S0
+            2,  # 1: S0 -> R, 0: S0 -> S1, 1: R -> S1
+        ]
 
         for input_data in data_to_test_2d:
             if input_data.ndim > 2:
                 sharding_spec_combs = sharding_src_dst_pairs_2d + [
-                    ([Shard(0), Shard(2)], [Shard(1), Shard(0)])
+                    ([Shard(0), Shard(2)], [Shard(1), Shard(0)]),
+                    ([Shard(1), Shard(1)], [Shard(1), Shard(2)]),
+                ]
+                comm_counts_2d = comm_counts_2d + [
+                    2,  # 1. S2 -> R, 0: S0 -> S1, 1: R -> S0
+                    1,  # 1: S1 -> S2
                 ]
             else:
                 sharding_spec_combs = sharding_src_dst_pairs_2d
-            for src, dst in sharding_spec_combs:
+
+            for idx, (src, dst) in enumerate(sharding_spec_combs):
                 expected_dt = distribute_tensor(input_data.clone(), mesh_2d, dst)
                 sharded_dt = distribute_tensor(input_data, mesh_2d, src)
-                out_dt = sharded_dt.redistribute(mesh_2d, dst)
+                with comm_mode:
+                    out_dt = sharded_dt.redistribute(mesh_2d, dst)
 
                 self.assertEqual(out_dt.placements, expected_dt.placements)
+                self.assertEqual(comm_mode.get_total_counts(), comm_counts_2d[idx])
+
                 local_out_dt = out_dt.to_local()
                 local_expected_dt = expected_dt.to_local()
-                self.assertEqual(out_dt.to_local(), expected_dt.to_local())
+                self.assertEqual(local_out_dt, local_expected_dt)
 
 
 class MultiDimRedistributeTest(DTensorTestBase):

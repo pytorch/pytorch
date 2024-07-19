@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import logging
 from functools import lru_cache
-from typing import cast, Dict, List, NamedTuple, Tuple
+from typing import cast, List, NamedTuple, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -16,33 +17,14 @@ from torch.distributed._tensor.placement_types import (
     TensorMeta,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class _TransformInfo(NamedTuple):
     mesh_dim: int
     src_dst_placements: Tuple[Placement, Placement]
     # logical_shape on this mesh dimension
     logical_shape: List[int]
-
-
-def _replicate_then_shard(val: _TransformInfo) -> int:
-    """
-    This is a helper function to allow reordering _TransformInfo list. The high level
-    idea is that we want to reorder the sharding redistributions so that the DTensor
-    redistribution is consistent with its full tensor. This is built on top of two simple
-    assumptions:
-    1. Replication happens from inner to outer dimension. i.e. Shard -> Replicate
-    2. Sharding happens from outer to inner dimension, i.e. Replicate -> Shard
-
-    So we always put the replication first and put sharding later.
-    """
-    mesh_dim = val.mesh_dim
-    src, dst = val.src_dst_placements
-    if (dst.is_replicate() or dst.is_partial()) and src.is_shard():
-        return -mesh_dim
-    elif (src.is_replicate() or src.is_partial()) and dst.is_shard():
-        return mesh_dim
-    else:
-        return 0
 
 
 @lru_cache(maxsize=None)
@@ -55,18 +37,14 @@ def _gen_transform_infos(
 
     To transform from source to target placement it might have multiple steps, i.e. it
     might decompose Si -> Sj into Si -> R -> Sj.
-    This would detects if there're mis-aligned shardings between src/dst placements.
+    This would detects if there're mis-aligned/nested shardings between src/dst placements.
     i.e. (Shard(0), Shard(0)) -> (Replicate(), Shard(0)), in this case Shard(0) -> Shard(0)
-    for mesh dimension 1 actually needs reshard, because in the first case it's a sub-sharding
+    for mesh dimension 1 actually needs reshard, because in the first case it's a nested-sharding
     of an already tensor dimension 0, and in the second case, it's the first sharding on tensor
     dimension 0.
     """
-    src_dim_counts: Dict[int, int] = {}
-    dst_dim_counts: Dict[int, int] = {}
     transform_infos: List[_TransformInfo] = []
 
-    src_placements = src_spec.placements
-    dst_placements = dst_spec.placements
     device_mesh = src_spec.device_mesh
     my_coordinate = device_mesh.get_coordinate()
     assert my_coordinate is not None
@@ -74,16 +52,27 @@ def _gen_transform_infos(
     # logical shape records the logic tensor shape on the mesh dimension
     # this is useful to ensure uneven sharding gets correct output shape
     initial_logical_shape = list(src_spec.shape)
+    if device_mesh.ndim == 1:
+        # if device_mesh is 1D, redistribute is a simple direct transformation
+        transform_infos.append(
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(src_spec.placements[0], dst_spec.placements[0]),
+                logical_shape=initial_logical_shape,
+            )
+        )
+        return transform_infos
+
+    # handle multi-dim device mesh placement redistribute
+    src_placements = list(src_spec.placements)
+    dst_placements = list(dst_spec.placements)
     mesh_dims_to_logical_shape = [initial_logical_shape]
-    mesh_ndim = len(src_placements)
 
     for i, (src, dst) in enumerate(zip(src_placements, dst_placements)):
         # detect mis-aligned sharding and build logical shapes
         current_logical_shape = mesh_dims_to_logical_shape[i]
         if isinstance(src, Shard):
-            src_dim_counts[src.dim] = src_dim_counts.get(src.dim, 0) + 1
-
-            if i < mesh_ndim - 1:
+            if i < device_mesh.ndim - 1:
                 # calculate and save the logical shape for this sharding
                 mesh_dim_size = device_mesh.size(mesh_dim=i)
                 local_shard_size, _ = src._local_shard_size_on_dim(
@@ -97,43 +86,131 @@ def _gen_transform_infos(
         else:
             mesh_dims_to_logical_shape.append(current_logical_shape)
 
-        if isinstance(dst, Shard):
-            dst_dim_counts[dst.dim] = dst_dim_counts.get(dst.dim, 0) + 1
+    if src_spec.num_shards > 1:
+        # If src_spec have sharding, it could potentially have sharding that is misaligned with dst_spec
+        # a common case of this is nested sharding (i.e. (S(0), S(0)) -> (R, S(0))).
+        # In those cases, we first tranverse from inner placement to outer placement
+        # to detect misaligned shardings and properly replicate nested sharding
+        search_transform_infos(
+            src_placements,
+            dst_placements,
+            device_mesh.ndim - 1,
+            device_mesh.ndim,
+            mesh_dims_to_logical_shape,
+            transform_infos,
+            left_to_right=False,
+        )
 
-        if (
-            isinstance(src, Shard)
-            and isinstance(dst, Shard)
-            and (mesh_ndim > 1 or src_dim_counts[src.dim] != dst_dim_counts[dst.dim])
-        ):
-            # for the case when mesh ndim > 1 or shard dim counts are different
-            # TODO: see if we can optimize the mesh_ndim > 1 case
-            # decompose Shard(i) -> Shard(j) into Shard(i) -> Replicate() -> Shard(j)
-            transform_infos.append(
-                _TransformInfo(
-                    mesh_dim=i,
-                    src_dst_placements=(src, Replicate()),
-                    logical_shape=mesh_dims_to_logical_shape[i],
-                )
-            )
-            transform_infos.append(
-                _TransformInfo(
-                    mesh_dim=i,
-                    src_dst_placements=(Replicate(), dst),
-                    logical_shape=mesh_dims_to_logical_shape[i],
-                )
-            )
-        else:
-            transform_infos.append(
-                _TransformInfo(
-                    mesh_dim=i,
-                    src_dst_placements=(src, dst),
-                    logical_shape=mesh_dims_to_logical_shape[i],
-                )
-            )
+    # we always tranverse from outer placement to inner placement to generate the transform infos
+    search_transform_infos(
+        src_placements,
+        dst_placements,
+        0,
+        device_mesh.ndim,
+        mesh_dims_to_logical_shape,
+        transform_infos,
+    )
 
-    # sort the pairs by first perform replication then sharding
-    transform_infos.sort(key=_replicate_then_shard)
     return transform_infos
+
+
+def reshardable_from_src_to_dst(src_placements, dst_placements, mesh_dim) -> bool:
+    src = src_placements[mesh_dim]
+    dst = dst_placements[mesh_dim]
+
+    # For src that is Shard, check if it's the inner most sharding
+    # if not then it's not reshardable, else we check the dst sharding
+    if src.is_shard():
+        for i in reversed(range(len(src_placements))):
+            if src_placements[i].is_shard(src.dim):
+                if i != mesh_dim:
+                    return False
+                else:
+                    break
+
+    if not dst.is_shard():
+        return True
+
+    shard_dim = dst.dim
+    # For dst that is Shard, check if src/dst_placements have the same
+    # sharding on the tensor dim BEFORE the current mesh_dim
+    src_dim_count, dst_dim_count = 0, 0
+    for i, (s, p) in enumerate(zip(src_placements, dst_placements)):
+        if i >= mesh_dim:
+            break
+        # if isinstance(s, Shard) and s.dim == shard_dim:
+        if s.is_shard(shard_dim):
+            src_dim_count += 1
+        if p.is_shard(shard_dim):
+            dst_dim_count += 1
+
+    return src_dim_count == dst_dim_count
+
+
+def search_transform_infos(
+    src_placements: List[Placement],
+    dst_placements: List[Placement],
+    current_mesh_idx,
+    mesh_ndim,
+    mesh_dims_to_logical_shape,
+    transform_infos: List[_TransformInfo],
+    left_to_right=True,
+) -> None:
+    # short circuit
+    if src_placements == dst_placements:
+        return
+
+    if current_mesh_idx < 0 or current_mesh_idx >= mesh_ndim:
+        return
+
+    src = src_placements[current_mesh_idx]
+    dst = dst_placements[current_mesh_idx]
+
+    if reshardable_from_src_to_dst(src_placements, dst_placements, current_mesh_idx):
+        # can transform directly
+        if src != dst:
+            transform_infos.append(
+                _TransformInfo(
+                    mesh_dim=current_mesh_idx,
+                    src_dst_placements=(src, dst),
+                    logical_shape=mesh_dims_to_logical_shape[current_mesh_idx],
+                )
+            )
+            src_placements[current_mesh_idx] = dst
+        search_transform_infos(
+            src_placements,
+            dst_placements,
+            current_mesh_idx + 1 if left_to_right else current_mesh_idx - 1,
+            mesh_ndim,
+            mesh_dims_to_logical_shape,
+            transform_infos,
+            left_to_right,
+        )
+    elif not left_to_right:
+        # if not reshardable, try to unshard this mesh dimension when traversing
+        # from inner to outer mesh dimensions (i.e. to clear nested sharding)
+        replica = Replicate()
+        transform_infos.append(
+            _TransformInfo(
+                mesh_dim=current_mesh_idx,
+                src_dst_placements=(src, replica),
+                logical_shape=mesh_dims_to_logical_shape[current_mesh_idx],
+            )
+        )
+        src_placements[current_mesh_idx] = replica
+        search_transform_infos(
+            src_placements,
+            dst_placements,
+            current_mesh_idx - 1,
+            mesh_ndim,
+            mesh_dims_to_logical_shape,
+            transform_infos,
+            left_to_right,
+        )
+    else:
+        raise RuntimeError(
+            f"Could not redistribute from {src_placements} to {dst_placements}!"
+        )
 
 
 def redistribute_local_tensor(
@@ -175,6 +252,8 @@ def redistribute_local_tensor(
             # short cut, just use the original local tensor
             new_local_tensor = local_tensor
             continue
+
+        logger.debug("redistribute from %s to %s on mesh dim %s", current, target, i)
 
         if target.is_replicate():
             # Case 1: target is Replicate
