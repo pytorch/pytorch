@@ -256,6 +256,9 @@ class TritonTemplateKernel(TritonKernel):
         self.render_hooks["<ARGDEFS>"] = hook
         return "<ARGDEFS>"
 
+    def gen_defines(self):
+        return self.defines
+
     def def_kernel(self, *argnames):
         """
         Hook called from template code to generate function def and
@@ -515,6 +518,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.make_load,
                 self.modification,
                 self.gen_argdefs,
+                self.gen_defines,
             ]
         }
 
@@ -632,7 +636,7 @@ class TritonTemplate(KernelTemplate):
         assert self.template, "requires jinja2"
         defines = StringIO()
         for name, val in kwargs.items():
-            defines.write(f"    {name} : tl.constexpr = {val}\n")
+            defines.write(f"{name} : tl.constexpr = {val}\n")
         defines = defines.getvalue()
 
         fake_out = ir.Buffer("buf_out", layout)
