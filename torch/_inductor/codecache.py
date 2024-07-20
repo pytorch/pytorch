@@ -2141,6 +2141,9 @@ class CppCodeCache:
 
     @classmethod
     def load_async(cls, source_code: str, cuda=False, submit_fn=None, extra_flags=()):
+        if sys.platform == "win32" and cuda:
+            raise RuntimeError("Windows CUDA not yet supported for inductor")
+
         compile_command = {
             **cls.cpp_compile_command_flags,
             "cuda": cuda,
