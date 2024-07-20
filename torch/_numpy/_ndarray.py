@@ -17,6 +17,7 @@ from ._normalizations import (
     NotImplementedType,
 )
 
+
 newaxis = None
 
 FLAGS = [
