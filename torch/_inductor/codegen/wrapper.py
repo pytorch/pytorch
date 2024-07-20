@@ -1550,7 +1550,12 @@ class WrapperCodeGen(CodeGen):
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
             return buf_name
-        elif issubclass(type(arg), sympy.Basic) or isinstance(arg, SymbolicCallArg):
+        elif (
+            issubclass(type(arg), sympy.Basic)
+            or isinstance(arg, SymbolicCallArg)
+            or arg_type
+            and issubclass(arg_type, sympy.Basic)
+        ):
             # arg is a symbol or symbolic expression
             if isinstance(arg, str):
                 if arg in self._meta_vars:

@@ -2084,7 +2084,7 @@ class AOTInductorTestsTemplate:
 
     def test_triton_kernel_sympy_fn_like_arg(self):
         # This test should hit sympy.expand("sqrt") which crashes with
-        # AttributeError: 'function' object has no attribute 'expand'
+        # AttributeError: 'function' object has no attribute 'expand'.
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
 
