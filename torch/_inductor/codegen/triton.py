@@ -2813,7 +2813,7 @@ class TritonKernel(SIMDKernel):
         if (
             entry.grid_dim == 1
             and not entry.has_zdim
-            and not (isinstance(entry.numel, int) and entry.numel <= get_max_y_grid())
+            and not V.graph.sizevars.statically_known_leq(entry.numel, get_max_y_grid())
         ):
             # For ynumel larger than max_ygrid, we need to use zdim.
             # For each z dimension, there are tl.num_programs(1) yblocks which is passed by grad(x,y,z).
