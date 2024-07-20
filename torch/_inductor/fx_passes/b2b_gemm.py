@@ -11,12 +11,16 @@ from ..pattern_matcher import (
 )
 from ..select_algorithm import (
     autotune_select_algorithm,
+    ExternKernelChoice,
     TritonTemplate,
     TritonTemplateCaller,
 )
 from ..utils import ceildiv
 
-aten = torch.ops.aten
+
+B2B_GEMM_PASS = PatternMatcherPass(
+    pass_name="b2b_gemm_pass",
+)
 
 
 def b2b_gemm_grid(M, P, meta):
@@ -99,9 +103,76 @@ b2b_gemm_template = TritonTemplate(
 )
 
 
-B2B_GEMM_PASS = PatternMatcherPass(
-    pass_name="b2b_gemm_pass",
-)
+def load_ratio(M: int, N: int, O: int, P: int, m: int, n: int, o: int, p: int) -> float:
+    """
+    compute the ratio of estimated numbers of loads in baseline and b2bgemm
+    M, N, O, P are matrix sizes
+    m, n, o, p are block sizes
+    |       | baseline (lower bound)        | b2bgemm
+    | load  | M * N + N * O + M * O + O * P | M / m * P / p * N / n * (m * n + O / o * (n * o + o * p))
+    | store | M * O + M * P                 | M * P
+    b2bgemm is always better on stores, but for loads we need to find out beneficial cases using this function
+    """
+
+    def cdiv(x: int, y: int):
+        return x // y + (1 if x % y != 0 else 0)
+
+    base = M * N + N * O + M * O + O * P
+    gemm = cdiv(M, m) * cdiv(P, p) * cdiv(N, n) * (m * n + cdiv(O, o) * (n * o + o * p))
+    return base / gemm
+
+
+# the block sizes are limited by hardware (the shared memory)
+b2b_gemm_configs = [
+    {
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 32,
+        "BLOCK_SIZE_O": 64,
+        "BLOCK_SIZE_P": 32,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 64,
+        "BLOCK_SIZE_O": 64,
+        "BLOCK_SIZE_P": 64,
+        "num_stages": 4,
+        "num_warps": 8,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 32,
+        "BLOCK_SIZE_O": 128,
+        "BLOCK_SIZE_P": 32,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 64,
+        "BLOCK_SIZE_O": 128,
+        "BLOCK_SIZE_P": 64,
+        "num_stages": 4,
+        "num_warps": 8,
+    },
+    {
+        "BLOCK_SIZE_M": 256,
+        "BLOCK_SIZE_N": 32,
+        "BLOCK_SIZE_O": 256,
+        "BLOCK_SIZE_P": 32,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 256,
+        "BLOCK_SIZE_N": 64,
+        "BLOCK_SIZE_O": 256,
+        "BLOCK_SIZE_P": 64,
+        "num_stages": 3,
+        "num_warps": 4,
+    },
+]
 
 
 def can_apply_b2b_gemm(match: Match) -> bool:
@@ -115,34 +186,61 @@ def can_apply_b2b_gemm(match: Match) -> bool:
     mat1, mat2, mat3 = mats
     if not ((mat1.shape[1] == mat2.shape[0]) and (mat2.shape[1] == mat3.shape[0])):
         return False
-    # TODO: change to a real-check for size restrictions (may consider hardware limit?)
-    return True
+    M, N = mat1.shape
+    O, P = mat3.shape
+    ratios = []
+    for config in b2b_gemm_configs:
+        ratio = load_ratio(
+            M,
+            N,
+            O,
+            P,
+            config["BLOCK_SIZE_M"],
+            config["BLOCK_SIZE_N"],
+            config["BLOCK_SIZE_O"],
+            config["BLOCK_SIZE_P"],
+        )
+        ratios.append(ratio)
+    # we only dispatch to B2B-GEMM when the average load ratio is > 1
+    average_ratio = 1.0
+    for r in ratios:
+        average_ratio *= r
+    average_ratio = average_ratio ** (1 / len(ratios))
+    return average_ratio > 1
 
 
-def tuned_b2b_gemm(mat1, mat2, mat3, *, layout=None):
+def unoptimized_b2b_gemm(m1, m2, m3, *, out):
+    torch.mm(torch.mm(m1, m2), m3, out=out)
+    return out
+
+
+unoptimized_choice = ExternKernelChoice(unoptimized_b2b_gemm)
+
+
+def tuned_b2b_gemm(
+    mat1: torch._inductor.ir.TensorBox,
+    mat2: torch._inductor.ir.TensorBox,
+    mat3: torch._inductor.ir.TensorBox,
+    *,
+    layout=None,
+) -> torch._inductor.ir.TensorBox:
+    # call .realize() to get rid of Pointwise
+    mat1.realize()
+    mat2.realize()
+    mat3.realize()
     layout = FixedLayout(
         mat1.get_device(), mat1.get_dtype(), [mat1.shape[0], mat3.shape[1]]
     )
     choices: list[TritonTemplateCaller] = []
-    # TODO: add more configs for tuning
-    # based on the assumption, when M, O >> N, P the optimization should be effective
-    # and it's good to set larger BLOCK_SIZE_M
-    for config in [
-        {
-            "BLOCK_SIZE_M": 128,
-            "BLOCK_SIZE_N": 32,
-            "BLOCK_SIZE_O": 128,
-            "BLOCK_SIZE_P": 32,
-            "num_stages": 2,
-            "num_warps": 4,
-        },
-    ]:
+    for config in b2b_gemm_configs:
         b2b_gemm_template.maybe_append_choice(
             choices,
             input_nodes=(mat1, mat2, mat3),
             layout=layout,
             **config,
         )
+    # add the unoptimized choice to mitigate performance degradation
+    choices.append(unoptimized_choice.bind((mat1, mat2, mat3), layout))
     return autotune_select_algorithm("b2b_gemm", choices, [mat1, mat2, mat3], layout)
 
 
@@ -150,7 +248,9 @@ def tuned_b2b_gemm(mat1, mat2, mat3, *, layout=None):
 # TODO: later will change to matching (A @ B) in (epilogue2 ((epilogue1 (A @ B)) @ C)) and inspecting the graph
 # TODO: match more cases such as bmm and addmm, and (A @ (B @ C)), etc.
 @register_graph_pattern(
-    CallFunction(aten.mm, CallFunction(aten.mm, Arg(), Arg()), Arg()),
+    CallFunction(
+        torch.ops.aten.mm, CallFunction(torch.ops.aten.mm, Arg(), Arg()), Arg()
+    ),
     extra_check=can_apply_b2b_gemm,
     pass_dict=B2B_GEMM_PASS,
 )
