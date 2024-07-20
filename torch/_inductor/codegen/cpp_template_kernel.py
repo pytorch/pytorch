@@ -284,7 +284,7 @@ class CppTemplateKernel(CppKernel):
                     scope.add_local_buffer(src)
                     return self.store_pointwise_nodes(dst, [copy])
             else:
-                assert dst.layout == src.layout
+                assert dst.layout == src.layout, f"{dst=}, {src=}"
                 return ""
 
 
