@@ -696,6 +696,8 @@ class CachingAutotuner(KernelInterface):
             launcher: self.bench(launcher, *args, **kwargs)
             for launcher in self.launchers
         }
+        for k, v in timings.items():
+            timings[k] = float(v)
 
         for k, v in timings.items():
             self.coordesc_tuner.cache_benchmark_result(k.config, v)
@@ -787,7 +789,7 @@ class CachingAutotuner(KernelInterface):
                 _, launcher = self._precompile_config(config, False)
             config2launcher[config] = launcher
 
-            out = self.bench(launcher, *args, **kwargs)
+            out = float(self.bench(launcher, *args, **kwargs))
             log.debug(
                 "COORDESC: %s: %f, nreg %d, nspill %d, #shared-mem %d",
                 launcher.config,
@@ -955,7 +957,7 @@ class DebugAutotuner(CachingAutotuner):
         (launcher,) = self.launchers
 
         if self.cached is None:
-            ms = self.bench(launcher, *args, grid=grid)
+            ms = float(self.bench(launcher, *args, grid=grid))
             num_in_out_ptrs = len(
                 [
                     arg_name
