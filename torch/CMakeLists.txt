@@ -440,6 +440,7 @@ add_custom_command(
       --is-debug=${TORCH_VERSION_DEBUG}
       --cuda-version=${CUDA_VERSION}
       --hip-version=${HIP_VERSION}
+      --xpu-version=%{USE_XPU}
   DEPENDS ${TOOLS_PATH}/generate_torch_version.py
   WORKING_DIRECTORY ${TORCH_ROOT}
 )

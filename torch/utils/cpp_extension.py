@@ -76,7 +76,8 @@ CUDA_CLANG_VERSIONS: VersionMap = {
 
 __all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
            "CppExtension", "CUDAExtension", "include_paths", "library_paths", "load", "load_inline", "is_ninja_available",
-           "verify_ninja_availability", "remove_extension_h_precompiler_headers", "get_cxx_compiler", "check_compiler_is_gcc"]
+           "verify_ninja_availability", "remove_extension_h_precompiler_headers", "get_cxx_compiler", "check_compiler_is_gcc",
+           "get_dpcpp_complier", "DPCPPExtension", "IntelDpcppBuildExtension"]
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
 def _nt_quote_args(args: Optional[List[str]]) -> List[str]:
@@ -201,6 +202,7 @@ environment variable or add NVCC to your system PATH. The extension compilation 
 ROCM_HOME = _find_rocm_home()
 HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
 IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
+IS_XPU_EXTENSION = True if torch.version.xpu is not None else False
 ROCM_VERSION = None
 if torch.version.hip is not None:
     ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
@@ -242,6 +244,8 @@ COMMON_HIPCC_FLAGS = [
     '-D__HIP_NO_HALF_CONVERSIONS__=1',
 ]
 
+COMMON_DPCPP_FLAGS = ["-fPIC"]
+
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 
 PLAT_TO_VCVARS = {
@@ -262,7 +266,14 @@ def _is_binary_build() -> bool:
 
 def _accepted_compilers_for_platform() -> List[str]:
     # gnu-c++ and gnu-cc are the conda gcc compilers
-    return ['clang++', 'clang'] if IS_MACOS else ['g++', 'gcc', 'gnu-c++', 'gnu-cc', 'clang++', 'clang']
+    if IS_XPU_EXTENSION:
+        return ["icpx", "icx"] if not IS_WINDOWS else ["icx"]
+    
+    if IS_MACOS:
+        return ['clang++', 'clang']
+    
+    # Default case for Linux and other platforms
+    return ['g++', 'gcc', 'gnu-c++', 'gnu-cc', 'clang++', 'clang']
 
 def _maybe_write(filename, new_content):
     r'''
@@ -1144,12 +1155,13 @@ def CUDAExtension(name, sources, *args, **kwargs):
     return setuptools.Extension(name, sources, *args, **kwargs)
 
 
-def include_paths(cuda: bool = False) -> List[str]:
+def include_paths(cuda: bool = False, xpu: Optional[bool] = None) -> List[str]:
     """
     Get the include paths required to build a C++ or CUDA extension.
 
     Args:
         cuda: If `True`, includes CUDA-specific include paths.
+        xpu: If `True`, includes XPU-specific include paths.
 
     Returns:
         A list of include path strings.
@@ -1180,10 +1192,15 @@ def include_paths(cuda: bool = False) -> List[str]:
             paths.append(cuda_inc_path)
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, 'include'))
+    elif xpu:
+        paths += _get_one_api_help().get_include_dirs()
+    if xpu is None and IS_XPU_EXTENSION:
+        paths += _get_one_api_help().get_include_dirs()
+
     return paths
 
 
-def library_paths(cuda: bool = False) -> List[str]:
+def library_paths(cuda: bool = False, xpu: Optional[bool] = None) -> List[str]:
     """
     Get the library paths required to build a C++ or CUDA extension.
 
@@ -1216,6 +1233,10 @@ def library_paths(cuda: bool = False) -> List[str]:
         paths.append(_join_cuda_home(lib_dir))
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, lib_dir))
+    elif xpu:
+        paths += _get_one_api_help().get_library_dirs()
+    if xpu is None and IS_XPU_EXTENSION:
+        paths += _get_one_api_help().get_include_dirs()
     return paths
 
 
@@ -1760,6 +1781,8 @@ def _write_ninja_file_and_compile_objects(
     verify_ninja_availability()
 
     compiler = get_cxx_compiler()
+    if IS_XPU_EXTENSION and not IS_WINDOWS:
+        compiler = get_dpcpp_complier()
 
     get_compiler_abi_compatibility_and_version(compiler)
     if with_cuda is None:
@@ -1788,6 +1811,42 @@ def _write_ninja_file_and_compile_objects(
         # that failed to build but there isn't a good way to get it here.
         error_prefix='Error compiling objects for extension')
 
+def _write_xpu_ninja_file_and_compile_objects(
+    sources: List[str],
+    objects,
+    cflags,
+    post_cflags,
+    build_directory: str,
+    verbose: bool,
+) -> None:
+    verify_ninja_availability()
+    if IS_WINDOWS:
+        compiler = os.environ.get("CXX", "cl")
+    else:
+        compiler = get_dpcpp_complier()
+    get_compiler_abi_compatibility_and_version(compiler)
+
+    build_file_path = os.path.join(build_directory, "build.ninja")
+    if verbose:
+        print(f"Emitting ninja build file {build_file_path}...")
+    _write_xpu_ninja_file(
+        path=build_file_path,
+        cflags=cflags,
+        post_cflags=post_cflags,
+        sources=sources,
+        objects=objects,
+        ldflags=None,
+        library_target=None,
+    )
+    if verbose:
+        print("Compiling objects...")
+    _run_ninja_build(
+        build_directory,
+        verbose,
+        # It would be better if we could tell users the name of the extension
+        # that failed to build but there isn't a good way to get it here.
+        error_prefix="Error compiling objects for extension",
+    )
 
 def _write_ninja_file_and_build_library(
         name,
@@ -1803,6 +1862,9 @@ def _write_ninja_file_and_build_library(
     verify_ninja_availability()
 
     compiler = get_cxx_compiler()
+
+    if IS_XPU_EXTENSION and not IS_WINDOWS:
+        compiler = get_dpcpp_complier()
 
     get_compiler_abi_compatibility_and_version(compiler)
     if with_cuda is None:
@@ -1908,6 +1970,25 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         elif IS_HIP_EXTENSION:
             extra_ldflags.append(f'-L{_join_rocm_home("lib")}')
             extra_ldflags.append('-lamdhip64')
+    
+    elif IS_XPU_EXTENSION:
+        library_dirs = library_paths(cuda=False, xpu=True)
+        # Append oneMKL link parameters, detailed please reference:
+        # https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl-link-line-advisor.html
+        oneapi_link_args = []
+        oneapi_link_args += [f"-L{x}" for x in library_dirs]
+        # oneapi_link_args += ['-fsycl-device-code-split=per_kernel']
+        oneapi_link_args += ["-Wl,--start-group"]
+        oneapi_link_args += [f"{x}" for x in _get_one_api_help().get_onemkl_libraries()]
+        oneapi_link_args += ["-Wl,--end-group"]
+        oneapi_link_args += ["-lsycl", "-lOpenCL", "-lpthread", "-lm", "-ldl"]
+        oneapi_link_args += ["-ldnnl"]
+
+        # Append IPEX link parameters.
+        oneapi_link_args += [f"-L{x}" for x in _get_one_api_help().get_default_lib_dir()]
+        oneapi_link_args += ["-lintel-ext-pt-gpu"]
+
+        extra_ldflags += oneapi_link_args
     return extra_ldflags
 
 
@@ -2404,6 +2485,109 @@ def _write_ninja_file(path,
     content += "\n"
     _maybe_write(path, content)
 
+def _write_xpu_ninja_file(
+    path, cflags, post_cflags, sources, objects, ldflags, library_target
+) -> None:
+    r"""Write a ninja file that does the desired compiling and linking.
+    `path`: Where to write this file
+    `cflags`: list of flags to pass to $cxx. Can be None.
+    `post_cflags`: list of flags to append to the $cxx invocation. Can be None.
+    `sources`: list of paths to source files
+    `objects`: list of desired paths to objects, one per source.
+    `ldflags`: list of flags to pass to linker. Can be None.
+    `library_target`: Name of the output library. Can be None; in that case,
+                      we do no linking.
+    """
+
+    def sanitize_flags(flags):
+        if flags is None:
+            return []
+        else:
+            return [flag.strip() for flag in flags]
+
+    cflags = sanitize_flags(cflags)
+    post_cflags = sanitize_flags(post_cflags)
+    ldflags = sanitize_flags(ldflags)
+
+    # Sanity checks...
+    assert len(sources) == len(objects)
+    assert len(sources) > 0
+
+    if IS_WINDOWS:
+        compiler = os.environ.get("CXX", "cl")
+    else:
+        compiler = get_dpcpp_complier()
+
+    # Version 1.3 is required for the `deps` directive.
+    config = ["ninja_required_version = 1.3"]
+    config.append(f"cxx = {compiler}")
+
+    flags = [f'cflags = {" ".join(cflags)}']
+    flags.append(f'post_cflags = {" ".join(post_cflags)}')
+    flags.append(f'ldflags = {" ".join(ldflags)}')
+
+    # Turn into absolute paths so we can emit them into the ninja build
+    # file wherever it is.
+    sources = [os.path.abspath(file) for file in sources]
+
+    # See https://ninja-build.org/build.ninja.html for reference.
+    compile_rule = ["rule compile"]
+    if IS_WINDOWS:
+        compile_rule.append(
+            "  command = cl /showIncludes $cflags -c $in /Fo$out $post_cflags"
+        )
+        compile_rule.append("  deps = msvc")
+    else:
+        compile_rule.append(
+            "  command = $cxx -MMD -MF $out.d $cflags -c $in -o $out $post_cflags"
+        )
+        compile_rule.append("  depfile = $out.d")
+        compile_rule.append("  deps = gcc")
+
+    # Emit one build rule per source to enable incremental build.
+    build = []
+    for source_file, object_file in zip(sources, objects):
+        rule = "compile"
+        if IS_WINDOWS:
+            source_file = source_file.replace(":", "$:")
+            object_file = object_file.replace(":", "$:")
+        source_file = source_file.replace(" ", "$ ")
+        object_file = object_file.replace(" ", "$ ")
+        build.append(f"build {object_file}: {rule} {source_file}")
+
+    if library_target is not None:
+        link_rule = ["rule link"]
+        if IS_WINDOWS:
+            cl_paths = (
+                subprocess.check_output(["where", "cl"])
+                .decode(*SUBPROCESS_DECODE_ARGS)
+                .split("\r\n")
+            )
+            if len(cl_paths) >= 1:
+                cl_path = os.path.dirname(cl_paths[0]).replace(":", "$:")
+            else:
+                raise RuntimeError("MSVC is required to load C++ extensions")
+            link_rule.append(
+                f'  command = "{cl_path}/link.exe" $in /nologo $ldflags /out:$out'
+            )
+        else:
+            link_rule.append("  command = $cxx $in $ldflags -o $out")
+
+        link = [f'build {library_target}: link {" ".join(objects)}']
+
+        default = [f"default {library_target}"]
+    else:
+        link_rule, link, default = [], [], []
+
+    # 'Blocks' should be separated by newlines, for visual benefit.
+    blocks = [config, flags, compile_rule]
+
+    blocks += [link_rule, build, link, default]
+    content = "\n\n".join("\n".join(b) for b in blocks)
+    # Ninja requires a new lines at the end of the .ninja file
+    content += "\n"
+    _maybe_write(path, content)
+
 def _join_cuda_home(*paths) -> str:
     """
     Join paths with CUDA_HOME, or raises an error if it CUDA_HOME is not set.
@@ -2422,3 +2606,526 @@ def _is_cuda_file(path: str) -> bool:
     if IS_HIP_EXTENSION:
         valid_ext.append('.hip')
     return os.path.splitext(path)[1] in valid_ext
+
+def get_dpcpp_complier():
+    # build cxx via dpcpp, only for Pytorch XPU
+    dpcpp_cmp = shutil.which("icpx")
+    if dpcpp_cmp is None:
+        raise RuntimeError("Failed to find compiler path from OS PATH")
+    _cxxbin = os.getenv("CXX")
+    if _cxxbin is not None:
+        dpcpp_cmp = _cxxbin
+    return dpcpp_cmp
+
+def _get_icx_complier():
+    # build cc via icx, only for Pytorch XPU
+    icx_cmp = shutil.which("icx")
+    if icx_cmp is None:
+        raise RuntimeError("Failed to find compiler path from OS PATH")
+    _ccbin = os.getenv("CC")
+    if _ccbin is not None:
+        dpcpp_cmp = _ccbin
+    return icx_cmp
+
+def _is_cpp_file(path: str) -> bool:
+    valid_ext = [".cpp", ".hpp"]
+    return os.path.splitext(path)[1] in valid_ext
+
+
+def _is_c_file(path: str) -> bool:
+    valid_ext = [".c", ".h"]
+    return os.path.splitext(path)[1] in valid_ext
+
+def _get_dpcpp_root():
+    # TODO: Need to decouple with toolchain env scripts
+    dpcpp_root = os.getenv("CMPLR_ROOT")
+    return dpcpp_root
+
+
+def _get_onemkl_root():
+    # TODO: Need to decouple with toolchain env scripts
+    path = os.getenv("MKLROOT")
+    return path
+
+
+def _get_onednn_root():
+    # TODO: Need to decouple with toolchain env scripts
+    path = os.getenv("DNNLROOT")
+    return path
+
+def _prepare_dpcpp_compile_flags(extra_compile_args):
+    if isinstance(extra_compile_args, List):
+        extra_compile_args.append("-fsycl")
+    elif isinstance(extra_compile_args, dict):
+        cl_flags = extra_compile_args.get("cxx", [])
+        cl_flags.append("-fsycl")
+        extra_compile_args["cxx"] = cl_flags
+
+    return extra_compile_args
+
+
+class _one_api_help:
+    __dpcpp_root = None
+    __onemkl_root = None
+    __onednn_root = None
+    __default_root = None
+
+    def __init__(self):
+        self.__dpcpp_root = _get_dpcpp_root()
+        self.__onemkl_root = _get_onemkl_root()
+        self.__onednn_root = _get_onednn_root()
+
+        CUR_DIR = os.path.dirname(__file__)
+        self.__default_root = os.path.dirname(CUR_DIR)
+
+        self.check_onednn_cfg()
+        self.check_dpcpp_cfg()
+        self.check_onemkl_cfg()
+
+    def check_onemkl_cfg(self):
+        if self.__onemkl_root is None:
+            raise "Didn't detect mkl root. Please source <oneapi_dir>/mkl/<version>/env/vars.sh "
+
+    def check_onednn_cfg(self):
+        if self.__onednn_root is None:
+            raise "Didn't detect dnnl root. Please source <oneapi_dir>/dnnl/<version>/env/vars.sh "
+        else:
+            warnings.warn(
+                "This extension has static linked onednn library. Please attaction to \
+                that, this path of onednn version maybe not match with the built-in version."
+            )
+
+    def check_dpcpp_cfg(self):
+        if self.__dpcpp_root is None:
+            raise "Didn't detect dpcpp root. Please source <oneapi_dir>/compiler/<version>/env/vars.sh "
+
+    def get_default_include_dir(self):
+        return [os.path.join(self.__default_root, "include")]
+
+    def get_default_lib_dir(self):
+        return [os.path.join(self.__default_root, "lib")]
+
+    def get_dpcpp_include_dir(self):
+        return [
+            os.path.join(self.__dpcpp_root, "linux", "include"),
+            os.path.join(self.__dpcpp_root, "linux", "include", "sycl"),
+        ]
+
+    def get_onemkl_include_dir(self):
+        return [os.path.join(self.__onemkl_root, "include")]
+
+    def get_onednn_include_dir(self):
+        return [os.path.join(self.__onednn_root, "include")]
+
+    def get_onednn_lib_dir(self):
+        return [os.path.join(self.__onednn_root, "lib")]
+
+    def is_onemkl_ready(self):
+        if self.__onemkl_root is None:
+            return False
+        return True
+
+    def is_onednn_ready(self):
+        if self.__onednn_root is None:
+            return False
+        return True
+
+    def get_library_dirs(self):
+        library_dirs = []
+        library_dirs += [f"{x}" for x in self.get_default_lib_dir()]
+        library_dirs += [f"{x}" for x in self.get_onednn_lib_dir()]
+        return library_dirs
+
+    def get_include_dirs(self):
+        include_dirs = []
+        include_dirs += [f"{x}" for x in self.get_dpcpp_include_dir()]
+        include_dirs += [f"{x}" for x in self.get_onemkl_include_dir()]
+        include_dirs += [f"{x}" for x in self.get_onednn_include_dir()]
+        include_dirs += [f"{x}" for x in self.get_default_include_dir()]
+        return include_dirs
+
+    def get_onemkl_libraries(self):
+        MKLROOT = self.__onemkl_root
+        return [
+            f"{MKLROOT}/lib/intel64/libmkl_sycl.a",
+            f"{MKLROOT}/lib/intel64/libmkl_intel_ilp64.a",
+            f"{MKLROOT}/lib/intel64/libmkl_sequential.a",
+            f"{MKLROOT}/lib/intel64/libmkl_core.a",
+        ]
+
+
+def _get_one_api_help():
+    oneAPI = _one_api_help()
+    return oneAPI
+
+def DPCPPExtension(name, sources, *args, **kwargs):
+    r"""
+    Creates a :class:`setuptools.Extension` for DPCPP/C++.
+    Convenience method that creates a :class:`setuptools.Extension` with the
+    bare minimum (but often sufficient) arguments to build a DPCPP/C++
+    extension.
+    All arguments are forwarded to the :class:`setuptools.Extension`
+    constructor.
+    Example:
+        >>> from intel_extension_for_pytorch.xpu.utils import DpcppBuildExtension, DPCPPExtension
+        >>> setup(
+                name='dpcpp_extension',
+                ext_modules=[
+                    DPCPPExtension(
+                            name='dpcpp_extension',
+                            sources=['extension.cpp', 'extension_kernel.cpp'],
+                            extra_compile_args={'cxx': ['-g', '-std=c++20', '-fPIC']})
+                ],
+                cmdclass={
+                    'build_ext': DpcppBuildExtension
+                })
+    """
+    library_dirs = kwargs.get("library_dirs", [])
+    library_dirs += library_paths()
+    kwargs["library_dirs"] = library_dirs
+
+    libraries = kwargs.get("libraries", [])
+    libraries.append("c10")
+    libraries.append("torch")
+    libraries.append("torch_cpu")
+    libraries.append("torch_python")
+
+    # Append oneDNN link parameters.
+    libraries.append("dnnl")
+    kwargs["libraries"] = libraries
+
+    include_dirs = kwargs.get("include_dirs", [])
+    include_dirs += include_paths(cuda=False, xpu=True)
+    kwargs["include_dirs"] = include_dirs
+
+    kwargs["language"] = "c++"
+
+    extra_compile_args = kwargs.get("extra_compile_args", {})
+    extra_link_args = kwargs.get("extra_link_args", [])
+    # add oneapi link parameters
+    extra_link_args = _prepare_ldflags(extra_link_args, with_cuda=False, verbose=False, is_standalone=False)
+    extra_compile_args = _prepare_dpcpp_compile_flags(extra_compile_args)
+
+    # todo: add dpcpp parameter support.
+    kwargs["extra_link_args"] = extra_link_args
+    kwargs["extra_compile_args"] = extra_compile_args
+
+    return setuptools.Extension(name, sources, *args, **kwargs)
+
+class IntelDpcppBuildExtension(build_ext):
+    r"""
+    A custom :mod:`setuptools` build extension .
+    This :class:`setuptools.build_ext` subclass takes care of passing the
+    minimum required compiler flags (e.g. ``-std=c++17``) as well as DPCPP
+    compilation.
+    When using :class:`IntelDpcppBuildExtension`, it is allowed to supply a dictionary
+    for ``extra_compile_args`` (rather than the usual list) that maps from
+    languages (``cxx``) to a list of additional compiler flags to supply to the
+    compiler.
+
+    ``use_ninja`` (bool): If ``use_ninja`` is ``True`` (default), then we
+    attempt to build using the Ninja backend. Ninja greatly speeds up
+    compilation compared to the standard ``setuptools.build_ext``.
+    Fallbacks to the standard distutils backend if Ninja is not available.
+
+    ``no_python_abi_suffix`` (bool): If ``no_python_abi_suffix`` is ``False`` (default),
+    then we attempt to build module with python abi suffix, example:
+    output module name: module_name.cpython-37m-x86_64-linux-gnu.so, the
+    ``cpython-37m-x86_64-linux-gnu`` is append python abi suffix.
+
+    .. note::
+        By default, the Ninja backend uses #CPUS + 2 workers to build the
+        extension. This may use up too many resources on some systems. One
+        can control the number of workers by setting the `MAX_JOBS` environment
+        variable to a non-negative number.
+    """
+
+    @classmethod
+    def with_options(cls, **options):
+        r"""
+        Returns a subclass with alternative constructor that extends any original keyword
+        arguments to the original constructor with the given options.
+        """
+
+        class cls_with_options(cls):  # type: ignore[misc, valid-type]
+            def __init__(self, *args, **kwargs):
+                kwargs.update(options)
+                super().__init__(*args, **kwargs)
+
+        return cls_with_options
+
+    def __init__(self, *args, **kwargs) -> None:
+        super(IntelDpcppBuildExtension, self).__init__(*args, **kwargs)
+        self.no_python_abi_suffix = kwargs.get("no_python_abi_suffix", False)
+
+        self.use_ninja = kwargs.get("use_ninja", True)
+        if self.use_ninja:
+            # Test if we can use ninja. Fallback otherwise.
+            if not is_ninja_available():
+                warnings.warn(
+                    "Ninja is required to load C++ extensions, but it could not be found. "
+                    "Falling back to using the slow distutils backend. "
+                    "Install ninja with `pip install ninja` or `conda install ninja`.",
+                    UserWarning
+                )
+                self.use_ninja = False
+
+    def finalize_options(self) -> None:
+        super().finalize_options()
+        if self.use_ninja:
+            self.force = True
+
+    def build_extensions(self) -> None:
+        dpcpp_ext = False
+        extension_iter = iter(self.extensions)
+        extension = next(extension_iter, None)
+        while not dpcpp_ext and extension:
+            extension = next(extension_iter, None)
+
+        for extension in self.extensions:
+            # Ensure at least an empty list of flags for 'cxx' when
+            # extra_compile_args is a dict. Otherwise, default torch
+            # flags do not get passed. Necessary when only one of 'cxx' is
+            # passed to extra_compile_args in DPCPPExtension, i.e.
+            #   DPCPPExtension(..., extra_compile_args={'cxx': [...]})
+            if isinstance(extension.extra_compile_args, dict):
+                for ext in ["cxx"]:
+                    if ext not in extension.extra_compile_args:
+                        extension.extra_compile_args[ext] = []
+
+            self._add_compile_flag(extension, "-DTORCH_API_INCLUDE_EXTENSION_H")
+            # See note [Pybind11 ABI constants]
+            for name in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
+                val = getattr(torch._C, f"_PYBIND11_{name}")
+                if val is not None and not IS_WINDOWS:
+                    self._add_compile_flag(extension, f'-DPYBIND11_{name}="{val}"')
+            self._define_torch_extension_name(extension)
+            self._add_gnu_cpp_abi_flag(extension)
+
+        # Save the original _compile method for later.
+        if self.compiler.compiler_type == "msvc":
+            original_compile = self.compiler.compile
+            original_spawn = self.compiler.spawn
+        else:
+            original_compile = self.compiler._compile
+            # save origin function for passthough
+            original_link_shared_object = self.compiler.link_shared_object
+            original_spawn = self.compiler.spawn
+
+        def append_std17_if_no_std_present(cflags) -> None:
+            cpp_format_prefix = (
+                "/{}:" if self.compiler.compiler_type == "msvc" else "-{}="
+            )
+            cpp_flag_prefix = cpp_format_prefix.format("std")
+            cpp_flag = cpp_flag_prefix + "c++17"
+            if not any(flag.startswith(cpp_flag_prefix) for flag in cflags):
+                cflags.append(cpp_flag)
+
+        def unix_dpcpp_flags(cflags):
+            cflags = COMMON_DPCPP_FLAGS + cflags
+            return cflags
+
+        def convert_to_absolute_paths_inplace(paths):
+            # Helper function. See Note [Absolute include_dirs]
+            if paths is not None:
+                for i in range(len(paths)):
+                    if not os.path.isabs(paths[i]):
+                        paths[i] = os.path.abspath(paths[i])
+
+        def unix_wrap_single_compile(
+            obj, src, ext, cc_args, extra_postargs, pp_opts
+        ) -> None:
+            # Copy before we make any modifications.
+            cflags = copy.deepcopy(extra_postargs)
+            try:
+                original_compiler = self.compiler.compiler_so
+                if _is_cpp_file(src):
+                    _cxxbin = get_dpcpp_complier()
+                    self.compiler.set_executable("compiler_so", _cxxbin)
+                    if isinstance(cflags, dict):
+                        cflags = cflags["cxx"]
+                    else:
+                        cflags = unix_dpcpp_flags(cflags)
+                elif _is_c_file(src):
+                    _ccbin = _get_icx_complier()
+                    self.compiler.set_executable("compiler_so", _ccbin)
+                    if isinstance(cflags, dict):
+                        cflags = cflags["cxx"]
+                    else:
+                        cflags = unix_dpcpp_flags(cflags)
+                elif isinstance(cflags, dict):
+                    cflags = cflags["cxx"]
+                append_std17_if_no_std_present(cflags)
+
+                original_compile(obj, src, ext, cc_args, cflags, pp_opts)
+            finally:
+                # Put the original compiler back in place.
+                self.compiler.set_executable("compiler_so", original_compiler)
+
+        def _gen_link_lib_cmd_line(
+            linker,
+            objects,
+            target_name,
+            library_dirs,
+            runtime_library_dirs,
+            libraries,
+            extra_postargs,
+        ):
+            cmd_line = []
+
+            library_dirs_args = []
+            library_dirs_args += [f"-L{x}" for x in library_dirs]
+
+            runtime_library_dirs_args = []
+            runtime_library_dirs_args += [f"-L{x}" for x in runtime_library_dirs]
+
+            libraries_args = []
+            libraries_args += [f"-l{x}" for x in libraries]
+
+            common_args = ["-shared"]
+
+            """
+            link command formats:
+            cmd = [LD common_args objects library_dirs_args runtime_library_dirs_args libraries_args
+                    -o target_name extra_postargs]
+            """
+
+            cmd_line += [linker]
+            cmd_line += common_args
+            cmd_line += objects
+            cmd_line += library_dirs_args
+            cmd_line += runtime_library_dirs_args
+            cmd_line += libraries_args
+            cmd_line += ["-o"]
+            cmd_line += [target_name]
+            cmd_line += extra_postargs
+
+            return cmd_line
+
+        def create_parent_dirs_by_path(filename):
+            if not os.path.exists(os.path.dirname(filename)):
+                try:
+                    os.makedirs(os.path.dirname(filename))
+                except OSError as exc:  # Guard against race condition
+                    if exc.errno != errno.EEXIST:
+                        raise
+
+        def unix_wrap_single_link_shared_object(
+            objects,
+            output_libname,
+            output_dir=None,
+            libraries=None,
+            library_dirs=None,
+            runtime_library_dirs=None,
+            export_symbols=None,
+            debug=0,
+            extra_preargs=None,
+            extra_postargs=None,
+            build_temp=None,
+            target_lang=None,
+        ):
+            # create output directories avoid linker error.
+            create_parent_dirs_by_path(output_libname)
+
+            _cxxbin = get_dpcpp_complier()
+            cmd = _gen_link_lib_cmd_line(
+                _cxxbin,
+                objects,
+                output_libname,
+                library_dirs,
+                runtime_library_dirs,
+                libraries,
+                extra_postargs,
+            )
+
+            return original_spawn(cmd)
+
+        def unix_wrap_ninja_compile(
+            sources,
+            output_dir=None,
+            macros=None,
+            include_dirs=None,
+            debug=0,
+            extra_preargs=None,
+            extra_postargs=None,
+            depends=None,
+        ):
+            r"""Compiles sources by outputting a ninja file and running it."""
+            # NB: I copied some lines from self.compiler (which is an instance
+            # of distutils.UnixCCompiler). See the following link.
+            # https://github.com/python/cpython/blob/f03a8f8d5001963ad5b5b28dbd95497e9cc15596/Lib/distutils/ccompiler.py#L564-L567
+            # This can be fragile, but a lot of other repos also do this
+            # (see https://github.com/search?q=_setup_compile&type=Code)
+            # so it is probably OK; we'll also get CI signal if/when
+            # we update our python version (which is when distutils can be
+            # upgraded)
+
+            # Use absolute path for output_dir so that the object file paths
+            # (`objects`) get generated with absolute paths.
+            output_dir = os.path.abspath(output_dir)
+
+            # See Note [Absolute include_dirs]
+            convert_to_absolute_paths_inplace(self.compiler.include_dirs)
+
+            _, objects, extra_postargs, pp_opts, _ = self.compiler._setup_compile(
+                output_dir, macros, include_dirs, sources, depends, extra_postargs
+            )
+            common_cflags = self.compiler._get_cc_args(pp_opts, debug, extra_preargs)
+            extra_cc_cflags = self.compiler.compiler_so[1:]
+
+            # extra_postargs can be either:
+            # - a dict mapping cxx to extra flags
+            # - a list of extra flags.
+            if isinstance(extra_postargs, dict):
+                post_cflags = extra_postargs["cxx"]
+            else:
+                post_cflags = list(extra_postargs)
+            append_std17_if_no_std_present(post_cflags)
+
+            _write_xpu_ninja_file_and_compile_objects(
+                sources=sources,
+                objects=objects,
+                cflags=[shlex.quote(f) for f in extra_cc_cflags + common_cflags],
+                post_cflags=[shlex.quote(f) for f in post_cflags],
+                build_directory=output_dir,
+                verbose=True,
+            )
+
+            # Return *all* object filenames, not just the ones we just built.
+            return objects
+
+        if self.compiler.compiler_type == "msvc":
+            raise "Not implemented"
+        else:
+            if self.use_ninja:
+                self.compiler.compile = unix_wrap_ninja_compile
+            else:
+                self.compiler._compile = unix_wrap_single_compile
+                self.compiler.link_shared_object = unix_wrap_single_link_shared_object
+
+        build_ext.build_extensions(self)
+
+    def _add_compile_flag(self, extension, flag):
+        extension.extra_compile_args = copy.deepcopy(extension.extra_compile_args)
+        if isinstance(extension.extra_compile_args, dict):
+            for args in extension.extra_compile_args.values():
+                args.append(flag)
+        else:
+            extension.extra_compile_args.append(flag)
+
+    def _define_torch_extension_name(self, extension):
+        # pybind11 doesn't support dots in the names
+        # so in order to support extensions in the packages
+        # like torch._C, we take the last part of the string
+        # as the library name
+        names = extension.name.split(".")
+        name = names[-1]
+        define = f"-DTORCH_EXTENSION_NAME={name}"
+        self._add_compile_flag(extension, define)
+
+    def _add_gnu_cpp_abi_flag(self, extension):
+        # use the same CXX ABI as what PyTorch was compiled with
+        self._add_compile_flag(
+            extension,
+            "-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI)),
+        )
