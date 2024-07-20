@@ -3810,7 +3810,7 @@ class CppScheduling(BaseScheduling):
         return (
             not node1.is_template()
             and not node2.is_template()
-            and node1.get_names() & node2.ancestors
+            and node1.get_operation_names() & node2.ancestors
             and not (
                 self._can_fuse_horizontal_impl(node1, node2)
                 and not node1.is_reduction()
@@ -3883,18 +3883,26 @@ class CppScheduling(BaseScheduling):
                 visited_scheduler_nodes: Set[str] = set()
                 for scheduler_node in node.get_nodes():
                     # all users inside same OuterLoopFusedSchedulerNode
+                    assert isinstance(scheduler_node, SchedulerNode)
                     visited_scheduler_nodes.add(scheduler_node.get_name())
-                    if not scheduler_node.is_reduction() and all(
-                        user.node in node.get_nodes() for user in scheduler_node.users
+                    if (
+                        scheduler_node.is_reduction()
+                        or len(scheduler_node.get_outputs()) != 1
                     ):
-                        global_buffer = scheduler_node.node
+                        continue
+
+                    scheduler_buffer = scheduler_node.get_outputs()[0]
+                    if all(
+                        user.node in node.get_nodes() for user in scheduler_buffer.users
+                    ):
+                        global_buffer = scheduler_buffer.node
                         assert isinstance(global_buffer, ir.ComputedBuffer)
                         global_buffer_layout = global_buffer.get_layout()
                         size_offset = node.outer_loop_fusion_depth - len(
                             get_call_ranges(scheduler_node)
                         )
 
-                        def is_all_write_read_contiguous(scheduler_node):
+                        def is_all_write_read_contiguous():
                             contiguous_index_expr = 0
                             stride = 1
                             for var, range in reversed(
@@ -3903,25 +3911,25 @@ class CppScheduling(BaseScheduling):
                                 contiguous_index_expr += stride * var
                                 stride *= range
                             write_index_expr = scheduler_node._body.writes_name2expr[
-                                scheduler_node.get_name()
+                                scheduler_buffer.get_name()
                             ]
 
                             def is_contiguous_index(x):
                                 return x == contiguous_index_expr
 
                             return is_contiguous_index(write_index_expr) and all(
-                                is_contiguous_index(
+                                isinstance(user.node, SchedulerNode)
+                                and is_contiguous_index(
                                     user.node._body.reads_name2expr[
-                                        scheduler_node.get_name()
+                                        scheduler_buffer.get_name()
                                     ],
                                 )
-                                for user in scheduler_node.users
+                                for user in scheduler_buffer.users
                             )
 
                         if not (
                             global_buffer_layout.is_contiguous()
-                            and not scheduler_node.is_reduction()
-                            and is_all_write_read_contiguous(scheduler_node)
+                            and is_all_write_read_contiguous()
                         ):
                             continue
                         # Local Buffer is a view of global buffer
@@ -3937,7 +3945,7 @@ class CppScheduling(BaseScheduling):
                                 if local_buffer_layout == local_buf.layout and all(
                                     all(
                                         user.node.get_name() in visited_scheduler_nodes
-                                        for user in V.graph.scheduler.name_to_node[
+                                        for user in V.graph.scheduler.name_to_buf[
                                             global_buffer.name
                                         ].users
                                     )
@@ -4058,7 +4066,9 @@ class CppScheduling(BaseScheduling):
         _, (_, rnumel) = template_node.group
         assert rnumel == ()
         ctb: ir.CppTemplateBuffer = cast(ir.CppTemplateBuffer, template_node.node)
-        epilogue_ir_nodes: List[Optional[ir.Buffer]] = [n.node for n in epilogue_nodes]
+        epilogue_ir_nodes: List[Optional[ir.Operation]] = [
+            n.node for n in epilogue_nodes
+        ]
         assert all(
             isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
         ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
