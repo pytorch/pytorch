@@ -939,7 +939,7 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
-            return benchmarker.lazy_benchmark(algo, args, {}, pruning_key="gemm")
+            return benchmarker.benchmark(algo, args, {})
 
     def to_callable(self):
         fn = self.choice.to_callable()

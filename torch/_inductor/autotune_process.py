@@ -595,7 +595,7 @@ class GPUDeviceBenchmarkRequest(BenchmarkRequest):
             device_idx = torch.cuda.current_device()
 
         with torch.cuda.device(device_idx):
-            out = benchmarker.lazy_benchmark_gpu(fn, pruning_key="gemm")
+            out = benchmarker.benchmark_gpu(fn)
 
         return out
 
