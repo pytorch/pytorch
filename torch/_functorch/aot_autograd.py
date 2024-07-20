@@ -26,7 +26,6 @@ from ._aot_autograd.autograd_cache import (  # noqa: F401
     AOTAutogradCache,
     autograd_cache_key,
 )
-
 from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
     run_functionalized_fw_and_collect_metadata,
 )
@@ -105,7 +104,6 @@ from ._aot_autograd.traced_function_transforms import (  # noqa: F401
     fn_input_mutations_to_outputs,
     fn_prepped_for_autograd,
 )
-
 from ._aot_autograd.utils import (  # noqa: F401
     _get_autocast_states,
     _get_symint_hints,
@@ -121,6 +119,7 @@ from ._aot_autograd.utils import (  # noqa: F401
     strict_zip,
 )
 from .partitioners import default_partition
+
 
 zip = strict_zip
 

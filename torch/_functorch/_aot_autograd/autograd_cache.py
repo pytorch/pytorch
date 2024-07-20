@@ -8,15 +8,12 @@ import logging
 import os
 import pickle
 import shutil
-
 from dataclasses import dataclass
-
 from typing import Callable, List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters
 from torch._functorch import config
-
 from torch._inductor.codecache import (
     _ident,
     BypassFxGraphCache,
@@ -27,7 +24,6 @@ from torch._inductor.codecache import (
     FxGraphHashDetails,
     write_atomic,
 )
-
 from torch._inductor.runtime.runtime_utils import cache_dir
 
 from .runtime_wrappers import (
@@ -39,8 +35,8 @@ from .runtime_wrappers import (
     RuntimeWrapper,
     SubclassMeta,
 )
-
 from .schemas import AOTConfig, ViewAndMutationMeta  # noqa: F401
+
 
 if TYPE_CHECKING:
     from torch.fx.node import Node
@@ -182,8 +178,8 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             # Sometimes inductor configs are unpickleable and can fail
             raise BypassAOTAutogradCache from e
 
-    def debug_str(self) -> str:
-        return AOTAutogradCachePickler.debug_str(self)
+    def debug_lines(self) -> List[str]:
+        return AOTAutogradCachePickler.debug_lines(self)
 
 
 def _reduce_aot_config(aot_config: AOTConfig):
@@ -238,9 +234,8 @@ def autograd_cache_key(
     details = AOTAutogradCacheDetails(gm, example_inputs, config)
     # The prefix distinguishes among the other kinds of objects we cache
     key = "a" + AOTAutogradCachePickler.get_hash(details)
-    log.debug(
-        "Autograd graph cache hash details for key %s:\n%s", key, details.debug_str()
-    )
+    debug_str = "\n".join(details.debug_lines())
+    log.debug("Autograd graph cache hash details for key %s:\n%s", key, debug_str)
     return key
 
 

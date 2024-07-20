@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import dataclasses
 import types
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch._ops
-from torch.onnx._internal import _beartype
 
 # We can only import onnx from this module in a type-checking context to ensure that
 # 'import torch.onnx' continues to work without having 'onnx' installed. We fully
@@ -27,7 +26,7 @@ class ONNXFunction:
 
     """
 
-    onnx_function: Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]
+    onnx_function: onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction
     op_full_name: str
     is_custom: bool = False
     is_complex: bool = False
@@ -42,9 +41,8 @@ class OpName:
     overload: str
 
     @classmethod
-    @_beartype.beartype
     def from_name_parts(
-        cls, namespace: str, op_name: str, overload: Optional[str] = None
+        cls, namespace: str, op_name: str, overload: str | None = None
     ) -> OpName:
         # NOTE: in PyTorch, the overload could be unprovided to indicate the
         # default overload
@@ -53,7 +51,6 @@ class OpName:
         return cls(namespace, op_name, overload)
 
     @classmethod
-    @_beartype.beartype
     def from_qualified_name(cls, qualified_name: str) -> OpName:
         """When the name is <namespace>::<op_name>[.<overload>]"""
         namespace, opname_overload = qualified_name.split("::")
@@ -62,12 +59,10 @@ class OpName:
         return cls(namespace, op_name, overload)
 
     @classmethod
-    @_beartype.beartype
     def from_op_overload(cls, op_overload: torch._ops.OpOverload) -> OpName:
         return cls.from_qualified_name(op_overload.name())
 
     @classmethod
-    @_beartype.beartype
     def from_builtin_function(
         cls, builtin_function: types.BuiltinFunctionType
     ) -> OpName:
@@ -86,6 +81,5 @@ class OpName:
         module = builtin_function.__module__  # _operators or math
         return cls.from_qualified_name(module + "::" + op)
 
-    @_beartype.beartype
     def qualified_name(self) -> str:
         return f"{self.namespace}::{self.op_name}.{self.overload}"
