@@ -1562,7 +1562,8 @@ optim_db: List[OptimizerInfo] = [
                 unittest.expectedFailure,  # Fails if use_closure
                 "CompiledOptimizerParityTests",
                 "test_correctness",
-                active_if=lambda kwargs: kwargs["use_closure"],
+                active_if=lambda kwargs: sys.platform == "darwin"
+                and kwargs["use_closure"],
             ),
         ),
     ),
