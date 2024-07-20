@@ -455,22 +455,22 @@ def prune_lstm_output_layernorm_linear(
             # otherwise need to prune the columns of the input of the next LSTM layer
             else:
                 with torch.no_grad():
-                    if parametrize.is_parametrized(lstm, f"weight_ih_l{i+1}"):
+                    if parametrize.is_parametrized(lstm, f"weight_ih_l{i + 1}"):
                         parametrization_dict = cast(
                             nn.ModuleDict, lstm.parametrizations
                         )
                         weight_parameterizations = cast(
                             ParametrizationList,
-                            getattr(parametrization_dict, f"weight_ih_l{i+1}"),
+                            getattr(parametrization_dict, f"weight_ih_l{i + 1}"),
                         )
 
                         weight_parameterizations.original = nn.Parameter(
                             weight_parameterizations.original[:, M_ho]
                         )
                     else:
-                        next_layer_weight = getattr(lstm, f"weight_ih_l{i+1}")
+                        next_layer_weight = getattr(lstm, f"weight_ih_l{i + 1}")
                         setattr(
                             lstm,
-                            f"weight_ih_l{i+1}",
+                            f"weight_ih_l{i + 1}",
                             nn.Parameter(next_layer_weight[:, M_ho]),
                         )

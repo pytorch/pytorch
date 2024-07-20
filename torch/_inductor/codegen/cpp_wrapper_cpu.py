@@ -2194,7 +2194,7 @@ if (custom_op_wrapper.get() == NULL) {
             py_args_var = f"py_args_{next(self.arg_var_id)}"
             # First arg is always the python op name
             lines = f"""
-RAIIPyObject {py_args_var}(PyTuple_New({num_args+1}));
+RAIIPyObject {py_args_var}(PyTuple_New({num_args + 1}));
 if ({py_args_var}.get() == NULL) {{
     throw std::runtime_error("PyTuple_New {py_args_var} failed");
 }}
