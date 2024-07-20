@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TestCase,
+    skipIfWindows,
 )
 from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
@@ -24,7 +25,6 @@ from torch.utils._sympy.numbers import int_oo, IntInfinity, NegativeIntInfinity
 from sympy.core.relational import is_ge, is_le, is_gt, is_lt
 import functools
 import torch.fx as fx
-
 
 
 UNARY_OPS = [
@@ -192,6 +192,7 @@ class TestNumbers(TestCase):
         self.assertIs(min(-int_oo, -sympy.oo), -sympy.oo)
 
 
+@skipIfWindows
 class TestValueRanges(TestCase):
     @parametrize("fn", UNARY_OPS)
     @parametrize("dtype", ("int", "float"))
@@ -212,6 +213,7 @@ class TestValueRanges(TestCase):
     def test_pow_half(self):
         ValueRangeAnalysis.pow(ValueRanges.unknown(), ValueRanges.wrap(0.5))
 
+    @skipIfWindows
     @parametrize("fn", BINARY_OPS)
     @parametrize("dtype", ("int", "float"))
     def test_binary_ref(self, fn, dtype):

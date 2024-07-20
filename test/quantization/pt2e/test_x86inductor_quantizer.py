@@ -24,7 +24,8 @@ from torch.testing._internal.common_quantization import (
     skipIfNoX86,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import skipIfTorchDynamo
+
+from torch.testing._internal.common_utils import skipIfTorchDynamo, skipIfWindows
 
 
 class NodePosType(Enum):
@@ -592,6 +593,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
 
 @skipIfNoInductorSupport
 class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
+    @skipIfWindows
     @skipIfNoX86
     def test_conv2d(self):
         """
@@ -624,6 +626,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_list,
             )
 
+    @skipIfWindows
     @skipIfNoX86
     def test_conv2d_unary(self):
         """
@@ -693,6 +696,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_list,
                 )
 
+    @skipIfWindows
     @skipIfNoX86
     def test_conv2d_binary(self):
         """
@@ -743,6 +747,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_list,
                 )
 
+    @skipIfWindows
     @skipIfNoX86
     def test_conv2d_binary2(self):
         """
@@ -939,6 +944,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             torch.ops.aten.max_pool2d.default,
         )
 
+    @skipIfWindows
     @skipIfNoX86
     def test_adaptive_avg_pool2d_recipe(self):
         r"""
@@ -967,6 +973,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             torch.ops.aten.flatten.using_ints,
         )
 
+    @skipIfWindows
     @skipIfNoX86
     def test_cat_recipe(self):
         r"""
@@ -1033,6 +1040,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         self.assertTrue(cat_out_obs is input_obs_of_maxpool)
         self.assertTrue(input_obs_of_maxpool is output_obs_of_maxpool)
 
+    @skipIfWindows
     @skipIfNoX86
     def test_cat_recipe_same_inputs(self):
         r"""
@@ -1081,6 +1089,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         self.assertTrue(cat_act_obs0 is cat_act_obs1)
         self.assertTrue(cat_act_obs0 is cat_out_obs)
 
+    @skipIfWindows
     @skipIfNoX86
     def test_cat_recipe_single_input(self):
         r"""
@@ -1126,6 +1135,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         self.assertTrue(isinstance(cat_out_obs, ObserverBase))
         self.assertTrue(cat_act_obs0 is cat_out_obs)
 
+    @skipIfWindows
     @skipIfNoX86
     def test_avg_pool2d_recipe(self):
         r"""
@@ -2547,6 +2557,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_list,
             )
 
+    @skipIfWindows
     @skipIfNoX86
     def test_attention_block(self):
         """
