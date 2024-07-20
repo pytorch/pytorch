@@ -4,7 +4,6 @@ from typing import Callable, Optional
 from .fake_impl import FakeImplHolder
 from .utils import RegistrationHandle
 
-
 __all__ = ["SimpleLibraryRegistry", "SimpleOperatorEntry", "singleton"]
 
 
