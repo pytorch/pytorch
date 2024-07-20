@@ -1019,6 +1019,8 @@ class DimDynamic(Enum):
     STATIC = 2
     # Treat the dimension as a size-like unbacked
     SIZE_LIKE_UNBACKED = 3
+    # Infer the strides from stride. If size is static, strides will be static as well.
+    INFER_STRIDE = 4
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -1230,7 +1232,9 @@ class StatelessSymbolicContext(SymbolicContext):
     This will cause fresh symbols to be allocated
     """
     dynamic_sizes: DimList[DimDynamic]
+    dynamic_strides: DimList[DimDynamic] = None
     constraint_sizes: DimList[DimConstraint] = None
+    constraint_strides: DimList[DimConstraint] = None
     # If the tensor is a view, this should be populated for the base. It contains
     # information on how to allocate symbols when recursively fakeifying the base
     # during view fake-ification.
@@ -1238,8 +1242,13 @@ class StatelessSymbolicContext(SymbolicContext):
     # TODO: add storage offset and stride symbolic_context
 
     def __post_init__(self):
+        if self.dynamic_strides is None:
+            object.__setattr__(self, 'dynamic_strides', [DimDynamic.INFER_STRIDE] * len(self.dynamic_sizes))
         if self.constraint_sizes is None:
             object.__setattr__(self, 'constraint_sizes', [None] * len(self.dynamic_sizes))
+        if self.constraint_strides is None:
+            object.__setattr__(self, 'constraint_strides', [None] * len(self.dynamic_sizes))
+        assert all(stride in (DimDynamic.INFER_STRIDE, DimDynamic.DYNAMIC, DimDynamic.DUCK) for stride in self.dynamic_strides)
 
 
 # note [Tensor Fakification and Symbol Caching]
@@ -1291,6 +1300,7 @@ class StatefulSymbolicContext(StatelessSymbolicContext):
     shape_env_to_source_to_symbol_cache : Dict[int, Dict["TensorPropertySource", "sympy.Expr"]] = None
 
     def __post_init__(self):
+        super().__post_init__()
         # The None default is annoying, but required because of dataclass limitations
         assert self.tensor_source is not None
         if not self.shape_env_to_source_to_symbol_cache:
@@ -3093,8 +3103,10 @@ class ShapeEnv:
 
         # Reimplement the legacy behavior
         if symbolic_context is None:
-            constraint_dims = [None] * dim
+            constraint_sizes = [None] * dim
+            constraint_strides = [None] * dim
             dynamic_dims = []
+            dynamic_strides = []
             for i in range(dim):
                 # NB: This is encapsulation breaking!  Legacy behavior was
                 # bad.
@@ -3105,13 +3117,22 @@ class ShapeEnv:
                 else:
                     r = DimDynamic.DUCK
                 dynamic_dims.append(r)
+                dynamic_strides.append(r)
             dynamic_dims = [DimDynamic.DUCK] * dim
+            dynamic_strides = [DimDynamic.INFER_STRIDE] * dim
             # symbolic_context is None - set one
-            symbolic_context = StatelessSymbolicContext(dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims)
+            symbolic_context = StatelessSymbolicContext(
+                dynamic_sizes=dynamic_dims,
+                dynamic_strides=dynamic_strides,
+                constraint_sizes=constraint_sizes,
+                constraint_strides=constraint_strides,
+            )
         # We got a StatelessSymbolicContext
         _assert_symbol_context(symbolic_context)
-        constraint_dims = symbolic_context.constraint_sizes
-        dynamic_dims = symbolic_context.dynamic_sizes
+        constraint_sizes = symbolic_context.constraint_sizes
+        constraint_strides = symbolic_context.constraint_strides
+        dynamic_sizes = symbolic_context.dynamic_sizes
+        dynamic_strides = symbolic_context.dynamic_strides
 
         # TODO: make this configurable from outside symbolic_context; we made a symbolic_context
         # decision here where if all sizes are static, we are going to
@@ -3119,10 +3140,13 @@ class ShapeEnv:
         # do this, and arguably we should ALWAYS allow for dynamic offset,
         # this is cheap.
         # TODO: This should be DYNAMIC, using DUCK for BC
-        dynamic_strides_offset = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
+        dynamic_offset = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_sizes) else DimDynamic.DUCK
+        are_sizes_static = all(r == DimDynamic.STATIC for r in dynamic_sizes)
 
-        assert len(dynamic_dims) == dim, f"{len(dynamic_dims)} != {dim}"
-        assert len(constraint_dims) == dim
+        assert len(dynamic_sizes) == dim, f"{len(dynamic_sizes)} != {dim}"
+        assert len(dynamic_strides) == dim, f"{len(dynamic_sizes)} != {dim}"
+        assert len(constraint_sizes) == dim
+        assert len(constraint_strides) == dim
 
         from torch._dynamo.source import TensorPropertySource, TensorProperty
         size: List[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(ex_size, source, symbolic_context)
@@ -3150,7 +3174,8 @@ class ShapeEnv:
                 key=_nested_int_aware_sort,
             )
             for _, i in val_list:
-                if stride[i] is None and ex_stride[i] in candidates:
+                # Set stride to a candidate only for DimDynamic.INFER_STRIDE
+                if stride[i] is None and dynamic_strides[i] == DimDynamic.INFER_STRIDE and ex_stride[i] in candidates:
                     stride[i] = candidates[ex_stride[i]]
                     candidates[ex_size[i] * ex_stride[i]] = size[i] * stride[i]
 
@@ -3163,11 +3188,15 @@ class ShapeEnv:
                         if stride[i] is None
                     ], key=_nested_int_aware_sort
                 )
+                # Set INFER_STRIDE to STATIC or DUCK depending on sizes
+                dyn_stride = dynamic_strides[i]
+                if dynamic_strides[i] == DimDynamic.INFER_STRIDE:
+                    dyn_stride = DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
                 stride[i] = self.create_symbol(
                     val,
                     TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    dynamic_dim=dynamic_strides_offset,
-                    constraint_dim=None,
+                    dynamic_dim=dyn_stride,
+                    constraint_dim=constraint_strides[i],
                     symbolic_context=symbolic_context,
                 )
         assert all(x is not None for x in stride)
@@ -3191,7 +3220,7 @@ class ShapeEnv:
             self.create_symbol(
                 ex_storage_offset,
                 TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-                dynamic_dim=dynamic_strides_offset,
+                dynamic_dim=dynamic_offset,
                 constraint_dim=None,
                 symbolic_context=symbolic_context
             ),
@@ -3656,7 +3685,9 @@ class ShapeEnv:
             return StatelessSymbolicContext(
                 # Ignored; only the constraints part is relevant below.
                 dynamic_sizes=[DimDynamic.DYNAMIC] * t.dim(),
-                constraint_sizes=[None] * t.dim()
+                dynamic_strides=[DimDynamic.INFER_STRIDE] * t.dim(),
+                constraint_sizes=[None] * t.dim(),
+                constraint_strides=[None] * t.dim()
             )
 
         # Expand optional inputs, or verify invariants are upheld
@@ -3918,7 +3949,7 @@ class ShapeEnv:
                 # For subclasses, we need to track symints on BOTH the outer
                 # and inner tensors.
                 sources_tensors_constraints = [
-                    (source, t, context.constraint_sizes)
+                    (source, t, context.constraint_sizes, context.constraint_strides)
                 ]
                 attrs, _ = t.__tensor_flatten__()
                 for attr in attrs:
@@ -3927,22 +3958,24 @@ class ShapeEnv:
                     sources_tensors_constraints.append((
                         AttrSource(source, attr),
                         inner_t,
-                        inner_context.constraint_sizes
+                        inner_context.constraint_sizes,
+                        inner_context.constraint_strides
                     ))
             else:
-                sources_tensors_constraints = [(source, t, context.constraint_sizes)]
+                sources_tensors_constraints = [(source, t, context.constraint_sizes, context.constraint_strides)]
 
-            for src, curr_t, constraint in sources_tensors_constraints:
+            for src, curr_t, constraint_size, constraint_stride in sources_tensors_constraints:
                 if is_sparse_any(curr_t):
                     for i, ss in enumerate(curr_t.size()):
                         property_source = TensorPropertySource(src, TensorProperty.SIZE, i)
-                        track_symint(property_source, ss, constraint[i])
+                        track_symint(property_source, ss, constraint_size[i])
                 else:
                     for i, ss in enumerate(curr_t.size()):
                         property_source = TensorPropertySource(src, TensorProperty.SIZE, i)
-                        track_symint(property_source, ss, constraint[i])
+                        track_symint(property_source, ss, constraint_size[i])
                     for i, ss in enumerate(curr_t.stride()):
-                        track_symint(TensorPropertySource(src, TensorProperty.STRIDE, i), ss)
+                        property_source = TensorPropertySource(src, TensorProperty.STRIDE, i)
+                        track_symint(property_source, ss, constraint_stride[i])
                     track_symint(TensorPropertySource(src, TensorProperty.STORAGE_OFFSET), curr_t.storage_offset())
 
         # 1. Every input must equal the final simplified symbolic expression
