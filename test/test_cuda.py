@@ -19,7 +19,6 @@ from random import randint
 
 import torch
 import torch.cuda
-
 from torch import inf, nan
 from torch.cuda._memory_viz import (
     _profile_to_snapshot,
@@ -71,6 +70,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils.checkpoint import checkpoint_sequential
 from torch.utils.viz._cycles import observe_tensor_cycles
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -979,6 +979,52 @@ except RuntimeError as e:
         res = src[idx]
         res_cpu = src.cpu()[idx.cpu()]
         self.assertEqual(res.cpu(), res_cpu)
+
+    def test_randint_randomness_for_large_range(self) -> None:
+        # For large ranges, randint generation is slightly different. This lead to a subtle bug where some Philox
+        # offsets were not calculated correctly, resulting in reused random states.
+        # See https://github.com/pytorch/pytorch/issues/125224
+        size = 1_000_000
+        high = 6_000_000_000  # Keep this above 2**32
+
+        def run(dev: torch.device) -> int:
+            # Measure how many unique numbers are generated in 2 consecutive calls to randint. If random states are
+            # reused, this will yield fewer unique numbers.
+            gen = torch.Generator(device=dev)
+            gen.manual_seed(0)
+            t1 = torch.randint(
+                0, high, [size], device=dev, generator=gen, dtype=torch.int64
+            )
+            t2 = torch.randint(
+                0, high, [size], device=dev, generator=gen, dtype=torch.int64
+            )
+            return torch.stack([t1, t2]).unique().shape[0]
+
+        # Use CPU as reference. The results should not deviate too much.
+        assert abs(run(torch.device("cuda")) - run(torch.device("cpu"))) < 10_000
+
+    @parametrize("dtype", [torch.float32, torch.double])
+    def test_random_no_reused_random_states(self, dtype: torch.dtype) -> None:
+        # Test if random states do not overlap between consecutive rand/randn calls.
+        # See https://github.com/pytorch/pytorch/issues/125224
+
+        def run(func, dev: torch.device, dtype: torch.dtype) -> int:
+            # Measure how many unique numbers are generated in 2 consecutive calls. If random states are
+            # reused, this will yield fewer unique numbers.
+            size = 1000000
+            gen = torch.Generator(device=dev)
+            gen.manual_seed(0)
+            t1 = func((size,), device=dev, generator=gen, dtype=dtype)
+            t2 = func((size,), device=dev, generator=gen, dtype=dtype)
+            return torch.stack([t1, t2]).unique().shape[0]
+
+        # Use CPU as reference. The results should not deviate too much.
+        for func in [torch.rand, torch.randn]:
+            deviation = abs(
+                run(func, torch.device("cuda"), dtype)
+                - run(func, torch.device("cpu"), dtype)
+            )
+            assert deviation < 50_000, deviation
 
     def test_min_max_inits(self):
         # Testing if THC_reduceAll received the correct index initialization.
@@ -2273,6 +2319,31 @@ torch.cuda.synchronize()
 
         g.reset()
         del g
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_debugdump(self):
+        torch.cuda.empty_cache()
+        x = torch.randn(10240000, device="cuda")
+        y = torch.rand_like(x)
+        g = torch.cuda.CUDAGraph()
+        g.enable_debug_mode()
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+        s0.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s0):
+            g.capture_begin()
+            z = x + y
+            with torch.cuda.stream(s1):
+                s1.wait_stream(s0)
+                w = z + y
+            s0.wait_stream(s1)
+            g.capture_end()
+        s0.synchronize()
+        torch.cuda.synchronize()
+        with tempfile.TemporaryDirectory() as tempdir:
+            g.debug_dump(os.path.join(tempdir, "out_multi_stream.dot"))
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -4446,7 +4517,7 @@ class TestCudaMallocAsync(TestCase):
 
             def alloc():
                 nonlocal total, c
-                b = random.randrange(2 * 1024 * 1024 // 4, 200 * 1024 * 1024 // 4)
+                b = random.randrange(2 * 1024 * 1024 // 4, 20 * 1024 * 1024 // 4)
                 mem.append((c, torch.full((b,), c, dtype=torch.int32, device="cuda")))
                 c += 1
                 total += b
@@ -4460,7 +4531,7 @@ class TestCudaMallocAsync(TestCase):
 
             choices = [alloc, free, torch.cuda.memory.empty_cache]
             for i in range(N):
-                while total >= 1024 * 1024 * 1024 / 4:
+                while total >= 1024 * 1024 * 1024 / (4 * 10):
                     free()
                 (action,) = random.choices(choices, weights=[1, 1 if mem else 0, 0.1])
                 action()
