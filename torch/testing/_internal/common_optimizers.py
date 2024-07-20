@@ -1558,6 +1558,12 @@ optim_db: List[OptimizerInfo] = [
                 "test_tensor_lr",
                 active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
+            DecorateInfo(
+                unittest.expectedFailure,  # Fails if use_closure
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                active_if=lambda kwargs: kwargs["use_closure"],
+            ),
         ),
     ),
     OptimizerInfo(
