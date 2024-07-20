@@ -7,6 +7,7 @@
 #include <ATen/core/Generator.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
 namespace at {
 
@@ -80,3 +81,4 @@ namespace detail {
 TORCH_API const XPUHooksInterface& getXPUHooks();
 } // namespace detail
 } // namespace at
+C10_CLANG_DIAGNOSTIC_POP()
