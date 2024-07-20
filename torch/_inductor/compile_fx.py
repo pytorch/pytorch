@@ -730,8 +730,6 @@ def fx_codegen_and_compile(
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
-    torch._logging.set_logs(output_code=True, benchmarking=True)
-
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
 
