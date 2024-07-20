@@ -528,7 +528,7 @@ class {module_name}(torch.nn.Module):
         for buffer_name, buffer in self._buffers.items():
             if buffer is None:
                 continue
-            model_str += f"{tab * 2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}, dtype={buffer.dtype}))\n"
+            model_str += f"{tab * 2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}, dtype={buffer.dtype}))\n"  # noqa: B950
 
         for param_name, param in self._parameters.items():
             if param is None:
