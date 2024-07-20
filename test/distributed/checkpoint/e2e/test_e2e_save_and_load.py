@@ -33,7 +33,6 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.nn.parallel import DistributedDataParallel
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
