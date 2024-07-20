@@ -12,6 +12,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._inductor import comms
 from torch._inductor.virtualized import ops
 
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
@@ -140,6 +141,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
     decompose_auto_functionalized(gm.graph)
+
+    comms.reinplace_fsdp_all_gather(gm.graph)
 
     gm.recompile()
     optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
