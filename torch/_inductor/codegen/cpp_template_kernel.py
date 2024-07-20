@@ -50,7 +50,7 @@ class CppTemplateKernel(CppKernel):
         self,
         inputs: Dict[str, ir.Buffer],
         outputs: Dict[str, ir.Buffer],
-        aliases: Optional[List[Tuple[ir.Buffer, ir.Buffer]]] = None,
+        aliases: Optional[Dict[str, str]] = None,
     ) -> str:
         for name, inp in inputs.items():
             if inp is not None:
@@ -58,17 +58,11 @@ class CppTemplateKernel(CppKernel):
         for name, out in outputs.items():
             self.args.output_buffers[out.get_name()] = name
         if aliases is not None:
-            for alias, orig in aliases:
-                orig_name = orig.get_name()
-                alias_name = alias.get_name()
-                if orig_name in self.args.input_buffers:
-                    self.args.input_buffers[alias_name] = self.args.input_buffers[
-                        orig_name
-                    ]
-                if orig_name in self.args.output_buffers:
-                    self.args.output_buffers[alias_name] = self.args.output_buffers[
-                        orig_name
-                    ]
+            for alias, orig in aliases.items():
+                if orig in self.args.input_buffers:
+                    self.args.input_buffers[alias] = self.args.input_buffers[orig]
+                if orig in self.args.output_buffers:
+                    self.args.output_buffers[alias] = self.args.output_buffers[orig]
 
         unique_sizevars = {
             s
@@ -92,12 +86,11 @@ class CppTemplateKernel(CppKernel):
         def hook():
             # remove all aliases before generate function definition
             if aliases is not None:
-                for alias, _ in aliases:
-                    alias_name = alias.get_name()
-                    if alias_name in self.args.input_buffers:
-                        self.args.input_buffers[alias_name] = "REMOVED"
-                    if alias_name in self.args.output_buffers:
-                        self.args.output_buffers[alias_name] = "REMOVED"
+                for alias in aliases:
+                    if alias in self.args.input_buffers:
+                        self.args.input_buffers[alias] = "REMOVED"
+                    if alias in self.args.output_buffers:
+                        self.args.output_buffers[alias] = "REMOVED"
             cpp_argdefs, _, _ = self.args.cpp_argdefs()
             return f"void {self.kernel_name}({', '.join(cpp_argdefs)})"
 
