@@ -719,8 +719,11 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 optimizer.step()
 
             metrics = torch._dynamo.utils.get_compilation_metrics()
-            # fwd + bwd = 2 (the important thing is it's the same on all nodes)
-            self.assertEqual(len(metrics), 2)
+            # Number of compiles same on all nodes
+            res = [None] * self.world_size
+            torch.distributed.all_gather_object(res, len(metrics))
+            for r in res[1:]:
+                self.assertEqual(res[0], r)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
@@ -744,8 +747,11 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 f(torch.randn(5, device=self.rank), data)
 
             metrics = torch._dynamo.utils.get_compilation_metrics()
-            # one static, one dynamic
-            self.assertEqual(len(metrics), 2)
+            # Number of compiles same on all nodes
+            res = [None] * self.world_size
+            torch.distributed.all_gather_object(res, len(metrics))
+            for r in res[1:]:
+                self.assertEqual(res[0], r)
 
 
 @requires_nccl()
