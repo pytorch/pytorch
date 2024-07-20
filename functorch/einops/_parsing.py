@@ -29,6 +29,7 @@ import keyword
 import warnings
 from typing import Collection, List, Mapping, Optional, Set, Tuple, Union
 
+
 # NB, this is a single unicode symbol. String is used as it is not a list, but can be iterated
 _ellipsis: str = "\u2026"
 

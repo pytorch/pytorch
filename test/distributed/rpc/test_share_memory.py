@@ -9,6 +9,7 @@ import sys
 import torch
 import torch.distributed as dist
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
