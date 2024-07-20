@@ -495,15 +495,17 @@ namespace c10::cuda {
 // allocations should be done in the pool. For example: using a different
 // system allocator such as ncclMemAlloc.
 struct C10_CUDA_API MemPool {
-  MemPool(CUDAAllocator* allocator = nullptr, bool is_user_created = true);
+  MemPool(
+      CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
+      bool is_user_created = true);
 
   MempoolId_t id();
-  CUDAAllocator* allocator();
+  CUDACachingAllocator::CUDAAllocator* allocator();
 
  private:
   static std::atomic<CaptureId_t> uid_;
   static std::atomic<CaptureId_t> uuid_;
-  CUDAAllocator* allocator_;
+  CUDACachingAllocator::CUDAAllocator* allocator_;
   bool is_user_created_;
   MempoolId_t id_;
 };

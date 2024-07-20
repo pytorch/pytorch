@@ -3547,7 +3547,9 @@ namespace c10::cuda {
 std::atomic<CaptureId_t> MemPool::uid_{1};
 std::atomic<CaptureId_t> MemPool::uuid_{1};
 
-MemPool::MemPool(CUDAAllocator* allocator, bool is_user_created)
+MemPool::MemPool(
+    CUDACachingAllocator::CUDAAllocator* allocator,
+    bool is_user_created)
     : allocator_(allocator), is_user_created_(is_user_created) {
   if (is_user_created_) {
     id_ = {0, uid_++};
@@ -3560,7 +3562,7 @@ MempoolId_t MemPool::id() {
   return id_;
 }
 
-CUDAAllocator* MemPool::allocator() {
+CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {
   return allocator_;
 }
 
