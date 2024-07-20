@@ -107,7 +107,7 @@ class Wishart(ExponentialFamily):
 
         if self.df.le(event_shape[-1] - 1).any():
             raise ValueError(
-                f"Value of df={df} expected to be greater than ndim - 1 = {event_shape[-1]-1}."
+                f"Value of df={df} expected to be greater than ndim - 1 = {event_shape[-1] - 1}."
             )
 
         if scale_tril is not None:
