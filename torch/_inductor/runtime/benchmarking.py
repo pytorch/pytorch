@@ -39,28 +39,32 @@ class LazyBenchmark:
         # to call self.benchmark again
         del self.benchmark
         return timing_ms
+    
+    @staticmethod
+    def magic_function_wrapper(magic_function_name, always_finalize):
+        def wrapped(self, *args, **kwargs):
+            if always_finalize or not hasattr(self, "gen"):
+                return getattr(self.val, magic_function_name)(*args, **kwargs)
+            return LazyBenchmark(lambda: getattr(self.val, magic_function_name)(*args, **kwargs))
+        return wrapped
 
-    __float__ = lambda self: self.timing_ms  # noqa: E731
-    __format__ = lambda self, format_spec: format(self.timing_ms, format_spec)  # noqa: E731
-    __str__ = lambda self: str(self.timing_ms)  # noqa: E731
+    __float__ = magic_function_wrapper("__float__", True)
+    __format__ = magic_function_wrapper("__format__", True)
+    __str__ = magic_function_wrapper("__str__", True)
 
-    __lt__ = lambda self, other: other > self.timing_ms  # noqa: E731
-    __le__ = lambda self, other: other >= self.timing_ms  # noqa: E731
+    __lt__ = magic_function_wrapper("__lt__", True)
+    __le__ = magic_function_wrapper("__le__", True)
+    __gt__ = magic_function_wrapper("__gt__", True)
+    __ge__ = magic_function_wrapper("__ge__", True)
 
-    __gt__ = lambda self, other: other < self.timing_ms  # noqa: E731
-    __ge__ = lambda self, other: other <= self.timing_ms  # noqa: E731
-
-    __add__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms + other)  # noqa: E731
-    __radd__ = lambda self, other: LazyBenchmark(lambda: other + self.timing_ms)  # noqa: E731
-
-    __sub__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms - other)  # noqa: E731
-    __rsub__ = lambda self, other: LazyBenchmark(lambda: other - self.timing_ms)  # noqa: E731
-
-    __mul__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms * other)  # noqa: E731
-    __rmul__ = lambda self, other: LazyBenchmark(lambda: other * self.timing_ms)  # noqa: E731
-
-    __truediv__ = lambda self, other: LazyBenchmark(lambda: self.timing_ms / other)  # noqa: E731
-    __rtruediv__ = lambda self, other: LazyBenchmark(lambda: other / self.timing_ms)  # noqa: E731
+    __add__ = magic_function_wrapper("__add__", False)
+    __radd__ = magic_function_wrapper("__radd__", False)
+    __sub__ = magic_function_wrapper("__sub__", False)
+    __rsub__ = magic_function_wrapper("__rsub__", False)
+    __mul__ = magic_function_wrapper("__mul__", False)
+    __rmul__ = magic_function_wrapper("__rmul__", False)
+    __truediv__ = magic_function_wrapper("__truediv__", False)
+    __rtruediv__ = magic_function_wrapper("__rtruediv__", False)
 
 
 class Benchmarker:
