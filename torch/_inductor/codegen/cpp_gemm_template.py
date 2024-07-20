@@ -280,7 +280,6 @@ class CppPackedGemmTemplate(CppTemplate):
 
         if best_blocking is None:
             for k_factor in factors:
-                # TODO: limit the max k_factor to mitigate sync cost?
                 if k_blocks >= k_factor and (
                     config.cpp.gemm_max_k_slices == 0
                     or k_factor <= config.cpp.gemm_max_k_slices
