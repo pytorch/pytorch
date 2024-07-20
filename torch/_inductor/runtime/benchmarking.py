@@ -1,9 +1,8 @@
 import functools
 import time
-from collections import defaultdict
 from functools import cached_property
 from statistics import median
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, assert_never
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch._dynamo.utils import counters
@@ -549,8 +548,6 @@ class Benchmarker:
             # we may or may not have to delete the callables explicitly to
             # cleanup the memory, just do it now for safety
             del callables
-            if key not in self.memory_cache:
-                assert_never("Callable timing not cached after benchmarking.")
             return self.memory_cache[key]
 
         return LazyBenchmark(benchmark)
