@@ -412,6 +412,7 @@ void mm_get_thread_blocking(
 
 inline void mm_get_thread_blocks(
     int thread_id,
+    int num_threads,
     int64_t M_blocks,
     int64_t N_blocks,
     int64_t K_blocks,
@@ -425,10 +426,14 @@ inline void mm_get_thread_blocks(
     int64_t& k_block_start,
     int64_t& k_block_end) {
   int64_t num_Kt = (K_blocks + Kt_blocks - 1) / Kt_blocks;
+  num_Kt = num_threads / (num_threads / num_Kt);
+  num_threads /= num_Kt;
   k_block_start = (thread_id % num_Kt) * Kt_blocks;
   k_block_end = std::min(k_block_start + Kt_blocks, K_blocks);
   thread_id /= num_Kt;
   int64_t num_Nt = (N_blocks + Nt_blocks - 1) / Nt_blocks;
+  num_Nt = num_threads / (num_threads / num_Nt);
+  num_threads /= num_Nt;
   n_block_start = (thread_id % num_Nt) * Nt_blocks;
   n_block_end = std::min(n_block_start + Nt_blocks, N_blocks);
   thread_id /= num_Nt;
@@ -441,14 +446,18 @@ private:
   bool is_init_;
   size_t size_;
   std::atomic<size_t> counter_;
-  std::atomic_flag flag_ = ATOMIC_FLAG_INIT;
+  std::atomic<bool> all_arrived_;
 
-  inline void pause() {
-
+  void pause() {
+#ifdef __aarch64__
+    __asm__ __volatile__("yield;" : : : "memory");
+#elif defined(__x86_64__) || defined(__i386__)
+    _mm_pause();
+#endif
   }
 
 public:
-  Barrier(): is_init_(false), size_(0), counter_(0) {}
+  Barrier(): is_init_(false), size_(0), counter_(0), all_arrived_(false) {}
 
   Barrier(size_t size) {
     init(size);
@@ -459,25 +468,27 @@ public:
     is_init_ = true;
     size_ = size;
     counter_ = 0;
-    flag_.clear();
+    all_arrived_ = false;
   }
 
   void arrive_and_wait() {
     TORCH_CHECK(is_init_, "Barrier is not initialized.");
-    flag_.test_and_set(std::memory_order_acquire);
+    while (all_arrived_.load(std::memory_order_acquire)) {
+      pause();
+    }
     size_t count = counter_.fetch_add(1, std::memory_order_acquire) + 1;
     if (count == size_) {
-      counter_.store(0, std::memory_order_release);
+      all_arrived_.store(true, std::memory_order_release);
+      count = counter_.fetch_sub(1, std::memory_order_acquire) - 1;
     } else {
-      while (flag_.test_and_set(std::memory_order_acquire)) {
-#ifdef __aarch64__
-        __asm__ __volatile__("yield;" : : : "memory");
-#elif defined(__x86_64__) || defined(__i386__)
-        _mm_pause();
-#endif
+      while (!all_arrived_.load(std::memory_order_acquire)) {
+        pause();
       }
+      count = counter_.fetch_sub(1, std::memory_order_acquire) - 1;
     }
-    flag_.clear(std::memory_order_release);
+    if (count == 0) {
+      all_arrived_.store(false, std::memory_order_release);
+    }
   }
 };
 
