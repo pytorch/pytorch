@@ -5969,15 +5969,15 @@ def forward(self, x):
             """\
 def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item)
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item);  sym_constrain_range_for_size_default = None
     ge = item >= 3
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 3 on node 'ge'");  ge = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 3 on node 'ge'");  ge = _assert_scalar_default = None
     le = item <= 5
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u1 <= 5 on node 'le'");  le = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u1 <= 5 on node 'le'");  le = _assert_scalar_default_1 = None
     gt = item > 2
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = _assert_scalar_default_2 = None
     lt = item < 6
-    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
+    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = _assert_scalar_default_3 = None
     foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
     return foo_unbacked""",
         )
@@ -5989,11 +5989,11 @@ def forward(self, x, y):
     sin = torch.ops.aten.sin.default(y)
     sum_1 = torch.ops.aten.sum.dim_IntList(sin, []);  sin = None
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense);  sym_constrain_range_for_size_default = None
     ge_1 = _local_scalar_dense >= 3
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u3 >= 3 on node 'ge_1'");  ge_1 = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u3 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
     le_1 = _local_scalar_dense <= 5;  _local_scalar_dense = None
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u3 <= 5 on node 'le_1'");  le_1 = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u3 <= 5 on node 'le_1'");  le_1 = _assert_scalar_default_1 = None
     full = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(full, []);  full = None
