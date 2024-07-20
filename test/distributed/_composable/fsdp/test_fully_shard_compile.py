@@ -170,6 +170,8 @@ class TestFullyShardCompile(FSDPTest):
         # reorder_for_compute_comm_overlap_passes=["sink_waits", "raise_comms"],
         _pre_fusion_custom_pass=comms.enforce_comm_ordering_for_fsdp,
         reorder_for_locality=False,
+        allow_buffer_reuse=False,
+        inplace_buffers=False,
     )
     def _test_traceable_fsdp(
         self, model_init_fn, input_creation_fn, backend, fullgraph
@@ -288,12 +290,14 @@ class TestFullyShardCompile(FSDPTest):
         class TestSubmodule(nn.Module):
             def __init__(self, hidden_dim):
                 super().__init__()
-                self.param = nn.Parameter(
-                    torch.randn(hidden_dim, hidden_dim, device="cuda")
+                self.param1 = nn.Parameter(
+                    torch.zeros(hidden_dim, hidden_dim, dtype=torch.float, device="cuda")
                 )
+                self.param2 = nn.Parameter(torch.zeros(hidden_dim, dtype=torch.float, device="cuda"))
 
             def forward(self, x):
-                ret = torch.matmul(x, self.param)
+                ret = torch.matmul(x, self.param1)
+                ret = ret * self.param2
                 ret = torch.relu(ret)
                 return ret
 
@@ -311,15 +315,15 @@ class TestFullyShardCompile(FSDPTest):
                     x = layer(x)
                 for layer in self.layers:
                     x = layer(x)
-                # for layer in self.layers:
-                #     x = layer(x)
+                for layer in self.layers:
+                    x = layer(x)
                 return x
 
         def model_init_fn():
             torch.manual_seed(self.rank)
             fsdp_config = {}
             mesh = init_device_mesh("cuda", (self.world_size,))
-            model = TestModule(n_layers=2)
+            model = TestModule(n_layers=3)
             for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(

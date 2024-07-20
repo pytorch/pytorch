@@ -14,7 +14,7 @@ from torch import _inductor
 
 from . import config, ir
 from .dependencies import WeakDep
-from .utils import contains_collective, contains_wait
+from .utils import contains_collective, contains_wait, is_collective
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 import logging
@@ -507,7 +507,7 @@ def enforce_comm_ordering_for_fsdp(
     from . import scheduler
 
     name_to_fused_node = kwargs["name_to_fused_node"]  # op name to (maybe fused) op
-    graph_inputs = kwargs["graph_inputs"]
+    # graph_inputs = kwargs["graph_inputs"]
     # name_to_buf = kwargs["name_to_buf"]
 
     # def buf_name_to_snode(buf_name):
@@ -537,7 +537,7 @@ def enforce_comm_ordering_for_fsdp(
         for user in snode.users:
             if user.node.get_name() == "OUTPUT":
                 continue
-            user_node = name_to_fused_node[user.node.get_name()]
+            user_node = user.node
             if user_node in collected_node_set:
                 continue
             _find_all_recursive_users_of_node_down_to_criteria(
@@ -548,7 +548,9 @@ def enforce_comm_ordering_for_fsdp(
     scheduled = set()
     ag_nodes = []
     rs_nodes = []
+    ag_op_to_ag_related_ops = defaultdict(set)
     ag_wait_op_to_ag_related_ops = defaultdict(set)
+    ag_wait_op_to_ag_op = {}
     snode_name_to_final_snode = {}
 
     def _create_group_node(snodes_to_group):
@@ -560,33 +562,48 @@ def enforce_comm_ordering_for_fsdp(
 
     # Create grouped nodes for specific ops
     for snode in snodes:
-        if isinstance(snode.node, ir.SetSourceTensorKernel) and any(
-            is_fallback_op(
-                name_to_fused_node[x].node,
-                op=torch.ops.fsdp.split_with_sizes_copy.default,
-            )
+        # Case 1: Handle AllGather
+        if is_collective(snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor_out.default) and any(
+            is_fallback_op(name_to_fused_node[x].node, torch.ops.fsdp.all_gather_copy_in.default)
             for x in snode.ancestors
         ):
-            # Case 1: Handle AllGather
-
-            # Find the "cast + copy_in + getitem + all_gather + all_gather_wait_tensor + copy_out + set_" code block
+            # Find the "cast + copy_in + getitem + all_gather" code block
             collected_node_set: set[scheduler.BaseSchedulerNode] = set()
             _find_all_recursive_deps_of_node_up_to_criteria(
                 snode,
                 collected_node_set,
             )
 
-            # Multiple .set_ nodes could recursively go up to the same all_gather op,
+            ag_nodes = set()
+            for n in collected_node_set:
+                if is_collective(n.node, op=torch.ops._c10d_functional.all_gather_into_tensor_out.default):
+                    ag_nodes.add(n)
+            assert len(ag_nodes) == 1, f"There should only be 1 all_gather node here! but found {len(ag_nodes)} all_gather nodes in {collected_node_set}, len: {len(collected_node_set)}"
+            ag_node = next(iter(ag_nodes))
+            ag_op_to_ag_related_ops[ag_node].update(collected_node_set)
+        elif isinstance(snode.node, ir._WaitKernel) and any(
+            is_collective(name_to_fused_node[x].node, op=torch.ops._c10d_functional.all_gather_into_tensor_out.default)
+            for x in snode.ancestors
+        ):
+            # Find the "all_gather_wait_tensor + copy_out + set_" code block
+            collected_node_set: set[scheduler.BaseSchedulerNode] = set()
+            _find_all_recursive_users_of_node_down_to_criteria(
+                snode,
+                collected_node_set,
+                criteria_cb=lambda x: isinstance(x.node, ir.SetSourceTensorKernel),
+            )
+
+            # Multiple .set_ nodes could recursively go up to the same all_gather wait op,
             # so we use a set in `ag_wait_op_to_ag_related_ops` to deduplicate.
-            wait_node = None
+            wait_nodes = set()
             for n in collected_node_set:
                 if isinstance(n.node, ir._WaitKernel):
-                    wait_node = n
-                    break
+                    wait_nodes.add(n)
+            assert len(wait_nodes) == 1, f"There should only be 1 common wait node here! but found {len(wait_nodes)} wait nodes in {collected_node_set}, len: {len(collected_node_set)}"
+            wait_node = next(iter(wait_nodes))
             ag_wait_op_to_ag_related_ops[wait_node].update(collected_node_set)
+        # Case 2: Handle ReduceScatter
         elif is_fallback_op(snode.node, torch.ops.fsdp.chunk_cat.default):
-            # Case 2: Handle ReduceScatter
-
             # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" code block
             collected_node_set: set[scheduler.BaseSchedulerNode] = set()
             _find_all_recursive_users_of_node_down_to_criteria(
@@ -618,16 +635,28 @@ def enforce_comm_ordering_for_fsdp(
                 )
             )
 
-    for ag_wait_node, collected_node_set in ag_wait_op_to_ag_related_ops.items():
-        # sort nodes by original operation order
-        collected_nodes = sorted(
-            collected_node_set, key=lambda x: int(x.get_name()[3:])
-        )
-        wait_node_idx = collected_nodes.index(ag_wait_node)
+    # Find each all_gather_wait node's corresponding all_gather node
+    for ag_wait_node in ag_wait_op_to_ag_related_ops.keys():
+        ag_nodes = set()
+        for snode_name in ag_wait_node.ancestors:
+            snode = name_to_fused_node[snode_name]
+            if is_collective(snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor_out.default):
+                ag_nodes.add(snode)
+        assert len(ag_nodes) == 1, "There should only be 1 matching all_gather node here!"
+        ag_node = next(iter(ag_nodes))
+        ag_wait_op_to_ag_op[ag_wait_node] = ag_node
+
+    for ag_wait_node, ag_node in ag_wait_op_to_ag_op.items():
         # Group "cast + copy_in + getitem + all_gather" into one GroupedSchedulerNode
-        ag_group_node = _create_group_node(collected_nodes[:wait_node_idx])
+        # sort nodes by original operation order
+        ag_related_nodes = sorted(ag_op_to_ag_related_ops[ag_node], key=lambda x: int(x.get_name()[3:]))
+        ag_group_node = _create_group_node(ag_related_nodes)
+        
         # Group "all_gather_wait_tensor + copy_out + set_" into one GroupedSchedulerNode
-        wait_group_node = _create_group_node(collected_nodes[wait_node_idx:])
+        # sort nodes by original operation order
+        ag_wait_related_nodes = sorted(ag_wait_op_to_ag_related_ops[ag_wait_node], key=lambda x: int(x.get_name()[3:]))
+        wait_group_node = _create_group_node(ag_wait_related_nodes)
+
         ag_nodes.append(
             (
                 ag_group_node,

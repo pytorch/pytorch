@@ -929,6 +929,12 @@ def init_group_snode(
         if dep.name not in group_snode.get_names()
     } - group_snode.read_writes.writes
 
+    for x in group_snode.snodes:
+        try:
+            x.min_order
+        except:
+            print(f"x: {x}, x.node: {x.node}, x.debug_str(): {x.debug_str()}")
+
     group_snode.min_order = min(x.min_order for x in group_snode.snodes)
     group_snode.max_order = max(x.max_order for x in group_snode.snodes)
 
@@ -2666,6 +2672,10 @@ class Scheduler:
         fused_node_names = V.kernel.store_buffer_names
         names_to_remove = []
         for out_buf in V.kernel.store_buffer_names:
+            if out_buf not in self.name_to_node:
+                # Aux buffers created during kernel codegen
+                names_to_remove.append(out_buf)
+                continue
             users = self.name_to_node[out_buf].users
             assert users is not None
             users = {user.get_name() for user in users if not user.is_weak}
