@@ -1900,17 +1900,24 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
 
                     if CompiledFunction.compiled_bw is None:
-                        # Only callsite is aot_dispatch_autograd which guarantees existence of
-                        # lazy_backward_info.saved_context.fw_metadata
                         assert lazy_backward_info is not None
-                        assert lazy_backward_info.saved_context is not None
-                        assert lazy_backward_info.saved_context.fw_metadata is not None
 
                         if not saved_tensors_use_once:
-                            lazy_backward_info.saved_context.fw_metadata.bw_donated_idxs = (
-                                []
-                            )
                             fw_metadata.bw_donated_idxs = []
+                            # Update bw_donated_idxs if using lazy_backward_info from `aot_dispatch_autograd`
+                            if (
+                                hasattr(lazy_backward_info, "saved_context")
+                                and hasattr(
+                                    lazy_backward_info.saved_context, "fw_metadata"
+                                )
+                                and hasattr(
+                                    lazy_backward_info.saved_context.fw_metadata,  # type: ignore[union-attr]
+                                    "bw_donated_idxs",
+                                )
+                            ):
+                                lazy_backward_info.saved_context.fw_metadata.bw_donated_idxs = (  # type: ignore[union-attr]
+                                    []
+                                )
 
                         bw_module = lazy_backward_info.bw_module
                         placeholder_list = lazy_backward_info.placeholder_list

@@ -1323,7 +1323,7 @@ SeqNr|OrigAten|SrcFn
         FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
-    def test_donated_buffer_with_retain_or_create_graph(self):
+    def test_donated_buffer_with_retain_or_create_graph1(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -1339,11 +1339,37 @@ SeqNr|OrigAten|SrcFn
         for _ in range(5):
             mod(inp).sum().backward()
 
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer_with_retain_or_create_graph2(self):
+        # Gives non-empty bw_donated_idxs
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.zeros([3, 3]))
+
+            def forward(self, x):
+                return torch.nn.functional.relu(x) + self.param
+
+        inp = torch.randn(3, 3, requires_grad=True)
+
         mod = torch.compile(Mod())
         out = mod(inp).sum()
         for _ in range(5):
             out.backward(retain_graph=True)
         out.backward()
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer_with_retain_or_create_graph3(self):
+        # Gives non-empty bw_donated_idxs
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.zeros([3, 3]))
+
+            def forward(self, x):
+                return torch.nn.functional.relu(x) + self.param
+
+        inp = torch.randn(3, 3, requires_grad=True)
 
         mod = torch.compile(Mod())
         mod(inp).sum().backward(create_graph=True)
@@ -1351,6 +1377,19 @@ SeqNr|OrigAten|SrcFn
         for _ in range(5):
             out.backward(retain_graph=True)
         out.backward()
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer_with_retain_or_create_graph4(self):
+        # Gives non-empty bw_donated_idxs
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.zeros([3, 3]))
+
+            def forward(self, x):
+                return torch.nn.functional.relu(x) + self.param
+
+        inp = torch.randn(3, 3, requires_grad=True)
 
         mod = torch.compile(Mod())
         mod(inp).sum().backward()
