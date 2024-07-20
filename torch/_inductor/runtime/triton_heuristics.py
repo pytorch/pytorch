@@ -664,7 +664,7 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        return benchmarker.benchmark_gpu(kernel_call)
+        return benchmarker.lazy_benchmark_gpu(kernel_call, ranking_key=f"bench [{hash(self)}]")
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides
@@ -695,6 +695,10 @@ class CachingAutotuner(KernelInterface):
         timings = {
             launcher: self.bench(launcher, *args, **kwargs)
             for launcher in self.launchers
+        }
+        timings = {
+            launcher: float(timing)
+            for launcher, timing in timings.items()
         }
 
         for k, v in timings.items():
@@ -787,7 +791,7 @@ class CachingAutotuner(KernelInterface):
                 _, launcher = self._precompile_config(config, False)
             config2launcher[config] = launcher
 
-            out = self.bench(launcher, *args, **kwargs)
+            out = float(self.bench(launcher, *args, **kwargs))
             log.debug(
                 "COORDESC: %s: %f, nreg %d, nspill %d, #shared-mem %d",
                 launcher.config,
@@ -955,7 +959,7 @@ class DebugAutotuner(CachingAutotuner):
         (launcher,) = self.launchers
 
         if self.cached is None:
-            ms = self.bench(launcher, *args, grid=grid)
+            ms = float(self.bench(launcher, *args, grid=grid))
             num_in_out_ptrs = len(
                 [
                     arg_name
