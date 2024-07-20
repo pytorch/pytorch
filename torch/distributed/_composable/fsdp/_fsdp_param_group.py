@@ -102,15 +102,15 @@ class FSDPParamGroup:
     def __init__(
         self,
         params: List[nn.Parameter],
-        module: nn.Module,
+        modules: Tuple[nn.Module, ...],
         mesh_info: FSDPMeshInfo,
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
-        self.module = module  # permit ref cycle because 1:1 lifetime
-        param_module_infos = _get_param_module_infos(params, module)
+        self.modules = modules  # permit ref cycle because 1:1 lifetime
+        param_module_infos = _get_param_module_infos(params, modules)
         self.fsdp_params = [
             FSDPParam(
                 param,
@@ -570,7 +570,7 @@ class FSDPParamGroup:
 
 
 def _get_param_module_infos(
-    params: List[nn.Parameter], module: nn.Module
+    params: List[nn.Parameter], modules: Tuple[nn.Module, ...]
 ) -> List[ParamModuleInfo]:
     """
     Shared parameter: lin1.weight = lin2.weight
@@ -580,16 +580,21 @@ def _get_param_module_infos(
     """
     params_set = set(params)
     param_to_module_info: Dict[nn.Parameter, ParamModuleInfo] = {}
-    for _, submodule in module.named_modules(remove_duplicate=False):
-        for param_name, param in _named_parameters_with_duplicates(
-            submodule, recurse=False
-        ):
-            if param in params_set:
-                if param not in param_to_module_info:
-                    param_to_module_info[param] = ParamModuleInfo(submodule, param_name)
-                else:
-                    param_to_module_info[param].shared_modules.append(submodule)
-                    param_to_module_info[param].shared_param_names.append(param_name)
+    for module in modules:
+        for _, submodule in module.named_modules(remove_duplicate=False):
+            for param_name, param in _named_parameters_with_duplicates(
+                submodule, recurse=False
+            ):
+                if param in params_set:
+                    if param not in param_to_module_info:
+                        param_to_module_info[param] = ParamModuleInfo(
+                            submodule, param_name
+                        )
+                    else:
+                        param_to_module_info[param].shared_modules.append(submodule)
+                        param_to_module_info[param].shared_param_names.append(
+                            param_name
+                        )
     if len(param_to_module_info) != len(params):
         raise AssertionError(f"Some parameters are not in the module tree of {module}")
     return [param_to_module_info[param] for param in params]
