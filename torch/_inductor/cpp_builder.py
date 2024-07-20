@@ -17,7 +17,7 @@ import sys
 import sysconfig
 import warnings
 from pathlib import Path
-from typing import List, Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._inductor import config, exc
@@ -257,20 +257,33 @@ class BuildOptionsBase:
     and maintains the suitable args.
     """
 
-    def __init__(self) -> None:
-        self._compiler = ""
-        self._definations: List[str] = []
-        self._include_dirs: List[str] = []
-        self._cflags: List[str] = []
-        self._ldflags: List[str] = []
-        self._libraries_dirs: List[str] = []
-        self._libraries: List[str] = []
+    def __init__(
+        self,
+        compiler: str = "",
+        definitions: Optional[List[str]] = None,
+        include_dirs: Optional[List[str]] = None,
+        cflags: Optional[List[str]] = None,
+        ldflags: Optional[List[str]] = None,
+        libraries_dirs: Optional[List[str]] = None,
+        libraries: Optional[List[str]] = None,
+        passthrough_args: Optional[List[str]] = None,
+        aot_mode: bool = False,
+        use_absolute_path: bool = False,
+        compile_only: bool = False,
+    ) -> None:
+        self._compiler = compiler
+        self._definations: List[str] = definitions or []
+        self._include_dirs: List[str] = include_dirs or []
+        self._cflags: List[str] = cflags or []
+        self._ldflags: List[str] = ldflags or []
+        self._libraries_dirs: List[str] = libraries_dirs or []
+        self._libraries: List[str] = libraries or []
         # Some args is hard to abstract to OS compatable, passthough it directly.
-        self._passthough_args: List[str] = []
+        self._passthough_args: List[str] = passthrough_args or []
 
-        self._aot_mode: bool = False
-        self._use_absolute_path: bool = False
-        self._compile_only: bool = False
+        self._aot_mode: bool = aot_mode
+        self._use_absolute_path: bool = use_absolute_path
+        self._compile_only: bool = compile_only
 
     def _remove_duplicate_options(self):
         self._definations = _remove_duplication_in_list(self._definations)
@@ -313,6 +326,24 @@ class BuildOptionsBase:
 
     def get_compile_only(self) -> bool:
         return self._compile_only
+
+    def save_flags_to_file(self, file) -> None:
+        attrs = {
+            "compiler": self.get_compiler(),
+            "definitions": self.get_definations(),
+            "include_dirs": self.get_include_dirs(),
+            "cflags": self.get_cflags(),
+            "ldflags": self.get_ldflags(),
+            "libraries_dirs": self.get_libraries_dirs(),
+            "libraries": self.get_libraries(),
+            "passthrough_args": self.get_passthough_args(),
+            "aot_mode": self.get_aot_mode(),
+            "use_absolute_path": self.get_use_absolute_path(),
+            "compile_only": self.get_compile_only(),
+        }
+
+        with open(file, "w") as f:
+            json.dump(attrs, f)
 
 
 def _get_warning_all_cflag(warning_all: bool = True) -> List[str]:

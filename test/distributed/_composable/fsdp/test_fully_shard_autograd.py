@@ -5,13 +5,11 @@ import copy
 import functools
 import itertools
 import unittest
-
 from typing import Any, List, Optional, Type, Union
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-
 from torch.distributed._composable.fsdp import fully_shard
 from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.testing._internal.common_cuda import TEST_CUDA
