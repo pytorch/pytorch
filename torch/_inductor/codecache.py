@@ -3320,7 +3320,7 @@ class CUDACodeCache:
                     except subprocess.CalledProcessError as error:
                         raise exc.CUDACompileError(cmd_parts, error.output) from error
                     end_time = time()
-                    log_duration_msg = f"CUDA Compilation took {end_time-start_time} seconds. Compile command: {cmd}"
+                    log_duration_msg = f"CUDA Compilation took {end_time - start_time} seconds. Compile command: {cmd}"
                     log.info(log_duration_msg)
                 else:
                     log.debug(
@@ -3414,7 +3414,7 @@ class ROCmCodeCache:
                     except subprocess.CalledProcessError as error:
                         raise exc.CUDACompileError(cmd_parts, error.output) from error
                     end_time = time()
-                    log_duration_msg = f"Compilation took {end_time-start_time} seconds. Compile command: {cmd}"
+                    log_duration_msg = f"Compilation took {end_time - start_time} seconds. Compile command: {cmd}"
                     log.info(log_duration_msg)
                 else:
                     log.debug(

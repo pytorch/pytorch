@@ -330,9 +330,7 @@ class TestTorchScriptOnnxDiagnostics(common_utils.TestCase):
             diagnostics.export_context().log(diagnostic)
 
     def test_diagnostics_records_python_call_stack(self):
-        diagnostic = diagnostics.TorchScriptOnnxExportDiagnostic(
-            self._sample_rule, diagnostics.levels.NOTE
-        )
+        diagnostic = diagnostics.TorchScriptOnnxExportDiagnostic(self._sample_rule, diagnostics.levels.NOTE)  # fmt: skip
         # Do not break the above line, otherwise it will not work with Python-3.8+
         stack = diagnostic.python_call_stack
         assert stack is not None  # for mypy

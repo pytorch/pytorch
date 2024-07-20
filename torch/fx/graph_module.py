@@ -523,20 +523,20 @@ class {module_name}(torch.nn.Module):
                 blobified_modules.append(module_name)
                 module_repr = module.__repr__().replace("\r", " ").replace("\n", " ")
                 module_str = f"torch.load(r'{module_file}') # {module_repr}"
-            model_str += f"{tab*2}self.{module_name} = {module_str}\n"
+            model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in self._buffers.items():
             if buffer is None:
                 continue
-            model_str += f"{tab*2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}, dtype={buffer.dtype}))\n"
+            model_str += f"{tab * 2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}, dtype={buffer.dtype}))\n"
 
         for param_name, param in self._parameters.items():
             if param is None:
                 continue
-            model_str += f"{tab*2}self.{param_name} = torch.nn.Parameter(torch.empty({list(param.shape)}, dtype={param.dtype}))\n"
+            model_str += f"{tab * 2}self.{param_name} = torch.nn.Parameter(torch.empty({list(param.shape)}, dtype={param.dtype}))\n"
 
         model_str += (
-            f"{tab*2}self.load_state_dict(torch.load(r'{folder}/state_dict.pt'))\n"
+            f"{tab * 2}self.load_state_dict(torch.load(r'{folder}/state_dict.pt'))\n"
         )
         model_str += f"{_addindent(self.code, 4)}\n"
 
