@@ -421,7 +421,7 @@ class _MinimizerBase:
         self.reports.append(report)
         report.append(f"Binary search iteration {self.iteration}")
         report.append(
-            f"From node index {start_idx}:{first_node_name} to {end_idx-1}:{output_node_name}. "
+            f"From node index {start_idx}:{first_node_name} to {end_idx - 1}:{output_node_name}. "
             f"Size of the interested node list is {len(nodes)}"
         )
         cur_nodes: NodeSet = set(nodes)
@@ -754,7 +754,7 @@ class _MinimizerBase:
         self.iteration += 1
         report.append(f" Nodes block {self.iteration}.")
         report.append(
-            f"From node index {start_idx} to {end_idx-1}. "
+            f"From node index {start_idx} to {end_idx - 1}. "
             f"Size of the interested node list is {len(nodes)}"
         )
 
