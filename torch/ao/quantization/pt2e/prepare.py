@@ -24,7 +24,7 @@ from torch.ao.quantization.quantizer import (
     QuantizationSpecBase,
 )
 from torch.ao.quantization import ObserverOrFakeQuantize
-from torch.ao.quantization.pt2e.numeric_debugger import NUMERIC_DEBUG_HANDLE_KEY
+from torch.ao.quantization import NUMERIC_DEBUG_HANDLE_KEY
 
 # TODO: make pt2e folder private?
 __all__ = [
