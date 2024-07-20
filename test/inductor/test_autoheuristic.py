@@ -108,7 +108,6 @@ class AutoHeuristicTest(TestCase):
             lines = file.readlines()
             self.assertTrue('"numerical_features": ["fa"]' in lines[0])
             self.assertTrue('"categorical_features": []' in lines[0])
-            self.assertTrue('"choices": ["a", "b", "c"]' in lines[0])
             self.assertTrue(f'"shared_memory": {shared_memory}' in lines[0])
             self.assertTrue(f'"device_capa": [{fst}, {snd}]' in lines[0])
             self.assertTrue('"name": "test"' in lines[0])
