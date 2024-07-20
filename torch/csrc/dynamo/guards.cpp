@@ -836,9 +836,18 @@ std::string get_exception_message() {
 }
 
 bool is_immutable_object(py::handle example_value) {
-  return PyTuple_CheckExact(example_value.ptr()) ||
-      PyLong_Check(example_value.ptr()) || PyFloat_Check(example_value.ptr()) ||
-      PyBool_Check(example_value.ptr()) ||
+  if (PyTuple_Check(example_value.ptr())) {
+    // Check that each element is immutable
+    for (Py_ssize_t i = 0; i < PyTuple_Size(example_value.ptr()); ++i) {
+      if (!is_immutable_object(
+              py::handle(PyTuple_GetItem(example_value.ptr(), i)))) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return PyLong_Check(example_value.ptr()) ||
+      PyFloat_Check(example_value.ptr()) || PyBool_Check(example_value.ptr()) ||
       PyUnicode_Check(example_value.ptr()) ||
       THPVariable_Check(example_value.ptr());
 }
