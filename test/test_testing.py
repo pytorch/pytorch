@@ -485,7 +485,7 @@ if __name__ == '__main__':
         del env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY]
         env[PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY] = 'cpu'
         _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
-        self.assertIn(f'Ran {test_bases_count-1} test', stderr.decode('ascii'))
+        self.assertIn(f'Ran {test_bases_count - 1} test', stderr.decode('ascii'))
 
         # Test with setting both should throw exception
         env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'

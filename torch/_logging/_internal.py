@@ -799,7 +799,7 @@ class TorchLogsFormatter(logging.Formatter):
             record.artifactprefix = f" [__{artifact_name}]"
 
         prefix = (
-            f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs*1000):06d} {record.process} "
+            f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs * 1000):06d} {record.process} "
             f"{os.path.relpath(record.pathname, os.path.dirname(os.path.dirname(torch.__file__)))}:"
             f"{record.lineno}]{record.traceid}{record.artifactprefix}"
         )
