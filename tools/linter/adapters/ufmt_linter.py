@@ -21,7 +21,7 @@ from usort import Config as UsortConfig
 
 IS_WINDOWS: bool = os.name == "nt"
 REPO_ROOT = Path(__file__).absolute().parents[3]
-ISORT_WHITELIST = re.compile(
+ISORT_SKIPLIST = re.compile(
     "|".join(
         (
             r"\A\Z",  # empty string
@@ -32,22 +32,17 @@ ISORT_WHITELIST = re.compile(
                     # .ci/**
                     # .github/**
                     # benchmarks/**
-                    "benchmarks/**",
                     # functorch/**
-                    "functorch/**",
                     # tools/**
                     # torchgen/**
                     # test/**
                     # test/[a-c]*/**
                     "test/[a-c]*/**",
                     # test/d*/**
-                    "test/d*/**",
                     # test/dy*/**
                     "test/dy*/**",
                     # test/[e-h]*/**
-                    "test/[e-h]*/**",
                     # test/i*/**
-                    "test/i*/**",
                     # test/j*/**
                     "test/j*/**",
                     # test/[k-p]*/**
@@ -55,17 +50,13 @@ ISORT_WHITELIST = re.compile(
                     # test/[q-z]*/**
                     "test/[q-z]*/**",
                     # torch/**
-                    "torch/**",
                     # torch/_[a-c]*/**
-                    "torch/_[a-c]*/**",
                     # torch/_d*/**
                     "torch/_d*/**",
                     # torch/_[e-h]*/**
-                    "torch/_[e-h]*/**",
                     # torch/_i*/**
                     "torch/_i*/**",
                     # torch/_[j-z]*/**
-                    "torch/_[j-z]*/**",
                     # torch/[a-c]*/**
                     "torch/[a-c]*/**",
                     # torch/d*/**
@@ -129,7 +120,7 @@ def check_file(filename: str) -> list[LintMessage]:
         usort_config = UsortConfig.find(path)
         black_config = make_black_config(path)
 
-        if not path.samefile(__file__) and not ISORT_WHITELIST.match(
+        if not path.samefile(__file__) and not ISORT_SKIPLIST.match(
             path.absolute().relative_to(REPO_ROOT).as_posix()
         ):
             isorted_replacement = re.sub(
