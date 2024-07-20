@@ -235,10 +235,11 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
   py::gil_scoped_acquire gil;
 
   py::handle load_aoti_eager_cache_function =
-      py::module::import("torch._inductor.utils").attr("load_aoti_eager_cache");
+      py::module::import("torch._inductor.aoti_eager")
+          .attr("load_aoti_eager_cache");
   TORCH_INTERNAL_ASSERT(
       load_aoti_eager_cache_function.ptr() != nullptr,
-      "Failed to import - torch._inductor.utils.load_aoti_eager_cache");
+      "Failed to import - torch._inductor.aoti_eager.load_aoti_eager_cache");
 
   auto result = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
       load_aoti_eager_cache_function.ptr(),
@@ -431,12 +432,12 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       overload_name);
 
   py::handle aot_compile_function =
-      py::module::import("torch._inductor.utils")
+      py::module::import("torch._inductor.aoti_eager")
           .attr("aoti_compile_with_persistent_cache");
   TORCH_INTERNAL_ASSERT(
       aot_compile_function.ptr() != nullptr &&
           aot_compile_function.ptr() != Py_None,
-      "Failed to import - torch._inductor.utils.aoti_compile_with_persistent_cache");
+      "Failed to import - torch._inductor.aoti_eager.aoti_compile_with_persistent_cache");
 
   // Pass the python operation to the AOT Inductor to generate the kernel
   // library.

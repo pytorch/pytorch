@@ -468,6 +468,7 @@ class FunctionEvent(FormattedTimesMixin):
         flops=None,
         trace_name=None,
         concrete_inputs=None,
+        kwinputs=None,
     ):
         self.id: int = id
         self.node_id: int = node_id
@@ -482,6 +483,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.cpu_parent: Optional[FunctionEvent] = None
         self.input_shapes: Tuple[int, ...] = input_shapes
         self.concrete_inputs: List[Any] = concrete_inputs
+        self.kwinputs: Dict[str, Any] = kwinputs
         self.stack: List = stack
         self.scope: int = scope
         self.use_device: Optional[str] = use_device

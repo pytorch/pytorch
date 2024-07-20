@@ -5,7 +5,6 @@ import unittest
 
 import torch
 import torch.utils._pytree as pytree
-
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
 from torch._higher_order_ops.while_loop import while_loop
@@ -17,7 +16,6 @@ from torch._subclasses.functional_tensor import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
@@ -1647,9 +1645,9 @@ def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_lin
                 gm.body_fn_0.code.strip(),
                 """\
 def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
-    sub = l_iter_ - 1;  l_iter_ = None
-    linear = torch._C._nn.linear(l_x_, l_self_modules_linear_parameters_weight__body_fn, l_self_modules_linear_parameters_bias__body_fn);  l_x_ = l_self_modules_linear_parameters_weight__body_fn = l_self_modules_linear_parameters_bias__body_fn = None
-    return (sub, linear)""",  # noqa: B950
+    child = l_iter_ - 1;  l_iter_ = None
+    child_1 = torch._C._nn.linear(l_x_, l_self_modules_linear_parameters_weight__body_fn, l_self_modules_linear_parameters_bias__body_fn);  l_x_ = l_self_modules_linear_parameters_weight__body_fn = l_self_modules_linear_parameters_bias__body_fn = None
+    return (child, child_1)""",  # noqa: B950
             )
         else:
             self.assertExpectedInline(

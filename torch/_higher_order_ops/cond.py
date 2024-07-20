@@ -169,7 +169,19 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
         with disable_proxy_modes_tracing():
             fw_inputs = pytree.tree_map(_from_fun, operands)
 
-            fw_outputs_true = pytree.tree_map(_from_fun, true_fn(*fw_inputs))
+            try:
+                fw_outputs_true = pytree.tree_map(_from_fun, true_fn(*fw_inputs))
+            except TypeError as e:
+                raise RuntimeError(
+                    "TypeError:"
+                    + "true_graph:\n"
+                    + true_fn.print_readable(print_output=False)
+                    + "\nfalse_fn:\n"
+                    + false_fn.print_readable(print_output=False)
+                    + "\n"
+                    + str(fw_inputs)
+                ) from e
+
             if any(
                 not isinstance(out, torch.Tensor)
                 for out in fw_outputs_true
@@ -199,6 +211,20 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
             fw_false_graph, joint_false_graph = create_fw_bw_graph(
                 false_fn, False, fw_inputs, fw_outputs_false
             )
+            from torch.testing._internal.common_utils import IS_WINDOWS
+
+            if IS_WINDOWS:
+                print("---------------")
+                print("true_graph", fw_true_graph.print_readable(print_output=False))
+                print("false_graph", fw_false_graph.print_readable(print_output=False))
+                print(
+                    "backward_true_graph",
+                    joint_true_graph.print_readable(print_output=False),
+                )
+                print(
+                    "backward_false_graph",
+                    joint_false_graph.print_readable(print_output=False),
+                )
 
         return fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph
 
