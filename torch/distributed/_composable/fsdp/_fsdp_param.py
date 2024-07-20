@@ -120,7 +120,13 @@ def set__functionalize(tensor, data):
     torch._sync(data)
     tensor_inner = torch._from_functional_tensor(tensor)
     data_inner = torch._from_functional_tensor(data)
-    tensor_inner.set_(data_inner)  # type: ignore[call-overload]
+    with torch._C._ExcludeDispatchKeyGuard(
+        torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+    ):
+        torch.ops.fsdp.set_.default(tensor_inner, data_inner)
+
+
+torch.fx.node.has_side_effect(torch.ops.fsdp.set_.default)
 
 
 class ShardedState(Enum):
@@ -445,7 +451,7 @@ class FSDPParam:
         if hasattr(self, "_unsharded_param"):
             assert ca.compiled_autograd_enabled
             with torch.no_grad():
-                torch.ops.fsdp.set_(self._unsharded_param, unsharded_param)
+                torch.ops.fsdp.set_.default(self._unsharded_param, unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(
                 unsharded_param, requires_grad=self.sharded_param.requires_grad

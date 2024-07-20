@@ -7,12 +7,35 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/ScopeExit.h>
+#include <c10/util/SmallVector.h>
 
-namespace torch {
-namespace monitor {
+namespace torch::monitor {
 namespace detail {
 class WaitCounterImpl;
-}
+
+class WaitCounterBackendIf {
+ public:
+  virtual ~WaitCounterBackendIf() = default;
+
+  virtual intptr_t start(
+      std::chrono::steady_clock::time_point now) noexcept = 0;
+  virtual void stop(
+      std::chrono::steady_clock::time_point now,
+      intptr_t ctx) noexcept = 0;
+};
+
+class WaitCounterBackendFactoryIf {
+ public:
+  virtual ~WaitCounterBackendFactoryIf() = default;
+
+  // May return nullptr.
+  // In this case the counter will be ignored by the given backend.
+  virtual std::unique_ptr<WaitCounterBackendIf> create(
+      std::string_view key) noexcept = 0;
+};
+
+void registerWaitCounterBackend(std::unique_ptr<WaitCounterBackendFactoryIf>);
+} // namespace detail
 
 // A handle to a wait counter.
 class WaitCounterHandle {
@@ -27,18 +50,18 @@ class WaitCounterHandle {
 
     void stop() {
       if (auto handle = std::exchange(handle_, nullptr)) {
-        handle->stop(ctx_);
+        handle->stop(std::move(ctxs_));
       }
     }
 
    private:
-    WaitGuard(WaitCounterHandle& handle, intptr_t ctx)
-        : handle_{&handle}, ctx_{ctx} {}
+    WaitGuard(WaitCounterHandle& handle, c10::SmallVector<intptr_t>&& ctxs)
+        : handle_{&handle}, ctxs_{std::move(ctxs)} {}
 
     friend class WaitCounterHandle;
 
     WaitCounterHandle* handle_;
-    intptr_t ctx_;
+    c10::SmallVector<intptr_t> ctxs_;
   };
 
   // Starts a waiter
@@ -47,12 +70,11 @@ class WaitCounterHandle {
  private:
   // Stops the waiter. Each start() call should be matched by exactly one stop()
   // call.
-  void stop(intptr_t ctx);
+  void stop(c10::SmallVector<intptr_t>&& ctxs);
 
   detail::WaitCounterImpl& impl_;
 };
-} // namespace monitor
-} // namespace torch
+} // namespace torch::monitor
 
 #define STATIC_WAIT_COUNTER(_key)                           \
   []() -> torch::monitor::WaitCounterHandle& {              \
