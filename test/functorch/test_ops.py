@@ -457,11 +457,7 @@ class TestOperators(TestCase):
                 {torch.float32: tol(atol=1e-04, rtol=1e-04)},
             ),
             tol1("masked.cumprod", {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
-            tol1(
-                "svd_lowrank",
-                {torch.float32: tol(atol=3e-04, rtol=3e-04)},
-                device_type="cuda",
-            ),
+            tol1("svd_lowrank", {torch.float32: tol(atol=3e-04, rtol=3e-04)}),
             tol1(
                 "linalg.multi_dot",
                 {torch.float32: tol(atol=1e-05, rtol=8e-04)},
