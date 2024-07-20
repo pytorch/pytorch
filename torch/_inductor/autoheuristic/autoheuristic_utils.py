@@ -106,7 +106,6 @@ class AHMetadata:
         return {
             "shared_memory": self.shared_memory,
             "device_capa": self.device_capa,
-            "choices": self.choices,
             "name": self.name,
         }
 
