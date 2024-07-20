@@ -5,7 +5,6 @@
 #include <ATen/TensorGeometry.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/irange.h>
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/mkldnn_rewrite.h>
@@ -130,12 +129,12 @@ bool& getOptConditionals() {
 
 std::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs) {
-  std::optional<at::Device> device = c10::nullopt;
+  std::optional<at::Device> device = std::nullopt;
   for (auto const& input : inputs) {
     auto tt = input->type()->cast<TensorType>();
     if (tt && tt->device()) {
       if (device && *device != *tt->device()) {
-        return c10::nullopt;
+        return std::nullopt;
       }
       device = *tt->device();
     }
@@ -145,7 +144,7 @@ std::optional<at::Device> pickDeviceType(
 
 static std::optional<at::Device> pickDeviceType(
     const std::shared_ptr<Graph>& graph) {
-  std::optional<at::Device> device = c10::nullopt;
+  std::optional<at::Device> device = std::nullopt;
   for (auto const& node : graph->nodes()) {
     for (auto const& input : node->inputs()) {
       if (auto tt = input->type()->cast<TensorType>()) {
@@ -185,10 +184,10 @@ static std::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
   c10::ScalarType dtype = c10::ScalarType::Float;
 
   if (!it) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   if (!it->isComplete()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   if (it->scalarType()) {
     // TODO: ideally we should be strict here and return nullopt if the dtype is
@@ -198,7 +197,7 @@ static std::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
   }
   auto concrete_sizes = it->sizes().concrete_sizes();
   if (!concrete_sizes) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return TensorInfo{*concrete_sizes, dtype};
 }
@@ -713,7 +712,7 @@ static std::optional<int64_t> tripCount(ForPtr loop) {
   if (auto val = to<LongImm>(tc.node())) {
     return val->value();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 // Prune innermost loops until iterations satisfies a minimum grain size.
@@ -885,7 +884,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
         inner1->set_gpu_thread_index(0);
       } else {
         throw std::runtime_error(
-            "Invalid loop-level: " + c10::to_string(loopLevels));
+            "Invalid loop-level: " + std::to_string(loopLevels));
       }
     }
   }
@@ -953,7 +952,7 @@ std::string TensorExprKernel::getCodeGenName(BackendType backendType) {
     default:
       throw std::runtime_error(
           "invalid backend type: " +
-          c10::to_string(static_cast<int>(backendType)));
+          std::to_string(static_cast<int>(backendType)));
   }
 }
 
@@ -1190,7 +1189,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
           ToDtype(static_cast<ScalarType>(*tt->scalarType())));
 
       result = Compute(
-          "input" + c10::to_string(bufs_.size() + 1),
+          "input" + std::to_string(bufs_.size() + 1),
           size_handles,
           [&](const std::vector<VarHandle>& axes) {
             ExprHandle idx = 0;
@@ -1315,7 +1314,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   BufPtr buf = bufs_.at(v);
   TORCH_INTERNAL_ASSERT(buf != nullptr);
   TORCH_INTERNAL_ASSERT(tt != nullptr);
-  TORCH_INTERNAL_ASSERT(tt->symbolic_sizes().rank() != c10::nullopt);
+  TORCH_INTERNAL_ASSERT(tt->symbolic_sizes().rank() != std::nullopt);
 
   auto stride_desc = getSymbolicStrideDesc(v);
   TORCH_INTERNAL_ASSERT(stride_desc.size() == 1);

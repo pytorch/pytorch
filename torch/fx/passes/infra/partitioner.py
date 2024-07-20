@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 import collections
 import itertools
@@ -17,16 +18,16 @@ logger.setLevel(logging.WARNING)
 class Partition:
     def __init__(self, id: Optional[int] = None, nodes: Optional[Iterable[Node]] = None):
         self.id = id
-        self.nodes: Set[Node] = set(nodes) if nodes is not None else set()
+        self.nodes = dict.fromkeys(nodes) if nodes is not None else {}
 
     def __repr__(self) -> str:
         return str(self.nodes)
 
     def add_node(self, node: Node):
-        self.nodes.add(node)
+        self.nodes.update({node: None})
 
     def remove_node(self, node: Node):
-        self.nodes.remove(node)
+        del self.nodes[node]
 
     def size(self):
         return len(self.nodes)
@@ -262,10 +263,14 @@ class CapabilityBasedPartitioner:
 
         return [partition for partition in partitions_by_id.values() if partition.size() > 0]
 
-    def fuse_partitions(self, partitions: List[Partition]) -> GraphModule:
+    def fuse_partitions(self, partitions: List[Partition], prefix: str = "fused_") -> GraphModule:
         logger.debug("Fusing partitions...")
         # fuse_by_partitions expects partitions in List[List[Node]]: [ [node0, node1], [node2, node3] ]
-        return fuse_by_partitions(self.graph_module, [list(partition.nodes) for partition in partitions])
+        return fuse_by_partitions(
+            self.graph_module,
+            [list(partition.nodes) for partition in partitions],
+            prefix=prefix,
+        )
 
     # remove non-compute-ops that sits at the boundary of a partition.
     def remove_bookend_non_compute_ops(self, partitions: List[Partition]):
@@ -316,14 +321,15 @@ class CapabilityBasedPartitioner:
             remove_node: Set[Node] = set()
             for node in partition.nodes:
                 if is_non_compute_node(node) and \
-                    (is_transparent_input_node(node, partition.nodes, remove_node) or
-                     is_transparent_output_node(node, partition.nodes, remove_node)):
+                    (is_transparent_input_node(node, set(partition.nodes), remove_node) or
+                     is_transparent_output_node(node, set(partition.nodes), remove_node)):
                     remove_node.add(node)
 
             if len(remove_node) != 0:
-                partition.nodes = partition.nodes - remove_node
+                for node in remove_node:
+                    partition.nodes.pop(node, None)
 
-    def partition_and_fuse(self) -> GraphModule:
+    def partition_and_fuse(self, prefix: str = "fused_") -> GraphModule:
         partitions = self.propose_partitions()
-        fused_gm = self.fuse_partitions(partitions)
+        fused_gm = self.fuse_partitions(partitions, prefix=prefix)
         return fused_gm

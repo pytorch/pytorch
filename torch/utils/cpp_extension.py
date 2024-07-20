@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import glob
 import importlib
@@ -307,9 +308,11 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     """
     if IS_WINDOWS:
         return True
-    which = subprocess.check_output(['which', compiler], stderr=subprocess.STDOUT)
+    compiler_path = shutil.which(compiler)
+    if compiler_path is None:
+        return False
     # Use os.path.realpath to resolve any symlinks, in particular from 'c++' to e.g. 'g++'.
-    compiler_path = os.path.realpath(which.decode(*SUBPROCESS_DECODE_ARGS).strip())
+    compiler_path = os.path.realpath(compiler_path)
     # Check the compiler name
     if any(name in compiler_path for name in _accepted_compilers_for_platform()):
         return True
@@ -960,6 +963,9 @@ def CppExtension(name, sources, *args, **kwargs):
     libraries.append('torch')
     libraries.append('torch_cpu')
     libraries.append('torch_python')
+    if IS_WINDOWS:
+        libraries.append("sleef")
+
     kwargs['libraries'] = libraries
 
     kwargs['language'] = 'c++'
@@ -1167,6 +1173,11 @@ def include_paths(cuda: bool = False) -> List[str]:
         # but gcc doesn't like having /usr/include passed explicitly
         if cuda_home_include != '/usr/include':
             paths.append(cuda_home_include)
+
+        # Support CUDA_INC_PATH env variable supported by CMake files
+        if (cuda_inc_path := os.environ.get("CUDA_INC_PATH", None)) and \
+                cuda_inc_path != '/usr/include':
+            paths.append(cuda_inc_path)
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, 'include'))
     return paths
@@ -1424,10 +1435,7 @@ def _check_and_build_extension_h_precompiler_headers(
             # read all content of a file
             content = file.read()
             # check if string present in a file
-            if signature == content:
-                return True
-            else:
-                return False
+            return signature == content
 
     def _create_if_not_exist(path_dir):
         if not os.path.exists(path_dir):
@@ -1874,9 +1882,6 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         extra_ldflags.append('-ltorch')
         if not is_standalone:
             extra_ldflags.append('-ltorch_python')
-
-        if is_standalone and "TBB" in torch.__config__.parallel_info():
-            extra_ldflags.append('-ltbb')
 
         if is_standalone:
             extra_ldflags.append(f"-Wl,-rpath,{TORCH_LIB_PATH}")

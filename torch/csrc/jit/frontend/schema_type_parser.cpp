@@ -4,7 +4,6 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/symbol.h>
 #include <ATen/core/type_factory.h>
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/custom_class.h>
@@ -82,12 +81,27 @@ TypePtr SchemaTypeParser::parseBaseType() {
 
   auto it = type_map.find(text);
   if (it == type_map.end()) {
-    if (!text.empty() && islower(text[0])) {
+    if (allow_typevars_ && !text.empty() && islower(text[0])) {
       // lower case identifiers that are not otherwise valid types
       // are treated as type variables
       return c10::TypeFactory::createNamed<VarType>(text);
     }
-    throw ErrorReport(tok.range) << "unknown type specifier";
+    if (text == "double") {
+      throw ErrorReport(tok.range)
+          << "Use `float` instead of `double` in an operator's schema string. "
+             "`float` in schema corresponds to the double type in C++";
+    }
+    if (text == "int64_t") {
+      throw ErrorReport(tok.range)
+          << "Use `SymInt` or `int` instead of `int64_t` in an operator's schema string. "
+             "`SymInt` corresponds to c10::SymInt in C++ while `int` in schema corresponds "
+             "to the int64_t type in C++.";
+    }
+    throw ErrorReport(tok.range)
+        << "unknown type specifier. Common valid schema types include "
+           "Tensor, SymInt, int, float, bool, Scalar; "
+           "for a full list, please see "
+           "https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/README.md#func ";
   }
   return it->second;
 }
@@ -141,7 +155,7 @@ std::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
         Symbol::fromQualString("alias::$" + std::to_string(next_id++)));
     alias_info.setIsWrite(true);
   } else {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   return alias_info;
@@ -154,11 +168,12 @@ std::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
   static std::unordered_map<std::string, at::ScalarType> type_map = {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 
+#undef DEFINE_SCALAR_TYPE
   auto type = type_map.find(dtype);
   if (type != type_map.end()) {
     return type->second;
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 std::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
@@ -283,7 +298,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     // Parsing ranks, supports mix of sized and unsized ranks, or, just strided
     // ranks
     if (L.cur().kind == '*') {
-      dims.emplace_back(c10::nullopt);
+      dims.emplace_back(std::nullopt);
       L.next();
       if (L.cur().kind == ':') {
         throw ErrorReport(L.cur()) << "Strides for unsized ranks not supported";

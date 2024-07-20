@@ -819,7 +819,7 @@ C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
 // for a given backend key, use the associated autograd key.
 // for non-backend keys, use AutogradOther as a default.
 // Note: it's convenient and fast to return a default here rather than (say)
-// returning an optional<DispatchKey>, or throwing. But it makes callers
+// returning an std::optional<DispatchKey>, or throwing. But it makes callers
 // responsible for either a) enforcing the invariant that only backend keys
 // be passed as arguments, or b) interpreting our return value carefully.
 inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
@@ -901,7 +901,7 @@ C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
 // legacy code that is still using DispatchKey for things like instanceof
 // checks; if at all possible, refactor the code to stop using DispatchKey in
 // those cases.
-static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
+inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // NB: If you add any extra keys that can be stored in TensorImpl on
   // top of existing "backend" keys like CPU/CUDA, you need to add it
   // here.  At the moment, autograd keys and ADInplaceOrView key need this

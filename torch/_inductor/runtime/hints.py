@@ -1,8 +1,9 @@
+# mypy: allow-untyped-defs
 import collections
 import typing
 from dataclasses import fields
 from enum import auto, Enum
-from typing import Optional
+from typing import Dict, List, Optional, Union
 
 
 # NOTE: if these fail asserts submit a PR to increase them
@@ -67,7 +68,7 @@ else:
     instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
         "instance_descriptor",
         ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-        defaults=[tuple(), tuple(), tuple(), tuple()],
+        defaults=[(), (), (), ()],
     )
 
 
@@ -127,3 +128,52 @@ class DeviceProperties(typing.NamedTuple):
             index=device.index,
             cc=device_interface.get_compute_capability(device),
         )
+
+
+class HalideInputSpec(typing.NamedTuple):
+    ctype: str
+    name: str
+    shape: Optional[List[str]] = None
+    stride: Optional[List[str]] = None
+    offset: Optional[str] = None
+    alias_of: Optional[str] = None
+
+    def bindings_type(self):
+        if self.ctype in ("half*", "bfloat16*"):
+            return "uint16_t*"  # half not defined
+        return self.ctype
+
+    def halide_type(self):
+        if self.ctype == "half*":
+            return "halide_type_t(halide_type_float, 16)"  # half not defined
+        if self.ctype == "bfloat16*":
+            return "halide_type_t(halide_type_bfloat, 16)"  # half not defined
+        return f"halide_type_of<{self.ctype.replace('*', '')}>()"
+
+    def is_scalar(self):
+        return self.shape is None
+
+    def is_buffer(self):
+        return self.shape is not None
+
+
+class HalideMeta(typing.NamedTuple):
+    argtypes: List[HalideInputSpec]
+    target: str
+    scheduler: Optional[str] = None
+    scheduler_flags: Optional[Dict[str, Union[int, str]]] = None
+    cuda_device: Optional[int] = None
+
+    def args(self):
+        """Command line args to pass to halide generator"""
+        args = [f"target={self.target}"]
+        if self.scheduler:
+            args.append(f"autoscheduler={self.scheduler}")
+        if self.scheduler_flags:
+            assert self.scheduler
+            for k, v in self.scheduler_flags.items():
+                args.append(f"autoscheduler.{k}={v}")
+        return args
+
+    def is_cuda(self):
+        return self.cuda_device is not None

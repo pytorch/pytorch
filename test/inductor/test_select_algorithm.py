@@ -11,9 +11,9 @@ from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import TritonBenchmarkRequest
 from torch._inductor.test_case import run_tests, TestCase
-
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
 
 aten = torch.ops.aten
 
@@ -96,7 +96,6 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocm
     @patches
     def test_mm(self):
         @torch.compile
@@ -225,7 +224,6 @@ class TestSelectAlgorithm(TestCase):
         foo(torch.randn(64, 64, device="cuda"))
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocm
     @expectedFailureDynamicWrapper
     @patches
     def test_convolution1(self):

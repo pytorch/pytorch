@@ -158,11 +158,11 @@ void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
 }
 
 void Module::to(at::ScalarType dtype, bool non_blocking) {
-  to_impl(/*device=*/c10::nullopt, dtype, non_blocking);
+  to_impl(/*device=*/std::nullopt, dtype, non_blocking);
 }
 
 void Module::to(at::Device device, bool non_blocking) {
-  to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
+  to_impl(device, /*dtype=*/std::nullopt, non_blocking);
 }
 
 static void module_state_to(
@@ -323,7 +323,7 @@ Module Module::deepcopy(std::optional<at::Device> device) const {
 
 Module Module::clone(bool inplace) const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
-  IValue::HashAliasedIValueMap memo;
+  IValue::HashIdentityIValueMap memo;
   const std::unordered_set<std::string> ignored_methods;
   const std::unordered_set<std::string> ignored_attributes;
   return clone_impl(
@@ -335,7 +335,7 @@ Module Module::clone(
     const std::unordered_set<std::string>& ignored_methods,
     const std::unordered_set<std::string>& ignored_attributes) const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
-  IValue::HashAliasedIValueMap memo;
+  IValue::HashIdentityIValueMap memo;
   return clone_impl(
       type_remap, inplace, memo, ignored_methods, ignored_attributes);
 }
@@ -343,7 +343,7 @@ Module Module::clone(
 Module Module::clone_impl(
     std::unordered_map<TypePtr, TypePtr>& type_remap,
     bool inplace,
-    IValue::HashAliasedIValueMap memo,
+    IValue::HashIdentityIValueMap memo,
     const std::unordered_set<std::string>& ignored_methods,
     const std::unordered_set<std::string>& ignored_attributes) const {
   // Create a new _ivalue in the same compilation unit.

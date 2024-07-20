@@ -369,7 +369,7 @@ struct ConvParams {
   }
 
   bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight, const std::optional<at::Tensor>& bias) const {
-#if defined(__ARM_NEON__)
+#if defined(__ARM_NEON__) || (defined(__riscv_v_intrinsic) && __riscv_v_intrinsic>=12000)
     // Currently only 3x3 depthwise convolutions on tensors of float are supported.
     return (input.ndimension() == 4) &&
            (at::symint::size<T>(input, 1) == groups) &&
@@ -501,11 +501,11 @@ struct ConvParams {
       return false;
     }
     return ((input.scalar_type() == at::kFloat) || (input.scalar_type() == at::kHalf) || (input.scalar_type() == at::kBFloat16))
-           && detail::getCUDAHooks().compiledWithMIOpen()
+           && cudnn_enabled
            && input.is_cuda()
+           && detail::getCUDAHooks().compiledWithMIOpen()
            && input.dim() <= MIOPEN_DIM_MAX
            && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
-           && cudnn_enabled
            ;
   }
   bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const  {
@@ -1409,8 +1409,8 @@ static inline at::MemoryFormat determine_backend_memory_format(
     const Tensor& weight,
     const ConvBackend backend) {
   at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
-  auto k = weight.ndimension();
 #if !defined(C10_MOBILE)
+  auto k = weight.ndimension();
   // See Note [Mobile check segfaults]
   switch(backend) {
     case ConvBackend::Cudnn:
@@ -1504,7 +1504,7 @@ at::Tensor _convolution(
   }
 
   // Select appropriate backend to use.
-  auto bias_sizes_opt = bias.defined() ? std::optional<IntArrayRef>(bias.sizes()) : c10::nullopt;
+  auto bias_sizes_opt = bias.defined() ? std::optional<IntArrayRef>(bias.sizes()) : std::nullopt;
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
   ConvBackend backend = _select_conv_backend(input, weight, bias, c10::OptionalIntArrayRef(bias_sizes_opt), need_backward, params);
@@ -1730,7 +1730,7 @@ static Tensor subvariable(const Tensor& var, int dim, int groups, int g) {
   return result;
 }
 
-std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::optional<Tensor>& ggI_opt, const c10::optional<Tensor>& ggW_r_opt, const c10::optional<Tensor>& ggb_opt,
+std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::optional<Tensor>& ggI_opt, const std::optional<Tensor>& ggW_r_opt, const std::optional<Tensor>& ggb_opt,
     const Tensor& gO_r, const Tensor& weight_r, const Tensor& input,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,

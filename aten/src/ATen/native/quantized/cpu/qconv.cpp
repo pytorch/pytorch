@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <algorithm>
 #include <cmath>
+#include <string>
 #include <vector>
 
 #include <ATen/core/Tensor.h>
@@ -35,7 +36,6 @@
 #endif
 
 #include <c10/util/irange.h>
-#include <c10/util/string_utils.h>
 
 namespace {
 // To have a sanity check for maximum matrix size.
@@ -452,7 +452,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
                 .memory_format(c10::MemoryFormat::ChannelsLast),
             output_scale,
             output_zero_point,
-            c10::nullopt)
+            std::nullopt)
       : at::native::fbgemm_utils::MakeEmptyAffineQuantizedChannelsLast3dTensor(
             output_shape[0],
             output_shape[1],
@@ -659,9 +659,9 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
       weight_tensor = at::native::empty_affine_quantized(
           weight_contig.sizes(),
           c10::CppTypeToScalarType<scalar_t>::value,
-          c10::nullopt /* layout */,
+          std::nullopt /* layout */,
           c10::kCPU,
-          c10::nullopt /* pin_memory */,
+          std::nullopt /* pin_memory */,
           w_scales_data[0],
           w_zp,
           c10::MemoryFormat::ChannelsLast);
@@ -672,9 +672,9 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
           at::zeros(w_scales.sizes(), at::kInt), /* see comment above about w_zp */
           weight_contig.q_per_channel_axis(),
           c10::CppTypeToScalarType<scalar_t>::value,
-          c10::nullopt /* layout */,
+          std::nullopt /* layout */,
           c10::kCPU,
-          c10::nullopt /* pin_memory */,
+          std::nullopt /* pin_memory */,
           c10::MemoryFormat::ChannelsLast);
     }
 
@@ -763,9 +763,9 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
   at::Tensor output = at::native::empty_affine_quantized(
       output_shape,
       c10::CppTypeToScalarType<scalar_t>::value,
-      c10::nullopt /* layout */,
+      std::nullopt /* layout */,
       c10::kCPU,
-      c10::nullopt /* pin_memory */,
+      std::nullopt /* pin_memory */,
       output_scale,
       output_zero_point,
       c10::MemoryFormat::ChannelsLast);
@@ -905,7 +905,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         at::device(c10::kCPU).dtype(c10::kQUInt8).memory_format(channels_last),
         weight_scales_data[0],
         w_zero_points[0],
-        c10::nullopt);
+        std::nullopt);
     auto* qnnp_w_data = qnnp_weight.template data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
     for (const auto i : c10::irange(wt_numel)) {
@@ -973,9 +973,9 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
   at::Tensor output = at::native::empty_affine_quantized(
       output_shape,
       c10::kQUInt8,
-      c10::nullopt /* layout */,
+      std::nullopt /* layout */,
       c10::kCPU,
-      c10::nullopt /* pin_memory */,
+      std::nullopt /* pin_memory */,
       output_scale,
       output_zero_point,
       channels_last);
@@ -1117,7 +1117,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply(
     const at::Tensor& input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<false>(input, c10::nullopt, output_scale, output_zero_point);
+  return apply_impl<false>(input, std::nullopt, output_scale, output_zero_point);
 }
 
 template <int kSpatialDim>
@@ -1125,7 +1125,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_relu(
     const at::Tensor& input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<true>(input, c10::nullopt, output_scale, output_zero_point);
+  return apply_impl<true>(input, std::nullopt, output_scale, output_zero_point);
 }
 
 template <int kSpatialDim>
@@ -1232,7 +1232,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
               c10::MemoryFormat::ChannelsLast3d),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      std::nullopt);
   if (output.numel() == 0) {
     return output;
   }
@@ -1620,7 +1620,11 @@ static at::Tensor _quantized_convolution_onednn(
   // The functions from ideep are heavy because they have complex data structures for unified API
   // oneDNN version >= 3.1.0 is required.
   using ideep::tensor;
-  auto weights_desc = packed_weight.get_desc();
+  auto weight_grouped = packed_weight.make_grouped_weights(groups, /* is_deconv */false);
+  auto weights_desc = tensor::desc(weight_grouped.get_dims(), ideep::data_type::s8, ideep::format_tag::any);
+  if (groups > 1) {
+    weights_desc = weights_desc.to_grouped(groups);
+  }
   auto dst_desc = dst.get_desc();
   auto bias_desc = with_bias ?
       tensor::desc(expected_bias.get_dims(), ideep::data_type::f32, ideep::format_tag::any) :
@@ -1631,7 +1635,7 @@ static at::Tensor _quantized_convolution_onednn(
   if (act_zero_point != 0) {
     op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
   }
-  int oc_per_group = packed_weight.get_dim(0) / groups;
+  int oc_per_group = weight_grouped.get_dim(0) / groups;
   int wei_scale_mask = ideep::utils::conv_weight_scale_mask(weight_scales.numel(), oc_per_group, groups, false);
   op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, wei_scale_mask);
   if (output_scale != 1.0f) {
@@ -1657,7 +1661,7 @@ static at::Tensor _quantized_convolution_onednn(
   auto primitive = dnnl::convolution_forward(primitive_desc);
 
   // Reorder weight if needed
-  auto expected_weight = packed_weight.reorder_if_differ_in(primitive_desc.weights_desc());
+  auto expected_weight = weight_grouped.reorder_if_differ_in(primitive_desc.weights_desc());
 
   // Prepare args and execute primitive
   tensor scratchpad(primitive_desc.scratchpad_desc());
@@ -1789,7 +1793,9 @@ class QConvAddInt8 final {
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
+#if AT_MKLDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
     auto& ctx = at::globalContext();
+#endif
 #if AT_MKLDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       if (kReluFused) {
@@ -1844,15 +1850,15 @@ class QConvInt8ForBC final {
       int64_t output_zero_point) {
     if (kReluFused) {
       TORCH_WARN_ONCE(
-          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv"
-          + c10::to_string(kSpatialDim) + "d_relu, " +
-          "have been removed, please update your model to remove these arguments.");
+          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv" +
+              std::to_string(kSpatialDim),
+          "d_relu, have been removed, please update your model to remove these arguments.");
       return packed_weight->apply_relu(act, output_scale, output_zero_point);
     } else {
       TORCH_WARN_ONCE(
-          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv"
-          + c10::to_string(kSpatialDim) + "d, " +
-          "have been removed, please update your model to remove these arguments.");
+          "Arguments [stride, padding, dilation, groups] in ops.quantized.conv",
+          std::to_string(kSpatialDim),
+          "d, have been removed, please update your model to remove these arguments.");
       return packed_weight->apply(act, output_scale, output_zero_point);
     }
   }
@@ -1901,8 +1907,8 @@ class QConvoneDNN final {
         weight, weight_scales, weight_zero_points,
         bias, stride, padding, dilation, /*transposed*/false,
         groups, output_scale, output_zero_point,
-        /*accum*/c10::nullopt, /*accum_scale*/0.0, /*accum_zero_point*/0,
-        /*output_dtype*/output_dtype, /*binary_attr*/c10::nullopt, /*binary_alpha*/c10::nullopt,
+        /*accum*/std::nullopt, /*accum_scale*/0.0, /*accum_zero_point*/0,
+        /*output_dtype*/output_dtype, /*binary_attr*/std::nullopt, /*binary_alpha*/std::nullopt,
         /*unary_attr*/attr, /*unary_scalars*/scalars, /*unary_algorithm*/algorithm
     );
 #else

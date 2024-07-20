@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import functools
 import inspect
@@ -13,6 +14,7 @@ import torch._dynamo
 import torch.fx
 
 import torch.utils._pytree as pytree
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._export.non_strict_utils import (
     _fakify_script_objects,
@@ -22,9 +24,9 @@ from torch._export.non_strict_utils import (
     make_fake_params_buffers,
     produce_guards_and_solve_constraints,
 )
-from torch._export.passes._node_metadata_hook import _node_metadata_hook
-from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-    _AddRuntimeAssertionsForInlineConstraintsPass,
+from torch._export.passes._node_metadata_hook import (
+    _node_metadata_hook,
+    _set_node_metadata_hook,
 )
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._export.passes.lift_constants_pass import (
@@ -32,9 +34,18 @@ from torch._export.passes.lift_constants_pass import (
     lift_constants_pass,
     rewrite_script_object_meta,
 )
-from torch._export.utils import placeholder_naming_pass, placeholder_prefixes
+from torch._export.utils import (
+    _detect_fake_mode_from_gm,
+    placeholder_naming_pass,
+    placeholder_prefixes,
+)
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
+from torch._functorch._aot_autograd.traced_function_transforms import (
+    create_functional_call,
+)
+
+from torch._functorch._aot_autograd.utils import create_tree_flattened_fn
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
 
@@ -44,6 +55,7 @@ from torch._utils_internal import log_export_usage
 from torch.export.dynamic_shapes import _combine_args
 from torch.export.exported_program import OutputKind
 from torch.fx._utils import first_call_function_nn_module_stack
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     free_unbacked_symbols,
@@ -88,6 +100,33 @@ class ExportDynamoConfig:
     reorderable_logging_functions: Set[Callable] = dataclasses.field(
         default_factory=set
     )
+    # Emit runtime asserts after AOTAutograd instead.
+    # This isn't really necessary, and isn't much more efficient since the runtime asserts pass does CSE,
+    # but if we want to reason more about what guards/runtime asserts to emit,
+    # this makes it a bit cleaner to do from the export side. Also no real point in running this twice.
+    do_not_emit_runtime_asserts = True
+
+
+@dataclasses.dataclass
+class ATenExportArtifact:
+    gm: torch.fx.GraphModule
+    sig: ExportGraphSignature
+    constants: Dict[
+        str,
+        Union[
+            torch.Tensor,
+            FakeScriptObject,
+            torch.ScriptObject,
+        ],
+    ]
+
+
+@dataclasses.dataclass(frozen=True)
+class ExportArtifact:
+    aten: ATenExportArtifact
+    out_spec: TreeSpec
+    fake_mode: FakeTensorMode
+    module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]]
 
 
 DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
@@ -115,22 +154,54 @@ def _ignore_backend_decomps():
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
 
 
-def _convert_input_to_fake(gm, args, kwargs):
-    params_buffers = _get_params_buffers(gm)
-    fake_inps: List[torch.Tensor] = []
+def _fixup_key(x):
+    return "L__self__" + _strip_root(x)
+
+
+def _strip_root(x):
+    if isinstance(x, str) and x.startswith("_export_root"):
+        stripped = x[len("_export_root") :]
+        return stripped[1:] if stripped.startswith(".") else stripped
+    return x
+
+
+def _rewrite_node(gm):
     for node in gm.graph.nodes:
-        if node.op == "placeholder" and "val" in node.meta:
-            fake_val = node.meta["val"]
-            if fake_val is not None and isinstance(fake_val, torch.Tensor):
-                fake_inps.append(fake_val)
+        if node.target == torch.ops.higher_order._export_tracepoint:
+            if "path" in node.kwargs:
+                path = _strip_root(node.kwargs["path"])
+                with gm.graph.inserting_before(node):
+                    new_node = gm.graph.create_node(
+                        "call_function",
+                        torch.ops.higher_order._export_tracepoint,
+                        args=node.args,
+                        kwargs={
+                            "path": path,
+                            "kind": node.kwargs["kind"],
+                        },
+                    )
+                    new_node.meta = node.meta
+                    node.replace_all_uses_with(new_node)
+                    gm.graph.erase_node(node)
 
-    if detected_fake_mode := detect_fake_mode(fake_inps):
-        fake_mode = detected_fake_mode
-    else:
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
 
-    if len(args) == 0 and len(kwargs) == 0:
-        return (), {}, params_buffers, fake_mode
+def _convert_input_to_fake(
+    gm: torch.fx.GraphModule, args: Tuple[Any], kwargs: Dict[Any, Any]
+):
+    params_buffers = _get_params_buffers(gm)
+    fake_inps = [
+        node.meta["val"]
+        for node in gm.graph.nodes
+        if node.op == "placeholder" and "val" in node.meta
+    ]
+    fake_mode = _detect_fake_mode_from_gm(gm)
+
+    # create a new fake mode if we cannot detect any fake modes
+    if fake_mode is None:
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
+
+    if len(args) == 0 and len(kwargs) == 0 and len(params_buffers) == 0:
+        return (), {}, {}, fake_mode
 
     count = 0
 
@@ -270,10 +341,45 @@ def _get_param_buffer_mapping(
     return param_buffer_table
 
 
+def _preserve_requires_grad_pass(
+    gm: torch.fx.GraphModule,
+    sig: ExportGraphSignature,
+    fake_params_buffers: Dict[str, torch.Tensor],
+    constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
+    flat_fake_args: List[Any],
+):
+    placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    assert len(sig.input_specs) == len(placeholders)
+    i = 0
+    for node, spec in zip(placeholders, sig.input_specs):
+        if spec.kind in (
+            InputKind.PARAMETER,
+            InputKind.BUFFER,
+        ):
+            assert spec.target is not None
+            node.meta["val"].requires_grad = fake_params_buffers[
+                spec.target
+            ].requires_grad
+        elif spec.kind == InputKind.USER_INPUT:
+            fake_arg = flat_fake_args[i]
+            if isinstance(fake_arg, torch.Tensor):
+                node.meta["val"].requires_grad = fake_arg.requires_grad
+            i += 1
+        elif spec.kind == InputKind.CONSTANT_TENSOR:
+            assert spec.target is not None
+            constant = constants[spec.target]
+            if isinstance(constant, torch.Tensor):
+                node.meta["val"].requires_grad = constant.requires_grad
+        elif spec.kind in (InputKind.CUSTOM_OBJ, InputKind.TOKEN):
+            continue
+        else:
+            raise AssertionError(spec.kind)
+
+
 def _remap_constants(
     orig_constant_attrs: ConstantAttrMap,
     graph_signature: ExportGraphSignature,
-    constants: Dict[str, Union[torch.Tensor, torch.ScriptObject]],
+    constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
 ) -> None:
     """Rewrite the graph signature and constants table to use the FQN from the original module."""
     remap_table: Dict[str, List[str]] = {}
@@ -413,6 +519,7 @@ def _export_to_torch_ir(
     *,
     preserve_module_call_signature: Tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
+    allow_complex_guards_as_runtime_asserts: bool = False,
     restore_fqn: bool = True,
     _log_export_usage: bool = True,
     same_signature: bool = True,
@@ -445,6 +552,10 @@ def _export_to_torch_ir(
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
+                    # currently the following 2 flags are tied together for export purposes,
+                    # but untangle for sake of dynamo export api
+                    prefer_deferred_runtime_asserts_over_guards=True,
+                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
                     _log_export_usage=_log_export_usage,
                     same_signature=same_signature,
                 )(
@@ -452,9 +563,9 @@ def _export_to_torch_ir(
                     **kwargs,
                 )
         except (ConstraintViolationError, ValueRangeError) as e:
-            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
+            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
         except GuardOnDataDependentSymNode as e:
-            raise UserError(  # noqa: TRY200
+            raise UserError(  # noqa: B904
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",
@@ -468,17 +579,18 @@ def _export_to_torch_ir(
     return gm_torch_level
 
 
-def _export_non_strict(
+def _export_to_aten_ir(
     mod: torch.nn.Module,
     fake_args,
     fake_kwargs,
     fake_params_buffers,
     constant_attrs: ConstantAttrMap,
+    produce_guards_callback=None,
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
-    should_insert_runtime_assertion=False,
-):
+    _is_torch_jit_trace=False,
+) -> ATenExportArtifact:
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
     # mode, we don't care. At predispatch level, we don't care about the state change.
@@ -519,6 +631,45 @@ def _export_non_strict(
     if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
         gm.meta.update(mod.meta)
 
+    from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
+
+    # Run produce guards before we handle runtime asserts.
+    # This means we run the export solver before the runtime asserts pass.
+    # Right now this doesn't mean much - the export solver is only there for suggested fixes,
+    # and we won't even get to constraint solving if that's needed.
+    # But if in future we want to control what runtime asserts are emitted for export,
+    # or rely on produce_guards + solver for some simplification on runtime asserts, this probably makes sense.
+    if produce_guards_callback:
+        try:
+            produce_guards_callback(gm)
+        except (ConstraintViolationError, ValueRangeError) as e:
+            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
+
+    # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
+    # Overwrite output specs afterwards.
+    flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
+    fake_mode = torch._export.utils._detect_fake_mode_from_gm(gm)
+    assert fake_mode is not None, "Cannot detect fake mode from graph"
+
+    if not torch._dynamo.config.do_not_emit_runtime_asserts:
+        stack_trace = (
+            'File "torch/fx/passes/runtime_assert.py", line 24, '
+            "in insert_deferred_runtime_asserts"
+        )
+        with _set_node_metadata_hook(
+            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+        ):
+            insert_deferred_runtime_asserts(
+                gm,
+                fake_mode.shape_env,
+                f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                export=True,
+            )
+
+    # update output specs
+    gm.recompile()
+    graph_signature.user_outputs = _graph_output_names(gm)
+
     def make_argument_spec(i, node) -> ArgumentSpec:
         if isinstance(node, (int, bool, float, type(None))):
             # For const outputs we just directly return this
@@ -538,7 +689,9 @@ def _export_non_strict(
         elif isinstance(val, torch.ScriptObject):
             return CustomObjArgument(name=node.name, class_fqn=val._type().qualified_name())  # type: ignore[attr-defined]
         elif isinstance(val, FakeScriptObject):
-            return CustomObjArgument(name=node.name, class_fqn=val.script_class_name)
+            return CustomObjArgument(
+                name=node.name, class_fqn=val.script_class_name, fake_val=val
+            )
         elif isinstance(val, (int, bool, str, float, type(None))):
             return ConstantArgument(name=node.name, value=val)
         else:
@@ -551,7 +704,6 @@ def _export_non_strict(
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
-    flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
     index = 0
     total_non_user_inputs = (
         len(graph_signature.parameters)
@@ -561,7 +713,7 @@ def _export_non_strict(
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             if index >= total_non_user_inputs:
-                user_arg = flat_args[index - total_non_user_inputs]
+                user_arg = flat_fake_args[index - total_non_user_inputs]
                 if not isinstance(user_arg, torch.Tensor):
                     node.meta["val"] = user_arg
             index += 1
@@ -594,31 +746,14 @@ def _export_non_strict(
         input_specs=input_specs, output_specs=output_specs
     )
 
-    from torch._guards import detect_fake_mode
-
-    fake_mode = detect_fake_mode(flat_args)
-
-    if should_insert_runtime_assertion:
-        stack_trace = (
-            'File "torch/fx/passes/runtime_assert.py", line 24, '
-            "in insert_deferred_runtime_asserts"
-        )
-        with gm._set_create_node_hook(
-            functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-        ):
-            insert_deferred_runtime_asserts(
-                gm,
-                fake_mode.shape_env,
-                f"non strict exported program: {first_call_function_nn_module_stack(gm.graph)}",
-                export=True,
-            )
-
     if pre_dispatch:
         from torch._export.passes.replace_set_grad_with_hop_pass import (
             replace_set_grad_with_hop_pass,
         )
 
-        gm = replace_set_grad_with_hop_pass(gm, export_graph_signature)
+        gm, export_graph_signature = replace_set_grad_with_hop_pass(
+            gm, export_graph_signature
+        )
 
     # Remove nn_module_stack, stack_trace metadata from all placeholders/inputs nodes.
     for _mod in gm.modules():
@@ -632,7 +767,7 @@ def _export_non_strict(
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
-    # prettify names for placeholder nodes
+    # Prettify names for placeholder nodes.
     placeholder_naming_pass(
         gm,
         export_graph_signature,
@@ -643,20 +778,11 @@ def _export_non_strict(
         constants,
     )
 
-    @dataclasses.dataclass
-    class _ExportedProgramNonStrict:
-        gm: torch.fx.GraphModule
-        sig: ExportGraphSignature
-        constants: Dict[
-            str,
-            Union[
-                torch.Tensor,
-                FakeScriptObject,
-                torch.ScriptObject,
-            ],
-        ]
+    _preserve_requires_grad_pass(
+        gm, export_graph_signature, fake_params_buffers, constants, flat_fake_args
+    )
 
-    return _ExportedProgramNonStrict(
+    return ATenExportArtifact(
         gm,
         export_graph_signature,
         constants,
@@ -708,7 +834,7 @@ def _rewrite_dynamo_tensor_constants(
     orig_mod_buffers: Set[torch.Tensor],
     traced_mod_buffers: Dict[str, torch.Tensor],
     graph_signature: ExportGraphSignature,
-    constants: Dict[str, Union[torch.Tensor, torch.ScriptObject]],
+    constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
 ):
     """Dynamo erroneously marks tensor attributes on modules as a buffers.
 
@@ -723,13 +849,13 @@ def _rewrite_dynamo_tensor_constants(
                 # Convert it int oa constant in the graph signature, and add its
                 # value to the constants table.
                 spec.kind = InputKind.CONSTANT_TENSOR
-                constants[spec.target] = value
+                constants[spec.target] = value  # type: ignore[arg-type]
 
 
 def _rewrite_non_persistent_buffers(
     orig_mod: torch.nn.Module,
     graph_signature: ExportGraphSignature,
-    constants: Dict[str, Union[torch.Tensor, torch.ScriptObject]],
+    constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
 ):
     """Dynamo erroneously drops the persistent flag on buffers.
 
@@ -742,7 +868,7 @@ def _rewrite_non_persistent_buffers(
             if spec.target not in state_dict:
                 assert spec.target not in constants
                 spec.persistent = False
-                constants[spec.target] = orig_mod.get_buffer(spec.target)
+                constants[spec.target] = orig_mod.get_buffer(spec.target)  # type: ignore[arg-type]
 
 
 def _verify_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
@@ -889,280 +1015,139 @@ def _log_export_wrapper(fn):
     return wrapper
 
 
-@_log_export_wrapper
-@_disable_prexisiting_fake_mode
-def _export(
+def _process_jit_trace_inputs_for_export(example_inputs, example_kwarg_inputs):
+    if not isinstance(example_inputs, (tuple, list, dict)):
+        example_inputs = (example_inputs,)
+
+    elif isinstance(example_inputs, list):
+        example_inputs = tuple(example_inputs)
+
+    elif (
+        isinstance(example_inputs, (torch.Tensor, dict))
+        and example_kwarg_inputs is None
+    ):
+        example_inputs = (example_inputs,)
+
+    if example_kwarg_inputs is None:
+        example_kwarg_inputs = {}
+    return example_inputs, example_kwarg_inputs
+
+
+@contextmanager
+def patch_forward(obj: torch.nn.Module, new_method):
+    """Helper method to make it easier to cleanly torch.export() a method on a
+    module that is not `forward`.
+    """
+    # Save the original method
+    original_method = obj.forward
+
+    # Patch the method
+    obj.forward = new_method.__get__(obj, obj.__class__)
+
+    try:
+        yield
+    finally:
+        # Restore the original method
+        obj.forward = original_method
+
+
+@contextmanager
+def _temp_disable_texpr_fuser():
+    original_state = torch._C._jit_texpr_fuser_enabled()
+    torch._C._jit_set_texpr_fuser_enabled(False)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_texpr_fuser_enabled(original_state)
+
+
+class _WrapperModule(torch.nn.Module):
+    def __init__(self, f):
+        super().__init__()
+        self.f = f
+
+    def forward(self, *args, **kwargs):
+        return self.f(*args, **kwargs)
+
+
+def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
+    with _temp_disable_texpr_fuser():
+        from torch.jit._trace import TopLevelTracedModule
+
+        export_args, export_kwargs = _process_jit_trace_inputs_for_export(args, kwargs)
+
+        if isinstance(traced_callable, (TopLevelTracedModule, torch._C.ScriptModule)):  # type: ignore[operator]
+            return _export(
+                traced_callable,
+                export_args,
+                export_kwargs,
+                strict=False,
+                _is_torch_jit_trace=True,
+            ).module()
+
+        elif isinstance(traced_callable, torch.ScriptMethod) and isinstance(
+            traced_callable.owner(), (torch._C.ScriptModule, torch.nn.Module)  # type: ignore[operator]
+        ):
+            with patch_forward(traced_callable.owner(), traced_callable):  # type: ignore[operator]
+                return _export(
+                    traced_callable.owner(),  # type: ignore[operator]
+                    export_args,
+                    export_kwargs,
+                    strict=False,
+                    _is_torch_jit_trace=True,
+                ).module()
+
+        else:
+            return _export(
+                _WrapperModule(traced_callable),
+                export_args,
+                export_kwargs,
+                strict=False,
+                _is_torch_jit_trace=True,
+            ).module()
+
+
+def _strict_export(
     mod: torch.nn.Module,
     args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
-    *,
-    strict: bool = True,
-    preserve_module_call_signature: Tuple[str, ...] = (),
-    pre_dispatch: bool = False,
-    _disable_forced_specializations: Optional[bool] = False,
-) -> ExportedProgram:
-    """
-    Traces either an nn.Module's forward function or just a callable with PyTorch
-    operations inside and produce a ExportedProgram.
+    kwargs: Dict[str, Any],
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]],
+    preserve_module_call_signature: Tuple[str, ...],
+    pre_dispatch: bool,
+    original_state_dict: Dict[str, Any],
+    orig_in_spec: TreeSpec,
+    allow_complex_guards_as_runtime_asserts: bool,
+    _is_torch_jit_trace: bool,
+) -> ExportArtifact:
+    lower_to_aten = functools.partial(_export_to_aten_ir, pre_dispatch=pre_dispatch)
+    return _strict_export_lower_to_aten_ir(
+        mod=mod,
+        args=args,
+        kwargs=kwargs,
+        dynamic_shapes=dynamic_shapes,
+        preserve_module_call_signature=preserve_module_call_signature,
+        pre_dispatch=pre_dispatch,
+        original_state_dict=original_state_dict,
+        orig_in_spec=orig_in_spec,
+        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+        _is_torch_jit_trace=_is_torch_jit_trace,
+        lower_to_aten_callback=lower_to_aten,
+    )
 
-    Args:
-        f: the `nn.Module` to trace.
 
-        args: example positional inputs.
-
-        kwargs: optional example keyword inputs.
-
-        dynamic_shapes:
-         An optional argument where the type should either be:
-         1) a dict from argument names of ``f`` to their dynamic shape specifications,
-         2) a tuple that specifies dynamic shape specifications for each input in original order.
-         If you are specifying dynamism on keyword args, you will need to pass them in the order that
-         is defined in the original function signature.
-
-         The dynamic shape of a tensor argument can be specified as either
-         (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
-         not required to include static dimension indices in this dict, but when they are,
-         they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
-         where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
-         are denoted by None. Arguments that are dicts or tuples / lists of tensors are
-         recursively specified by using mappings or sequences of contained specifications.
-
-        preserve_module_call_signature: A list of submodule paths for which the original
-            calling conventions are preserved as metadata.
-
-        _disable_forced_specializations:
-         By default, some inferred dynamic shapes guards/constraints that are not expressible with the current
-         dynamic shapes language will lead to specialization to the concrete input values provided.
-         If _disable_forced_specializations is set to True, we will not specialize, and will not perform runtime
-         checks on such produced guards. Instead, we allow the user to specify arbitrary shapes,
-         and fail during runtime if the inputs are invalid. Constraints expressible with the language
-         (e.g. ranges, linear derived dims) will still be enforced.
-
-    Returns:
-        An ExportedProgram containing the traced method.
-    """
-    if not isinstance(args, tuple):
-        raise UserError(
-            UserErrorType.INVALID_INPUT,
-            f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
-        )
-
-    if _disable_forced_specializations and strict:
-        raise UserError(
-            UserErrorType.INVALID_INPUT,
-            "_disable_forced_specializations can be only be specified in non-strict mode.",
-        )
-
-    global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
-    _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
-
-    flags = set()
-    flags.add("strict" if strict else "non_strict")
-    flags.add("pre_dispatch" if pre_dispatch else "aot_dispatch")
-    log_export_usage(event="export.enter", flags=flags)
-    _EXPORT_FLAGS = flags
-
-    kwargs = kwargs or {}
-    if isinstance(dynamic_shapes, torch.export.ShapesCollection):
-        dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
-
-    flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
-    original_state_dict = mod.state_dict(keep_vars=True)
-    forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
-
-    if not strict:
-        out_spec = None
-
-        module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
-
-        def strip_root(x):
-            if isinstance(x, str) and x.startswith("_export_root"):
-                stripped = x[len("_export_root") :]
-                return stripped[1:] if stripped.startswith(".") else stripped
-            return x
-
-        def fixup_key(x):
-            return "L__self__" + strip_root(x)
-
-        def _tuplify_outputs(aot_export):
-            def _aot_export_non_strict(mod, args, kwargs=None, **flags):
-                kwargs = kwargs or {}
-
-                class Wrapper(torch.nn.Module):
-                    def __init__(self, mod):
-                        super().__init__()
-                        self._export_root = mod
-
-                    def forward(self, *args, **kwargs):
-                        nonlocal out_spec
-                        if isinstance(self._export_root, torch.fx.GraphModule):
-                            with torch.fx.traceback.preserve_node_meta():
-                                tree_out = torch.fx.Interpreter(self._export_root).run(
-                                    *args, **kwargs
-                                )
-                        else:
-                            tree_out = self._export_root(*args, **kwargs)
-                        flat_outs, out_spec = pytree.tree_flatten(tree_out)
-                        return tuple(flat_outs)
-
-                wrapped_mod = Wrapper(mod)
-                # Patch export_root to the signatures so that wrapper module correctly populates the
-                # in/out spec
-                new_preserved_call_signatures = [
-                    "_export_root." + i for i in preserve_module_call_signature
-                ]
-                with _wrap_submodules(
-                    wrapped_mod, new_preserved_call_signatures, module_call_specs
-                ):
-                    gm, sig = aot_export(wrapped_mod, args, kwargs=kwargs, **flags)
-
-                sig.parameters = pytree.tree_map(strip_root, sig.parameters)
-                sig.buffers = pytree.tree_map(strip_root, sig.buffers)
-                sig.inputs_to_buffers = pytree.tree_map(
-                    strip_root, sig.inputs_to_buffers
-                )
-                sig.inputs_to_parameters = pytree.tree_map(
-                    strip_root, sig.inputs_to_parameters
-                )
-                sig.buffers_to_mutate = pytree.tree_map(
-                    strip_root, sig.buffers_to_mutate
-                )
-                for node in gm.graph.nodes:
-                    if "nn_module_stack" in node.meta:
-                        nn_module_stack = node.meta["nn_module_stack"]
-                        node.meta["nn_module_stack"] = {
-                            fixup_key(key): val
-                            for key, val in pytree.tree_map(
-                                strip_root, nn_module_stack
-                            ).items()
-                        }
-
-                return gm, sig
-
-            return _aot_export_non_strict
-
-        (
-            fake_mode,
-            fake_args,
-            fake_kwargs,
-            equalities_inputs,
-            original_signature,
-        ) = make_fake_inputs(mod, args, kwargs, dynamic_shapes)
-
-        fake_params_buffers = make_fake_params_buffers(
-            fake_mode, _get_params_buffers(mod)
-        )
-
-        with fake_mode:
-            with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
-                patched_mod,
-                new_fake_args,
-                new_fake_kwargs,
-                new_fake_constant_attrs,
-                map_fake_to_real,
-            ):
-                ep_non_strict = _export_non_strict(
-                    patched_mod,
-                    new_fake_args,
-                    new_fake_kwargs,
-                    fake_params_buffers,
-                    new_fake_constant_attrs,
-                    pre_dispatch=pre_dispatch,
-                    transform=_tuplify_outputs,
-                    should_insert_runtime_assertion=not strict,
-                )
-                # ep_non_strict.constants contains only fake script objects, we need to map them back
-                ep_non_strict.constants = {
-                    fqn: map_fake_to_real[obj]
-                    if isinstance(obj, FakeScriptObject)
-                    else obj
-                    for fqn, obj in ep_non_strict.constants.items()
-                }
-
-        ep_non_strict.gm.meta["inline_constraints"] = {
-            k: v
-            for k, v in fake_mode.shape_env.var_to_range.items()
-            if free_unbacked_symbols(k)
-        }
-        num_lifted = len(
-            [
-                spec
-                for spec in ep_non_strict.sig.input_specs
-                if spec.kind != InputKind.USER_INPUT
-            ]
-        )
-        try:
-            produce_guards_and_solve_constraints(
-                fake_mode,
-                ep_non_strict.gm,
-                equalities_inputs,
-                original_signature,
-                _disable_forced_specializations=_disable_forced_specializations,
-            )
-        except (ConstraintViolationError, ValueRangeError) as e:
-            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
-
-        combined_args = _combine_args(mod, args, kwargs)
-        range_constraints = make_constraints(
-            fake_mode,
-            ep_non_strict.gm,
-            combined_args,
-            dynamic_shapes,
-            num_lifted,
-        )
-
-        assert out_spec is not None
-
-        gm = ep_non_strict.gm
-
-        gm.meta["forward_arg_names"] = forward_arg_names
-        module_call_signatures = {
-            strip_root(fqn): ModuleCallSignature(inputs=[], outputs=[], **specs)
-            for fqn, specs in module_call_specs.items()
-        }
-
-        if len(preserve_module_call_signature) > 0:
-            for node in gm.graph.nodes:
-                if node.target == torch.ops.higher_order._export_tracepoint:
-                    if "path" in node.kwargs:
-                        path = strip_root(node.kwargs["path"])
-                        with gm.graph.inserting_before(node):
-                            new_node = gm.graph.create_node(
-                                "call_function",
-                                torch.ops.higher_order._export_tracepoint,
-                                args=node.args,
-                                kwargs={
-                                    "path": path,
-                                    "kind": node.kwargs["kind"],
-                                },
-                            )
-                            new_node.meta = node.meta
-                            node.replace_all_uses_with(new_node)
-                            gm.graph.erase_node(node)
-
-            res = CollectTracepointsPass(module_call_signatures, ep_non_strict.sig)(gm)
-            assert res is not None
-            gm = res.graph_module
-
-        _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
-        _verify_nn_module_stack(gm)
-        _verify_stack_trace(gm)
-        _verify_placeholder_names(gm, ep_non_strict.sig)
-        exported_program = ExportedProgram(
-            root=gm,
-            graph=gm.graph,
-            graph_signature=ep_non_strict.sig,
-            state_dict=original_state_dict,
-            range_constraints=range_constraints,
-            module_call_graph=_make_module_call_graph(
-                _EXPORT_MODULE_HIERARCHY, orig_in_spec, out_spec, module_call_signatures
-            ),
-            example_inputs=(args, kwargs),
-            constants=ep_non_strict.constants,
-        )
-        return exported_program
-
+def _strict_export_lower_to_aten_ir(
+    mod: torch.nn.Module,
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]],
+    preserve_module_call_signature: Tuple[str, ...],
+    pre_dispatch: bool,
+    original_state_dict: Dict[str, Any],
+    orig_in_spec: TreeSpec,
+    allow_complex_guards_as_runtime_asserts: bool,
+    _is_torch_jit_trace: bool,
+    lower_to_aten_callback: Callable,
+) -> ExportArtifact:
     gm_torch_level = _export_to_torch_ir(
         mod,
         args,
@@ -1170,6 +1155,7 @@ def _export(
         dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         restore_fqn=False,  # don't need to restore because we will do it later
+        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
         _log_export_usage=False,
     )
 
@@ -1236,7 +1222,11 @@ def _export(
 
     # Fix the graph output signature to be tuple if scalar
     out_spec = orig_out_spec = gm_torch_level._out_spec
+
+    # Used to get rid of lint type error.
     assert out_spec is not None
+    assert orig_out_spec is not None
+
     # aot_export expect the return type to always be a tuple.
     if out_spec.type not in (list, tuple):
         out_spec = pytree.TreeSpec(tuple, None, [out_spec])
@@ -1256,19 +1246,19 @@ def _export(
 
     # NOTE: graph module expects only positional args
     constant_attrs = _gather_constant_attrs(mod)
-    ep_non_strict = _export_non_strict(
-        gm_torch_level,
-        _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
-        {},
-        fake_params_buffers,
-        constant_attrs,
-        pre_dispatch=pre_dispatch,
-        should_insert_runtime_assertion=not strict,
-    )
+    with dynamo_fake_mode:
+        aten_export_artifact = lower_to_aten_callback(
+            gm_torch_level,
+            _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
+            {},
+            fake_params_buffers,
+            constant_attrs,
+        )
 
-    gm = ep_non_strict.gm
-    export_graph_signature = ep_non_strict.sig
-    constants = ep_non_strict.constants
+    # Decompose for readability.
+    gm = aten_export_artifact.gm
+    export_graph_signature = aten_export_artifact.sig
+    constants = aten_export_artifact.constants
 
     # Don't copy over nn_module_stack, stack_trace metadata for params/buffers nodes
     for metadata in params_buffers_to_node_meta.values():
@@ -1291,16 +1281,494 @@ def _export(
                     for k, v in params_buffers_to_node_meta[buffer_name].items():
                         node.meta[k] = v
 
-    # The unbacked symint symbols are updated in aot_export
-    # so we serialize them here instead of inside dynamo
+    # Do some cleanups on the graph module to restore the state dict to the
+    # expected form. Each of these steps should probably get fixed upstream.
+    # 1. Remove tensor constants that were added as buffers.
+    _rewrite_dynamo_tensor_constants(
+        orig_mod_buffers=set(mod.buffers()),
+        traced_mod_buffers=dict(gm_torch_level.named_buffers()),
+        graph_signature=export_graph_signature,
+        constants=constants,
+    )
+    # 2. Restore FQN of param/buffers
+    param_buffer_table: Dict[str, str] = _get_param_buffer_mapping(mod, gm_torch_level)
+    _replace_param_buffer_names(param_buffer_table, export_graph_signature)
 
-    gm.meta["inline_constraints"] = {
-        k: v
-        for k, v in dynamo_fake_mode.shape_env.var_to_range.items()
-        if free_unbacked_symbols(k)
-    }
+    # 3. Remove non-persistent buffers from the graph signature
+    _rewrite_non_persistent_buffers(mod, export_graph_signature, constants)
+
+    # 4. Rewrite constants to have the same FQN as the original module.
+    _remap_constants(constant_attrs, export_graph_signature, constants)
+
+    # 5. Rename constants nodes in graph module from buffers to constants
+    _rename_constants_nodes(gm, export_graph_signature)
+
+    return ExportArtifact(
+        aten=aten_export_artifact,
+        out_spec=orig_out_spec,
+        fake_mode=dynamo_fake_mode,
+        module_call_specs=gm_torch_level.meta["module_call_specs"],
+    )
+
+
+def _export_to_aten_ir_make_fx(
+    mod: torch.nn.Module,
+    fake_args,
+    fake_kwargs,
+    fake_params_buffers,
+    constant_attrs: ConstantAttrMap,
+    produce_guards_callback=None,
+    transform=lambda x: x,
+) -> ATenExportArtifact:
+    @contextmanager
+    def _compiling_state_context():
+        old_value = torch.compiler._is_compiling_flag
+        try:
+            torch.compiler._is_compiling_flag = True
+            yield
+        finally:
+            torch.compiler._is_compiling_flag = old_value
+
+    def _make_fx_helper(mod, args, kwargs, **flags):
+        kwargs = kwargs or {}
+
+        named_parameters = dict(mod.named_parameters(remove_duplicate=False))
+        param_len = len(named_parameters)
+        named_buffers = dict(mod.named_buffers(remove_duplicate=False))
+        buffer_len = len(named_buffers)
+
+        params_and_buffers = {
+            **dict(named_parameters),
+            **dict(named_buffers),
+        }
+        params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
+        params_and_buffers_flat = tuple(params_and_buffers_flat)
+        params_len = len(params_and_buffers)
+
+        functional_call = create_functional_call(
+            mod, params_spec, params_len, store_orig_mod=True
+        )
+
+        params_buffers_args: List[Any] = []
+        params_buffers_args.extend(params_and_buffers_flat)
+        params_buffers_args.extend(args)
+
+        flat_fn, out_spec = create_tree_flattened_fn(
+            functional_call, params_buffers_args, kwargs
+        )
+        flat_args, in_spec = pytree.tree_flatten((params_buffers_args, kwargs))
+
+        @functools.wraps(flat_fn)
+        def wrapped_fn(*args):
+            return tuple(flat_fn(*args))
+
+        with enable_python_dispatcher():
+            gm = make_fx(
+                wrapped_fn,
+                record_module_stack=True,
+                pre_dispatch=True,
+            )(*flat_args)
+            gm.graph.eliminate_dead_code()
+
+        return gm, None
+
+    # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
+    # otherwise aot_export_module will error out because it sees a mix of fake_modes.
+    # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
+    with torch.nn.utils.stateless._reparametrize_module(
+        mod,
+        fake_params_buffers,
+        tie_weights=True,
+        strict=True,
+        stack_weights=True,
+    ), _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
+        named_parameters = dict(mod.named_parameters(remove_duplicate=False))
+        param_len = len(named_parameters)
+        named_buffers = dict(mod.named_buffers(remove_duplicate=False))
+        buffer_len = len(named_buffers)
+
+        params_and_buffers = {
+            **dict(named_parameters),
+            **dict(named_buffers),
+        }
+        params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
+        params_and_buffers_flat = tuple(params_and_buffers_flat)
+        params_len = len(params_and_buffers)
+
+        gm, sig = transform(_make_fx_helper)(
+            mod,
+            fake_args,
+            trace_joint=False,
+            kwargs=fake_kwargs,
+        )
+
+        if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
+            gm.meta.update(mod.meta)
+
+        # DEDUP this
+        def make_argument_spec(i, node) -> ArgumentSpec:
+            if isinstance(node, (int, bool, float, type(None))):
+                # For const outputs we just directly return this
+                return ConstantArgument(name="", value=node)
+
+            assert (
+                "val" in node.meta
+            ), f"{node} is not a constant or a node with a 'val' metadata field"
+            val = node.meta["val"]
+            if isinstance(val, FakeTensor):
+                return TensorArgument(name=node.name)
+            elif isinstance(val, torch.SymInt):
+                return SymIntArgument(name=node.name)
+            elif isinstance(val, torch.ScriptObject):
+                return CustomObjArgument(name=node.name, class_fqn=val._type().qualified_name())  # type: ignore[attr-defined]
+            elif isinstance(val, FakeScriptObject):
+                return CustomObjArgument(
+                    name=node.name, class_fqn=val.script_class_name, fake_val=val
+                )
+            elif isinstance(val, (int, bool, str, float, type(None))):
+                return ConstantArgument(name=node.name, value=val)
+            else:
+                raise AssertionError(
+                    f"Encountered an unsupported object of type {type(val)} "
+                    f"while writing the metadata for exported program"
+                )
+
+    flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
+    index = 0
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            if index >= params_len:
+                user_arg = flat_args[index - params_len]
+                if not isinstance(user_arg, torch.Tensor):
+                    node.meta["val"] = user_arg
+            index += 1
+
+    # DEDUP this
+    def _graph_input_names(gm):
+        return [node.name for node in gm.graph.find_nodes(op="placeholder")]
+
+    def _graph_output_names(gm):
+        output_node = next(iter(reversed(gm.graph.nodes)))
+        assert output_node.op == "output" and len(output_node.args) == 1
+        return_args = output_node.args[0]
+        return [getattr(return_arg, "name", None) for return_arg in return_args]
+
+    input_names = _graph_input_names(gm)
+    output_names = _graph_output_names(gm)
+
+    input_specs, output_specs = _sig_to_specs(
+        user_inputs=set(input_names[params_len:]),
+        inputs_to_parameters=dict(zip(input_names[0:param_len], named_parameters)),
+        inputs_to_buffers=dict(zip(input_names[param_len : param_len + buffer_len], named_buffers)),  # type: ignore[arg-type]
+        user_outputs=set(output_names),
+        buffer_mutations={},
+        user_input_mutations={},
+        grad_params={},  # type: ignore[arg-type, union-attr]
+        grad_user_inputs={},  # type: ignore[arg-type, union-attr]
+        loss_output=None,  # type: ignore[arg-type, union-attr]
+        inputs=[
+            make_argument_spec(i, node)
+            for i, node in enumerate(gm.graph.nodes)
+            if node.op == "placeholder"
+        ],
+        outputs=[
+            make_argument_spec(i, node)
+            for i, node in enumerate(
+                pytree.tree_leaves(next(iter(reversed(gm.graph.nodes))).args)
+            )
+        ],
+        input_tokens=[],
+        output_tokens=[],
+    )
+    export_graph_signature = ExportGraphSignature(
+        input_specs=input_specs, output_specs=output_specs
+    )
+
+    # See comment in _export_to_aten_ir()
+    if produce_guards_callback:
+        try:
+            produce_guards_callback(gm)
+        except (ConstraintViolationError, ValueRangeError) as e:
+            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
+
+    fake_mode = detect_fake_mode(flat_args)
+
+    if not torch._dynamo.config.do_not_emit_runtime_asserts:
+        stack_trace = (
+            'File "torch/fx/passes/runtime_assert.py", line 24, '
+            "in insert_deferred_runtime_asserts"
+        )
+        with _set_node_metadata_hook(
+            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+        ):
+            insert_deferred_runtime_asserts(
+                gm,
+                fake_mode.shape_env,
+                f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                export=True,
+            )
+
+    # Remove nn_module_stack, stack_trace metadata from all placeholders/inputs nodes.
+    for _mod in gm.modules():
+        if not isinstance(_mod, torch.fx.GraphModule):
+            continue
+        for node in _mod.graph.nodes:
+            if node.op in ["placeholder", "output"]:
+                node.meta.pop("nn_module_stack", None)
+                node.meta.pop("stack_trace", None)
+
+    constants = rewrite_script_object_meta(gm)
+    constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
+
+    _preserve_requires_grad_pass(
+        gm, export_graph_signature, fake_params_buffers, constants, flat_args
+    )
+
+    # Prettify names for placeholder nodes.
+    placeholder_naming_pass(
+        gm,
+        export_graph_signature,
+        mod,
+        fake_args,
+        fake_kwargs,
+        fake_params_buffers,
+        constants,
+    )
+
+    return ATenExportArtifact(
+        gm,
+        export_graph_signature,
+        constants,
+    )
+
+
+def _non_strict_export(
+    mod: torch.nn.Module,
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]],
+    preserve_module_call_signature: Tuple[str, ...],
+    pre_dispatch: bool,
+    original_state_dict: Dict[str, Any],
+    orig_in_spec: TreeSpec,
+    allow_complex_guards_as_runtime_asserts: bool,
+    _is_torch_jit_trace: bool,
+    _is_training: bool = False,
+) -> ExportArtifact:
+    out_spec: Optional[TreeSpec] = None
+
+    module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
+
+    def _tuplify_outputs(aot_export):
+        def _aot_export_non_strict(mod, args, kwargs=None, **flags):
+            kwargs = kwargs or {}
+
+            class Wrapper(torch.nn.Module):
+                def __init__(self, mod):
+                    super().__init__()
+                    self._export_root = mod
+
+                def forward(self, *args, **kwargs):
+                    nonlocal out_spec
+                    if isinstance(self._export_root, torch.fx.GraphModule):
+                        with torch.fx.traceback.preserve_node_meta():
+                            tree_out = torch.fx.Interpreter(self._export_root).run(
+                                *args, **kwargs
+                            )
+                    else:
+                        tree_out = self._export_root(*args, **kwargs)
+                    flat_outs, out_spec = pytree.tree_flatten(tree_out)
+                    return tuple(flat_outs)
+
+            wrapped_mod = Wrapper(mod)
+            # Patch export_root to the signatures so that wrapper module correctly populates the
+            # in/out spec
+            new_preserved_call_signatures = [
+                "_export_root." + i for i in preserve_module_call_signature
+            ]
+            with _wrap_submodules(
+                wrapped_mod, new_preserved_call_signatures, module_call_specs
+            ):
+                gm, sig = aot_export(wrapped_mod, args, kwargs=kwargs, **flags)
+                log.debug("Exported program from AOTAutograd:\n%s", gm)
+
+            if sig is not None:
+                assert (
+                    not _is_training
+                ), "graph signature should be None for training IR"
+                sig.parameters = pytree.tree_map(_strip_root, sig.parameters)
+                sig.buffers = pytree.tree_map(_strip_root, sig.buffers)
+                sig.inputs_to_buffers = pytree.tree_map(
+                    _strip_root, sig.inputs_to_buffers
+                )
+                sig.inputs_to_parameters = pytree.tree_map(
+                    _strip_root, sig.inputs_to_parameters
+                )
+                sig.buffers_to_mutate = pytree.tree_map(
+                    _strip_root, sig.buffers_to_mutate
+                )
+            else:
+                # TODO(pianpwk): clean up _make_fx_helper() so we don't have these checks
+                assert _is_training, "graph signature can be None only for training IR"
+
+            for node in gm.graph.nodes:
+                if "nn_module_stack" in node.meta:
+                    nn_module_stack = node.meta["nn_module_stack"]
+                    node.meta["nn_module_stack"] = {
+                        _fixup_key(key): val
+                        for key, val in pytree.tree_map(
+                            _strip_root, nn_module_stack
+                        ).items()
+                    }
+
+            return gm, sig
+
+        return _aot_export_non_strict
+
+    (
+        fake_mode,
+        fake_args,
+        fake_kwargs,
+        equalities_inputs,
+        original_signature,
+    ) = make_fake_inputs(
+        mod,
+        args,
+        kwargs,
+        dynamic_shapes,
+        _is_torch_jit_trace=_is_torch_jit_trace,
+        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,  # for shape env initialization
+    )
+
+    fake_params_buffers = make_fake_params_buffers(fake_mode, _get_params_buffers(mod))
+
+    def _produce_guards_callback(gm):
+        return produce_guards_and_solve_constraints(
+            fake_mode=fake_mode,
+            gm=gm,
+            dynamic_shapes=dynamic_shapes,
+            equalities_inputs=equalities_inputs,
+            original_signature=original_signature,
+            _is_torch_jit_trace=_is_torch_jit_trace,
+        )
+
+    with fake_mode:
+        with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
+            patched_mod,
+            new_fake_args,
+            new_fake_kwargs,
+            new_fake_constant_attrs,
+            map_fake_to_real,
+        ):
+            _to_aten_func = (
+                _export_to_aten_ir_make_fx
+                if _is_training
+                else functools.partial(
+                    _export_to_aten_ir,
+                    pre_dispatch=pre_dispatch,
+                    _is_torch_jit_trace=_is_torch_jit_trace,
+                )
+            )
+            aten_export_artifact = _to_aten_func(  # type: ignore[operator]
+                patched_mod,
+                new_fake_args,
+                new_fake_kwargs,
+                fake_params_buffers,
+                new_fake_constant_attrs,
+                produce_guards_callback=_produce_guards_callback,
+                transform=_tuplify_outputs,
+            )
+            # aten_export_artifact.constants contains only fake script objects, we need to map them back
+            aten_export_artifact.constants = {
+                fqn: map_fake_to_real[obj] if isinstance(obj, FakeScriptObject) else obj
+                for fqn, obj in aten_export_artifact.constants.items()
+            }
+
+    _rewrite_non_persistent_buffers(
+        mod, aten_export_artifact.sig, aten_export_artifact.constants
+    )
+
+    assert out_spec is not None
+    return ExportArtifact(
+        aten=aten_export_artifact,
+        out_spec=out_spec,
+        fake_mode=fake_mode,
+        module_call_specs=module_call_specs,
+    )
+
+
+# TODO (tmanlaibaatar) We need to preserve aten.to here somehow
+@_log_export_wrapper
+@_disable_prexisiting_fake_mode
+def _export_for_training(
+    mod: torch.nn.Module,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    *,
+    strict: bool = True,
+    preserve_module_call_signature: Tuple[str, ...] = (),
+) -> ExportedProgram:
+    if not isinstance(args, tuple):
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
+        )
+
+    global _EXPORT_MODULE_HIERARCHY
+    _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
+
+    # TODO (tmanlaibaatar) setup logging here
+    kwargs = kwargs or {}
+    if isinstance(dynamic_shapes, torch.export.ShapesCollection):
+        dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
+
+    flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
+    original_state_dict = mod.state_dict(keep_vars=True)
+    forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
+
+    export_func = (
+        functools.partial(
+            _strict_export_lower_to_aten_ir,
+            lower_to_aten_callback=_export_to_aten_ir_make_fx,
+        )
+        if strict
+        else functools.partial(
+            _non_strict_export,
+            _is_training=True,
+        )
+    )
+    export_artifact = export_func(  # type: ignore[operator]
+        mod=mod,
+        args=args,
+        kwargs=kwargs,
+        dynamic_shapes=dynamic_shapes,
+        preserve_module_call_signature=preserve_module_call_signature,
+        pre_dispatch=False,
+        original_state_dict=original_state_dict,
+        orig_in_spec=orig_in_spec,
+        allow_complex_guards_as_runtime_asserts=False,
+        _is_torch_jit_trace=False,
+    )
+
+    # Decompose here for readability.
+    gm = export_artifact.aten.gm
+    export_graph_signature = export_artifact.aten.sig
+    out_spec = export_artifact.out_spec
+    fake_mode = export_artifact.fake_mode
+    module_call_specs = export_artifact.module_call_specs
+
+    # Add forward args metadata.
     gm.meta["forward_arg_names"] = forward_arg_names
 
+    # The unbacked symint symbols are updated in aot_export
+    # so we serialize them here instead of inside dynamo.
+    assert fake_mode.shape_env is not None
+    gm.meta["inline_constraints"] = {
+        k: v
+        for k, v in fake_mode.shape_env.var_to_range.items()
+        if free_unbacked_symbols(k)
+    }
     num_lifted = next(
         (
             i
@@ -1311,64 +1779,30 @@ def _export(
     )
     combined_args = _combine_args(mod, args, kwargs)
     range_constraints = make_constraints(
-        dynamo_fake_mode,
+        fake_mode,
         gm,
         combined_args,
         dynamic_shapes,
         num_lifted,
     )
 
-    # Do some cleanups on the graph module to restore the state dict to the
-    # expected form. Each of these steps should probably get fixed upstream.
-    # 1. Remove tensor constants that were added as buffers.
-    _rewrite_dynamo_tensor_constants(
-        orig_mod_buffers=set(mod.buffers()),
-        traced_mod_buffers=dict(gm_torch_level.named_buffers()),
-        graph_signature=ep_non_strict.sig,
-        constants=ep_non_strict.constants,
-    )
-    # 2. Restore FQN of param/buffers
-    param_buffer_table: Dict[str, str] = _get_param_buffer_mapping(mod, gm_torch_level)
-    _replace_param_buffer_names(param_buffer_table, export_graph_signature)
-
-    # 3. Remove non-persistent buffers from the graph signature
-    _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
-
-    # 4. Rewrite constants to have the same FQN as the original module.
-    _remap_constants(constant_attrs, export_graph_signature, constants)
-
-    # 5. Rename constants nodes in graph module from buffers to constants
-    _rename_constants_nodes(gm, export_graph_signature)
-
-    module_call_signatures = {
-        fqn: ModuleCallSignature(inputs=[], outputs=[], **specs)
-        for fqn, specs in gm_torch_level.meta["module_call_specs"].items()
-    }
-
-    if len(preserve_module_call_signature) > 0:
-        res = CollectTracepointsPass(module_call_signatures, export_graph_signature)(gm)
-        assert res is not None
-        gm = res.graph_module
-
-    # We can't get rid of this yet, since for some reason
-    # insert_deferred_runtime_assertions doesn't add assertions to cond
-    # subgraphs
-    if len(range_constraints) > 0:
-        stack_trace = (
-            'File "torch/_export/passes/add_runtime_assertions_for_constraints_pass.py", line 46, '
-            "in _AddRuntimeAssertionsForInlineConstraintsPass"
+    # Make module signatures.
+    module_call_signatures = {}
+    for fqn, specs in module_call_specs.items():
+        mod_fqn = _strip_root(fqn) if not strict else fqn
+        module_call_signatures[mod_fqn] = ModuleCallSignature(
+            inputs=[], outputs=[], **specs
         )
-        with dynamo_fake_mode, gm._set_create_node_hook(
-            functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-        ):
-            res = _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)(gm)
-        assert res is not None
-        gm = res.graph_module
 
-    assert orig_out_spec is not None
+    assert out_spec is not None
+
     _verify_nn_module_stack(gm)
     _verify_stack_trace(gm)
     _verify_placeholder_names(gm, export_graph_signature)
+
+    assert _EXPORT_MODULE_HIERARCHY is not None
+    from torch._export.verifier import TrainingIRVerifier
+
     exported_program = ExportedProgram(
         root=gm,
         graph=gm.graph,
@@ -1378,12 +1812,189 @@ def _export(
         module_call_graph=_make_module_call_graph(
             _EXPORT_MODULE_HIERARCHY,
             orig_in_spec,
-            orig_out_spec,
+            out_spec,
             module_call_signatures,
         ),
         example_inputs=(args, kwargs),
-        constants=constants,
+        constants=export_artifact.aten.constants,
+        verifier=TrainingIRVerifier,
     )
-    log.debug("Exported program from AOTAutograd:\n%s", exported_program)
+
+    return exported_program
+
+
+@_log_export_wrapper
+@_disable_prexisiting_fake_mode
+def _export(
+    mod: torch.nn.Module,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    *,
+    strict: bool = True,
+    preserve_module_call_signature: Tuple[str, ...] = (),
+    pre_dispatch: bool = False,
+    allow_complex_guards_as_runtime_asserts: bool = False,
+    _is_torch_jit_trace: bool = False,
+) -> ExportedProgram:
+    """
+    Traces either an nn.Module's forward function or just a callable with PyTorch
+    operations inside and produce a ExportedProgram.
+
+    Args:
+        f: the `nn.Module` to trace.
+
+        args: example positional inputs.
+
+        kwargs: optional example keyword inputs.
+
+        dynamic_shapes:
+         An optional argument where the type should either be:
+         1) a dict from argument names of ``f`` to their dynamic shape specifications,
+         2) a tuple that specifies dynamic shape specifications for each input in original order.
+         If you are specifying dynamism on keyword args, you will need to pass them in the order that
+         is defined in the original function signature.
+
+         The dynamic shape of a tensor argument can be specified as either
+         (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
+         not required to include static dimension indices in this dict, but when they are,
+         they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
+         where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
+         are denoted by None. Arguments that are dicts or tuples / lists of tensors are
+         recursively specified by using mappings or sequences of contained specifications.
+
+        preserve_module_call_signature: A list of submodule paths for which the original
+            calling conventions are preserved as metadata.
+
+        allow_complex_guards_as_runtime_asserts:
+         With the current dynamic shapes language for dims and derived dims, we can run into constraints
+         that are not expressible with the language. For example, flattening a matrix and adding to a vector,
+         both fully dynamic (i.e. x.reshape([-1]) + y) emits a guard s0 * s1 = s2, which is not expressible.
+         By default, we either raise a constraint violation error or specialize to static values.
+         If this flag is set to True, we avoid erroring out and instead allow complex constraints to exist as runtime
+         assertions in the graph. The sympy interpreter (torch/utils/_sympy/interp.py) will produce the math ops
+         required to compute and assert the value of the guard (e.g. sym_size_int, eq, _assert_scalar).
+         Additionally, if TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS=1 is specified, we will allow complex constraints
+         while not emitting runtime asserts, returning a cleaner graph with lesser guarantees around dynamic shapes.
+
+    Returns:
+        An ExportedProgram containing the traced method.
+    """
+    if not isinstance(args, tuple):
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
+        )
+
+    global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
+    _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
+
+    flags = set()
+    flags.add("strict" if strict else "non_strict")
+    flags.add("pre_dispatch" if pre_dispatch else "aot_dispatch")
+    log_export_usage(event="export.enter", flags=flags)
+    _EXPORT_FLAGS = flags
+
+    kwargs = kwargs or {}
+    if isinstance(dynamic_shapes, torch.export.ShapesCollection):
+        dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
+
+    flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
+    original_state_dict = mod.state_dict(keep_vars=True)
+    if not _is_torch_jit_trace:
+        forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
+    else:
+        forward_arg_names = None
+
+    # Call the appropriate export function based on the strictness of tracing.
+    export_func = _strict_export if strict else _non_strict_export
+
+    export_artifact = export_func(  # type: ignore[operator]
+        mod,
+        args,
+        kwargs,
+        dynamic_shapes,
+        preserve_module_call_signature,
+        pre_dispatch,
+        original_state_dict,
+        orig_in_spec,
+        allow_complex_guards_as_runtime_asserts,
+        _is_torch_jit_trace,
+    )
+    # Decompose here for readability.
+    gm = export_artifact.aten.gm
+    export_graph_signature = export_artifact.aten.sig
+    out_spec = export_artifact.out_spec
+    fake_mode = export_artifact.fake_mode
+    module_call_specs = export_artifact.module_call_specs
+
+    # Add forward args metadata.
+    gm.meta["forward_arg_names"] = forward_arg_names
+
+    # The unbacked symint symbols are updated in aot_export
+    # so we serialize them here instead of inside dynamo.
+    assert fake_mode.shape_env is not None
+    gm.meta["inline_constraints"] = {
+        k: v
+        for k, v in fake_mode.shape_env.var_to_range.items()
+        if free_unbacked_symbols(k)
+    }
+    num_lifted = next(
+        (
+            i
+            for i, s in enumerate(export_graph_signature.input_specs)
+            if s.kind == InputKind.USER_INPUT
+        ),
+        len(export_graph_signature.input_specs),
+    )
+    combined_args = _combine_args(
+        mod, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
+    )
+    range_constraints = make_constraints(
+        fake_mode,
+        gm,
+        combined_args,
+        dynamic_shapes,
+        num_lifted,
+    )
+
+    # Make module signatures.
+    module_call_signatures = {}
+    for fqn, specs in module_call_specs.items():
+        mod_fqn = _strip_root(fqn) if not strict else fqn
+        module_call_signatures[mod_fqn] = ModuleCallSignature(
+            inputs=[], outputs=[], **specs
+        )
+
+    if len(preserve_module_call_signature) > 0:
+        if not strict:
+            _rewrite_node(gm)
+        res = CollectTracepointsPass(module_call_signatures, export_graph_signature)(gm)
+        assert res is not None
+        gm = res.graph_module
+
+    assert out_spec is not None
+
+    _verify_nn_module_stack(gm)
+    _verify_stack_trace(gm)
+    if not _is_torch_jit_trace:
+        _verify_placeholder_names(gm, export_graph_signature)
+
+    assert _EXPORT_MODULE_HIERARCHY is not None
+    exported_program = ExportedProgram(
+        root=gm,
+        graph=gm.graph,
+        graph_signature=export_graph_signature,
+        state_dict=original_state_dict,
+        range_constraints=range_constraints,
+        module_call_graph=_make_module_call_graph(
+            _EXPORT_MODULE_HIERARCHY,
+            orig_in_spec,
+            out_spec,
+            module_call_signatures,
+        ),
+        example_inputs=(args, kwargs),
+        constants=export_artifact.aten.constants,
+    )
 
     return exported_program

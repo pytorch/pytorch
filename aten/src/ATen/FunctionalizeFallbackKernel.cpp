@@ -217,7 +217,7 @@ static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
     // we will end up hitting PreDispatch stack first. So, we should
     // directly redispatch to the functionalize key manually.
     static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::clone", "").typed<at::Tensor(const at::Tensor &, std::optional<at::MemoryFormat>)>();
-    return op.redispatch(c10::DispatchKeySet({c10::DispatchKey::Functionalize}), self, c10::nullopt);
+    return op.redispatch(c10::DispatchKeySet({c10::DispatchKey::Functionalize}), self, std::nullopt);
   }
 
   at::AutoDispatchSkipFunctionalize guard;

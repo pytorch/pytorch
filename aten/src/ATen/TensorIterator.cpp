@@ -22,7 +22,6 @@
 #endif
 
 #include <c10/util/irange.h>
-#include <c10/util/string_utils.h>
 #include <c10/util/SmallBuffer.h>
 
 #include <array>
@@ -172,7 +171,7 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
   //   This will bypass all shape checking in the TensorIterator. Kernels which call this method
   //   are expected to check shapes before calling `add_owned_input` or `add_owned_output`.
   TORCH_CHECK(!resize_outputs_, "resize_outputs() must be called before declare_static_shape(...)")
-  static_shape_ = c10::make_optional(DimVector(shape));
+  static_shape_ = std::make_optional(DimVector(shape));
   return *this;
 }
 
@@ -1310,7 +1309,7 @@ bool TensorIteratorBase::can_use_32bit_indexing() const {
 
 std::unique_ptr<TensorIterator> TensorIteratorBase::split(int dim) {
   TORCH_INTERNAL_ASSERT(dim >= 0 && dim < ndim() && shape()[dim] >= 2);
-  std::unique_ptr<TensorIterator> copy(new TensorIterator(*this));
+  auto copy = std::make_unique<TensorIterator>(*this);
 
   bool overlaps = is_dim_reduced(dim);
   auto copy_size = shape_[dim] / 2;
@@ -1398,7 +1397,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
         break;
       }
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unsupported fast setup type", c10::to_string((int)setup_type));
+      TORCH_INTERNAL_ASSERT(false, "Unsupported fast setup type", std::to_string((int)setup_type));
   }
   //coalescing dimensions consists of collapsing dimensions to 1 (we are limited to contiguous no-broadcast cases here)
   if (ndim() > 1){

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 import operator
 from collections import defaultdict
@@ -185,7 +186,7 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
 
     # If the output is copied back into the input, this forces both to be
     # realized as the output is a user of the input
-    if inp.op == "placeholder" and any(  # type: ignore[union-attr]
+    if inp.op in ("placeholder", "get_attr") and any(  # type: ignore[union-attr]
         user.target is aten.copy_.default and user.args[0] is inp for user in node.users
     ):
         return True
@@ -374,16 +375,25 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     This condition is slightly different for graph inputs where they can only
     be inplaced if the above condition is true and there's a copy_ in the
     epilogue that signals that the caller wants to observe the mutation.
+
+    Unlike JIT Inductor, AOTInductor currently unlifts weights and buffers from
+    input args, so instead of checking mutation on placeholder, AOTInductor
+    checks mutation on get_attr. This is subject to change in future.
     """
 
     copy_args_to_copy_nodes = {}
+    # maps argument to the first copy_ node that mutates it.
+    copy_nodes = {}
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
     node_order: Dict[Any, int] = {}
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
-        if node.target == aten.copy_.default and node.args[0].op == "placeholder":
+        if node.target == aten.copy_.default and node.args[0].op in (
+            "placeholder",
+            "get_attr",
+        ):
             dst = node.args[0]
             src = node.args[1]
             # If the target is a getitem and it indexes a possible clone,
@@ -399,10 +409,11 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 src = src.args[0]
 
             copy_args_to_copy_nodes[(dst, src)] = node
+            copy_nodes[dst] = node
 
             mutated_inputs.add(node.args[0])
 
-    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
+    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node, mutated_arg):
         node_loc = node_order[node]
         copy_node_loc = node_order[copy_node] if copy_node is not None else None
 
@@ -424,6 +435,16 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 # Reinplacing does not change shape metadata
                 if is_meta_only_user(user):
                     continue
+                # If our graph looks like:
+                # foo(mutated_arg)
+                # mutated_arg.copy_(other)
+                # then it's safe for us to reinplace foo because mutated_arg
+                # will get overwritten anyways.
+                if (
+                    user.target is torch.ops.aten.copy_.default
+                    and mutated_arg is user.args[0]
+                ):
+                    continue
                 return True
         return False
 
@@ -434,26 +455,28 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         if get_node_storage(mutated_arg) is None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
-        if mutated_arg.op == "placeholder":
-            if not (
-                copy_node := copy_args_to_copy_nodes.get((mutated_arg, node), False)
-            ):
+        if mutated_arg.op in ("placeholder", "get_attr"):
+            # Get the first copy_ node that mutates the mutated_arg.
+            copy_node = copy_nodes.get(mutated_arg, None)
+            if copy_node is None:
+                # There is no copy_ back to the candidate mutated_arg (which is a graph input).
+                # Therefore the semantics of the program are that it does not mutate
+                # mutated_arg, so we cannot re-inplace it.
                 return False
-
             if any_use_of_views_after_node(
-                node, shared_view_nodes, copy_node=copy_node
+                node, shared_view_nodes, copy_node=copy_node, mutated_arg=mutated_arg
             ):
                 return False
 
             return True
-        elif any(view.op == "placeholder" for view in shared_view_nodes):
+        elif any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
             # If mutated arg is view of any of the inputs of the graph,
             # do not allow for inplacing.
             # This would require more sophisticated algorithm to handle
             return False
         else:
             return not any_use_of_views_after_node(
-                node, shared_view_nodes, copy_node=None
+                node, shared_view_nodes, copy_node=None, mutated_arg=mutated_arg
             )
 
     replace_dict: Dict[torch.fx.Node, torch.fx.Node] = {}

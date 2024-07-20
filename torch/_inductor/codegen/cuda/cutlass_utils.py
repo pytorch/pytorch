@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 import os
@@ -156,7 +157,7 @@ def _gen_ops_cached(arch, version) -> List[Any]:
             arch,
             version,
         )
-        return list()
+        return []
     arch = _normalize_cuda_arch(arch)
     args = CUTLASSArgs(architectures=arch, cuda_version=version)
     manifest = cutlass_manifest.Manifest(args)

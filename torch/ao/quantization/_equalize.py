@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import copy
 from typing import Dict, Any
@@ -5,18 +6,22 @@ from typing import Dict, Any
 __all__ = [
     "set_module_weight",
     "set_module_bias",
+    "has_bias",
     "get_module_weight",
     "get_module_bias",
     "max_over_ndim",
     "min_over_ndim",
     "channel_range",
+    "get_name_by_module",
     "cross_layer_equalization",
+    "process_paired_modules_list_to_name",
+    "expand_groups_in_paired_modules_list",
     "equalize",
     "converged",
 ]
 
-_supported_types = {torch.nn.Conv2d, torch.nn.Linear}
-_supported_intrinsic_types = {torch.ao.nn.intrinsic.ConvReLU2d, torch.ao.nn.intrinsic.LinearReLU}
+_supported_types = {torch.nn.Conv2d, torch.nn.Linear, torch.nn.Conv1d}
+_supported_intrinsic_types = {torch.ao.nn.intrinsic.ConvReLU2d, torch.ao.nn.intrinsic.LinearReLU, torch.ao.nn.intrinsic.ConvReLU1d}
 _all_supported_types = _supported_types.union(_supported_intrinsic_types)
 
 def set_module_weight(module, weight) -> None:
@@ -30,6 +35,12 @@ def set_module_bias(module, bias) -> None:
         module.bias = torch.nn.Parameter(bias)
     else:
         module[0].bias = torch.nn.Parameter(bias)
+
+def has_bias(module) -> bool:
+    if type(module) in _supported_types:
+        return module.bias is not None
+    else:
+        return module[0].bias is not None
 
 def get_module_weight(module):
     if type(module) in _supported_types:
@@ -69,6 +80,21 @@ def channel_range(input, axis=0):
     assert mins.size(0) == input.size(axis), "Dimensions of resultant channel range does not match size of requested axis"
     return maxs - mins
 
+def get_name_by_module(model, module):
+    """Get the name of a module within a model.
+
+    Args:
+        model: a model (nn.module) that equalization is to be applied on
+        module: a module within the model
+
+    Returns:
+        name: the name of the module within the model
+    """
+    for name, m in model.named_modules():
+        if m is module:
+            return name
+    raise ValueError("module is not in the model")
+
 def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     """Scale the range of Tensor1.output to equal Tensor2.input.
 
@@ -79,6 +105,9 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     if type(module1) not in _all_supported_types or type(module2) not in _all_supported_types:
         raise ValueError("module type not supported:", type(module1), " ", type(module2))
 
+    conv1_has_bias = has_bias(module1)
+    bias = None
+
     weight1 = get_module_weight(module1)
     weight2 = get_module_weight(module2)
 
@@ -86,7 +115,8 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
         raise TypeError("Number of output channels of first arg do not match \
         number input channels of second arg")
 
-    bias = get_module_bias(module1)
+    if conv1_has_bias:
+        bias = get_module_bias(module1)
 
     weight1_range = channel_range(weight1, output_axis)
     weight2_range = channel_range(weight2, input_axis)
@@ -96,7 +126,8 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     scaling_factors = torch.sqrt(weight1_range / weight2_range)
     inverse_scaling_factors = torch.reciprocal(scaling_factors)
 
-    bias = bias * inverse_scaling_factors
+    if conv1_has_bias:
+        bias = bias * inverse_scaling_factors
 
     # formatting the scaling (1D) tensors to be applied on the given argument tensors
     # pads axis to (1D) tensors to then be broadcasted
@@ -112,8 +143,36 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     weight2 = weight2 * scaling_factors
 
     set_module_weight(module1, weight1)
-    set_module_bias(module1, bias)
+    if conv1_has_bias:
+        set_module_bias(module1, bias)
     set_module_weight(module2, weight2)
+
+def process_paired_modules_list_to_name(model, paired_modules_list):
+    """Processes a list of paired modules to a list of names of paired modules. """
+
+    for group in paired_modules_list:
+        for i, item in enumerate(group):
+            if isinstance(item, torch.nn.Module):
+                group[i] = get_name_by_module(model, item)
+            elif not isinstance(item, str):
+                raise TypeError("item must be a nn.Module or a string")
+    return paired_modules_list
+
+def expand_groups_in_paired_modules_list(paired_modules_list):
+    """Expands module pair groups larger than two into groups of two modules. """
+    new_list = []
+
+    for group in paired_modules_list:
+        if len(group) == 1:
+            raise ValueError("Group must have at least two modules")
+        elif len(group) == 2:
+            new_list.append(group)
+        elif len(group) > 2:
+            for i in range(len(group) - 1):
+                new_list.append([group[i], group[i + 1]])
+
+    return new_list
+
 
 def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
     """Equalize modules until convergence is achieved.
@@ -125,19 +184,28 @@ def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
     are not that different than the current modules (determined by converged_test),
     then the modules have converged enough that further equalizing is not necessary
 
-    Implementation of this referced section 4.1 of this paper https://arxiv.org/pdf/1906.04721.pdf
+    Reference is section 4.1 of this paper https://arxiv.org/pdf/1906.04721.pdf
 
     Args:
-        model: a model (nn.module) that equalization is to be applied on
-        paired_modules_list: a list of lists where each sublist is a pair of two
-            submodules found in the model, for each pair the two submodules generally
-            have to be adjacent in the model to get expected/reasonable results
-        threshold: a number used by the converged function to determine what degree
-            similarity between models is necessary for them to be called equivalent
-        inplace: determines if function is inplace or not
+        model: a model (nn.Module) that equalization is to be applied on
+            paired_modules_list (List(List[nn.module || str])): a list of lists
+            where each sublist is a pair of two submodules found in the model,
+            for each pair the two modules have to be adjacent in the model,
+            with only piece-wise-linear functions like a (P)ReLU or LeakyReLU in between
+            to get expected results.
+            The list can contain either modules, or names of modules in the model.
+            If you pass multiple modules in the same list, they will all be equalized together.
+            threshold (float): a number used by the converged function to determine what degree
+            of similarity between models is necessary for them to be called equivalent
+        inplace (bool): determines if function is inplace or not
     """
+
+    paired_modules_list = process_paired_modules_list_to_name(model, paired_modules_list)
+
     if not inplace:
         model = copy.deepcopy(model)
+
+    paired_modules_list = expand_groups_in_paired_modules_list(paired_modules_list)
 
     name_to_module : Dict[str, torch.nn.Module] = {}
     previous_name_to_module: Dict[str, Any] = {}

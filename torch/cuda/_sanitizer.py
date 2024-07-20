@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""
 This module introduces CUDA Sanitizer, a tool for detecting synchronization errors between kernels ran on different streams.
 
@@ -480,7 +481,7 @@ class ArgumentHandler:
     def __init__(self):
         self.dataptrs_read: Set[DataPtr] = set()
         self.dataptrs_written: Set[DataPtr] = set()
-        self.tensor_aliases: Dict[DataPtr, List[str]] = dict()
+        self.tensor_aliases: Dict[DataPtr, List[str]] = {}
         self.outputs: Set[DataPtr] = set()
 
     def _handle_argument(

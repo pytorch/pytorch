@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import builtins
 import collections
 import inspect
@@ -232,10 +233,12 @@ __all__ = [
     # View & Shape Ops
     #
     "alias",
+    "alias_copy",
     "atleast_1d",
     "atleast_2d",
     "atleast_3d",
     "as_strided",
+    "as_strided_copy",
     "as_strided_scatter",
     "block_diag",
     "broadcast_shapes",
@@ -351,9 +354,7 @@ aten = torch._ops.ops.aten
 
 
 def is_noncontiguous_supported(device):
-    if device is not None and device.type == "hpu":
-        return False
-    return True
+    return device is None or device.type != "hpu"
 
 
 def handle_noncontiguous_outputs(input_tlist, output):
@@ -1709,6 +1710,15 @@ def sub(
 
     a, b = _maybe_broadcast(a, b)
 
+    if isinstance(a, TensorLike) and isinstance(b, TensorLike):
+        torch._check(
+            not utils.is_boolean_dtype(a.dtype) and not utils.is_boolean_dtype(b.dtype),
+            lambda: (
+                "Subtraction, the `-` operator, with two bool tensors is not supported. "
+                "Use the `^` or `logical_xor()` operator instead."
+            ),
+        )
+
     if alpha != 1:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
@@ -2553,6 +2563,14 @@ def addr(
         vec2.ndim == 1,
         lambda: f"addr: Expected 1-D argument vec2, but got {vec2.ndim}-D",
     )
+    for arg, arg_name in ((alpha, "alpha"), (beta, "beta")):
+        if isinstance(arg, bool):
+            torch._check(
+                utils.is_boolean_dtype(self.dtype)
+                and utils.is_boolean_dtype(vec1.dtype)
+                and utils.is_boolean_dtype(vec2.dtype),
+                lambda: f"Boolean {arg_name} only supported for Boolean results.",
+            )
     self = self.expand(vec1.shape[0], vec2.shape[0])
     if utils.is_boolean_dtype(self.dtype):
         # Integers are accepted for booleans
@@ -2651,6 +2669,9 @@ def as_strided(
         storage_offset if storage_offset is not None else a.storage_offset()
     )
     return prims.as_strided(a, size, stride, storage_offset_int)
+
+
+as_strided_copy = _make_copy_from_view(as_strided)
 
 
 @register_decomposition(aten.as_strided_scatter)
@@ -3649,6 +3670,16 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         else:
             return _a
 
+    if a.is_contiguous():
+        # Special-cases for nd_to_1d
+        if len(shape) == 1 and a.ndim > 1:
+            return torch.as_strided(a, [a.numel()], [1])
+        # Special-cases for 1d_to_2d
+        if len(shape) == 2 and a.ndim == 1:
+            dim0 = shape[0]
+            dim1 = shape[1]
+            return torch.as_strided(a, [dim0, dim1], [dim1, 1])
+
     # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
 
     # NOTE [Reshape Algorithm]
@@ -3745,9 +3776,7 @@ def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
 
 @register_decomposition(aten.roll)
 @out_wrapper()
-def roll(
-    a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
-) -> TensorLikeType:
+def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
     dims = utils.canonicalize_dims(a.ndim, dims)
     # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
@@ -3823,14 +3852,14 @@ def rot90(
     elif k == 3:
         return torch.transpose(torch.flip(a, (dims[0],)), dims[0], dims[1])
     else:
-        return clone(a, memory_format=torch.contiguous_format)
+        return a.clone(memory_format=torch.contiguous_format)
 
 
 def _check_stack_inputs(tensors: TensorSequenceType) -> None:
     entry_shape = tensors[0].shape
     for i in range(1, len(tensors)):
         assert tensors[i].shape == entry_shape, (
-            f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0"
+            f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0 "
             f"and {tensors[i].shape} at entry {i}"
         )
 
@@ -3907,7 +3936,7 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
         lambda: "Dimension specified as 0 but tensor has no dimensions",
     )
     if guard_size_oblivious(t.shape[dim] == 0):
-        return tuple()
+        return ()
     else:
         return tuple(
             torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim)
@@ -4449,6 +4478,9 @@ def T(a: TensorLikeType) -> TensorLikeType:
 @register_decomposition(aten.alias)
 def alias(a: TensorLikeType) -> TensorLikeType:
     return prims.view_of(a)
+
+
+alias_copy = _make_copy_from_view(alias)
 
 
 @register_decomposition(aten.transpose)
@@ -5967,7 +5999,18 @@ def exponential(self, rate=1, generator=None):
         rate > 0.0,
         lambda: f"exponential_ expects lambda > 0.0, but found lambda={rate}",
     )
-    return -1 / rate * torch.log1p(-torch.rand_like(self))
+
+    uniform_val = torch.rand_like(self)
+
+    # copying numerics of transformation::exponential see comment:
+    # curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
+    # we need log to be not 0, and not underflow when converted to half
+    # fast __logf approximation can underflow, so set log to -epsilon/2 for 1 or close to 1 args
+    epsilon = torch.finfo(uniform_val.dtype).eps / 2
+    condition = uniform_val >= 1.0 - epsilon
+    log_uniform = torch.where(condition, -epsilon, torch.log(uniform_val))
+
+    return -1 / rate * log_uniform
 
 
 @register_decomposition(aten.geometric)
@@ -6298,7 +6341,7 @@ def _compute_sizes(seq, scalar_type):
         try:
             handle = seq[0]
         except Exception:
-            raise ValueError(  # noqa: TRY200
+            raise ValueError(  # noqa: B904
                 f"could not determine the shape of object type '{type(seq).__name__}'"
             )
         seq = handle
@@ -6358,12 +6401,24 @@ def _infer_scalar_type(obj):
 
 # Analogous to recursive_store
 # xref: recursive_store in torch/csrc/utils/tensor_new.cpp
-def _recursive_build(scalarType: torch.dtype, obj: TensorOrNumberLikeType):
-    if isinstance(obj, Tensor) and obj.ndim <= 1:
+def _recursive_build(
+    scalarType: torch.dtype, obj: Union[TensorOrNumberLikeType, TensorSequenceType]
+):
+    if isinstance(obj, Tensor) and obj.numel() == 1:
         return obj.detach().to(dtype=scalarType, device="cpu", copy=True).view(())
+    elif isinstance(obj, Tensor):
+        # It is invalid to call ".tensor([...])" with a non-scalar tensor in eager mode
+        # >>> torch.tensor([torch.randn(2)])
+        # ValueError: only one element tensors can be converted to Python scalars
+        #
+        # But it is possible with a NumPy array
+        # >>> torch.tensor([np.random.uniform(size=(2,))]).shape
+        # torch.Size([1, 2])
+        return obj.detach().to(dtype=scalarType, device="cpu", copy=True)
     elif isinstance(obj, Number):
         return torch.scalar_tensor(obj, dtype=scalarType)
 
+    # seq can be a list of tensors
     seq = obj
     return torch.stack([_recursive_build(scalarType, item) for item in seq])
 

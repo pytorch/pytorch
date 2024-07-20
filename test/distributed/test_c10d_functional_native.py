@@ -4,7 +4,6 @@ import unittest
 from typing import List
 
 import torch
-
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 from torch._C import FileCheck
@@ -48,6 +47,7 @@ def load_test_module(name):
 AOTIRunnerUtil = load_test_module("inductor.test_aot_inductor_utils").AOTIRunnerUtil
 
 import sys
+
 
 if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
@@ -192,6 +192,18 @@ class TestWithNCCL(MultiProcessTestCase):
                 for rank in self.ranks
             ]
         )
+        assert torch.allclose(output, expect)
+        assert output.eq(expect).all()
+
+        # Test out-variant of all_gather_into_tensor
+        output = torch.empty(expect.shape, device=self.device)
+        output = torch.ops._c10d_functional.all_gather_into_tensor_out(
+            input,
+            self.world_size,
+            "default",
+            out=output,
+        )
+        output = torch.ops._c10d_functional.wait_tensor(output)
         assert torch.allclose(output, expect)
         assert output.eq(expect).all()
 
@@ -464,6 +476,7 @@ class CompileTest(TestCase):
             .check("return (buf0, buf7, )")
             .run(code)
         )
+        assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
         out = AOTIRunnerUtil.run("cuda", func, (arg,))
@@ -509,6 +522,7 @@ class CompileTest(TestCase):
             .check("return (buf0, buf1, buf5, buf6, )")
             .run(code)
         )
+        assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
         out = AOTIRunnerUtil.run("cuda", func, (args,))
@@ -574,6 +588,7 @@ class CompileTest(TestCase):
             .check("return (buf7, buf8, )")
             .run(code)
         )
+        assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
@@ -596,6 +611,7 @@ class CompileTest(TestCase):
             .check("return (buf0, )")
             .run(code)
         )
+        assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
         out = AOTIRunnerUtil.run("cuda", func, (arg,))

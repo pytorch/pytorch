@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -5,15 +6,15 @@ import sympy
 from sympy.parsing.sympy_parser import parse_expr
 
 import torch
-from .. import codecache, config, ir, lowering as L
+from torch.utils._sympy.symbol import SymT
+from .. import config, cpp_builder, ir, lowering as L
 
 from ..autotune_process import CppBenchmarkRequest
 from ..select_algorithm import PartialRender
-from ..utils import sympy_index_symbol
+from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
-from .common import Kernel, OpOverrides
-from .cpp import CppKernelProxy, KernelGroup
-from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferScope
+from .cpp import CppKernel, CppKernelProxy, KernelGroup
+from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext
 
 
 def parse_expr_with_index_symbols(expr):
@@ -33,11 +34,9 @@ def wrap_with_tensorbox(node) -> ir.TensorBox:
     )
 
 
-class CppTemplateKernel(Kernel):
-    overrides = OpOverrides
-
-    def __init__(self, kernel_name):
-        super().__init__()
+class CppTemplateKernel(CppKernel):
+    def __init__(self, kernel_name, num_threads):
+        super().__init__(None, num_threads)
         self.kernel_name = kernel_name
         self.render_hooks = {}
         self.local_buffers = {}
@@ -45,19 +44,26 @@ class CppTemplateKernel(Kernel):
     def render(self, template, **kwargs):
         return PartialRender(
             template.render(kernel=self, **kwargs), self.render_hooks
-        ).finalize()
+        ).finalize_all()
 
     def def_kernel(
         self,
         inputs: Dict[str, ir.Buffer],
         outputs: Dict[str, ir.Buffer],
+        aliases: Optional[Dict[str, str]] = None,
     ) -> str:
         for name, inp in inputs.items():
             if inp is not None:
                 self.args.input_buffers[inp.get_name()] = name
         for name, out in outputs.items():
-            if out.get_name() not in self.args.inplace_buffers:
-                self.args.output_buffers[out.get_name()] = name
+            self.args.output_buffers[out.get_name()] = name
+        if aliases is not None:
+            for alias, orig in aliases.items():
+                if orig in self.args.input_buffers:
+                    self.args.input_buffers[alias] = self.args.input_buffers[orig]
+                if orig in self.args.output_buffers:
+                    self.args.output_buffers[alias] = self.args.output_buffers[orig]
+
         unique_sizevars = {
             s
             for input in inputs.values()
@@ -78,10 +84,17 @@ class CppTemplateKernel(Kernel):
             self.args.sizevars[sizevar] = f"k{sizevar}"
 
         def hook():
+            # remove all aliases before generate function definition
+            if aliases is not None:
+                for alias in aliases:
+                    if alias in self.args.input_buffers:
+                        self.args.input_buffers[alias] = "REMOVED"
+                    if alias in self.args.output_buffers:
+                        self.args.output_buffers[alias] = "REMOVED"
             cpp_argdefs, _, _ = self.args.cpp_argdefs()
             return f"void {self.kernel_name}({', '.join(cpp_argdefs)})"
 
-        placeholder = "<DEFINE_KERNEL>"
+        placeholder = "<DEF_KERNEL>"
         assert placeholder not in self.render_hooks
         self.render_hooks[placeholder] = hook
         return placeholder
@@ -107,7 +120,7 @@ class CppTemplateKernel(Kernel):
         return cexpr_index(self.rename_indexing(node.get_stride()[dim]))
 
     def index(self, node: ir.Buffer, indices: List[Any]) -> str:
-        indexer = node.make_indexer()
+        indexer = node.layout.as_fixed().make_indexer()
         index = indexer(parse_expr_with_index_symbols(indices))
         index = self.rename_indexing(index)
         outer_name = node.get_name()
@@ -131,7 +144,7 @@ class CppTemplateKernel(Kernel):
             assert len(_range) == 2
             start, end = parse_expr_with_index_symbols(_range)
             sliced = L.slice_(sliced, dim, start, end, clamp=False)
-        assert isinstance(sliced.data, ir.ReinterpretView)
+        assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
         return sliced.data
 
     def view(self, node, sizes: List[Any]) -> ir.View:
@@ -145,13 +158,6 @@ class CppTemplateKernel(Kernel):
         assert isinstance(permuted, ir.ReinterpretView)
         return permuted
 
-    @property
-    def assert_function(self) -> str:
-        if V.graph.aot_mode:
-            return "AOTI_TORCH_CHECK"
-        else:
-            return "TORCH_CHECK"
-
     def maybe_codegen_profile(self) -> str:
         if config.cpp.enable_kernel_profile:
             graph_id = V.graph.graph_id
@@ -161,7 +167,7 @@ class CppTemplateKernel(Kernel):
             return ""
 
     def unroll_pragma(self, unroll):
-        if codecache.is_gcc():
+        if cpp_builder.is_gcc():
             return f"#pragma GCC unroll {unroll}"
         else:
             return f"#pragma unroll {unroll}"
@@ -180,12 +186,17 @@ class CppTemplateKernel(Kernel):
         dst: ir.Buffer,
         nodes: List[ir.IRNode],
         offsets: Optional[List[sympy.Expr]] = None,
-        reindexer: Optional[Callable[[List[Any]], List[Any]]] = None,
+        reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
     ) -> str:
         var_sizes = (tuple(dst.get_size()), ())
-        var_ranges = {sympy.Symbol(f"z{i}"): sz for i, sz in enumerate(var_sizes[0])}
+        var_ranges = {
+            sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
+            for i, sz in enumerate(var_sizes[0])
+        }
         if not offsets:
             offsets = [sympy.Integer(0)] * len(var_sizes[0])
+        if not reindexers:
+            reindexers = [None] * len(nodes)
         assert len(offsets) == len(var_sizes[0])
         output_index = dst.get_layout().make_indexer()(var_ranges.keys())
         kernel_group = KernelGroup()
@@ -203,8 +214,8 @@ class CppTemplateKernel(Kernel):
                 assert len(args[0]) == len(var_sizes[0])
                 assert len(args[1]) == 0
                 new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
-                if reindexer is not None:
-                    new_args = reindexer(new_args)
+                if reindexers[i] is not None:
+                    new_args = reindexers[i](new_args)  # type: ignore[misc]
                 V.ops.store(
                     output_name,
                     output_index,
@@ -223,9 +234,10 @@ class CppTemplateKernel(Kernel):
         self,
         dst: ir.Buffer,
         src: ir.Buffer,
+        orig_src: Optional[ir.Buffer] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         offsets: Optional[List[Any]] = None,
-        reindexer: Optional[Callable[[List[Any]], List[Any]]] = None,
+        reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
     ):
         """
         Store the `src` buffer to the `dst` buffer. The size of `src` and `dst` should match.
@@ -244,21 +256,35 @@ class CppTemplateKernel(Kernel):
               the sizes of `src` and `dst`.
            b) `dst` might be indexed in a different way as the `epilogue_nodes`, hence a `reindexer` is
               needed on the indices to `epilogue_nodes` to match the indexing of `dst`.
+           c) If `src` is local, we need to add a local buffer for it and localize the `orig_src` buffer
+              in `epilogue_nodes` with `src`.
         """
         assert dst.get_size() == src.get_size()
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
         if epilogue_nodes:
-            return self.store_pointwise_nodes(dst, epilogue_nodes, offsets, reindexer)
+            with LocalBufferContext(self.args) as scope:
+                assert orig_src is not None
+                if orig_src.get_name() != src.get_name():
+                    scope.add_local_buffer(
+                        src,
+                        [
+                            orig_src,
+                        ],
+                    )
+                    epilogue_nodes = scope.localize_nodes(epilogue_nodes)
+                return self.store_pointwise_nodes(
+                    dst, epilogue_nodes, offsets, reindexers  # type: ignore[arg-type]
+                )
         else:
             if dst.get_name() != src.get_name():
                 # src is local
                 copy = L.copy(dst, src).data.data
-                with LocalBufferScope(self) as scope:
+                with LocalBufferContext(self.args) as scope:
                     scope.add_local_buffer(src)
                     return self.store_pointwise_nodes(dst, [copy])
             else:
-                assert dst.layout == src.layout
+                assert dst.layout == src.layout, f"{dst=}, {src=}"
                 return ""
 
 

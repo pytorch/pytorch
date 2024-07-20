@@ -5,7 +5,7 @@ import os
 import sys
 import types
 import unittest
-from collections import OrderedDict
+from collections import defaultdict, OrderedDict
 from textwrap import dedent
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
@@ -254,7 +254,7 @@ class TestList(JitTestCase):
         self.checkScript(foo, ())
 
         def foo2():
-            x: List[int] = list()
+            x: List[int] = list()  # noqa: C408
             x.append(1)
             return (x,)
 
@@ -330,7 +330,7 @@ class TestList(JitTestCase):
 
     def test_dict_keyword_is_correctly_typed(self):
         def fn():
-            x: Dict[str, int] = dict()
+            x: Dict[str, int] = dict()  # noqa: C408
             x["foo"] = 1
             return x
 
@@ -1645,9 +1645,9 @@ class TestDict(JitTestCase):
 
         def test_dictcomprehension_is_typed_from_annotation():
             metasyntactics = ["foo", "bar", "baz"]
-            x: Dict[str, Optional[int]] = {
+            x: Dict[str, Optional[int]] = {  # noqa: C420, RUF025
                 word: None for word in metasyntactics
-            }  # noqa: RUF025
+            }
             return x
 
         self.checkScript(test_dictcomprehension_is_typed_from_annotation, ())
@@ -2025,7 +2025,7 @@ class TestDict(JitTestCase):
         test_func(no_args, ())
 
         def test_dict_constructor():
-            a = dict()
+            a = dict()  # noqa: C408
             a["one"] = torch.tensor(1)
             return a, dict([(1, 2), (2, 3), (1, 4)])  # noqa: C406
 
@@ -2041,7 +2041,7 @@ class TestDict(JitTestCase):
         test_func(test_dict_initializer_list, ())
 
         def test_dict_error():
-            a = dict()
+            a = dict()  # noqa: C408
             a[1] = 2
             return a
 
@@ -2966,3 +2966,32 @@ class TestScriptList(JitTestCase):
         self.assertEqual(len(l), 3)
         self.assertTrue(3 in l)
         self.assertEqual(l[2], 3)
+
+    def test_defaultdict(self):
+        def get_dict():
+            test_dict = defaultdict(list)
+            return test_dict
+
+        class Test(torch.nn.Module):
+            segments_groupby_col: Dict[str, List[str]]
+
+            def __init__(self):
+                super().__init__()
+                self.segments_groupby_col = get_dict()
+                self.col1 = "a"
+                self.col2 = "b"
+
+            def forward(self):
+                if self.col1 in self.segments_groupby_col.keys():
+                    return 1
+                else:
+                    return 2
+
+        test = Test()
+        test_script = torch.jit.script(test)
+        test_script.segments_groupby_col
+
+        # Smoketest for flakiness. Takes around 2s.
+        for i in range(300):
+            test = Test()
+            test_script = torch.jit.script(test)

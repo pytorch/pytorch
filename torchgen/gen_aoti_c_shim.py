@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import textwrap
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Sequence
 
 from torchgen.api.types import DispatcherSignature
 from torchgen.api.types.signatures import CppSignature, CppSignatureGroup
-
 from torchgen.context import method_with_native_function
 from torchgen.model import (
     Argument,
@@ -22,6 +23,7 @@ from torchgen.model import (
 )
 from torchgen.utils import mapMaybe
 
+
 base_type_to_c_type = {
     BaseTy.Tensor: "AtenTensorHandle",
     BaseTy.bool: "int32_t",  # Use int to pass bool
@@ -34,6 +36,7 @@ base_type_to_c_type = {
     BaseTy.Layout: "int32_t",  # Represent enum as int
     BaseTy.MemoryFormat: "int32_t",  # Represent enum as int
     BaseTy.ScalarType: "int32_t",  # Represent enum as int
+    BaseTy.Generator: "AtenGeneratorHandle",
 }
 
 base_type_to_aten_type = {
@@ -48,6 +51,7 @@ base_type_to_aten_type = {
     BaseTy.Layout: "c10::Layout",
     BaseTy.MemoryFormat: "c10::MemoryFormat",
     BaseTy.ScalarType: "c10::ScalarType",
+    BaseTy.Generator: "at::Generator",
 }
 
 base_type_to_callsite_expr = {
@@ -62,11 +66,12 @@ base_type_to_callsite_expr = {
     BaseTy.Layout: "static_cast<c10::Layout>",
     BaseTy.MemoryFormat: "static_cast<c10::MemoryFormat>",
     BaseTy.ScalarType: "static_cast<c10::ScalarType>",
+    BaseTy.Generator: "*generator_handle_to_generator_pointer",
 }
 
 
 # convert args to C types, names in declarations, and expressions in function bodies
-def convert_arg_type_and_name(typ: Type, name: str) -> Tuple[List[str], List[str], List[str], List[str]]:  # type: ignore[return]
+def convert_arg_type_and_name(typ: Type, name: str) -> tuple[list[str], list[str], list[str], list[str]]:  # type: ignore[return]
     if isinstance(typ, BaseType):
         if typ.name in base_type_to_c_type:
             return (
@@ -89,7 +94,7 @@ def convert_arg_type_and_name(typ: Type, name: str) -> Tuple[List[str], List[str
                 ],
             )
         else:
-            # TODO: BaseTy.Dimname, BaseTy.Generator, etc.
+            # TODO: BaseTy.Dimname, etc.
             raise NotImplementedError(f"TODO: add support for arg type {repr(typ)}")
     elif isinstance(typ, OptionalType):
         c_types, names, aten_types, callsite_exprs = convert_arg_type_and_name(
@@ -164,12 +169,12 @@ def convert_arg_type_and_name(typ: Type, name: str) -> Tuple[List[str], List[str
         )
 
 
-def zip_type_and_name(types: List[str], names: List[str]) -> List[str]:
+def zip_type_and_name(types: list[str], names: list[str]) -> list[str]:
     return [typ + " " + name for typ, name in zip(types, names)]
 
 
 # Generate argument declarations and callsite expressions
-def gen_arguments(flat_arguments: Sequence[Argument]) -> Tuple[List[str], List[str]]:
+def gen_arguments(flat_arguments: Sequence[Argument]) -> tuple[list[str], list[str]]:
     types = []
     new_names = []
     callsite_exprs = []
@@ -186,7 +191,7 @@ def gen_arguments(flat_arguments: Sequence[Argument]) -> Tuple[List[str], List[s
 # Return values are passed out as pointer arguments because all the C shim functions
 # are expected to return AOTITorchError.
 # Generate returns as declarations and callsite expressions
-def gen_returns(schema: FunctionSchema) -> Tuple[List[str], List[str]]:
+def gen_returns(schema: FunctionSchema) -> tuple[list[str], list[str]]:
     types = []
     names = []
     for idx, ret in enumerate(schema.returns):
@@ -213,13 +218,14 @@ def gen_returns(schema: FunctionSchema) -> Tuple[List[str], List[str]]:
     for name in [
         "_scaled_dot_product_flash_attention",
         "_scaled_dot_product_efficient_attention",
+        "_scaled_dot_product_cudnn_attention",
         "convolution_backward",
     ]:
         if name in unambiguous_name:
             ret_pointer_can_be_null = True
             break
 
-    callsite_exprs: List[str] = []
+    callsite_exprs: list[str] = []
     for idx, ret in enumerate(schema.returns):
         tmp = "tmp_result" if len(names) == 1 else f"std::get<{idx}>(tmp_result)"
         assert isinstance(ret.type, BaseType)
@@ -233,12 +239,12 @@ def gen_returns(schema: FunctionSchema) -> Tuple[List[str], List[str]]:
 
 
 # gen.py generates header first and then src, so caching the result here to avoid duplicate work
-declaration_definition_cache: Dict[Tuple[str, str, str], Tuple[str, str]] = {}
+declaration_definition_cache: dict[tuple[str, str, str], tuple[str, str]] = {}
 
 
 def gen_declaration_and_definition(
     schema: FunctionSchema, device: str, backend_call: str
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     func_name = schema.name.unambiguous_name()
 
     global declaration_definition_cache
@@ -246,18 +252,18 @@ def gen_declaration_and_definition(
         return declaration_definition_cache[(func_name, device, backend_call)]
 
     if schema.is_out_fn():
-        # out_variant has out arguments in the front, and it's ok to ignore return value
+        # out_variant has out arguments in the front, and it's ok to ignore return values
         # because C shim functions only return AOTITorchError
-        # Somehow at::native out-variant functions have out arguments in the back
         args, callsite_exprs = gen_arguments(
-            [*schema.arguments.flat_non_out, *schema.arguments.out]
-            if "at::native" in backend_call
-            else [*schema.arguments.out, *schema.arguments.flat_non_out],
+            [*schema.arguments.out, *schema.arguments.flat_non_out]
         )
-        ret_assignments: List[str] = []
+        ret_assignments: list[str] = []
     else:
         args, callsite_exprs = gen_arguments(schema.arguments.flat_all)
-        ret_declarations, ret_assignments = gen_returns(schema)
+        # ignore return values for inplace ops
+        ret_declarations, ret_assignments = (
+            ([], []) if schema.name.name.inplace else gen_returns(schema)
+        )
         args.extend(ret_declarations)
 
     declaration = f"AOTITorchError aoti_torch_{device}_{func_name}({', '.join(args)})"
@@ -281,7 +287,7 @@ def gen_declaration_and_definition(
 
 
 def gen_static_dispatch_backend_call_signature(
-    sig: Union[CppSignature, DispatcherSignature],
+    sig: CppSignature | DispatcherSignature,
     f: NativeFunction,
 ) -> CppSignature:
     sig = DispatcherSignature.from_schema(f.func)
@@ -307,10 +313,10 @@ def gen_static_dispatch_backend_call(
 
 def get_backend_index_for_aoti(
     func: NativeFunction,
-    func_group_mapping: Dict[OperatorName, NativeFunctionsGroup],
+    func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey,
-    backend_indices: Dict[DispatchKey, BackendIndex],
-) -> Optional[BackendIndex]:
+    backend_indices: dict[DispatchKey, BackendIndex],
+) -> BackendIndex | None:
     backend_index = None
     if backend_indices[dispatch_key].has_kernel(func) or (
         func.structured_delegate is not None
@@ -330,16 +336,18 @@ def get_backend_index_for_aoti(
         backend_index = backend_indices[
             DispatchKey.CompositeExplicitAutogradNonFunctional
         ]
+    elif backend_indices[DispatchKey.CompositeImplicitAutograd].has_kernel(func):
+        backend_index = backend_indices[DispatchKey.CompositeImplicitAutograd]
 
     return backend_index
 
 
 def get_header_for_aoti(
     func: NativeFunction,
-    func_group_mapping: Dict[OperatorName, NativeFunctionsGroup],
+    func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey,
-    backend_indices: Dict[DispatchKey, BackendIndex],
-) -> Optional[str]:
+    backend_indices: dict[DispatchKey, BackendIndex],
+) -> str | None:
     backend_index = get_backend_index_for_aoti(
         func, func_group_mapping, dispatch_key, backend_indices
     )
@@ -360,11 +368,11 @@ def get_fallback_op_name(func: NativeFunction) -> str:
 
 def gen_c_shim(
     func: NativeFunction,
-    func_group_mapping: Dict[OperatorName, NativeFunctionsGroup],
+    func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey,
-    backend_indices: Dict[DispatchKey, BackendIndex],
+    backend_indices: dict[DispatchKey, BackendIndex],
     header: bool,
-) -> Optional[str]:
+) -> str | None:
     backend_index = get_backend_index_for_aoti(
         func, func_group_mapping, dispatch_key, backend_indices
     )
@@ -394,16 +402,16 @@ def gen_c_shim(
 
 @dataclass(frozen=True)
 class ShimGenerator:
-    func_group_mapping: Dict[OperatorName, NativeFunctionsGroup]
+    func_group_mapping: dict[OperatorName, NativeFunctionsGroup]
     dispatch_key: DispatchKey
-    backend_indices: Dict[DispatchKey, BackendIndex]
+    backend_indices: dict[DispatchKey, BackendIndex]
     header: bool  # True to generate .h and False to generate .cpp
 
     @method_with_native_function
     def __call__(
         self,
         func: NativeFunction,
-    ) -> Optional[str]:
+    ) -> str | None:
         result = gen_c_shim(
             func,
             self.func_group_mapping,
@@ -416,9 +424,9 @@ class ShimGenerator:
 
 def gen_aoti_c_shim(
     native_functions: Sequence[NativeFunction],
-    func_group_mapping: Dict[OperatorName, NativeFunctionsGroup],
+    func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey,
-    backend_indices: Dict[DispatchKey, BackendIndex],
+    backend_indices: dict[DispatchKey, BackendIndex],
     header: bool,
     includes: str = "",
 ) -> str:
@@ -468,6 +476,7 @@ extern "C" {{
 #include <ATen/{str(dispatch_key)}Functions.h>
 #include <ATen/CompositeExplicitAutogradFunctions.h>
 #include <ATen/CompositeExplicitAutogradNonFunctionalFunctions.h>
+#include <ATen/CompositeImplicitAutogradFunctions.h>
 #else
 {includes}
 #endif

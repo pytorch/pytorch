@@ -234,7 +234,7 @@ std::optional<std::string> findObserverName(Value* v) {
       return module_instance->node()->s(attr::name);
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool isPlaceholderObserver(Value* observer) {
@@ -268,7 +268,7 @@ std::optional<std::string> getEmbeddingBagObsName(
     auto op_name = observer_module.attr("custom_op").toStringRef();
     return isPlaceholderObserver(observer) ? std::move(op_name) : "";
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool isEmbeddingBagOp(
@@ -792,7 +792,7 @@ class InsertQuantDeQuantHelper {
       const std::vector<Value*>& inputs,
       bool is_scalar = false,
       const std::optional<std::tuple<c10::QScheme, QParamVector>>& qparams_opt =
-          c10::nullopt);
+          std::nullopt);
 
   bool isQuantized(Value* v) {
     return quantized_values_.count(v) != 0;
@@ -1042,10 +1042,10 @@ void InsertQuantDeQuantHelper::quantizeTensors(
       const auto& qparam = pr.second;
       size_t uid = 0;
       auto qparam_name =
-          original_value->debugName() + name + "_" + c10::to_string(uid++);
+          original_value->debugName() + name + "_" + std::to_string(uid++);
       while (module.hasattr(qparam_name)) {
         qparam_name =
-            original_value->debugName() + name + "_" + c10::to_string(uid++);
+            original_value->debugName() + name + "_" + std::to_string(uid++);
       }
       qparam_name_map_for_node_[n][name] = qparam_name;
       module.register_attribute(qparam_name, qparam.type(), qparam);
@@ -1269,7 +1269,7 @@ std::optional<std::vector<Value*>> getDequantizedInputs(Value* output) {
       return inputs;
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {

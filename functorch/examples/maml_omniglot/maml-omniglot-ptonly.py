@@ -33,14 +33,15 @@ import time
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-
 import pandas as pd
+from support.omniglot_loaders import OmniglotNShot
+
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from functorch import make_functional_with_buffers
-from support.omniglot_loaders import OmniglotNShot
 from torch import nn
+
 
 mpl.use("Agg")
 plt.style.use("bmh")
