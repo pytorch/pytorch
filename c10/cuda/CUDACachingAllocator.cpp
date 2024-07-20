@@ -3528,6 +3528,12 @@ struct BackendStaticInitializer {
 std::atomic<CUDAAllocator*> allocator;
 BackendStaticInitializer backend_static_initializer;
 
+} // namespace cuda::CUDACachingAllocator
+
+} // namespace c10
+
+namespace c10::cuda {
+
 // uid_ is incremented when a user creates a MemPool,
 // for example: using graph_pool_handle() or c10::cuda::MemPool().
 //
@@ -3541,9 +3547,7 @@ BackendStaticInitializer backend_static_initializer;
 std::atomic<CaptureId_t> MemPool::uid_{1};
 std::atomic<CaptureId_t> MemPool::uuid_{1};
 
-MemPool::MemPool(
-    CUDAAllocator* allocator,
-    bool is_user_created)
+MemPool::MemPool(CUDAAllocator* allocator, bool is_user_created)
     : allocator_(allocator), is_user_created_(is_user_created) {
   if (is_user_created_) {
     id_ = {0, uid_++};
@@ -3575,6 +3579,4 @@ MemPool* MemPoolContext::getActiveMemPool() {
   return active_mempool_;
 }
 
-} // namespace cuda::CUDACachingAllocator
-
-} // namespace c10
+} // namespace c10::cuda

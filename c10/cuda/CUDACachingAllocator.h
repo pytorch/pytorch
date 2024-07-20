@@ -484,6 +484,10 @@ inline void enablePeerAccess(
   return get()->enablePeerAccess(dev, dev_to_access);
 }
 
+} // namespace c10::cuda::CUDACachingAllocator
+
+namespace c10::cuda {
+
 // MemPool represents a pool of memory in a caching allocator. Currently,
 // it's just the ID of the pool object maintained in the CUDACachingAllocator.
 //
@@ -491,9 +495,7 @@ inline void enablePeerAccess(
 // allocations should be done in the pool. For example: using a different
 // system allocator such as ncclMemAlloc.
 struct C10_CUDA_API MemPool {
-  MemPool(
-      CUDAAllocator* allocator = nullptr,
-      bool is_user_created = true);
+  MemPool(CUDAAllocator* allocator = nullptr, bool is_user_created = true);
 
   MempoolId_t id();
   CUDAAllocator* allocator();
@@ -529,4 +531,4 @@ struct C10_CUDA_API MemPoolContext {
   static thread_local MemPool* active_mempool_;
 };
 
-} // namespace c10::cuda::CUDACachingAllocator
+} // namespace c10::cuda
