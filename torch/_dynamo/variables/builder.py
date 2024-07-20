@@ -2290,10 +2290,10 @@ def _automatic_dynamic(
                                 e.size(i),
                                 dim,
                             )
-                            has_size_changed = True
                             frame_state_entry.size[i] = None
-                        elif dim is None:
-                            has_size_changed = True
+                        has_size_changed = (
+                            has_size_changed or frame_state_entry.size[i] is None
+                        )
 
                     # We want to trigger automatic dynamism when strides change, but we have to think whether stride should
                     # be INFER_STRIDE or DYNAMIC.
