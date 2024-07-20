@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import torch
+
 from torch._export.db.case import SupportLevel
 
 

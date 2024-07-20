@@ -13,7 +13,6 @@ import torch
 
 from . import _dtypes, _dtypes_impl, _util
 
-
 ArrayLike = typing.TypeVar("ArrayLike")
 Scalar = typing.Union[int, float, complex, bool]
 ArrayLikeOrScalar = typing.Union[ArrayLike, Scalar]
