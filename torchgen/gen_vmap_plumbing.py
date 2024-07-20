@@ -111,7 +111,7 @@ def gen_returns(
             idx += 2
         elif is_tensor_list(ret.type):
             wrapped_returns.append(
-                f"makeBatchedVector(std::get<{idx}>({results_var}), std::get<{idx+1}>({results_var}), {cur_level_var})"
+                f"makeBatchedVector(std::get<{idx}>({results_var}), std::get<{idx + 1}>({results_var}), {cur_level_var})"
             )
             idx += 2
         else:
