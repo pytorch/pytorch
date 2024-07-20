@@ -53,6 +53,7 @@ __version_info__ = tuple(int(segment) for segment in __version__.split("."))
 import os
 import sys
 
+
 unicode = str
 
 if sys.platform.startswith("java"):

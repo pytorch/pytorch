@@ -20,12 +20,12 @@ from torch._subclasses.fake_tensor import is_fake
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
-
 from .functional_utils import (
     _check_if_mutation_can_be_in_graph,
     FunctionalTensorMetadataEq,
 )
 from .utils import strict_zip
+
 
 zip = strict_zip
 

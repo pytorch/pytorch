@@ -152,7 +152,7 @@ class CommDebugModeExample:
     def example_MLP_module_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module level tracing using a MLP model.
-        Prints a table of module level collective tracing information and logs table to output.txt
+        Prints a table of module level collective tracing information and logs table to comm_mode_log.txt
 
         Expected Output:
         Global
@@ -179,13 +179,13 @@ class CommDebugModeExample:
             output_tp.sum().backward()
 
         # print the module level collective tracing information
-        print(comm_mode.generate_module_tracing_table())
-        comm_mode.log_module_tracing_table_to_file()
+        print(comm_mode.generate_comm_debug_tracing_table(noise_level=1))
+        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=1)
 
     def example_transformer_module_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module level tracing using a distributed Transformer model.
-        Prints a table of module level collective tracing information and logs table to output.txt
+        Prints a table of module level collective tracing information and logs table to comm_mode_log.txt
 
         Expected output:
         Global
@@ -267,13 +267,13 @@ class CommDebugModeExample:
             output = model(inp)
 
         # print the module level collective tracing information
-        print(comm_mode.generate_module_tracing_table())
-        comm_mode.log_module_tracing_table_to_file()
+        print(comm_mode.generate_comm_debug_tracing_table(noise_level=1))
+        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=1)
 
     def example_MLP_operation_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module operation level tracing using a distributed MLP model.
-        Prints a table of module opoeration level collective tracing information and logs table to output.txt
+        Prints a table of module opoeration level collective tracing information and logs table to comm_mode_log.txt
 
         Expected output:
         Global
@@ -556,15 +556,16 @@ class CommDebugModeExample:
             output_tp.sum().backward()
 
         # print the operation level collective tracing information
-        print(comm_mode.generate_operation_tracing_table())
-        comm_mode.log_operation_tracing_table_to_file()
+        print(comm_mode.generate_comm_debug_tracing_table(noise_level=3))
+        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=3)
 
     def example_transformer_operation_tracing(
         self, is_seq_parallel: bool = False
     ) -> None:
         """
         Example code to demonstrate CommModeDebug's module operation level tracing using a distributed transformer model.
-        Prints a table of module opoeration level collective tracing information and logs table to output.txt
+        Prints a table of module opoeration level collective tracing information, excluding trivial operations and logs
+        table to transformer_operation_log.txt
         """
 
         torch.manual_seed(0)
@@ -576,8 +577,10 @@ class CommDebugModeExample:
             output = model(inp)
 
         # print the operation level collective tracing information
-        print(comm_mode.generate_operation_tracing_table())
-        comm_mode.log_operation_tracing_table_to_file()
+        print(comm_mode.generate_comm_debug_tracing_table(noise_level=2))
+        comm_mode.log_comm_debug_tracing_table_to_file(
+            noise_level=2, file_name="transformer_operation_log.txt"
+        )
 
     def example_MLP_json_dump(self) -> None:
         """
@@ -597,8 +600,8 @@ class CommDebugModeExample:
 
     def example_transformer_json_dump(self, is_seq_parallel: bool = False) -> None:
         """
-        Example code to demonstrate CommModeDebug's json dump using a transformer model. Sends the information to
-        user-passed transformer_log.json file
+        Example code to demonstrate CommModeDebug's json dump using a transformer model, excluding the trivial
+        operations. Sends the information to user-passed transformer_log.json file
         """
 
         torch.manual_seed(0)
@@ -609,7 +612,7 @@ class CommDebugModeExample:
         with comm_mode:
             output = model(inp)
 
-        comm_mode.generate_json_dump(file_name="transformer_log.json")
+        comm_mode.generate_json_dump(file_name="transformer_log.json", noise_level=2)
 
 
 def run_example(world_size: int, rank: int, example_name: str) -> None:
