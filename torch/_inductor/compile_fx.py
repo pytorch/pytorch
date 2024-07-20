@@ -277,12 +277,20 @@ def _recursive_post_grad_passes(gm, is_inference: bool = False):
 
 def split_const_gm(
     gm: torch.fx.GraphModule,
+    lifted_constants: Optional[Dict[str, Any]] = None,
+    skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> Tuple[torch.fx.GraphModule, Dict[str, int]]:
     """
     This function takes an GraphModule input "gm".
     The gm will be split into 2 components,
       1) const_gm, which consists the subgraph of gm that can be constant folded.
       2) gm (being inplace modified,) which returns the graph after constant folding.
+
+    If an additional "lifted_constants" argument is passed in, we will assume the gm has
+    been lifted and run the transformation accordingly.
+
+    When a "skip_folding_node_fn" callback is passed, we will skip constant folding on
+    the nodes for which the callback returns True.
 
     const_output_index is a mapping of corresponding node name from gm to the
     output index of const_gm.
@@ -296,8 +304,9 @@ def split_const_gm(
         run_and_get_constant_graph,
     )
 
-    const_gm = run_and_get_constant_graph(gm)
-    const_result = const_gm()
+    const_gm, const_result = run_and_get_constant_graph(
+        gm, lifted_constants, skip_folding_node_fn
+    )
 
     const_outputs = {
         x.name: idx for idx, x in enumerate(tuple(const_gm.graph.nodes)[-1].args[0])
@@ -309,7 +318,7 @@ def split_const_gm(
     for node in gm.graph.nodes:
         if node.name in const_outputs:
             to_replace_node.append(node)
-        elif node.meta[META_TAG] == CONST_MODULE_TAG:
+        elif node.meta[META_TAG] == CONST_MODULE_TAG and node.op != "placeholder":
             to_erase_node.append(node)
 
     for node in to_replace_node:
