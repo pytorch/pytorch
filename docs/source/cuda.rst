@@ -122,6 +122,7 @@ Memory management
      change_current_allocator
      MemPool
      MemPoolContext
+     MemPoolContext.active_pool
 .. FIXME The following doesn't seem to exist. Is it supposed to?
    https://github.com/pytorch/pytorch/issues/27785
    .. autofunction:: reset_max_memory_reserved

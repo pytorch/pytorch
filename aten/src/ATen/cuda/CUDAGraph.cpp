@@ -4,7 +4,6 @@
 #include <ATen/Functions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
-#include <c10/cuda/MemPool.h>
 
 #include <chrono>
 #include <cstddef>

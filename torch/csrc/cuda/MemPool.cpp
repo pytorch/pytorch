@@ -4,7 +4,6 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/MemPool.h>
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
