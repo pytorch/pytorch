@@ -21392,6 +21392,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         name="cond",
         supports_out=False,
+        dtypes=all_types_and(torch.bool, torch.half),
         skips=(
             DecorateInfo(
                 unittest.expectedFailure,
