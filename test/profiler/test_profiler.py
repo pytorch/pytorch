@@ -1479,7 +1479,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 """
         try:
             subprocess.check_output(
-                [sys.executable, "-W", "all", "-c", script],
+                [sys.executable, "-W", "always", "-c", script],
                 cwd=os.path.dirname(os.path.realpath(__file__)),
             )
         except subprocess.CalledProcessError as e:
