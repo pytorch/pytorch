@@ -1,14 +1,18 @@
+# mypy: allow-untyped-defs
 import os
 import textwrap
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import cast, NoReturn, Optional
+from typing import Any, cast, NoReturn, Optional, Tuple, TYPE_CHECKING
 
 import torch._guards
 
 from . import config
 
 from .utils import counters
+
+if TYPE_CHECKING:
+    from torch._guards import CompileId
 
 
 def exportdb_error_message(case_name):
@@ -158,11 +162,32 @@ class UserError(Unsupported):
         self.message = msg
 
 
+class UserStopIteration(TorchDynamoException):
+    value: Optional[Any]
+
+    # Reference `StopIteration_init` in CPython
+    # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
+    def __init__(self, *args, **kwargs):
+        super().__init__("unhandled `raise StopIteration`")
+        if len(args) > 0:
+            self.value = args[0]
+        else:
+            self.value = None
+
+
+class UnsafeScriptObjectError(TorchDynamoException):
+    pass
+
+
 class UncapturedHigherOrderOpError(TorchDynamoException):
     pass
 
 
 class IncorrectUsage(Exception):
+    pass
+
+
+class ObservedException(TorchDynamoException):
     pass
 
 
@@ -186,11 +211,16 @@ def unimplemented_with_warning(e: Exception, code, msg: str) -> NoReturn:
     graph_break_msg = format_error_msg_verbose(e, code)
     graph_breaks_log.debug("%s", graph_break_msg)
     log.warning(msg)
-    raise unimplemented(msg) from e
+    unimplemented(msg, from_exc=e)
 
 
-def unimplemented(msg: str) -> NoReturn:
+_NOTHING = object()
+
+
+def unimplemented(msg: str, *, from_exc: Any = _NOTHING) -> NoReturn:
     assert msg != os.environ.get("BREAK", False)
+    if from_exc is not _NOTHING:
+        raise Unsupported(msg) from from_exc
     raise Unsupported(msg)
 
 
@@ -259,6 +289,18 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
     else:
         new_msg = old_msg + msg
         exc.args = (new_msg,) + exc.args[1:]
+
+
+def get_exc_message(
+    e: Exception, compile_id: "CompileId"
+) -> Tuple[Optional[str], Optional[int]]:
+    filename = None
+    lineno = None
+    if e.innermost_user_frame_summary is not None:  # type: ignore[attr-defined]
+        filename = e.innermost_user_frame_summary.filename  # type: ignore[attr-defined]
+        lineno = e.innermost_user_frame_summary.lineno  # type: ignore[attr-defined]
+    e.compile_id = compile_id  # type: ignore[attr-defined]
+    return filename, lineno
 
 
 def get_real_stack(exc: Exception, frame=None) -> Optional[StackSummary]:

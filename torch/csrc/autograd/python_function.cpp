@@ -183,7 +183,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   return to_variable_list(r.get(), is_variable_input);
 }
 
-auto PyNode::compiled_apply(
+auto PyNode::defer_to_dynamo(
     variable_list&& inputs,
     std::optional<PyObject*> compiler) -> variable_list {
   pybind11::gil_scoped_acquire gil;
@@ -338,13 +338,11 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect(f->output_info);
   args.collect(f->input_info);
 
-  static PyObject* forward_cls_name =
-      PyUnicode_InternFromString("_forward_cls");
-  THPObjectPtr forward_cls(PyObject_GetAttr(obj, forward_cls_name));
-  static PyObject* backward_name = PyUnicode_InternFromString("backward");
-  PyObject* backward(PyObject_GetAttr(forward_cls.get(), backward_name));
-  _backward_idx =
-      args.add_backward(c10::SafePyObject(backward, getPyInterpreter()));
+  if (compiled_autograd_should_lift()) {
+    Py_INCREF(obj);
+    _backward_idx =
+        args.add_backward(c10::SafePyObject(obj, getPyInterpreter()));
+  }
 
   PyObject* bw_state = f->compiled_autograd_backward_state;
   if (args.cond(bw_state != nullptr)) {
@@ -386,7 +384,7 @@ variable_list PyNode::apply_with_saved(
       result = apply(variable_list(inputs));
     }
   } else {
-    result = compiled_apply(variable_list(inputs), saved.get_py_compiler());
+    result = defer_to_dynamo(variable_list(inputs), saved.get_py_compiler());
   }
   f->compiled_autograd_tracing = false;
   saved.after(f->compiled_autograd_symints);
@@ -621,7 +619,7 @@ static void _wrap_outputs(
   auto non_differentiable = _parse_non_differentiable(self);
   auto dirty_inputs = _mark_dirty(self);
 
-  std::vector<c10::optional<Variable>> raw_output_vars;
+  std::vector<std::optional<Variable>> raw_output_vars;
   raw_output_vars.reserve(num_outputs);
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
@@ -748,7 +746,7 @@ static void _wrap_outputs(
 static void _get_tensors_to_save(
     THPFunction* self,
     std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
-    std::vector<c10::optional<at::Tensor>>& tensors_to_save,
+    std::vector<std::optional<at::Tensor>>& tensors_to_save,
     bool overridden_setup_context,
     bool is_executable) {
   if (self->saved_for_forward && overridden_setup_context) {
@@ -780,7 +778,7 @@ static void _get_tensors_to_save(
     for (const auto i : c10::irange(num_saved)) {
       PyObject* obj = PyTuple_GET_ITEM(self->to_save, i);
       if (obj == Py_None) {
-        tensors_to_save.emplace_back(c10::nullopt);
+        tensors_to_save.emplace_back(std::nullopt);
         continue;
       } else if (THPVariable_Check(obj)) {
         const auto& tensor = THPVariable_Unpack(obj);
@@ -806,7 +804,7 @@ static void _get_tensors_to_save(
 }
 // Save any variables that requested by to_save
 static void _save_variables(
-    const std::vector<c10::optional<at::Tensor>>& tensors_to_save,
+    const std::vector<std::optional<at::Tensor>>& tensors_to_save,
     const std::shared_ptr<PyNode>& cdata_ptr,
     THPFunction* self) {
   if (!self->to_save)
@@ -1108,7 +1106,7 @@ PyObject* process_outputs(
   }
 
   std::unordered_set<at::TensorImpl*> to_save_if_setup_context{};
-  std::vector<c10::optional<at::Tensor>> tensors_to_save{};
+  std::vector<std::optional<at::Tensor>> tensors_to_save{};
   _get_tensors_to_save(
       grad_fn,
       to_save_if_setup_context,
@@ -1180,6 +1178,26 @@ PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
   auto cdata = ((THPFunction*)self)->cdata.lock();
   cdata->set_sequence_nr(THPUtils_unpackUInt64(sequence_nr));
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPFunction_input_metadata(PyObject* self, void* unused) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  const auto num_inputs = cdata->num_inputs();
+  THPObjectPtr list(PyTuple_New(num_inputs));
+  if (!list) {
+    return nullptr;
+  }
+  for (size_t i = 0; i < num_inputs; ++i) {
+    const auto& metadata = cdata->input_metadata(i);
+    THPObjectPtr item(py::cast(metadata).release().ptr());
+    if (!item) {
+      return nullptr;
+    }
+    PyTuple_SET_ITEM(list.get(), i, item.release());
+  }
+  return list.release();
   END_HANDLE_TH_ERRORS
 }
 
@@ -1720,11 +1738,16 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr},
     {"needs_input_grad",
      &getObject<&THPFunction::needs_input_grad>,
-     nullptr,
+     &setObject<&THPFunction::needs_input_grad>,
      nullptr,
      nullptr},
     {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
     {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
+    {"_input_metadata",
+     (getter)THPFunction_input_metadata,
+     nullptr,
+     nullptr,
+     nullptr},
     {"materialize_grads",
      nullptr,
      (setter)THPFunction_set_materialize_grads,

@@ -7,9 +7,7 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
-
 from torch.distributed._tensor import DeviceMesh, DTensor
-
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -27,6 +25,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
+
 
 # rewrite common size variables to sth can be sharded evenly
 # we can enable uneven shards later, but need to adjust more on
@@ -102,6 +101,7 @@ dtensor_fails = {
     xfail("addr"),
     xfail("all"),
     xfail("allclose"),
+    xfail("alias_copy"),
     xfail("amax"),
     xfail("amin"),
     xfail("aminmax"),
@@ -112,6 +112,7 @@ dtensor_fails = {
     xfail("argsort"),
     xfail("as_strided"),
     xfail("as_strided", "partial_views"),
+    xfail("as_strided_copy"),
     xfail("as_strided_scatter"),
     xfail("bernoulli"),
     xfail("_batch_norm_with_update"),
@@ -190,7 +191,10 @@ dtensor_fails = {
     xfail("index_copy"),
     xfail("index_fill"),
     xfail("index_put"),
-    xfail("index_reduce"),
+    xfail("index_reduce", "prod"),
+    xfail("index_reduce", "mean"),
+    xfail("index_reduce", "amax"),
+    xfail("index_reduce", "amin"),
     xfail("index_select"),
     xfail("isin"),
     xfail("isinf"),
@@ -199,7 +203,6 @@ dtensor_fails = {
     xfail("kthvalue"),
     xfail("linalg.cholesky"),
     xfail("linalg.cholesky_ex"),
-    xfail("linalg.cond"),
     xfail("linalg.cross"),
     xfail("linalg.det"),
     xfail("linalg.det", "singular"),
@@ -234,8 +237,6 @@ dtensor_fails = {
     xfail("linalg.solve"),
     xfail("linalg.solve_ex"),
     xfail("linalg.solve_triangular"),
-    xfail("linalg.svd"),
-    xfail("linalg.svdvals"),
     xfail("linalg.tensorinv"),
     xfail("linalg.tensorsolve"),
     xfail("linalg.vander"),
@@ -378,7 +379,6 @@ dtensor_fails = {
     xfail("nn.functional.upsample_bilinear"),
     xfail("nn.functional.upsample_nearest"),
     xfail("nonzero"),
-    xfail("norm", "nuc"),
     xfail("normal"),
     xfail("normal", "number_mean"),
     xfail("normal", "in_place"),
@@ -404,7 +404,6 @@ dtensor_fails = {
     xfail("rsub"),
     xfail("scalar_tensor"),
     xfail("scatter_add"),
-    xfail("scatter"),
     xfail("scatter_reduce", "amax"),
     xfail("scatter_reduce", "amin"),
     xfail("scatter_reduce", "mean"),
@@ -460,13 +459,10 @@ dtensor_fails = {
     xfail("std_mean"),
     xfail("std_mean", "unbiased"),
     xfail("stft"),
-    xfail("svd"),
     xfail("svd_lowrank"),
-    xfail("t"),
     xfail("take"),
     xfail("tensor_split"),
     xfail("to_sparse"),
-    xfail("topk"),
     xfail("trace"),
     xfail("trapezoid"),
     xfail("trapz"),
@@ -482,11 +478,12 @@ dtensor_fails = {
     xfail("unique"),
     xfail("unsafe_split"),
     xfail("unsafe_chunk"),
+    xfail("_unsafe_masked_index"),
+    xfail("_unsafe_masked_index_put_accumulate"),
     xfail("var_mean"),
     xfail("var_mean", "unbiased"),
     xfail("vdot"),
     xfail("view_copy"),
-    xfail("view_as_complex"),
     xfail("zeros"),
     # ops inside this might even fail without dtensor
     # tests, as we rescale op db common test size factor (i.e. L, M, S)

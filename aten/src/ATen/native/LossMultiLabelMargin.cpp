@@ -24,8 +24,8 @@ namespace {
 
 template <typename scalar_t>
 inline scalar_t multilabel_margin_loss_forward_inner_sum_cpu(
-    scalar_t* input_data,
-    int64_t* target_data,
+    const scalar_t* input_data,
+    const int64_t* target_data,
     scalar_t* is_target_data,
     int64_t dim) {
   using accscalar_t = at::acc_type<scalar_t, false>;
@@ -67,8 +67,8 @@ static void multilabel_margin_loss_forward_out_frame(
     int64_t nframe,
     int64_t dim) {
   using accscalar_t = at::acc_type<scalar_t, false>;
-  scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
-  int64_t* target_data = target_contiguous.data_ptr<int64_t>();
+  const scalar_t* input_data = input_contiguous.const_data_ptr<scalar_t>();
+  const int64_t* target_data = target_contiguous.const_data_ptr<int64_t>();
   scalar_t* is_target_data = is_target.data_ptr<scalar_t>();
 
   if (reduction != Reduction::None || output.dim() == 0) {
@@ -114,7 +114,9 @@ static void multilabel_margin_loss_forward_out_cpu_template(
     Tensor& output,
     Tensor& is_target,
     int64_t reduction) {
+#ifndef STRIP_ERROR_MESSAGES
   auto target_arg = TensorArg(target, "target", 2);
+#endif
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t nframe, dim;
   const int64_t ndims = input.dim();
@@ -161,16 +163,18 @@ static void multilabel_margin_loss_backward_out_frame(
     const Tensor& is_target_contiguous,
     int64_t nframe,
     int64_t dim) {
+#ifndef STRIP_ERROR_MESSAGES
   auto is_target_arg = TensorArg(is_target_contiguous, "is_target", 5);
+#endif
 
   TORCH_CHECK(
       is_target_contiguous.min().item<scalar_t>() >= 0, is_target_arg, " is out of range");
   TORCH_CHECK(
       is_target_contiguous.max().item<scalar_t>() <= 1, is_target_arg, " is out of range");
 
-  scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
-  int64_t* target_data = target_contiguous.data_ptr<int64_t>();
-  scalar_t* is_target_data = is_target_contiguous.data_ptr<scalar_t>();
+  const scalar_t* input_data = input_contiguous.const_data_ptr<scalar_t>();
+  const int64_t* target_data = target_contiguous.const_data_ptr<int64_t>();
+  const scalar_t* is_target_data = is_target_contiguous.const_data_ptr<scalar_t>();
   scalar_t g = static_cast<scalar_t>(
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       reduction == Reduction::Mean ? 1. / (nframe * dim) : 1. / dim);
@@ -204,13 +208,13 @@ static void multilabel_margin_loss_backward_out_frame(
   if (reduction != Reduction::None || grad_output.dim() == 0) {
     assert(
         reduction != Reduction::None || grad_output.dim() > 0 || nframe == 1);
-    const auto d = *grad_output.data_ptr<scalar_t>();
+    const auto d = *grad_output.const_data_ptr<scalar_t>();
     for (int64_t t = 0; t < nframe * dim; t++) {
       grad_input_data[t] *= d;
     }
   } else {
     check_dim_size(grad_output, 1, 0, nframe);
-    auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
+    auto grad_output_acc = grad_output.accessor<const scalar_t, 1>();
     for (const auto t : c10::irange(nframe)) {
       for (const auto d : c10::irange(dim)) {
         grad_input_data[t * dim + d] *= grad_output_acc[t];

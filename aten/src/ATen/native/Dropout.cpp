@@ -70,7 +70,7 @@ Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   }
 
   at::Tensor b; // used for alpha_dropout only
-  auto noise = feature_dropout ? make_feature_noise(input) : at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto noise = feature_dropout ? make_feature_noise(input) : at::empty_like(input);
   noise.bernoulli_(1 - p);
   if (alpha_dropout) {
     constexpr double alpha = 1.7580993408473766;
@@ -102,7 +102,7 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 } // anonymous namespace
 
 std::tuple<Tensor,Tensor>
-native_dropout_cpu(const Tensor& input, double p, c10::optional<bool> train) {
+native_dropout_cpu(const Tensor& input, double p, std::optional<bool> train) {
   if (input.numel() == 0) {
     return std::make_tuple(input, at::empty_like(input, input.options()));
   }

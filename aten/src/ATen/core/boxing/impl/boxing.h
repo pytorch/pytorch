@@ -39,7 +39,15 @@ template <class T, class Enable = void>
 struct has_ivalue_to : std::false_type {};
 
 template <class T>
-struct has_ivalue_to<T, std::void_t<decltype(std::declval<IValue>().to<T>())>>
+struct ivalue_to_helper
+{
+    using type = decltype(std::declval<IValue>().template to<T>());
+};
+template <class T>
+using ivalue_to_helper_t = typename ivalue_to_helper<T>::type;
+
+template <class T>
+struct has_ivalue_to<T, std::void_t<ivalue_to_helper_t<T>>>
 : std::true_type
 {};
 
@@ -85,7 +93,7 @@ torch::jit::Stack boxArgs(Args... args) {
 }
 
 template <class T>
-static inline constexpr size_t boxed_size_one() {
+inline constexpr size_t boxed_size_one() {
   static_assert(!std::is_same<std::decay_t<T>, c10::TensorOptions>::value, "need to patch this path to support TensorOptions passed by reference");
   return 1;
 }

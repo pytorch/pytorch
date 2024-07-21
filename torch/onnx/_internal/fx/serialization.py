@@ -1,13 +1,14 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import io
 import logging
 import os
-from typing import Optional, Tuple, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 from torch.onnx import _type_utils as jit_type_utils
-from torch.onnx._internal import _beartype
+
 
 if TYPE_CHECKING:
     import onnx
@@ -15,13 +16,12 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-@_beartype.beartype
 def _create_tensor_proto_with_external_data(
     tensor: torch.Tensor,
     name: str,
     location: str,
     basepath: str,
-    dtype_override: Optional["onnx.TypeProto"] = None,  # type: ignore[name-defined]
+    dtype_override: onnx.TypeProto | None = None,  # type: ignore[name-defined]
 ) -> onnx.TensorProto:  # type: ignore[name-defined]
     """Create a TensorProto with external data from a PyTorch tensor.
     The external data is saved to os.path.join(basepath, location).
@@ -113,12 +113,11 @@ def _convert_safetensors_to_torch_format(safetensors_file):
 
 
 # TODO: generalize to allow more checkpoints formats (torch or gguf)
-@_beartype.beartype
 def save_model_with_external_data(
     basepath: str,
     model_location: str,
     initializer_location: str,
-    torch_state_dicts: Tuple[Union[dict, str, io.BytesIO], ...],
+    torch_state_dicts: tuple[dict | str | io.BytesIO, ...],
     onnx_model: onnx.ModelProto,  # type: ignore[name-defined]
     rename_initializer: bool = False,
 ) -> None:
@@ -155,6 +154,10 @@ def save_model_with_external_data(
     # FIXME: Avoid importing onnx into torch.onnx.
     import onnx
 
+    initializers_to_be_deleted = {}  # Using dict because it is **ordered**
+    existing_initializers = {
+        k.name: idx for idx, k in enumerate(onnx_model.graph.initializer)
+    }
     onnx_input_names = {input.name for input in onnx_model.graph.input}
     for el in torch_state_dicts:
         if isinstance(el, dict):
@@ -182,6 +185,7 @@ def save_model_with_external_data(
                         state_dict = torch.load(el, map_location="cpu")
                     else:
                         raise e
+
         for name, tensor in state_dict.items():
             if rename_initializer:
                 # Basically, "transformer.attention.self.query.weight" is mapped
@@ -217,6 +221,9 @@ def save_model_with_external_data(
             # os.path.join(basepath, relative_tensor_file_path).
             model_input_types = {k.name: k.type for k in onnx_model.graph.input}
 
+            # Mark for deletion - a replacement will be appended next
+            if name in existing_initializers:
+                initializers_to_be_deleted[existing_initializers[name]] = name
             tensor_proto = _create_tensor_proto_with_external_data(
                 tensor,
                 name,
@@ -226,6 +233,12 @@ def save_model_with_external_data(
             )
             # Add the tensor_proto to the ONNX model as an initializer with external data.
             onnx_model.graph.initializer.append(tensor_proto)
+    # Remove old duplicated initializers, if any. delete in desc order to not invalidate deletion indices
+    initializers_to_be_deleted = dict(
+        sorted(initializers_to_be_deleted.items(), reverse=True)
+    )
+    for idx in initializers_to_be_deleted.keys():
+        del onnx_model.graph.initializer[idx]
 
     # model_location should be a pure file name such as "file_name.onnx", not "folder/file_name.onnx".
     onnx.save(onnx_model, os.path.join(basepath, model_location))  # type: ignore[attr-defined]

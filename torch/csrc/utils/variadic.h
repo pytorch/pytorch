@@ -4,8 +4,6 @@
 #include <ATen/core/Variadic.h>
 #include <torch/csrc/autograd/variable.h>
 
-#include <cstdint>
-#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -18,7 +16,7 @@ struct CountTensors : IterArgs<CountTensors> {
   void operator()(const at::Tensor& x) {
     out += 1;
   }
-  void operator()(const c10::optional<at::Tensor>& x) {
+  void operator()(const std::optional<at::Tensor>& x) {
     out += x.has_value();
   }
   void operator()(at::ArrayRef<at::Tensor> xs) {
@@ -71,48 +69,6 @@ struct MakeIndices<0, Is...> {
 //===----------------------------------------------------------------------===//
 //                                 Utilities
 //===----------------------------------------------------------------------===//
-
-template <bool value, typename T = void>
-using enable_if_t = std::enable_if_t<value, T>;
-
-template <bool value, typename T = void>
-using disable_if_t = enable_if_t<!value, T>;
-
-template <typename T>
-using decay_t = std::decay_t<T>;
-
-namespace detail {
-template <bool...>
-struct pack;
-} // namespace detail
-
-template <bool... values>
-struct all_of : std::is_same<
-                    detail::pack<values..., true>,
-                    detail::pack<true, values...>> {};
-
-template <bool...>
-struct any_of;
-
-template <>
-struct any_of<> : std::false_type {};
-
-template <bool head, bool... tail>
-struct any_of<head, tail...> {
-  static constexpr bool value = head || any_of<tail...>::value;
-};
-
-template <bool... values>
-struct none_of {
-  static constexpr bool value = !any_of<values...>::value;
-};
-
-template <bool... values>
-using enable_if_all_of_t = enable_if_t<all_of<values...>::value>;
-
-template <typename T, typename... Ts>
-using disable_if_contains_t =
-    enable_if_all_of_t<(!std::is_same_v<T, decay_t<Ts>>)...>;
 
 template <typename Function, typename... Ts>
 void apply(Function function, Ts&&... ts) {

@@ -1,19 +1,35 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import sys
+import re
 from unittest.mock import patch
 
 import functorch
-
 import torch
 import torch._inductor.config as config
+import torch.autograd
 from torch._inductor import metrics
-from torch._inductor.compile_fx import compile_fx, count_bytes_inner
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
+from torch._inductor.utils import run_and_get_code
 
+########################
+# Explanation of Tests #
+########################
+# These tests are all testing *memory accesses* of TorchInductor.
+# They are intended to be deterministic performance tests.
+# The expect tests are all measuring the number of memory bytes read/written by
+# the code that Inductor has generated
+#
+# If the test is failing because the number became smaller, feel free to lower it.
+# On the other hand, if the test is failing because the number became larger,
+# that means that your change is leading to *more* memory accesses on this test.
+#
+# That may still be aceeptable, but be aware that you are likely lowering
+# performance for that setting.
+#
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
+
 
 if HAS_CUDA:
     from torch.testing._internal.triton_utils import add_kernel
@@ -21,22 +37,12 @@ if HAS_CUDA:
 aten = torch.ops.aten
 
 
-def count_bytes_inductor(gm, example_inputs):
-    return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
+def compile_but_use_eager(gm, example_inputs):
+    def inner_compile(gm, *args, **kwargs):
+        compile_fx_inner(gm, *args, **kwargs)
+        return gm
 
-
-# We don't support torch.compile() on
-# Windows and Python 3.12+
-if not IS_WINDOWS and sys.version_info < (3, 12):
-
-    @torch._dynamo.optimize(count_bytes_inductor)
-    def f(x):
-        return torch.cat([x, x.cos()])
-
-else:
-
-    def f(x):
-        return torch.cat([x, x.cos()])
+    return compile_fx(gm, example_inputs, inner_compile=inner_compile)
 
 
 def count_numel(f, *args):
@@ -44,7 +50,7 @@ def count_numel(f, *args):
     Assumes all inputs are fp32
     """
     metrics.reset()
-    torch._dynamo.optimize(count_bytes_inductor)(f)(*args)
+    torch.compile(f, backend=compile_but_use_eager)(*args)
     print(metrics.nodes_num_elem)
     return str(metrics.num_bytes_accessed // 4)
 
@@ -55,7 +61,7 @@ def count_numel_train(f, *args):
     """
     metrics.reset()
 
-    f = torch._dynamo.optimize(count_bytes_inductor)(f)
+    f = torch.compile(f, backend=compile_but_use_eager)
     out = f(*args)
     res = 0
     for o in out:
@@ -226,9 +232,8 @@ class NumBytesMetricTests(TestCase):
         def f(a, b):
             return torch.cat([torch.softmax(a, dim=-1), torch.softmax(b, dim=-1)]).cos()
 
-        # potentially beneficial to fuse but we exclude reductions from pointwise cat
         inp = (T(10, 10), T(10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """800""")
+        self.assertExpectedInline(count_numel(f, *inp), """680""")
 
         # Should turn into pointwise even if only some of inputs are pointwise.
         def f(a, b):
@@ -253,7 +258,34 @@ class NumBytesMetricTests(TestCase):
         inp = (T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """400""")
 
+        def f(a, b):
+            b = b.cos()
+            return torch.cat([a, b])
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """400""")
+
+        def f(a, b):
+            a = a @ a
+            return torch.constant_pad_nd(torch.cat([a, b]), [2, 2], 0.5)
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """680""")
+
     @patch.object(config, "split_cat_fx_passes", False)
+    @patch.object(
+        config,
+        "pre_grad_fusion_options",
+        {
+            "batch_linear": {},
+            "batch_linear_lhs": {},
+            "batch_layernorm": {},
+            "batch_tanh": {},
+            "batch_relu": {},
+            "batch_sigmoid": {},
+        },
+    )
+    @patch.object(config, "post_grad_fusion_options", {})
     def test_cat_pointwise_many_complex_inputs(self):
         def f(*inputs):
             input = [torch.nn.functional.gelu(val) for val in inputs]
@@ -263,6 +295,19 @@ class NumBytesMetricTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """6400""")
 
     @patch.object(config, "split_cat_fx_passes", False)
+    @patch.object(
+        config,
+        "pre_grad_fusion_options",
+        {
+            "batch_linear": {},
+            "batch_linear_lhs": {},
+            "batch_layernorm": {},
+            "batch_tanh": {},
+            "batch_relu": {},
+            "batch_sigmoid": {},
+        },
+    )
+    @patch.object(config, "post_grad_fusion_options", {})
     def test_cat_pointwise_many_simple_inputs(self):
         def f(*inputs):
             input = [torch.nn.functional.relu(val) for val in inputs]
@@ -447,31 +492,15 @@ class FusionTests(TestCase):
 
         inp = (T(4, 2048, hidden_size, dtype=torch.float), T(1, dtype=torch.float))
 
-        # 3 kernels:
-        # kernel 1: (input = X, scale, LN scale, LN bias, output = LN_pointwise(X), welford_reduction(X) * 2)
-        # kernel 2: (input = X, welford_reduction(X) * 2, LN scale, LN bias, output = first-level amax (split-reduction))
-        # kernel 3: (input = first-level amax, output = final amax)
-        # scale (1) + X (4*2048*hidden_size) * 3 + welford_reduction (4*2048) * 4 +
-        #   LN scale (hidden_size) * 2 + LN bias (hidden_size) * 2 + amax (num_splits * 2 + 1)
-        # num_splits depends on SM architectures.
-        expected_amax_keep_dim_numel = (
-            1 + hidden_size * 4 + 4 * 2048 * hidden_size * 3 + 4 * 2048 * 4 + 1
-        )
-        self.assertGreaterAlmostEqual(
-            int(count_numel(f, *inp, True)), expected_amax_keep_dim_numel
-        )
-
         # 2 kernels:
         # kernel 1: (input = X, scale, LN scale, LN bias, output = LN_pointwise(X), first-level amax (split-reduction))
         # kernel 2: (input = first-level amax, output = final amax)
         # scale (1) + X (4*2048*hidden_size) * 2 + LN scale (hidden_size) + LN bias (hidden_size) + amax (4 * 2048 * 2 + 1)
-
-        expected_amax_no_keep_dim_numel = (
+        expected_numel = (
             1 + hidden_size * 2 + 4 * 2048 * hidden_size * 2 + 4 * 2048 * 2 + 1
         )
-        self.assertExpectedInline(
-            count_numel(f, *inp, False), str(expected_amax_no_keep_dim_numel)
-        )
+        self.assertExpectedInline(count_numel(f, *inp, True), str(expected_numel))
+        self.assertExpectedInline(count_numel(f, *inp, False), str(expected_numel))
 
     def test_pointwise_multi_level_reduction(self):
         # TODO: this can be optimized by having the first pointwise kernel leveraging block sizes
@@ -664,6 +693,45 @@ class MinCutPartitioningTests(TestCase):
         inp = (T(10, grad=True), T(10, grad=True))
         self.assertExpectedInline(count_numel_train(f, *inp), """70""")
 
+    def test_partitioning_with_view(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x.sin()
+                x = x.cos()
+                x = x.view(10, 10)
+                ctx.save_for_backward(x, y)
+                x = x.cos()
+                return x
+
+            @staticmethod
+            def backward(ctx, gradOut):
+                x, y = ctx.saved_tensors
+                return torch.mm(gradOut, x).view(100) * y
+
+        def f(a):
+            return Foo.apply(a)
+
+        inp = (T(100, grad=True),)
+        # We do not want to recompute the x.cos().view() chain, as it's
+        # materialized in backwards
+        self.assertExpectedInline(count_numel_train(f, *inp), """900""")
+
+    @patch.object(config, "pattern_matcher", False)
+    def test_partitioning_long_chain_add(self):
+        def f(x):
+            orig = x
+            for _ in range(2):
+                x = x * x
+                x = torch.mm(x, x)
+                x = x * 2
+                x = orig + x
+                orig = x
+            return x
+
+        inp = (T(10, 10, grad=True),)
+        self.assertExpectedInline(count_numel_train(f, *inp), """3900""")
+
 
 def unfusible(x):
     # For the purpose of noop tests, we want inductor to fall back to
@@ -792,7 +860,99 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """42""")
 
     @requires_cuda
-    @skipIfRocm
+    def test_inplace_custom_op(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("foo(Tensor x, Tensor(a!) out) -> ()")
+
+            def foo(x: torch.Tensor, out: torch.Tensor) -> None:
+                out.copy_(x.sin())
+
+            m.impl("foo", foo, "CompositeExplicitAutograd")
+
+            def f(x, out):
+                torch.ops.mylib.foo(x, out)
+                torch.ops.mylib.foo(out, out)
+                torch.ops.mylib.foo(out, out)
+                return out
+
+            x = T(3)
+            out = T(3)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, fullgraph=True), x, out
+            )
+            self.assertEqual(compiled_out, x.sin().sin().sin())
+
+            # Check that we are allocating the minimum number of intermediate buffers
+            matches = re.findall(r"empty_strided_\w+\(", code)
+            self.assertEqual(len(matches), 0)
+
+            self.assertExpectedInline(count_numel(f, x, out), """6""")
+
+    @requires_cuda
+    def test_inplace_custom_op_intermediate(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("foo(Tensor x, Tensor(a!) out) -> ()")
+
+            def foo(x: torch.Tensor, out: torch.Tensor) -> None:
+                out.copy_(x.sin())
+
+            m.impl("foo", foo, "CompositeExplicitAutograd")
+
+            def f(x, out):
+                out = torch.empty_like(x)
+                torch.ops.mylib.foo(x, out)
+                torch.ops.mylib.foo(out, out)
+                torch.ops.mylib.foo(out, out)
+                return out
+
+            x = T(3)
+            out = T(3)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, fullgraph=True), x, out
+            )
+            self.assertEqual(compiled_out, x.sin().sin().sin())
+
+            # Check that we are allocating the minimum number of intermediate buffers
+            matches = re.findall(r"empty_strided_\w+\(", code)
+            self.assertEqual(len(matches), 1)
+
+            self.assertExpectedInline(count_numel(f, x, out), """6""")
+
+    @requires_cuda
+    def test_inplace_custom_op_two_mutated_inputs(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("foo(Tensor q, Tensor(a!) k_cache, Tensor(b!) v_cache) -> Tensor")
+
+            def foo(q, k_cache, v_cache):
+                k_cache.add_(1)
+                v_cache.add_(1)
+                return q + 1
+
+            m.impl("foo", foo, "CompositeExplicitAutograd")
+
+            q = T(3)
+            k_cache = T(3)
+            v_cache = torch.rand_like(k_cache)
+
+            def f():
+                x = 0
+                for _ in range(2):
+                    x = x + torch.ops.mylib.foo(q, k_cache, v_cache)
+                return x
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, fullgraph=True),
+            )
+
+            # Check that we are allocating the minimum number of intermediate buffers
+            matches = re.findall(r"empty_strided_\w+\(", code)
+            self.assertEqual(len(matches), 1)
+
+            self.assertExpectedInline(count_numel(f), """21""")
+
+    @requires_cuda
     def test_inplace_triton_kernel_v1(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
@@ -805,7 +965,6 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """40""")
 
     @requires_cuda
-    @skipIfRocm
     def test_inplace_triton_kernel_v2(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
@@ -819,7 +978,6 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     @requires_cuda
-    @skipIfRocm
     def test_inplace_triton_kernel_v3(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
@@ -830,10 +988,9 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """80""")
+        self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     @requires_cuda
-    @skipIfRocm
     def test_inplace_triton_kernel_v4(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             x_view = x.view(-1)
@@ -848,7 +1005,6 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     @requires_cuda
-    @skipIfRocm
     def test_inplace_triton_kernel_v5(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             x_view = x.view(-1)
@@ -860,10 +1016,9 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """80""")
+        self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     @requires_cuda
-    @skipIfRocm
     def test_inplace_triton_kernel_v6(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)

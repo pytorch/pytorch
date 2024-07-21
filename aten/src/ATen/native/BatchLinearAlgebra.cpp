@@ -656,7 +656,7 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
 TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
                              bool full_matrices,
                              bool compute_uv,
-                             c10::optional<c10::string_view> driver) {
+                             std::optional<c10::string_view> driver) {
   at::native::checkIsMatrix(A, "linalg.svd");
   at::native::checkFloatingOrComplex(A, "linalg.svd");
 
@@ -1516,7 +1516,7 @@ void _linalg_check_errors(
   } else {
     // Find the first non-zero info
     auto infos_cpu = infos.to(at::kCPU);
-    auto ptr = infos_cpu.data_ptr<int32_t>();
+    auto ptr = infos_cpu.const_data_ptr<int32_t>();
     auto n = infos.numel();
     auto info_ptr = std::find_if(ptr, ptr + n, [](int32_t x) { return x != 0; });
     info = *info_ptr;
@@ -2794,13 +2794,13 @@ static void linalg_eig_make_complex_eigenvectors_impl(Tensor& result, const Tens
   auto matrix_stride = matrixStride(real_vectors);
 
   auto result_data = result.data_ptr<c10::complex<scalar_t>>();
-  auto real_vectors_data = real_vectors.data_ptr<scalar_t>();
-  auto values_data = complex_values.data_ptr<c10::complex<scalar_t>>();
+  auto real_vectors_data = real_vectors.const_data_ptr<scalar_t>();
+  auto values_data = complex_values.const_data_ptr<c10::complex<scalar_t>>();
 
   for (auto b = decltype(batch_size){0}; b < batch_size; b++) {
-    scalar_t* vecs = &real_vectors_data[b * matrix_stride];
+    const scalar_t* vecs = &real_vectors_data[b * matrix_stride];
     c10::complex<scalar_t>* res = &result_data[b * matrix_stride];
-    c10::complex<scalar_t>* vals = &values_data[b * n];
+    const c10::complex<scalar_t>* vals = &values_data[b * n];
     for (auto j = decltype(n){0}; j < n; j++) {
       if (vals[j].imag() == 0.0) {  // eigenvalue is real, then v(j) = VR(:,j)
         for (auto i = decltype(n){0}; i < n; i++) {
@@ -3128,7 +3128,7 @@ DEFINE_DISPATCH(svd_stub);
 TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
                                  const bool full_matrices,
                                  const bool compute_uv,
-                                 c10::optional<c10::string_view> driver,
+                                 std::optional<c10::string_view> driver,
                                  const Tensor & U,
                                  const Tensor & S,
                                  const Tensor & Vh) {
@@ -3177,7 +3177,7 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
 std::tuple<Tensor&, Tensor&, Tensor&>
 linalg_svd_out(const Tensor& A,
                bool full_matrices,
-               c10::optional<c10::string_view> driver,
+               std::optional<c10::string_view> driver,
                Tensor & U,
                Tensor & S,
                Tensor & Vh) {
@@ -3196,12 +3196,12 @@ linalg_svd_out(const Tensor& A,
 }
 
 std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& A, bool full_matrices,
-    c10::optional<c10::string_view> driver) {
+    std::optional<c10::string_view> driver) {
   return at::_linalg_svd(A, full_matrices, /*compute_uv=*/true, driver);
 }
 
 // See note in linalg_svd for why this function does not have an _ex variant
-Tensor& linalg_svdvals_out(const Tensor& A, c10::optional<c10::string_view> driver, Tensor & S) {
+Tensor& linalg_svdvals_out(const Tensor& A, std::optional<c10::string_view> driver, Tensor & S) {
   // Dummies
   auto U = at::empty({0}, A.options());
   auto Vh = at::empty({0}, A.options());
@@ -3209,7 +3209,7 @@ Tensor& linalg_svdvals_out(const Tensor& A, c10::optional<c10::string_view> driv
   return S;
 }
 
-Tensor linalg_svdvals(const Tensor& A, c10::optional<c10::string_view> driver) {
+Tensor linalg_svdvals(const Tensor& A, std::optional<c10::string_view> driver) {
   return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false,
                      /*compute_uv=*/_may_require_fw_or_bw_grad(A),
                      /*driver=*/driver));
@@ -3469,7 +3469,7 @@ static void linalg_lstsq_out_info(
   }
 }
 
-static std::string get_default_lstsq_driver(c10::optional<c10::string_view> driver, const Tensor& input) {
+static std::string get_default_lstsq_driver(std::optional<c10::string_view> driver, const Tensor& input) {
   // if `driver` is empty, we set driver_str to "gels" if working with CUDA tensors,
   // otherwise to "gelsy" driver.
   std::string driver_str;
@@ -3505,8 +3505,8 @@ static std::string get_default_lstsq_driver(c10::optional<c10::string_view> driv
 std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
     const Tensor& input,
     const Tensor& other,
-    c10::optional<double> rcond,
-    c10::optional<c10::string_view> driver,
+    std::optional<double> rcond,
+    std::optional<c10::string_view> driver,
     Tensor& solution,
     Tensor& residuals,
     Tensor& rank,
@@ -3524,10 +3524,22 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   TORCH_CHECK(
       0 <= dim_diff && dim_diff <= 1,
       "torch.linalg.lstsq: input.dim() must be greater or equal to other.dim() and (input.dim() - other.dim()) <= 1");
-  Tensor other_2d = dim_diff ? other.unsqueeze(-1) : other;
+
+  // now check whether the provided output tensors can be used directly
+
+  // Two types of 'other' tensors are supported:
+  // - 1-dimensional (1D) tensor or batch of 1D tensors (vector case)
+  // - 2-dimensional (2D) tensor or batch of 2D tensors (matrix case)
+  // original torch.lstsq supported only the matrix case, while NumPy works for both cases
+  // for the batched input we need to be able to distinguish them
+  // auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim() - 1); // input.shape[:-1]
+  // bool vector_case = other.dim() == 1 || (input.dim() - 1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
+
+  bool vector_case = linalg_solve_is_vector_rhs(input, other);
+  Tensor other_2d = vector_case ? other.unsqueeze(-1) : other;
   TORCH_CHECK(
       input.size(-2) == other_2d.size(-2),
-      dim_diff ? "torch.linalg.lstsq: input.size(-2) should match other.size(-1)"
+      vector_case ? "torch.linalg.lstsq: input.size(-2) should match other.size(-1)"
                : "torch.linalg.lstsq: input.size(-2) should match other.size(-2)");
 
   checkSameDevice("torch.linalg.lstsq", other, input, "other");
@@ -3560,17 +3572,6 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
     : _get_epsilon(c10::toRealValueType(input.scalar_type())) * std::max<int64_t>(input.size(-2), input.size(-1));
 
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
-
-  // now check whether the provided output tensors can be used directly
-
-  // Two types of 'other' tensors are supported:
-  // - 1-dimensional (1D) tensor or batch of 1D tensors (vector case)
-  // - 2-dimensional (2D) tensor or batch of 2D tensors (matrix case)
-  // original torch.lstsq supported only the matrix case, while NumPy works for both cases
-  // for the batched input we need to be able to distinguish them
-  // auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim() - 1); // input.shape[:-1]
-  // bool vector_case = other.dim() == 1 || (input.dim() - 1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
-  bool vector_case = linalg_solve_is_vector_rhs(input, other);
 
   // provided output tensor can be used directly if:
   // 1. the shape matches the expected shape
@@ -3668,8 +3669,8 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
     const Tensor& input, const Tensor& other,
-    c10::optional<double> rcond,
-    c10::optional<c10::string_view> driver) {
+    std::optional<double> rcond,
+    std::optional<c10::string_view> driver) {
   Tensor solution = at::empty({0}, input.options());
   Tensor residuals = at::empty({0}, input.options().dtype(toRealValueType(input.scalar_type())));
   Tensor rank = at::empty({0}, input.options().dtype(at::kLong));
@@ -4003,7 +4004,7 @@ Tensor linalg_solve_triangular(
 
 Tensor linalg_vander_symint(
     const Tensor& x,
-    c10::optional<c10::SymInt> N) {
+    std::optional<c10::SymInt> N) {
   auto t = x.scalar_type();
   TORCH_CHECK(t == ScalarType::Float ||
               t == ScalarType::Double ||

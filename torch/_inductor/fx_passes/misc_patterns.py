@@ -1,12 +1,13 @@
+# mypy: allow-untyped-defs
 import functools
-
 from typing import Dict, Set, Tuple
 
 import torch
 from torch._dynamo.utils import counters
-
 from torch._ops import OpOverload, OpOverloadPacket
+
 from ..pattern_matcher import fwd_only, register_replacement
+
 
 aten = torch.ops.aten
 
@@ -58,7 +59,7 @@ def _misc_patterns_init():
         index = torch.randperm(x.shape[0], device=x.device)[:slice_shape]
         return torch.ops.aten._unsafe_index(x, (index,)), index
 
-    pattern = register_replacement(
+    register_replacement(
         randperm_index_pattern,
         randperm_index_replacement,
         [torch.empty(4, 8, device=device)],

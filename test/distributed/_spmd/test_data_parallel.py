@@ -3,16 +3,13 @@
 from copy import deepcopy
 
 import torch
-
 import torch.nn as nn
-
 from torch.distributed._spmd.api import compile
-
 from torch.distributed._spmd.parallel_mode import DataParallel
 from torch.distributed._tensor import Replicate
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests  # noqa: TCH001
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,

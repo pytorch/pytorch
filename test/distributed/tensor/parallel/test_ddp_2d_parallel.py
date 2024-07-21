@@ -2,24 +2,22 @@
 
 import torch
 import torch.distributed as dist
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, init_device_mesh
+from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh, Replicate
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
 )
 from torch.distributed.tensor.parallel.ddp import _pre_dp_module_transform
-
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-
 from torch.testing._internal.common_utils import run_tests
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
     with_comms,
 )
+
 
 # Tensor-Parallel degree
 TP_DEGREE = 2
@@ -39,7 +37,11 @@ def init_model(device_type, model_parallel_size=TP_DEGREE):
         device_type=device_type,
         mesh=torch.arange(0, world_size).view(-1, model_parallel_size),
     )
-    mesh_2d = init_device_mesh(device_type, (world_size // model_parallel_size, model_parallel_size), mesh_dim_names=("dp", "tp"))
+    mesh_2d = init_device_mesh(
+        device_type,
+        (world_size // model_parallel_size, model_parallel_size),
+        mesh_dim_names=("dp", "tp"),
+    )
 
     dp_pg = mesh_2d.get_group(mesh_dim=0)
 

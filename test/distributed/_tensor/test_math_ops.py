@@ -5,7 +5,6 @@ import copy
 import itertools
 
 import torch
-
 from torch.distributed._tensor import DeviceMesh, distribute_module, distribute_tensor
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.ops.utils import is_tensor_partial, normalize_dim
@@ -344,10 +343,12 @@ class DistMathOpsTest(DTensorTestBase):
             comm_mode = CommDebugMode()
             with comm_mode:
                 y_dist = layer_norm_dist(x_dist)
+                y_dist.sum().backward()
 
             expected_fwd_comm = 0 if shard_dim < norm_idx else 1
+
             self.assertEqual(
-                comm_mode.get_total_counts(),
+                sum(comm_mode.comm_module_counts["Global"]["forward"].values()),
                 expected_fwd_comm,
                 f"comm count={comm_mode.get_total_counts()}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
@@ -357,13 +358,11 @@ class DistMathOpsTest(DTensorTestBase):
 
             # backward step
             y_local.sum().backward()
-            with comm_mode:
-                y_dist.sum().backward()
 
             expected_bwd_comm = 0 if shard_dim < norm_idx else 1
 
             self.assertEqual(
-                comm_mode.get_total_counts(),
+                sum(comm_mode.comm_module_counts["Global"]["backward"].values()),
                 expected_bwd_comm,
                 f"comm count={comm_mode.get_total_counts()}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
@@ -371,7 +370,7 @@ class DistMathOpsTest(DTensorTestBase):
 
             if elementwise_affine:
                 # if input is sharded on any outer dimension, the gradient of weight
-                # and bias should be _Partial
+                # and bias should be Partial
                 dim_map = x_dist._spec.dim_map
                 outer_dims = range(norm_idx)
                 needs_reduction = any(dim_map[d] >= 0 for d in outer_dims)
@@ -393,6 +392,68 @@ class DistMathOpsTest(DTensorTestBase):
                 )
 
             self.assertEqual(x_local.grad, x_dist.grad.full_tensor())
+
+    @with_comms
+    def test_topk(self):
+        device_mesh = self.build_device_mesh()
+        placement_combs = [Shard(0), Shard(1), Shard(2), Replicate()]
+
+        comm_mode = CommDebugMode()
+
+        tensor = torch.randn(12, 8, 8, requires_grad=True)
+        global_topk = tensor.topk(3, dim=0)
+
+        for placement in placement_combs:
+            dtensor = distribute_tensor(tensor, device_mesh, (placement,))
+            with comm_mode:
+                out_dt = dtensor.topk(3, dim=0)
+            if placement.is_shard(0):
+                self.assertEqual(comm_mode.get_total_counts(), 1)
+                self.assertEqual(
+                    comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                    1,
+                )
+            out_full_values = out_dt.values.full_tensor()
+            self.assertEqual(global_topk.values, out_full_values)
+
+            # TODO: support backward scatter
+            # global_topk.values.sum().backward()
+            # out_full_values.sum().backward()
+
+    @with_comms
+    def test_shard0_svd(self):
+        device_mesh = self.build_device_mesh()
+        torch.manual_seed(42)
+        replicated_x = torch.randn((8, 8), device=self.device_type)
+        sharded_x = distribute_tensor(replicated_x, device_mesh, (Shard(0),))
+        with CommDebugMode() as comm_mode:
+            U, S, V = torch.linalg.svd(sharded_x, full_matrices=False)
+        ref_U, ref_S, ref_V = torch.linalg.svd(replicated_x, full_matrices=False)
+        self.assertEqual(U.to_local(), ref_U)
+        self.assertEqual(S.to_local(), ref_S)
+        self.assertEqual(V.to_local(), ref_V)
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(len(comm_counts), 1)
+        self.assertEqual(comm_counts[funcol.all_gather_into_tensor], 1)
+
+    @with_comms
+    def test_foreach_norm(self):
+        device_mesh = self.build_device_mesh()
+
+        grad0 = torch.randn(12, 8)
+        grad1 = torch.randn(8, 8)
+
+        sharded_grad0 = distribute_tensor(grad0, device_mesh, [Shard(0)])
+        sharded_grad1 = distribute_tensor(grad1, device_mesh, [Shard(0)])
+
+        # non-sharded op
+        out = torch.ops.aten._foreach_norm([grad0, grad1], 2)
+
+        # sharded op
+        sharded_out = torch.ops.aten._foreach_norm([sharded_grad0, sharded_grad1], 2)
+
+        for o, so in zip(out, sharded_out):
+            self.assertEqual(so.full_tensor(), o)
 
 
 if __name__ == "__main__":

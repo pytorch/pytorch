@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import importlib
 import logging
@@ -14,9 +15,9 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
-
 from typing_extensions import TypeAlias
 
 import torch
@@ -31,9 +32,11 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 from torch.utils import _pytree
 
+if TYPE_CHECKING:
+    import onnx
+
 try:
     # Use try-except to initialize package-dependent global variables.
-    import onnx
     import onnxruntime  # type: ignore[import]
     from onnxruntime.capi import _pybind_state as ORTC  # type: ignore[import]
 
@@ -145,7 +148,7 @@ def _get_ort_device_type(device_type: str):
     if device_type == "cpu":
         return ORTC.OrtDevice.cpu()
     # ort pytorch device is mapped to NPU OrtDevice type
-    if device_type == "ort":
+    if device_type == "maia":
         return ORTC.OrtDevice.npu()
     raise ValueError("Unsupported device type: " + device_type)
 
@@ -552,9 +555,9 @@ class OrtExecutionInfoPerSession:
         self.output_value_infos: Tuple[onnx.ValueInfoProto, ...] = output_value_infos  # type: ignore[name-defined]
         # For the ONNX model stored in self.session, self.input_devices[i] is the
         # i-th positional input's device.
-        self.input_devices: Tuple["ORTC.OrtDevice", ...] = input_devices
+        self.input_devices: Tuple[ORTC.OrtDevice, ...] = input_devices
         # Similar to self.input_devices, but for outputs.
-        self.output_devices: Tuple["ORTC.OrtDevice", ...] = output_devices
+        self.output_devices: Tuple[ORTC.OrtDevice, ...] = output_devices
         # This is the outputs of executing the original torch.fx.GraphModule with example inputs
         # (i.e., args passed into OrtBackend._ort_acclerated_call).
         self.example_outputs: Union[
@@ -804,7 +807,7 @@ class OrtBackend:
     def _select_eps(
         self, graph_module: torch.fx.GraphModule, *args
     ) -> Sequence[Tuple[str, Mapping[str, Any]]]:
-        inferred_eps: Tuple[str, ...] = tuple()
+        inferred_eps: Tuple[str, ...] = ()
         if self._options.infer_execution_providers:
             if eps_from_args := _infer_ep_from_device(*args):
                 # If user feeds CUDA tensor as input argument,
@@ -921,6 +924,20 @@ class OrtBackend:
             onnx_model = exported.to_model_proto(
                 opset_version=self._resolved_onnx_exporter_options.onnx_registry.opset_version,
             )
+
+            try:
+                from onnxscript import optimizer  # type: ignore[import]
+                from onnxscript.rewriter import (  # type: ignore[import]
+                    onnxruntime as ort_rewriter,  # type: ignore[import]
+                )
+
+                onnx_model = optimizer.optimize(onnx_model)
+                onnx_model = ort_rewriter.rewrite(onnx_model)
+            except ImportError:
+                logger.warning(
+                    "ONNXScript optimizer is not available. Skipping optimization. "
+                    "Please `pip install onnxscript -U` to enable post-export optimization."
+                )
 
             # Modify ONNX model using pre-registered graph transforms.
             # They are in-place modifications for avoiding unnecessary

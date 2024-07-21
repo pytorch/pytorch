@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import importlib
 import logging
 import os
@@ -7,13 +8,22 @@ import subprocess
 import sys
 import warnings
 
-import torch
-from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
 
+try:
+    from .common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+except ImportError:
+    from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+
+import torch
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs
 
+
 log = logging.getLogger(__name__)
+
+# Enable FX graph caching
+if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
+    torch._inductor.config.fx_graph_cache = True
 
 
 def pip_install(package):
@@ -55,6 +65,12 @@ imports = [
 ]
 
 
+def process_hf_reformer_output(out):
+    assert isinstance(out, list)
+    # second output is unstable
+    return [elem for i, elem in enumerate(out) if i != 1]
+
+
 try:
     mod = importlib.import_module("transformers")
     for cls in imports:
@@ -72,7 +88,7 @@ finally:
 # combination of models supported by HF Fx parser and some manually supplied
 # models. For these models, we already know the largest batch size that can fit
 # on A100 GPUs - 40 GB.
-BATCH_SIZE_KNOWN_MODELS = dict()
+BATCH_SIZE_KNOWN_MODELS = {}
 
 
 # Get the list of models and their batch sizes
@@ -171,9 +187,18 @@ REQUIRE_HIGHER_TOLERANCE_TRAINING = {
     # harmful.
     "AlbertForQuestionAnswering",
 }
+
+REQUIRE_HIGHER_TOLERANCE_MAX_AUTOTUNE_TRAINING = {
+    # DebertaForQuestionAnswering needs higher tolerance in Max-Autotune mode
+    "DebertaForQuestionAnswering",
+}
+
 REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
     "GPT2ForSequenceClassification",
     "RobertaForQuestionAnswering",
+}
+REQUIRE_HIGHER_TOLERANCE_INFERENCE_CPU_ONLY = {
+    "LayoutLMForSequenceClassification",
 }
 
 
@@ -532,6 +557,10 @@ class HuggingfaceRunner(BenchmarkRunner):
             return SKIP_ACCURACY_CHECK_MODELS
         return set()
 
+    @property
+    def get_output_amp_train_process_func(self):
+        return {}
+
     def pick_grad(self, name, is_training):
         if is_training:
             return torch.enable_grad()
@@ -541,12 +570,22 @@ class HuggingfaceRunner(BenchmarkRunner):
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         if is_training:
-            if name in REQUIRE_HIGHER_TOLERANCE_TRAINING:
+            from torch._inductor import config as inductor_config
+
+            if (name in REQUIRE_HIGHER_TOLERANCE_TRAINING) or (
+                inductor_config.max_autotune
+                and name in REQUIRE_HIGHER_TOLERANCE_MAX_AUTOTUNE_TRAINING
+            ):
                 return 2e-2, cosine
             else:
                 return 1e-2, cosine
         else:
             if name in REQUIRE_HIGHER_TOLERANCE_INFERENCE:
+                return 4e-3, cosine
+            if (
+                current_device == "cpu"
+                and name in REQUIRE_HIGHER_TOLERANCE_INFERENCE_CPU_ONLY
+            ):
                 return 4e-3, cosine
         return 1e-3, cosine
 
@@ -582,7 +621,7 @@ def refresh_model_names_and_batch_sizes():
     """
     import transformers.utils.fx as hf_fx
 
-    family = dict()
+    family = {}
     lm_seen = set()
     family_seen = set()
     for cls_name in hf_fx._SUPPORTED_MODELS:

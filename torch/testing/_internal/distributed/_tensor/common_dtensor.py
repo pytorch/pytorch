@@ -26,6 +26,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
     skip_if_lt_x_gpu,
+    run_subtests,
     TEST_SKIPS,
 )
 
@@ -34,7 +35,6 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 DEVICE_TYPE = (
     "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
 )
-PG_BACKEND = "nccl" if DEVICE_TYPE == "cuda" else "gloo"
 
 NUM_DEVICES = 4
 
@@ -62,12 +62,12 @@ class RMSNormPython(torch.nn.Module):
 
 
 class MLPModule(nn.Module):
-    def __init__(self, device):
+    def __init__(self, device, bias: bool = True):
         super().__init__()
         torch.manual_seed(5)
-        self.net1 = nn.Linear(10, 16, device=device)
+        self.net1 = nn.Linear(10, 16, bias=bias, device=device)
         self.relu = nn.ReLU()
-        self.net2 = nn.Linear(16, 10, device=device)
+        self.net2 = nn.Linear(16, 10, bias=bias, device=device)
 
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))
@@ -77,12 +77,23 @@ class MLPModule(nn.Module):
         self.net2.reset_parameters()
 
 
+class MLPStacked(nn.Module):
+    def __init__(self, device, n_layers: int = 2):
+        super().__init__()
+        self.layers = nn.ModuleList([MLPModule(device) for i in range(n_layers)])
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
 @dataclass
 class ModelArgs:
     n_layers: int = 2
-    vocab_size: int = 16
+    vocab_size: int = 8
     max_seq_len: int = 16
-    dim: int = 8
+    dim: int = 16
     n_heads: int = 4
     dropout_p: float = 0.1
     use_attn_mask: bool = True
@@ -202,14 +213,14 @@ class Transformer(nn.Module):
         # Parallelize the root submodules.
         if use_seq_parallel:
             root_plan = {
-                "tok_embeddings": ColwiseParallel(output_layouts=Shard(1)),
-                "pos_embeddings": ColwiseParallel(output_layouts=Shard(0)),
+                "tok_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(1)),
+                "pos_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(0)),
                 "norm": SequenceParallel(),
             }
         else:
             root_plan = {
-                "tok_embeddings": ColwiseParallel(output_layouts=Replicate()),
-                "pos_embeddings": ColwiseParallel(output_layouts=Replicate()),
+                "tok_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Replicate()),
+                "pos_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Replicate()),
             }
 
         module_tp = parallelize_module(module, device_mesh, root_plan)
@@ -224,9 +235,9 @@ class Transformer(nn.Module):
                 # shard the RMSNorms
                 layer_parallelize_plan["attention_norm"] = SequenceParallel()
                 layer_parallelize_plan["ffn_norm"] = SequenceParallel()
-            layer_parallelize_plan["attention.wq"] = ColwiseParallel()
-            layer_parallelize_plan["attention.wk"] = ColwiseParallel()
-            layer_parallelize_plan["attention.wv"] = ColwiseParallel()
+            layer_parallelize_plan["attention.wq"] = ColwiseParallel(use_local_output=False)
+            layer_parallelize_plan["attention.wk"] = ColwiseParallel(use_local_output=False)
+            layer_parallelize_plan["attention.wv"] = ColwiseParallel(use_local_output=False)
             layer_parallelize_plan["attention.wo"] = (
                 RowwiseParallel(output_layouts=Shard(1))
                 if use_seq_parallel
@@ -249,32 +260,15 @@ class Transformer(nn.Module):
         # Parallelize the output submodule. If weight tying is enabled, we need to
         # make sure output.weight is sharded consistently as tok_embeddings.weight,
         # at the cost of the all_reduce operation using RowwiseParallel.
-        output_parallelize_plan = None
-        if not module_tp.model_args.weight_tying:
-            output_parallelize_plan = (
-                ColwiseParallel(
-                    input_layouts=Shard(1),
-                    output_layouts=Replicate(),
-                )
-                if use_seq_parallel
-                else ColwiseParallel(output_layouts=Replicate())
+        output_parallelize_plan = (
+            ColwiseParallel(
+                input_layouts=Shard(1),
+                output_layouts=Replicate(),
             )
-        else:
-            output_parallelize_plan = (
-                RowwiseParallel(
-                    input_layouts=Shard(1),
-                    output_layouts=Replicate(),
-                )
-                if use_seq_parallel
-                else RowwiseParallel(input_layouts=Replicate())
-            )
+            if use_seq_parallel
+            else ColwiseParallel(output_layouts=Replicate())
+        )
         parallelize_module(module_tp.output, device_mesh, output_parallelize_plan)
-
-        # Do manual setup on features that DTensor does not support yet.
-
-        # Manually adjust the number of heads after sharding the attention modules.
-        for layer in module_tp.layers:
-            layer.attention.n_heads = module_tp.model_args.n_heads // device_mesh.size()
 
         # Manually set output.weight so that parameters and gradients are shared.
         if module_tp.model_args.weight_tying:
@@ -303,10 +297,11 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        return PG_BACKEND
+        backend = "nccl" if self.device_type == "cuda" else "gloo"
+        return backend
 
     def build_device_mesh(self) -> DeviceMesh:
-        return DeviceMesh(DEVICE_TYPE, list(range(self.world_size)))
+        return DeviceMesh(self.device_type, list(range(self.world_size)))
 
     def init_pg(self) -> None:
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
@@ -364,49 +359,23 @@ def with_comms(func: TestFunc) -> TestFunc:
     def wrapper(
         self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
     ) -> None:
-        # if backend not specified, and cuda available, then use nccl, else gloo
-        if torch.cuda.is_available() and torch.cuda.device_count() >= self.world_size:
-            self.device_type = "cuda"
-        else:
+        # if enough GPU we can use GPU, otherwise we fallback to CPU
+        if not torch.cuda.is_available() or torch.cuda.device_count() < self.world_size:
             self.device_type = "cpu"
+        else:
+            self.device_type = DEVICE_TYPE
 
         self.init_pg()
-        func(self, *args, **kwargs)  # type: ignore[misc]
+
+        try:
+            func(self, *args, **kwargs)  # type: ignore[misc]
+        except Exception as e:
+            dist.destroy_process_group()
+            raise e
+
         self.destroy_pg()
 
     return wrapper
-
-
-def run_subtests(
-    cls_inst,
-    subtest_config: Dict[str, List[Any]],
-    test_fn: Callable,
-    *test_args,
-    **test_kwargs: Any,
-):
-    """
-    Runs a test function given by ``test_fn`` as a subtest according to the
-    configurations specified by ``subtest_config``. This amortizes the
-    costly setup overhead (including process spawn and initializing the
-    process group) over the subtests.
-
-    Args:
-        subtest_config (Dict[str, List[Any]]): A mapping from subtest
-            keyword argument name to a list of its possible values.
-        test_fn (Callable): A callable that runs the actual test.
-        test_args: Positional arguments to pass to ``test_fn``.
-        test_kwargs: Keyword arguments to pass to ``test_fn``.
-    """
-    # Convert the config mapping to a list to have a fixed order
-    subtest_config_items: List[Tuple[str, List[Any]]] = list(subtest_config.items())
-    subtest_config_keys: List[str] = [item[0] for item in subtest_config_items]
-    subtest_config_values: List[List[Any]] = [item[1] for item in subtest_config_items]
-    for values in itertools.product(*subtest_config_values):
-        # Map keyword to chosen value
-        subtest_kwargs = dict(zip(subtest_config_keys, values))
-        with cls_inst.subTest(**subtest_kwargs):
-            test_fn(*test_args, **test_kwargs, **subtest_kwargs)
-        dist.barrier()
 
 
 class DTensorOpTestBase(MultiThreadedTestCase):

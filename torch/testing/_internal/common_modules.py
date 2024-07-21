@@ -24,10 +24,11 @@ from torch.testing._internal.common_nn import (
     marginrankingloss_reference, multimarginloss_reference, multilabelmarginloss_reference,
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
+    freeze_rng_state, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
     skipIfTorchDynamo)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
+import operator
 
 # List of all namespaces containing modules to test.
 MODULE_NAMESPACES: List[ModuleType] = [
@@ -214,6 +215,7 @@ class ModuleInfo:
                  decorators=None,  # Additional decorators to apply to generated tests
                  dtypes=floating_types(),  # dtypes this function is expected to work with
                  dtypesIfMPS=(torch.float16, torch.float32,),  # dtypes this function is expected to work with on MPS
+                 dtypesIfHpu=(torch.bfloat16, torch.float32,),
                  supports_gradgrad=True,  # whether the op supports second order gradients
                  gradcheck_nondet_tol=0.0,  # tolerance for nondeterminism while performing gradcheck
                  module_memformat_affects_out=False,  # whether converting module to channels last will generate
@@ -226,6 +228,7 @@ class ModuleInfo:
         self.decorators = (*(decorators if decorators else []), *(skips if skips else []))
         self.dtypes = dtypes
         self.dtypesIfMPS = dtypesIfMPS
+        self.dtypesIfHpu = dtypesIfHpu
         self.supports_gradgrad = supports_gradgrad
         self.gradcheck_nondet_tol = gradcheck_nondet_tol
         self.module_memformat_affects_out = module_memformat_affects_out
@@ -234,7 +237,7 @@ class ModuleInfo:
         self.is_lazy = issubclass(module_cls, torch.nn.modules.lazy.LazyModuleMixin)
 
     def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
-        result = [set_single_threaded_if_parallel_tbb]
+        result = []
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
                 if decorator.is_active(test_class, test_name, device, dtype, param_kwargs):
@@ -246,6 +249,8 @@ class ModuleInfo:
     def supported_dtypes(self, device_type):
         if device_type == 'mps':
             return self.dtypesIfMPS
+        elif device_type == 'hpu':
+            return self.dtypesIfHpu
         else:
             return self.dtypes
 
@@ -1928,6 +1933,55 @@ def module_inputs_torch_nn_LayerNorm(module_info, device, dtype, requires_grad, 
             desc='3d_elementwise_affine_no_bias'),
     ]
 
+def module_inputs_torch_nn_RMSNorm(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def rms_norm_reference_fn(m, p, i):
+        eps = m.eps
+        if eps is None:
+            eps = torch.finfo(i.dtype).eps
+        ndim = i.ndim
+        normalized_shape = m.normalized_shape
+        weight = m.weight
+        dims = [ndim - i - 1 for i in range(len(normalized_shape))]
+        result = i * torch.rsqrt(i.pow(2).mean(dim=dims, keepdim=True) + m.eps)
+        if weight is not None:
+            result *= weight
+        return result
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput([5], 1e-3),
+            forward_input=FunctionInput(make_input((4, 5, 5))),
+            desc='1d_elementwise_affine',
+            reference_fn=rms_norm_reference_fn),
+        ModuleInput(
+            constructor_input=FunctionInput([5], 1e-3),
+            forward_input=FunctionInput(make_input((128, 5, 5))),
+            desc='1d_elementwise_affine_large_batch',
+            reference_fn=rms_norm_reference_fn),
+        ModuleInput(
+            constructor_input=FunctionInput([5], 1e-3, False),
+            forward_input=FunctionInput(make_input((4, 5, 5))),
+            desc='1d_no_elementwise_affine',
+            reference_fn=rms_norm_reference_fn),
+        ModuleInput(
+            constructor_input=FunctionInput([2, 2, 5], 1e-3),
+            forward_input=FunctionInput(make_input((4, 2, 2, 5))),
+            desc='3d_elementwise_affine',
+            reference_fn=rms_norm_reference_fn),
+        ModuleInput(
+            constructor_input=FunctionInput([2, 2, 5], 1e-3, False),
+            forward_input=FunctionInput(make_input((4, 2, 2, 5))),
+            desc='3d_no_elementwise_affine',
+            reference_fn=rms_norm_reference_fn),
+        ModuleInput(
+            constructor_input=FunctionInput([5], 1e-3),
+            forward_input=FunctionInput(make_input((0, 5))),
+            desc='1d_empty_elementwise_affine',
+            reference_fn=rms_norm_reference_fn),
+    ]
+
 
 def module_inputs_torch_nn_LocalResponseNorm(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -2398,7 +2452,7 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
                 make_input((2, 3, 4))
             ),
             desc='no_bias'
-        ),]
+        ), ]
 
     # Samples below are for validating the no-batch-dim support.
     key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
@@ -3325,7 +3379,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                    ),)
                ),
     ModuleInfo(torch.nn.AdaptiveAvgPool3d,
@@ -3364,7 +3418,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='cuda',
                    ),
                    # error: input types 'tensor<f32>' and 'tensor<15x10xf16>' are not broadcast compatible
@@ -3391,13 +3445,13 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_symbolic_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ),
                    # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ))
                ),
     ModuleInfo(torch.nn.BatchNorm2d,
@@ -3412,13 +3466,13 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_symbolic_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ),
                    # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ),)
                ),
     ModuleInfo(torch.nn.BatchNorm3d,
@@ -3432,13 +3486,13 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_symbolic_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ),
                    # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ),)
                ),
     ModuleInfo(torch.nn.CELU,
@@ -3821,7 +3875,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),
@@ -3964,16 +4018,8 @@ module_db: List[ModuleInfo] = [
                decorators=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format'),
-                   # Expect failures for tests that rely on torch.half implementation on CPU
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward", dtypes=[torch.float16], device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_if_train_and_eval_modes_differ",
-                                dtypes=[torch.float16], device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_save_load", dtypes=[torch.float16],
-                                device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", dtypes=[torch.float16],
-                                device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_multiple_device_transfer", dtypes=[torch.float16],
-                                device_type='cuda'),
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-2, rtol=1e-3)}), "TestModule",
+                                "test_forward", dtypes=[torch.float16], device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
                                 device_type='cuda'),),
                ),
@@ -4029,7 +4075,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),),
                supports_gradgrad=False),
@@ -4070,6 +4116,9 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # No channels_last support for LayerNorm currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+               ),
+    ModuleInfo(torch.nn.RMSNorm,
+               module_inputs_func=module_inputs_torch_nn_RMSNorm,
                ),
     # TransformerEncoder takes the same inputs as TransformerEncoderLayer
     ModuleInfo(torch.nn.TransformerEncoder,
@@ -4149,7 +4198,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),
@@ -4191,7 +4240,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),
@@ -4254,7 +4303,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),
@@ -4267,7 +4316,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),
@@ -4288,22 +4337,12 @@ module_db: List[ModuleInfo] = [
                train_and_eval_differ=True,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=True),
                module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
-               skips=(
-                   # RNNBase overrides `_apply` and adds weakrefs to params
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap']),
-                   # RNNBase overrides `_apply` and adds weakrefs to params
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to_empty', active_if=lambda p: p['swap']),),
                decorators=rnn_gru_lstm_module_info_decorators
                ),
     ModuleInfo(torch.nn.GRU,
                train_and_eval_differ=True,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=False),
                module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
-               skips=(
-                   # RNNBase overrides `_apply` and adds weakrefs to params
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap']),
-                   # RNNBase overrides `_apply` and adds weakrefs to params
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to_empty', active_if=lambda p: p['swap']),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.LSTM,
                train_and_eval_differ=True,
@@ -4311,11 +4350,7 @@ module_db: List[ModuleInfo] = [
                module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
                    # LSTM with projections is not currently supported with MPS
-                   DecorateInfo(skipMPS),
-                   # RNNBase overrides `_apply` and adds weakrefs to params
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap']),
-                   # RNNBase overrides `_apply` and adds weakrefs to params
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to_empty', active_if=lambda p: p['swap']),),
+                   DecorateInfo(skipMPS),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.ReflectionPad1d,
                module_inputs_func=module_inputs_torch_nn_ReflectionPad1d,

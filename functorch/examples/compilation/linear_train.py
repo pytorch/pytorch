@@ -11,6 +11,7 @@ import torch.nn as nn
 from functorch import make_functional
 from functorch.compile import nnc_jit
 
+
 torch._C._jit_override_can_fuse_on_cpu(True)
 
 

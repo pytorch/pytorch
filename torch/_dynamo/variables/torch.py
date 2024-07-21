@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import inspect
 import logging
@@ -17,7 +18,11 @@ from torch._streambase import _StreamBase
 from ..._guards import TracingContext
 from .. import config, polyfill, variables
 from ..codegen import PyCodegen
-from ..create_parameter_op import new_parameter_placeholder, tracable_create_parameter
+from ..create_parameter_op import (
+    can_convert_to_tracable_parameter,
+    new_parameter_placeholder,
+    tracable_create_parameter,
+)
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -46,16 +51,24 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
+try:
+    from torch.distributed._composable.fsdp import _fsdp_param_group
+except ModuleNotFoundError:
+    _fsdp_param_group = None  # type: ignore[assignment]
+
 log = logging.getLogger(__name__)
 
 supported_ctx_manager_classes = dict.fromkeys(
     [
         torch.profiler.profiler.profile,
+        torch.autograd.forward_ad._set_fwd_grad_enabled,
+        torch.autograd.forward_ad.dual_level,
         torch.autograd.profiler.profile,
         torch.autograd.profiler.record_function,
         torch._C.DisableTorchFunctionSubclass,
         torch._functorch.vmap.vmap_increment_nesting,
         torch._functorch.eager_transforms.grad_increment_nesting,
+        torch._functorch.eager_transforms.jvp_increment_nesting,
         torch._functorch.eager_transforms.enable_inplace_requires_grad,
         torch.amp.autocast_mode.autocast,
         torch.autograd.grad_mode.enable_grad,
@@ -80,9 +93,11 @@ constant_fold_functions = [
     torch._assert,
     torch._utils._get_device_index,
     torch._C._get_cublas_allow_tf32,
+    torch._C._is_any_autocast_enabled,
     torch.cuda.get_device_properties,
     torch.cuda.is_available,
     torch.distributed.is_available,
+    torch.get_autocast_dtype,
     torch.get_autocast_gpu_dtype,
     torch.get_default_dtype,
     torch.is_autocast_cache_enabled,
@@ -116,6 +131,7 @@ tracing_state_functions = {
     torch._utils.is_compiling: True,
     torch.compiler.is_compiling: True,
     torch.compiler.is_dynamo_compiling: True,
+    torch.nn.modules.activation._is_make_fx_tracing: False,
 }
 
 bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
@@ -143,7 +159,7 @@ class BaseTorchVariable(VariableTracker):
             name = f"torch_obj_{id(self.value)}"
         unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
         codegen.extend_output(
-            codegen.setup_globally_cached(unique_var_name, self.value, False)
+            codegen.setup_globally_cached(unique_var_name, self.value)
         )
 
     def as_proxy(self):
@@ -178,17 +194,28 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         # We can't do isinstance(value, type) check because some ctx managers
         # are implemented as a function decorated by contextlib.contextmanager,
         # E.g., torch._functorch.vmap.vmap_increment_nesting.
-        return hashable(value) and value in supported_ctx_manager_classes
+        return (
+            # Context manager type or function with @contextmanager is callable
+            callable(value)
+            and (
+                hashable(value)  # accesses value.__hash__()
+                and value in supported_ctx_manager_classes
+            )
+        )
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import (
             DisabledSavedTensorsHooksVariable,
+            DualLevelContextManager,
+            FSDPParamGroupUseTrainingStateVariable,
             GradIncrementNestingCtxManagerVariable,
             GradInplaceRequiresGradCtxManagerVariable,
             GradModeVariable,
             InferenceModeVariable,
+            JvpIncrementNestingCtxManagerVariable,
+            SetFwdGradEnabledContextManager,
             StreamVariable,
             VmapIncrementNestingCtxManagerVariable,
         )
@@ -252,6 +279,18 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx,
                 [guard_if_dyn(x) for x in args],
             )
+        elif self.value is torch._functorch.eager_transforms.jvp_increment_nesting:
+            assert len(args) == 0
+            return JvpIncrementNestingCtxManagerVariable.create(tx)
+        elif self.value is torch.autograd.forward_ad._set_fwd_grad_enabled:
+            assert len(args) == 1
+            return SetFwdGradEnabledContextManager.create(
+                tx,
+                [guard_if_dyn(x) for x in args],
+            )
+        elif self.value is torch.autograd.forward_ad.dual_level:
+            assert len(args) == 0
+            return DualLevelContextManager.create(tx)
         elif self.value is torch._functorch.eager_transforms.grad_increment_nesting:
             assert len(args) == 0
             return GradIncrementNestingCtxManagerVariable.create(tx)
@@ -267,6 +306,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) == 1
             return DisabledSavedTensorsHooksVariable.create(
                 tx, args[0].as_python_constant()
+            )
+        elif (
+            _fsdp_param_group is not None
+            and self.value is _fsdp_param_group.FSDPParamGroup.use_training_state
+        ):
+            assert len(args) == 2
+            return FSDPParamGroupUseTrainingStateVariable.create(
+                tx, args[0], args[1].as_python_constant()
             )
 
         return super().call_function(tx, args, kwargs)
@@ -615,7 +662,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 and args[1].is_python_constant()
                 and args[1].as_python_constant() == -1
             ):
-                raise unimplemented(
+                unimplemented(
                     "torch.nn.functional.one_hot with data-dependent output shape"
                 )
 
@@ -629,6 +676,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         expr.sym_num
                     )
                 )
+            elif isinstance(expr, ConstantVariable):
+                return expr
 
         @register(torch._C._autograd._unsafe_set_version_counter)
         def handle_unsafe_set_version_counter(self, tx, *args, **kwargs):
@@ -711,7 +760,7 @@ To support this behavior, we need to allow const-propping tensors that store sym
 For now, dynamo will explicitly graph break when it encounters user code with this behavior.
 """
                 log.warning(msg)
-                raise unimplemented(msg)
+                unimplemented(msg)
 
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
@@ -723,6 +772,16 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     torch, torch_sym_op
                 ):
                     fn_ = getattr(torch, torch_sym_op)
+
+            fake_out_shape = None
+            if "out" in kwargs and isinstance(kwargs["out"], variables.TensorVariable):
+                # Calling fake tensor propagation can mutate the out= tensor in
+                # tx.output.tracked_fakes. tracked_fakes are used to apply
+                # symbolic_shape guards. Mutating them destroys the information
+                # prior to tracing, which is essential for creating right
+                # guards. So save the shape now, and check later if it has
+                # changed. If it has, graph break.
+                fake_out_shape = kwargs["out"].proxy.node.meta["example_value"].shape
 
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
@@ -779,7 +838,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     if (
                         kwargs["out"].source
                         and kwargs["out"] in tx.output.graphargs
-                        and fake_out.shape != fake_tensor.shape
+                        and fake_out_shape != fake_tensor.shape
                     ):
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
@@ -793,6 +852,30 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     name = tx.find_symbolic_locals_name(kwargs["out"])
                     if name in tx.symbolic_locals:
                         tx.symbolic_locals[name] = tensor_variable
+                elif (
+                    isinstance(tensor_variable, ConstantVariable)
+                    and tensor_variable.value is None
+                ):
+                    # Handle out-variant custom ops that return None.
+                    if isinstance(kwargs["out"], TensorVariable):
+                        assert "example_value" in kwargs["out"].proxy.node.meta
+                        fake_out = kwargs["out"].proxy.node.meta["example_value"]
+                        if not torch._prims_common.is_contiguous(fake_out):
+                            # It's difficult to handle strides correctly in functionalization
+                            # when calling an out= op with a non-contiguous out argument
+                            unimplemented(
+                                "out= op was called where output tensor was non-contiguous"
+                            )
+                    elif isinstance(kwargs["out"], ListVariable):
+                        for idx, x in enumerate(kwargs["out"].items):
+                            assert "example_value" in x.proxy.node.meta  # type: ignore[attr-defined]
+                            fake_out = x.proxy.node.meta["example_value"]  # type: ignore[attr-defined]
+                            if not torch._prims_common.is_contiguous(fake_out):
+                                # It's difficult to handle strides correctly in functionalization
+                                # when calling an out= op with a non-contiguous out argument
+                                unimplemented(
+                                    "out= op was called where some of the output tensors were non-contiguous"
+                                )
                 else:
                     unimplemented(f"out variant of {type(kwargs['out'])}")
 
@@ -828,6 +911,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
     @classmethod
     def call_nn_parameter(cls, tx, data=None, requires_grad=True):
         """A call to torch.nn.Parameter() gets lifted to before the graph"""
+        if tx.export:
+            unimplemented("nn parameter construction not supported with export")
+
         if isinstance(requires_grad, variables.VariableTracker):
             try:
                 requires_grad = requires_grad.as_python_constant()
@@ -840,6 +926,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         # this results in cleaner graphs, but only works for inputs
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
+
+        if not can_convert_to_tracable_parameter():
+            unimplemented("Workaround for issues with nn_parameter construction")
 
         try:
             shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
@@ -867,6 +956,13 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         )
         assert isinstance(result, variables.TensorVariable)
         result.class_type = torch.nn.Parameter
+
+        # TODO(jansel/bdhirsh) - There is some issue with
+        # tracable_create_paramter. It does not seem to use the right
+        # grad_enabled. Since this is parameter, we can just override the
+        # has_grad_fn field to False to workaround the issue.
+        result.has_grad_fn = False
+
         # In reconstruct() should use the original parameter.  The one returned by the graph will be an alias.
         result.source = placeholder.source
 
@@ -883,12 +979,18 @@ Either create the tensor outside the compiled region, or do not set the tensor t
 
         # construct the nn.Parmeter before the graph save it to varname
         cg = PyCodegen(tx)
-        cg.load_import_from("torch.nn", "Parameter")
+        cg.add_push_null(lambda: cg.load_import_from("torch.nn", "Parameter"))
         cg(data.source)
         cg(variables.ConstantVariable(requires_grad))
-        cg.call_function(2, True)
+        cg.call_function(2, False)
         cg.store(varname)
         tx.output.pregraph_bytecode.extend(cg.get_instructions())
+
+        data_node = data.as_proxy().node
+        if data_node.op not in ("placeholder", "get_attr"):
+            unimplemented(
+                "Unexpected type of data placeholder op for parameter construction"
+            )
 
         # add the newly constructed nn.Parameter as a graph input
         source = SyntheticLocalSource(varname)

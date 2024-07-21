@@ -1,11 +1,17 @@
+# mypy: allow-untyped-defs
+import itertools
 import logging
 import typing
 from collections import Counter
-from typing import Dict, List, Set
+from typing import Any, Dict, List, Set, Union
 
 import torch
 import torch._guards
+import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
+from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
+from torch.fx.experimental.symbolic_shapes import statically_known_true
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.multiprocessing.reductions import StorageWeakRef
 
 from .. import config
@@ -14,14 +20,23 @@ from ..pattern_matcher import (
     init_once_fakemode,
     KeywordArg,
     Match,
+    MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
     stable_topological_sort,
 )
 from .replace_random import replace_random_passes
 
+
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
+aten = torch.ops.aten
+prims = torch.ops.prims
+
+pass_patterns = [
+    patterns,
+    PatternMatcherPass(),
+]
 
 
 @init_once_fakemode
@@ -40,7 +55,6 @@ def remove_no_ops(
     gm: torch.fx.GraphModule, zeros: Set[torch.fx.Node], ones: Set[torch.fx.Node]
 ):
     "Removes no-ops: (+ 0, - 0, * 1, / 1)"
-    aten = torch.ops.aten
     graph = gm.graph
 
     def fake_tensors_eq(t1, t2, fields=("shape", "dtype", "device")):
@@ -78,12 +92,9 @@ def remove_no_ops(
         replacement.meta.update(node.meta)
         graph.erase_node(node)
 
-    for node in graph.nodes:
-        if node.op != "call_function":
-            continue
-
+    for node in graph.find_nodes(op="call_function", target=aten.add.Tensor):
         # TODO handle Tensor-Scalar adds, it's a different schema
-        if node.target == aten.add.Tensor and len(node.args) == 2:
+        if len(node.args) == 2:
             if (
                 not any(e in zeros for e in node.args)
                 or node.kwargs.get("alpha", 1) != 1
@@ -93,25 +104,46 @@ def remove_no_ops(
             replace_index = 1 if node.args[0] in zeros else 0
             replace_no_op(node, replace_index)
 
-        elif node.target == aten.sub.Tensor and len(node.args) == 2:
+    for node in graph.find_nodes(op="call_function", target=aten.sub.Tensor):
+        if len(node.args) == 2:
             if node.args[1] not in zeros or node.kwargs.get("alpha", 1) != 1:
                 continue
 
             replace_no_op(node, 0)
 
-        elif node.target == aten.mul.Tensor and len(node.args) == 2:
+    for node in graph.find_nodes(op="call_function", target=aten.mul.Tensor):
+        if len(node.args) == 2:
             if not any(e in ones for e in node.args):
                 continue
 
             replace_input_index = 1 if node.args[0] in ones else 0
             replace_no_op(node, replace_input_index)
 
-        elif (
-            node.target == aten.div.Tensor
-            and len(node.args) == 2
-            and node.args[1] in ones
-        ):
+    for node in graph.find_nodes(op="call_function", target=aten.div.Tensor):
+        if len(node.args) == 2 and node.args[1] in ones:
             replace_no_op(node, 0)
+
+    # meta tensors returned from the graph have no data and can be replaced with empty_strided
+    for output_node in graph.find_nodes(op="output"):
+        had_meta_return = False
+
+        def visit(n):
+            nonlocal had_meta_return
+            val = n.meta.get("val")
+            if isinstance(val, torch.Tensor) and val.device.type == "meta":
+                with graph.inserting_before(output_node):
+                    n.replace_all_uses_with(
+                        graph.call_function(
+                            torch.ops.aten.empty_strided.default,
+                            args=(val.size(), val.stride()),
+                            kwargs={"dtype": val.dtype, "device": val.device},
+                        )
+                    )
+                had_meta_return = True
+
+        torch.fx.map_arg(output_node.args, visit)
+        if had_meta_return:
+            graph.eliminate_dead_code()
 
 
 @torch.utils._python_dispatch._disable_current_modes()
@@ -124,13 +156,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
     views: Dict[torch.fx.Node, Dict[torch.dtype, torch.fx.Node]] = {}
     graph = gm.graph
 
-    for node in graph.nodes:
-        if node.op != "call_function":
-            continue
-
-        if node.target != torch.ops.aten.view.dtype:
-            continue
-
+    for node in graph.find_nodes(op="call_function", target=torch.ops.aten.view.dtype):
         src = node.args[0]
         to_type = node.args[1]
         existing_views = views.get(src)
@@ -178,21 +204,120 @@ class UniformValueConstantFolder(ConstantFolder):
         # see: [constant folding refining of symints]
         self.node_replacements_shapes: Dict[torch.fx.Node, List[int]] = {}
 
+        # initialize symint -> node mapping so that we can
+        # use symint nodes in full constructors
+        self.symint_nodes = _SymHashingDict()
+        for n in self.module.graph.nodes:
+            if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
+                self.symint_nodes[n.meta["val"]] = n
+
+        # reference from torch/_funtorch/partitioners.py:get_default_op_list
+        self.view_op_packets = [
+            aten.squeeze,
+            aten.unsqueeze,
+            aten.alias,
+            aten.view,
+            aten.slice,
+            aten.t,
+            prims.broadcast_in_dim,
+            aten.expand,
+            aten.as_strided,
+            aten.permute,
+        ]
+
+        self.indexing_op_packets = {
+            aten.slice,
+        }
+
+    def _support_dynamic_shape(self):
+        return True
+
     def insertable_tensor_check(self, t: torch.Tensor) -> bool:
-        # TODO - we could also Tensors which get replaced with arange here
-        return (
-            t.numel() != 0
-            and bool((t == t.flatten()[0]).all())
-            and torch._C._has_storage(t)
-            and t.layout == torch.strided
-        )
+        return True
 
     def add_node_replacement(self, node: torch.fx.Node, tensor: torch.Tensor) -> None:
         self.node_replacements[node] = tensor.flatten()[0].item()
+        self.node_replacements_shapes[node] = node.meta["val"].shape
         self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
-        shape = list(tensor.shape)
-        assert all(type(dim) is int for dim in shape)
-        self.node_replacements_shapes[node] = shape
+
+    def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
+        for n in self.module.graph.find_nodes(op="placeholder"):
+            if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
+                env[n] = n.meta["val"]
+            else:
+                env[n] = self.unknown_value
+
+    def _deduce_value(self, node: torch.fx.Node):
+        # deduce value for full-like nodes
+        # 1. for constructors, substitute value is a tensor of size [1]
+        # 2. for view ops/indexing, substitute value is the same as the input
+        # 3. for pointwise ops, run node to get the substitute value
+        # 4. deal with some special ops
+        # otherwise, stop deduce value and return unknown value
+
+        # TODO: cat, more indexing
+        # TODO - do on cpu to avoid syncs
+
+        # single-elem attrs
+        if node.op == "get_attr" or (
+            node.op == "call_function"
+            and node.target == torch.ops.aten.lift_fresh_copy.default
+        ):
+            out = super(ConstantFolder, self).run_node(node)
+            if isinstance(out, torch.Tensor) and out.numel() == 1:
+                return out
+
+        # handle device_put op
+        if node.target == prims.device_put.default:
+            return super(ConstantFolder, self).run_node(node)
+
+        # constructors ops
+        if (
+            node.op == "call_function"
+            and node.target == aten.full.default
+            and len(node.args) == 2
+        ):
+            args, kwargs = self.fetch_args_kwargs_from_env(node)
+            new_args = [[1], args[1]]
+            return aten.full.default(*new_args, **node.kwargs)
+
+        # handle before view ops because this changes value
+        if node.target == aten.view.dtype:
+            return super(ConstantFolder, self).run_node(node)
+
+        # view ops, return input tensor, the first argument
+        if hasattr(node.target, "overloadpacket") and (
+            node.target.overloadpacket in self.view_op_packets
+            or node.target.overloadpacket in self.indexing_op_packets
+        ):
+            assert isinstance(node.args[0], torch.fx.Node)
+            return self.env[node.args[0]]
+
+        # we don't want to return unknown value for symints so that we can
+        # still constant fold through their use in constructors or views
+        # if we see them in a pointwise node (e.g., tensor * symint)
+        # we will bail
+        if "val" in node.meta and isinstance(node.meta["val"], torch.SymInt):
+            return node.meta["val"]
+
+        # pointwise ops
+        if isinstance(node.target, torch._ops.OpOverload) and (
+            torch.Tag.pointwise in node.target.tags
+            or node.target is torch.ops.aten.scalar_tensor.default
+        ):
+            args, kwargs = self.fetch_args_kwargs_from_env(node)
+            flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
+
+            if any(isinstance(inp, torch.SymInt) for inp in flattened_inputs):
+                return self.unknown_value
+
+            # we run the ops with dim 1, so remove memory_format to avoid error
+            kwargs = dict(kwargs)
+            kwargs.pop("memory_format", None)
+
+            return node.target(*args, **kwargs)
+
+        return self.unknown_value
 
 
 @torch.utils._python_dispatch._disable_current_modes()
@@ -231,8 +356,16 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
     for node, value in node_replacements.items():
         # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
         # hasn't shown up to be important yet
+        if "val" not in node.meta:
+            # This can only happen in AOTI
+            continue
+
         fake_tensor = node.meta["val"]
         if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
+            continue
+
+        # TODO - not sure about lossy uint->python value->uint conversions
+        if fake_tensor.dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
             continue
 
         if constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1:
@@ -253,10 +386,24 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             ):
                 torch._check(runtime_size == compile_time_size)
 
-            # zeros, and ones just get traced into full, so we insert those
+            # replace SymInt as Node before creating a new full node
+            # e.g. (1, s0) -> (1, arg0_1)
+            node_shape = node_replacements_shapes[node]
+            if not all(
+                not isinstance(s, torch.SymInt) or s in cf.symint_nodes
+                for s in node_shape
+            ):
+                continue
+
+            shapes = [
+                cf.symint_nodes[s] if isinstance(s, torch.SymInt) else s
+                for s in node_replacements_shapes[node]
+            ]
+
+            # zeros and ones just get traced into full, so we insert those
             new_node = graph.call_function(
                 aten.full.default,
-                args=(node_replacements_shapes[node], value),
+                args=(shapes, value),
                 kwargs={
                     "dtype": fake_tensor.dtype,
                     "layout": torch.strided,
@@ -284,15 +431,36 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     """
     lazy_init()
     count = 0
+    if config.joint_custom_pre_pass is not None:
+        with GraphTransformObserver(
+            graph, "joint_custom_pre_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.joint_custom_pre_pass(graph.graph)
+            count += 1
+
+    from .post_grad import remove_noop_ops
+
+    remove_noop_ops(graph.graph)
 
     if config.joint_graph_constant_folding:
-        constant_fold_uniform_value(graph)
+        with GraphTransformObserver(
+            graph, "constant_fold_uniform_value", config.trace.log_url_for_graph_xform
+        ):
+            constant_fold_uniform_value(graph)
 
     if config.pattern_matcher:
-        count += patterns.apply(graph.graph)  # type: ignore[arg-type]
+        for patterns in pass_patterns:
+            count += patterns.apply(graph.graph)  # type: ignore[arg-type]
 
     if not config.fallback_random:
         count += replace_random_passes(graph)
+
+    if config.joint_custom_post_pass is not None:
+        with GraphTransformObserver(
+            graph, "joint_custom_post_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.joint_custom_post_pass(graph.graph)
+            count += 1
 
     if count:
         stable_topological_sort(graph.graph)
@@ -339,3 +507,129 @@ def pointless_view(match: Match, arg, size):
     if size == arg_size:
         node.replace_all_uses_with(node.args[0])
         match.erase_nodes(graph)
+
+
+# When softmax is used with temperature or other scaling, we get the pattern
+#
+#   scale(x) - scale(x).amax(dim, keepdim=True)
+#
+# which is expected to be at most zero, but we may end up with numerical
+# discrepancies # between the recomputed values of scale(x) inside and out
+# of the reduction, # depending on compiler optimizations, e.g. use of fma
+# instructions.
+#
+# Here we replace it with the mathematically equivalent,
+#
+#   scale(x - x.amax(dim, keepdim=True))
+#
+# which is more stable as we only compute the scaling once.
+#
+# NOTE: This pattern must come after fused attention matching!
+
+
+def _partial_softmax_pattern(linear_func, reverse=False, to_dtype=False):
+    # Allow matching inp * other and other * input
+    if reverse:
+        scaled = CallFunction(
+            linear_func, KeywordArg("other"), KeywordArg("inp"), _users=MULTIPLE
+        )
+    else:
+        scaled = CallFunction(
+            linear_func, KeywordArg("inp"), KeywordArg("other"), _users=MULTIPLE
+        )
+    if to_dtype:
+        scaled = CallFunction(
+            prims.convert_element_type, scaled, KeywordArg("dtype"), _users=MULTIPLE
+        )
+    amax = CallFunction(
+        aten.amax.default, scaled, KeywordArg("dim"), KeywordArg("keepdim")
+    )
+    return CallFunction(aten.sub.Tensor, scaled, amax)
+
+
+def _other_is_broadcasted_in_dim(match):
+    # Check that the scaling factor is constant across the reduction dim,
+    # so scaling doesn't change which index corresponds to the maximum value
+    other = match.kwargs["other"]
+    if isinstance(other, (int, float)):
+        return True
+
+    inp = match.kwargs["inp"]
+    if not all(isinstance(x, torch.fx.Node) for x in (inp, other)):
+        return False
+
+    inp_example = inp.meta["val"]
+    other_example = other.meta["val"]
+    if isinstance(other_example, (torch.SymInt, torch.SymFloat)):
+        return True
+
+    if not all(isinstance(x, torch.Tensor) for x in (inp_example, other_example)):
+        return False
+
+    inp_ndim = inp_example.ndim
+    other_shape = other_example.shape
+    if inp_ndim < len(other_shape):
+        return False
+
+    # Pad other_shape to the same ndim as inp
+    other_shape = [1] * (inp_ndim - len(other_shape)) + list(other_shape)
+
+    dim = match.kwargs["dim"]
+    if isinstance(dim, int):
+        dim = (dim,)
+
+    return all(statically_known_true(other_shape[d] == 1) for d in dim)
+
+
+def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
+    def repl(inp, other):
+        if dtype is not None:
+            inp = inp.to(dtype)
+
+        sign: Union[int, float, torch.Tensor]
+        if isinstance(other, (int, float)):
+            sign = 1 if other >= 0 else -1
+        else:
+            one = torch.scalar_tensor(1, dtype=inp.dtype, device=inp.device)
+            sign = torch.where(other >= 0, one, -one)
+
+        inp = inp * sign
+        max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
+        return (inp - max_) * (sign * other)
+
+    match.replace_by_example(repl, [inp, other])
+
+
+for reverse, to_dtype in itertools.product((False, True), repeat=2):
+    register_graph_pattern(
+        _partial_softmax_pattern(aten.mul.Tensor, reverse=reverse, to_dtype=to_dtype),
+        pass_dict=pass_patterns[1],
+        extra_check=_other_is_broadcasted_in_dim,
+    )(mul_softmax_pattern)
+
+
+def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
+    def repl(inp, other):
+        if dtype is not None:
+            inp = inp.to(dtype)
+
+        sign: Union[int, float, torch.Tensor]
+        if isinstance(other, (int, float)):
+            sign = 1 if other >= 0 else -1
+        else:
+            one = torch.scalar_tensor(1, dtype=inp.dtype, device=inp.device)
+            sign = torch.where(other >= 0, one, -one)
+
+        inp = inp * sign
+        max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
+        return (inp - max_) / (sign * other)
+
+    match.replace_by_example(repl, [inp, other])
+
+
+for to_dtype in (False, True):
+    register_graph_pattern(
+        _partial_softmax_pattern(aten.div.Tensor, to_dtype=to_dtype),
+        pass_dict=pass_patterns[1],
+        extra_check=_other_is_broadcasted_in_dim,
+    )(div_softmax_pattern)

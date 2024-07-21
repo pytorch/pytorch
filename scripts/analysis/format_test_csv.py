@@ -20,6 +20,7 @@ import csv
 import subprocess
 import sys
 
+
 parser = argparse.ArgumentParser(
     description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
 )
@@ -34,7 +35,7 @@ hash = subprocess.check_output(
 
 out.writerow([hash, args.log_url, ""])
 
-with open(args.file, "r") as f:
+with open(args.file) as f:
     reader = csv.DictReader(f)
     for row in reader:
         if row["status"] not in {"failed", "error"}:

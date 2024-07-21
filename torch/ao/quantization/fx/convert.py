@@ -75,6 +75,7 @@ from .custom_config import (
 from .lower_to_fbgemm import lower_to_fbgemm
 # importing the lib so that the quantized_decomposed ops are registered
 from ._decomposed import quantized_decomposed_lib  # noqa: F401
+from torch.ao.quantization import NUMERIC_DEBUG_HANDLE_KEY
 import operator
 
 __all__ = [
@@ -82,6 +83,18 @@ __all__ = [
     "convert_custom_module",
     "convert_standalone_module",
     "convert_weighted_module",
+]
+
+SUPPORTED_QDTYPES = [
+    torch.quint8,
+    torch.qint8,
+    torch.qint32,
+    torch.uint8,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.float8_e5m2,
+    torch.float8_e4m3fn,
 ]
 
 _QSCHEME_TO_CHOOSE_QPARAMS_OP = {
@@ -136,8 +149,15 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     if hasattr(activation_post_process, "is_dynamic"):
         is_dynamic = activation_post_process.is_dynamic  # type: ignore[assignment]
 
-    if dtype in [torch.quint8, torch.qint8, torch.qint32, torch.uint8, torch.int8, torch.int16, torch.int32] and \
-            (not is_dynamic):
+    def add_dequantize_op_kwargs(dequantize_op, input_node):
+        dequantize_op_kwargs = {}
+        if 'val' in input_node.meta:
+            dq_out_dtype = input_node.meta['val'].dtype
+            if dq_out_dtype != torch.float32:
+                dequantize_op_kwargs = {"out_dtype": dq_out_dtype}
+        return dequantize_op_kwargs
+
+    if dtype in SUPPORTED_QDTYPES and (not is_dynamic):
         # TODO: probably should cleanup this condition check, it's hard
         # to reason about this if and the following elif
 
@@ -207,18 +227,13 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             dequantized_node = graph.call_function(
                 dequantize_op,
                 tuple(dq_inputs),
-                {}
+                add_dequantize_op_kwargs(dequantize_op, input_node)
             )
 
-            def remap_fn(x):
-                return dequantized_node if x is node else x
-
-            # remap numeric_debug_handle
-            for user_node in node.users:
-                if "numeric_debug_handle" in user_node.meta:
-                    numeric_debug_handle = user_node.meta["numeric_debug_handle"]
-                    user_node.meta["numeric_debug_handle"] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
             node.replace_all_uses_with(dequantized_node)
+            # propagate numeric debug handle from observer/fake_quant node to dequantize node
+            if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
+                dequantized_node.meta[NUMERIC_DEBUG_HANDLE_KEY] = node.meta[NUMERIC_DEBUG_HANDLE_KEY]
             graph.erase_node(node)
     elif is_dynamic:
 
@@ -315,18 +330,16 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             dequantized_node = graph.call_function(
                 dequantize_op,
                 tuple(dq_inputs),
-                {}
+                add_dequantize_op_kwargs(dequantize_op, input_node)
             )
 
             def remap_fn(x):
                 return dequantized_node if x is node else x
 
-            # remap numeric_debug_handle
-            for user_node in node.users:
-                if "numeric_debug_handle" in user_node.meta:
-                    numeric_debug_handle = user_node.meta["numeric_debug_handle"]
-                    user_node.meta["numeric_debug_handle"] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
             node.replace_all_uses_with(dequantized_node)
+            # propagate numeric debug handle from observer/fake_quant node to dequantize node
+            if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
+                dequantized_node.meta[NUMERIC_DEBUG_HANDLE_KEY] = node.meta[NUMERIC_DEBUG_HANDLE_KEY]
             graph.erase_node(node)
     elif dtype == torch.float16:
         raise NotImplementedError("decomposed to float16 op not implemented yet")
@@ -372,7 +385,7 @@ def _replace_observer_with_quantize_dequantize_node(
     if hasattr(activation_post_process, "is_dynamic"):
         is_dynamic = activation_post_process.is_dynamic  # type: ignore[attr-defined, assignment]
 
-    if dtype in [torch.quint8, torch.qint8, torch.qint32] and \
+    if dtype in [torch.quint8, torch.qint8, torch.qint32, torch.float8_e5m2, torch.float8_e4m3fn] and \
             (not is_dynamic):
         # TODO: probably should cleanup this condition check, it's hard
         # to reason about this if and the following elif
@@ -477,15 +490,7 @@ def _is_conversion_supported(activation_post_process: torch.nn.Module) -> bool:
         is_dynamic = activation_post_process.is_dynamic  # type: ignore[attr-defined, assignment]
 
     return (
-        (dtype in [
-            torch.quint8,
-            torch.qint8,
-            torch.qint32,
-            torch.uint8,
-            torch.int8,
-            torch.int16,
-            torch.int32
-        ] and (not is_dynamic)) or  # type: ignore[return-value]
+        (dtype in SUPPORTED_QDTYPES and (not is_dynamic)) or  # type: ignore[return-value]
         is_dynamic or
         dtype == torch.float16
     )
@@ -946,24 +951,33 @@ def convert(
     if convert_custom_config is None:
         convert_custom_config = ConvertCustomConfig()
 
-    if isinstance(convert_custom_config, Dict):
+    if isinstance(convert_custom_config, dict):
         warnings.warn(
             "Passing a convert_custom_config_dict to convert is deprecated and will not be supported "
-            "in a future version. Please pass in a ConvertCustomConfig instead.")
+            "in a future version. Please pass in a ConvertCustomConfig instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
         convert_custom_config = ConvertCustomConfig.from_dict(convert_custom_config)
 
-    if isinstance(qconfig_mapping, Dict):
+    if isinstance(qconfig_mapping, dict):
         warnings.warn(
             "Passing a QConfig dictionary to convert is deprecated and will not be supported "
-            "in a future version. Please pass in a QConfigMapping instead.")
+            "in a future version. Please pass in a QConfigMapping instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
         qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping) if qconfig_mapping else None
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
     assert qconfig_mapping is None or isinstance(qconfig_mapping, QConfigMapping)
 
-    if isinstance(backend_config, Dict):
+    if isinstance(backend_config, dict):
         warnings.warn(
             "Passing a backend_config_dict to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a BackendConfig instead.")
+            "in a future version. Please pass in a BackendConfig instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
         backend_config = BackendConfig.from_dict(backend_config)
 
     if backend_config is None:
