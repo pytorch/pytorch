@@ -40,10 +40,9 @@ class LazyBenchmark:
         del self.benchmark
         return timing_ms
     
-    @staticmethod
     def magic_function_wrapper(magic_function_name: str, always_finalize: bool) -> Callable[..., Any]:
         def wrapped(self, *args: Any, **kwargs: Any) -> Any:
-            if always_finalize or not hasattr(self, "gen"):
+            if always_finalize or not hasattr(self, "benchmark"):
                 return getattr(self.timing_ms, magic_function_name)(*args, **kwargs)
             return LazyBenchmark(lambda: getattr(self.timing_ms, magic_function_name)(*args, **kwargs))
         return wrapped
