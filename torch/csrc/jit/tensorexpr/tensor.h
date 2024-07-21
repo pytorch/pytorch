@@ -224,7 +224,9 @@ Tensor Reduce(
       dims,
       strides,
       reducer,
-      [&](ParameterList p [[maybe_unused]]) { return ExprHandle(reducer.initializer()); },
+      [&](ParameterList p [[maybe_unused]]) {
+        return ExprHandle(reducer.initializer());
+      },
       body_func,
       reduce_dims);
 }
