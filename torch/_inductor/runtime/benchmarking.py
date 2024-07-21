@@ -571,6 +571,11 @@ class Benchmarker:
             kwargs_hash
         ] = self.kwargs_hash_to_futures_gpu.get(kwargs_hash, []) + [(_callable, key)]
 
+        futures_gpu = self.kwargs_hash_to_futures_gpu.pop(kwargs_hash)
+        del futures_gpu
+
+        return self.benchmark_gpu(_callable, **kwargs)
+
         def benchmark() -> float:
             # all but the first benchmark in a grouping of lazy benchmarks
             # should be cached in memory, so we should return that cached timing
