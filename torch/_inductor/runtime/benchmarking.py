@@ -586,7 +586,7 @@ class Benchmarker:
             self.memory_cache.update(zip(keys, timings_ms))
             # we may or may not have to delete the callables explicitly to
             # cleanup the memory, just do it now for safety
-            del callables
+            del callables[:]
             return self.memory_cache[key]
 
         return LazyBenchmark(benchmark)
