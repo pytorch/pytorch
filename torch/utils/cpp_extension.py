@@ -268,10 +268,10 @@ def _accepted_compilers_for_platform() -> List[str]:
     # gnu-c++ and gnu-cc are the conda gcc compilers
     if IS_XPU_EXTENSION:
         return ["icpx", "icx"] if not IS_WINDOWS else ["icx"]
-    
+
     if IS_MACOS:
         return ['clang++', 'clang']
-    
+
     # Default case for Linux and other platforms
     return ['g++', 'gcc', 'gnu-c++', 'gnu-cc', 'clang++', 'clang']
 
@@ -1970,7 +1970,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         elif IS_HIP_EXTENSION:
             extra_ldflags.append(f'-L{_join_rocm_home("lib")}')
             extra_ldflags.append('-lamdhip64')
-    
+
     elif IS_XPU_EXTENSION:
         library_dirs = library_paths(cuda=False, xpu=True)
         # Append oneMKL link parameters, detailed please reference:
@@ -2636,19 +2636,19 @@ def _is_c_file(path: str) -> bool:
     valid_ext = [".c", ".h"]
     return os.path.splitext(path)[1] in valid_ext
 
-def _get_dpcpp_root():
+def _get_dpcpp_root() -> Optional[str]:
     # TODO: Need to decouple with toolchain env scripts
     dpcpp_root = os.getenv("CMPLR_ROOT")
     return dpcpp_root
 
 
-def _get_onemkl_root():
+def _get_onemkl_root() -> Optional[str]:
     # TODO: Need to decouple with toolchain env scripts
     path = os.getenv("MKLROOT")
     return path
 
 
-def _get_onednn_root():
+def _get_onednn_root() -> Optional[str]:
     # TODO: Need to decouple with toolchain env scripts
     path = os.getenv("DNNLROOT")
     return path
@@ -2665,30 +2665,28 @@ def _prepare_dpcpp_compile_flags(extra_compile_args):
 
 
 class _one_api_help:
-    __dpcpp_root = None
-    __onemkl_root = None
-    __onednn_root = None
-    __default_root = None
-
     def __init__(self):
-        self.__dpcpp_root = _get_dpcpp_root()
-        self.__onemkl_root = _get_onemkl_root()
-        self.__onednn_root = _get_onednn_root()
+        self.__dpcpp_root: Optional[str] = _get_dpcpp_root()
+        self.__onemkl_root: Optional[str] = _get_onemkl_root()
+        self.__onednn_root: Optional[str] = _get_onednn_root()
 
         CUR_DIR = os.path.dirname(__file__)
-        self.__default_root = os.path.dirname(CUR_DIR)
+        self.__default_root: str = os.path.dirname(CUR_DIR)
 
         self.check_onednn_cfg()
         self.check_dpcpp_cfg()
         self.check_onemkl_cfg()
+        assert type(self.__dpcpp_root) == str
+        assert type(self.__onemkl_root) == str
+        assert type(self.__onednn_root) == str
 
     def check_onemkl_cfg(self):
         if self.__onemkl_root is None:
-            raise "Didn't detect mkl root. Please source <oneapi_dir>/mkl/<version>/env/vars.sh "
+            raise RuntimeError("Didn't detect mkl root. Please source <oneapi_dir>/mkl/<version>/env/vars.sh ")
 
     def check_onednn_cfg(self):
         if self.__onednn_root is None:
-            raise "Didn't detect dnnl root. Please source <oneapi_dir>/dnnl/<version>/env/vars.sh "
+            raise RuntimeError("Didn't detect dnnl root. Please source <oneapi_dir>/dnnl/<version>/env/vars.sh ")
         else:
             warnings.warn(
                 "This extension has static linked onednn library. Please attaction to \
@@ -2697,27 +2695,27 @@ class _one_api_help:
 
     def check_dpcpp_cfg(self):
         if self.__dpcpp_root is None:
-            raise "Didn't detect dpcpp root. Please source <oneapi_dir>/compiler/<version>/env/vars.sh "
+            raise RuntimeError("Didn't detect dpcpp root. Please source <oneapi_dir>/compiler/<version>/env/vars.sh ")
 
-    def get_default_include_dir(self):
+    def get_default_include_dir(self) -> List[str]:
         return [os.path.join(self.__default_root, "include")]
 
-    def get_default_lib_dir(self):
+    def get_default_lib_dir(self) -> List[str]:
         return [os.path.join(self.__default_root, "lib")]
 
-    def get_dpcpp_include_dir(self):
+    def get_dpcpp_include_dir(self) -> List[str]:
         return [
             os.path.join(self.__dpcpp_root, "linux", "include"),
             os.path.join(self.__dpcpp_root, "linux", "include", "sycl"),
         ]
 
-    def get_onemkl_include_dir(self):
+    def get_onemkl_include_dir(self) -> List[str]:
         return [os.path.join(self.__onemkl_root, "include")]
 
-    def get_onednn_include_dir(self):
+    def get_onednn_include_dir(self) -> List[str]:
         return [os.path.join(self.__onednn_root, "include")]
 
-    def get_onednn_lib_dir(self):
+    def get_onednn_lib_dir(self) -> List[str]:
         return [os.path.join(self.__onednn_root, "lib")]
 
     def is_onemkl_ready(self):
@@ -3095,7 +3093,7 @@ class IntelDpcppBuildExtension(build_ext):
             return objects
 
         if self.compiler.compiler_type == "msvc":
-            raise "Not implemented"
+            raise NotImplementedError("MSVC compiler is not implemented")
         else:
             if self.use_ninja:
                 self.compiler.compile = unix_wrap_ninja_compile

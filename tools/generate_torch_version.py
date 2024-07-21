@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 from setuptools import distutils  # type: ignore[import]
 
@@ -63,7 +64,7 @@ def get_torch_version(sha: str | None = None) -> str:
         version += "+git" + sha[:7]
     return version
 
-def get_xpu_version():
+def get_xpu_version() -> Optional[str]:
     try:
         result = subprocess.run(['icpx', '-fsycl', '--version'], capture_output=True, text=True)
         output = result.stdout
@@ -76,7 +77,7 @@ def get_xpu_version():
     except Exception as e:
         print(f"Error detecting XPU version: {e}")
         return None
-    
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Generate torch/version.py from build and environment metadata."
