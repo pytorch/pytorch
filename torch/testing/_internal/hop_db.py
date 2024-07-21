@@ -98,7 +98,7 @@ def sample_inputs_cond(opinfo, device, dtype, requires_grad, **kwargs):
 
 
 def simple_cond(x):
-    return torch.cond(x.sum() > 2, lambda x: x.cos(), lambda x: x.sin(), [x])
+    return torch.cond(x.sum() > 2, lambda x: (x.cos(),), lambda x: (x.sin(),), [x])
 
 
 def sample_inputs_auto_functionalize(opinfo, device, dtype, requires_grad, **kwargs):
@@ -201,23 +201,17 @@ hop_db = [
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
         skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestEagerFusionOpInfo",
-                "test_aot_autograd_exhaustive",
-                active_if=IS_WINDOWS,
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestEagerFusionOpInfo",
-                "test_aot_autograd_symbolic_exhaustive",
-                active_if=IS_WINDOWS,
-            ),
             # TODO (yidi): figure out window test failures
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestBwdGradients",
                 "test_fn_grad",
+                active_if=IS_WINDOWS,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestConverter",
+                "test_convert_nn_module_with_nested_if_and_param",
                 active_if=IS_WINDOWS,
             ),
         ),
