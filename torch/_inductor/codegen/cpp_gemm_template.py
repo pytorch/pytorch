@@ -61,7 +61,9 @@ extern "C"
     {%- endif %}
     const int64_t Mc_blocks = Mt_blocks;
     const int64_t Kc_blocks = Kt_blocks;
-    const int64_t num_k_slices = (K0_blocks + Kt_blocks - 1) / Kt_blocks;
+    const int64_t num_Mc_blocks = (M0_blocks + Mc_blocks - 1) / Mc_blocks;
+    const int64_t num_Nc_blocks = N0_blocks;
+    const int64_t num_k_slices = {{num_threads}} / ({{num_threads}} / ((K0_blocks + Kt_blocks - 1) / Kt_blocks));
     {%- else %}
     constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
     constexpr int64_t M0_blocks = (M + M0 - 1) / M0;
@@ -70,6 +72,8 @@ extern "C"
     constexpr int64_t Kt_blocks = {{template.thread_blocking().block_k}};
     constexpr int64_t Mc_blocks = {{template.cache_blocking().block_m}};
     constexpr int64_t Kc_blocks = {{template.cache_blocking().block_k}};
+    constexpr int64_t num_Mc_blocks = (M0_blocks + Mc_blocks - 1) / Mc_blocks;
+    constexpr int64_t num_Nc_blocks = N0_blocks;
     constexpr int64_t num_k_slices = {{num_threads}} / ({{num_threads}} / ((K0_blocks + Kt_blocks - 1) / Kt_blocks));
     {%- endif %}
 
@@ -79,17 +83,21 @@ extern "C"
         "Not all partitions are assigned."
     );
 
-    // TODO: avoid working on barriers if we don't need k slicing
-    {{kernel.assert_function}}(
-        {{num_threads}} % num_k_slices == 0,
-        "Number of threads should be divisible by number of k slices."
-    );
-    int64_t num_barriers = {{num_threads}} / num_k_slices;
-    auto barriers = std::make_unique<Barrier[]>(num_barriers);
-    for (int64_t i = 0; i < num_barriers; i++) {
-        barriers[i].init(num_k_slices);
+    {%- if maybe_k_slicing %}
+    std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}*[]> local_buf_ptrs;
+    if (num_k_slices > 1) {
+        {{kernel.assert_function}}(
+            {{num_threads}} % num_k_slices == 0,
+            "Number of threads should be divisible by number of k slices."
+        );
+        local_buf_ptrs.reset(new {{DTYPE_TO_CPP[acc_buf_dtype]}}*[num_Mc_blocks * num_Nc_blocks * num_k_slices]);
     }
-    auto local_buf_ptrs = std::make_unique<{{DTYPE_TO_CPP[acc_buf_dtype]}}*[]>({{num_threads}});
+    {%- else %}
+    {{kernel.assert_function}}(
+        num_k_slices == 1,
+        "Number of k slices should be 1 without local acc."
+    );
+    {%- endif %}
 
     {%- if num_threads > 1 %}
     #pragma omp parallel num_threads({{num_threads}})
@@ -100,7 +108,7 @@ extern "C"
             tid, {{num_threads}}, M0_blocks, N0_blocks, K0_blocks, Mt_blocks, Nt_blocks, Kt_blocks,
             m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end);
         const int64_t k_group_id = tid / num_k_slices;
-        const int64_t k_group_offset = tid % num_k_slices;
+        const int64_t k_slice_id = tid % num_k_slices;
     {%- else %}
     {
         const int tid = 0;
@@ -110,8 +118,6 @@ extern "C"
         const int64_t n_block_end = N0_blocks;
         const int64_t k_block_start = 0;
         const int64_t k_block_end = K0_blocks;
-        constexpr int64_t k_group_id = 0;
-        const int64_t k_group_offset = 0;
     {%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
         for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
@@ -119,6 +125,7 @@ extern "C"
             const int64_t m_end = std::min((mc + Mc_blocks) * M0, M);
             const int64_t m_size = m_end - m_start;
             {%- if use_local_acc %}
+            {%- set acc_buf_name = "local_acc_buf" %}
             {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "N0"], acc_buf_dtype) }}
             {%- endif %}
             for (int64_t nc = n_block_start; nc < n_block_end; ++nc) {
@@ -142,22 +149,13 @@ extern "C"
                         {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(24, false) }}
                     }
                 }
-                {%- if use_local_acc %}
-                local_buf_ptrs[tid] = {{acc_buf_name}};
+                {%- if maybe_k_slicing %}
+                if (num_k_slices > 1) {
+                    const int64_t mxn_cache_block_id = mc * num_Nc_blocks + nc;
+                    local_buf_ptrs[mxn_cache_block_id * num_k_slices + k_slice_id] = {{acc_buf_name}};
+                } else
                 {%- endif %}
-                barriers[k_group_id].arrive_and_wait();
-                // TODO: parallelize epilogue computes among k groups
-                if (k_group_offset == 0) {
-                {%- if use_local_acc %}
-                    for (int64_t other_id = tid + 1; other_id < num_k_slices; other_id++) {
-                        for (int64_t m = 0; m < m_size; m++) {
-                            #pragma omp simd
-                            for (int64_t n = 0; n < n_size; n++) {
-                                local_buf_ptrs[tid][m*N0 + n] += local_buf_ptrs[other_id][m*N0 + n];
-                            }
-                        }
-                    }
-                {%- endif %}
+                {
                 {%- if N == PADDED_N %}
                     {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
                     {%- set tile_acc = acc %}
@@ -170,9 +168,43 @@ extern "C"
                     )|indent(16, false)
                     }}
                 }
-                barriers[k_group_id].arrive_and_wait();
             }
         }
+        {%- if maybe_k_slicing %}
+        if (num_k_slices > 1) {
+            #pragma omp barrier
+            for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
+                // We slice M-dim and each thread in the k-slicing group works on a slice
+                const int64_t m_slice_size = (Mc_blocks * M0 + num_k_slices - 1) / num_k_slices;
+                const int64_t m_start = std::min(mc * M0 + m_slice_size * k_slice_id, M);
+                const int64_t m_end = std::min(mc * M0 + m_slice_size * (k_slice_id + 1), M);
+                const int64_t m_size = m_end - m_start;
+                const int64_t m_offset = m_start - mc * M0;
+                for (int64_t nc = n_block_start; nc < n_block_end; ++nc) {
+                    const int64_t n_start = nc * N0;
+                    const int64_t n_end = std::min((nc + 1) * N0, N);
+                    const int64_t n_size = n_end - n_start;
+                    const int64_t mxn_cache_block_id = mc * num_Nc_blocks + nc;
+                    auto first_acc = local_buf_ptrs[mxn_cache_block_id * num_k_slices];
+                    auto {{acc_buf_name}} = first_acc;
+                    for (int64_t other_slice = 1; other_slice < num_k_slices; other_slice++) {
+                        auto other_acc = local_buf_ptrs[mxn_cache_block_id * num_k_slices + other_slice];
+                        for (int64_t m = m_offset; m < m_size; m++) {
+                            #pragma omp simd
+                            for (int64_t n = 0; n < n_size; n++) {
+                                first_acc[m*N0 + n] += other_acc[m*N0 + n];
+                            }
+                        }
+                    }
+                    {%- set tile_acc_m_slice = kernel.slice_nd(acc, [("m_offset", "m_offset + m_end - m_start"), ()]) %}
+                    {{ kernel.store_output(
+                        tile_Y, tile_acc_m_slice, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
+                    )|indent(16, false)
+                    }}
+                }
+            }
+        }
+        {%- endif %}
         {{ micro_gemm.codegen_finalize(kernel) }}
     }
 }
@@ -381,6 +413,17 @@ class CppPackedGemmTemplate(CppTemplate):
             register_blocking, thread_blocking
         )
         return GemmBlocking(Mc_blocks, Nc_blocks, Kc_blocks)
+
+    def maybe_k_slicing(self):
+        if self.num_threads == 1:
+            return False
+        if self.is_dynamic_M:
+            # TODO(jgong5): perhaps use size hint to decide?
+            return True
+        register_blocking = self.register_blocking
+        k_blocks = math.ceil(self.k / register_blocking.block_k)
+        thread_blocking = self.thread_blocking()
+        return k_blocks > thread_blocking.block_k
 
     @staticmethod
     def add_choices(
@@ -700,9 +743,11 @@ class CppPackedGemmTemplate(CppTemplate):
 
         Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
         use_local_acc = (
-            self.layout.dtype != torch.float or int8_gemm or self.padded_n != self.n
+            self.layout.dtype != torch.float
+            or int8_gemm
+            or self.padded_n != self.n
+            or self.maybe_k_slicing()
         )
-        acc_buf_name = "local_acc_buf"
         if epilogue_nodes:
             epilogues.extend(epilogue_nodes)
             assert Y.get_numel() == epilogues[-1].get_numel()
@@ -773,7 +818,7 @@ class CppPackedGemmTemplate(CppTemplate):
             reindexers=reindexers,
             Y_2d=Y_2d,
             use_local_acc=use_local_acc,
-            acc_buf_name=acc_buf_name,
+            maybe_k_slicing=self.maybe_k_slicing(),
             x_scale=x_scale,
             x_zp=x_zp,
             w_scale=w_scale,
