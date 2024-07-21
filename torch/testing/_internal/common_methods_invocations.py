@@ -21389,19 +21389,6 @@ op_db: List[OpInfo] = [
             ),
         ),
     ),
-    OpInfo(
-        name="cond",
-        supports_out=False,
-        dtypes=all_types_and(torch.bool, torch.half),
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestConverter",
-                "test_convert_nn_module_with_nested_if_and_param",
-                active_if=IS_WINDOWS,
-            ),
-        ),
-    ),
 ]
 op_db += opinfo.definitions.op_db
 
