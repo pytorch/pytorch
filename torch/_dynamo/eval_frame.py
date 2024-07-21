@@ -1462,13 +1462,14 @@ def export(
             parameter_names = list(original_signature.parameters.keys())
             fx_graph = torch.fx.Graph()
             for i, name in enumerate(parameter_names):
-                if torch.is_tensor(flat_args[i]):
-                    node = fx_graph.placeholder(name)
-                    node.meta["val"] = fake_mode.from_tensor(
-                        flat_args[i], static_shapes=True
-                    )
-                    graph_captured_input = graph_captured_input + (flat_args[i],)
-                    example_inputs.append(flat_args[i])
+                if i in range(len(flat_args)):
+                    if torch.is_tensor(flat_args[i]):
+                        node = fx_graph.placeholder(name)
+                        node.meta["val"] = fake_mode.from_tensor(
+                            flat_args[i], static_shapes=True
+                        )
+                        graph_captured_input = graph_captured_input + (flat_args[i],)
+                        example_inputs.append(flat_args[i])
             fx_graph.output(graph_captured_result)
             module = torch.nn.Module()
             graph = torch.fx.GraphModule(module, fx_graph)
