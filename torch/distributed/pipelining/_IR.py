@@ -13,6 +13,7 @@ import torch
 import torch.fx as fx
 from torch.distributed import ProcessGroup
 from torch.export import ExportedProgram
+from torch.export._trace import _export
 from torch.export.unflatten import (
     _assign_attr,
     _AttrKind,
@@ -1004,11 +1005,14 @@ class Pipe(torch.nn.Module):
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
         try:
-            ep = torch.export.export(
-                mod,
-                example_args,
-                example_kwargs,
-            )
+            with torch.no_grad():
+                ep = _export(
+                    mod,
+                    example_args,
+                    example_kwargs,
+                    strict=True,
+                    pre_dispatch=False,
+                )
         except Exception as e:
             raise RuntimeError(
                 "It seems that we cannot capture your model as a full graph. "

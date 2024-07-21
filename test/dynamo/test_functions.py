@@ -990,8 +990,17 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref[1]["c"], res[1]["c"]))
         self.assertTrue(same(ref[1][param], res[1][param]))
 
-    def test_default_dict(self):
+    def test_default_dict_dict(self):
         self._test_default_dict_helper(dict)
+
+    def test_default_dict_list(self):
+        self._test_default_dict_helper(list)
+
+    def test_default_dict_tuple(self):
+        self._test_default_dict_helper(tuple)
+
+    def test_default_dict_set(self):
+        self._test_default_dict_helper(set)
 
     def test_default_dict_lambda(self):
         self._test_default_dict_helper(lambda: dict())  # noqa: C408
@@ -1964,7 +1973,6 @@ class GraphModule(torch.nn.Module):
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, s0: "Sym(s0)", L_lambda0_keywords_y_: "f32[s0, s0]"):
-        s0_1 = s0
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
         mul: "f32[s0, s0]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
@@ -2013,7 +2021,6 @@ class GraphModule(torch.nn.Module):
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, s0: "Sym(s0)", L_lambda0_keywords_y_: "f32[s0, s0]"):
-        s0_1 = s0
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
         mul: "f32[s0, s0]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
@@ -2065,7 +2072,6 @@ class GraphModule(torch.nn.Module):
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, s0: "Sym(s0)", L_lambda0_keywords_y_: "f32[s0, s0]"):
-        s0_1 = s0
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
         mul: "f32[s0, s0]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
@@ -2114,7 +2120,6 @@ class GraphModule(torch.nn.Module):
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, s0: "Sym(s0)", L_x_: "f32[s0, s0]"):
-        s0_1 = s0
         l_x_ = L_x_
 
         mul: "f32[s0, s0]" = l_x_ * 4
