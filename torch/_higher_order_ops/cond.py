@@ -215,6 +215,23 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
 
             if IS_WINDOWS:
                 print("---------------")
+                if isinstance(true_fn, torch.fx.GraphModule):
+                    print("true_fn", true_fn.print_readable(print_output=False))
+                else:
+                    print("true_fn is not a graph module", true_fn)
+                if isinstance(false_fn, torch.fx.GraphModule):
+                    print("true_fn", true_fn.print_readable(print_output=False))
+                else:
+                    print("false_fn is not a graph module")
+
+                print(
+                    "fw_outputs_true:",
+                    fw_outputs_true,
+                    "fw_outputs_false",
+                    fw_outputs_false,
+                    " fw_inputs",
+                    fw_inputs,
+                )
                 print("true_graph", fw_true_graph.print_readable(print_output=False))
                 print("false_graph", fw_false_graph.print_readable(print_output=False))
                 print(

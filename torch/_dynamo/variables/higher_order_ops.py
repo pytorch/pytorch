@@ -461,6 +461,16 @@ def speculate_subgraph(
                 )
                 tx.output.side_effects = prev_side_effects
 
+            from torch.testing._internal.common_utils import IS_WINDOWS
+
+            if IS_WINDOWS:
+                print(
+                    "In dynamo before flattening:",
+                    output,
+                    "should_flatten_outputs",
+                    should_flatten_outputs,
+                )
+
             treespec = None
             if should_flatten_outputs:
                 # Flatten the speculated subgraph output.
@@ -470,6 +480,9 @@ def speculate_subgraph(
                 # Actually, transform the list (returned by flatten) into a tuple
                 # for dynamo consistency.
                 output = BuiltinVariable(tuple).call_function(tx, [output], {})
+
+            if IS_WINDOWS:
+                print("In dynamo after flattening", output)
 
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
