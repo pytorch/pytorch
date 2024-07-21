@@ -92,11 +92,6 @@ extern "C"
         );
         local_buf_ptrs.reset(new {{DTYPE_TO_CPP[acc_buf_dtype]}}*[num_Mc_blocks * num_Nc_blocks * num_k_slices]);
     }
-    {%- else %}
-    {{kernel.assert_function}}(
-        num_k_slices == 1,
-        "Number of k slices should be 1 without local acc."
-    );
     {%- endif %}
 
     {%- if num_threads > 1 %}
@@ -107,8 +102,10 @@ extern "C"
         mm_get_thread_blocks(
             tid, {{num_threads}}, M0_blocks, N0_blocks, K0_blocks, Mt_blocks, Nt_blocks, Kt_blocks,
             m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end);
+        {%- if maybe_k_slicing %}
         const int64_t k_group_id = tid / num_k_slices;
         const int64_t k_slice_id = tid % num_k_slices;
+        {%- endif %}
     {%- else %}
     {
         const int tid = 0;
@@ -165,7 +162,7 @@ extern "C"
                 {%- endif %}
                     {{ kernel.store_output(
                         tile_Y, tile_acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
-                    )|indent(16, false)
+                    )|indent(20, false)
                     }}
                 }
             }
@@ -199,7 +196,7 @@ extern "C"
                     {%- set tile_acc_m_slice = kernel.slice_nd(acc, [("m_offset", "m_offset + m_end - m_start"), ()]) %}
                     {{ kernel.store_output(
                         tile_Y, tile_acc_m_slice, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
-                    )|indent(16, false)
+                    )|indent(20, false)
                     }}
                 }
             }
