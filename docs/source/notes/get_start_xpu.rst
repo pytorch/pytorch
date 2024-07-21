@@ -61,7 +61,8 @@ Now we have all the required packages installed and environment acitvated. Use t
    # (optional) If using torch.compile with inductor/triton, install the matching version of triton
    # Run from the pytorch directory after cloning
    # For Intel GPU support, please explicitly `export USE_XPU=1` before running command.
-   USE_XPU=1 make triton
+   export USE_XPU=1
+   make triton
 
    # If you would like to compile PyTorch with new C++ ABI enabled, then first run this command:
    export _GLIBCXX_USE_CXX11_ABI=1
