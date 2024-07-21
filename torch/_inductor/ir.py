@@ -5084,6 +5084,7 @@ class SetSourceTensorKernel(ExternKernelAlloc):
             self_tensor.get_layout(),
             [self_tensor, storage_tensor],
             python_kernel_name="torch.ops.aten.set_.source_Tensor",
+            op_overload=torch.ops.aten.set_.source_Tensor,
         )
         V.graph.never_reuse_buffers.add(self_tensor.data.get_name())
         V.graph.never_reuse_buffers.add(storage_tensor.get_name())
@@ -5755,6 +5756,7 @@ class FallbackKernel(ExternKernelAlloc):
             )
         else:
             self.codegen_comment(wrapper)
+            wrapper.writeline(f"{wrapper.comment} name: {self.name}")  # Very useful for debugging!
             args = [*self.codegen_args(), *self.codegen_kwargs()]
             V.graph.wrapper_code.generate_fallback_kernel(self, args)
             if isinstance(self.layout, Layout):

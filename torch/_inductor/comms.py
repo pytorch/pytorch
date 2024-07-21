@@ -153,7 +153,7 @@ def _schedule_for_comm(
     # TODO(yifu): this is needed due to a mutation handling bug in the
     # scheduler. It should be fixed by https://github.com/pytorch/pytorch/pull/128893.
     # We can remove this logic once the fix is landed.
-    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = defaultdict(set)
+    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {snode: set() for snode in snodes}
     for snode in snodes:
         if isinstance(snode.node, ir.MutationOutput):
             src_name = snode.node.node_doing_mutating.get_name()
@@ -164,16 +164,8 @@ def _schedule_for_comm(
                 for dep in snode.unmet_dependencies
                 if dep.name != src_name
             }
-        assert snode not in unmet_deps
         for dep in snode.unmet_dependencies:
-            # if dep.name not in name_to_maybe_grouped_snode:
-            #     for sn in snodes:
-            #         torch_log.warning(f"sn: {sn}, sn.node: {sn.node}")
             unmet_deps[snode].add(name_to_maybe_grouped_snode[dep.name].get_name())
-        # unmet_deps[snode] = {
-        #     name_to_maybe_grouped_snode[dep.name].get_name()
-        #     for dep in snode.unmet_dependencies
-        # }
 
     for snode, deps in unmet_deps.items():
         for dep in list(deps):
@@ -276,6 +268,7 @@ def _schedule_for_comm(
         if not len(deps) == 0:
             for sub_sn in snode.snodes:
                 torch_log.warning(f"sub_sn: {sub_sn}, sub_sn.debug_str(): {sub_sn.debug_str()}")
+
         assert len(deps) == 0, (
             "Detected unscheduled nodes. "
             f"Nodes with unmet dependencies: {snode}, deps: {deps}"
@@ -500,6 +493,10 @@ def is_fallback_op(node, op):
     return isinstance(node, ir.FallbackKernel) and node.op_overload is op
 
 
+def get_buf_idx(snode):
+    return int(snode.get_name().split("_")[0][3:])
+
+
 def enforce_comm_ordering_for_fsdp(
     snodes: List[_inductor.scheduler.BaseSchedulerNode],
     **kwargs,
@@ -507,18 +504,24 @@ def enforce_comm_ordering_for_fsdp(
     from . import scheduler
 
     name_to_fused_node = kwargs["name_to_fused_node"]  # op name to (maybe fused) op
+    snode_to_users = defaultdict(set)
     # graph_inputs = kwargs["graph_inputs"]
     # name_to_buf = kwargs["name_to_buf"]
 
     # def buf_name_to_snode(buf_name):
     #     return name_to_buf[buf_name].defining_op
+    # TODO(yf225): I don't understand why we need to do this instead of using snode.users
+    for snode in snodes:
+        for dep in snode.unmet_dependencies:
+            dep_snode = name_to_fused_node[dep.name]
+            snode_to_users[dep_snode].add(snode)
 
     def _find_all_recursive_deps_of_node_up_to_criteria(
         snode, collected_node_set, criteria_cb=None
     ):
-        collected_node_set.add(snode)
         if criteria_cb and criteria_cb(snode):
             return
+        collected_node_set.add(snode)
         for dep in snode.unmet_dependencies:
             # dep_node = name_to_fused_node[buf_name_to_snode(dep.name).get_name()]
             dep_node = name_to_fused_node[dep.name]
@@ -531,13 +534,15 @@ def enforce_comm_ordering_for_fsdp(
     def _find_all_recursive_users_of_node_down_to_criteria(
         snode, collected_node_set, criteria_cb=None
     ):
-        collected_node_set.add(snode)
         if criteria_cb and criteria_cb(snode):
             return
-        for user in snode.users:
+        collected_node_set.add(snode)
+        for user in snode_to_users[snode]:
             if user.node.get_name() == "OUTPUT":
                 continue
-            user_node = user.node
+            if user.node.get_name() not in name_to_fused_node:
+                continue
+            user_node = name_to_fused_node[user.node.get_name()]
             if user_node in collected_node_set:
                 continue
             _find_all_recursive_users_of_node_down_to_criteria(
@@ -546,14 +551,13 @@ def enforce_comm_ordering_for_fsdp(
 
     new_order: list[BaseSchedulerNode] = []
     scheduled = set()
-    ag_nodes = []
-    rs_nodes = []
-    ag_op_to_ag_related_ops = defaultdict(set)
-    ag_wait_op_to_ag_related_ops = defaultdict(set)
-    ag_wait_op_to_ag_op = {}
+    ag_grouped_node_to_wait_grouped_node = {}
+    rs_grouped_node_to_wait_grouped_node = {}
     snode_name_to_final_snode = {}
 
     def _create_group_node(snodes_to_group):
+        for snode in snodes_to_group:
+            assert hasattr(snode, "min_order"), f"no min_order: snode: {snode}, snode.node: {snode.node}"
         group_node = scheduler.GroupedSchedulerNode.create(snodes_to_group)
         for snode in snodes_to_group:
             snode_name_to_final_snode[snode.get_name()] = group_node
@@ -567,41 +571,56 @@ def enforce_comm_ordering_for_fsdp(
             is_fallback_op(name_to_fused_node[x].node, torch.ops.fsdp.all_gather_copy_in.default)
             for x in snode.ancestors
         ):
+            ag_snode = snode
+            collected_node_set: set[scheduler.BaseSchedulerNode] = set()
+
             # Find the "cast + copy_in + getitem + all_gather" code block
-            collected_node_set: set[scheduler.BaseSchedulerNode] = set()
             _find_all_recursive_deps_of_node_up_to_criteria(
-                snode,
+                ag_snode,
                 collected_node_set,
             )
 
-            ag_nodes = set()
-            for n in collected_node_set:
-                if is_collective(n.node, op=torch.ops._c10d_functional.all_gather_into_tensor_out.default):
-                    ag_nodes.add(n)
-            assert len(ag_nodes) == 1, f"There should only be 1 all_gather node here! but found {len(ag_nodes)} all_gather nodes in {collected_node_set}, len: {len(collected_node_set)}"
-            ag_node = next(iter(ag_nodes))
-            ag_op_to_ag_related_ops[ag_node].update(collected_node_set)
-        elif isinstance(snode.node, ir._WaitKernel) and any(
-            is_collective(name_to_fused_node[x].node, op=torch.ops._c10d_functional.all_gather_into_tensor_out.default)
-            for x in snode.ancestors
-        ):
-            # Find the "all_gather_wait_tensor + copy_out + set_" code block
-            collected_node_set: set[scheduler.BaseSchedulerNode] = set()
+            # Find the "all_gather + all_gather_wait_tensor + copy_out + set_" code block
+            allowed_ops = {torch.ops._c10d_functional.all_gather_into_tensor_out.default, torch.ops._c10d_functional.wait_tensor.default, torch.ops.fsdp.split_with_sizes_copy.default, torch.ops.aten.set_.source_Tensor}
             _find_all_recursive_users_of_node_down_to_criteria(
-                snode,
+                ag_snode,
                 collected_node_set,
-                criteria_cb=lambda x: isinstance(x.node, ir.SetSourceTensorKernel),
+                criteria_cb=lambda x: not(isinstance(x, scheduler.NopKernelSchedulerNode) or (isinstance(x, scheduler.ExternKernelSchedulerNode) and x.node.op_overload in allowed_ops)),
             )
 
-            # Multiple .set_ nodes could recursively go up to the same all_gather wait op,
-            # so we use a set in `ag_wait_op_to_ag_related_ops` to deduplicate.
-            wait_nodes = set()
-            for n in collected_node_set:
-                if isinstance(n.node, ir._WaitKernel):
-                    wait_nodes.add(n)
-            assert len(wait_nodes) == 1, f"There should only be 1 common wait node here! but found {len(wait_nodes)} wait nodes in {collected_node_set}, len: {len(collected_node_set)}"
-            wait_node = next(iter(wait_nodes))
-            ag_wait_op_to_ag_related_ops[wait_node].update(collected_node_set)
+            # sort nodes by original operation order
+            collected_nodes = sorted(
+                collected_node_set, key=lambda x: get_buf_idx(x)
+            )
+
+            end_idx_of_current_ag_block = len(collected_nodes)
+            for i in range(1, len(collected_nodes)):
+                prev_snode = collected_nodes[i - 1]
+                cur_snode = collected_nodes[i]
+                # Heuristic: if the distance between two nodes is too large (>5),
+                # we assume that the two nodes are not part of the same all-gather code block
+                # The reason we need this, is that ops like `.set_` in the 2nd all-gather code block could also
+                # depend on `split_with_sizes_copy` in the 1st all-gather code block, and we don't want to group them together.
+                if get_buf_idx(cur_snode) - get_buf_idx(prev_snode) > 5:
+                    end_idx_of_current_ag_block = i
+                    break
+
+            collected_nodes = collected_nodes[:end_idx_of_current_ag_block]
+
+            # Group "cast + copy_in + getitem + all_gather" into one GroupedSchedulerNode
+            wait_node_idx = None
+            for i in range(len(collected_nodes) - 1):
+                if isinstance(collected_nodes[i + 1].node, ir._WaitKernel):
+                    wait_node_idx = i + 1
+                    break
+            assert wait_node_idx is not None
+            ag_group_node = _create_group_node(collected_nodes[:wait_node_idx])
+
+            # Group "all_gather_wait_tensor + copy_out + set_" into one GroupedSchedulerNode
+            ag_wait_group_node = _create_group_node(collected_nodes[wait_node_idx:])
+
+            ag_grouped_node_to_wait_grouped_node[ag_group_node] = ag_wait_group_node
+
         # Case 2: Handle ReduceScatter
         elif is_fallback_op(snode.node, torch.ops.fsdp.chunk_cat.default):
             # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" code block
@@ -613,7 +632,7 @@ def enforce_comm_ordering_for_fsdp(
 
             # sort nodes by original operation order
             collected_nodes = sorted(
-                collected_node_set, key=lambda x: int(x.get_name().split("_")[0][3:])
+                collected_node_set, key=lambda x: get_buf_idx(x)
             )
 
             # Group "reduce_scatter copy-in + reduce_scatter comm" into one GroupedSchedulerNode
@@ -626,43 +645,9 @@ def enforce_comm_ordering_for_fsdp(
             rs_group_node = _create_group_node(collected_nodes[:wait_node_idx])
 
             # Group "reduce_scatter wait + related output nodes" into one GroupedSchedulerNode
-            wait_group_node = _create_group_node(collected_nodes[wait_node_idx:])
+            rs_wait_group_node = _create_group_node(collected_nodes[wait_node_idx:])
 
-            rs_nodes.append(
-                (
-                    rs_group_node,
-                    wait_group_node,
-                )
-            )
-
-    # Find each all_gather_wait node's corresponding all_gather node
-    for ag_wait_node in ag_wait_op_to_ag_related_ops.keys():
-        ag_nodes = set()
-        for snode_name in ag_wait_node.ancestors:
-            snode = name_to_fused_node[snode_name]
-            if is_collective(snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor_out.default):
-                ag_nodes.add(snode)
-        assert len(ag_nodes) == 1, "There should only be 1 matching all_gather node here!"
-        ag_node = next(iter(ag_nodes))
-        ag_wait_op_to_ag_op[ag_wait_node] = ag_node
-
-    for ag_wait_node, ag_node in ag_wait_op_to_ag_op.items():
-        # Group "cast + copy_in + getitem + all_gather" into one GroupedSchedulerNode
-        # sort nodes by original operation order
-        ag_related_nodes = sorted(ag_op_to_ag_related_ops[ag_node], key=lambda x: int(x.get_name()[3:]))
-        ag_group_node = _create_group_node(ag_related_nodes)
-        
-        # Group "all_gather_wait_tensor + copy_out + set_" into one GroupedSchedulerNode
-        # sort nodes by original operation order
-        ag_wait_related_nodes = sorted(ag_wait_op_to_ag_related_ops[ag_wait_node], key=lambda x: int(x.get_name()[3:]))
-        wait_group_node = _create_group_node(ag_wait_related_nodes)
-
-        ag_nodes.append(
-            (
-                ag_group_node,
-                wait_group_node,
-            )
-        )
+            rs_grouped_node_to_wait_grouped_node[rs_group_node] = rs_wait_group_node
 
     for snode in snodes:
         if snode.get_name() in snode_name_to_final_snode:
@@ -674,29 +659,29 @@ def enforce_comm_ordering_for_fsdp(
 
     """
     For nested_fully_shard:
-    Step 1: make grouping work without chaining
+    Step 1: make grouping work without chaining - DONE
         - How to tackle: compare Inductor code before vs. after applying enforce fsdp comm order pass
-    Step 2: make grouping work with chaining
+    Step 2: make grouping work with chaining - DONE
         - How to tackle: compare Inductor code before vs. after applying the following code
     Step 3: make reordering for overlap work
 
     Repeat the same process for transformer model
     """
 
-    # # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
-    # # before next AllGather's "copy_in then AG" group node
-    # prev_ag_wait = None
-    # for ag_group_node, wait_group_node in ag_nodes:
-    #     if prev_ag_wait is not None:
-    #         ag_group_node.add_fake_dep(WeakDep(prev_ag_wait.get_name()))
-    #     prev_ag_wait = wait_group_node
+    # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
+    # before next AllGather's "copy_in then AG" group node
+    prev_ag_wait = None
+    for ag_group_node, wait_group_node in ag_grouped_node_to_wait_grouped_node.items():
+        if prev_ag_wait is not None:
+            ag_group_node.add_fake_dep(WeakDep(prev_ag_wait.get_name()))
+        prev_ag_wait = wait_group_node
 
-    # # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
-    # # before next ReduceScatter's "copy_in then RS" group node
-    # prev_rs_wait = None
-    # for rs_group_node, wait_group_node in rs_nodes:
-    #     if prev_rs_wait is not None:
-    #         rs_group_node.add_fake_dep(WeakDep(prev_rs_wait.get_name()))
-    #     prev_rs_wait = wait_group_node
+    # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
+    # before next ReduceScatter's "copy_in then RS" group node
+    prev_rs_wait = None
+    for rs_group_node, wait_group_node in rs_grouped_node_to_wait_grouped_node.items():
+        if prev_rs_wait is not None:
+            rs_group_node.add_fake_dep(WeakDep(prev_rs_wait.get_name()))
+        prev_rs_wait = wait_group_node
 
     return new_order  # type: ignore[return-value]

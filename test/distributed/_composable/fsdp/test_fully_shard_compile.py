@@ -166,8 +166,8 @@ class TestFullyShardCompile(FSDPTest):
     @torch._functorch.config.patch(recompute_views=True)
     @torch._functorch.config.patch(cse=False)
     @torch._inductor.config.patch(
-        # reorder_for_compute_comm_overlap=True,
-        # reorder_for_compute_comm_overlap_passes=["sink_waits", "raise_comms"],
+        reorder_for_compute_comm_overlap=True,
+        reorder_for_compute_comm_overlap_passes=["sink_waits", "raise_comms"],
         _pre_fusion_custom_pass=comms.enforce_comm_ordering_for_fsdp,
         reorder_for_locality=False,
         allow_buffer_reuse=False,

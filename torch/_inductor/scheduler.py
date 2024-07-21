@@ -1499,9 +1499,7 @@ class Scheduler:
         self.compute_dependencies()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.dead_node_elimination()
-        if config.reorder_for_compute_comm_overlap:
-            comms.decide_global_ordering_of_comms(self.nodes)
-        self.compute_ancestors()
+        self.compute_ancestors()        
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
@@ -1516,6 +1514,9 @@ class Scheduler:
                 name_to_fused_node=self.name_to_fused_node,
                 graph_inputs=V.graph.graph_inputs,
             )
+        # # TODO(yf225): do we need to update .ancestors for the affected comm nodes?
+        # if config.reorder_for_compute_comm_overlap:
+        #     comms.decide_global_ordering_of_comms(self.nodes)
         self.nodes = self.fuse_nodes(self.nodes)
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
