@@ -1,10 +1,16 @@
 # mypy: allow-untyped-defs
+import collections
+import copy
 import dataclasses
 import inspect
 import logging
 import threading
+import typing
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Union
+
+import torch
+import torch.fx as fx
 
 import torch.utils._pytree as pytree
 from torch import Tensor
@@ -18,6 +24,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 
+
 log = logging.getLogger("torch._dynamo")
 
 
@@ -30,9 +37,9 @@ log = logging.getLogger("torch._dynamo")
 # Use a side table.
 # We use two dicts so that fetching both the kernel and id are O(1)
 class KernelSideTable:
-    id_to_kernel: Dict[int, Any] = dict()
-    kernel_to_id: Dict[Any, int] = dict()
-    constant_args: Dict[int, Any] = dict()
+    id_to_kernel: Dict[int, Any] = {}
+    kernel_to_id: Dict[Any, int] = {}
+    constant_args: Dict[int, Any] = {}
     lock = threading.Lock()
 
     # Returns index on the table
@@ -69,9 +76,9 @@ class KernelSideTable:
     # Resets the table (only meant to be used in unit tests)
     # This is only safe assuming single threaded execution
     def reset_table(self) -> None:
-        self.id_to_kernel = dict()
-        self.kernel_to_id = dict()
-        self.constant_args = dict()
+        self.id_to_kernel = {}
+        self.kernel_to_id = {}
+        self.constant_args = {}
 
 
 kernel_side_table = KernelSideTable()
@@ -168,7 +175,7 @@ def generate_ttir(kernel, kwargs):
     context = triton._C.libtriton.ir.context()
     target = triton.runtime.driver.active.get_current_target()
     backend = triton.compiler.compiler.make_backend(target)
-    options = backend.parse_options(dict())
+    options = backend.parse_options({})
     triton._C.libtriton.ir.load_dialects(context)
     backend.load_dialects(context)
 
@@ -735,3 +742,273 @@ triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastCUDA)  # type: 
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)
+
+
+###############################################################################
+# The "TritonHOPifier": a class that transforms a call to a triton kernel into
+# a call to the triton_kernel_wrapper_mutation HOP.
+
+fx_acceptable_types = typing.get_args(fx.node.BaseArgumentTypes)
+
+
+class TritonHOPifier:
+    """Orchestrator for converting a user-defined triton kernel into a call
+    to the triton_kernel_wrapper_mutation HOP.
+
+    It has two main use cases.
+
+    1. When Dynamo sees a triton kernel, it wraps it into a TritonKernelVariable
+    and uses the TritonHOPifier to convert calls to the TritonKernelVariable
+    into a call to the HOP.
+
+    2. In order to capture a user-defined triton kernel while performing
+    tracing (via make_fx or non-strict export), a user must annotate their
+    triton kernel with the `capture_triton` decorator. The decorator uses
+    TritonHOPifier to convert calls to the triton kernel into a call
+    to the HOP (which can then be traced).
+
+    Because Dynamo has its own calling conventions for e.g. invoking a user-defined function
+    TritonHOPifier is an abstract class that can be overriden by its subclasses.
+    """
+
+    def raise_unsupported(self, msg):
+        raise NotImplementedError("abstract method")
+
+    def is_callable(self, maybe_callable):
+        raise NotImplementedError("abstract method")
+
+    def call_grid(self, grid, meta, tx):
+        raise NotImplementedError("abstract method")
+
+    def call_HOP(self, variable, grids, combined_args, tx):
+        raise NotImplementedError("abstract method")
+
+    def check_grid(self, grid):
+        raise NotImplementedError("abstract method")
+
+    def init_variable(self, variable, kernel, kernel_idx, grid):
+        from triton.runtime.autotuner import Autotuner
+
+        assert kernel is not None
+
+        variable.kernel = kernel
+        variable.kernel_idx = kernel_side_table.add_kernel(kernel)
+
+        assert kernel_idx is None or variable.kernel_idx == kernel_idx
+
+        variable.grid = grid
+
+        if isinstance(kernel, Autotuner):
+            import torch
+            import torch._dynamo
+
+            # We only support configs and keys arguments of triton.autotune
+            # Make sure other arguments are defaulted
+            defaults = inspect.signature(Autotuner.__init__).parameters
+
+            # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
+            # The call to get_first_attr is to maintain backward-compatibility.
+            if (
+                (
+                    "warmup" in defaults
+                    and defaults["warmup"].default
+                    != torch._dynamo.utils.get_first_attr(
+                        kernel, "num_warmups", "warmup"
+                    )
+                )
+                or (
+                    "rep" in defaults
+                    and defaults["rep"].default
+                    != torch._dynamo.utils.get_first_attr(kernel, "num_reps", "rep")
+                )
+                or (
+                    "prune_configs_by" in defaults
+                    and defaults["prune_configs_by"].default
+                    != kernel.early_config_prune
+                )
+                # Set via reset_to_zero argument
+                or len(kernel.reset_idx) != 0
+                or len(kernel.restore_idx) != 0
+            ):
+                self.raise_unsupported(
+                    "Only configs and keys are supported for triton.autotune"
+                )
+
+    def call_getitem(self, variable, args):
+        # __getitem__ should only be called if we don't already have a grid
+        # Only grid needs to be passed
+        if variable.grid is not None or len(args) != 1:
+            self.raise_unsupported(
+                "Triton kernels should be called with only a single grid"
+            )
+
+        return type(variable)(
+            kernel=variable.kernel,
+            kernel_idx=variable.kernel_idx,
+            grid=args[0],
+        )
+
+    def call_run(self, variable, args, kwargs, tx):
+        if "grid" not in kwargs:
+            self.raise_unsupported("Triton kernel requires to be called with a grid")
+        grid = kwargs.pop("grid")
+        kwargs.pop("warmup", None)
+        # rewrite kernel.run(*args, grid=grid) to kernel[grid](*args)
+        return self.call_triton_kernel(
+            type(variable)(
+                kernel=variable.kernel, kernel_idx=variable.kernel_idx, grid=grid
+            ),
+            args,
+            kwargs,
+            tx,
+        )
+
+    def call_triton_kernel(self, variable, args, kwargs, tx):
+        from triton.runtime.autotuner import autotune, Autotuner, Config
+
+        if "num_ctas" in kwargs:
+            self.raise_unsupported(
+                "Passing num_ctas directly to the Triton kernel is not supported. "
+                "Please use a Config in @triton.autotune instead."
+            )
+
+        special_kwargs = {}
+        for name in ("num_warps", "num_stages"):
+            if name in kwargs:
+                # remove special kwargs from `kwargs`
+                val = kwargs.pop(name)
+                special_kwargs[name] = val.value
+
+        if special_kwargs:
+            if isinstance(variable.kernel, Autotuner):
+                # if there is Autotuner already, set
+                # special kwargs to each of its configs
+                new_configs = copy.deepcopy(variable.kernel.configs)
+                for config in new_configs:
+                    config.__dict__.update(special_kwargs)
+                new_kernel = autotune(configs=new_configs, key=[])(variable.kernel.fn)
+            else:
+                # if there is no Autotuner, wrap the kernel into a
+                # new one with a single config with special kwargs
+                new_config = Config(kwargs={}, **special_kwargs)
+                new_kernel = autotune(configs=[new_config], key=[])(variable.kernel)
+
+            # create a new variable to contain the new (wrapped) kernel;
+            # skip kernel_idx to get a new record in the kernel side table
+            new_var = type(variable)(new_kernel, None, variable.grid)
+            return new_var.call_function(tx, args, kwargs)
+
+        if variable.grid is None:
+            self.raise_unsupported("Triton kernels should always be called with a grid")
+
+        # Both for grid's meta as well as for the kernel, we need combined
+        # args and kwargs combined and normalized
+        combined_args_raw = {**dict(zip(variable.kernel.arg_names, args)), **kwargs}
+
+        configs = (
+            [config.kwargs for config in variable.kernel.configs]
+            if isinstance(variable.kernel, Autotuner)
+            else [{}]
+        )
+        grids = []
+        for config_args in configs:
+            # If the grid is a function, then lets execute it and convert it to
+            # a list
+            grid = variable.grid
+            if self.is_callable(grid):
+                # Populate the special "meta" argument to call the grid function
+                meta = {**combined_args_raw, **config_args}
+                grid = self.call_grid(grid, meta, tx)
+            grids.append(self.check_grid(grid))
+
+        for i in range(len(grids)):
+            if not isinstance(grids[i], tuple):
+                self.raise_unsupported("Only tuple grids are supported")
+            # inductor expects all grids to be 3-tuple so lets make it
+            if len(grids[i]) == 1:
+                grids[i] = (grids[i][0], 1, 1)
+            elif len(grids[i]) == 2:
+                grids[i] = (grids[i][0], grids[i][1], 1)
+            elif len(grids[i]) > 3:
+                self.raise_unsupported("Grid can have at most rank 3")
+
+        assert len(grids) != 0
+
+        def intify(x):
+            if isinstance(x, torch.SymInt):
+                return int(x)
+            else:
+                return x
+
+        if len(set(pytree.tree_map(intify, grids))) == 1:
+            # If there's only one unique grid, lets simplify
+            grids = [grids[0]]
+
+        return self.call_HOP(variable, grids, combined_args_raw, tx)
+
+
+###############################################################################
+# Helpers for capture_triton API that makes a user-defined triton kernel traceable into
+# a graph via make_fx or non-strict export (coming soon)
+
+
+class TracingTritonHOPifier(TritonHOPifier):
+    def raise_unsupported(self, msg):
+        raise RuntimeError(msg)
+
+    def is_callable(self, maybe_callable):
+        return callable(maybe_callable)
+
+    def call_grid(self, grid, meta, tx):
+        assert tx is None
+        return grid(meta)
+
+    def check_grid(self, grid):
+        if not isinstance(grid, collections.abc.Sequence):
+            raise RuntimeError(
+                "capture_triton can only handle grids that resolve to Sequence[int]."
+            )
+        # normalize to tuple
+        return tuple(grid)
+
+    def call_HOP(self, variable, grids, combined_args, tx):
+        assert tx is None
+
+        non_graphable_args = {
+            k: v
+            for k, v in combined_args.items()
+            if not isinstance(v, fx_acceptable_types)
+        }
+        graphable_args = {
+            k: v for k, v in combined_args.items() if isinstance(v, fx_acceptable_types)
+        }
+
+        constant_args_idx = kernel_side_table.add_constant_args(non_graphable_args)
+        return triton_kernel_wrapper_mutation(
+            kernel_idx=variable.kernel_idx,
+            constant_args_idx=constant_args_idx,
+            grid=grids,
+            kwargs=graphable_args,
+        )
+
+
+tracing_triton_hopifier_singleton = TracingTritonHOPifier()
+
+
+class TraceableTritonKernelWrapper:
+    def __init__(self, kernel, kernel_idx, grid):
+        self.kernel = None
+        self.grid = None
+        tracing_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
+        assert self.kernel is not None
+
+    def __getitem__(self, *args):
+        return tracing_triton_hopifier_singleton.call_getitem(self, args)
+
+    def run(self, *args, **kwargs):
+        return tracing_triton_hopifier_singleton.call_run(self, args, kwargs, None)
+
+    def __call__(self, *args, **kwargs):
+        return tracing_triton_hopifier_singleton.call_triton_kernel(
+            self, args, kwargs, None
+        )

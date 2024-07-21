@@ -20,6 +20,7 @@ from .triton_utils import (
     DeferredCudaKernelLine,
 )
 
+
 if TYPE_CHECKING:
     from ..graph import GraphLowering
 
@@ -249,6 +250,7 @@ class CppWrapperCuda(CppWrapperCpu):
             DeferredCudaGridLine(kernel_name, grid_var, grid, autotune_configs)
         )
 
+        kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
         self.writeline(f"if ({grid_var}.is_non_zero()) {{")
         self.writeline(
             DeferredCudaKernelLine(

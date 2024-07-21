@@ -186,6 +186,12 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return 0;
   }
 
+#ifdef USE_ROCM
+  virtual bool isGPUArch(DeviceIndex /*device_index*/, const std::vector<std::string>& /*archs*/) const {
+    TORCH_CHECK(false, "Cannot check GPU arch without ATen_cuda library. ", CUDA_HELP);
+  }
+#endif
+
   virtual void deviceSynchronize(DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Cannot synchronize CUDA device without ATen_cuda library. ", CUDA_HELP);
   }
