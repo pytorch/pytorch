@@ -84,13 +84,13 @@ extern "C"
     );
 
     {%- if maybe_k_slicing %}
-    std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}*[]> local_buf_ptrs;
+    std::unique_ptr<std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[]> local_buf_ptrs;
     if (num_k_slices > 1) {
         {{kernel.assert_function}}(
             {{num_threads}} % num_k_slices == 0,
             "Number of threads should be divisible by number of k slices."
         );
-        local_buf_ptrs.reset(new {{DTYPE_TO_CPP[acc_buf_dtype]}}*[num_Mc_blocks * num_Nc_blocks * num_k_slices]);
+        local_buf_ptrs.reset(new std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[num_Mc_blocks * num_Nc_blocks * num_k_slices]);
     }
     {%- endif %}
 
@@ -149,7 +149,7 @@ extern "C"
                 {%- if maybe_k_slicing %}
                 if (num_k_slices > 1) {
                     const int64_t mxn_cache_block_id = mc * num_Nc_blocks + nc;
-                    local_buf_ptrs[mxn_cache_block_id * num_k_slices + k_slice_id] = {{acc_buf_name}};
+                    local_buf_ptrs[mxn_cache_block_id * num_k_slices + k_slice_id].reset(_{{acc_buf_name}}.release());
                 } else
                 {%- endif %}
                 {
@@ -182,10 +182,10 @@ extern "C"
                     const int64_t n_end = std::min((nc + 1) * N0, N);
                     const int64_t n_size = n_end - n_start;
                     const int64_t mxn_cache_block_id = mc * num_Nc_blocks + nc;
-                    auto first_acc = local_buf_ptrs[mxn_cache_block_id * num_k_slices];
+                    auto first_acc = local_buf_ptrs[mxn_cache_block_id * num_k_slices].get();
                     auto {{acc_buf_name}} = first_acc;
                     for (int64_t other_slice = 1; other_slice < num_k_slices; other_slice++) {
-                        auto other_acc = local_buf_ptrs[mxn_cache_block_id * num_k_slices + other_slice];
+                        auto other_acc = local_buf_ptrs[mxn_cache_block_id * num_k_slices + other_slice].get();
                         for (int64_t m = m_offset; m < m_size; m++) {
                             #pragma omp simd
                             for (int64_t n = 0; n < n_size; n++) {
