@@ -53,6 +53,7 @@ from .schemas import (
 )
 from .subclass_utils import (
     create_subclass_meta,
+    remap_unwrapped_subclass_arg_indices,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
@@ -226,7 +227,7 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
 
         if config.functionalize_rng_ops:
             PhiloxStateTracker.mark_beginning_of_backward()
-        backward_out: Tuple[Tensor, ...] = tuple()
+        backward_out: Tuple[Tensor, ...] = ()
         # Call the backwards pass
         if grad_primals:
             with fx_traceback.preserve_node_meta():
@@ -702,6 +703,9 @@ def aot_dispatch_subclass(
     args_unwrapped = unwrap_tensor_subclasses(
         args, is_joint_structure=is_joint_structure
     )
+    remapped_static_indices = remap_unwrapped_subclass_arg_indices(
+        args, meta.static_input_indices
+    )
 
     if is_joint_structure:
         primals_unwrapped = args_unwrapped[0]
@@ -729,6 +733,7 @@ def aot_dispatch_subclass(
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
     meta_updated = run_functionalized_fw_and_collect_metadata(
         metadata_fn,
+        static_input_indices=remapped_static_indices,
         keep_input_mutations=meta.keep_input_mutations,
         is_train=meta.is_train,
     )(*primals_unwrapped)
@@ -765,7 +770,7 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
 
         if not isinstance(out, (tuple, list)):
             raise RuntimeError(
-                "Graph output must be a tuple(). This is so that we can avoid "
+                "Graph output must be a (). This is so that we can avoid "
                 "pytree processing of the outputs. Please change the module to "
                 "have tuple outputs or use aot_module instead."
             )

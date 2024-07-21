@@ -19,6 +19,7 @@ from .cpp_wrapper_cpu import CppWrapperCpu
 from .triton_utils import DeferredCudaKernelLine
 from .wrapper import SymbolicCallArg
 
+
 if TYPE_CHECKING:
     from ..graph import GraphLowering
 
@@ -259,6 +260,7 @@ class CppWrapperCuda(CppWrapperCpu):
 
         if grid_uses_symbolic_shapes:
             self.writeline(f"if ({grid_name}.is_non_zero()) {{")
+        kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
         self.writeline(
             DeferredCudaKernelLine(
                 kernel_name,
