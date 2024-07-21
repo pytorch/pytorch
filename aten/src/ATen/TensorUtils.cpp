@@ -380,7 +380,7 @@ inline std::optional<ResultVec> computeStride_impl(
         view_d--;
       }
       if (view_numel != tensor_numel) {
-        return c10::nullopt;
+        return std::nullopt;
       }
       if (tensor_d > 0) {
         chunk_base_stride = oldstride[tensor_d - 1];
@@ -390,7 +390,7 @@ inline std::optional<ResultVec> computeStride_impl(
     }
   }
   if (view_d != -1) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return newstride;
 }
