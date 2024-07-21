@@ -441,57 +441,6 @@ inline void mm_get_thread_blocks(
   m_block_end = std::min(m_block_start + Mt_blocks, M_blocks);
 }
 
-class Barrier {
-private:
-  bool is_init_;
-  size_t size_;
-  std::atomic<size_t> counter_;
-  std::atomic<bool> all_arrived_;
-
-  void pause() {
-#ifdef __aarch64__
-    __asm__ __volatile__("yield;" : : : "memory");
-#elif defined(__x86_64__) || defined(__i386__)
-    _mm_pause();
-#endif
-  }
-
-public:
-  Barrier(): is_init_(false), size_(0), counter_(0), all_arrived_(false) {}
-
-  Barrier(size_t size) {
-    init(size);
-  }
-
-  void init(size_t size) {
-    TORCH_CHECK(!is_init_, "Barrier is already initialized.");
-    is_init_ = true;
-    size_ = size;
-    counter_ = 0;
-    all_arrived_ = false;
-  }
-
-  void arrive_and_wait() {
-    TORCH_CHECK(is_init_, "Barrier is not initialized.");
-    while (all_arrived_.load(std::memory_order_acquire)) {
-      pause();
-    }
-    size_t count = counter_.fetch_add(1, std::memory_order_acquire) + 1;
-    if (count == size_) {
-      all_arrived_.store(true, std::memory_order_release);
-      count = counter_.fetch_sub(1, std::memory_order_acquire) - 1;
-    } else {
-      while (!all_arrived_.load(std::memory_order_acquire)) {
-        pause();
-      }
-      count = counter_.fetch_sub(1, std::memory_order_acquire) - 1;
-    }
-    if (count == 0) {
-      all_arrived_.store(false, std::memory_order_release);
-    }
-  }
-};
-
 struct amx_tilecfg {
   uint8_t palette_id;
   uint8_t start_row;
