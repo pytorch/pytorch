@@ -115,15 +115,15 @@ inline C10_HOST_DEVICE bool _isinf(at::Float8_e5m2 val) {
   return val.isinf();
 }
 
-inline C10_HOST_DEVICE bool _isinf(at::Float8_e4m3fn val) {
+inline C10_HOST_DEVICE bool _isinf(at::Float8_e4m3fn val [[maybe_unused]]) {
   return false;
 }
 
-inline C10_HOST_DEVICE bool _isinf(at::Float8_e5m2fnuz val) {
+inline C10_HOST_DEVICE bool _isinf(at::Float8_e5m2fnuz val [[maybe_unused]]) {
   return false;
 }
 
-inline C10_HOST_DEVICE bool _isinf(at::Float8_e4m3fnuz val) {
+inline C10_HOST_DEVICE bool _isinf(at::Float8_e4m3fnuz val [[maybe_unused]]) {
   return false;
 }
 

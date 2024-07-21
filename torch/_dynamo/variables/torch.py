@@ -159,7 +159,7 @@ class BaseTorchVariable(VariableTracker):
             name = f"torch_obj_{id(self.value)}"
         unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
         codegen.extend_output(
-            codegen.setup_globally_cached(unique_var_name, self.value, False)
+            codegen.setup_globally_cached(unique_var_name, self.value)
         )
 
     def as_proxy(self):
@@ -773,6 +773,16 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ):
                     fn_ = getattr(torch, torch_sym_op)
 
+            fake_out_shape = None
+            if "out" in kwargs and isinstance(kwargs["out"], variables.TensorVariable):
+                # Calling fake tensor propagation can mutate the out= tensor in
+                # tx.output.tracked_fakes. tracked_fakes are used to apply
+                # symbolic_shape guards. Mutating them destroys the information
+                # prior to tracing, which is essential for creating right
+                # guards. So save the shape now, and check later if it has
+                # changed. If it has, graph break.
+                fake_out_shape = kwargs["out"].proxy.node.meta["example_value"].shape
+
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -828,7 +838,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     if (
                         kwargs["out"].source
                         and kwargs["out"] in tx.output.graphargs
-                        and fake_out.shape != fake_tensor.shape
+                        and fake_out_shape != fake_tensor.shape
                     ):
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
@@ -969,10 +979,10 @@ Either create the tensor outside the compiled region, or do not set the tensor t
 
         # construct the nn.Parmeter before the graph save it to varname
         cg = PyCodegen(tx)
-        cg.load_import_from("torch.nn", "Parameter")
+        cg.add_push_null(lambda: cg.load_import_from("torch.nn", "Parameter"))
         cg(data.source)
         cg(variables.ConstantVariable(requires_grad))
-        cg.call_function(2, True)
+        cg.call_function(2, False)
         cg.store(varname)
         tx.output.pregraph_bytecode.extend(cg.get_instructions())
 
