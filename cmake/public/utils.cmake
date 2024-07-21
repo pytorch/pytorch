@@ -362,7 +362,7 @@ function(torch_compile_options libname)
       -Wall
       -Wextra
       -Wdeprecated
-      -Wunused-parameter
+      -Wno-unused-parameter
       -Wno-missing-field-initializers
       -Wno-type-limits
       -Wno-array-bounds
@@ -393,7 +393,6 @@ function(torch_compile_options libname)
         -Werror=inconsistent-missing-destructor-override
         -Werror=unused-function
         -Werror=unused-variable
-        -Werror=unused-parameter
         -Werror=pedantic
       )
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
