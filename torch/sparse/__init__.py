@@ -31,6 +31,7 @@ __all__ = [
     'mm',
     'sum',
     'softmax',
+    'solve',
     'log_softmax',
     'SparseSemiStructuredTensor',
     'SparseSemiStructuredTensorCUTLASS',
@@ -283,6 +284,23 @@ Args:
         overflows. Default: None
 """)
 
+
+solve = _add_docstr(_sparse._sparse_solve, r"""
+sparse.solve(input, other, *, left=True) -> Tensor
+
+Computes the solution of a square system of linear equations with 
+a unique solution. Its purpose is similar to :func:`torch.linalg.solve`,
+except that the system is defined by a sparse CSR matrix with layout
+`sparse_csr`. 
+                    
+Args:
+    input (Tensor): a sparse CSR matrix of shape `(n, n)` representing the
+        coefficients of the linear system.
+    other (Tensor): a dense matrix of shape `(n, )` representing the right-hand
+        side of the linear system.
+    left (bool, optional): whether to solve the system for `input @ out = other`
+        (default) or `out @ input = other`. Only `left=True` is supported.
+""")
 
 log_softmax = _add_docstr(_sparse._sparse_log_softmax, r"""
 sparse.log_softmax(input, dim, *, dtype=None) -> Tensor

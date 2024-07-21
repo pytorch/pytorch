@@ -14176,7 +14176,7 @@
 - func: linalg_solve(Tensor A, Tensor B, *, bool left=True) -> Tensor
   python_module: linalg
 
-- func: _sparse_solve(Tensor A, Tensor B, *, bool left) -> Tensor
+- func: _sparse_solve(Tensor A, Tensor B, *, bool left=True) -> Tensor
   python_module: sparse
   dispatch:
     SparseCsrCUDA: _sparse_csr_linear_solve
