@@ -803,6 +803,10 @@ class OutputGraph:
                 # Track the object so to avoid duplicate registration in case of
                 # different sources pointing to the same tensor object.
                 vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
+
+                assert "tensor_dict" not in vt.proxy.node.meta
+                vt.proxy.node.meta["tensor_dict"] = target.__dict__.copy()
+
                 return vt
 
         elif isinstance(target, torch.nn.Module):
@@ -2065,8 +2069,13 @@ class SubgraphTracer(fx.Tracer):
                     TracingContext.extract_stack()
                 )
 
-        # Use graph_namespace to create unique name.
-        name = self.graph._graph_namespace.create_name(name, obj=None)
+        # unique
+        if name in self.input_name_to_proxy:
+            for i in itertools.count():
+                candidate_name = f"{name}_{i}"
+                if candidate_name not in self.input_name_to_proxy:
+                    name = candidate_name
+                    break
 
         if self.input_name_to_proxy:
             prev_name = next(reversed(self.input_name_to_proxy))
