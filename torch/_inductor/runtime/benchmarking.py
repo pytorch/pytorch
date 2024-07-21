@@ -1,4 +1,5 @@
 import functools
+import random
 import time
 from functools import cached_property
 from statistics import median
@@ -566,7 +567,7 @@ class Benchmarker:
         # that we only benchmark callables that should run under the same conditions
         # with respect to warmup, benchmarking, etc.
         kwargs_hash = str(hash(tuple(sorted(kwargs.items()))))
-        key = str(hash(_callable)) + kwargs_hash
+        key = str(hash(_callable) + random.randint(-(2**100), 2**100)) + kwargs_hash
         self.kwargs_hash_to_futures_gpu[
             kwargs_hash
         ] = self.kwargs_hash_to_futures_gpu.get(kwargs_hash, []) + [(_callable, key)]
