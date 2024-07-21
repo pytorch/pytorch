@@ -584,9 +584,9 @@ class Benchmarker:
                 callables, ranking_key=ranking_key, pruning_key=pruning_key, **kwargs
             )
             self.memory_cache.update(zip(keys, timings_ms))
-            # we may or may not have to delete the callables explicitly to
+            # we may or may not have to delete the futures explicitly to
             # cleanup the memory, just do it now for safety
-            del callables[:]
+            del futures_gpu
             return self.memory_cache[key]
 
         return LazyBenchmark(benchmark)
