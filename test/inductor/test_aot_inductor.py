@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_CI,
     IS_FBCODE,
+    IS_MACOS,
     IS_WINDOWS,
     skipIfRocm,
     TEST_WITH_ROCM,
@@ -3006,7 +3007,11 @@ class AOTInductorTestsTemplate:
             model, example_inputs_list, dynamic_shapes=dynamic_shapes
         )
 
-    def test_misc_1(self):
+    @common_utils.parametrize("max_autotune", [False, True])
+    def test_misc_1(self, max_autotune):
+        if self.device == "cpu" and IS_MACOS and max_autotune:
+            raise unittest.SkipTest("max_autotune not supported on macos")
+
         class Model(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3027,7 +3032,9 @@ class AOTInductorTestsTemplate:
             torch.randn(16, 128, device=self.device),
             torch.randint(0, 128, (16, 10), device=self.device),
         )
-        self.check_model(Model(), example_inputs)
+        self.check_model(
+            Model(), example_inputs, options=dict(max_autotune=max_autotune)
+        )
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
@@ -3094,7 +3101,8 @@ def fail_non_abi_compatible_cuda(is_skip=False):
 
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
-    "test_add_complex": fail_stack_allocation(is_skip=True),
+    # TODO: error: ‘complex64’ was not declared in this scope
+    "test_add_complex": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: test_conv_freezing_abi_compatible_cpu fails,
     #   AssertionError: None, i.e. optional output is not supported
     "test_conv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
@@ -3105,14 +3113,17 @@ CPU_TEST_FAILURES = {
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
+    # TODO: use of deleted function RAIIAtenTensorHandle
     "test_dup_unbacked_sym_decl": fail_minimal_arrayref_interface(is_skip=True),
+    # TODO: use of deleted function RAIIAtenTensorHandle
     "test_dup_unbacked_sym_decl_with_refinement": fail_minimal_arrayref_interface(
         is_skip=True
     ),
+    # TODO:  error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
     "test_dynamic_cat": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/129550
     # https://github.com/pytorch/pytorch/issues/123691
-    "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
+    "test_dynamic_scalar": fail_minimal_arrayref_interface(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/122980
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
     # TODO: test_freezing_abi_compatible_cpu fails,
@@ -3126,20 +3137,19 @@ CPU_TEST_FAILURES = {
     # minimal arrayref interface only works with CPU; test crashes.
     # https://github.com/pytorch/pytorch/issues/122983
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
+    # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
     "test_normal_functional": fail_with_and_without_stack_allocation(is_skip=True),
-    # undefined symbol: _Z16aoti_torch_dtypeIN3c104HalfEEiv
-    "test_non_contiguous_output_alias": fail_with_and_without_stack_allocation(
-        is_skip=True
-    ),
-    "test_return_view_constant": fail_minimal_arrayref_interface(is_skip=True),
-    # The same issue as https://github.com/pytorch/pytorch/issues/122978
+    # TODO: The same issue as https://github.com/pytorch/pytorch/issues/122978
+    # error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
     "test_reuse_kernel_dynamic": fail_minimal_arrayref_interface(is_skip=True),
     # the test segfaults
     "test_repeat_output": fail_stack_allocation(is_skip=True),
-    "test_view_outputs": fail_stack_allocation(is_skip=True),
-    "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
+    # segfault
     "test_buffer_mutation_1": fail_stack_allocation(is_skip=True),
+    # segfault
     "test_buffer_mutation_2": fail_stack_allocation(is_skip=True),
+    # segfault
+    # 'AOTInductorTestABICompatibleCpuWithStackAllocation' object has no attribute 'code_check_count'
     "test_buffer_mutation_3": fail_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
@@ -3183,12 +3193,13 @@ CPU_TEST_FAILURES = {
     "test_while_loop_simple": fail_stack_allocation(is_skip=True),
     "test_while_loop_nested": fail_stack_allocation(is_skip=True),
     "test_while_loop_with_outer_code": fail_stack_allocation(is_skip=True),
-    "test_while_loop_with_parameters": fail_stack_allocation(is_skip=True),
+    # TODO: error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
     "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
 }
 
+# test_failures, xfail by default, set is_skip=True to skip
 CUDA_TEST_FAILURES = {
-    # test_failures, xfail by default, set is_skip=True to skip
+    # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
     "test_normal_functional": fail_abi_compatible_cuda(is_skip=True),
     # no runtime checks for non_abi_compatible mode
     "test_runtime_checks": fail_non_abi_compatible_cuda(is_skip=True),

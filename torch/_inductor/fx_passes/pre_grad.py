@@ -18,7 +18,6 @@ from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 
 from .. import config
-
 from ..fx_utils import matches_module_function_pattern
 from ..pattern_matcher import (
     init_once_fakemode,
@@ -29,6 +28,7 @@ from ..utils import is_cpu_device, pass_execution_and_save
 from .group_batch_fusion import group_batch_fusion_passes, PRE_GRAD_FUSIONS
 from .misc_patterns import numpy_compat_normalization
 from .split_cat import PRE_GRAD_PATTERNS
+
 
 log = logging.getLogger(__name__)
 
