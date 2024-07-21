@@ -70,19 +70,6 @@ struct TORCH_API CompilationUnit {
     TORCH_CHECK(false, "attempted to get undefined function ", name.name());
   }
 
-  void set_optimized(bool o) {
-    TORCH_WARN(
-        "CompilationUnit::set_optimized() is deprecated and has no effect. "
-        "Please use setGraphExecutorOptimize()");
-  }
-
-  bool is_optimized() const {
-    TORCH_WARN(
-        "CompilationUnit::is_optimized() is deprecated and always returns true. "
-        "Please use getGraphExecutorOptimize()");
-    return true;
-  }
-
   // for historic reasons, these are defined in ir_emitter.cpp
   // Returns the list of Functions just defined.
   std::vector<Function*> define(

@@ -99,19 +99,6 @@ struct TORCH_API Module : public Object {
   Module(ModulePtr module_value) : Object(std::move(module_value)) {}
   ~Module() = default;
 
-  void set_optimized(bool o) {
-    TORCH_WARN(
-        "Module::set_optimized() is deprecated and has no effect. "
-        "Please use setGraphExecutorOptimize()");
-  }
-
-  bool is_optimized() const {
-    TORCH_WARN(
-        "Module::is_optimized() is deprecated and always returns true. "
-        "Please use getGraphExecutorOptimize()");
-    return true;
-  }
-
   IValue forward(std::vector<IValue> inputs, const Kwargs& kwargs = Kwargs()) {
     return get_method("forward")(std::move(inputs), kwargs);
   }
