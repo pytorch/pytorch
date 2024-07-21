@@ -21389,6 +21389,18 @@ op_db: List[OpInfo] = [
             ),
         ),
     ),
+    OpInfo(
+        name="cond",
+        supports_out=False,
+        skips=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestConverter",
+                "test_convert_nn_module_with_nested_if_and_param",
+                active_if=IS_WINDOWS,
+            ),
+        ),
+    ),
 ]
 op_db += opinfo.definitions.op_db
 

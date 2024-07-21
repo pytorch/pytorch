@@ -200,21 +200,6 @@ hop_db = [
         supports_autograd=True,
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
-        skips=(
-            # TODO (yidi): figure out window test failures
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestBwdGradients",
-                "test_fn_grad",
-                active_if=IS_WINDOWS,
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestConverter",
-                "test_convert_nn_module_with_nested_if_and_param",
-                active_if=IS_WINDOWS,
-            ),
-        ),
     ),
     OpInfo(
         name="while_loop",
