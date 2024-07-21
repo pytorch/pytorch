@@ -343,7 +343,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
         const float_vec_return_type& rhs,
         float scale,
         int32_t zero_point,
-        float inverse_scale) {
+        float inverse_scale [[maybe_unused]]) {
       Vectorized<c10::qint32> retval;
       auto rhs_data = (__m512)rhs[0];
       at::native::quantize_vec<c10::qint32, /*precision=*/32>(
