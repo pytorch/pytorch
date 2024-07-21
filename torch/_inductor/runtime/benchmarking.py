@@ -39,31 +39,67 @@ class LazyBenchmark:
         # to call self.benchmark again
         del self.benchmark
         return timing_ms
+
+    def __float__(self) -> float:
+        return float(self.timing_ms)
     
-    def magic_function_wrapper(magic_function_name: str, always_finalize: bool) -> Callable[..., Any]:
-        def wrapped(self, *args: Any, **kwargs: Any) -> Any:
-            if always_finalize or not hasattr(self, "benchmark"):
-                return getattr(self.timing_ms, magic_function_name)(*args, **kwargs)
-            return LazyBenchmark(lambda: getattr(self.timing_ms, magic_function_name)(*args, **kwargs))
-        return wrapped
-
-    __float__ = magic_function_wrapper("__float__", True)
-    __format__ = magic_function_wrapper("__format__", True)
-    __str__ = magic_function_wrapper("__str__", True)
-
-    __lt__ = magic_function_wrapper("__lt__", True)
-    __le__ = magic_function_wrapper("__le__", True)
-    __gt__ = magic_function_wrapper("__gt__", True)
-    __ge__ = magic_function_wrapper("__ge__", True)
-
-    __add__ = magic_function_wrapper("__add__", False)
-    __radd__ = magic_function_wrapper("__radd__", False)
-    __sub__ = magic_function_wrapper("__sub__", False)
-    __rsub__ = magic_function_wrapper("__rsub__", False)
-    __mul__ = magic_function_wrapper("__mul__", False)
-    __rmul__ = magic_function_wrapper("__rmul__", False)
-    __truediv__ = magic_function_wrapper("__truediv__", False)
-    __rtruediv__ = magic_function_wrapper("__rtruediv__", False)
+    def __format__(self, format_spec: str) -> str:
+        return format(self.timing_ms, format_spec)
+    
+    def __str__(self) -> str:
+        return str(self.timing_ms)
+    
+    def __lt__(self, other: Any) -> bool:
+        return self.timing_ms < other
+    
+    def __le__(self, other: Any) -> bool:
+        return self.timing_ms <= other
+    
+    def __gt__(self, other: Any) -> bool:
+        return self.timing_ms > other
+    
+    def __ge__(self, other: Any) -> bool:
+        return self.timing_ms >= other
+    
+    def __add__(self, other: Any) -> Any:
+        if not hasattr(self, "benchmark"):
+            return self.timing_ms + other
+        return LazyBenchmark(lambda: self.timing_ms + other)
+    
+    def __radd__(self, other: Any) -> Any:
+        if not hasattr(self, "benchmark"):
+            return other + self.timing_ms
+        return LazyBenchmark(lambda: other + self.timing_ms)
+    
+    def __sub__(self, other: Any) -> Any:
+        if not hasattr(self, "benchmark"):
+            return self.timing_ms - other
+        return LazyBenchmark(lambda: self.timing_ms - other)
+    
+    def __rsub__(self, other: Any) -> Any:
+        if not hasattr(self, "benchmark"):
+            return other - self.timing_ms
+        return LazyBenchmark(lambda: other - self.timing_ms)
+    
+    def __mul__(self, other: Any) -> Any:
+        if not hasattr(self, "benchmark"):
+            return self.timing_ms * other
+        return LazyBenchmark(lambda: self.timing_ms * other)
+    
+    def __rmul__(self, other: Any) -> Any:
+        if not hasattr(self, "benchmark"):
+            return other * self.timing_ms
+        return LazyBenchmark(lambda: other * self.timing_ms)
+    
+    def __truediv__(self, other: Any) -> Any:
+        if not hasattr(self, "benchmark"):
+            return self.timing_ms / other
+        return LazyBenchmark(lambda: self.timing_ms / other)
+    
+    def __rtruediv__(self, other: Any) -> Any:
+        if not hasattr(self, "benchmark"):
+            return other / self.timing_ms
+        return LazyBenchmark(lambda: other / self.timing_ms)
 
 
 class Benchmarker:
