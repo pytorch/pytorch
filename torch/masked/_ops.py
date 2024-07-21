@@ -1385,12 +1385,7 @@ elements, have ``nan`` values.
             total = sum(input, dim, keepdim=keepdim, dtype=dtype)
         else:
             inmask = _input_mask(input, mask=mask)
-            count = sum(
-                inmask.new_ones(input.shape, dtype=torch.int64),
-                dim,
-                keepdim=keepdim,
-                mask=inmask,
-            )
+            count = inmask.sum(dim=dim, keepdim=keepdim)
             total = sum(input, dim, keepdim=keepdim, dtype=dtype, mask=inmask)
         return total / count
     elif input.layout == torch.sparse_csr:
@@ -1609,12 +1604,7 @@ def _std_var(
             sample_total = sum(input, dim, keepdim=True, dtype=dtype)
         else:
             inmask = _input_mask(input, mask=mask)
-            count = sum(
-                inmask.new_ones(input.shape, dtype=torch.int64),
-                dim,
-                keepdim=True,
-                mask=inmask,
-            )
+            count = inmask.sum(dim=dim, keepdim=True)
             sample_total = sum(input, dim, keepdim=True, dtype=dtype, mask=inmask)
         # TODO: replace torch.subtract/divide/square/maximum with
         # masked subtract/divide/square/maximum when these will be
