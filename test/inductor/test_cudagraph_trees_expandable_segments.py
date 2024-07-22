@@ -7,11 +7,7 @@ import sys
 
 import torch
 from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
