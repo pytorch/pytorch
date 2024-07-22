@@ -1064,6 +1064,25 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         self._test_default_dict_helper(factory)
 
+    def test_class_dict(self):
+        class A:
+            x = 4
+            y = 5
+
+            def __init__(self):
+                self.a = 6
+
+        a = A()
+
+        def fn(x):
+            if "x" in type(a).__dict__:
+                return x + 1
+            return x + 2
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_default_dict_constr(self):
         param = torch.nn.Parameter(torch.ones([2, 2]))
 
