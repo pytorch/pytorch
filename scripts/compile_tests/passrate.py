@@ -7,8 +7,8 @@ from common import (
     key,
     open_test_results,
 )
-
 from download_reports import download_reports
+
 
 """
 Usage: passrate.py commit_sha

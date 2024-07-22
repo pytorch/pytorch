@@ -1130,6 +1130,20 @@ class TestSerialization(TestCase, SerializationMixin):
                 torch.serialization.clear_safe_globals()
                 ClassThatUsesBuildInstruction.__setstate__ = None
 
+    def test_weights_only_safe_globals_blocklist(self):
+        module = 'nt' if IS_WINDOWS else 'posix'
+        error_msg = f"unsupported GLOBAL {module}.execv whose module {module} is blocked"
+        with BytesIOContext() as f:
+            torch.save(os.execv, f)
+            f.seek(0)
+            with self.assertRaisesRegex(pickle.UnpicklingError, error_msg):
+                torch.load(f, weights_only=True)
+            f.seek(0)
+            # safe_globals doesn't work even with allowlist
+            with torch.serialization.safe_globals([os.execv]):
+                with self.assertRaisesRegex(pickle.UnpicklingError, error_msg):
+                    torch.load(f, weights_only=True)
+
     @parametrize("unsafe_global", [True, False])
     def test_weights_only_error(self, unsafe_global):
         sd = {'t': TwoTensor(torch.randn(2), torch.randn(2))}

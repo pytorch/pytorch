@@ -8,7 +8,10 @@ import torch
 import torch.distributed._tensor._dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
-from torch.distributed._tensor._collective_utils import mesh_broadcast
+from torch.distributed._tensor._collective_utils import (
+    check_tensor_meta,
+    mesh_broadcast,
+)
 from torch.distributed._tensor._redistribute import (
     Redistribute,
     redistribute_local_tensor,
@@ -141,7 +144,10 @@ class _FromTorchTensor(torch.autograd.Function):
             # simply set the local tensor to an empty tensor
             input = input.new_empty(0, requires_grad=input.requires_grad)
         elif run_check:
-            # TODO: by default check tensor metas across rank
+            # TODO: support uneven sharding when global shape/stride not passed, by
+            # building the global TensorMeta during check_tensor_meta
+            check_shape_stride = not shape and not stride
+            check_tensor_meta(input, check_shape_stride=check_shape_stride)
             # TODO: See if we need to make this run_check logic
             # have a corresponding backward.
             for idx, placement in enumerate(placements):
@@ -318,13 +324,13 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         device_mesh: Optional[DeviceMesh] = None,
         placements: Optional[Sequence[Placement]] = None,
         *,
-        run_check: bool = True,
+        run_check: bool = False,
         shape: Optional[torch.Size] = None,
         stride: Optional[Tuple[int, ...]] = None,
     ) -> "DTensor":
         """
         Create a :class:`DTensor` from a local torch.Tensor on each rank
-        according to the `device_mesh` and `placements` specified.
+        according to the ``device_mesh`` and ``placements`` specified.
 
         Args:
             local_tensor (torch.Tensor): local torch.Tensor on each rank.
@@ -333,28 +339,31 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 context manager, default: None
             placements (List[:class:`Placement`], optional): the placements that
                 describes how to place the local torch.Tensor on DeviceMesh, must
-                have the same number of elements as `device_mesh.ndim`. If not
-                specified, we will by default replicate the tensor across the
-                `device_mesh` from the first rank of each dimension of the `device_mesh`.
+                have the same number of elements as ``device_mesh.ndim``.
 
         Keyword args:
-            run_check (bool, optional): indicate whether to run check across ranks
-                to check meta information and data. if have :class:`Replicate` in
-                `placements`, the data on first rank of the device mesh dimension
-                will be broadcasted to other ranks.
+            run_check (bool, optional): at a cost of extra communications, perform
+                sanity check across ranks to check each local tensor's meta information
+                to ensure correctness. If have :class:`Replicate` in ``placements``, the
+                data on first rank of the device mesh dimension will be broadcasted
+                to other ranks. default: False
             shape (torch.Size, optional): A List of int which specifies the size of
                 DTensor which build on top of `local_tensor`. Note this needs to be
-                provided if the shape of `local_tensor` are different across the ranks.
-                If not provided, `shape` will be computed assuming the given distributed
-                tensor is evenly sharded across ranks.
+                provided if the shape of ``local_tensor`` are different across the ranks.
+                If not provided, ``shape`` will be computed assuming the given distributed
+                tensor is evenly sharded across ranks. default: None
             stride (tuple, optional): A List of int which specifies the stride of DTensor.
-                If not provided, `stride` will be computed assuming the given distributed
-                tensor is evenly sharded across ranks.
+                If not provided, ``stride`` will be computed assuming the given distributed
+                tensor is evenly sharded across ranks. default: None
 
         Returns:
             A :class:`DTensor` object
 
-        .. note:: `from_local` is differentiable, the `requires_grad` of the created
+        .. note:: When ``run_check=False``, it is the user's responsibility to ensure the
+            local tensor passed in is correct across ranks. If not, the behavior of the created
+            DTensor is undefined.
+
+        .. note:: ``from_local`` is differentiable, the `requires_grad` of the created
             `DTensor` object will depend on if `local_tensor` requires_grad or not.
         """
         # if same shape/dtype, no need to run_check, if not, must allgather
