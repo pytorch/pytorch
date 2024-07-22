@@ -2556,9 +2556,15 @@ class SourcelessBuilder:
             return DeviceMeshVariable(value)
         elif isinstance(value, re.Pattern):
             return RegexPatternVariable(value)
-        unimplemented(
-            f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
-        )
+        else:
+            log.debug(
+                "%s",
+                (
+                    f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}. "
+                    "Converting to a catch all variable tracker - UserDefinedObjectVariable"
+                ),
+            )
+            return UserDefinedObjectVariable(value)
 
     @staticmethod
     def wrap_constant_literal(value):
