@@ -7,9 +7,9 @@ from torch import Tensor
 from torch._dynamo.utils import counters
 
 from .. import config
-
 from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern
 from .split_cat import construct_pattern_matcher_pass
+
 
 aten = torch.ops.aten
 log = logging.getLogger(__name__)

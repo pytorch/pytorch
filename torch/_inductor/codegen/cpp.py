@@ -21,8 +21,8 @@ from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
-from ..._dynamo.utils import counters
 
+from ..._dynamo.utils import counters
 from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
@@ -46,7 +46,6 @@ from ..utils import (
     sympy_product,
     sympy_subs,
 )
-
 from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
     BackendFeature,
@@ -63,7 +62,6 @@ from .common import (
     OpOverrides,
     OptimizationContext,
 )
-
 from .cpp_utils import (
     cexpr,
     cexpr_index,
@@ -73,6 +71,7 @@ from .cpp_utils import (
     unify_mask_base_type,
     value_to_cpp,
 )
+
 
 _IS_WINDOWS = sys.platform == "win32"
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
