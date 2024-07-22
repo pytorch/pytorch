@@ -281,11 +281,7 @@ class TestPublicBindings(TestCase):
                     continue
 
                 subprocess.check_output(
-                    [
-                        "python",
-                        "-c",
-                        f"import {modname}"
-                    ],
+                    ["python", "-c", f"import {modname}"],
                     stderr=subprocess.STDOUT,
                     text=True,
                 )
