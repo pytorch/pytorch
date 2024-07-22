@@ -9,6 +9,7 @@ import typing
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Union
 
+import torch
 import torch.fx as fx
 
 import torch.utils._pytree as pytree
@@ -932,7 +933,14 @@ class TritonHOPifier:
                 self.raise_unsupported("Grid can have at most rank 3")
 
         assert len(grids) != 0
-        if len(set(grids)) == 1:
+
+        def intify(x):
+            if isinstance(x, torch.SymInt):
+                return int(x)
+            else:
+                return x
+
+        if len(set(pytree.tree_map(intify, grids))) == 1:
             # If there's only one unique grid, lets simplify
             grids = [grids[0]]
 
