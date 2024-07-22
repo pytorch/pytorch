@@ -477,7 +477,7 @@ std::ofstream& TuningContext::GetUntunedFile(){
   if (!untuned_file_.is_open())
   {
     const char *env = std::getenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME");
-    std::string filename = (env == nullptr) ? "untuned.csv" : env;
+    std::string filename = (env == nullptr) ? "tunableop_untuned.csv" : env;
 
     std::string device = c10::str(int(c10::cuda::current_device()));
     std::size_t found = filename.rfind(".");
