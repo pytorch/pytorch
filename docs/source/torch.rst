@@ -310,9 +310,12 @@ Constants
     :toctree: generated
     :nosignatures:
 
+    e
     inf
     nan
-    
+    pi
+
+
 Pointwise Ops
 ~~~~~~~~~~~~~~~~~~~~~~
 
