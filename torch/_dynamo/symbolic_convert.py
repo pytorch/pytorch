@@ -184,7 +184,7 @@ class SpeculationLog:
             and entry.lineno == lineno
         ), textwrap.dedent(
             f"""
-            SpecuationLog diverged at {self.index} of {len(self.entries)}:
+            SpeculationLog diverged at {self.index} of {len(self.entries)}:
             - Run1: {entry.filename}:{entry.lineno} (ip={entry.instruction_pointer})
             - Run2: {filename}:{lineno} (ip={instruction_pointer})
             Please submit a bug report.
@@ -333,6 +333,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         if push:
             self.push(value)
         if_jump = self.create_call_resume_at(inst.target)
+
+        if sys.version_info >= (3, 13):
+            # 3.13 requires stack[-1] to be bool type
+            self.output.add_output_instructions([create_instruction("TO_BOOL")])
 
         self.output.add_output_instructions(
             [create_instruction(inst.opname, target=if_jump[0])] + if_next + if_jump
@@ -592,6 +596,8 @@ def break_graph_if_unsupported(*, push):
                     else ()
                 )
                 if len(kw_names) > 0:
+                    # KW_NAMES no longer used in 3.13
+                    assert sys.version_info < (3, 13)
                     self.output.add_output_instructions(
                         [create_instruction("KW_NAMES", argval=kw_names)]
                     )
@@ -935,9 +941,7 @@ class InstructionTranslatorBase(
     def popn(self, n: int) -> List[VariableTracker]:
         return [*reversed([self.pop() for _ in range(n)])]
 
-    def LOAD_FAST(self, inst):
-        name = inst.argval
-
+    def _load_fast(self, name):
         if self.exec_recorder and name in self.f_locals:
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
@@ -957,6 +961,9 @@ class InstructionTranslatorBase(
         if name.startswith("___stack"):
             self.symbolic_locals.pop(name)
 
+    def LOAD_FAST(self, inst):
+        self._load_fast(inst.argval)
+
     def LOAD_DEREF(self, inst):
         assert inst.argval in self.cell_and_freevars()
 
@@ -967,11 +974,13 @@ class InstructionTranslatorBase(
             unimplemented(f"undefined LOAD_DEREF {inst.argval}")
         self.push(self.symbolic_locals[inst.argval])
 
-    def STORE_FAST(self, inst):
+    def _store_fast(self, name):
         loaded_vt = self.pop()
-        name = inst.argval
         loaded_vt.set_name_hint(name)
         self.symbolic_locals[name] = loaded_vt
+
+    def STORE_FAST(self, inst):
+        self._store_fast(inst.argval)
 
     def DELETE_FAST(self, inst):
         del self.symbolic_locals[inst.argval]
@@ -1490,21 +1499,41 @@ class InstructionTranslatorBase(
             argsvars = self.pop()
         else:
             unimplemented("CALL_FUNCTION_EX")
-        fn = self.pop()
-        if sys.version_info >= (3, 11):
+
+        if sys.version_info >= (3, 13):
+            # 3.13 swapped null and callable
             null = self.pop()
             assert isinstance(null, NullVariable)
 
-        if (
-            isinstance(fn, GetAttrVariable)
-            and isinstance(fn.obj, TensorVariable)
-            and fn.name == "view"
-            and isinstance(argsvars, (ConstantVariable, TensorVariable))
-        ):
-            # Hack to handle special case in some bert models.  Converts
-            # x.view(*shape) into x.view(shape), which is correct for view()
-            # but not generally.  See test_transpose_for_scores().
-            argsvars = TupleVariable([argsvars])
+        fn = self.pop()
+
+        if sys.version_info >= (3, 11) and sys.version_info < (3, 13):
+            null = self.pop()
+            assert isinstance(null, NullVariable)
+
+        if isinstance(fn, GetAttrVariable) and isinstance(fn.obj, TensorVariable):
+            # realize is requires for Python 3.8
+            kwargsvars = kwargsvars.realize()
+            if fn.name == "view" and isinstance(
+                argsvars, (ConstantVariable, TensorVariable)
+            ):
+                # Hack to handle special case in some bert models.  Converts
+                # x.view(*shape) into x.view(shape), which is correct for view()
+                # but not generally.  See test_transpose_for_scores().
+                argsvars = TupleVariable([argsvars])
+            elif (
+                fn.name == "random_"
+                and isinstance(argsvars, TupleVariable)
+                and len(argsvars.items) == 0
+                and isinstance(kwargsvars, ConstDictVariable)
+                and ConstantVariable.create("from") in kwargsvars
+            ):
+                # `from`` is python keyword. Adding random_ with `from` in the
+                # Fx graph causes syntax error. Even if we convert the kwargs to
+                # args, aot_autograd/inductor while lowering generates
+                # aten.random.from, again causing syntax errors. Since this
+                # usecase is uncommon, graph break.
+                unimplemented("random_ op is called with from keyword")
 
         if not isinstance(
             argsvars, BaseListVariable
@@ -1668,7 +1697,7 @@ class InstructionTranslatorBase(
 
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
         seqs = self.popn(inst.argval)
-        items = list()
+        items = []
         for seq in seqs:
             try:
                 items.extend(seq.unpack_var_sequence(self))
@@ -1690,7 +1719,7 @@ class InstructionTranslatorBase(
         items = self.popn(inst.argval)
         # ensure everything is a dict
         items = [BuiltinVariable(dict).call_function(self, [x], {}) for x in items]
-        result = dict()
+        result = {}
         for x in items:
             assert isinstance(x, ConstDictVariable)
             result.update(x.items)
@@ -2060,18 +2089,31 @@ class InstructionTranslatorBase(
     def PUSH_NULL(self, inst):
         self.push(NullVariable())
 
-    @break_graph_if_unsupported(push=1)
-    def CALL(self, inst):
+    def _call(self, inst, call_kw=False):
         # see https://docs.python.org/3.11/library/dis.html#opcode-CALL
         # for convention
-        contents = self.popn(inst.arg + 2)
-        if isinstance(contents[0], NullVariable):
-            fn = contents[1]
-            args = []
+        if call_kw:
+            # TOS is kw_names for CALL_KW instruction
+            assert sys.version_info >= (3, 13)
+            kw_names = self.pop()
+            assert isinstance(kw_names, TupleVariable) and kw_names.is_python_constant()
+            kw_names = kw_names.as_python_constant()
         else:
+            kw_names = self.kw_names.value if self.kw_names else ()
+
+        contents = self.popn(inst.arg + 2)
+        if sys.version_info >= (3, 13):
+            # NULL and callable swapped
             fn = contents[0]
-            args = [contents[1]]
-        kw_names = self.kw_names.value if self.kw_names else ()
+            args = [] if isinstance(contents[1], NullVariable) else [contents[1]]
+        else:
+            if isinstance(contents[0], NullVariable):
+                fn = contents[1]
+                args = []
+            else:
+                fn = contents[0]
+                args = [contents[1]]
+
         if kw_names:
             args = args + contents[2 : -len(kw_names)]
             kwargs_list = contents[-len(kw_names) :]
@@ -2080,8 +2122,13 @@ class InstructionTranslatorBase(
         else:
             args = args + contents[2:]
             kwargs = {}
+
         self.call_function(fn, args, kwargs)
         self.kw_names = None
+
+    @break_graph_if_unsupported(push=1)
+    def CALL(self, inst):
+        self._call(inst)
 
     def COPY(self, inst):
         self.push(self.stack[-inst.arg])
@@ -2201,6 +2248,29 @@ class InstructionTranslatorBase(
 
     def END_SEND(self, inst):
         del self.stack[-2]
+
+    # 3.13 opcodes
+    def LOAD_FAST_LOAD_FAST(self, inst):
+        self._load_fast(inst.argval[0])
+        self._load_fast(inst.argval[1])
+
+    def STORE_FAST_STORE_FAST(self, inst):
+        self._store_fast(inst.argval[0])
+        self._store_fast(inst.argval[1])
+
+    @break_graph_if_unsupported(push=1)
+    def CALL_KW(self, inst):
+        self._call(inst, call_kw=True)
+
+    def TO_BOOL(self, inst):
+        # TO_BOOL only precedes a conditional jump or UNARY_NOT (see compile.c in CPython)
+        # So we can skip this instruction as long as we remember to codegen a TO_BOOL
+        # before conditional jumps/UNARY_NOT.
+        assert self.next_instruction.opname in (
+            "POP_JUMP_IF_TRUE",
+            "POP_JUMP_IF_FALSE",
+            "UNARY_NOT",
+        )
 
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
@@ -2442,7 +2512,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                     self.symbolic_locals
                 )
 
-            self._freevars_ids = dict()
+            self._freevars_ids = {}
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])

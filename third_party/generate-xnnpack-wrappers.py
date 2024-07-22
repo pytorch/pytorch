@@ -46,7 +46,7 @@ WRAPPER_SRC_NAMES = {
     # add non-prod microkernel sources here:
 }
 
-SRC_NAMES = set([
+SRC_NAMES = {
     "OPERATOR_SRCS",
     "SUBGRAPH_SRCS",
     "LOGGING_SRCS",
@@ -89,14 +89,14 @@ SRC_NAMES = set([
     "AARCH64_ASM_MICROKERNEL_SRCS",
 
     # add non-prod microkernel sources here:
-])
+}
 
 def handle_singleline_parse(line):
     start_index = line.find("(")
     end_index = line.find(")")
     line = line[start_index+1:end_index]
     key_val = line.split(" ")
-    return key_val[0], list(map(lambda x: x[4:], key_val[1:]))
+    return key_val[0], [x[4:] for x in key_val[1:]]
 
 def update_sources(xnnpack_path, cmakefile = "XNNPACK/CMakeLists.txt"):
     sources = collections.defaultdict(list)

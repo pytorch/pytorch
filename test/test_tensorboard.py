@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_CROSSREF,
     TestCase,
+    skipIfTorchDynamo,
 )
 
 
@@ -760,6 +761,7 @@ class TestTensorProtoSummary(BaseTestCase):
             (torch.bfloat16, DataType.DT_BFLOAT16),
         ],
     )
+    @skipIfTorchDynamo("Unsuitable test for Dynamo, behavior changes with version")
     def test_half_tensor_proto(self, tensor_type, proto_type):
         float_values = [1.0, 2.0, 3.0]
         actual_proto = tensor_proto(

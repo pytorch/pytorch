@@ -3,7 +3,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/TensorIterator.h>
 #include <torch/library.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <torch/all.h>
 #include <stdexcept>
 
@@ -75,7 +75,7 @@ void test_random_from_to(const at::Device& device) {
     };
     tos = {
       1L,
-      static_cast<::std::optional<int64_t>>(c10::nullopt)
+      static_cast<::std::optional<int64_t>>(::std::nullopt)
     };
   } else if constexpr (::std::is_signed_v<T>) {
     constexpr int64_t min_from = _min_from<T>();
@@ -90,7 +90,7 @@ void test_random_from_to(const at::Device& device) {
       ::std::optional<int64_t>(0L),
       ::std::optional<int64_t>(42L),
       ::std::optional<int64_t>(max_to),
-      static_cast<::std::optional<int64_t>>(c10::nullopt)
+      static_cast<::std::optional<int64_t>>(::std::nullopt)
     };
   } else {
     froms = {
@@ -100,7 +100,7 @@ void test_random_from_to(const at::Device& device) {
     tos = {
       ::std::optional<int64_t>(42L),
       ::std::optional<int64_t>(max_to),
-      static_cast<::std::optional<int64_t>>(c10::nullopt)
+      static_cast<::std::optional<int64_t>>(::std::nullopt)
     };
   }
 

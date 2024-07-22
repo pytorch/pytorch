@@ -45,15 +45,15 @@ TORCH_API mobile::Module _load_for_mobile(
 
 TORCH_API mobile::Module _load_for_mobile(
     std::istream& in,
-    std::optional<at::Device> device = c10::nullopt);
+    std::optional<at::Device> device = std::nullopt);
 
 TORCH_API mobile::Module _load_for_mobile(
     const std::string& filename,
-    std::optional<at::Device> device = c10::nullopt);
+    std::optional<at::Device> device = std::nullopt);
 
 TORCH_API mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
-    std::optional<c10::Device> device = c10::nullopt);
+    std::optional<c10::Device> device = std::nullopt);
 
 /**
  * Load only the contents of the "extra/" files whose names are

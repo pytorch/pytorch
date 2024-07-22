@@ -276,7 +276,7 @@ class ComptimeVariable(VariableTracker):
                 # a free variable that we actually DO have the runtime
                 # value for
                 # tuple(make_cell(ComptimeVar(i)) for i in fn.closure.items)
-                tuple(),
+                (),
             )
             func(ComptimeContext(tx))
         else:
@@ -580,7 +580,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 for x in args
             )
         proxy = tx.output.create_proxy(
-            "call_function", torch.autograd.function.FunctionCtx, tuple(), {}
+            "call_function", torch.autograd.function.FunctionCtx, (), {}
         )
         out = tx.output.side_effects.track_object_new(
             None,

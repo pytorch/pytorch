@@ -26,7 +26,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
-from ..current_scope_id import current_scope_id
 from ..exc import unimplemented, UserError, UserErrorType
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
@@ -43,7 +42,7 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import _is_top_level_scope, VariableTracker
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
 
@@ -333,6 +332,27 @@ class TensorVariable(VariableTracker):
         return variables.TorchInGraphFunctionVariable(_tensor_version).call_function(
             tx, [self], {}
         )
+
+    def call_hasattr(self, tx, name):
+        from . import GetAttrVariable
+        from .builtin import BuiltinVariable
+
+        try:
+            var = BuiltinVariable(getattr).call_function(
+                tx, [self, ConstantVariable(name)], {}
+            )
+            # in the event that TensorVariable returns NotImplemented
+            # BuiltinVariable.call_getattr returns GetAttrVariable
+            ret_val = not isinstance(var, GetAttrVariable)
+        except AttributeError:
+            ret_val = False
+
+        if self.source:
+            install_guard(
+                AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+            )
+
+        return ConstantVariable(ret_val)
 
     def var_getattr(self, tx, name):
         from . import UserDefinedClassVariable
@@ -984,10 +1004,7 @@ class TensorVariable(VariableTracker):
         )
 
     def set_name_hint(self, name: str):
-        # Only rename at the top-level scope, this is to avoid the confusion between
-        # mutating a variable vs renaming it (e.g. a = b) during speculating a higher order op,
-        # where mutation is prohibited and it's difficult to differentiate it with renaming.
-        if not self._is_name_set and _is_top_level_scope(current_scope_id()):
+        if not self._is_name_set:
             self.proxy.node._rename(name)
             self._is_name_set = True
 
@@ -1175,8 +1192,8 @@ class NumpyNdarrayVariable(TensorVariable):
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
-        if name == "tobytes":
-            unimplemented("tobytes is not modelled in torch._numpy")
+        if name in ("tostring", "tobytes"):
+            unimplemented(f"{name} is not modelled in torch._numpy")
         proxy = tx.output.create_proxy(
             "call_function",
             numpy_method_wrapper(name),
