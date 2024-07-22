@@ -1874,6 +1874,12 @@ class AotCodeCompiler:
                     use_mmap_weights=use_mmap_weights,
                 )
 
+                # Temp: add command debug code.
+                if config.is_fbcode():
+                    _temp_validate_new_and_old_command(
+                        compile_cmd.split(" "), compile_cmd_old.split(" ")
+                    )
+
                 log.debug("aot compilation command: %s", compile_cmd)
                 if fbcode_aot_cpu_re:
                     compile_file(input_path, output_o, compile_cmd.split())
@@ -1997,6 +2003,12 @@ class AotCodeCompiler:
                     aot_mode=graph.aot_mode,
                     use_absolute_path=use_absolute_path,
                 )
+
+                # Temp: add command debug code.
+                if config.is_fbcode():
+                    _temp_validate_new_and_old_command(
+                        link_cmd.split(" "), link_cmd_old.split(" ")
+                    )
 
                 log.debug("aot linkage command: %s", link_cmd)
                 if fbcode_aot_cpu_re:
