@@ -303,6 +303,16 @@ Examples::
 Math operations
 ---------------
 
+Constants
+----------------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    inf
+    nan
+    
 Pointwise Ops
 ~~~~~~~~~~~~~~~~~~~~~~
 

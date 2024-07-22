@@ -5381,6 +5381,22 @@ Example::
 )
 
 add_docstr(
+    torch.inf,
+    r"""
+inf -> float
+
+Returns a floating point value which amounts to positive infinity.
+Alias for math.inf
+
+Example::
+
+    >>> x = torch.inf
+    inf
+
+""",
+)
+
+add_docstr(
     torch.inverse,
     r"""
 inverse(input, *, out=None) -> Tensor
@@ -8087,6 +8103,22 @@ Examples::
 """.format(
         **common_args
     ),
+)
+
+add_docstr(
+    torch.nan,
+    r"""
+nan -> float
+
+Returns a constant value  that is a floating-point nan (Not a Number) value. 
+Alias for math.nan
+
+Example::
+
+    >>> x = torch.nan
+    nan
+
+""",
 )
 
 add_docstr(

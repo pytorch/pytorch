@@ -2598,6 +2598,16 @@ See :func:`torch.index_select`
 )
 
 add_docstr_all(
+    "inf",
+    r"""
+inf -> float
+
+See :func:`torch.inf`.
+""",
+)
+
+
+add_docstr_all(
     "sparse_mask",
     r"""
 sparse_mask(mask) -> Tensor
@@ -3473,6 +3483,16 @@ mvlgamma_(p) -> Tensor
 In-place version of :meth:`~Tensor.mvlgamma`
 """,
 )
+
+add_docstr_all(
+    "nan",
+    r"""
+nan -> float
+
+See :func:`torch.nan`.
+""",
+)
+
 
 add_docstr_all(
     "narrow",
