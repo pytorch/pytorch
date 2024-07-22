@@ -10,10 +10,10 @@ import sympy
 from sympy import Expr
 
 import torch
-
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
+
 from .. import config, ir
 from ..utils import _align, ALIGN_BYTES, cache_on_self, sympy_product
 from ..virtualized import V
@@ -1175,6 +1175,8 @@ class CppWrapperCpu(WrapperCodeGen):
             # FIXME: no need to do this after we switch to the torchgen-ed C shim
             if kernel_suffix == "_scaled_dot_product_flash_attention":
                 shim_fn = "aoti_torch__scaled_dot_product_flash_attention_v2"
+            elif kernel_suffix == "_scaled_mm":
+                shim_fn = "aoti_torch__scaled_mm_v2"
             elif kernel_suffix.startswith("wrapped_fbgemm"):
                 assert self.device == "cpu", "Using wrapped_fbgemm out of CPU!"
                 shim_fn = f"aoti_torch_cpu_{kernel_suffix}"
