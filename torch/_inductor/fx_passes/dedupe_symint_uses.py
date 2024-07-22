@@ -3,8 +3,7 @@ from dataclasses import dataclass
 from typing import Union
 
 import torch
-from torch import SymBool, SymFloat, SymInt
-from torch.types import py_sym_types
+from torch.fx.experimental.proxy_tensor import py_sym_types, SymBool, SymFloat, SymInt
 
 
 @dataclass

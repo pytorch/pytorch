@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import gzip
-from typing import TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 
 import torch
 
@@ -50,8 +50,8 @@ class TorchScriptOnnxExportDiagnostic(infra.Diagnostic):
     diagnostic.
     """
 
-    python_call_stack: infra.Stack | None = None
-    cpp_call_stack: infra.Stack | None = None
+    python_call_stack: Optional[infra.Stack] = None
+    cpp_call_stack: Optional[infra.Stack] = None
 
     def __init__(
         self,
@@ -93,7 +93,7 @@ class ExportDiagnosticEngine:
     established.
     """
 
-    contexts: list[infra.DiagnosticContext]
+    contexts: List[infra.DiagnosticContext]
     _background_context: infra.DiagnosticContext
 
     def __init__(self) -> None:
@@ -111,7 +111,7 @@ class ExportDiagnosticEngine:
         self,
         name: str,
         version: str,
-        options: infra.DiagnosticOptions | None = None,
+        options: Optional[infra.DiagnosticOptions] = None,
     ) -> infra.DiagnosticContext:
         """Creates a new diagnostic context.
 
@@ -189,7 +189,7 @@ def create_export_diagnostic_context() -> (
 def diagnose(
     rule: infra.Rule,
     level: infra.Level,
-    message: str | None = None,
+    message: Optional[str] = None,
     frames_to_skip: int = 2,
     **kwargs,
 ) -> TorchScriptOnnxExportDiagnostic:

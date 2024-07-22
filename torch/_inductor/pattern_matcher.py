@@ -38,6 +38,7 @@ successful match or a `FailedMatch` object for a failure to match.
 from __future__ import annotations
 
 import contextlib
+
 import dataclasses
 import functools
 import importlib
@@ -94,7 +95,6 @@ from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type
-
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten

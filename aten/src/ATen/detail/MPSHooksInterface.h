@@ -10,7 +10,6 @@
 
 #include <cstddef>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
 struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
@@ -108,4 +107,3 @@ TORCH_API const MPSHooksInterface& getMPSHooks();
 
 } // namespace detail
 } // namespace at
-C10_CLANG_DIAGNOSTIC_POP()

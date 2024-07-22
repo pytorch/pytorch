@@ -70,7 +70,7 @@ struct LineNumberProgram {
           switch (member.content_type) {
             case DW_LNCT_path: {
               include_directories_.emplace_back(
-                  s_.readString(L, member.form, is_64bit_));
+                  s_.readString(L, member.form, is_64bit_, 0));
             } break;
             default: {
               skipForm(L, member.form);
@@ -94,7 +94,7 @@ struct LineNumberProgram {
           switch (member.content_type) {
             case DW_LNCT_path: {
               file_names_.emplace_back(
-                  s_.readString(L, member.form, is_64bit_));
+                  s_.readString(L, member.form, is_64bit_, 0));
             } break;
             case DW_LNCT_directory_index: {
               file_directory_index_.emplace_back(readData(L, member.form));

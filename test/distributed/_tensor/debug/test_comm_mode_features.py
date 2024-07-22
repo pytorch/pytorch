@@ -247,10 +247,7 @@ class TestCommModeFeatures(DTensorTestBase):
             self.assertEqual(
                 len(comm_mode.advanced_module_tracker.module_helper_dict), 1
             )
-            self.assertEqual(
-                comm_mode.comm_module_counts,
-                {"Global": {"forward": {}, "backward": {}}},
-            )
+            self.assertEqual(comm_mode.comm_module_counts, {})
             output_tp = model(inp)
 
         model_args = ModelArgs(dropout_p=0.0)
