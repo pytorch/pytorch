@@ -1342,12 +1342,13 @@ class AlgorithmSelectorCache(PersistentCache):
                     name, input_nodes, timings, autotune_elapse, precompile_elapse
                 )
 
-            precompile_key = create_precompile_key(name, inputs_key)
-            if precompile_key in autoheuristic_registry:
-                ah_feedback = []
-                for choice, timing in timings.items():
-                    ah_feedback.append((choice.autoheuristic_id(), timing))
-                autoheuristic_registry[precompile_key](ah_feedback)
+            if config.collect_autoheuristic(name):
+                precompile_key = create_precompile_key(name, inputs_key)
+                if precompile_key in autoheuristic_registry:
+                    ah_feedback = []
+                    for choice, timing in timings.items():
+                        ah_feedback.append((choice.autoheuristic_id(), timing))
+                    autoheuristic_registry[precompile_key](ah_feedback)
 
             return timings
 
