@@ -54,8 +54,10 @@ extern "C"
     const auto Nt_blocks = N0_blocks;
     const auto Kt_blocks = K0_blocks;
     {%- endif %}
-    int64_t Mc_blocks, Kc_blocks;
-    mm_get_cache_blocking(num_threads, M, N, K, M0, N0, K0, Mt_blocks, Kt_blocks, sizeof(*X), sizeof(*W), Mc_blocks, Kc_blocks);
+    int64_t Mc_blocks, Nc_blocks, Kc_blocks;
+    mm_get_cache_blocking<{{kernel.dtype(X)}}, {{kernel.dtype(W)}}>(
+        num_threads, M, N, K, M0, N0, K0, Mt_blocks, Kt_blocks, Mc_blocks, Nc_blocks, Kc_blocks
+    );
     {%- else %}
     constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
     constexpr int64_t M0_blocks = (M + M0 - 1) / M0;
@@ -281,6 +283,7 @@ class CppPackedGemmTemplate(CppTemplate):
         Mc_blocks, Nc_blocks, Kc_blocks = get_cache_blocking(
             register_blocking, thread_blocking
         )
+        print("Mc, Kc", Mc_blocks, Kc_blocks)
         return GemmBlocking(Mc_blocks, Nc_blocks, Kc_blocks)
 
     @staticmethod

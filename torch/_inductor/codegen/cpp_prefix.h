@@ -392,6 +392,7 @@ void mm_get_thread_blocking(
   return;
 }
 
+template<typename X_t, typename W_t>
 void mm_get_cache_blocking(
     int num_threads,
     int64_t M,
@@ -402,18 +403,12 @@ void mm_get_cache_blocking(
     int64_t K0,
     int64_t Mt_blocks,
     int64_t Kt_blocks,
-    size_t num_byte_A,
-    size_t num_byte_B,
     int64_t& Mc_blocks,
+    int64_t& Nc_blocks,
     int64_t& Kc_blocks) {
   Mc_blocks = Mt_blocks;
-  int64_t Nc_blocks = 1; // Nc_blocks is always 1
+  Nc_blocks = 1; // Nc_blocks is always 1
   Kc_blocks = Kt_blocks;
-
-  // TODO: support multi-thread
-  if (num_threads != 1) {
-      return;
-  }
 
   // TODO: tune the factor here
   float L1_limit_factor = 1.0;
@@ -427,6 +422,9 @@ void mm_get_cache_blocking(
 
   int64_t B_size_limit = L1_cache_size * L1_limit_factor;
   int64_t A_size_limit = L2_cache_size * L2_limit_factor;
+
+  constexpr size_t num_byte_A = sizeof(X_t);
+  constexpr size_t num_byte_B = sizeof(W_t);
 
   int64_t size_cache_B = K0 * Kc_blocks * N0 * Nc_blocks * num_byte_B;
   if (size_cache_B > B_size_limit) {
