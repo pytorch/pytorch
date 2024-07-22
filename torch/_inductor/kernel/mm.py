@@ -4,6 +4,11 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import torch
+from torch._inductor.autoheuristic.autoheuristic import AutoHeuristic, GlobalFeedback
+from torch._inductor.autoheuristic.autoheuristic_utils import (
+    AHContext,
+    context_add_strides,
+)
 from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
 from .. import config as inductor_config
@@ -450,6 +455,44 @@ def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
     return None
 
 
+def mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes):
+    def get_context(m, k, n, mat1, mat2):
+        context = AHContext()
+        context.add_feature("m", m)
+        context.add_feature("k", k)
+        context.add_feature("n", n)
+        context.add_feature("mat1_dtype", mat1.layout.dtype, is_categorical=True)
+        context.add_feature("mat2_dtype", mat2.layout.dtype, is_categorical=True)
+        context_add_strides(context, "mat1", mat1.layout.stride)
+        context_add_strides(context, "mat2", mat2.layout.stride)
+        context.add_feature(
+            "mat1_iscontig", mat1.layout.is_contiguous(), is_categorical=True
+        )
+        context.add_feature(
+            "mat2_iscontig", mat2.layout.is_contiguous(), is_categorical=True
+        )
+        return context
+
+    def fallback():
+        return "unsure"
+
+    choicestr2choice: Dict[str, Any] = {"unsure": None}
+    for choice in choices:
+        choicestr2choice[choice.autoheuristic_id()] = choice
+    choices_str = list(choicestr2choice.keys())
+    feedback = GlobalFeedback(inputs=input_nodes)
+    context = get_context(m, k, n, mat1, mat2)
+    autoheuristic = AutoHeuristic(
+        fallback=fallback,
+        choices=choices_str,
+        feedback=feedback,
+        context=context,
+        name=name,
+    )
+    choice_str = autoheuristic.get_choice()
+    return choicestr2choice.get(choice_str, None)
+
+
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
     static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
@@ -502,7 +545,14 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
 
     if skip_triton and not choices:
         choices = [fallback]
-    return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
+
+    name = "mixed_mm"
+    input_nodes = [mat1, mat2]
+    if torch._inductor.config.run_autoheuristic(name):
+        choice = mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes)
+        if choice is not None:
+            choices.insert(0, choice)
+    return autotune_select_algorithm(name, choices, input_nodes, layout)
 
 
 # This op is a special case of the int_mm op which we use based on the pattern
