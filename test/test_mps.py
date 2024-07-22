@@ -9250,8 +9250,44 @@ class TestLinalgMPS(TestCaseMPS):
             self.assertLess(mean_err, 0.05)
 
 
+class TestSDPA(TestCaseMPS):
+    def test_sdpa_1(self):
+        torch.manual_seed(1729)
+        max_seq_length = 72
+        causal_mask = torch.tril(
+            torch.ones(max_seq_length, max_seq_length, dtype=torch.bool, device='mps'),
+        )
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            for i in range(6, max_seq_length):
+                input_pos = torch.tensor([i], dtype=torch.int32, device='mps')
+                mask = causal_mask[None, None, input_pos]
+                q = torch.randn([1, 32, 1, 128], dtype=torch.float16, device="mps")
+                k = torch.randn([1, 32, max_seq_length, 128], dtype=torch.float16, device="mps")
+                v = torch.randn([1, 32, max_seq_length, 128], dtype=torch.float16, device="mps")
+                
+                y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False)
+                ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), dropout_p=0.0, is_causal=False)
+                mean_err = ((y.cpu() - ref).abs() / ref).mean().item()
+                if mean_err > 0.01:
+                    print(f"Error for i: {i} is: {mean_err}")
+                self.assertLess(mean_err, 0.01)
 
-
+    def test_sdpa_2(self):
+        torch.manual_seed(1729)
+        max_seq_length = 72
+        causal_mask = torch.tril(
+            torch.ones(max_seq_length, max_seq_length, dtype=torch.bool, device='mps'),
+        )
+        input_pos = torch.tensor([0, 1, 2, 3, 4, 5], dtype=torch.int32, device='mps')
+        mask = causal_mask[None, None, input_pos]
+        q = torch.randn([1, 32, 6, 128], dtype=torch.float16, device="mps")
+        k = torch.randn([1, 32, max_seq_length, 128], dtype=torch.float16, device="mps")
+        v = torch.randn([1, 32, max_seq_length, 128], dtype=torch.float16, device="mps")
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0)
+            ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), dropout_p=0.0)
+            mean_err = ((y.cpu() - ref).abs() / ref).mean()
+            self.assertLess(mean_err, 0.01)
 
 
 class TestGatherScatter(TestCaseMPS):

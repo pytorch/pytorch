@@ -12,33 +12,20 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_fused_sdp_choice_native.h>
-#include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_native.h>
+#include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
 #include <ATen/ops/empty_native.h>
 #endif
 
 namespace at::native {
-int64_t _fused_sdp_choice_mps(const Tensor& query,
-                              const Tensor& key,
-                              const Tensor& value,
-                              const std::optional<Tensor>& attn_mask,
-                              double dropout_p,
-                              bool is_causal,
-                              std::optional<double> scale) {
-  if (attn_mask.has_value() || dropout_p != 0.0 || !query.is_contiguous() || !key.is_contiguous() ||
-      !value.is_contiguous()) {
-    return static_cast<int64_t>(sdp::SDPBackend::math);
-  }
-  return static_cast<int64_t>(sdp::SDPBackend::flash_attention);
-}
 
-std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_mps(const Tensor& query,
-                                                                   const Tensor& key,
-                                                                   const Tensor& value,
-                                                                   double dropout_p,
-                                                                   bool is_causal,
-                                                                   const std::optional<Tensor>& attn_mask,
-                                                                   std::optional<double> scale) {
+std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& query,
+                                                                  const Tensor& key,
+                                                                  const Tensor& value,
+                                                                  const std::optional<Tensor>& attn_mask,
+                                                                  double dropout_p,
+                                                                  bool is_causal,
+                                                                  const std::optional<Tensor>& dropout_mask,
+                                                                  std::optional<double> scale) {
   using namespace mps;
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -53,7 +40,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_mps(const Tensor&
   int64_t num_head = query.size(1);
   int64_t headSize = query.size(3);
   auto out = at::empty({batchSize, num_head, qSize, headSize}, query.options());
-  auto scale_factor = sdp::calculate_scale(query, scale).as_float_unchecked();
+  auto scale_factor = sdp::calculate_scale(query, scale).sqrt().as_float_unchecked();
   @autoreleasepool {
     auto mkey = __func__ + getTensorsStringKey({query, key, value}) + ":" + std::to_string(is_causal) + ":" + std::to_string(attn_mask.has_value());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(mkey, [&](auto mpsGraph, auto graph) {
@@ -61,9 +48,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_mps(const Tensor&
       auto kTensor = mpsGraphRankedPlaceHolder(mpsGraph, key);
       auto vTensor = mpsGraphRankedPlaceHolder(mpsGraph, value);
       auto kT = [mpsGraph transposeTensor:kTensor dimension:2 withDimension:3 name:nil];
-      auto qkMM = [mpsGraph matrixMultiplicationWithPrimaryTensor:qTensor secondaryTensor:kT name:nil];
-      auto scaleTensor = [mpsGraph constantWithScalar:scale_factor shape:getMPSShape({1}) dataType:qkMM.dataType];
-      auto maskedMM = [mpsGraph multiplicationWithPrimaryTensor:qkMM secondaryTensor:scaleTensor name:nil];
+      auto scaleTensor = [mpsGraph constantWithScalar:scale_factor shape:getMPSShape({1}) dataType:kT.dataType];
+      auto sqTensor = [mpsGraph multiplicationWithPrimaryTensor:qTensor secondaryTensor:scaleTensor name:nil];
+      auto skT = [mpsGraph multiplicationWithPrimaryTensor:kT secondaryTensor:scaleTensor name:nil];
+      auto maskedMM = [mpsGraph matrixMultiplicationWithPrimaryTensor:sqTensor secondaryTensor:skT name:nil];
       if (is_causal) {
         auto causalMask = [mpsGraph constantWithScalar:1.0f shape:getMPSShape({qSize, qSize}) dataType:MPSDataTypeBool];
         causalMask = [mpsGraph bandPartWithTensor:causalMask numLower:-1 numUpper:0 name:nil];
@@ -76,11 +64,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_mps(const Tensor&
                                                   name:nil];
       } else if (attn_mask) {
         graph->attnTensor = mpsGraphRankedPlaceHolder(mpsGraph, *attn_mask);
-        auto minusInf = [mpsGraph constantWithScalar:-1e20 shape:maskedMM.shape dataType:maskedMM.dataType];
-        maskedMM = [mpsGraph selectWithPredicateTensor:graph->attnTensor
-                                   truePredicateTensor:maskedMM
-                                  falsePredicateTensor:minusInf
-                                                  name:nil];
+        maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM secondaryTensor:graph->attnTensor name:nil];
       }
       auto sm = [mpsGraph softMaxWithTensor:maskedMM axis:3 name:nil];
       auto output = [mpsGraph matrixMultiplicationWithPrimaryTensor:sm secondaryTensor:vTensor name:nil];
@@ -105,5 +89,4 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_mps(const Tensor&
   return {out, Tensor()};
 }
 
-REGISTER_MPS_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_mps);
 } // namespace at::native
