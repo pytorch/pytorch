@@ -945,9 +945,10 @@ def wait_for_process(p, timeout=None):
         else:
             p.kill()
         raise
-    except:  # noqa: B001,E722, copied from python core library
+    except Exception as e:
+        print(f"Exception received. Terminating the process. {e}", flush=True)
         p.kill()
-        raise
+        raise e
     finally:
         # Always call p.wait() to ensure exit
         exit_status = p.wait()
