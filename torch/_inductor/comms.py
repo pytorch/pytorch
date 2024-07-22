@@ -504,10 +504,6 @@ def enforce_comm_ordering_for_fsdp(
     snode_name_to_final_snode = {}
 
     def _create_group_node(snodes_to_group):
-        for snode in snodes_to_group:
-            assert hasattr(
-                snode, "min_order"
-            ), f"no min_order: snode: {snode}, snode.node: {snode.node}"
         group_node = scheduler.GroupedSchedulerNode.create(snodes_to_group)
         for snode in snodes_to_group:
             snode_name_to_final_snode[snode.get_name()] = group_node
