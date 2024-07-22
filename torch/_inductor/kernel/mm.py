@@ -4,7 +4,10 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import torch
-from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
+from torch._inductor.codegen.cpp_gemm_template import (
+    CppPackedGemmTemplate,
+    CppPackedWoQGemmTemplate,
+)
 from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
@@ -120,6 +123,10 @@ aten_addmm = ExternKernelChoice(
 )
 
 aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm")
+
+aten__weight_int8pack_mm = ExternKernelChoice(
+    torch._weight_int8pack_mm, "at::_weight_int8pack_mm", has_out_variant=False
+)
 
 
 def _is_int8_mat(mat):
@@ -395,6 +402,58 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             beta=beta,
         )
         return fallback_choice.output_node()
+
+
+@register_lowering(aten._weight_int8pack_mm, type_promotion_kind=None)
+def int8pack_mm(input, weight, scale, *, layout=None):
+    _, _, _, layout, mat1, mat2, vec1 = mm_args(
+        input, weight, scale, layout=layout, is_woq_gemm=True
+    )
+    assert (
+        mat1.get_dtype() in [torch.bfloat16, torch.float16, torch.float]
+        and mat2.get_dtype() == torch.int8
+    )
+    aten_layout = layout
+    if not use_max_autotune():
+        aten_layout = FlexibleLayout(
+            device=layout.device, dtype=layout.dtype, size=layout.size
+        )
+
+    # options to tune from
+    choices = (
+        [aten__weight_int8pack_mm.bind((mat1, mat2, vec1), aten_layout)]
+        if use_aten_gemm_kernels()
+        else []
+    )
+
+    if use_cpp_packed_gemm_template(aten_layout, mat1, mat2, is_woq_gemm=True):
+        CppPackedWoQGemmTemplate.add_choices(
+            choices,
+            aten_layout,
+            [mat1, mat2, vec1],
+        )
+
+    if (
+        len(choices) == 0
+        and not use_aten_gemm_kernels()
+        and inductor_config.autotune_fallback_to_aten
+    ):
+        log.warning("No choices for GEMM, using ATen backend as fallback")
+        return aten__weight_int8pack_mm.bind(
+            (mat1, mat2, vec1), aten_layout
+        ).output_node()
+
+    try:
+        return autotune_select_algorithm(
+            "_weight_int8pack_mm", choices, [mat1, mat2, vec1], aten_layout
+        )
+    except NoValidChoicesError:
+        if not inductor_config.autotune_fallback_to_aten:
+            raise
+        log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
+        return aten__weight_int8pack_mm.bind(
+            (mat1, mat2, vec1), aten_layout
+        ).output_node()
 
 
 def fallback_mixed_mm(mat1, mat2, *, out):

@@ -1149,7 +1149,7 @@ def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 
 
-def use_cpp_packed_gemm_template(layout, mat1, mat2):
+def use_cpp_packed_gemm_template(layout, mat1, mat2, is_woq_gemm=False):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
     from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
@@ -1164,7 +1164,10 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     int8_gemm = mat1.get_dtype() == torch.uint8
     layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
     m, n, k, layout, mat1, mat2 = mm_args(
-        mat1, mat2, out_dtype=layout.dtype if int8_gemm else None
+        mat1,
+        mat2,
+        out_dtype=layout.dtype if int8_gemm else None,
+        is_woq_gemm=is_woq_gemm,
     )
     # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
@@ -1172,7 +1175,10 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
 
-    output_dtype, _ = get_gemm_template_output_and_compute_dtype(mat1.get_dtype())
+    output_dtype, _ = get_gemm_template_output_and_compute_dtype(
+        mat1.get_dtype(), mat2.get_dtype()
+    )
+    compute_dtype = torch.float if is_woq_gemm else None
     micro_gemm = create_micro_gemm(
         "micro_gemm",
         m,
@@ -1181,6 +1187,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         input_dtype=mat1.get_dtype(),
         input2_dtype=mat2.get_dtype(),
         output_dtype=output_dtype,
+        compute_dtype=compute_dtype,
         num_threads=parallel_num_threads(),
     )
     return (
@@ -1189,6 +1196,8 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and mat2.is_module_buffer()
+        if not is_woq_gemm
+        else 1
     )
 
 

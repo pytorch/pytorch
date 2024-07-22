@@ -268,13 +268,24 @@ def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
     )
 
 
-def mm_args(mat1, mat2, *others, layout=None, out_dtype=None, use_4x2_dim=False):
+def mm_args(
+    mat1,
+    mat2,
+    *others,
+    layout=None,
+    out_dtype=None,
+    use_4x2_dim=False,
+    is_woq_gemm=False,
+):
     """
     Common arg processing for mm,bmm,addmm,etc
     """
     mat1, mat2 = realize_inputs(mat1, mat2)
     *b1, m, k1 = mat1.get_size()
-    *b2, k2, n = mat2.get_size()
+    if is_woq_gemm:
+        *b2, n, k2 = mat2.get_size()
+    else:
+        *b2, k2, n = mat2.get_size()
     b = [V.graph.sizevars.guard_equals(a, b) for a, b in zip(b1, b2)]
     if use_4x2_dim:
         k2 = k2 * 2
@@ -294,8 +305,8 @@ def mm_args(mat1, mat2, *others, layout=None, out_dtype=None, use_4x2_dim=False)
 
     from ..lowering import expand
 
-    others = [realize_inputs(expand(x, layout.size)) for x in others]
-
+    if not is_woq_gemm:
+        others = [realize_inputs(expand(x, layout.size)) for x in others]
     return [m, n, k, layout, mat1, mat2, *others]
 
 

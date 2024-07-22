@@ -430,6 +430,242 @@ inline void {{kernel_name}}_kernel(
         return result
 
 
+@register_micro_gemm(
+    *generate_gemm_config(
+        VecAVX512,
+        [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.bfloat16,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecAVX2,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.bfloat16,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecAVX512,
+        [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
+        input_dtype=torch.float,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecAVX2,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.float,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+    ),
+)
+class CppMicroGemmWoQGEMM(CppMicroGemmFP32Vec):
+    """
+    This class generates the code for WoQ micro gemm using fp32 vec instructions for compute.
+    It supports activation of bfloat16, float16 & float32 dtype, and weights of int8 datatype.
+    Currently, AMX is unsupported
+    """
+
+    DECLARE_KERNEL = r"""
+template <bool accum>
+inline void {{kernel_name}}(
+{%- if kernel_extra_args_declare %}
+    {{kernel_extra_args_declare}}
+{%- endif %}
+    const {{input_t}}* __restrict__ X,
+    const {{input2_t}}* __restrict__ W,
+    const {{input_t}}* __restrict__ S,
+    {{output_t}}* __restrict__ Y,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc
+)
+"""
+
+    TEMPLATE_ENTRY = r"""
+{{declare_kernel}} {
+    TORCH_CHECK(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
+    TORCH_CHECK(K % {{block_k}} == 0, "K dimension must be multiple of {{block_k}}");
+    // TODO(jgong5): loop unroll for M and N
+    for (int64_t m = 0; m < M; m += {{block_m}}) {
+        int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
+        for (int64_t n = 0; n < N; n += {{block_n}}) {
+            if (block_m == {{block_m}}) {
+                {{kernel_name}}_kernel<{{block_m}}, {{block_n}}, accum>(
+                    X + m * lda,
+                    W + n,
+                    S + n,
+                    Y + m * ldc + n,
+                    K,
+                    lda,
+                    ldb,
+                    ldc
+                );
+            } else {
+                switch (block_m) {
+                {%- for b in range(block_m - 1, 0, -1) %}
+                case {{b}}:
+                    {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum>(
+                        X + m * lda,
+                        W + n,
+                        S + n,
+                        Y + m * ldc + n,
+                        K,
+                        lda,
+                        ldb,
+                        ldc
+                    );
+                    break;
+                {%- endfor %}
+                default:
+                    {{kernel.assert_function}}(false, "Unsupported block_m: ", block_m);
+                }
+            }
+        }
+    }
+}
+"""
+
+    TEMPLATE_KERNEL = r"""
+template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
+inline void {{kernel_name}}_kernel(
+    const {{input_t}}* __restrict__ X,
+    const {{input2_t}}* __restrict__ W,
+    const {{input_t}}* __restrict__ S,
+    {{input_t}}* __restrict__ Y,
+    int64_t K,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc
+) {
+    using Vectorized = at::vec::Vectorized<float>;
+    using VectorizedIn = at::vec::Vectorized<{{input_t}}>;
+    using VectorizedW = at::vec::Vectorized<{{input2_t}}>;
+
+    constexpr auto VLEN = Vectorized::size();
+    constexpr auto ROWS = BLOCK_M;
+    constexpr auto COLS = BLOCK_N / VLEN;
+
+    Vectorized va;
+    at::vec::VectorizedN<float, COLS> vb;
+    at::vec::VectorizedN<float, ROWS*COLS> vc;
+    at::vec::VectorizedN<float, COLS> scale;
+
+    auto load_scale = [&](int i) {
+        {%- if input_dtype == torch.bfloat16 or input_dtype == torch.float16 %}
+        auto scale_bf16 = VectorizedIn::loadu(S + i * VLEN, VLEN);
+        scale[i] = at::vec::convert<float>(scale_bf16);
+        {%- else %}
+        scale[i] = VectorizedIn::loadu(S + i * VLEN, VLEN);
+        {%- endif %}
+    };
+    c10::ForcedUnroll<COLS>{}(load_scale);
+
+    auto loadc = [&](auto i) {
+        if constexpr (accum) {
+            constexpr int row = i / COLS;
+            constexpr int col = i % COLS;
+            {%- if input_dtype == torch.bfloat16 or input_dtype == torch.float16 %}
+            auto c = VectorizedIn::loadu(Y + row * ldc + col * VLEN, VLEN);
+            vc[i] = at::vec::convert<float>(c);
+            {%- else %}
+            vc[i] = VectorizedIn::loadu(Y + row * ldc + col * VLEN, VLEN);
+            {%- endif %}
+        } else {
+            vc[i] = Vectorized(0.0f);
+        }
+    };
+    c10::ForcedUnroll<ROWS * COLS>{}(loadc);
+
+    auto compute = [&, COLS](auto i, int k) {
+        constexpr int row = i / COLS;
+        constexpr int col = i % COLS;
+
+        if constexpr (col == 0) {
+            va = Vectorized(static_cast<{{compute_t}}>(X[row * lda + k]));
+        }
+
+        if constexpr (row == 0) {
+            auto b32 = at::vec::convert_to_int32<int8_t>(W + k * ldb + col * VLEN);
+            vb[col] = at::vec::convert<float>(b32);
+            vb[col] = vb[col] * scale[col];
+        }
+
+        constexpr int idx = row * COLS + col;
+        vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
+    };
+
+    {{kernel.unroll_pragma(4)}}
+    for (int k = 0; k < K; ++k) {
+        c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
+    }
+
+    // store to C
+    auto storec = [&](auto i) {
+        constexpr int row = i / COLS;
+        constexpr int col = i % COLS;
+        {%- if input_dtype == torch.bfloat16 or input_dtype == torch.float16 %}
+        auto vc_bf16 = at::vec::convert<{{input_t}}>(vc[i]);
+        vc_bf16.store(Y + row * ldc + col * VLEN, VLEN);
+        {%- else %}
+        vc[i].store(Y + row * ldc + col * VLEN, VLEN);
+        {%- endif %}
+    };
+    c10::ForcedUnroll<ROWS * COLS>{}(storec);
+}
+"""
+
+    def codegen_call(
+        self,
+        kernel: CppTemplateKernel,
+        X: ir.Buffer,
+        W: ir.Buffer,
+        S: ir.Buffer,
+        Y: ir.Buffer,
+        accum: bool,
+    ) -> str:
+        """
+        Generate the code for calling the templated kernel that computes
+        `C += alpha * A @ B` if `accum` is True, or `C = alpha * A @ B` otherwise.
+        """
+        X_ptr = f"&({kernel.index(X, [0, 0])})"
+        W_ptr = f"&({kernel.index(W, [0, 0])})"
+        S_ptr = f"&({kernel.index(S, [0])})"
+        Y_ptr = f"&({kernel.index(Y, [0, 0])})"
+        M = kernel.size(Y, 0)
+        N = kernel.size(Y, 1)
+        K = kernel.size(X, 1)
+        lda = kernel.stride(X, 0)
+        ldb = kernel.stride(W, 0)
+        ldc = kernel.stride(Y, 0)
+        res = IndentedBuffer()
+        res.writeline(f"{self.name}<{value_to_cpp(accum, 'bool')}>(")
+        with res.indent():
+            extra_args = self.get_kernel_extra_args()
+            if extra_args:
+                res.writeline(extra_args)
+            res.writeline(f"{X_ptr},")
+            res.writeline(f"{W_ptr},")
+            res.writeline(f"{S_ptr},")
+            res.writeline(f"{Y_ptr},")
+            res.writeline(f"{M},")
+            res.writeline(f"{N},")
+            res.writeline(f"{K},")
+            res.writeline(f"{lda},")
+            res.writeline(f"{ldb},")
+            res.writeline(f"{ldc}")
+        res.writeline(");")
+        return res.getvalue()
+
+
 # extra check for CppMicroGemmAMX
 def check_amx_extra(config, m, n, k, alpha, num_threads):
     vnni_size = 4 if config.input_dtype == torch.uint8 else 2

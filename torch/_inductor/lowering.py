@@ -6404,7 +6404,7 @@ from . import quantized_lowerings
 
 
 quantized_lowerings.register_quantized_ops()
-quantized_lowerings.register_woq_mm_ops()
+# quantized_lowerings.register_woq_mm_ops()
 
 from . import mkldnn_lowerings
 

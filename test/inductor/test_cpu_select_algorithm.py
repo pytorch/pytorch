@@ -17,6 +17,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyCPU,
 )
 from torch.testing._internal.common_quantization import _generate_qdq_quantized_model
 from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
@@ -464,6 +465,72 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
+
+    @onlyCPU
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    def test_int8_woq_mm(self):
+        batch_size = 384
+        in_features = 192
+        out_features = 384
+
+        def _dynamically_quantize_per_channel(x, quant_min, quant_max, target_dtype):
+            # From test/test_linalg.py
+            # source: https://github.com/pytorch-labs/gpt-fast/blob/main/quantize.py
+            # default setup for affine quantization of activations
+            x_dtype = x.dtype
+            x = x.float()
+            eps = torch.finfo(torch.float32).eps
+
+            # get min and max
+            min_val, max_val = torch.aminmax(x, dim=1)
+
+            # calculate scales and zero_points based on min and max
+            # reference: https://fburl.com/code/srbiybme
+            min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
+            max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
+            device = min_val_neg.device
+
+            # reference: https://fburl.com/code/4wll53rk
+            max_val_pos = torch.max(-min_val_neg, max_val_pos)
+            scales = max_val_pos / (float(quant_max - quant_min) / 2)
+            # ensure scales is the same dtype as the original tensor
+            scales = torch.clamp(scales, min=eps).to(x.dtype)
+            zero_points = torch.zeros(
+                min_val_neg.size(), dtype=torch.int64, device=device
+            )
+
+            # quantize based on qmin/qmax/scales/zp
+            x_div = x / scales.unsqueeze(-1)
+            x_round = torch.round(x_div)
+            x_zp = x_round + zero_points.unsqueeze(-1)
+            quant = torch.clamp(x_zp, quant_min, quant_max).to(target_dtype)
+
+            return quant, scales.to(x_dtype), zero_points
+
+        def _convert_weight_to_int8pack(w):
+            w_int8pack, w_scales, _ = _dynamically_quantize_per_channel(
+                w, -128, 127, torch.int8
+            )
+            return w_int8pack, w_scales
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch.compile
+            def forward(self, x, w, scale):
+                return torch._weight_int8pack_mm(x, w, scale)
+
+        counters.clear()
+        mod = M().eval()
+        x = torch.rand((batch_size, in_features), dtype=torch.bfloat16)
+        w = torch.rand((out_features, in_features), dtype=torch.bfloat16)
+        w_int8pack, w_scales = _convert_weight_to_int8pack(w)
+        self.common(mod, (x, w_int8pack, w_scales))
+        # TODO(jgong5): support transposed input
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
