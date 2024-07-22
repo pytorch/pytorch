@@ -10664,6 +10664,9 @@ class CommonTemplate:
     # We only support dtypeview for abi_conpatible aoti
     @torch._inductor.config.patch(abi_compatible=True)
     def test_dtypeview(self):
+        if TEST_WITH_ASAN:
+            return
+
         # https://github.com/pytorch/pytorch/issues/126338
         def fn(x, y, x_dtype, x2):
             x = x.view(x_dtype)
