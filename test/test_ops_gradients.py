@@ -36,6 +36,13 @@ class TestBwdGradients(TestGradients):
         else:
             self._grad_test_helper(device, dtype, op, op.get_op())
 
+    def setUp(self):
+        TestGradients.setUp(self)
+        # reset dynamo cache to avoid issues like
+        # https://github.com/pytorch/pytorch/issues/125967#issuecomment-2118483919
+        # which depends on test order.
+        torch._dynamo.reset()
+
     # Method grad (and gradgrad, see below) tests are disabled since they're
     #   costly and redundant with function grad (and gradgad) tests
     # @_gradcheck_ops(op_db)
