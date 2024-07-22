@@ -403,6 +403,9 @@ class CppPackedGemmTemplate(CppTemplate):
 
     def log_blockings(self):
         log.debug(f"Register blocking: {self.register_blocking}")  # noqa: G004
+        if self.is_dynamic_M:
+            # thread and cache blockings are determined at runtime for dynamic shapes
+            return
         log.debug(f"Cache blocking: {self.cache_blocking()}")  # noqa: G004
         thread_blocking = self.thread_blocking()
         log.debug(f"Thread blocking: {thread_blocking}")  # noqa: G004
