@@ -27,46 +27,46 @@ python test/run_test.py --cpp --verbose -i \
   cpp/legacy_vmap_test \
   cpp/operators_test
 
-if [[ -x ./tensor_interop_test ]]; then
+if [[ -x ${CPP_TESTS_DIR}/tensor_interop_test ]]; then
   python test/run_test.py --cpp --verbose -i cpp/tensor_interop_test
 fi
-if [[ -x ./cudnn_test ]]; then
+if [[ -x ${CPP_TESTS_DIR}/cudnn_test ]]; then
   python test/run_test.py --cpp --verbose -i cpp/cudnn_test
 fi
-if [[ -x ./cuda_generator_test ]]; then
+if [[ -x ${CPP_TESTS_DIR}/cuda_generator_test ]]; then
   python test/run_test.py --cpp --verbose -i cpp/cuda_generator_test
 fi
-if [[ -x ./apply_test ]]; then
+if [[ -x ${CPP_TESTS_DIR}/apply_test ]]; then
   python test/run_test.py --cpp --verbose -i cpp/apply_test
 fi
-if [[ -x ./stream_test ]]; then
+if [[ -x ${CPP_TESTS_DIR}/stream_test ]]; then
   python test/run_test.py --cpp --verbose -i cpp/stream_test
 fi
-if [[ -x ./cuda_half_test ]]; then
+if [[ -x ${CPP_TESTS_DIR}/cuda_half_test ]]; then
   python test/run_test.py --cpp --verbose -i cpp/cuda_half_test
 fi
-if [[ -x ./cuda_vectorized_test ]]; then
+if [[ -x ${CPP_TESTS_DIR}/cuda_vectorized_test ]]; then
   python test/run_test.py --cpp --verbose -i cpp/cuda_vectorized_test
 fi
-if [[ -x ./cuda_distributions_test ]]; then
+if [[ -x ${CPP_TESTS_DIR}/cuda_distributions_test ]]; then
   python test/run_test.py --cpp --verbose -i cpp/cuda_distributions_test
 fi
-if [[ -x ./cuda_optional_test ]]; then
+if [[ -x ${CPP_TESTS_DIR}/cuda_optional_test ]]; then
   python test/run_test.py --cpp --verbose -i cpp/cuda_optional_test
 fi
-if [[ -x ./cuda_tensor_interop_test ]]; then
+if [[ -x ${CPP_TESTS_DIR}/cuda_tensor_interop_test ]]; then
   python test/run_test.py --cpp --verbose -i cpp/cuda_tensor_interop_test
 fi
-if [[ -x ./cuda_complex_test ]]; then
+if [[ -x ${CPP_TESTS_DIR}/cuda_complex_test ]]; then
   python test/run_test.py --cpp --verbose -i cpp/cuda_complex_test
 fi
-if [[ -x ./cuda_complex_math_test ]]; then
+if [[ -x ${CPP_TESTS_DIR}/cuda_complex_math_test ]]; then
   python test/run_test.py --cpp --verbose -i cpp/cuda_complex_math_test
 fi
-if [[ -x ./cuda_cub_test ]]; then
+if [[ -x ${CPP_TESTS_DIR}/cuda_cub_test ]]; then
   python test/run_test.py --cpp --verbose -i cpp/cuda_cub_test
 fi
-if [[ -x ./cuda_atomic_ops_test ]]; then
+if [[ -x ${CPP_TESTS_DIR}/cuda_atomic_ops_test ]]; then
   python test/run_test.py --cpp --verbose -i cpp/cuda_atomic_ops_test
 fi
 
@@ -74,7 +74,7 @@ if [ "$VALGRIND" == "ON" ]; then
   # NB: As these tests are invoked by valgrind, let's leave them for now as it's
   # unclear if valgrind -> python -> gtest would work
   valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 "${CPP_TESTS_DIR}/basic" --gtest_filter='-*CUDA'
-  if [[ -x ./tensor_interop_test ]]; then
+  if [[ -x ${CPP_TESTS_DIR}/tensor_interop_test ]]; then
     valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 "${CPP_TESTS_DIR}/tensor_interop_test"
   fi
 fi
