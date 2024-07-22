@@ -1,6 +1,6 @@
 import functools
-
 from typing import Any, Callable, Dict, List, Tuple
+
 
 Feedback = float
 Choice = str
@@ -106,7 +106,6 @@ class AHMetadata:
         return {
             "shared_memory": self.shared_memory,
             "device_capa": self.device_capa,
-            "choices": self.choices,
             "name": self.name,
         }
 
