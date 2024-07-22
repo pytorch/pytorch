@@ -133,6 +133,7 @@ extern "C"
                 const int64_t n_size = n_end - n_start;
                 {%- if use_local_acc %}
                 {%- set acc = kernel.local_buffers[acc_buf_name] %}
+                {{ kernel.reinit_buffer_if_null(acc_buf_name) }}
                 {%- else %}
                 {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
                 {%- endif %}
@@ -151,7 +152,7 @@ extern "C"
                 {%- if maybe_k_slicing %}
                 if (num_k_slices > 1) {
                     const int64_t mxn_cache_block_id = mc * num_Nc_blocks + nc;
-                    local_buf_ptrs[mxn_cache_block_id * num_k_slices + k_slice_id].reset(_{{acc_buf_name}}.release());
+                    local_buf_ptrs[mxn_cache_block_id * num_k_slices + k_slice_id].reset({{ kernel.release_buffer(acc_buf_name) }});
                 } else
                 {%- endif %}
                 {
@@ -352,6 +353,8 @@ class CppPackedGemmTemplate(CppTemplate):
             # Nc_blocks is always 1
             Nc_blocks = 1
             Kc_blocks = thread_blocking.block_k
+
+            # return Mc_blocks, Nc_blocks, Kc_blocks
 
             # TODO: tune the factor here
             L1_limit_factor = 1

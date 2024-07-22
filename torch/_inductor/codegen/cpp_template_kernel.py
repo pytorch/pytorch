@@ -181,6 +181,19 @@ class CppTemplateKernel(CppKernel):
         numel = f"{cexpr_index(buf.get_numel())}"
         return f"auto _{name} = std::make_unique<{ctype}[]>({numel}); auto {name} = _{name}.get();"
 
+    def reinit_buffer_if_null(self, name):
+        """Reinit the previously defined local buffer if it is null"""
+        assert name in self.local_buffers
+        buf = self.local_buffers[name]
+        ctype = f"{DTYPE_TO_CPP[buf.layout.dtype]}"
+        numel = f"{cexpr_index(buf.get_numel())}"
+        return f"if (_{name} == nullptr) {{ _{name} = std::make_unique<{ctype}[]>({numel}); {name} = _{name}.get(); }}"
+
+    def release_buffer(self, name):
+        """Codegen the code to release the ownership of a local buffer to others"""
+        assert name in self.local_buffers
+        return f"_{name}.release()"
+
     def store_pointwise_nodes(
         self,
         dst: ir.Buffer,
