@@ -10,7 +10,6 @@ from torch.testing._internal.opinfo.core import (
     SampleInput,
 )
 from torch.testing._internal.common_dtype import all_types_and, custom_types
-from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.opinfo.core import DecorateInfo
 from torch.nn.attention.flex_attention import flex_attention, _create_empty_block_mask
 
