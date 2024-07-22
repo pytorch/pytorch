@@ -280,8 +280,8 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands, **kwarg
         for val in torch.utils._pytree.tree_flatten(kwargs)[0]
     ):
         raise NotImplementedError(
-            f"Run vmap on autograd.Function with kwarg-only Tensor args. In the original "
-            f"definition of the op, please make your tensors not kwarg-only. "
+            f"Run vmap on autograd.Function with kwarg-only Tensor args. "
+            f"Please do not pass kwarg-only Tensors to autograd.Function. "
             f"Got: {kwargs}"
         )
 
