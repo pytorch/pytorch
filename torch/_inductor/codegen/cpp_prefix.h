@@ -392,15 +392,8 @@ void mm_get_thread_blocking(
 
   for (int i = 0; i < count; ++i) {
     int64_t factor = factors[i];
-    if (n_blocks >= factor) {
-      auto [Mt_, Nt_, Kt_] = get_blocking(
-          num_threads, factor, m_blocks, n_blocks, k_blocks);
-      if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
-        std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
-      }
-    }
     int64_t cofactor = num_threads / factor;
-    if (m_blocks >= cofactor) {
+    if (n_blocks >= factor || m_blocks >= cofactor) {
       auto [Mt_, Nt_, Kt_] = get_blocking(
           num_threads, factor, m_blocks, n_blocks, k_blocks);
       if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
@@ -408,6 +401,8 @@ void mm_get_thread_blocking(
       }
     }
   }
+
+  assert(Mt != 0);
 }
 
 inline void mm_get_thread_blocks(
