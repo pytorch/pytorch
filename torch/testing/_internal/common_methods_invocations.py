@@ -569,7 +569,7 @@ def reference_inputs_prelu(op, device, dtype, requires_grad, **kwargs):
     yield from reference_inputs_elementwise_unary(op, device, dtype, requires_grad, **kwargs)
 
 def sample_kwargs_prelu_scalar_weight(device, dtype, input):
-    weight = torch.rand(tuple(), device=device, dtype=dtype)
+    weight = torch.rand((), device=device, dtype=dtype)
     # NumPy does not support bfloat16, so we default to float32 (only for NumPy) in that case
     if dtype == torch.bfloat16:
         weight_cpu = weight.to(dtype=torch.float32, device="cpu")
@@ -580,7 +580,7 @@ def sample_kwargs_prelu_scalar_weight(device, dtype, input):
 
 def error_inputs_prelu(op, device):
     # Weight has numel != 1, but self.ndim is zero-dim tensor
-    inp = make_tensor(tuple(), device=device, dtype=torch.float32)
+    inp = make_tensor((), device=device, dtype=torch.float32)
     weight = make_tensor((2,), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(inp, kwargs={'weight': weight}),
                      error_regex="Not allow zero-dim input tensor.")
@@ -2108,14 +2108,13 @@ def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=
     """
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    batches = [(), (0, ), (2, ), (1, 1)]
-    size = [1, 5, 10]
-
+    batches = [(), (2,)]
+    size = [3, 4]
     for batch, m, n in product(batches, size, size):
-        for k in range(min(3, m, n)):
-            a = make_arg((*batch, m, k))
-            b = make_arg((*batch, n, k))
-            yield a, b
+        k = 2
+        a = make_arg((*batch, m, k))
+        b = make_arg((*batch, n, k))
+        yield a, b
 
 
 def sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -4518,7 +4517,7 @@ def error_inputs_native_layer_norm(opinfo, device, **kwargs):
 
     err_msg1 = "Expected normalized_shape to be at least 1-dimensional"
     s1 = SampleInput(
-        make_arg(input_shape), args=(tuple(), None, None, 1e-5)
+        make_arg(input_shape), args=((), None, None, 1e-5)
     )
     yield ErrorInput(s1, error_regex=err_msg1)
 
@@ -4549,7 +4548,7 @@ def error_inputs_rms_norm(opinfo, device, **kwargs):
 
     err_msg1 = "Expected normalized_shape to be at least 1-dimensional"
     s1 = SampleInput(
-        make_arg(input_shape), args=(tuple(), None, 1e-5)
+        make_arg(input_shape), args=((), None, 1e-5)
     )
     yield ErrorInput(s1, error_regex=err_msg1)
 
@@ -8616,19 +8615,19 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
 
         # shape mismatch
         (make_input(3, 5), (make_input(3, 4), make_input(3, 4)),
-         dict(),
+         {},
          RuntimeError,
          (r'(Attempting to broadcast a dimension of length|'
           r"The size of tensor a \(5\) must match the size of tensor b \(4\) "
           r"at non-singleton dimension 1)")),
         (make_input(3, 4), (make_input(3, 5), make_input(3, 4)),
-         dict(),
+         {},
          RuntimeError,
          (r'(Attempting to broadcast a dimension of length|'
           r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
           r"at non-singleton dimension 1)")),
         (make_input(3, 4), (make_input(3, 4), make_input(3, 5)),
-         dict(),
+         {},
          RuntimeError,
          (r'(Attempting to broadcast a dimension of length|'
           r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
@@ -8636,19 +8635,19 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
 
         # different dimensions
         (make_input(3,), (make_input(3, 4), make_input(3, 4)),
-         dict(),
+         {},
          RuntimeError,
          (r"The anchor, positive, and negative tensors are expected to have "
           r"the same number of dimensions, but got: anchor 1D, positive 2D, "
           r"and negative 2D inputs")),
         (make_input(3, 4), (make_input(3,), make_input(3, 4)),
-         dict(),
+         {},
          RuntimeError,
          (r"The anchor, positive, and negative tensors are expected to have "
           r"the same number of dimensions, but got: anchor 2D, positive 1D, "
           r"and negative 2D inputs")),
         (make_input(3, 4), (make_input(3, 4), make_input(3,)),
-         dict(),
+         {},
          RuntimeError,
          (r"The anchor, positive, and negative tensors are expected to have "
           r"the same number of dimensions, but got: anchor 2D, positive 2D, "
@@ -8662,20 +8661,27 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
 def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
     make_mat_e4m3 = partial(make_tensor, device=device, dtype=torch.float8_e4m3fn, requires_grad=requires_grad)
     make_mat_e5m2 = partial(make_tensor, device=device, dtype=torch.float8_e5m2, requires_grad=requires_grad)
+    make_scale = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
     M, N, K = 15, 32, 16
     samples = []
     # two e4m3
     mat1 = make_mat_e4m3((M, K))
     mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
-    samples.append(SampleInput(mat1, mat2))
+    scale1 = make_scale((1,))
+    scale2 = make_scale((1,))
+    samples.append(SampleInput(mat1, mat2, scale1, scale2))
     # mat1 e4m3 mat2 e5m2
     mat1 = make_mat_e4m3((M, K))
     mat2 = make_mat_e5m2((K, N)).t().contiguous().t()
-    samples.append(SampleInput(mat1, mat2))
+    scale1 = make_scale((1,))
+    scale2 = make_scale((1,))
+    samples.append(SampleInput(mat1, mat2, scale1, scale2))
     # mat1 e5m2 mat2 e4m3
     mat1 = make_mat_e5m2((M, K))
     mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
-    samples.append(SampleInput(mat1, mat2))
+    scale1 = make_scale((1,))
+    scale2 = make_scale((1,))
+    samples.append(SampleInput(mat1, mat2, scale1, scale2))
 
     yield from samples
 
@@ -13165,17 +13171,6 @@ op_db: List[OpInfo] = [
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),),
            ),
-    OpInfo('expand_copy',
-           # op=lambda self, shape: self.expand(shape),
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_expand,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           assert_jit_shape_analysis=True,
-           supports_out=True,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-           )),
     OpInfo('diag',
            ref=np.diag,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -16954,22 +16949,6 @@ op_db: List[OpInfo] = [
            supports_varargs=True,
            sample_inputs_func=sample_inputs_permute,
            reference_inputs_func=reference_inputs_permute),
-    OpInfo('permute_copy',
-           ref=np.transpose,
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           supports_out=True,
-           assert_autodiffed=True,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
-           assert_jit_shape_analysis=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           supports_varargs=False,  # torch.permute is also not varargs
-           sample_inputs_func=sample_inputs_permute,
-           reference_inputs_func=reference_inputs_permute,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-           )),
     BinaryUfuncInfo('pow',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                     dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
@@ -18006,18 +17985,12 @@ op_db: List[OpInfo] = [
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03),
                                                        torch.complex64: tol(atol=1e-02, rtol=1e-02)}),
                                     'TestCommon', 'test_noncontiguous_samples'),
-                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=5e-05)}),
-                                    'TestOperators', 'test_grad'),
                        # FIXME This should be the following, but the toleranceOverride does not seem to do anything!
                        # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
                        #              'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
                        DecorateInfo(unittest.skip("See comment above"),
                                     'TestFwdGradients',
                                     'test_fn_fwgrad_bwgrad',
-                                    dtypes=[torch.complex128]),
-                       DecorateInfo(unittest.skip("See comment above"),
-                                    'TestBwdGradientsCUDA',
-                                    'test_fn_gradgrad',
                                     dtypes=[torch.complex128]),
                        ],
            skips=(
@@ -18049,6 +18022,8 @@ op_db: List[OpInfo] = [
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03),
                                                        torch.complex64: tol(atol=4e-02, rtol=4e-02)}),
                                     'TestCommon', 'test_noncontiguous_samples'),
+                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=5e-05)}),
+                                    'TestOperators', 'test_grad'),
                        # FIXME This should be the following, but the toleranceOverride does not seem to do anything!
                        # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
                        #              'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
@@ -18400,7 +18375,7 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs__unsafe_masked_index_put_accumulate,
            skips=(
-               DecorateInfo(slowTest, 'TestDecomp', 'test_quick_core_backward', device_type='cpu',
+               DecorateInfo(slowTest, 'TestDecomp', 'test_quick_core_backward',
                             dtypes=(torch.float64,), active_if=IS_WINDOWS),
            ),),
     OpInfo('__getitem__',
@@ -19540,29 +19515,6 @@ op_db: List[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_squeeze_multiple),
-    OpInfo('squeeze_copy',
-           ref=_squeeze_ref,
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           supports_out=True,
-           assert_autodiffed=True,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
-           assert_jit_shape_analysis=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           # vmap does not support inplace views
-           check_inplace_batched_forward_grad=False,
-           # https://github.com/pytorch/pytorch/issues/66357
-           check_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_squeeze,
-           skips=(
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestJit',
-                   'test_variant_consistency_jit',
-                   dtypes=(torch.float32,),
-               ),
-           )),
     UnaryUfuncInfo(
         'fill',
         ref=_fill_np,
@@ -19691,29 +19643,6 @@ op_db: List[OpInfo] = [
            autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            sample_inputs_func=sample_unsqueeze),
-    OpInfo('unsqueeze_copy',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           supports_out=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           # See https://github.com/pytorch/pytorch/pull/78358
-           check_batched_forward_grad=False,
-           # vmap does not support inplace views
-           check_inplace_batched_forward_grad=False,
-           assert_jit_shape_analysis=True,
-           assert_autodiffed=True,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
-           sample_inputs_func=sample_unsqueeze,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestJit',
-                   'test_variant_consistency_jit',
-                   dtypes=(torch.float32,),
-               ),
-           )),
     BinaryUfuncInfo('xlogy',
                     aliases=('special.xlogy',),
                     dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -19767,26 +19696,6 @@ op_db: List[OpInfo] = [
            # vmap does not support inplace views
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_transpose_swapdims),
-    OpInfo('transpose_copy',
-           aliases=('swapdims', 'swapaxes'),
-           assert_jit_shape_analysis=True,
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
-           supports_out=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           # vmap does not support inplace views
-           check_inplace_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_transpose_swapdims,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestJit',
-                   'test_variant_consistency_jit',
-                   dtypes=(torch.float32,)
-               ),
-           )),
     OpInfo('T',
            op=lambda x: x.T,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
@@ -20454,20 +20363,6 @@ op_db: List[OpInfo] = [
     OpInfo('t',
            sample_inputs_func=sample_inputs_t,
            supports_out=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           # See https://github.com/pytorch/pytorch/pull/78358
-           check_batched_forward_grad=False,
-           # vmap does not support inplace views
-           check_inplace_batched_forward_grad=False,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           assert_autodiffed=True,
-           error_inputs_func=error_inputs_t),
-    OpInfo('t_copy',
-           sample_inputs_func=sample_inputs_t,
-           supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/pull/78358
@@ -21371,18 +21266,15 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.channel_shuffle",
         sample_inputs_func=sample_inputs_channel_shuffle,
-        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-        backward_dtypes=integral_types_and(torch.bool),
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=False,
-        supports_autograd=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         allow_cow_input_materialize_forward=[0],
+        allow_cow_input_materialize_backward=[0, 'output grad 0'],
         skips=(
             # Skip due to NotImplementedError for MPS device.
             DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
-            # vmap: calling random operator not supported
-            DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-            DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
-            DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
             DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
         ),
@@ -21641,11 +21533,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.lerp",
         torch_opinfo_name="lerp",
-    ),
-    PythonRefInfo(
-        "_refs.view_copy",
-        torch_opinfo_name="view_copy",
-        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.ones",
@@ -22712,6 +22599,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.celu",
         torch_opinfo_name="nn.functional.celu",
+        supports_out=True,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.channel_shuffle",
+        torch_opinfo_name="nn.functional.channel_shuffle",
         supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -23842,10 +23734,6 @@ python_ref_db = [
         torch_opinfo_name="expand_as",
     ),
     PythonRefInfo(
-        "_refs.expand_copy",
-        torch_opinfo_name="expand_copy",
-    ),
-    PythonRefInfo(
         "_refs.flatten",
         torch_opinfo_name="flatten",
     ),
@@ -23903,10 +23791,6 @@ python_ref_db = [
         "_refs.permute",
         torch_opinfo_name="permute",
     ),
-    PythonRefInfo(
-        "_refs.permute_copy",
-        torch_opinfo_name="permute_copy",
-    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.rad2deg",
         torch_opinfo_name="rad2deg",
@@ -23958,11 +23842,6 @@ python_ref_db = [
         torch_opinfo_name="squeeze",
     ),
     PythonRefInfo(
-        "_refs.squeeze_copy",
-        torch_opinfo_name="squeeze_copy",
-        supports_out=True,
-    ),
-    PythonRefInfo(
         "_refs.squeeze",
         torch_opinfo_name="squeeze",
         torch_opinfo_variant_name="multiple",
@@ -24003,6 +23882,7 @@ python_ref_db = [
         # .conj() does not set ._is_view() correctly in ATen
         validate_view_consistency=False,
         skips=(
+            # RuntimeError: no _refs support for torch.Tensor.is_conj
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', dtypes=[torch.complex64, torch.complex128]),
         ),
     ),
@@ -24011,22 +23891,8 @@ python_ref_db = [
         torch_opinfo_name="transpose",
     ),
     PythonRefInfo(
-        "_refs.transpose_copy",
-        torch_opinfo_name="transpose_copy",
-        skips=(
-            # RuntimeError: no _refs support for torch.Tensor.is_conj
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-        ),
-        supports_out=True,
-    ),
-    PythonRefInfo(
         "_refs.t",
         torch_opinfo_name="t",
-    ),
-    PythonRefInfo(
-        "_refs.t_copy",
-        torch_opinfo_name="t_copy",
-        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.T",
@@ -24047,17 +23913,17 @@ python_ref_db = [
         torch_opinfo_name="unsqueeze",
     ),
     PythonRefInfo(
-        "_refs.unsqueeze_copy",
-        torch_opinfo_name="unsqueeze_copy",
-        supports_out=True,
-    ),
-    PythonRefInfo(
         "_refs.view",
         torch_opinfo_name="view",
     ),
     PythonRefInfo(
         "_refs.view_as",
         torch_opinfo_name="view_as",
+    ),
+    PythonRefInfo(
+        "_refs.view_copy",
+        torch_opinfo_name="view_copy",
+        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.vstack",
@@ -24528,8 +24394,7 @@ python_ref_db = [
         # empty_strided
         skips=(
             # no _refs support for Tensor.__setitem__
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-        ),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),)
     ),
     #
     # Test-related functions

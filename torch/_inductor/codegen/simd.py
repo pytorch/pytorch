@@ -28,13 +28,12 @@ import sympy
 
 import torch
 import torch._logging
-
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
+
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash
-
 from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
 from ..ir import TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
@@ -200,7 +199,11 @@ class IterationRangesRoot(IterationRanges):
         """Figure out vars from this tree used in index"""
         nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
         nodes = [n for n in nodes if n and n.prefix == self.prefix]
-        nodes.sort(key=lambda x: V.graph.sizevars.size_hint(x.divisor))
+        nodes.sort(
+            key=lambda x: V.graph.sizevars.size_hint(
+                x.divisor, fallback=config.unbacked_symint_fallback
+            )
+        )
         divisor = sympy.Integer(1)
         index_vars = []
         sizes = []
@@ -690,7 +693,16 @@ class SIMDKernel(Kernel):
                     replacements = {a: V.graph.sizevars.lookup_precomputed_size(a)}
                     index = sympy_subs(index, replacements)
 
-        return self.codegen_indexing(self.simplify_indexing(index))
+        simp_index = self.simplify_indexing(index)
+
+        # Now that we are done simplifying we can unwrap Identity so that downstream handling
+        # for its contained expression will work. previously, tl.full wrapping of sympy.Integer
+        # would not occur
+        simp_index = (
+            simp_index if not isinstance(simp_index, Identity) else simp_index.args[0]
+        )
+
+        return self.codegen_indexing(simp_index)
 
     def active_range_trees(self, reorder=False):
         trees = [
@@ -1208,7 +1220,7 @@ class SIMDScheduling(BaseScheduling):
             if not isinstance(node, scheduler.BaseSchedulerNode):
                 continue
 
-            buffer_names.update(node.get_names())
+            buffer_names.update(node.get_buffer_names())
             buffer_names.update(node.used_buffer_names())
 
         # Get buffers objects
@@ -1280,8 +1292,11 @@ class SIMDScheduling(BaseScheduling):
 
         mutations = set()
         for node in node_schedule:
-            if hasattr(node, "get_mutations"):
-                mutations.update(node.get_mutations())
+            if node in (DisableReduction, EnableReduction):
+                continue
+
+            for buf in node.get_outputs():
+                mutations.update(buf.get_mutations())
 
         index_dtype = self.select_index_dtype(node_schedule, numel, reduction_numel)
 
@@ -1461,6 +1476,7 @@ class SIMDScheduling(BaseScheduling):
 
         if not isinstance(partial_code, str):
             partial_code.finalize_hook("<DEF_KERNEL>")
+            partial_code.finalize_hook("<ARGDEFS>", strict=False)
         # finalize must be called after adding epilogue above
         with V.set_kernel_handler(kernel):
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.

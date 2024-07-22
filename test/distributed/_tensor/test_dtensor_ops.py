@@ -7,9 +7,7 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
-
 from torch.distributed._tensor import DeviceMesh, DTensor
-
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -27,6 +25,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
+
 
 # rewrite common size variables to sth can be sharded evenly
 # we can enable uneven shards later, but need to adjust more on
@@ -151,7 +150,6 @@ dtensor_fails = {
     xfail("empty_strided"),
     xfail("empty_like"),
     xfail("empty_permuted"),
-    xfail("expand_copy"),
     xfail("exponential"),
     xfail("equal"),
     xfail("eye"),
@@ -387,7 +385,6 @@ dtensor_fails = {
     xfail("ormqr"),
     xfail("ones"),
     xfail("pca_lowrank"),
-    xfail("permute_copy"),
     xfail("pinverse"),
     xfail("polar"),
     xfail("put"),
@@ -445,7 +442,6 @@ dtensor_fails = {
     xfail("special.xlog1py"),
     xfail("special.zeta"),
     xfail("squeeze", "multiple"),
-    xfail("squeeze_copy"),
     xfail("signal.windows.bartlett"),
     xfail("signal.windows.blackman"),
     xfail("signal.windows.cosine"),
@@ -464,7 +460,6 @@ dtensor_fails = {
     xfail("std_mean", "unbiased"),
     xfail("stft"),
     xfail("svd_lowrank"),
-    xfail("t_copy"),
     xfail("take"),
     xfail("tensor_split"),
     xfail("to_sparse"),

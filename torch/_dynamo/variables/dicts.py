@@ -348,7 +348,7 @@ class DefaultDictVariable(ConstDictVariable):
     @staticmethod
     def is_supported_arg(arg):
         if isinstance(arg, variables.BuiltinVariable):
-            return arg.fn in [list, tuple, dict]
+            return arg.fn in (list, tuple, dict, set)
         else:
             return isinstance(arg, variables.functions.BaseUserFunctionVariable)
 
@@ -443,6 +443,24 @@ class SetVariable(ConstDictVariable):
             assert len(args) == 1
             return variables.UserFunctionVariable(
                 polyfill.set_isdisjoint
+            ).call_function(tx, [self, args[0]], {})
+        elif name == "intersection":
+            assert not kwargs
+            assert len(args) == 1
+            return variables.UserFunctionVariable(
+                polyfill.set_intersection
+            ).call_function(tx, [self, args[0]], {})
+        elif name == "union":
+            assert not kwargs
+            assert len(args) == 1
+            return variables.UserFunctionVariable(polyfill.set_union).call_function(
+                tx, [self, args[0]], {}
+            )
+        elif name == "difference":
+            assert not kwargs
+            assert len(args) == 1
+            return variables.UserFunctionVariable(
+                polyfill.set_difference
             ).call_function(tx, [self, args[0]], {})
         elif (
             name == "update"
