@@ -292,6 +292,8 @@ class SequenceParallel(ParallelStyle):
     to this ``nn.Module`` is already a :class:`DTensor` but not sharded on the sequence dimension, it would redistribute
     the input to be sharded on the sequence dimension.
 
+    The output of the ``nn.Module`` will be sharded on the sequence dimension.
+
     Keyword Args:
         sequence_dim (int, optional):
             The sequence dimension of the input tensor for the ``nn.Module``, this is used to annotate the input tensor to
