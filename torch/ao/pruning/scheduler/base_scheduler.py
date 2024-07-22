@@ -4,7 +4,7 @@ import warnings
 import weakref
 from functools import wraps
 
-from torch.ao.pruning import BaseSparsifier
+from torch.ao.pruning.sparsifier.base_sparsifier import BaseSparsifier
 
 
 __all__ = ["BaseScheduler"]
