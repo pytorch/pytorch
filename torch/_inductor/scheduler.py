@@ -1165,7 +1165,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         # Don't permit fusion if there are multiple subnodes
         # that this consumer reads from
         if len(producers) == 1:
-            return list(producers)[0]
+            return next(iter(producers))
         else:
             return None
 
