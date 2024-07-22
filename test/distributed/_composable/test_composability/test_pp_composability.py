@@ -115,10 +115,6 @@ class ComposabilityTest(MultiProcContinousTest):
             assert layers_per_stage * num_stages == total_layers
             # return offset so validation code can match partial layer back to orig model
             offset = stage_idx * layers_per_stage
-            partial_model = nn.Sequential(
-                *full_model[offset : (stage_idx + 1) * layers_per_stage]
-            )
-            partial_model.to(self.device)
             return partial_model, offset
 
         # Apply DP to stage module
@@ -194,10 +190,6 @@ class ComposabilityTest(MultiProcContinousTest):
         # (in fsdp case, we use one of these inputs on each DP rank)
         (ref_model(inputs[0]).sum()).backward()
         (ref_model(inputs[1]).sum()).backward()
-
-        # simulate the built-in averaging done by FSDP
-        for p in ref_model.parameters():
-            p.grad /= dp_mesh.size()
 
         # Validate that whichever weights we have locally match that part of our local/full ref model
         # (we force FSDP's grads to be all-gathered (.full_tensor) to make it simpler)

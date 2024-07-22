@@ -235,9 +235,6 @@ class TestFullyShard2DTraining(FSDPTest):
             ref_loss = ref_model(inp).sum()
             self.assertEqual(loss, ref_loss)
 
-            with CommDebugMode() as bwd_comm_mode:
-                loss.backward()
-            bwd_comm_counts = bwd_comm_mode.get_comm_counts()
             self.assertEqual(len(bwd_comm_counts), 3)
             # First MLP's input gradient does not need to be all-reduced
             self.assertEqual(bwd_comm_counts[funcol.all_reduce], num_mlps - 1)
@@ -681,12 +678,6 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         # Update the parameters so model.state_dict() will be different from ref_dtensor_sd.
         model_2d(model_2d.get_input().cuda(self.rank)).sum().backward()
         optim_2d.step()
-
-        # Load ref_state_dict back.
-        checkpoint.seek(0)
-        load_ref_state_dict = torch.load(checkpoint)
-        model_2d.load_state_dict(load_ref_state_dict)
-        new_state_dict = model_2d.state_dict()
 
         # Check whether new_state_dict is the same as ref_state_dict.
         for (k1, v1), (k2, v2) in zip(ref_state_dict.items(), new_state_dict.items()):
