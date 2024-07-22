@@ -276,16 +276,21 @@ def _schedule_for_comm(
     return scheduled
 
 
-def decide_global_ordering_of_comms(snodes: List[BaseSchedulerNode]):
+def decide_global_ordering_of_comms(snodes: List[BaseSchedulerNode], name_to_fused_node) -> List[BaseSchedulerNode]:
     """
     Decide global ordering of comms, by just enforcing the ordering that's in the input graph
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
+    # If FSDP2 is used, we apply FSDP-specific passes.
+    if any((is_fallback_op(x.node, {torch.ops.fsdp.all_gather_copy_in.default, torch.ops.fsdp.chunk_cat.default}) for x in snodes)):
+        snodes = enforce_comm_ordering_for_fsdp(snodes, name_to_fused_node)
+
     comm_snodes = [sn for sn in snodes if contains_collective(sn)]
     for i in range(1, len(comm_snodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
         comm_snodes[i].add_fake_dep(WeakDep(comm_snodes[i - 1].get_name()))
+    return snodes
 
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
@@ -490,7 +495,9 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
 
 
 def is_fallback_op(node, op):
-    return isinstance(node, ir.FallbackKernel) and node.op_overload is op
+    if isinstance(op, torch._ops.OpOverload):
+        op = {op}
+    return isinstance(node, ir.FallbackKernel) and node.op_overload in op
 
 
 def get_buf_idx(snode):
@@ -499,18 +506,15 @@ def get_buf_idx(snode):
 
 def enforce_comm_ordering_for_fsdp(
     snodes: List[_inductor.scheduler.BaseSchedulerNode],
-    **kwargs,
+    name_to_fused_node,
 ) -> List[_inductor.scheduler.BaseSchedulerNode]:
     from . import scheduler
 
-    name_to_fused_node = kwargs["name_to_fused_node"]  # op name to (maybe fused) op
     snode_to_users = defaultdict(set)
-    # graph_inputs = kwargs["graph_inputs"]
-    # name_to_buf = kwargs["name_to_buf"]
 
     # def buf_name_to_snode(buf_name):
     #     return name_to_buf[buf_name].defining_op
-    # TODO(yf225): I don't understand why we need to do this instead of using snode.users
+    # TODO(yf225): we should try to just use snode.users
     for snode in snodes:
         for dep in snode.unmet_dependencies:
             dep_snode = name_to_fused_node[dep.name]

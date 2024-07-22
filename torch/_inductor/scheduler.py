@@ -1499,7 +1499,11 @@ class Scheduler:
         self.compute_dependencies()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.dead_node_elimination()
-        self.compute_ancestors()        
+        self.compute_ancestors()
+        self.compute_order()
+        if config.reorder_for_compute_comm_overlap:
+            self.nodes = comms.decide_global_ordering_of_comms(self.nodes, self.name_to_fused_node)
+            self.compute_ancestors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
@@ -1509,14 +1513,7 @@ class Scheduler:
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.logged_slow_fusion: Set[Tuple[str, str]] = set()
         if config._pre_fusion_custom_pass is not None:
-            self.nodes = config._pre_fusion_custom_pass(
-                self.nodes,
-                name_to_fused_node=self.name_to_fused_node,
-                graph_inputs=V.graph.graph_inputs,
-            )
-        # # TODO(yf225): do we need to update .ancestors for the affected comm nodes?
-        # if config.reorder_for_compute_comm_overlap:
-        #     comms.decide_global_ordering_of_comms(self.nodes)
+            self.nodes = config._pre_fusion_custom_pass(self.nodes)
         self.nodes = self.fuse_nodes(self.nodes)
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
@@ -1870,6 +1867,14 @@ class Scheduler:
             visit(node)
         return result
 
+    def compute_order(self) -> None:
+        """
+        Populate each node.min_order and node.max_order
+        """
+        for order, node in enumerate(self.nodes):
+            node.min_order = order
+            node.max_order = order
+
     def compute_ancestors(self) -> None:
         """
         Populate each node.ancestors
@@ -1883,10 +1888,6 @@ class Scheduler:
                 ancestors |= name_to_ancestors[dep.name]
             name_to_ancestors[node.get_name()] = ancestors
             node.ancestors = ancestors
-
-        for order, node in enumerate(self.nodes):
-            node.min_order = order
-            node.max_order = order
 
     def fuse_nodes(self, nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
         """
