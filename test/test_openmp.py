@@ -6,12 +6,15 @@ import unittest
 import torch
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ASAN, TestCase
 
+
 try:
     import psutil
 
     HAS_PSUTIL = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_PSUTIL = False
+    psutil = None
+
 
 device = torch.device("cpu")
 

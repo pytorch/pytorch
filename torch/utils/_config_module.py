@@ -8,6 +8,7 @@ import io
 import pickle
 import tokenize
 import unittest
+import warnings
 from types import FunctionType, ModuleType
 from typing import Any, Dict, Optional, Set, Union
 from typing_extensions import deprecated
@@ -52,8 +53,8 @@ def install_config_module(module):
             else:
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 
-    config: Dict[str, Any] = dict()
-    default: Dict[str, Any] = dict()
+    config: Dict[str, Any] = {}
+    default: Dict[str, Any] = {}
 
     compile_ignored_keys = get_assignments_with_compile_ignored_comments(module)
 
@@ -178,6 +179,8 @@ class ConfigModule(ModuleType):
         mod = self.__name__
         for k, v in self._config.items():
             if k in self._config.get("_save_config_ignore", ()):
+                if v != self._default[k]:
+                    warnings.warn(f"Skipping serialization of {k} value {v}")
                 continue
             if v == self._default[k]:
                 continue

@@ -231,7 +231,7 @@ class TORCH_API Pickler {
   }
 
   // Stream to write binary data to
-  // Code shouldn't call writer_ directly without first flush()ing.
+  // Code shouldn't call writer_ directly without first flushing.
   std::function<void(const char*, size_t)> writer_;
 
   // Buffer to avoid calling a writer_ on a per-byte basis.

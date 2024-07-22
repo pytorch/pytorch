@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import os
 import shutil
 import sys
 import time
-from typing import Any, NoReturn, Optional
+from typing import Any, NoReturn
 
 from .setting import (
     CompilerType,
@@ -113,7 +115,7 @@ def get_test_name_from_whole_path(path: str) -> str:
     return path[start + 1 : end]
 
 
-def check_compiler_type(cov_type: Optional[CompilerType]) -> None:
+def check_compiler_type(cov_type: CompilerType | None) -> None:
     if cov_type is not None and cov_type in [CompilerType.GCC, CompilerType.CLANG]:
         return
     raise Exception(  # noqa: TRY002

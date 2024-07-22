@@ -7,7 +7,6 @@ import sys
 import unittest
 
 import torch
-
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -16,6 +15,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TestCase,
 )
+
 
 # Various data types (preserved over operations).
 DTYPES = [
