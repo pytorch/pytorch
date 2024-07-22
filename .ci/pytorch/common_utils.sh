@@ -56,28 +56,8 @@ function assert_git_not_dirty() {
 function pip_install_whl() {
   # This is used to install PyTorch and other build artifacts wheel locally
   # without using any network connection
-
-  # Convert the input arguments into an array
-  local args=("$@")
-
-  # Check if the first argument contains multiple paths separated by spaces
-  if [[ "${args[0]}" == *" "* ]]; then
-    # Split the string by spaces into an array
-    IFS=' ' read -r -a paths <<< "${args[0]}"
-    # Loop through each path and install individually
-    for path in "${paths[@]}"; do
-      echo "Installing $path"
-      python3 -mpip install --no-index --no-deps "$path"
-    done
-  else
-    # Loop through each argument and install individually
-    for path in "${args[@]}"; do
-      echo "Installing $path"
-      python3 -mpip install --no-index --no-deps "$path"
-    done
-  fi
+  python3 -mpip install --no-index --no-deps "$@"
 }
-
 
 function pip_install() {
   # retry 3 times
@@ -178,11 +158,6 @@ function install_torchvision() {
   fi
 }
 
-function install_tlparse() {
-  pip_install --user "tlparse==0.3.7"
-  PATH="$(python -m site --user-base)/bin:$PATH"
-}
-
 function install_torchrec_and_fbgemm() {
   local torchrec_commit
   torchrec_commit=$(get_pinned_commit torchrec)
@@ -206,6 +181,50 @@ function clone_pytorch_xla() {
     git submodule update --init --recursive
     popd
   fi
+}
+
+# install trition-lang/triton at a specific commit taken as argument
+function checkout_install_triton_at_commit() {
+
+  # assert that the commit is passed as an argument
+  if [ $# -ne 1 ]; then
+    echo "Usage: checkout_install_triton_at_commit <commit>"
+    exit 1
+  fi
+  local commit
+  commit=$1
+  pushd ..
+  git clone --recurse-submodules https://github.com/triton-lang/triton.git
+  pushd triton
+
+  git checkout "${commit}"
+  # taken from triton README
+  pip install ninja cmake wheel; # build-time dependencies
+  pip install -e python
+  popd
+  popd
+}
+
+function checkout_install_torchdeploy() {
+  local commit
+  commit=$(get_pinned_commit multipy)
+  pushd ..
+  git clone --recurse-submodules https://github.com/pytorch/multipy.git
+  pushd multipy
+  git checkout "${commit}"
+  python multipy/runtime/example/generate_examples.py
+  BUILD_CUDA_TESTS=1 pip install -e .
+  popd
+  popd
+}
+
+function test_torch_deploy(){
+ pushd ..
+ pushd multipy
+ ./multipy/runtime/build/test_deploy
+ ./multipy/runtime/build/test_deploy_gpu
+ popd
+ popd
 }
 
 function checkout_install_torchbench() {
