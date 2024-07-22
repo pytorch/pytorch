@@ -10,6 +10,7 @@ import inspect
 import logging
 import operator
 import re
+
 import tempfile
 from itertools import count
 from typing import (
@@ -40,6 +41,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import async_compile, config, ir
+
 from ..codecache import output_code_log
 from ..ir import ReinterpretView
 from ..runtime import triton_heuristics
@@ -55,7 +57,6 @@ from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 from .triton_utils import config_of, signature_to_meta
-
 
 if TYPE_CHECKING:
     import triton
@@ -1491,7 +1492,7 @@ class WrapperCodeGen(CodeGen):
                     if not kernel.cuda_kernel_saved:
                         if len(kernel.launchers) == 0:
                             kernel.precompile()
-                        kernel.save_gpu_kernel(
+                        kernel.save_cuda_kernel(
                             grid=(0, 0, 0),   # use dummy grid
                             stream="stream",  # use dummy stream
                             launcher=kernel.launchers[0],
@@ -1748,7 +1749,7 @@ class WrapperCodeGen(CodeGen):
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
 
-    def make_buffer_reuse(self, old: ir.Buffer, new: ir.Buffer, delete_old: bool):
+    def make_buffer_reuse(self, old, new, delete_old: bool):
         assert old.get_dtype() == new.get_dtype()
         old_name = old.get_name()
         new_name = new.get_name()
@@ -1777,14 +1778,14 @@ class WrapperCodeGen(CodeGen):
             )
         )
 
-    def codegen_allocation(self, buffer: ir.Buffer):
+    def codegen_allocation(self, buffer):
         name = buffer.get_name()
 
         if name in V.graph.removed_buffers or name in self.allocated:
             return
         self.allocated.add(name)
         if isinstance(
-            buffer.get_defining_op(),
+            buffer,
             (ir.ExternKernelAlloc, ir.MultiOutput),
         ):
             return
@@ -1798,15 +1799,17 @@ class WrapperCodeGen(CodeGen):
             assert isinstance(
                 layout.view, ir.ReinterpretView
             ), f"unexpected {type(layout.view)}: {layout.view}"
-            assert isinstance(layout.view.data, ir.StorageBox), type(layout.view.data)
-            assert isinstance(layout.view.data.data, ir.Buffer), type(layout.view.data)
-            self.codegen_allocation(layout.view.data.data)
+            self.codegen_allocation(layout.view.data)
             self.codegen_deferred_allocation(name, layout)
             return
 
         self.writeline(AllocateLine(self, buffer))
 
     def codegen_free(self, buffer):
+        assert (
+            buffer.get_workspace_size() == 0
+        ), "Only support zero workspace size for now!"
+
         name = buffer.get_name()
 
         # can be freed but not reused
@@ -1839,7 +1842,7 @@ class WrapperCodeGen(CodeGen):
             and self.reuses[buffer.get_name()] == reused_buffer.get_name()
         )
 
-    def codegen_inplace_reuse(self, input_buffer: ir.Buffer, output_buffer: ir.Buffer):
+    def codegen_inplace_reuse(self, input_buffer, output_buffer):
         assert buffer_reuse_key(input_buffer) == buffer_reuse_key(output_buffer)
         self.codegen_allocation(input_buffer)
         self.freed.add(input_buffer.get_name())

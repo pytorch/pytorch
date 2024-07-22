@@ -8,6 +8,7 @@ from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDi
 import torch
 
 from .. import config, ir
+
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -29,7 +30,6 @@ from ..utils import (
 )
 from ..virtualized import V
 from .mm_common import filtered_configs
-
 
 if TYPE_CHECKING:
     from ..ir import TensorBox

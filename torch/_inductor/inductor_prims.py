@@ -7,7 +7,6 @@ from typing import Optional, Sequence
 import torch
 from torch import _prims, Tensor
 
-
 log = logging.getLogger(__name__)
 
 

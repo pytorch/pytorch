@@ -6,7 +6,6 @@ import math
 
 import torch
 from torch.nn.attention import sdpa_kernel, SDPBackend
-
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
     filter_nodes,
@@ -14,7 +13,6 @@ from ..pattern_matcher import (
     gen_register_replacement,
     joint_fwd_bwd,
 )
-
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten

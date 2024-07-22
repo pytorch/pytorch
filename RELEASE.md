@@ -34,6 +34,7 @@
     - [Building Binaries / Promotion to Stable](#building-binaries--promotion-to-stable)
 - [Hardware / Software Support in Binary Build Matrix](#hardware--software-support-in-binary-build-matrix)
   - [Python](#python)
+    - [TL;DR](#tldr)
   - [Accelerator Software](#accelerator-software)
     - [Special support cases](#special-support-cases)
   - [Operating Systems](#operating-systems)
@@ -411,13 +412,12 @@ PyTorch has a support matrix across a couple of different axis. This section sho
 
 ## Python
 
-PyTorch supports all minor versions of CPython that are not EOL: https://devguide.python.org/versions/
+For versions of Python that we support we follow the [NEP 29 policy](https://numpy.org/neps/nep-0029-deprecation_policy.html), which was originally drafted by numpy.
 
-For each minor release independently, we only support patch releases as follows:
-- If the latest patch release is a bugfix release, we only support this one.
-- Otherwise, we support all the non-bugfix patch releases.
+### TL;DR
 
-See https://github.com/pytorch/rfcs/blob/master/RFC-0038-cpython-support.md for details on the rules and process for upgrade and sunset of each version.
+* All minor versions of Python released 42 months prior to the project, and at minimum the two latest minor versions.
+* All minor versions of numpy released in the 24 months prior to the project, and at minimum the last three minor versions.
 
 ## Accelerator Software
 
