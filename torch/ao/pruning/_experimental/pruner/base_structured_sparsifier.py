@@ -6,7 +6,7 @@ from typing import Callable, Dict, Optional, Set, Tuple, Type, Union
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.ao.pruning import BaseSparsifier
+from torch.ao.pruning.sparsifier.base_sparsifier import BaseSparsifier
 from torch.fx import symbolic_trace
 from torch.nn.utils import parametrize
 
