@@ -4,11 +4,8 @@ import unittest
 
 import torch
 import torch._inductor.config as inductor_config
-from torch._inductor.autoheuristic.autoheuristic import (
-    AHContext,
-    AutoHeuristic,
-    LocalFeedback,
-)
+from torch._inductor.autoheuristic.autoheuristic import AutoHeuristic, LocalFeedback
+from torch._inductor.autoheuristic.autoheuristic_utils import AHContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_gpu_shared_memory
@@ -129,6 +126,22 @@ class AutoHeuristicTest(TestCase):
         # Make sure heuristic does not break anything
         # TODO (AlnisM): Find a way to check whether heuristic is used
         self.run_mm()
+
+    @inductor_config.patch(autoheuristic_collect="mixed_mm")
+    def test_global_feedback(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        a = torch.randn(8, 8, device="cuda")
+        b = torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda")
+        torch.compile(fn, mode="max-autotune-no-cudagraphs")(a, b)
+        path = self.get_path_to_autoheuristic_log("mixed_mm")
+        self.assertTrue(os.path.exists(path))
+        num_lines = self.count_lines_in_file(path)
+
+        # 1 line for metadata, 1 line for header
+        # 1 line for fallback + at least 1 config
+        self.assertTrue(num_lines > 4)
 
 
 if __name__ == "__main__":
