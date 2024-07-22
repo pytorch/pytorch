@@ -6,7 +6,7 @@ from __future__ import annotations
 import functools
 import sys
 import warnings
-from typing import Sequence
+from typing import Optional, Sequence
 
 import torch
 from torch import _C
@@ -1189,7 +1189,7 @@ def linalg_vector_norm(
     g: jit_utils.GraphContext,
     self,
     ord,
-    dim: Sequence[int] | None,
+    dim: Optional[Sequence[int]],
     keepdim: bool,
     dtype,
 ):

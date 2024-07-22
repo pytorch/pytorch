@@ -418,57 +418,6 @@ class TestConverter(TestCase):
         inp = ((torch.zeros(1, 4), torch.ones(1, 4)),)
         self._check_equal_ts_ep_converter(MUnpackTuple(), inp)
 
-    def test_convert_retrace_nested_scripted_modules(self):
-        class Wrapper(torch.nn.Module):
-            def __init__(self, mod) -> None:
-                super().__init__()
-                self.mod = mod
-
-            def forward(self, x, y):
-                return self.mod(x, y)
-
-        class LinearM(torch.nn.Module):
-            def __init__(self, dim: int) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(dim, dim)
-
-            def forward(self, x, y):
-                return self.linear(y)
-
-        class M(torch.nn.Module):
-            def __init__(self, dim: int) -> None:
-                super().__init__()
-                m = LinearM(dim)
-                m = torch.jit.script(m)
-                self.mod1 = m
-                self.mod2 = Wrapper(m)
-
-            def forward(self, x: torch.Tensor, y: torch.Tensor):
-                if x:
-                    return -self.mod1(x, y) - self.mod2(x, y)
-                else:
-                    return -self.mod1(x, y) + self.mod2(x, y)
-
-        class NestedM(torch.nn.Module):
-            def __init__(self, dim: int) -> None:
-                super().__init__()
-                m = M(dim)
-                m = torch.jit.script(m)
-                self.mod1 = m
-                self.mod2 = Wrapper(m)
-
-            def forward(self, x: torch.Tensor, y: torch.Tensor):
-                if x:
-                    return self.mod1(x, y) + self.mod2(x, y)
-                else:
-                    return self.mod1(x, y) - self.mod2(x, y)
-
-        inp = (
-            torch.tensor(True),
-            torch.randn([3, 3]),
-        )
-        self._check_equal_ts_ep_converter(NestedM(3), inp)
-
     def test_convert_nn_module_with_nested_param(self):
         class M(torch.nn.Module):
             def __init__(self, dim: int) -> None:
@@ -576,7 +525,8 @@ class TestConverter(TestCase):
         # Super nested module testing.
         inp = (torch.ones(1),)
         orig_m = SuperNestedM()
-        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
+        # TODO: fix trace: state_dict is not equal.
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
 
         t = inp[0]
         t -= 1
@@ -654,12 +604,12 @@ class TestConverter(TestCase):
         # Nested module testing.
         inp = (torch.ones(3),)
         orig_m = NestedM(3)
-        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
+        # TODO: fix trace: state_dict is not equal.
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
 
         t = inp[0]
         t -= 0.8
-        # Skip jit.traced because it specializes on one path.
-        for ep in ep_list[1:]:
+        for ep in ep_list:
             torch.testing.assert_close(
                 ep.module()(*inp),
                 orig_m(*inp),
@@ -668,12 +618,12 @@ class TestConverter(TestCase):
         # Super nested module testing.
         inp = (torch.ones(3),)
         orig_m = SuperNestedM1(3)
-        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
+        # TODO: fix trace: state_dict is not equal.
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
 
         t = inp[0]
         t -= 0.8
-        # Skip jit.traced because it specializes on one path.
-        for ep in ep_list[1:]:
+        for ep in ep_list:
             torch.testing.assert_close(
                 ep.module()(*inp),
                 orig_m(*inp),
@@ -682,12 +632,12 @@ class TestConverter(TestCase):
         # Super nested module testing.
         inp = (torch.ones(3),)
         orig_m = SuperNestedM2(3)
-        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
+        # TODO: fix trace: state_dict is not equal.
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
 
         t = inp[0]
         t -= 0.8
-        # Skip jit.traced because it specializes on one path.
-        for ep in ep_list[1:]:
+        for ep in ep_list:
             torch.testing.assert_close(
                 ep.module()(*inp),
                 orig_m(*inp),

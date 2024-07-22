@@ -12,7 +12,21 @@ import inspect
 import re
 import typing
 import warnings
-from typing import Any, Callable, cast, Collection, Mapping, Sequence
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Collection,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -107,7 +121,9 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
 
 
 @contextlib.contextmanager
-def disable_apex_o2_state_dict_hook(model: torch.nn.Module | torch.jit.ScriptFunction):
+def disable_apex_o2_state_dict_hook(
+    model: Union[torch.nn.Module, torch.jit.ScriptFunction]
+):
     # Apex O2 hook state_dict to return fp16 weights as fp32.
     # Exporter cannot identify them as same tensors.
     # Since this hook is only used by optimizer, it is safe to
@@ -162,26 +178,26 @@ def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
 
 
 def export(
-    model: torch.nn.Module | torch.jit.ScriptModule | torch.jit.ScriptFunction,
-    args: tuple[Any, ...] | torch.Tensor,
-    f: str | io.BytesIO | None = None,
+    model: Union[torch.nn.Module, torch.jit.ScriptModule, torch.jit.ScriptFunction],
+    args: Union[Tuple[Any, ...], torch.Tensor],
+    f: Optional[Union[str, io.BytesIO]] = None,
     export_params: bool = True,
     verbose: bool = False,
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
-    input_names: Sequence[str] | None = None,
-    output_names: Sequence[str] | None = None,
+    input_names: Optional[Sequence[str]] = None,
+    output_names: Optional[Sequence[str]] = None,
     operator_export_type: _C_onnx.OperatorExportTypes = _C_onnx.OperatorExportTypes.ONNX,
-    opset_version: int | None = None,
+    opset_version: Optional[int] = None,
     do_constant_folding: bool = True,
-    dynamic_axes: Mapping[str, Mapping[int, str]]
-    | Mapping[str, Sequence[int]]
-    | None = None,
-    keep_initializers_as_inputs: bool | None = None,
-    custom_opsets: Mapping[str, int] | None = None,
-    export_modules_as_functions: bool | Collection[type[torch.nn.Module]] = False,
-    autograd_inlining: bool | None = True,
+    dynamic_axes: Optional[
+        Union[Mapping[str, Mapping[int, str]], Mapping[str, Sequence[int]]]
+    ] = None,
+    keep_initializers_as_inputs: Optional[bool] = None,
+    custom_opsets: Optional[Mapping[str, int]] = None,
+    export_modules_as_functions: Union[bool, Collection[Type[torch.nn.Module]]] = False,
+    autograd_inlining: Optional[bool] = True,
     dynamo: bool = False,
-) -> torch.onnx.ONNXProgram | None:
+) -> Optional[torch.onnx.ONNXProgram]:
     r"""Exports a model into ONNX format.
 
     If ``model`` is not a :class:`torch.jit.ScriptModule` nor a
@@ -724,7 +740,7 @@ def _resolve_args_by_export_type(arg_name, arg_value, operator_export_type):
 
 
 def _decide_keep_init_as_input(
-    keep_initializers_as_inputs: bool | None,
+    keep_initializers_as_inputs: Optional[bool],
     operator_export_type: _C_onnx.OperatorExportTypes,
     opset_version: int,
 ):
@@ -807,7 +823,7 @@ def _decide_input_format(model, args):
         ordered_list_keys = list(sig.parameters.keys())
         if ordered_list_keys[0] == "self":
             ordered_list_keys = ordered_list_keys[1:]
-        args_dict: dict = {}
+        args_dict: Dict = {}
         if isinstance(args, list):
             args_list = args
         elif isinstance(args, tuple):
@@ -837,11 +853,11 @@ def _decide_input_format(model, args):
 
 def _from_dynamic_axes_to_dynamic_shapes(
     model,
-    dynamic_axes: Mapping[str, Mapping[int, str]]
-    | Mapping[str, Sequence[int]]
-    | None = None,
-    input_names: Sequence[str] | None = None,
-) -> dict[str, Any] | None:
+    dynamic_axes: Optional[
+        Union[Mapping[str, Mapping[int, str]], Mapping[str, Sequence[int]]]
+    ] = None,
+    input_names: Optional[Sequence[str]] = None,
+) -> Optional[Dict[str, Any]]:
     """
 
     dynamic_axes examples:
@@ -861,7 +877,7 @@ def _from_dynamic_axes_to_dynamic_shapes(
     else:
         input_names_set = set(input_names)
 
-    dynamic_shapes: dict[str, Any | None] = {}
+    dynamic_shapes: Dict[str, Optional[Any]] = {}
     for input_name, axes in dynamic_axes.items():
         if input_name in input_names_set:
             raise ValueError(
@@ -980,8 +996,8 @@ def _check_flatten_did_not_remove(original, jit_flattened):
 
 
 def _create_jit_graph(
-    model: torch.nn.Module | torch.jit.ScriptFunction, args: Sequence[Any]
-) -> tuple[_C.Graph, list[_C.IValue], Any | None, _C.ScriptModule | None]:
+    model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
+) -> Tuple[_C.Graph, List[_C.IValue], Optional[Any], Optional[_C.ScriptModule]]:
     if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
         flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
         _check_flatten_did_not_remove(args, flattened_args)
@@ -1106,15 +1122,18 @@ def _model_to_graph(
     fixed_batch_size=False,
     training=_C_onnx.TrainingMode.EVAL,
     dynamic_axes=None,
-) -> tuple[
+) -> Tuple[
     _C.Graph,
-    dict[str, torch.Tensor],
-    torch.Tensor
-    | tuple[torch.Tensor, ...]
-    | list[torch.Tensor]
-    | dict[str, torch.Tensor]
-    | Any
-    | None,
+    Dict[str, torch.Tensor],
+    Optional[
+        Union[
+            torch.Tensor,
+            Tuple[torch.Tensor, ...],
+            List[torch.Tensor],
+            Dict[str, torch.Tensor],
+            Any,  # Can be nested tuples etc.
+        ]
+    ],
 ]:
     """Converts model into an ONNX graph.
 
@@ -1307,8 +1326,8 @@ def unconvertible_ops(
     model,
     args,
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
-    opset_version: int | None = None,
-) -> tuple[_C.Graph, list[str]]:
+    opset_version: Optional[int] = None,
+) -> Tuple[_C.Graph, List[str]]:
     """Returns an approximated list of all ops that are yet supported by :mod:`torch.onnx`.
 
     The list is approximated because some ops may be removed during the conversion
@@ -1372,9 +1391,9 @@ def unconvertible_ops(
 
 
 def _setup_trace_module_map(
-    model: torch.nn.Module | torch.jit.ScriptModule,
-    export_modules_as_functions: bool | Collection[type[torch.nn.Module]],
-) -> set[str]:
+    model: Union[torch.nn.Module, torch.jit.ScriptModule],
+    export_modules_as_functions: Union[bool, Collection[Type[torch.nn.Module]]],
+) -> Set[str]:
     def __register_attribute_hook():
         attr_name = "_onnx_attrs"
 
@@ -1554,7 +1573,7 @@ def _export(
         _autograd_inlining_previous = GLOBALS.autograd_inlining
         GLOBALS.autograd_inlining = autograd_inlining
 
-        module_typenames_to_export_as_functions: set[str] = set()
+        module_typenames_to_export_as_functions: Set[str] = set()
         if isinstance(model, (torch.nn.Module, torch.jit.ScriptModule)):
             module_typenames_to_export_as_functions = _setup_trace_module_map(
                 model, export_modules_as_functions
@@ -1838,11 +1857,11 @@ def _run_symbolic_function(
     block: _C.Block,
     node: _C.Node,
     inputs: Any,
-    env: dict[_C.Value, _C.Value],
-    values_in_env: set[_C.Value],
-    new_nodes: list[_C.Node],
+    env: Dict[_C.Value, _C.Value],
+    values_in_env: Set[_C.Value],
+    new_nodes: List[_C.Node],
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
-) -> _C.Value | Sequence[_C.Value | None] | None:
+) -> Optional[Union[_C.Value, Sequence[Optional[_C.Value]]]]:
     """Runs a symbolic function.
 
     The function is used in C++ to export the node to ONNX.
@@ -2059,7 +2078,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
             dynamic_axes[key] = value_dict
 
 
-def model_signature(model: torch.nn.Module | Callable) -> inspect.Signature:
+def model_signature(model: Union[torch.nn.Module, Callable]) -> inspect.Signature:
     return inspect.signature(
         model.forward if isinstance(model, torch.nn.Module) else model
     )

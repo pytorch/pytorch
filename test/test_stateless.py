@@ -887,7 +887,7 @@ exit(len(w))
 """
         try:
             subprocess.check_output(
-                [sys.executable, '-W', 'always', '-c', script],
+                [sys.executable, '-W', 'all', '-c', script],
                 stderr=subprocess.STDOUT,
                 # On Windows, opening the subprocess with the default CWD makes `import torch`
                 # fail, so just set CWD to this script's directory

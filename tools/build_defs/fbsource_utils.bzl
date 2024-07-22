@@ -1,4 +1,5 @@
 # Only used for PyTorch open source BUCK build
+# @lint-ignore-every BUCKRESTRICTEDSYNTAX
 
 def is_arvr_mode():
     if read_config("pt", "is_oss", "0") == "0":

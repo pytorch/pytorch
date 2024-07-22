@@ -536,6 +536,11 @@ class UnspecializedNNModuleSource(NNModuleSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class UnspecializedBuiltinNNModuleSource(UnspecializedNNModuleSource):
+    pass
+
+
+@dataclasses.dataclass(frozen=True)
 class FSDPNNModuleSource(NNModuleSource):
     def guard_source(self):
         return _GUARD_SOURCE_FSDP_MODULE[self.base.guard_source()]
@@ -671,3 +676,9 @@ def is_from_defaults(source: Source):
 
 def is_cell_contents(source: Source):
     return isinstance(source, AttrSource) and source.member == "cell_contents"
+
+
+def is_unspecialized_builtin_nnmodule_attr(source: Source):
+    return isinstance(source, AttrSource) and isinstance(
+        source.base, UnspecializedBuiltinNNModuleSource
+    )

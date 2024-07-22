@@ -4159,7 +4159,7 @@ In-place version of :meth:`~Tensor.renorm`
 add_docstr_all(
     "repeat",
     r"""
-repeat(*repeats) -> Tensor
+repeat(*sizes) -> Tensor
 
 Repeats this tensor along the specified dimensions.
 
@@ -4174,7 +4174,8 @@ Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
     For the operator similar to `numpy.repeat`, see :func:`torch.repeat_interleave`.
 
 Args:
-    repeat (torch.Size, int..., tuple of int or list of int): The number of times to repeat this tensor along each dimension
+    sizes (torch.Size or int...): The number of times to repeat this tensor along each
+        dimension
 
 Example::
 

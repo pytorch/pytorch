@@ -12,7 +12,6 @@ from ..utils import cache_on_self
 from ..virtualized import V
 from .common import TensorArg
 
-
 log = logging.getLogger(__name__)
 
 
