@@ -27,7 +27,7 @@ import threading
 import warnings
 from bisect import bisect_right
 from copy import copy
-from ctypes import c_void_p, cdll, CDLL
+from ctypes import c_void_p, CDLL, cdll
 from functools import partial
 from pathlib import Path
 from time import time, time_ns
@@ -57,27 +57,27 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
-from .cpp_builder import (
-    _get_python_include_dirs,
-    get_cpp_compiler,
-    homebrew_libomp,
-    is_apple_clang,
-    is_clang,
-    is_conda_llvm_openmp_installed,
-)
+
 
 """
 codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
 https://github.com/pytorch/pytorch/issues/124245#issuecomment-2197778902
 """
 from torch._inductor.cpp_builder import (
+    _get_python_include_dirs,
     _set_gpu_runtime_env,
     _transform_cuda_paths,
     CppBuilder,
     CppOptions,
     CppTorchCudaOptions,
     get_compiler_version_info,
+    get_cpp_compiler,
     get_name_and_dir_from_output_file_path,
+    homebrew_libomp,
+    is_apple_clang,
+    is_clang,
+    is_conda_llvm_openmp_installed,
+    normalize_path_separator,
 )
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, pick_vec_isa, VecISA
 from torch._inductor.runtime.compile_tasks import (
@@ -87,7 +87,6 @@ from torch._inductor.runtime.compile_tasks import (
 )
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import ALIGN_BYTES, clear_on_fresh_inductor_cache, is_linux
-
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -95,6 +94,7 @@ from torch._subclasses.fake_tensor import (
     TensorMetadata,
 )
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
+
 
 if TYPE_CHECKING:
     from concurrent.futures import Future
@@ -2001,7 +2001,7 @@ def cpp_prefix_path() -> str:
             content,
             "h",
         )
-    return filename
+    return normalize_path_separator(filename)
 
 
 def cpp_prefix() -> str:
@@ -2188,7 +2188,7 @@ class CppCodeCache:
                 fb_output_path,
             )
 
-            binary_path = (
+            binary_path = normalize_path_separator(
                 fb_output_path
                 if config.is_fbcode()
                 else cpp_builder.get_target_file_path()

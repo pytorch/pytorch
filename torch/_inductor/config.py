@@ -1057,6 +1057,11 @@ class trace:
 _save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
+    "post_grad_custom_post_pass",
+    "post_grad_custom_pre_pass",
+    "joint_custom_pre_pass",
+    "joint_custom_post_pass",
+    "pre_grad_custom_pass",
 ]
 
 _cache_config_ignore_prefix = [
@@ -1072,6 +1077,7 @@ if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
+
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
