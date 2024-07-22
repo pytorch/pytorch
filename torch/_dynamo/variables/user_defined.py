@@ -112,7 +112,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from .. import trace_rules
         from . import ConstantVariable, EnumVariable
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         if name == "__name__":
             return ConstantVariable.create(self.value.__name__)
@@ -133,14 +133,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return trace_rules.lookup(func)(func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
-
-        elif source:
-            # __mro__ is a member in < 3.12, an attribute in >= 3.12
-            if inspect.ismemberdescriptor(obj) or (
-                sys.version_info >= (3, 12) and name == "__mro__"
-            ):
-                return VariableBuilder(tx, source)(obj.__get__(self.value))
-
         elif inspect.ismemberdescriptor(obj) or inspect.isdatadescriptor(obj):
             builder = (
                 VariableBuilder(tx, source)

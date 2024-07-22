@@ -235,8 +235,6 @@ class TensorVariable(VariableTracker):
                 return SourcelessBuilder.create(tx, example_value)
 
         if not (self.source and self.source.subguards_allowed()):
-            raise NotImplementedError
-        if not self.source:
             return
 
         from ..guards import CLOSURE_VARS, GuardBuilder
@@ -1175,7 +1173,6 @@ class NumpyNdarrayVariable(TensorVariable):
             unimplemented(f"TODO: add support for ndarray.{name}")
         elif name in ["__version__"]:
             unimplemented("delegate np.__version__ to NumPy")
-
         if result is not None:
             return result
         return super().var_getattr(tx, name)

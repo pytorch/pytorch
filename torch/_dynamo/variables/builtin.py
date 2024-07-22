@@ -25,7 +25,7 @@ from ..exc import (
 )
 from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
-from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
+from ..source import AttrSource, is_constant_source, TypeSource
 from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
@@ -1526,7 +1526,6 @@ class BuiltinVariable(VariableTracker):
         from .. import trace_rules
         from . import (
             ConstantVariable,
-            GetAttrVariable,
             PythonModuleVariable,
             TorchInGraphFunctionVariable,
             UserFunctionVariable,
@@ -1573,90 +1572,8 @@ class BuiltinVariable(VariableTracker):
         else:
             source = None
 
-        if name == "__bases__":
-            try:
-                value = obj.as_python_constant()
-                if isinstance(value, type):
-                    bases = value.__bases__
-                    if source is not None:
-                        tuple_args = [
-                            VariableBuilder(tx, GetItemSource(source, i))(b)
-                            for i, b in enumerate(bases)
-                        ]
-                    else:
-                        tuple_args = [SourcelessBuilder.create(tx, b) for b in bases]
-
-                    return variables.TupleVariable(tuple_args, **options)
-            except NotImplementedError:
-                pass
-
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name)
-
-        elif isinstance(obj, variables.TensorVariable) and name == "grad":
-            if source:
-                # We are going to be raising this tensor as grapharg. So, ensure
-                # that we have real grad value instead of fake tensor value.
-                # Walk through the inputs of the subgraph and find if we already
-                # have the original tensor stored in the graphargs.
-                for grapharg in tx.output.graphargs:
-                    if grapharg.source == source.base:
-                        old_grad = grapharg.example.grad
-                        new_grad = obj.as_proxy().node.meta["example_value"].grad
-
-                        def _grad_changed(old, new):
-                            if old is None or new is None:
-                                return new is not old
-                            try:
-                                if old.shape != new.shape:
-                                    return True
-                                if old.stride() != new.stride():
-                                    return True
-                                return False
-                            except TypeError as te:
-                                # There is a rare edge case in which
-                                # we seem to get symbol mismatches
-                                # for jagged tensor comparison.
-                                # See PYTORCH_TEST_WITH_DYNAMO=1 python test/test_nestedtensor.py
-                                #   -k test_dropout_backward_layout_torch_jagged_cpu
-                                unimplemented(str(te))
-
-                        if _grad_changed(old_grad, new_grad):
-                            if new_grad is not None:
-                                grad_shape_specialized = [
-                                    int(x) for x in new_grad.shape
-                                ]
-                                # We lazily update the grad on the example to its real state as tracked by fake tensor.
-                                # This allocation is fine - it is just a hint. It will not make it to runtime, but it coerces
-                                # the underlying value to always be correct.
-                                grapharg.example.grad = torch.zeros(
-                                    grad_shape_specialized, device=new_grad.device
-                                )
-                            else:
-                                grapharg.example.grad = None
-                        return VariableBuilder(tx, source)(grapharg.example.grad)
-
-                return obj.dynamic_getattr(tx, name)
-            else:
-                example_value = obj.as_proxy().node.meta["example_value"]
-                if example_value.grad is not None:
-                    unimplemented("getattr on non-None grad - NYI")
-                return ConstantVariable(None)
-        elif isinstance(
-            obj,
-            (
-                variables.TensorVariable,
-                variables.NamedTupleVariable,
-                variables.ConstantVariable,
-                variables.DistributedVariable,
-                variables.UserDefinedClassVariable,
-                variables.UserDefinedObjectVariable,
-            ),
-        ):
-            try:
-                return obj.var_getattr(tx, name)
-            except NotImplementedError:
-                return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchInGraphFunctionVariable):
             # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
             member = getattr(obj.value, name)

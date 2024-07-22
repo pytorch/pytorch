@@ -246,7 +246,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             builder = VariableBuilder(tx, source)
         else:
             source = None
-            builder = functools.partial(SourcelessBuilder.create, tx=tx)
+            builder = functools.partial(SourcelessBuilder(), tx=tx)
 
         try:
             value = self.const_getattr(tx, name)
