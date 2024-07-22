@@ -3634,6 +3634,7 @@ class CppKernelProxy(CppKernel):
                     CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
                 )
                 inner_main_loop.set_kernel(tile2d_kernel)
+
                 if could_masked_vec:
                     inner_tail_loop.steps = (
                         inner_tail_loop.size - inner_tail_loop.offset
@@ -3646,13 +3647,7 @@ class CppKernelProxy(CppKernel):
                         inner_tail_loop.steps,
                     )
                     inner_tail_loop.set_kernel(masked_tile2d_kernel1)
-                else:
-                    vec_kernel = codegen_kernel(
-                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
-                    )
-                    inner_tail_loop.set_kernel(vec_kernel)
 
-                if could_masked_vec:
                     outer_tail_loop.steps = (
                         outer_tail_loop.size - outer_tail_loop.offset
                     )
@@ -3662,6 +3657,7 @@ class CppKernelProxy(CppKernel):
                     ) = outer_tail_loop.split_with_tiling(
                         tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                     )
+
                     masked_tile2d_kernel2 = codegen_kernel(
                         CppTile2DKernel,
                         tiling_factors[0],
@@ -3671,6 +3667,7 @@ class CppKernelProxy(CppKernel):
                         outer_tail_loop.steps,
                     )
                     inner_main_loop_of_outer_tail_loop.set_kernel(masked_tile2d_kernel2)
+
                     inner_tail_loop_of_outer_tail_loop.steps = (
                         inner_tail_loop_of_outer_tail_loop.size
                         - inner_tail_loop_of_outer_tail_loop.offset
@@ -3685,6 +3682,11 @@ class CppKernelProxy(CppKernel):
                     )
                     inner_tail_loop_of_outer_tail_loop.set_kernel(masked_tile2d_kernel3)
                 else:
+                    vec_kernel = codegen_kernel(
+                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                    )
+                    inner_tail_loop.set_kernel(vec_kernel)
+
                     outer_tail_loop.set_kernel(scalar_kernel)
 
     def codegen_loop_bodies(self, loop_bodies, var_sizes_list):
