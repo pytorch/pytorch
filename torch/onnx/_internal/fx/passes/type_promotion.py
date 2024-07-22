@@ -9,7 +9,7 @@ import inspect
 import logging
 from types import ModuleType
 
-from typing import Any, Callable, Mapping, Optional, Sequence, Set, Union
+from typing import Any, Callable, Mapping, Sequence
 
 import torch
 import torch._ops
@@ -294,7 +294,7 @@ class ReductionTypePromotionRule(TypePromotionRule):
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
         arg = args[0]
         assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
-        dtype: Optional[torch.dtype] = kwargs.get("dtype", None)
+        dtype: torch.dtype | None = kwargs.get("dtype", None)
 
         computation_dtype, result_dtype = _prims_common.reduction_dtypes(
             arg, self.promotion_kind, dtype
@@ -358,7 +358,7 @@ class SumLikeReductionTypePromotionRule(ReductionTypePromotionRule):
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
         arg = args[0]
         assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
-        dtype: Optional[torch.dtype] = kwargs.get("dtype", None)
+        dtype: torch.dtype | None = kwargs.get("dtype", None)
         # The below logic is copied from `torch/_refs/__init__.py` reduction ops impl.
         if dtype is None:
             if _prims_common.is_boolean_dtype(
@@ -1137,7 +1137,7 @@ class ElementwiseTypePromotionRuleSetGenerator:
     """
 
     @classmethod
-    def generate_from_torch_refs(cls) -> Set[ElementwiseTypePromotionRule]:
+    def generate_from_torch_refs(cls) -> set[ElementwiseTypePromotionRule]:
         """Parse type promotion rules from reference ops under torch._C._refs."""
         rule_set = set()
         rule_set.update(cls._parse_torch_refs(_refs))
@@ -1150,7 +1150,7 @@ class ElementwiseTypePromotionRuleSetGenerator:
     @classmethod
     def _parse_torch_refs(
         cls, ref_module: ModuleType
-    ) -> Set[ElementwiseTypePromotionRule]:
+    ) -> set[ElementwiseTypePromotionRule]:
         logger.info("Processing module: %s", ref_module.__name__)
         rule_set = set()
         for name in ref_module.__all__:
@@ -1165,7 +1165,7 @@ class ElementwiseTypePromotionRuleSetGenerator:
     def _parse_type_promotion_rule_from_refs_op(
         cls,
         decorated_op: Callable,
-    ) -> Optional[ElementwiseTypePromotionRule]:
+    ) -> ElementwiseTypePromotionRule | None:
         """Retrieve and parse type promotion decorator from op under torch._refs."""
         fn = decorated_op
         type_promo_wrapper = None
@@ -1239,9 +1239,7 @@ class TypePromotionTable:
             raise ValueError(f"Invalid type promotion rule: {rule}")
         self._rule_table[f"{rule.namespace}.{rule.op_name}"] = rule
 
-    def get_rule(
-        self, py_op: torch._ops.OpOverloadPacket
-    ) -> Optional[TypePromotionRule]:
+    def get_rule(self, py_op: torch._ops.OpOverloadPacket) -> TypePromotionRule | None:
         """Get type promotion rule for a python op under 'torch.ops.<namespace>'."""
         return self._rule_table.get(str(py_op), None)
 
@@ -1250,7 +1248,7 @@ def get_type_promotion_rule(
     diagnostic: diagnostics.Diagnostic,
     node: torch.fx.Node,
     type_promotion_table: TypePromotionTable,
-) -> Optional[TypePromotionRule]:
+) -> TypePromotionRule | None:
     """Get type promotion rule for a node.
 
     Args:
@@ -1474,7 +1472,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         diagnostic: diagnostics.Diagnostic,
         node: torch.fx.Node,
         fx_arg: torch.fx.node.Argument,
-        dtype: Optional[torch.dtype],
+        dtype: torch.dtype | None,
     ) -> torch.fx.node.Argument:
         """Promote fx_arg to dtype if necessary."""
         if dtype is None:
@@ -1660,7 +1658,7 @@ class InsertTypePromotion(_pass.Transform):
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
         module: torch.fx.GraphModule,
-        type_promotion_table: Optional[TypePromotionTable] = None,
+        type_promotion_table: TypePromotionTable | None = None,
     ):
         super().__init__(diagnostic_context, module)
         self.interpreter = _TypePromotionInterpreter(
@@ -1670,17 +1668,14 @@ class InsertTypePromotion(_pass.Transform):
     def _fetch_fake_args(
         self,
     ) -> Sequence[
-        Optional[
-            Union[
-                fake_tensor.FakeTensor,
-                float,
-                int,
-                bool,
-                torch.SymInt,
-                torch.SymFloat,
-                torch.SymBool,
-            ]
-        ]
+        fake_tensor.FakeTensor
+        | float
+        | int
+        | bool
+        | torch.SymInt
+        | torch.SymFloat
+        | torch.SymBool
+        | None
     ]:
         """Fetch fake args from fx graph.
 
