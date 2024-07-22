@@ -58,10 +58,8 @@ from torch.utils._sympy.functions import (
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
-
 from . import config
 from .runtime.runtime_utils import ceildiv as runtime_ceildiv
-
 
 log = logging.getLogger(__name__)
 
@@ -1183,9 +1181,11 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
     )
+    # TODO(jgong5): support n % n_block_size != 0
     return (
         layout.dtype in layout_dtypes
         and micro_gemm is not None
+        and n % micro_gemm.register_blocking[1] == 0
         and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and mat2.is_module_buffer()

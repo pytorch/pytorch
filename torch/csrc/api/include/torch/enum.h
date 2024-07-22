@@ -30,10 +30,10 @@
   const enumtype::k##name k##name; \
   }
 
-#define TORCH_ENUM_PRETTY_PRINT(name)                                         \
-  std::string operator()(const enumtype::k##name& v [[maybe_unused]]) const { \
-    std::string k("k");                                                       \
-    return k + #name;                                                         \
+#define TORCH_ENUM_PRETTY_PRINT(name)                        \
+  std::string operator()(const enumtype::k##name& v) const { \
+    std::string k("k");                                      \
+    return k + #name;                                        \
   }
 
 // NOTE: Backstory on why we need the following two macros:

@@ -56,7 +56,6 @@ aten = torch.ops.aten
 
 
 class CudaReproTests(TestCase):
-    device = "cuda"
     common = check_model_cuda
 
     def test_index_put_issue(self):

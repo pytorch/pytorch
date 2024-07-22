@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+from typing import List, Optional, Tuple
+
 import torch
 import torch.fx
 
@@ -39,10 +41,10 @@ class ReplaceGetAttrWithPlaceholder(_pass.Transform):
     they are useful when creating random inputs for the modified graph_module.
     """
 
-    _replaced_attrs: tuple[torch.Tensor, ...] | None
+    _replaced_attrs: Optional[Tuple[torch.Tensor, ...]]
 
     @property
-    def replaced_attrs(self) -> tuple[torch.Tensor, ...]:
+    def replaced_attrs(self) -> Tuple[torch.Tensor, ...]:
         """The list of replaced weight tensors."""
         assert (
             self._replaced_attrs is not None
@@ -52,10 +54,10 @@ class ReplaceGetAttrWithPlaceholder(_pass.Transform):
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
         graph_module = self.module
         graph = graph_module.graph
-        replaced_attrs: list[torch.Tensor] = []
+        replaced_attrs: List[torch.Tensor] = []
         for node in graph.nodes:
             if node.op == "get_attr":
-                replaced_attr: torch.Tensor | None = None
+                replaced_attr: Optional[torch.Tensor] = None
                 # get_attr could retrieve either parameter or buffer, so
                 # we need to try both.
                 try:
