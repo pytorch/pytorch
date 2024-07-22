@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import logging
 import math
 from typing import Any, Callable, cast, List, Optional, Set, Union
 from unittest.mock import patch
@@ -18,6 +19,7 @@ from .cpp_template import CppTemplate
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import GemmBlocking, get_gemm_template_output_and_compute_dtype
 
+log = logging.getLogger(__name__)
 
 GEMM_TEMPLATE = r"""
 {{template.header().getvalue()}}
@@ -231,16 +233,14 @@ class CppPackedGemmTemplate(CppTemplate):
                 )
                 best_blocking = get_better_blocking(blocking, best_blocking)
 
-        if best_blocking is not None:
-            return best_blocking
-
-        for factor in factors:
-            cofactor = self.num_threads // factor
-            if n_blocks >= factor or m_blocks >= cofactor:
-                blocking = get_blocking(
-                    self.num_threads, factor, m_blocks, n_blocks, k_blocks
-                )
-                best_blocking = get_better_blocking(blocking, best_blocking)
+        if best_blocking is None:
+            for factor in factors:
+                cofactor = self.num_threads // factor
+                if n_blocks >= factor or m_blocks >= cofactor:
+                    blocking = get_blocking(
+                        self.num_threads, factor, m_blocks, n_blocks, k_blocks
+                    )
+                    best_blocking = get_better_blocking(blocking, best_blocking)
 
         assert best_blocking is not None
         return best_blocking
@@ -303,10 +303,32 @@ class CppPackedGemmTemplate(CppTemplate):
         register_blocking = self.register_blocking
         thread_blocking = self.thread_blocking()
 
-        Mc_blocks, Nc_blocks, Kc_blocks = get_cache_blocking(
-            register_blocking, thread_blocking
+        return GemmBlocking(*get_cache_blocking(register_blocking, thread_blocking))
+
+    def log_blockings(self):
+        log.debug(f"Register blocking: {self.register_blocking}")  # noqa: G004
+        log.debug(f"Cache blocking: {self.cache_blocking()}")  # noqa: G004
+        thread_blocking = self.thread_blocking()
+        log.debug(f"Thread blocking: {thread_blocking}")  # noqa: G004
+
+        def get_occupancy():
+            m_blocks = math.ceil(self.m / self.register_blocking.block_m)
+            n_blocks = math.ceil(self.n / self.register_blocking.block_n)
+            k_blocks = math.ceil(self.k / self.register_blocking.block_k)
+            m = self.num_threads // (
+                self.num_threads // math.ceil(m_blocks / thread_blocking.block_m)
+            )
+            n = self.num_threads // (
+                self.num_threads // math.ceil(n_blocks / thread_blocking.block_n)
+            )
+            k = self.num_threads // (
+                self.num_threads // math.ceil(k_blocks / thread_blocking.block_k)
+            )
+            return (m, n, k)
+
+        log.debug(
+            f"Number of threads: {self.num_threads}, occupancy: {get_occupancy()}"  # noqa: G004
         )
-        return GemmBlocking(Mc_blocks, Nc_blocks, Kc_blocks)
 
     @staticmethod
     def add_choices(
@@ -675,6 +697,7 @@ class CppPackedGemmTemplate(CppTemplate):
         )
         assert micro_gemm is not None
         assert self.register_blocking == micro_gemm.register_blocking
+        self.log_blockings()
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
 
