@@ -314,7 +314,6 @@ Args:
         (default) or `out @ input = other`. Only `left=True` is supported.
 """)
 
-log_softmax = _add_docstr(_sparse._sparse_log_softmax, r"""
 log_softmax = _add_docstr(
     _sparse._sparse_log_softmax,
     r"""
