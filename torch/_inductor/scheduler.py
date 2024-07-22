@@ -712,7 +712,7 @@ def pformat(obj: Any) -> str:
         obj = sorted(obj, key=str)
     result = pprint.pformat(obj, indent=4)
     if "\n" in result:
-        return f"\n{textwrap.indent(result, ' '*4)}"
+        return f"\n{textwrap.indent(result, ' ' * 4)}"
     return result
 
 
@@ -1729,7 +1729,7 @@ class Scheduler:
                 NodeUser(user_node, can_inplace, is_weak)
             )
 
-        unbacked_symbol_to_origin_node = {}
+        unbacked_symbol_to_origin_node: Dict[sympy.Symbol, Optional[str]] = {}
 
         # NB: None means that the dependency is on an input.  Don't actually
         # generate a dependency because if we do, Inductor will start trying
@@ -2590,9 +2590,7 @@ class Scheduler:
 
         real_name = self.mutation_real_name[weak_dep.mutating_buf]
         relevant_reads = [
-            read
-            for read in node1.read_writes.reads
-            if read.name == real_name
+            read for read in node1.read_writes.reads if read.name == real_name
         ]
         return all(
             isinstance(read, MemoryDep)
@@ -3077,6 +3075,7 @@ def debug_triton_code(node: Union[SchedulerNode, FusedSchedulerNode]) -> List[st
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
         )
+
         from .codegen.simd import SIMDScheduling
 
         snodes = (node,) if isinstance(node, SchedulerNode) else node.snodes

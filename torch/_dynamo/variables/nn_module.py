@@ -23,7 +23,6 @@ from ..source import (
     FSDPNNModuleSource,
     GetItemSource,
     NNModuleSource,
-    UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
 )
 from ..utils import (
@@ -1114,14 +1113,5 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     def __setattr__(self, name: str, value: Any) -> None:
         if name == "source":
             value = FSDPManagedNNModuleVariable._wrap_source(value)
-
-        return super().__setattr__(name, value)
-
-
-class UnspecializedBuiltinNNModuleVariable(UnspecializedNNModuleVariable):
-    # A subclass of UnspecializedNNModuleVariable to differentiate between user-defined and builtin nn modules.
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name == "source":
-            value = UnspecializedBuiltinNNModuleSource(value)
 
         return super().__setattr__(name, value)
