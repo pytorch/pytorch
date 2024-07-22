@@ -25,6 +25,12 @@ class TestModule(TestCase):
     precision = 1e-5
     rel_tol = 1e-5
 
+    def setUp(self):
+        # reset dynamo cache to avoid issues like
+        # https://github.com/pytorch/pytorch/issues/125967#issuecomment-2118483919
+        # which depends on test order.
+        torch._dynamo.reset()
+
     def _assert_module_parameters_and_buffer_are(self, module, device, dtype):
         # Check device placement and dtype for created parameters and buffers.
         # Only verify floating point dtypes since that's what the kwarg or methods
