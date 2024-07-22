@@ -1751,8 +1751,6 @@ coverage_ignore_functions = [
     "verify_aten_graph",
     # torch.optim.adadelta
     "adadelta",
-    # torch.optim.adafactor
-    "adafactor",
     # torch.optim.adagrad
     "adagrad",
     # torch.optim.adam
