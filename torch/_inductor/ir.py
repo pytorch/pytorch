@@ -3215,7 +3215,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
         return self.get_buffer().layout
 
     @classmethod
-    def realize_into(cls, src, dst):
+    def realize_into(cls, src, dst, unsafe_alias=False):
         dst.realize()
         # NOTE: We must realize users of `dst` before we realize `src`, since
         # realization order determines scheduling order. Otherwise, src's
@@ -3233,15 +3233,16 @@ class MutationLayoutSHOULDREMOVE(Layout):
         # dst, we can alias src to dst.
         src.realize_hint()
 
-        src = Pointwise.create(
-            device=src.get_device(),
-            dtype=src.get_dtype(),
-            inner_fn=src.make_loader(),
-            ranges=[
-                V.graph.sizevars.guard_equals(a, b)
-                for a, b in zip(src.get_size(), dst.get_size())
-            ],
-        ).data
+        if not unsafe_alias:
+            src = Pointwise.create(
+                device=src.get_device(),
+                dtype=src.get_dtype(),
+                inner_fn=src.make_loader(),
+                ranges=[
+                    V.graph.sizevars.guard_equals(a, b)
+                    for a, b in zip(src.get_size(), dst.get_size())
+                ],
+            ).data
 
         src.realize()
         assert isinstance(src.data.layout, FlexibleLayout)

@@ -1153,22 +1153,19 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def get_producer_subnode_for(
         self, consumer: BaseSchedulerNode
     ) -> Optional[BaseSchedulerNode]:
-        producers = []
+        producers = set()
         for rd in consumer.read_writes.reads:
-            if isinstance(rd, dependencies.WeakDep):
-                continue
-
             if rd.name not in self.scheduler.name_to_buf:
                 continue
 
             node_name = self.scheduler.name_to_buf[rd.name].defining_op.get_name()
             if node_name in self.name_to_node:
-                producers.append(self.name_to_node[node_name])
+                producers.add(self.name_to_node[node_name])
 
         # Don't permit fusion if there are multiple subnodes
         # that this consumer reads from
         if len(producers) == 1:
-            return producers[0]
+            return list(producers)[0]
         else:
             return None
 
@@ -2573,6 +2570,9 @@ class Scheduler:
     def fusable_weak_dep(
         self, weak_dep: WeakDep, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
+        if weak_dep.name not in node1.get_buffer_names():
+            return False
+
         # A weak dep can be fused if and only if the fused operation acts inplace
         # on the buffer being mutated. i.e. the same index is being read then mutated
         mutating_writes = [
@@ -2588,11 +2588,12 @@ class Scheduler:
         if free_symbol_is_type(write.index, SymT.TMP):
             return False
 
-        relevant_reads = (
+        real_name = self.mutation_real_name[weak_dep.mutating_buf]
+        relevant_reads = [
             read
             for read in node1.read_writes.reads
-            if self.mutation_renames.get(read.name, read.name) == weak_dep.mutating_buf
-        )
+            if read.name == real_name
+        ]
         return all(
             isinstance(read, MemoryDep)
             and not free_symbol_is_type(read.index, SymT.TMP)
