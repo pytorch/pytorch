@@ -4,7 +4,6 @@ from typing import Any, List, Optional, Set
 import sympy
 
 import torch
-
 from torch._prims_common import make_channels_last_strides_for
 
 from .ir import (
@@ -22,9 +21,7 @@ from .ir import (
     NoneLayout,
     TensorBox,
 )
-
 from .utils import convert_shape_to_inductor, pad_listlike
-
 from .virtualized import V
 
 

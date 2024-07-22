@@ -34,6 +34,7 @@
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+#include <torch/csrc/cuda/GdsFile.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/cuda/python_comm.h>
@@ -1175,16 +1176,14 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             self.set_release_pool(func);
           });
   m.def("_cuda_customAllocator", [](uint64_t malloc_ptr, uint64_t free_ptr) {
-    using MallocFuncType = void*(size_t, int, cudaStream_t);
-    using FreeFuncType = void(void*, size_t, int, cudaStream_t);
+    using namespace torch::cuda::CUDAPluggableAllocator;
     std::function<MallocFuncType> malloc_fn =
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<MallocFuncType*>(malloc_ptr);
     std::function<FreeFuncType> free_fn =
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<FreeFuncType*>(free_ptr);
-    return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
-        malloc_fn, free_fn);
+    return createCustomAllocator(malloc_fn, free_fn);
   });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
@@ -1214,13 +1213,6 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       "_set_storage_access_error_msg", [](const at::Tensor& t, std::string s) {
         t.unsafeGetTensorImpl()
             ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
-      });
-
-  m.def(
-      "_set_storage_data_ptr_access_error_msg",
-      [](size_t storage_impl_ptr, std::string s) {
-        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-        storage_impl->release_data_and_set_meta_custom_data_ptr_error_msg_(s);
       });
 
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
@@ -1962,6 +1954,7 @@ namespace shared {
 
 void initCudartBindings(PyObject* module);
 void initNvtxBindings(PyObject* module);
+void initGdsBindings(PyObject* module);
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 void initCudnnBindings(PyObject* module);
 #endif
@@ -1977,6 +1970,7 @@ void initModule(PyObject* module) {
 #if defined(USE_CUDNN) || defined(USE_ROCM)
   shared::initCudnnBindings(module);
 #endif
+  shared::initGdsBindings(module);
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
 }
