@@ -1020,7 +1020,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         q, k, v = (torch.randn(1, 8, 1024, 64, device="cuda") for _ in range(3))
         metrics.reset()
         _, code = run_and_get_code(f, q, k, v)
-        # TODO: attention output is not being DCE'd
         fc = FileCheck()
         fc.check("triton_tem_fused")  # template call
         fc.check_not("poi_fused_cos")  # No cos pointwise operation
@@ -1028,10 +1027,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         accessed_bytes = 1 * 8 * 1024 * 64 * torch.float32.itemsize
         num_accesses = 4  # q, k, v reads, one output.
         # TODO: Get rid of this fudge factor
-        # We need this fudge factor for now, since
-        # 1. For some reason we materialize the output of the attention unnecessarily (it's related to the mutation somehow)
-        # 2. We also write the extraneous logsumexp
-        num_accesses += 2
+        # We need this fudge factor for now as we write the extraneous logsumexp
+        num_accesses += 1
         self.assertLess(metrics.num_bytes_accessed, accessed_bytes * num_accesses)
 
     @supported_platform
@@ -1331,6 +1328,30 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @common_utils.parametrize("mode", ["eager", "aot_eager"])
+    def test_document_masking_edge_case(self, mode):
+        document_masks = torch.full((2, 128), 0, dtype=torch.int32, device="cuda")
+        document_masks[:, 64:] = 1
+
+        def mask_mod(b, h, q, kv):
+            same_doc = document_masks[b, q] == document_masks[b, kv]
+            return same_doc
+
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 1, 128, 4),
+            device="cuda",
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        func = torch.compile(flex_attention, backend=mode, fullgraph=True)
+
+        block_mask = create_block_mask(mask_mod, 2, 1, 128, 128)
+        out = func(query, key, value, block_mask=block_mask)
+        out.sum().backward()
+
+    @supported_platform
     def test_comparison_vs_sdpa(self):
         def causal(score, b, h, q_idx, kv_idx):
             return torch.where(q_idx >= kv_idx, score, -float("inf"))
@@ -1597,9 +1618,9 @@ class GraphModule(torch.nn.Module):
             NotImplementedError, "NYI: L must be a multiple of 128"
         ):
             flex_attention(
-                torch.randn((2, 3, 4)),
-                torch.randn((2, 10, 5)),
-                torch.randn((2, 10, 5)),
+                torch.randn((1, 2, 3, 4)),
+                torch.randn((1, 2, 10, 5)),
+                torch.randn((1, 2, 10, 5)),
                 score_mod=_identity,
             )
 
@@ -1608,9 +1629,9 @@ class GraphModule(torch.nn.Module):
         ):
             compiled_flex = torch.compile(flex_attention)
             compiled_flex(
-                torch.randn((2, 3, 4)),
-                torch.randn((2, 10, 5)),
-                torch.randn((2, 10, 5)),
+                torch.randn((1, 2, 3, 4)),
+                torch.randn((1, 2, 10, 5)),
+                torch.randn((1, 2, 10, 5)),
                 score_mod=_identity,
             )
 

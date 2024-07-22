@@ -6,12 +6,10 @@
 #include <c10/core/Stream.h>
 #include <c10/util/Registry.h>
 
-#include <c10/core/Allocator.h>
-
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
 #include <string>
-
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 class Context;
 }
@@ -90,15 +88,6 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
   virtual void setCurrentStream(const c10::Stream& stream) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
-
-  virtual bool isPinnedPtr(const void* data) const override {
-    return false;
-  }
-
-  virtual Allocator* getPinnedMemoryAllocator() const override {
-    FAIL_MTIAHOOKS_FUNC(__func__);
-    return nullptr;
-  }
 };
 
 struct TORCH_API MTIAHooksArgs {};
@@ -112,3 +101,4 @@ TORCH_API const MTIAHooksInterface& getMTIAHooks();
 TORCH_API bool isMTIAHooksBuilt();
 } // namespace detail
 } // namespace at
+C10_DIAGNOSTIC_POP()
