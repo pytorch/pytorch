@@ -2168,6 +2168,72 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_limit", 1)
+        def test_skip_if_dynamic_shape_limit_reached1(self):
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(3, 3, device="cuda")
+
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    return self.linear(x)
+
+            def iter(batch_size: int, mod: torch.nn.Module):
+                x = torch.rand((batch_size, 3), device="cuda")
+                for _ in range(3):
+                    mod(x)
+
+            mod = torch.compile(Mod(), mode="reduce-overhead")
+
+            with capture_stderr() as captured_output:
+                for batch_size in range(10, 40, 10):
+                    iter(batch_size, mod)
+
+            FileCheck().check(
+                "skipping cudagraphs due to recording more than 1 CUDAGraphs "
+                "for supporting dynamic shapes. We have observed 2 distinct "
+                "sizes, including [20, 30]. Consider padding the inputs to "
+                "a few fixed number of shapes for better performance."
+            ).run(captured_output[0])
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
+        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_limit", 1)
+        def test_skip_if_dynamic_shape_limit_reached2(self):
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.attn = torch.nn.MultiheadAttention(
+                        embed_dim=3, num_heads=3, device="cuda"
+                    )
+
+                def forward(
+                    self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+                ) -> torch.Tensor:
+                    return self.attn(q, k, v)
+
+            mod = torch.compile(Mod(), mode="reduce-overhead")
+
+            def iter(batch_size: int, length: int):
+                q = torch.rand((batch_size, length, 3), device="cuda")
+                k = torch.rand((batch_size, length, 3), device="cuda")
+                v = torch.rand((batch_size, length, 3), device="cuda")
+                for _ in range(3):
+                    mod(q, k, v)
+
+            with capture_stderr() as captured_output:
+                for batch_size in range(10, 40, 10):
+                    for length in range(10, 30, 10):
+                        iter(batch_size, length)
+
+            print(captured_output)
+            FileCheck().check(
+                "skipping cudagraphs due to recording more than 1 CUDAGraphs "
+                "for supporting dynamic shapes. We have observed 2 distinct "
+                "sizes, including [(20, 10, 20), (20, 20, 20)]. Consider "
+                "padding the inputs to a few fixed number of shapes for "
+                "better performance."
+            ).run(captured_output[0])
+
     instantiate_parametrized_tests(CudaGraphTreeTests)
 
 if __name__ == "__main__":

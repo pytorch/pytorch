@@ -234,3 +234,23 @@ def log_data_ptr_mismatch(
                 f"input stack trace: {get_placeholder_stack_trace(placeholder)}\n"
             )
     return error_msg
+
+
+def skip_due_to_dynamic_shape(
+    fn_cache: Dict[Tuple[int, ...], Callable[..., Any]],
+    new_int_key: Any,
+) -> Optional[str]:
+    num_cudagraphs = len(fn_cache.keys()) + 1
+
+    skip_msg = (
+        f"recording more than {torch._inductor.config.triton.cudagraph_dynamic_shape_limit} "
+        f"CUDAGraphs for supporting dynamic shapes. We have observed {num_cudagraphs} "
+        f"distinct sizes, including {[*fn_cache.keys(), new_int_key]}. Consider padding the "
+        f"inputs to a few fixed number of shapes for better performance."
+    )
+
+    return (
+        skip_msg
+        if num_cudagraphs > torch._inductor.config.triton.cudagraph_dynamic_shape_limit
+        else None
+    )
