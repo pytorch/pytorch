@@ -413,7 +413,15 @@ def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
     return props.major <= 7
 
 
+def dims_are_int(dims):
+    return all(isinstance(dim, int) for dim in dims)
+
+
 def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
+    m, n, k = get_size_hints(mat1, mat2, m, n, k)
+    if not dims_are_int([m, n, k]):
+        return None
+
     if mat1.dtype != torch.float16:
         return None
 
@@ -456,6 +464,10 @@ def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
 
 
 def mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes):
+    m, n, k = get_size_hints(mat1, mat2, m, n, k)
+    if not dims_are_int([m, n, k]):
+        return None
+
     def get_context(m, k, n, mat1, mat2):
         context = AHContext()
         context.add_feature("m", m)
@@ -491,6 +503,21 @@ def mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes):
     )
     choice_str = autoheuristic.get_choice()
     return choicestr2choice.get(choice_str, None)
+
+
+def get_size_hints(mat1, mat2, m, n, k):
+    if not isinstance(m, int) or not isinstance(k, int):
+        (m, k) = V.graph.sizevars.size_hints(
+            mat1.get_size(),
+            fallback=torch._inductor.config.unbacked_symint_fallback,
+        )
+
+    if not isinstance(n, int) or not isinstance(k, int):
+        (k, n) = V.graph.sizevars.size_hints(
+            mat2.get_size(),
+            fallback=torch._inductor.config.unbacked_symint_fallback,
+        )
+    return m, n, k
 
 
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
