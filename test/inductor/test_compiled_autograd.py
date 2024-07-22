@@ -20,6 +20,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.logging_utils import logs_to_string
 
+
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
 
@@ -1668,9 +1669,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
                 loss.backward()
                 yield x.grad
 
-        # can bring this down to 2 if we support dynamic shapes
-        # instead of collecting the saved_data's tensor hash
-        self.check_output_and_recompiles(fn, 5)
+        # compiles for 10 (static) and 100 (dynamic)
+        self.check_output_and_recompiles(fn, 2)
 
     def test_autograd_cpp_node_data_dependent(self):
         cpp_source = """
@@ -2278,6 +2278,7 @@ known_failing_tests = {
     "test_grad_materialize_grads",  # RuntimeError: compiled_autograd does not support create_graph
     "test_grad_nonleaf",  # RuntimeError: compiled_autograd does not support create_graph
     "test_grad_nonleaf_many_outputs",  # RuntimeError: compiled_autograd does not support create_graph
+    "test_gradient_edge_output",  # RuntimeError: trying to backward through the graph a second time
     "test_hessian_vector",  # RuntimeError: compiled_autograd does not support create_graph
     "test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_False",  # AttributeError: type object
     "test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_True",  # AttributeError: type object
@@ -2346,6 +2347,7 @@ known_failing_tests = {
     "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
     "test_unpack_hooks_exec_count",  # pack/unpack saved tensor hooks firing more than once
     "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
+    "test_backward_twice_without_saved_values",  # https://github.com/pytorch/pytorch/issues/129938
 }
 
 if not HAS_CUDA:

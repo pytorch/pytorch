@@ -25,7 +25,7 @@ inline bool CheckStrideIndices(const Tensor& t, at::MemoryFormat format) {
   // testing computeStrideProps with `IValue ival(t)` somehow doesn't work on CI
   // with onnx; The function works fine within, but stride properties is somehow
   // altered in ival->type()->cast<TensorType>();
-  auto tt = TensorType::create(c10::nullopt, c10::nullopt, t.sizes(), t.strides(), c10::nullopt);
+  auto tt = TensorType::create(std::nullopt, std::nullopt, t.sizes(), t.strides(), std::nullopt);
   TORCH_INTERNAL_ASSERT(tt->stride_properties().isComplete(), "complete stride properties is needed for the test");
 
   auto index_iter = stride_indices.begin();
@@ -53,11 +53,11 @@ TEST(StridePropertiesTest, ZeroStrideIndicesEagerConsistencyTest) {
   auto permuted_tensor = at::rand({6, 3, 1, 5, 2}).permute({0, 3, 2, 1, 4}); // permute dim-1 & dim-3
   auto tensor = permuted_tensor.expand({6, 5, 4, 3, 2}); // expand dim-2
 
-  auto temp = TensorType::create(c10::nullopt, c10::nullopt, tensor.sizes(), tensor.strides(), c10::nullopt);
+  auto temp = TensorType::create(std::nullopt, std::nullopt, tensor.sizes(), tensor.strides(), std::nullopt);
 
   // TensorIterator would preserve stride order, this is the eager reference
   auto eager_tensor = tensor.relu();
-  auto ref_type = TensorType::create(c10::nullopt, c10::nullopt, eager_tensor.sizes(), eager_tensor.strides(), c10::nullopt);
+  auto ref_type = TensorType::create(std::nullopt, std::nullopt, eager_tensor.sizes(), eager_tensor.strides(), std::nullopt);
 
   TORCH_INTERNAL_ASSERT(temp->stride_properties().isComplete() &&
       temp->stride_properties().isComplete(), "complete stride properties is needed for the test");
@@ -80,7 +80,7 @@ TEST(StridePropertiesTest, SlicedStrideIndicesTest) {
   // Sliced tensor shouldn't have changed stride order
   Tensor t = at::rand({16, 4}).slice(1, 0, 4, 4);
 
-  auto temp = TensorType::create(c10::nullopt, c10::nullopt, t.sizes(), t.strides(), c10::nullopt);
+  auto temp = TensorType::create(std::nullopt, std::nullopt, t.sizes(), t.strides(), std::nullopt);
   TORCH_INTERNAL_ASSERT(temp->stride_properties().isComplete() &&
       temp->stride_properties().isComplete(), "complete stride properties is needed for the test");
   std::vector<size_t> stride_indices(2);

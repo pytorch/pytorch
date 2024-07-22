@@ -13,6 +13,7 @@ else:
     DynamoFrameType: TypeAlias = types.FrameType
 
 import torch
+from torch._guards import CompileId
 
 # This class has a `check_fn` field for the guard,
 #  and a `code` field for the code object.
@@ -50,6 +51,7 @@ class GuardFn(Protocol):
 class GuardedCode:
     code: types.CodeType
     check_fn: GuardFn
+    compile_id: CompileId
 
 
 class DynamoCallbackFn(Protocol):
