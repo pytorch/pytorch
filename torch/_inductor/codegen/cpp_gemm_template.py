@@ -419,15 +419,9 @@ class CppPackedGemmTemplate(CppTemplate):
             m_blocks = math.ceil(self.m / self.register_blocking.block_m)
             n_blocks = math.ceil(self.n / self.register_blocking.block_n)
             k_blocks = math.ceil(self.k / self.register_blocking.block_k)
-            m = self.num_threads // (
-                self.num_threads // math.ceil(m_blocks / thread_blocking.block_m)
-            )
-            n = self.num_threads // (
-                self.num_threads // math.ceil(n_blocks / thread_blocking.block_n)
-            )
-            k = self.num_threads // (
-                self.num_threads // math.ceil(k_blocks / thread_blocking.block_k)
-            )
+            m = math.ceil(m_blocks / thread_blocking.block_m)
+            n = math.ceil(n_blocks / thread_blocking.block_n)
+            k = math.ceil(k_blocks / thread_blocking.block_k)
             return (m, n, k)
 
         log.debug(
