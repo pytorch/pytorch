@@ -387,6 +387,7 @@ TuningStatus TuningResultsValidator::ValidatePyTorchVersion(const std::string& v
 TuningContext::TuningContext() :
     enable_{false},
     tuning_enable_{true},
+    record_untuned_enable_{true},
     manager_initialized_{false},
     write_file_on_exit_{true},
     numerics_check_enable_{false},
@@ -457,6 +458,16 @@ void TuningContext::EnableTuning(bool value) {
   }
 }
 
+void TuningContext::EnableRecordUntuned(bool value) {
+  record_untuned_enable_ = value;
+  if (value) {
+    TUNABLE_LOG1("Enable Record Untuned for TunableOp");
+  }
+  else {
+    TUNABLE_LOG1("Disable Record Untuned for TunableOp");
+  }
+}
+
 bool TuningContext::IsTuningEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_TUNING");
   if (env != nullptr && strcmp(env, "0") == 0) {
@@ -467,10 +478,10 @@ bool TuningContext::IsTuningEnabled() const {
 
 bool TuningContext::IsRecordUntunedEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_RECORD_UNTUNED");
-  if (env != nullptr && strcmp(env, "1") == 0) {
-    return true;
+  if (env != nullptr && strcmp(env, "0") == 0) {
+    return false;
   }
-  return false;
+  return record_untuned_enable_;
 }
 
 std::ofstream& TuningContext::GetUntunedFile(){

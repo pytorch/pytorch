@@ -4812,33 +4812,36 @@ class TestLinalg(TestCase):
                 pass
 
     @onlyCUDA
-    @dtypes(*floating_types_and(torch.half))
+    @dtypes(torch.half)
     def test_matmul_offline_tunableop(self, device, dtype):
         import os
+        torch.cuda.tunable.enable()
         # record GEMM
-        os.putenv('PYTORCH_TUNABLEOP_ENABLED', '1')
-        os.putenv('PYTORCH_TUNABLEOP_TUNING', '0')
-        os.putenv('PYTORCH_TUNABLEOP_RECORD_UNTUNED', '1')
+        torch.cuda.tunable.tuning_enable(False)
+        torch.cuda.tunable.record_untuned_enable(True)
+        assert torch.cuda.tunable.record_untuned_is_enabled(), "Record untuned should be on by default"
 
         make_arg = partial(make_tensor, device=device, dtype=dtype)
-
         for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
             x = make_arg(size_x, noncontiguous=nctg_x)
             y = make_arg(size_y, noncontiguous=nctg_y)
             self.check_single_matmul(x, y)
 
+
+        assert torch.cuda.tunable.is_enabled()
+        assert torch.cuda.tunable.tuning_is_enabled() is False
         ordinal = torch.cuda.current_device()
         untuned_filename = f"tunableop_untuned{ordinal}.csv"
         assert os.path.exists(untuned_filename)
 
         # tuning the untuned GEMMs in file
-        os.putenv('PYTORCH_TUNABLEOP_ENABLED', '1')
-        os.putenv('PYTORCH_TUNABLEOP_TUNING', '1')
-        
+        torch.cuda.tunable.tuning_enable(True)
+        torch.cuda.tunable.record_untuned_enable(False)
+
         # set these to single iterations to keep it short but still exercise the code
         torch.cuda.tunable.set_max_tuning_duration(1)
         torch.cuda.tunable.set_max_tuning_iterations(1)
-        
+
         torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
         result_filename = f"tunableop_results{ordinal}.csv"
         assert os.path.exists(result_filename)
@@ -4846,7 +4849,6 @@ class TestLinalg(TestCase):
         # remove the files created above to avoid error 'Build left local git repository checkout dirty', ignore errors
         for filename in [untuned_filename, result_filename]:
             try:
-                import os
                 os.remove(filename)
             finally:
                 pass

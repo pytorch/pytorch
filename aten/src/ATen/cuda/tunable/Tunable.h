@@ -178,6 +178,7 @@ class TORCH_CUDA_CPP_API TuningContext {
     void EnableTuning(bool value);
     bool IsTuningEnabled() const;
 
+    void EnableRecordUntuned(bool value);
     bool IsRecordUntunedEnabled() const;
     std::ofstream& GetUntunedFile();
 
@@ -221,6 +222,7 @@ class TORCH_CUDA_CPP_API TuningContext {
   private:
     bool enable_;
     bool tuning_enable_;
+    bool record_untuned_enable_;
     bool manager_initialized_;
     bool write_file_on_exit_;
     bool numerics_check_enable_;

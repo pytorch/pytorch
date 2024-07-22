@@ -155,11 +155,20 @@ def tuning_enable(val: bool = True) -> None:
     """
     torch._C._cuda_tunableop_tuning_enable(val)  # type: ignore[attr-defined]
 
-
 def tuning_is_enabled() -> bool:
     r"""Returns whether TunableOp implementations can be tuned."""
     return torch._C._cuda_tunableop_tuning_is_enabled()  # type: ignore[attr-defined]
 
+def record_untuned_enable(val: bool = True) -> None:
+    r"""Enable record untuned of TunableOp implementations.
+
+    When enabled, if a tuned entry isn't found, record the GEMM into file.
+    """
+    torch._C._cuda_record_untuned_enable(val)  # type: ignore[attr-defined]
+
+def record_untuned_is_enabled() -> bool:
+    r"""Returns whether TunableOp implementations can be recorded."""
+    return torch._C._cuda_record_untuned_is_enabled()  # type: ignore[attr-defined]
 
 def set_max_tuning_duration(duration: int) -> None:
     r"""Set max time in milliseconds to spend tuning a given solution.

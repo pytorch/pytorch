@@ -114,6 +114,8 @@ All python APIs exist in the `torch.cuda.tunable` module.
 | is_enabled() -> bool | |
 | tuning_enable(val: bool = True) -> None | Default is True. |
 | tuning_is_enabled() -> bool | |
+| record_untuned_enable(val: bool = True) -> None | Default is True. |
+| record_untuned_is_enabled() -> bool | |
 | set_max_tuning_duration(duration: int) -> None | |
 | get_max_tuning_duration() -> int | |
 | set_max_tuning_iterations(iterations: int) -> None | |
