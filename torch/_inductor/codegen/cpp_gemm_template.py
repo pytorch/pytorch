@@ -96,7 +96,7 @@ extern "C"
         {{ micro_gemm.codegen_init(kernel) }}
         for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
             const int64_t m_start = mc * M0;
-            const int64_t m_end = std::min((mc + Mc_blocks) * M0, M);
+            const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * M0, M);
             const int64_t m_size = m_end - m_start;
             {%- if use_local_acc %}
             {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "N0"], acc_buf_dtype) }}
@@ -318,15 +318,9 @@ class CppPackedGemmTemplate(CppTemplate):
             m_blocks = math.ceil(self.m / self.register_blocking.block_m)
             n_blocks = math.ceil(self.n / self.register_blocking.block_n)
             k_blocks = math.ceil(self.k / self.register_blocking.block_k)
-            m = self.num_threads // (
-                self.num_threads // math.ceil(m_blocks / thread_blocking.block_m)
-            )
-            n = self.num_threads // (
-                self.num_threads // math.ceil(n_blocks / thread_blocking.block_n)
-            )
-            k = self.num_threads // (
-                self.num_threads // math.ceil(k_blocks / thread_blocking.block_k)
-            )
+            m = math.ceil(m_blocks / thread_blocking.block_m)
+            n = math.ceil(n_blocks / thread_blocking.block_n)
+            k = math.ceil(k_blocks / thread_blocking.block_k)
             return (m, n, k)
 
         log.debug(
