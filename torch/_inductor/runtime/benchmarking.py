@@ -22,7 +22,7 @@ def time_and_log(fn: Callable[..., Any]) -> Callable[..., Any]:
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         start_time = time.perf_counter()
         result = fn(*args, **kwargs)
-        log.debug(f"{fn.__name__} took {time.perf_counter() - start_time} seconds.")
+        log.debug("{function_name} took {elapsed_time_s} seconds.", extra=dict(function_name=fn.__name__, elapsed_time_s=time.perf_counter() - start_time))
         return result
     return wrapper
 
@@ -43,60 +43,60 @@ class LazyBenchmark:
 
     def __float__(self) -> float:
         return float(self.timing_ms)
-    
+
     def __format__(self, format_spec: str) -> str:
         return format(self.timing_ms, format_spec)
-    
+
     def __str__(self) -> str:
         return str(self.timing_ms)
-    
+
     def __lt__(self, other: Any) -> bool:
         return self.timing_ms < other
-    
+
     def __le__(self, other: Any) -> bool:
         return self.timing_ms <= other
-    
+
     def __gt__(self, other: Any) -> bool:
         return self.timing_ms > other
-    
+
     def __ge__(self, other: Any) -> bool:
         return self.timing_ms >= other
-    
+
     def __add__(self, other: Any) -> Any:
         if not hasattr(self, "benchmark"):
             return self.timing_ms + other
         return LazyBenchmark(lambda: self.timing_ms + other)
-    
+
     def __radd__(self, other: Any) -> Any:
         if not hasattr(self, "benchmark"):
             return other + self.timing_ms
         return LazyBenchmark(lambda: other + self.timing_ms)
-    
+
     def __sub__(self, other: Any) -> Any:
         if not hasattr(self, "benchmark"):
             return self.timing_ms - other
         return LazyBenchmark(lambda: self.timing_ms - other)
-    
+
     def __rsub__(self, other: Any) -> Any:
         if not hasattr(self, "benchmark"):
             return other - self.timing_ms
         return LazyBenchmark(lambda: other - self.timing_ms)
-    
+
     def __mul__(self, other: Any) -> Any:
         if not hasattr(self, "benchmark"):
             return self.timing_ms * other
         return LazyBenchmark(lambda: self.timing_ms * other)
-    
+
     def __rmul__(self, other: Any) -> Any:
         if not hasattr(self, "benchmark"):
             return other * self.timing_ms
         return LazyBenchmark(lambda: other * self.timing_ms)
-    
+
     def __truediv__(self, other: Any) -> Any:
         if not hasattr(self, "benchmark"):
             return self.timing_ms / other
         return LazyBenchmark(lambda: self.timing_ms / other)
-    
+
     def __rtruediv__(self, other: Any) -> Any:
         if not hasattr(self, "benchmark"):
             return other / self.timing_ms
@@ -143,7 +143,7 @@ class Benchmarker:
         torch.cuda.synchronize()
         return idx
 
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def get_cpu_launch_overhead_ms_per_event_record(self) -> float:
         counters["inductor"]["benchmarking_get_cpu_launch_overhead_ms_per_event_record"] += 1
         # ensures the queue is empty
@@ -164,7 +164,7 @@ class Benchmarker:
         counters["inductor"]["benchmarking_gpu_time_ms_per_gpu_cache_clear"] += 1
         return self.get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear()[1]
 
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear(
         self,
     ) -> Tuple[float, float]:
@@ -413,7 +413,7 @@ class Benchmarker:
         if ranking_key is not None:
             if benchmarking_config.enable_early_ranking:
                 counters["inductor"]["benchmarking_early_ranking"] += 1
-                log.debug(f"Returning early ranking for ranking key {ranking_key}.")
+                log.debug("Returning early ranking for ranking key {ranking_key}.", extra=dict(ranking_key=ranking_key))
                 # explicitly delete the buffer, sometimes helps memory
                 # footprint metrics in OSS Inductor benchmarks
                 del buffer
@@ -438,7 +438,7 @@ class Benchmarker:
                     for _callable in callables
                     if callable_to_timing_ms[_callable] < target_timing_ms
                 ]
-                log.debug(f"Pruned to {len(callables_to_benchmark)} callables for pruning key {pruning_key}.")
+                log.debug("Pruned to {num_callables} callables for pruning key {pruning_key}.", extra=dict(num_callables=len(callables), pruning_key=pruning_key))
                 cpu_launch_overhead_ms_per_iter = (
                     cpu_launch_overhead_ms_per_iter_per_callable
                     * len(callables_to_benchmark)
@@ -594,7 +594,7 @@ class Benchmarker:
                 timings_ms = self.benchmark_many_gpu(
                     callables, ranking_key=ranking_key, pruning_key=pruning_key, **kwargs
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: TRY302
                 raise e
             else:
                 self.memory_cache.update(zip(keys, timings_ms))

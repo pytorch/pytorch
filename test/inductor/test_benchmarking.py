@@ -10,7 +10,7 @@ from torch._dynamo.utils import counters
 from torch._inductor.runtime.benchmarking import Benchmarker, LazyBenchmark
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_big_gpu
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_CPU
+from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_CPU, GPU_TYPE
 
 
 log = logging.getLogger(__name__)
@@ -66,6 +66,7 @@ class TestBenchmarking(TestCase):
 
         # test benchmarker.benchmark
         fn, args, kwargs = self.get_cpu_fn_args_kwargs()
+        _callable = self.get_cpu_callable()
         timing = benchmarker.benchmark(fn, args, kwargs)
         sanity_check_timing = self.sanity_check_cpu_benchmark(_callable)
         self.assertEqual(timing <= sanity_check_timing, True)
@@ -74,7 +75,6 @@ class TestBenchmarking(TestCase):
         counters.clear()
 
         # test benchmarker.benchmark_cpu
-        _callable = self.get_cpu_callable()
         timing = benchmarker.benchmark_cpu(_callable)
         self.assertEqual(timing <= sanity_check_timing, True)
         self.assertEqual(counters["inductor"]["benchmarking_benchmark_cpu"], 1)
@@ -191,7 +191,7 @@ class TestBenchmarking(TestCase):
     @patches
     def test_lazy_benchmark_magic_methods(self):
         lazy_benchmark = LazyBenchmark(lambda: 0.0)  # noqa: E731
-        self.assertEqual(float(lazy_benchmark), float(0.0))
+        self.assertEqual(float(lazy_benchmark), 0.0)
         self.assertEqual(counters["inductor"]["benchmarking_finalize_lazy_benchmark"], 1)
         counters.clear()
 
