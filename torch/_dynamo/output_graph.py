@@ -2,8 +2,10 @@
 import collections
 import contextlib
 import copy
+import dataclasses
 import functools
 import itertools
+import json
 import logging
 import operator
 import re
@@ -1259,7 +1261,17 @@ class OutputGraph:
 
         if (ds := tx.distributed_state) is not None and ds.all_states is None:
             compile_pg = ds.compile_pg
-            log.info("compile_pg %s", ds.local_state)
+            log.info("compiler_collective %s", ds.local_state)
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "compiler_collective",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(
+                    dataclasses.asdict(ds.local_state),
+                ),
+            )
             with torch.cuda.device(compile_pg.rank() % torch.cuda.device_count()):
                 all_states = [None] * compile_pg.size()
                 dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
