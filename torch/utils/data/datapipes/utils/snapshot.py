@@ -8,7 +8,9 @@ from torch.utils.data.graph_settings import apply_random_seed
 #   1. Caller (either the ReadingService or DataLoader) must pass in the initial RNG
 #   2. `in_batch_shuffle` and `bucketbatch` are not compatible with this because they currently
 #      lack the option to `set_seed`.
-def _simple_graph_snapshot_restoration(datapipe: IterDataPipe, n_iterations: int, rng=None) -> None:
+def _simple_graph_snapshot_restoration(
+    datapipe: IterDataPipe, n_iterations: int, rng=None
+) -> None:
     r"""
     Fast-forward the given DataPipe and its parents by ``n_iterations``, re-doing computations to restore a snapshot.
 
@@ -34,7 +36,8 @@ def _simple_graph_snapshot_restoration(datapipe: IterDataPipe, n_iterations: int
     if datapipe._snapshot_state == _SnapshotState.Restored:
         raise RuntimeError(
             "Snapshot restoration cannot be applied. You can only restore simple snapshot to the graph "
-            "if your graph has not been restored.")
+            "if your graph has not been restored."
+        )
 
     # For this snapshot restoration function, we want the DataPipe to be at its initial state prior to
     # simple fast-forwarding. Therefore, we need to call `reset` twice, because if `SnapshotState` is `Restored`,
@@ -49,8 +52,10 @@ def _simple_graph_snapshot_restoration(datapipe: IterDataPipe, n_iterations: int
             next(it)
             remainder -= 1
         except StopIteration as e:
-            raise RuntimeError(f"Fast-forward {datapipe} by {n_iterations} iterations "
-                               "exceeds the number of samples available.") from e
+            raise RuntimeError(
+                f"Fast-forward {datapipe} by {n_iterations} iterations "
+                "exceeds the number of samples available."
+            ) from e
     datapipe._fast_forward_iterator = it
     # While the DataPipe has `_fast_forward_iterator`, `next()` will get result from there instead of elsewhere.
 
