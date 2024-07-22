@@ -2,7 +2,6 @@
 
 import copy
 from typing import Set, Type
-import os
 
 import torch
 import torch.fx
