@@ -51,7 +51,7 @@ inline AtenTensorHandle new_tensor_handle(at::Tensor&& tensor) {
 inline void assert_inf_and_nan(
     const std::string& tensor_name,
     at::Tensor& check_tensor) {
-  auto flattened = check_tensor.view({-1});
+  auto flattened = check_tensor.reshape({-1});
 
   for (int64_t i = 0; i < flattened.numel(); i++) {
     auto value = flattened[i].item<float>();
