@@ -515,7 +515,7 @@ class Benchmarker:
         fn_args: Tuple[Any],
         fn_kwargs: Dict[str, Any],
         **kwargs: Any
-    ) -> LazyBenchmark:
+    ) -> Union[LazyBenchmark, float]:
         counters["inductor"]["benchmarking_lazy_benchmark"] += 1
         _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
         if not benchmarking_config.enable_lazy_benchmarking:
@@ -549,7 +549,7 @@ class Benchmarker:
         ranking_key: Optional[str] = None,
         pruning_key: Optional[str] = None,
         **kwargs: Any
-    ) -> LazyBenchmark:
+    ) -> Union[LazyBenchmark, float]:
         counters["inductor"]["benchmarking_lazy_benchmark_gpu"] += 1
 
         if not benchmarking_config.enable_lazy_benchmarking:
@@ -703,7 +703,7 @@ class Benchmarker:
         interleaved_event_pairs: List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]],
     ) -> List[float]:
         return [
-            self.get_min_timing_ms(event_pairs)  # type: ignore
+            self.get_min_timing_ms(event_pairs)
             for event_pairs in zip(*interleaved_event_pairs)
         ]
 
