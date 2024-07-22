@@ -5,12 +5,10 @@ import unittest
 import sympy
 
 import torch
-
 from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
 from torch._inductor.runtime.runtime_utils import do_bench_gpu
-
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_triton_code
@@ -25,6 +23,7 @@ from torch.utils._sympy.functions import (
     RoundDecimal,
     RoundToInt,
 )
+
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
