@@ -237,10 +237,7 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
     bf16x8 vals[kWorldSize];
 #pragma unroll kWorldSize
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      // Make sure the values in `vals` are order by rank so that the reduction
-      // results are consistent across ranks.
-      int srcRank = (ii + kWorldSize - rank) % kWorldSize;
-      streamLoad128(vals[srcRank], &srcs[ii][N_start + i]);
+      streamLoad128(vals[ii], &srcs[ii][N_start + i]);
     }
 
     bf16x8 sums;
@@ -535,7 +532,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
   const bool fuseInputCopy = isAligned && blocks.x < kMaxAllReduceBlocks;
   if (!fuseInputCopy) {
     AT_CUDA_CHECK(cudaMemcpyAsync(
-        symmetricMemory_->get_buffer_ptrs()[rank_],
+        symmetricMemory_->get_buffer_ptrs_dev()[rank_],
         input.data_ptr(),
         input.numel() * input.element_size(),
         cudaMemcpyDeviceToDevice,
@@ -579,7 +576,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
 at::Tensor IntraNodeComm::twoShotAllReduce(
     const at::Tensor& input,
     at::cuda::CUDAStream& stream) {
-  checkInput(input, deviceIdx_);
+  checkInput(input, rank_);
 
   size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
   size_t N_aligned = alignUp(input.numel(), worldSize_ * numelPerWarp);
@@ -595,7 +592,7 @@ at::Tensor IntraNodeComm::twoShotAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      symmetricMemory_->get_buffer_ptrs()[rank_],
+      symmetricMemory_->get_buffer_ptrs_dev()[rank_],
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
@@ -634,7 +631,7 @@ at::Tensor IntraNodeComm::twoShotAllReduce(
 at::Tensor IntraNodeComm::hybridCubeMeshAllReduce(
     const at::Tensor& input,
     at::cuda::CUDAStream& stream) {
-  checkInput(input, deviceIdx_);
+  checkInput(input, rank_);
 
   size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
   size_t N_aligned = alignUp(input.numel(), numelPerWarp);
@@ -645,7 +642,7 @@ at::Tensor IntraNodeComm::hybridCubeMeshAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      symmetricMemory_->get_buffer_ptrs()[rank_],
+      symmetricMemory_->get_buffer_ptrs_dev()[rank_],
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,

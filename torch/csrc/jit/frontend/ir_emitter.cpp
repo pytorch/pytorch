@@ -2633,7 +2633,8 @@ struct to_ir {
       case '^':
         return use_inplace_op ? aten::bitwise_xor : aten::__xor__;
       case TK_LSHIFT:
-        return use_inplace_op ? aten::__ilshift__ : aten::__lshift__;
+        // NOLINTNEXTLINE(bugprone-branch-clone)
+        return use_inplace_op ? aten::__lshift__ : aten::__lshift__;
       case TK_RSHIFT:
         return use_inplace_op ? aten::__irshift__ : aten::__rshift__;
       case TK_POW:

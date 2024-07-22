@@ -1,13 +1,12 @@
 import json
 import os
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest import mock
 
 import torch
 import torch._export
 from torch._inductor.utils import is_cpu_device
-
 from .runtime.runtime_utils import cache_dir
 
 
@@ -47,14 +46,12 @@ def load_aoti_eager_cache(
                     return []
 
                 for metadata in item["meta_info"]:
-                    if metadata.get("is_dynamic"):
-                        raise NotImplementedError("Only support static shape for now")
-                    if "device_type" in metadata and metadata["device_type"] == "cpu":
+                    assert not metadata[
+                        "is_dynamic"
+                    ], "Only support static shape for now"
+                    if metadata["device_type"] == "cpu":
                         metadata["device_index"] = -1
-                    if "dtype" in metadata:
-                        metadata["dtype"] = getattr(
-                            torch, metadata["dtype"].split(".")[-1]
-                        )
+                    metadata["dtype"] = getattr(torch, metadata["dtype"].split(".")[-1])
 
             return json_data
 
@@ -65,7 +62,8 @@ def supported_builtin_dtype_torch_dtype() -> Dict[type, torch.dtype]:
 
 def supported_scalar_types() -> Tuple[type, ...]:
     type_to_torch_dtype = supported_builtin_dtype_torch_dtype()
-    return tuple(type_to_torch_dtype.keys())
+    supported_scalar_types = tuple(type_to_torch_dtype.keys())
+    return supported_scalar_types
 
 
 def extract_tensor_metadata(dynamic: bool, input: torch.Tensor) -> Dict[str, Any]:
@@ -100,7 +98,9 @@ def extract_tensor_list_metadata(
     return metadata
 
 
-def extract_scalar_metadata(device_type: str, input: Any) -> Dict[str, Any]:
+def extract_scalar_metadata(
+    device_type: str, input: Union[int, float, bool]
+) -> Dict[str, Any]:
     assert isinstance(input, supported_scalar_types())
     metadata: Dict[str, Any] = {}
     metadata["is_dynamic"] = False
@@ -110,13 +110,6 @@ def extract_scalar_metadata(device_type: str, input: Any) -> Dict[str, Any]:
     type_to_torch_dtype = supported_builtin_dtype_torch_dtype()
     metadata["dtype"] = f"{type_to_torch_dtype[type(input)]}"
     metadata["scalar_value"] = input
-    return metadata
-
-
-def extract_string_metadata(input: str) -> Dict[str, Any]:
-    assert isinstance(input, str)
-    metadata: Dict[str, Any] = {}
-    metadata["string_value"] = input
     return metadata
 
 
@@ -138,9 +131,11 @@ def aoti_compile_with_persistent_cache(
     Compile the given function with persistent cache for AOTI eager mode.
     """
     assert not dynamic, "Only support static shape for now"
+    type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
+    supported_scalar_types = tuple(type_to_torch_dtype.keys())
     flattened_inputs = list(args) + list(kwargs.values())
     if not all(
-        isinstance(input, (supported_scalar_types(), torch.Tensor, list, str))
+        isinstance(input, (supported_scalar_types, torch.Tensor, list))
         for input in flattened_inputs
     ):
         raise NotImplementedError(
@@ -189,12 +184,8 @@ def aoti_compile_with_persistent_cache(
                 elif isinstance(input, list):
                     assert all(isinstance(item, torch.Tensor) for item in input)
                     metadata = extract_tensor_list_metadata(dynamic, input)
-                elif isinstance(input, supported_scalar_types()):
-                    metadata = extract_scalar_metadata(device_type, input)
-                elif isinstance(input, str):
-                    metadata = extract_string_metadata(input)
                 else:
-                    raise NotImplementedError(f"Unsupported input type: {type(input)}")
+                    metadata = extract_scalar_metadata(device_type, input)
 
                 metadata["arg_order"] = idx
                 kernel_metadata_items.append(metadata)

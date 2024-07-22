@@ -274,7 +274,6 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.block_diag,
             aten.celu,
             aten.celu_,
-            aten.channel_shuffle,
             aten.clamp_max,
             aten.clamp_min,
             aten.col2im,
