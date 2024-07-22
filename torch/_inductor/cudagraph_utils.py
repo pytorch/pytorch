@@ -236,21 +236,18 @@ def log_data_ptr_mismatch(
     return error_msg
 
 
-def skip_due_to_dynamic_shape(
+def maybe_warning_due_to_dynamic_shape(
     fn_cache: Dict[Tuple[int, ...], Callable[..., Any]],
     new_int_key: Any,
-) -> Optional[str]:
+):
     num_cudagraphs = len(fn_cache.keys()) + 1
 
-    skip_msg = (
-        f"recording more than {torch._inductor.config.triton.cudagraph_dynamic_shape_limit} "
-        f"CUDAGraphs for supporting dynamic shapes. We have observed {num_cudagraphs} "
-        f"distinct sizes, including {[*fn_cache.keys(), new_int_key]}. Consider padding the "
-        f"inputs to a few fixed number of shapes for better performance."
+    warn_msg = (
+        "CUDAGraph supports dynamic shapes by recording a new graph for each "
+        f"distinct input size. We have observed {num_cudagraphs} distinct "
+        f"sizes, including {[*fn_cache.keys(), new_int_key]}. Consider padding "
+        "inputs to a few fixed number of shapes for better performance."
     )
 
-    return (
-        skip_msg
-        if num_cudagraphs > torch._inductor.config.triton.cudagraph_dynamic_shape_limit
-        else None
-    )
+    if num_cudagraphs > torch._inductor.config.triton.cudagraph_dynamic_shape_limit:
+        perf_hint_log.warning(warn_msg)

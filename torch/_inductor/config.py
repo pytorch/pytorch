@@ -722,7 +722,7 @@ class triton:
     cudagraph_unexpected_rerecord_limit = 128
 
     # Maximal number of cudagraphs due to dynamic shape
-    cudagraph_dynamic_shape_limit = 10
+    cudagraph_dynamic_shape_limit = 50
 
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False

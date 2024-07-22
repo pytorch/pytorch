@@ -2190,12 +2190,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     iter(batch_size, mod)
 
             FileCheck().check(
-                "skipping cudagraphs due to recording more than 1 CUDAGraphs "
-                "for supporting dynamic shapes. We have observed 2 distinct "
-                "sizes, including [20, 30]. Consider padding the inputs to "
-                "a few fixed number of shapes for better performance."
-            ).run(captured_output[0])
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+                "CUDAGraph supports dynamic shapes by recording a new graph "
+                "for each distinct input size. We have observed 2 distinct "
+                "sizes, including [20, 30]. Consider padding inputs to a few "
+                "fixed number of shapes for better performance."
+            ).run("\n".join(captured_output))
 
         @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_limit", 1)
         def test_skip_if_dynamic_shape_limit_reached2(self):
@@ -2227,11 +2226,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             print(captured_output)
             FileCheck().check(
-                "skipping cudagraphs due to recording more than 1 CUDAGraphs "
-                "for supporting dynamic shapes. We have observed 2 distinct "
+                "CUDAGraph supports dynamic shapes by recording a new graph "
+                "for each distinct input size. We have observed 2 distinct "
                 "sizes, including [(20, 10, 20), (20, 20, 20)]. Consider "
-                "padding the inputs to a few fixed number of shapes for "
-                "better performance."
+                "padding inputs to a few fixed number of shapes for better "
+                "performance."
             ).run(captured_output[0])
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
