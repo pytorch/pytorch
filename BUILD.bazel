@@ -413,6 +413,7 @@ cc_library(
         "@cuda//:nvrtc",
         "@cudnn",
         "@cudnn_frontend",
+        "@cuda//:cufile",
     ],
     alwayslink = True,
 )
@@ -762,6 +763,7 @@ cc_library(
         ":torch_headers",
         "@kineto",
         "@cpp-httplib",
+        "@nlohmann",
     ] + if_cuda([
         "@cuda//:nvToolsExt",
         "@cutlass",

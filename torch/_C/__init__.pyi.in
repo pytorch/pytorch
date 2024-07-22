@@ -24,7 +24,7 @@ from typing import (
     Set,
     SupportsIndex,
     Tuple,
-    Type,
+    Type as _Type,
     TypeVar,
     Union,
     overload,
@@ -35,12 +35,18 @@ from typing_extensions import ParamSpec, Self
 import numpy
 
 import torch
-from torch import inf, SymInt, Tensor
+from torch import SymInt, Tensor, inf
+from torch._prims_common import DeviceLikeType
 from torch.autograd.graph import Node as _Node
 from torch.package import PackageExporter
-from torch.storage import UntypedStorage, TypedStorage
+from torch.storage import TypedStorage, UntypedStorage
 from torch.types import (
+    Device,
+    Number,
+    Storage,
+    IntLikeType,
     _bool,
+    _bytes,
     _complex,
     _device,
     _dispatchkey,
@@ -50,17 +56,24 @@ from torch.types import (
     _layout,
     _qscheme,
     _size,
-    Device,
-    Number,
-    Storage,
+    _str,
+    _symsize,
 )
-
-from torch._prims_common import DeviceLikeType
 from torch.utils._python_dispatch import TorchDispatchMode
 
-# This module is defined in torch/csrc/Module.cpp
+from . import (
+    _aoti,
+    _cpu,
+    _functorch,
+    _lazy,
+    _lazy_ts_backend,
+    _nn,
+    _onnx,
+    _VariableFunctions,
+    _verbose,
+)
 
-from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunctions, _cpu, _aoti, _verbose
+# This module is defined in torch/csrc/Module.cpp
 
 K = TypeVar("K")
 T = TypeVar("T")
@@ -1105,7 +1118,7 @@ class Module: ...
 def _initExtension(shm_manager_path: str) -> None: ...  # THPModule_initExtension
 def _autograd_init() -> _bool: ...  # THPAutograd_initExtension
 def _add_docstr(obj: T, doc_obj: str) -> T: ...  # THPModule_addDocStr
-def _init_names(arg: Sequence[Type]) -> None: ...  # THPModule_initNames
+def _init_names(arg: Sequence[_Type]) -> None: ...  # THPModule_initNames
 def _has_distributed() -> _bool: ...  # THPModule_hasDistributed
 def _set_default_tensor_type(type) -> None: ...  # THPModule_setDefaultTensorType
 def _set_default_dtype(d: _dtype) -> None: ...  # THPModule_setDefaultDtype
@@ -1141,6 +1154,8 @@ def _set_sdp_use_mem_efficient(
 ) -> None: ...  # THPModule_setSDPUseMemEfficient
 def _get_math_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_math(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
+def _get_overrideable_sdp_enabled() -> _bool: ...  # THPModule_userEnabledOverrideableSDP
+def _set_sdp_use_overrideable(arg: _bool) -> None: ...  # THPModule_setSDPUseOverrideable
 def _get_cudnn_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_cudnn(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
 def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn
@@ -1235,13 +1250,13 @@ def _log_api_usage_metadata(event: str, metadata_map: Dict[str, str]) -> None: .
 def _demangle(str) -> str: ...  # c10::demangle
 def _disabled_torch_function_impl(
     func: Callable,
-    types: Iterable[Type],
+    types: Iterable[_Type],
     args: Tuple,
     kwargs: Dict,
 ) -> Any: ...  # THPModule_disable_torch_function
 def _disabled_torch_dispatch_impl(
     func: Callable,
-    types: Iterable[Type],
+    types: Iterable[_Type],
     args: Tuple,
     kwargs: Dict,
 ) -> Any: ...  # THPModule_disable_dispatch_function
@@ -1455,7 +1470,7 @@ def _get_privateuse1_backend_name() -> str: ...
 class Generator:
     device: _device
     def __init__(self, device: Optional[DeviceLikeType] = None) -> None: ...
-    def __reduce__(self) -> Tuple[Type[Generator], Tuple[_device], Tuple[_int, Optional[_int], Tensor]]: ...
+    def __reduce__(self) -> Tuple[_Type[Generator], Tuple[_device], Tuple[_int, Optional[_int], Tensor]]: ...
     def __setstate__(self, state: Tuple[_int, Optional[_int], Tensor]) -> None: ...
     def get_state(self) -> Tensor: ...
     def set_state(self, _new_state: Tensor) -> Generator: ...
@@ -1569,6 +1584,7 @@ class DispatchKeySet:
     def __or__(self, other: DispatchKeySet) -> DispatchKeySet: ...
     def __sub__(self, other: DispatchKeySet) -> DispatchKeySet: ...
     def __and__(self, other: DispatchKeySet) -> DispatchKeySet: ...
+    def raw_repr(self) -> _int: ...
     def highestPriorityTypeId(self) -> DispatchKey: ...
     def has(self, k: _dispatchkey) -> _bool: ...
     def add(self, k: _dispatchkey) -> DispatchKeySet: ...
@@ -1646,6 +1662,18 @@ class _SetExcludeDispatchKeyGuard:
     def __init__(self, k: DispatchKey, enabled: _bool): ...
     def __enter__(self): ...
     def __exit__(self, exc_type, exc_value, traceback): ...
+
+# Defined in torch/csrc/utils/schema_info.h
+
+class _SchemaInfo:
+    def __init__(self, schema: _int) -> None: ...
+
+    @overload
+    def is_mutable(self) -> _bool: ...
+    @overload
+    def is_mutable(self, name: str) -> _bool: ...
+
+    def has_argument(self, name: str) -> _bool: ...
 
 # Defined in torch/csrc/utils/init.cpp
 class BenchmarkConfig:
@@ -1915,6 +1943,8 @@ class _CudaDeviceProperties:
     is_multi_gpu_board: _int
     max_threads_per_multi_processor: _int
     gcnArchName: str
+    warp_size: _int
+    uuid: str
 
 # Functions related to SDPA
 class _SDPAParams:
@@ -1940,8 +1970,17 @@ class _SDPBackend(Enum):
     EFFICIENT_ATTENTION = 2
     CUDNN_ATTENTION = 3
 
+def _can_use_cudnn_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
 def _can_use_flash_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
 def _can_use_mem_efficient_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
+
+# Defined in torch/csrc/cuda/GdsFile.cpp
+def _gds_register_buffer(t: Storage) -> None: ...
+def _gds_deregister_buffer(t: Storage) -> None: ...
+def _gds_register_handle(fd: _int) -> _int: ...
+def _gds_deregister_handle(handle: _int) -> None: ...
+def _gds_load_storage(handle: _int, s: Storage, offset: _int) -> None: ...
+def _gds_save_storage(handle: _int, s: Storage, offset: _int) -> None: ...
 
 # Defined in torch/csrc/cuda/python_comm.cpp
 def _broadcast(tensor: Tensor, devices: List[_int]) -> List[Tensor]: ...
@@ -2146,6 +2185,24 @@ class InferredType:
 
 R = TypeVar("R", bound=JitType)
 
+class Type(JitType):
+    def str(self) -> _str: ...
+    def containedTypes(self) -> List[JitType]: ...
+    def dim(self) -> Optional[_int]: ...
+    def undefined(self) -> Optional[_bool]: ...
+    def sizes(self) -> Optional[List[_int]]: ...
+    def symbol_sizes(self) -> Optional[List[_int]]: ...
+    def varyingSizes(self) -> Optional[List[Optional[_int]]]: ...
+    def strides(self) -> Optional[List[_int]]: ...
+    def contiguous(self) -> Self: ...
+    def device(self) -> Optional[_device]: ...
+    def __eq__(self, other: object) -> _bool: ...
+    __hash__ = None  # type: ignore[assignment]
+    def is_interface_type(self) -> _bool: ...
+    def requires_grad(self) -> _bool: ...
+    @property
+    def annotation_string(self) -> _str: ...
+
 class AnyType(JitType):
     @staticmethod
     def get() -> AnyType: ...
@@ -2305,7 +2362,8 @@ def _register_py_class_for_device(device: str, cls: Any) -> None: ...
 # Defined in torch/csrc/Module.cpp
 def _current_graph_task_id() -> _int: ...
 def _current_autograd_node() -> _Node: ...
-def _dispatch_key_set(Tensor) -> str: ...
+def _will_engine_execute_node(node: _Node) -> _bool: ...
+def _dispatch_key_set(tensor) -> str: ...
 
 # Defined in torch/csrc/Exceptions.cpp
 class OutOfMemoryError(RuntimeError): ...

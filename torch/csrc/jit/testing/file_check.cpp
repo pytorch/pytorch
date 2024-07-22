@@ -10,13 +10,13 @@
 // API modified from llvm::FileCheck
 
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/testing/file_check.h>
+#include <optional>
 
 #include <algorithm>
 #include <iostream>
@@ -43,13 +43,13 @@ struct Check {
   Check(
       CheckType type,
       std::string str,
-      std::optional<size_t> count = c10::nullopt)
+      std::optional<size_t> count = std::nullopt)
       : type_(type), count_(count), search_str_(std::move(str)) {}
 
   Check(
       CheckType type,
       c10::string_view str,
-      std::optional<size_t> count = c10::nullopt)
+      std::optional<size_t> count = std::nullopt)
       : Check(type, std::string(str.begin(), str.end()), count) {}
 
   CheckType type_;
@@ -234,7 +234,7 @@ struct FileCheckImpl {
   TORCH_API void addCheck(
       CheckType type,
       const std::string& s,
-      std::optional<size_t> count = c10::nullopt) {
+      std::optional<size_t> count = std::nullopt) {
     addCheck(Check(type, s, count));
   }
 
@@ -264,7 +264,7 @@ struct FileCheckImpl {
       }
       size_t end_check_string = suffix_pos + check_suffix.size();
       CheckType type = check_pair.first;
-      std::optional<size_t> count = c10::nullopt;
+      std::optional<size_t> count = std::nullopt;
       auto end_line = source->text_str().find("\n", end_check_string);
       bool exactly = false;
       if (type == CHECK_COUNT) {

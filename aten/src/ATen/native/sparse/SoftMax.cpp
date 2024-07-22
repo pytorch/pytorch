@@ -620,7 +620,7 @@ Tensor _sparse_softmax(const Tensor& input_, const int64_t dim_, std::optional<S
   return result;
 }
 
-Tensor _sparse_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
+Tensor _sparse_softmax(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
   return at::_sparse_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
@@ -638,7 +638,7 @@ Tensor _sparse_log_softmax(const Tensor& input_, const int64_t dim_, std::option
   return result;
 }
 
-Tensor _sparse_log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
+Tensor _sparse_log_softmax(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
   return at::_sparse_log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
