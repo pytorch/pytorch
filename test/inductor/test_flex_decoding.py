@@ -51,14 +51,14 @@ def get_gqa_score_mod(score_mod, G, q_seq_len):
     return score_mod_gqa
 
 
-def get_gqa_mask_fn(mask_fn, G, q_seq_len):
-    def mask_fn_gqa(b, hkv, m, n):
+def get_gqa_mask_mod(mask_fn, G, q_seq_len):
+    def mask_mod_gqa(b, hkv, m, n):
         g = m // q_seq_len
         new_m = m % q_seq_len
         hq = hkv * G + g
         return mask_fn(b, hq, new_m, n)
 
-    return mask_fn_gqa
+    return mask_mod_gqa
 
 
 def create_attention(score_mod, block_mask):
@@ -69,7 +69,6 @@ def create_block_mask_test(score_mod, query, key):
     block_mask = create_block_mask(
         score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
     )
-    print(block_mask.as_tuple())
     return block_mask
 
 

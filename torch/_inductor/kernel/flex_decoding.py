@@ -102,7 +102,7 @@ flex_decoding_template = TritonTemplate(
 
     tl.static_assert(SPARSE_KV_BLOCK_SIZE >= BLOCK_N and SPARSE_KV_BLOCK_SIZE % BLOCK_N == 0)
     SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
-    SPARSE_KV_BLOCK_CNT: tl.constexpr = KV_LEN // SPARSE_KV_BLOCK_SIZE
+    SPARSE_KV_BLOCK_CNT: tl.constexpr = tl.cdiv(KV_LEN, SPARSE_KV_BLOCK_SIZE)
 
     MATMUL_PRECISION = Q.dtype.element_ty
 
@@ -125,8 +125,8 @@ flex_decoding_template = TritonTemplate(
 
 
     indices_idx = block_n_start // SPARSE_KV_MULTIPLE
-    off_n_block_in_spase = block_n_start % SPARSE_KV_MULTIPLE
-    off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_spase * BLOCK_N
+    off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
+    off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
     # first kv block we're loading
 
     q_offset = off_z * stride_qz + off_h * stride_qh
