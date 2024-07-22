@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import warnings
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -56,7 +57,7 @@ class AutoFunctionalized(HigherOrderOperator):
         super().__init__("auto_functionalized")
 
     def __call__(
-        self,
+        self_,  # noqa: B902
         _mutable_op: torch._ops.OpOverload,
         **kwargs: Dict[str, Any],
     ) -> Tuple[Any, Tuple[Tensor, ...]]:
@@ -93,8 +94,13 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
             and type(arg.type.getElementType()) is torch.TensorType
         ):
             continue
+        if (
+            type(arg.type) is torch.ListType
+            and type(arg.type.getElementType()) is torch.TensorType
+        ):
+            continue
         # Not yet supported: other Tensor types. This includes things like
-        # Tensor[], Tensor?[], Tensor[]?.
+        # Tensor?[], Tensor[]?.
         return False
 
     if len(schema.returns) == 1 and isinstance(schema.returns[0].type, torch.NoneType):
@@ -105,6 +111,8 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
         if ret.alias_info is None and type(ret.type) is torch.TensorType:
             continue
         # Not yet supported: List[Tensor] return.
+        return False
+    if torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), "Functionalize"):
         return False
     return True
 
@@ -127,7 +135,9 @@ def auto_functionalized_dense(
             new_kwargs[name] = kwargs[name]
         else:
             new_kwargs[name] = (
-                clone_preserve_strides(kwargs[name])
+                [clone_preserve_strides(x) for x in kwargs[name]]
+                if kwargs[name] is not None and isinstance(kwargs[name], list)
+                else clone_preserve_strides(kwargs[name])
                 if kwargs[name] is not None
                 else None
             )
@@ -222,6 +232,11 @@ def do_auto_functionalize(
             normalized_kwargs[arg.name] = arg.default_value
 
     unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
+    if "self" in unwrapped_kwargs or "self_" in unwrapped_kwargs:
+        warnings.warn(
+            "Using `self` or `self_` as an argument in the definition of custom ops may lead to ambiguous parsing. "
+            "Please consider using a different name for this argument to avoid potential issues."
+        )
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized(
             op, **unwrapped_kwargs  # type: ignore[arg-type]
@@ -248,11 +263,27 @@ def do_auto_functionalize(
         # Can be None if input was `Tensor(a!)?`
         if unwrapped_out is None:
             continue
-        assert isinstance(unwrapped_out, torch.Tensor)
+
+        # We only handle Tensor or List[Tensor] here for now.
+        def sync_update(o, orig_arg):
+            ctx.replace(orig_arg, o)
+            ctx.commit_update(orig_arg)
+            ctx.sync(orig_arg)
+
         orig_arg = normalized_kwargs[name]
-        ctx.replace(orig_arg, unwrapped_out)
-        ctx.commit_update(orig_arg)
-        ctx.sync(orig_arg)
+
+        if isinstance(unwrapped_out, torch.Tensor):
+            sync_update(unwrapped_out, orig_arg)
+        elif isinstance(unwrapped_out, list) and all(
+            isinstance(o, torch.Tensor) for o in unwrapped_out
+        ):
+            assert len(orig_arg) == len(unwrapped_out)
+            for orig_a, o in zip(orig_arg, unwrapped_out):
+                sync_update(o, orig_a)
+        else:
+            raise RuntimeError(
+                f"unsupported type for auto-functionalization: {unwrapped_out}"
+            )
 
     return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
 

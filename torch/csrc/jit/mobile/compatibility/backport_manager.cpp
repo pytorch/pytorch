@@ -408,7 +408,7 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   }
   // Loading the TS module is required for this backport, because bytecode needs
   // to be re-emitted (refer to the comments below)
-  Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
+  Module torch_script = torch::jit::load(rai, std::nullopt, extra_files);
 
   // The RAII guard to change the flag, emitBytecodeDefaultInputs, to true, so
   // that TS stores the default argument values in the constant table, and emits
@@ -476,7 +476,7 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
   }
   // Loading the TS module is required for this backport, because bytecode needs
   // to be re-emitted (refer to the comments below)
-  Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
+  Module torch_script = torch::jit::load(rai, std::nullopt, extra_files);
 
   // The RAII guard to change the flag, emit_default_input_instructions, to
   // false to keep the same behavior in bytecode version 6. Change the flag,
@@ -502,7 +502,7 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
 std::stringstream backport_v9_to_v8(std::stringstream& input_model_stream) {
   ExtraFilesMap extra_files;
   Module torch_script =
-      torch::jit::load(input_model_stream, c10::nullopt, extra_files);
+      torch::jit::load(input_model_stream, std::nullopt, extra_files);
   std::stringstream intermediate_model_stream;
   // TODO(@pavithran) : Check if debug info is available and use load/save while
   // backporting hardcode debaug info to be false untill supported.
@@ -540,7 +540,7 @@ std::stringstream backport_v8_to_v7(std::stringstream& input_model_stream) {
       extra_files.emplace(record.substr(found + 1), "");
     }
   }
-  Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
+  Module torch_script = torch::jit::load(rai, std::nullopt, extra_files);
   std::stringstream intermediate_model_stream;
   {
     BytecodeEmitModeGuard argNumGuard(
