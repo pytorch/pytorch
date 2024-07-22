@@ -1493,7 +1493,7 @@ void test_conv2d_context(
   const auto prepack_vulkan = callOpByName(
       "vulkan_prepack::create_conv2d_context",
       "",
-      weight, bias, stride, padding, dilation, groups, c10::nullopt, c10::nullopt);
+      weight, bias, stride, padding, dilation, groups, std::nullopt, std::nullopt);
 
   const auto vulkan_output = callOpByName(
       "vulkan_prepack::run_conv2d_context",
@@ -1534,7 +1534,7 @@ void test_backwards_compatible_conv2d_context(
   const auto prepack_vulkan = callOpByName(
       "vulkan_prepack::conv2d_clamp_prepack",
       "",
-      weight, bias, stride, padding, dilation, groups, c10::nullopt, c10::nullopt);
+      weight, bias, stride, padding, dilation, groups, std::nullopt, std::nullopt);
 
   const auto vulkan_output = callOpByName(
       "vulkan_prepack::conv2d_clamp_run",
@@ -1576,7 +1576,7 @@ void test_transposed_conv2d_context(
   const auto prepack_vulkan = callOpByName(
       "vulkan_prepack::create_tconv2d_context",
       "",
-      weight, bias, stride, padding, output_padding, dilation, groups, c10::nullopt, c10::nullopt);
+      weight, bias, stride, padding, output_padding, dilation, groups, std::nullopt, std::nullopt);
 
   const auto vulkan_output = callOpByName(
       "vulkan_prepack::run_tconv2d_context",
@@ -2136,7 +2136,7 @@ TEST_F(VulkanAPITest, conv2d_clamp_after_div) {
   const auto prepack_cpu = callOpByName(
       "prepacked::conv2d_clamp_prepack",
       "",
-      weight, bias, stride, padding, dilation, groups, 0.0f, c10::nullopt)[0];
+      weight, bias, stride, padding, dilation, groups, 0.0f, std::nullopt)[0];
 
   const auto out_cpu = callOpByName(
       "prepacked::conv2d_clamp_run",
@@ -2147,7 +2147,7 @@ TEST_F(VulkanAPITest, conv2d_clamp_after_div) {
   const auto prepack_vk = callOpByName(
       "vulkan_prepack::create_conv2d_context",
       "",
-      weight, bias, stride, padding, dilation, groups, 0.0f, c10::nullopt)[0];
+      weight, bias, stride, padding, dilation, groups, 0.0f, std::nullopt)[0];
 
   const auto out_vk = callOpByName(
       "vulkan_prepack::run_conv2d_context",
