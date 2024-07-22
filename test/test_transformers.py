@@ -2005,6 +2005,22 @@ class TestSDPA(NNTestCase):
                 self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
                 self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
 
+    @onlyCPU
+    def test_scaled_dot_product_fused_attention_with_inf(self, device):
+        # https://github.com/pytorch/pytorch/issues/127055.
+        full = torch.full((600, 600), float("-inf"), device=device)
+        mask = torch.triu(full, diagonal=1) + torch.tril(full, diagonal=-10)
+        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=torch.float32, requires_grad=False)
+        input_shape = SdpaShape(1, 600, 2, 8)
+        q = make_tensor(input_shape)
+        k = make_tensor(input_shape)
+        v = make_tensor(input_shape)
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            actual = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        self.assertEqual(math_ref, actual)
+
     @parametrize("kernel", [SDPBackend.MATH])
     def test_scaled_dot_product_attention_math_with_negative_scale(self, device, kernel: SDPBackend):
         # https://github.com/pytorch/pytorch/issues/105190.

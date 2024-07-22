@@ -2744,6 +2744,9 @@ for details.
       .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
       .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
       .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
+#ifdef NCCL_HAS_COMM_SPLIT
+      .def_readwrite("split_share", &ncclConfig_t::splitShare)
+#endif
       .def_property(
           "net_name",
           [](const ncclConfig_t& self) { return self.netName; },
@@ -2784,6 +2787,7 @@ Example::
     >>> nccl_options.config.cga_cluster_size = 2
     >>> nccl_options.config.max_ctas = 4
     >>> nccl_options.config.min_ctas = 2
+    >>> nccl_options.config.split_share = 1
     >>> # initialize a nccl process group with the options just created
     >>> dist.init_process_group("nccl", pg_options=nccl_options)
       )")
@@ -3193,6 +3197,23 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       R"(
         Arguments:
           tensors(List[torch.Tensor]): List of tensors we want to hash.
+      )");
+  module.def(
+      "_dump_nccl_trace_json",
+      [](std::optional<bool> includeCollectives,
+         std::optional<bool> onlyActive) {
+        return py::bytes(::c10d::dump_nccl_trace_json(
+            includeCollectives.value_or(true), onlyActive.value_or(false)));
+      },
+      py::arg("includeCollectives") = std::optional<bool>(),
+      py::arg("onlyActive") = std::optional<bool>(),
+      R"(
+      Arguments:
+            includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+            onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+      Returns:
+            Stringified json work traces.
+            Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
       )");
   module.def(
       "_dump_nccl_trace",
