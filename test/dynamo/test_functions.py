@@ -981,6 +981,48 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         test = make_test(fn)
         test(self)
 
+    def test_dict_mutable_map(self):
+        from collections.abc import MutableMapping
+
+        class TensorDict(MutableMapping):
+            def __init__(self):
+                self._dict = {}
+
+            def add(self, key, value):
+                self._dict[key] = value
+
+            def items(self):
+                return self._dict.items()
+
+            def __delitem__(self, key):
+                del self._dict[key]
+
+            def __getitem__(self, key):
+                return self._dict[key]
+
+            def __iter__(self):
+                return iter(self._dict)
+
+            def __len__(self):
+                return len(self._dict)
+
+            def __setitem__(self, key, value):
+                self._dict[key] = value
+
+        tensor_dict = TensorDict()
+        tensor_dict.add("a", torch.ones(4) * 2)
+
+        def fn(x):
+            copy_tensordict = dict(tensor_dict)
+            return x * copy_tensordict["a"]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def _test_default_dict_helper(self, factory):
         dd = collections.defaultdict(factory)
         param = torch.nn.Parameter(torch.ones([2, 2]))
