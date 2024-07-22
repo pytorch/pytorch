@@ -1,10 +1,8 @@
 # mypy: allow-untyped-defs
 import copy
 import io
-import logging
 import math
 import weakref
-from logging import getLogger
 from typing import (
     Any,
     Callable,
@@ -29,10 +27,6 @@ if dist.is_available() or TYPE_CHECKING:
     from torch.distributed import distributed_c10d
     from torch.distributed._shard.sharded_tensor import ShardedTensor
     from torch.distributed._tensor import distribute_tensor, DTensor, Replicate
-
-
-logger = getLogger()
-logger.setLevel(logging.INFO)
 
 
 def _identity_func(
