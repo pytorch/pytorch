@@ -10664,25 +10664,28 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self._checked_swap(t6, t7)
 
     def test_c10_feature_enabled(self):
+        namespace = "movefast/knobs"
+        feature = "use_justknobs"
         @contextlib.contextmanager
-        def mocksetting(k, v):
+        def mocksetting(v):
             if IS_FBCODE:
                 from pyjk import PyPatchJustKnobs  # type: ignore[import]
-                with PyPatchJustKnobs.patch(f"pytorch/features:{k}", v):
+                with PyPatchJustKnobs().patch(f"{namespace}:{feature}", v):
                     yield
             else:
                 try:
                     assert k not in os.environ
-                    os.environ[k] = "1" if v else "0"
+                    os.environ[feature] = "1" if feature else "0"
                     yield
                 finally:
-                    del os.environ[k]
+                    del os.environ[feature]
 
-        self.assertTrue(torch._C._c10_feature_enabled("TORCH_FEATURE_TEST_ENABLED"))
-        with mocksetting("TORCH_FEATURE_TEST_ENABLED", True):
-            self.assertTrue(torch._C._c10_feature_enabled("TORCH_FEATURE_TEST_ENABLED"))
-        with mocksetting("TORCH_FEATURE_TEST_ENABLED", False):
-            self.assertFalse(torch._C._c10_feature_enabled("TORCH_FEATURE_TEST_ENABLED"))
+        # check that an unset environment variable default is true
+        self.assertTrue(torch._C._c10_feature_enabled(namespace, feature))
+        with mocksetting(True):
+            self.assertTrue(torch._C._c10_feature_enabled(namespace, feature))
+        with mocksetting(False):
+            self.assertFalse(torch._C._c10_feature_enabled(namespace, feature))
 
 
 # The following block extends TestTorch with negative dim wrapping tests

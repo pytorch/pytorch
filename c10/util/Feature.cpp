@@ -4,12 +4,12 @@
 #include <string>
 
 namespace c10 {
-static std::function<bool(const char*)> feature_resolver =
+static std::function<bool(const char*, const char*)> feature_resolver =
     FeatureEnabledDefaultResolver;
-bool FeatureEnabled(const char* feature_name) {
-  return feature_resolver(feature_name);
+bool FeatureEnabled(const char* the_namespace, const char* feature_name) {
+  return feature_resolver(the_namespace, feature_name);
 }
-bool FeatureEnabledDefaultResolver(const char* feature_name) {
+bool FeatureEnabledDefaultResolver(const char* the_namespace, const char* feature_name) {
   const char* env_val = std::getenv(feature_name);
   if (env_val == nullptr) {
     // FeatureEnabled is used for killswitches so the
@@ -36,7 +36,7 @@ bool FeatureEnabledDefaultResolver(const char* feature_name) {
         feature_name);
   }
 }
-void SetFeatureResolver(std::function<bool(const char*)> resolver) {
-  feature_resolver = resolver;
+void SetFeatureResolver(std::function<bool(const char*, const char*)> resolver) {
+  feature_resolver = std::move(resolver);
 }
 } // namespace c10
