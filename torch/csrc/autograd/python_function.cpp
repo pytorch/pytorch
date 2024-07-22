@@ -778,7 +778,7 @@ static void _get_tensors_to_save(
     for (const auto i : c10::irange(num_saved)) {
       PyObject* obj = PyTuple_GET_ITEM(self->to_save, i);
       if (obj == Py_None) {
-        tensors_to_save.emplace_back(c10::nullopt);
+        tensors_to_save.emplace_back(std::nullopt);
         continue;
       } else if (THPVariable_Check(obj)) {
         const auto& tensor = THPVariable_Unpack(obj);
@@ -1181,6 +1181,26 @@ PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_input_metadata(PyObject* self, void* unused) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  const auto num_inputs = cdata->num_inputs();
+  THPObjectPtr list(PyTuple_New(num_inputs));
+  if (!list) {
+    return nullptr;
+  }
+  for (size_t i = 0; i < num_inputs; ++i) {
+    const auto& metadata = cdata->input_metadata(i);
+    THPObjectPtr item(py::cast(metadata).release().ptr());
+    if (!item) {
+      return nullptr;
+    }
+    PyTuple_SET_ITEM(list.get(), i, item.release());
+  }
+  return list.release();
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_maybe_clear_saved_tensors(
     PyObject* self,
     PyObject* noargs) {
@@ -1190,16 +1210,6 @@ PyObject* THPFunction_maybe_clear_saved_tensors(
     cdata->release_variables();
   }
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THPFunction_is_retain_graph(PyObject* self, PyObject* noargs) {
-  HANDLE_TH_ERRORS;
-  if (get_current_graph_task_keep_graph()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
   END_HANDLE_TH_ERRORS
 }
 
@@ -1733,6 +1743,11 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr},
     {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
     {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
+    {"_input_metadata",
+     (getter)THPFunction_input_metadata,
+     nullptr,
+     nullptr,
+     nullptr},
     {"materialize_grads",
      nullptr,
      (setter)THPFunction_set_materialize_grads,
@@ -1757,10 +1772,6 @@ static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"_set_sequence_nr", THPFunction_set_sequence_nr, METH_O, nullptr},
     {(char*)"maybe_clear_saved_tensors",
      THPFunction_maybe_clear_saved_tensors,
-     METH_NOARGS,
-     nullptr},
-    {(char*)"is_retain_graph",
-     THPFunction_is_retain_graph,
      METH_NOARGS,
      nullptr},
     {(char*)"apply", THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},

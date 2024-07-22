@@ -1,18 +1,15 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
 import unittest
-
 from typing import Dict, List, Tuple
 
 import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._export.wrappers import _mark_strict_experimental
-
 from torch._functorch.aot_autograd import aot_export_module
 from torch.export._trace import _convert_ts_to_export_experimental
 from torch.export.experimental import _export_forward_backward
-
 from torch.testing import FileCheck
 
 
@@ -264,6 +261,26 @@ def forward(self, arg0_1, arg1_1):
         )
         Range constraints: {}
         """
+
+    def test_joint_dynamic(self) -> None:
+        from torch.export import Dim
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.y = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, x):
+                x = torch.ones(x.shape[0], 3)
+                return (self.y + x).sum()
+
+        m = Module()
+        example_inputs = (torch.randn(3),)
+        m(*example_inputs)
+        ep = torch.export._trace._export(
+            m, example_inputs, pre_dispatch=True, dynamic_shapes={"x": {0: Dim("x0")}}
+        )
+        joint_ep = _export_forward_backward(ep)
 
 
 if __name__ == "__main__":

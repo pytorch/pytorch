@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import contextlib
 import functools
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Iterator, List, Optional, Tuple, TypeVar, Union
 
 import torchgen.local as local
 from torchgen.model import (
@@ -38,7 +40,7 @@ F3 = TypeVar("F3", Tuple[NativeFunction, Any], List[NativeFunction])
 
 @contextlib.contextmanager
 def native_function_manager(
-    g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup, NativeFunction]
+    g: NativeFunctionsGroup | NativeFunctionsViewGroup | NativeFunction,
 ) -> Iterator[None]:
     if isinstance(g, NativeFunctionsGroup):
         # By default, we associate all errors with structured native functions
@@ -118,10 +120,10 @@ def with_native_function_and_index(
 
 # Convenience decorator for functions that explicitly take in a Dict of BackendIndices
 def with_native_function_and_indices(
-    func: Callable[[F, Dict[DispatchKey, BackendIndex]], T]
-) -> Callable[[F, Dict[DispatchKey, BackendIndex]], T]:
+    func: Callable[[F, dict[DispatchKey, BackendIndex]], T]
+) -> Callable[[F, dict[DispatchKey, BackendIndex]], T]:
     @functools.wraps(func)
-    def wrapper(f: F, backend_indices: Dict[DispatchKey, BackendIndex]) -> T:
+    def wrapper(f: F, backend_indices: dict[DispatchKey, BackendIndex]) -> T:
         with native_function_manager(f):
             return func(f, backend_indices)
 

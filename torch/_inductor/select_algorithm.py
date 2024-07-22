@@ -14,7 +14,7 @@ import sys
 import textwrap
 import time
 from collections import namedtuple
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -61,7 +61,7 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 # correctness checks struggle with fp16/tf32
-VERIFY: Dict[str, Any] = dict()
+VERIFY: Dict[str, Any] = {}
 PRINT_AUTOTUNE = True
 DEBUG = False
 
@@ -86,10 +86,14 @@ class PartialRender:
         self.code = code
         self.replacement_hooks = replacement_hooks
 
-    def finalize_hook(self, hook_key: str) -> None:
-        assert (
-            hook_key in self.replacement_hooks
-        ), f"{hook_key} not registered in self.replacement_hooks"
+    def finalize_hook(self, hook_key: str, strict=True) -> None:
+        if hook_key not in self.replacement_hooks:
+            if strict:
+                raise RuntimeError(
+                    f"{hook_key} not registered in self.replacement_hooks"
+                )
+            else:
+                return
         assert (
             self.replacement_hooks[hook_key] is not None
         ), "hook_key can only be called once"
@@ -154,7 +158,7 @@ class TritonTemplateKernel(TritonKernel):
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
         self.epilogue_fn = epilogue_fn
-        self.render_hooks = dict()  # type: ignore[var-annotated]
+        self.render_hooks = {}  # type: ignore[var-annotated]
         self.triton_meta: Optional[Dict[str, object]] = None
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: Optional[List[ir.ComputedBuffer]] = subgraphs
@@ -243,6 +247,18 @@ class TritonTemplateKernel(TritonKernel):
             @triton.jit
         """
 
+    def gen_argdefs(self):
+        def hook():
+            # python_argdefs() cannot be run until after the rest of the template lazily adds more args
+            arg_defs, *_ = self.args.python_argdefs()
+            return f"{', '.join(arg_defs)}"
+
+        self.render_hooks["<ARGDEFS>"] = hook
+        return "<ARGDEFS>"
+
+    def gen_defines(self):
+        return self.defines
+
     def def_kernel(self, *argnames):
         """
         Hook called from template code to generate function def and
@@ -314,18 +330,21 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_size()[index]
         return texpr(self.rename_indexing(val))
 
-    def stride(self, name, index):
+    def stride(self, name, index=None):
         """
         Hook called from template code to get the stride of an arg.
         Will add needed args to pass it in if it is dynamic.
         """
-        assert isinstance(index, int)
         if name is None:
-            val = self.output_node.get_stride()[index]
+            val = self.output_node.get_stride()
         else:
             assert isinstance(name, str)
-            val = self.named_input_nodes[name].get_stride()[index]
-        return texpr(self.rename_indexing(val))
+            val = self.named_input_nodes[name].get_stride()
+
+        if isinstance(index, int):
+            return texpr(self.rename_indexing(val[index]))
+        else:
+            return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
     def modification(
         self, subgraph_number: int, output_name: str, **fixed_inputs
@@ -376,9 +395,9 @@ class TritonTemplateKernel(TritonKernel):
                     subgraph, ir.ComputedBuffer
                 ), f"Expected the subgraph to be a ComputedBuffer, got {type(subgraph)}"
                 if isinstance(subgraph.data, ir.InputBuffer):
-                    out = subgraph.data.make_loader()((1,))
+                    out = subgraph.data.make_loader()(())
                 else:
-                    out = subgraph.data.inner_fn((1,))
+                    out = subgraph.data.inner_fn(())
 
             self.codegen_body()
             self.body.writeline(f"{output_name} = {out.value}")
@@ -498,6 +517,8 @@ class TritonTemplateKernel(TritonKernel):
                 self.store_output,
                 self.make_load,
                 self.modification,
+                self.gen_argdefs,
+                self.gen_defines,
             ]
         }
 
@@ -572,7 +593,7 @@ def _jinja2_env():
 
 class TritonTemplate(KernelTemplate):
     index_counter = itertools.count()
-    all_templates: Dict[str, "TritonTemplate"] = dict()
+    all_templates: Dict[str, "TritonTemplate"] = {}
 
     def __init__(self, name: str, grid: Any, source: str, debug=False):
         super().__init__(name)
@@ -615,7 +636,7 @@ class TritonTemplate(KernelTemplate):
         assert self.template, "requires jinja2"
         defines = StringIO()
         for name, val in kwargs.items():
-            defines.write(f"    {name} : tl.constexpr = {val}\n")
+            defines.write(f"{name} : tl.constexpr = {val}\n")
         defines = defines.getvalue()
 
         fake_out = ir.Buffer("buf_out", layout)
@@ -1185,10 +1206,6 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
-            # TODO - debug issue
-            if torch.version.hip:
-                return no_op
-
             # check local and global cache before precompiling
             timings = self.lookup(
                 choices,
@@ -1205,8 +1222,13 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
-            precompile_key = (
-                f"{name}: {inputs_key} : {torch.get_float32_matmul_precision()}"
+            precompile_key = ":".join(
+                [
+                    name,
+                    inputs_key,
+                    torch.get_float32_matmul_precision(),
+                ]
+                + [choice.hash_key() for choice in choices]
             )
             if precompile_func := self.precompile_cache.get(precompile_key):
                 return precompile_func
@@ -1230,42 +1252,25 @@ class AlgorithmSelectorCache(PersistentCache):
                     return choice.precompile()
 
             executor = ThreadPoolExecutor(max_workers=num_workers)
-            futures = executor.map(
-                lambda c: precompile_with_captured_stdout(c),
-                [c for c in choices if hasattr(c, "precompile")],
-                timeout=precompilation_timeout_seconds,
-            )
+
+            futures = {}
+            for c in choices:
+                if hasattr(c, "precompile"):
+                    future = executor.submit(precompile_with_captured_stdout, c)
+                    futures[future] = c
 
             @functools.lru_cache(None)
             @restore_stdout_stderr(initial_stdout, initial_stderr)
             def wait_on_futures():
                 counters["inductor"]["select_algorithm_precompile"] += 1
-                try:
-                    iterator = iter(futures)
-                    while True:
-                        try:
-                            next(iterator)
-                        except CUDACompileError:
-                            log.error(  # noqa: G201
-                                "CUDA Compilation error", exc_info=True
-                            )
-                except TimeoutError:
-                    log.warning(
-                        f"Precompilation timed out after {precompilation_timeout_seconds} seconds."  # noqa: G004
-                    )
-                except StopIteration:
-                    pass
-                except Exception as e:
-                    try:
-                        from triton.runtime.autotuner import OutOfResources
-
-                        if isinstance(e, OutOfResources):
-                            # This config is invalid due to requiring too many resources
-                            pass
-                        else:
-                            raise e
-                    except ImportError:
-                        raise e from None
+                for future in as_completed(
+                    futures,
+                    timeout=precompilation_timeout_seconds,
+                ):
+                    if e := future.exception():
+                        log.error(
+                            "Exception %s for benchmark choice %s", e, futures[future]
+                        )
 
                 executor.shutdown(wait=True)
 
@@ -1516,7 +1521,9 @@ class AlgorithmSelectorCache(PersistentCache):
         elapse: float,
         precompile_elapse: float,
     ):
-        V.debug.log_autotuning_results(name, input_nodes, timings, elapse)
+        V.debug.log_autotuning_results(
+            name, input_nodes, timings, elapse, precompile_elapse
+        )
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
             return
         sizes = ", ".join(
