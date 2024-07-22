@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import contextlib
 import functools
 import inspect
 import logging
@@ -44,6 +45,7 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .constant import ConstantVariable
+from .ctx_manager import PreserveVersionContextVariable
 from .lists import SizeVariable
 
 try:
@@ -79,6 +81,31 @@ supported_tensor_comparison_op_values = dict.fromkeys(
 supported_const_comparison_op_values = dict.fromkeys(
     supported_const_comparison_ops.values()
 )
+
+
+@contextlib.contextmanager
+def maybe_proxy_hide_mutations_from_autograd(self, tx, method_name):
+    # Subclass VT that represents the result of calling tensor.data.
+    # any mutations done to .data are hidden from autograd.
+    # so we subclass TensorVariableTracker, and:
+    # (1) attempt to see if we are passing the tensor into a mutable op
+    # (2) If so, insert a `torch._C._autograd._unsafe_set_version_counter` before/after
+    #     to emulate .data mutation and avoid bumping the version counter.
+    # Note: this isn't fully robust (the mutable op detection is a heuristic).
+    # we could just emit the above calls before/after every op,
+    # but I don't want to risk making the graphs huge, and also
+    # this case does not come up very much.
+    if not self.is_data_attr:
+        yield
+        return
+    # basic check for tensor method mutation ops that catches most cases.
+    if not method_name.endswith("_"):
+        yield
+        return
+    out = PreserveVersionContextVariable.constructor(tx).call_function(tx, [self], {})
+    out.enter(tx)
+    yield
+    out.exit(tx)
 
 
 class TensorVariable(VariableTracker):
@@ -148,6 +175,7 @@ class TensorVariable(VariableTracker):
             # no need to rename inputs
             _is_name_set = self.proxy.node.op == "placeholder"
         self._is_name_set: bool = _is_name_set
+        self.is_data_attr = False
 
     def debug_repr(self):
         # TODO: strip off fake tensor from repr here
@@ -318,7 +346,10 @@ class TensorVariable(VariableTracker):
             return ConstantVariable.create(self.is_sparse)
 
     def method_attr_data(self, tx):
-        return self.call_method(tx, "detach", [], {})
+        out = self.call_method(tx, "detach", [], {})
+        assert isinstance(out, TensorVariable)
+        out.is_data_attr = True
+        return out
 
     def method_attr_grad_fn(self, tx):
         if self.has_grad_fn:
@@ -504,14 +535,15 @@ class TensorVariable(VariableTracker):
 
         from .builder import wrap_fx_proxy
 
-        return wrap_fx_proxy(
-            tx,
-            tx.output.create_proxy(
-                "call_method",
-                name,
-                *proxy_args_kwargs([self, *args], kwargs),
-            ),
-        )
+        with maybe_proxy_hide_mutations_from_autograd(self, tx, name):
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self, *args], kwargs),
+                ),
+            )
 
     def method_size(self, *args, **kwargs):
         return self._method_size_stride("size", *args, **kwargs)
