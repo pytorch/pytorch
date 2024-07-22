@@ -644,14 +644,16 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
             args.clear()
             # expectation: runtime_fn is a boxed fn
             unwrapped_outs = compiled_fn(unwrapped_args)
+
+            num_tokens = len(runtime_metadata.tokens)
+            tokens = unwrapped_outs[:num_tokens]
             wrapped_outs = wrap_tensor_subclasses(
-                unwrapped_outs,
+                unwrapped_outs[num_tokens:],
                 subclass_metas=subclass_metas,
                 num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
                 is_runtime=True,
-                num_tokens=len(runtime_metadata.tokens),
             )
-            return wrapped_outs
+            return (*tokens, *wrapped_outs)
 
         # box it
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
