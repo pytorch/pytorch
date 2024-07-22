@@ -8,15 +8,12 @@ import sys
 import time
 import warnings
 from itertools import count
-
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from unittest import mock
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
-
 import torch.fx
 import torch.utils._pytree as pytree
-
 from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo import (
     compiled_autograd,
@@ -76,6 +73,7 @@ from .utils import (
     output_node,
 )
 from .virtualized import V
+
 
 if config.is_fbcode():
     from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
