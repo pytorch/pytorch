@@ -678,6 +678,13 @@ class GraphLowering(torch.fx.Interpreter):
         return V.fake_mode
 
     def get_buffer(self, buffer_name: str):
+        buf = self.try_get_buffer(buffer_name)
+        if buf is not None:
+            return buf
+
+        raise RuntimeError(f"Could not find buffer {buffer_name}")
+
+    def try_get_buffer(self, buffer_name: str):
         if buffer_name in self.name_to_buffer:
             return self.name_to_buffer[buffer_name]
         if buffer_name in self.graph_inputs:
@@ -690,7 +697,9 @@ class GraphLowering(torch.fx.Interpreter):
                     data.device, data.dtype, *V.graph.static_sizes_strides(data)
                 ),
             )
-        raise RuntimeError(f"Could not find buffer {buffer_name}")
+        
+        return None
+
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
