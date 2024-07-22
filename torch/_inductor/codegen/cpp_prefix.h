@@ -166,7 +166,7 @@ inline IndexValue<T>& argmax_combine(IndexValue<T>& a, T next_value, int64_t nex
   return a;
 }
 template <typename T>
-inline IndexValue<T>& argmin_combine(IndexValue<T>& a, IndexValue<T>& next){
+inline IndexValue<T>& argmin_combine(IndexValue<T>& a, const IndexValue<T>& next){
   if(!(less_or_nan(a.value, next.value, a.index, next.index))){
     a.value = next.value;
     a.index = next.index;
@@ -174,7 +174,7 @@ inline IndexValue<T>& argmin_combine(IndexValue<T>& a, IndexValue<T>& next){
   return a;
 }
 template <typename T>
-inline IndexValue<T>& argmax_combine(IndexValue<T>& a, IndexValue<T>& next){
+inline IndexValue<T>& argmax_combine(IndexValue<T>& a, const IndexValue<T>& next){
   if(!(greater_or_nan(a.value, next.value, a.index, next.index))){
     a.value = next.value;
     a.index = next.index;
@@ -183,26 +183,107 @@ inline IndexValue<T>& argmax_combine(IndexValue<T>& a, IndexValue<T>& next){
 }
 
 #if INDUCTOR_USE_VECTOR_TYPES()
-template <typename T>
-inline IndexValue<T>& argmin_combine(IndexValue<T>& a, at::vec::Vectorized<T> next_value, int64_t next_index){
+
+template <typename T, int L>
+struct IndexValueVec {
+  IndexValue<T> arr[L];
+  IndexValueVec(const T _value) {
+    for (int i = 0; i < L; i++){
+      arr[i].index = 0;
+      arr[i].value = _value;
+    };
+  };
+  IndexValueVec() {};
+  void store(int64_t* dst, int len){
+    TORCH_CHECK(L == len);
+    for (int i = 0; i < L; i++){
+      dst[i] = arr[i].index;
+    };
+  };
+  IndexValue<T>& operator[](size_t index){
+    return arr[index];
+  };
+  IndexValue<T> operator[](size_t index) const {
+    return arr[index];
+  };
+};
+
+template <typename T, int L>
+inline IndexValueVec<T, L>& argmin_combine_vec(IndexValueVec<T, L>& a, at::vec::Vectorized<T> next_value, int64_t next_index, bool horizontal_reduction){
   constexpr int len = at::vec::Vectorized<T>::size();
   __at_align__ std::array<T, len> tmpbuf;
   next_value.store(tmpbuf.data());
   for (int i = 0; i < len; i++){
-    a = argmin_combine(a, tmpbuf[i], next_index + i);
+    a[i] = argmin_combine(a[i], tmpbuf[i], horizontal_reduction ? next_index + i : next_index);
   }
   return a;
 }
-template <typename T>
-inline IndexValue<T>& argmax_combine(IndexValue<T>& a, at::vec::Vectorized<T> next_value, int64_t next_index){
+
+template <typename T, int L>
+inline IndexValueVec<T, L>& argmax_combine_vec(IndexValueVec<T, L>& a, at::vec::Vectorized<T> next_value, int64_t next_index, bool horizontal_reduction){
   constexpr int len = at::vec::Vectorized<T>::size();
   __at_align__ std::array<T, len> tmpbuf;
   next_value.store(tmpbuf.data());
   for (int i = 0; i < len; i++){
-    a = argmax_combine(a, tmpbuf[i], next_index + i);
+    a[i] = argmax_combine(a[i], tmpbuf[i], horizontal_reduction ? next_index + i : next_index);
   }
   return a;
 }
+
+template <typename T, int L, int N>
+inline IndexValueVec<T, L>& argmin_combine_vec(IndexValueVec<T, L>& a, at::vec::VectorizedN<T, N> next_value, int64_t next_index, bool horizontal_reduction){
+  constexpr int len = at::vec::VectorizedN<T, N>::size();
+  __at_align__ std::array<T, len> tmpbuf;
+  next_value.store(tmpbuf.data());
+  for (int i = 0; i < len; i++){
+    a[i] = argmin_combine(a[i], tmpbuf[i], horizontal_reduction ? next_index + i : next_index);
+  }
+  return a;
+}
+
+template <typename T, int L, int N>
+inline IndexValueVec<T, L>& argmax_combine_vec(IndexValueVec<T, L>& a, at::vec::VectorizedN<T, N> next_value, int64_t next_index, bool horizontal_reduction){
+  constexpr int len = at::vec::VectorizedN<T, N>::size();
+  __at_align__ std::array<T, len> tmpbuf;
+  next_value.store(tmpbuf.data());
+  for (int i = 0; i < len; i++){
+    a[i] = argmax_combine(a[i], tmpbuf[i], horizontal_reduction ? next_index + i : next_index);
+  }
+  return a;
+}
+
+template <typename T, int L>
+inline IndexValue<T>& argmin_combine_vec(IndexValue<T>& a, const IndexValueVec<T, L>& vec_b){
+  for (int i = 0; i < L; i++){
+    a = argmin_combine(a, vec_b[i]);
+  }
+  return a;
+}
+
+template <typename T, int L>
+inline IndexValue<T>& argmax_combine_vec(IndexValue<T>& a, const IndexValueVec<T, L>& vec_b){
+  for (int i = 0; i < L; i++){
+    a = argmax_combine(a, vec_b[i]);
+  }
+  return a;
+}
+
+template <typename T, int L>
+inline IndexValueVec<T, L>& argmin_combine_vec(IndexValueVec<T, L>& vec_a, const IndexValueVec<T, L>& vec_b){
+  for (int i = 0; i < L; i++){
+    vec_a[i] = argmin_combine(vec_a[i], vec_b[i]);
+  }
+  return vec_a;
+}
+
+template <typename T, int L>
+inline IndexValueVec<T, L>& argmax_combine_vec(IndexValueVec<T, L>& vec_a, const IndexValueVec<T, L>& vec_b){
+  for (int i = 0; i < L; i++){
+    vec_a[i] = argmax_combine(vec_a[i], vec_b[i]);
+  }
+  return vec_a;
+}
+
 template <typename scalar_t>
 inline at::vec::Vectorized<scalar_t> vec_shuffle_down(at::vec::Vectorized<scalar_t> x, size_t n) {
   using Vec = at::vec::Vectorized<scalar_t>;
