@@ -599,16 +599,6 @@ def enforce_comm_ordering_for_fsdp(
         new_order.append(snode)
         scheduled.add(snode)
 
-    """
-    For nested_fully_shard:
-    Step 1: make grouping work without chaining - DONE
-        - How to tackle: compare Inductor code before vs. after applying enforce fsdp comm order pass
-    Step 2: make grouping work with chaining - DONE
-        - How to tackle: compare Inductor code before vs. after applying the following code
-    Step 3: make reordering for overlap work
-    Repeat the same process for transformer model
-    """
-
     # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
     # before next AllGather's "copy_in then AG" group node
     prev_ag_wait = None
