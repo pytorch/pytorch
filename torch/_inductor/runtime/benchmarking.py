@@ -22,8 +22,15 @@ def time_and_log(fn: Callable[..., Any]) -> Callable[..., Any]:
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         start_time = time.perf_counter()
         result = fn(*args, **kwargs)
-        log.debug("{function_name} took {elapsed_time_s} seconds.", extra=dict(function_name=fn.__name__, elapsed_time_s=time.perf_counter() - start_time))
+        log.debug(
+            "{function_name} took {elapsed_time_s} seconds.",
+            extra=dict(
+                function_name=fn.__name__,
+                elapsed_time_s=time.perf_counter() - start_time,
+            ),
+        )
         return result
+
     return wrapper
 
 
@@ -106,9 +113,7 @@ class LazyBenchmark:
 class Benchmarker:
     def __init__(self) -> None:
         self.memory_cache: Dict[str, float] = {}
-        self.kwargs_hash_to_futures_gpu: Dict[
-            str, Tuple[Callable[[], Any], str]
-        ] = {}
+        self.kwargs_hash_to_futures_gpu: Dict[str, Tuple[Callable[[], Any], str]] = {}
 
     @cached_property
     def L2_cache_size(self) -> int:
@@ -145,7 +150,9 @@ class Benchmarker:
 
     @functools.lru_cache(None)  # noqa: B019
     def get_cpu_launch_overhead_ms_per_event_record(self) -> float:
-        counters["inductor"]["benchmarking_get_cpu_launch_overhead_ms_per_event_record"] += 1
+        counters["inductor"][
+            "benchmarking_get_cpu_launch_overhead_ms_per_event_record"
+        ] += 1
         # ensures the queue is empty
         torch.cuda.synchronize()
         start_time_s = time.perf_counter()
@@ -156,7 +163,9 @@ class Benchmarker:
 
     @cached_property
     def cpu_launch_overhead_ms_per_gpu_cache_clear(self) -> float:
-        counters["inductor"]["benchmarking_cpu_launch_overhead_ms_per_gpu_cache_clear"] += 1
+        counters["inductor"][
+            "benchmarking_cpu_launch_overhead_ms_per_gpu_cache_clear"
+        ] += 1
         return self.get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear()[0]
 
     @cached_property
@@ -168,7 +177,9 @@ class Benchmarker:
     def get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear(
         self,
     ) -> Tuple[float, float]:
-        counters["inductor"]["benchmarking_get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear"] += 1
+        counters["inductor"][
+            "benchmarking_get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear"
+        ] += 1
         buffer = torch.empty(
             int(self.L2_cache_size // 4), dtype=torch.int, device="cuda"
         )
@@ -215,7 +226,7 @@ class Benchmarker:
         fn: Callable[..., Any],
         fn_args: Tuple[Any],
         fn_kwargs: Dict[str, Any],
-        **kwargs: Any
+        **kwargs: Any,
     ) -> float:
         counters["inductor"]["benchmarking_benchmark"] += 1
         _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
@@ -413,18 +424,22 @@ class Benchmarker:
         if ranking_key is not None:
             if benchmarking_config.enable_early_ranking:
                 counters["inductor"]["benchmarking_early_ranking"] += 1
-                log.debug("Returning early ranking for ranking key {ranking_key}.", extra=dict(ranking_key=ranking_key))
+                log.debug(
+                    "Returning early ranking for ranking key {ranking_key}.",
+                    extra=dict(ranking_key=ranking_key),
+                )
                 # explicitly delete the buffer, sometimes helps memory
                 # footprint metrics in OSS Inductor benchmarks
                 del buffer
                 return estimated_timings_ms
             else:
-                log.debug("Early ranking is disabled. Continuing full benchmarking cycle.")
+                log.debug(
+                    "Early ranking is disabled. Continuing full benchmarking cycle."
+                )
 
         callable_to_timing_ms = {}
         for _callable, estimated_timing_ms in zip(callables, estimated_timings_ms):
             callable_to_timing_ms[_callable] = estimated_timing_ms
-
 
         if pruning_key is not None:
             if benchmarking_config.enable_early_pruning:
@@ -438,16 +453,22 @@ class Benchmarker:
                     for _callable in callables
                     if callable_to_timing_ms[_callable] < target_timing_ms
                 ]
-                log.debug("Pruned to {num_callables} callables for pruning key {pruning_key}.", extra=dict(num_callables=len(callables), pruning_key=pruning_key))
+                log.debug(
+                    "Pruned to {num_callables} callables for pruning key {pruning_key}.",
+                    extra=dict(num_callables=len(callables), pruning_key=pruning_key),
+                )
                 cpu_launch_overhead_ms_per_iter = (
                     cpu_launch_overhead_ms_per_iter_per_callable
                     * len(callables_to_benchmark)
                 )
                 estimated_timings_ms = [
-                    callable_to_timing_ms[_callable] for _callable in callables_to_benchmark
+                    callable_to_timing_ms[_callable]
+                    for _callable in callables_to_benchmark
                 ]
             else:
-                log.debug("Early pruning is disabled. Continuing full benchmarking cycle.")
+                log.debug(
+                    "Early pruning is disabled. Continuing full benchmarking cycle."
+                )
                 callables_to_benchmark = callables
         else:
             callables_to_benchmark = callables
@@ -514,12 +535,14 @@ class Benchmarker:
         fn: Callable[..., Any],
         fn_args: Tuple[Any],
         fn_kwargs: Dict[str, Any],
-        **kwargs: Any
+        **kwargs: Any,
     ) -> Union[LazyBenchmark, float]:
         counters["inductor"]["benchmarking_lazy_benchmark"] += 1
         _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
         if not benchmarking_config.enable_lazy_benchmarking:
-            log.debug("Lazy benchmarking is disabled. Immediately proceeding to CPU benchmarking.")
+            log.debug(
+                "Lazy benchmarking is disabled. Immediately proceeding to CPU benchmarking."
+            )
             return self.benchmark_cpu(_callable, **kwargs)
         fn_args_and_kwargs = list(fn_args) + list(fn_kwargs.values())
         if is_cpu_device(fn_args_and_kwargs):
@@ -533,11 +556,13 @@ class Benchmarker:
         _callable: Callable[[], Any],
         ranking_key: Optional[str] = None,
         pruning_key: Optional[str] = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> Union[LazyBenchmark, float]:
         counters["inductor"]["benchmarking_lazy_benchmark_cpu"] += 1
         if not benchmarking_config.enable_lazy_benchmarking:
-            log.debug("Lazy benchmarking is disabled. Immediately proceeding to CPU benchmarking.")
+            log.debug(
+                "Lazy benchmarking is disabled. Immediately proceeding to CPU benchmarking."
+            )
             return self.benchmark_cpu(_callable, **kwargs)
         # should we just immediately benchmark on CPU?
         return LazyBenchmark(lambda: self.benchmark_cpu(_callable, **kwargs))
@@ -548,12 +573,14 @@ class Benchmarker:
         _callable: Callable[[], Any],
         ranking_key: Optional[str] = None,
         pruning_key: Optional[str] = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> Union[LazyBenchmark, float]:
         counters["inductor"]["benchmarking_lazy_benchmark_gpu"] += 1
 
         if not benchmarking_config.enable_lazy_benchmarking:
-            log.debug("Lazy benchmarking is disabled. Immediately proceeding to GPU benchmarking.")
+            log.debug(
+                "Lazy benchmarking is disabled. Immediately proceeding to GPU benchmarking."
+            )
             return self.benchmark_gpu(_callable, **kwargs)
 
         # we should try the callable before queueing it for benchmarking, in
@@ -576,9 +603,9 @@ class Benchmarker:
         # from the lazy benchmark queue and as such any memory referenced by _callable
         # would remain allocated
         key = str(hash(_callable) + random.randint(-(2**100), 2**100)) + kwargs_hash
-        self.kwargs_hash_to_futures_gpu[
-            kwargs_hash
-        ] = self.kwargs_hash_to_futures_gpu.get(kwargs_hash, []) + [(_callable, key)]
+        self.kwargs_hash_to_futures_gpu[kwargs_hash] = (
+            self.kwargs_hash_to_futures_gpu.get(kwargs_hash, []) + [(_callable, key)]
+        )
 
         def benchmark() -> float:
             # all but the first benchmark in a grouping of lazy benchmarks
@@ -592,7 +619,10 @@ class Benchmarker:
 
             try:
                 timings_ms = self.benchmark_many_gpu(
-                    callables, ranking_key=ranking_key, pruning_key=pruning_key, **kwargs
+                    callables,
+                    ranking_key=ranking_key,
+                    pruning_key=pruning_key,
+                    **kwargs,
                 )
             except Exception as e:  # noqa: TRY302
                 raise e

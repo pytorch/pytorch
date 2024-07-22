@@ -1045,9 +1045,7 @@ class Reduction(Loops):
                 return (
                     bool(val)
                     if dst_dtype == torch.bool
-                    else float(val)
-                    if dst_dtype.is_floating_point
-                    else int(val)
+                    else float(val) if dst_dtype.is_floating_point else int(val)
                 )
 
             rtypes_to_inits = {
@@ -3522,9 +3520,11 @@ class ComputedBuffer(OperationBuffer):
             )
             reads = self.get_read_writes().reads
             reads_bufs = [
-                V.graph.name_to_buffer[r.name]
-                if r.name in V.graph.name_to_buffer.keys()
-                else None
+                (
+                    V.graph.name_to_buffer[r.name]
+                    if r.name in V.graph.name_to_buffer.keys()
+                    else None
+                )
                 for r in reads
             ]
             # only consider reads to buffer of same size
@@ -3846,7 +3846,9 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
-        return benchmarker.lazy_benchmark(algo, args, {"out": out}, pruning_key="max-autotune-gemm")
+        return benchmarker.lazy_benchmark(
+            algo, args, {"out": out}, pruning_key="max-autotune-gemm"
+        )
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -4329,9 +4331,7 @@ class ExternKernel(InputsKernel):
         return pw
 
     @classmethod
-    def process_kernel(
-        cls, kernel, *args, **kwargs
-    ) -> Tuple[
+    def process_kernel(cls, kernel, *args, **kwargs) -> Tuple[
         Any,
         List[Any],
         List[Any],
@@ -4558,11 +4558,13 @@ class ExternKernel(InputsKernel):
                     x,
                     freeze=True,
                     want_contiguous=False,
-                    stride_order=get_stride_order(
-                        V.graph.sizevars.size_hints(x.get_layout().stride)
-                    )
-                    if is_stride_order_storage_and_layout(x, order)
-                    else order,
+                    stride_order=(
+                        get_stride_order(
+                            V.graph.sizevars.size_hints(x.get_layout().stride)
+                        )
+                        if is_stride_order_storage_and_layout(x, order)
+                        else order
+                    ),
                     allow_padding=allow_padding,
                 )
                 return x
@@ -4832,9 +4834,11 @@ class RandomSeeds(ExternKernelOut):
             # FIXME: Ideally we should only use at::_ops::randint_low_out::call here,
             # but the signature is different from is at::randint_out. Again,
             # we can simplify the code when only keeping an ABI-compatible version.
-            cpp_kernel_name="at::_ops::randint_low_out::call"
-            if config.abi_compatible
-            else "at::randint_out",
+            cpp_kernel_name=(
+                "at::_ops::randint_low_out::call"
+                if config.abi_compatible
+                else "at::randint_out"
+            ),
             op_overload=aten.randint.low_out,
         )
 

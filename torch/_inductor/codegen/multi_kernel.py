@@ -344,11 +344,8 @@ class MultiKernelCall:
         be picked.
         """
         return benchmarker.benchmark_many_gpu(
-            [
-                lambda: kernel_call(True)
-                for kernel_call in kernel_calls
-            ],
-            ranking_key="benchmark_sub_kernels"
+            [lambda: kernel_call(True) for kernel_call in kernel_calls],
+            ranking_key="benchmark_sub_kernels",
         )
 
     # record_choice and lookup_choice are helper functions for cpp-wrapper

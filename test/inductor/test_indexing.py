@@ -9,7 +9,6 @@ from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
 from torch._inductor.runtime.benchmarking import benchmarker
-
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_triton_code
