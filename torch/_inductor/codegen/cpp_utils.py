@@ -2,7 +2,6 @@
 import contextlib
 import copy
 import math
-
 from collections import namedtuple
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import patch
@@ -11,11 +10,12 @@ import sympy
 
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
+
 from .. import ir
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import V
-
 from .common import CSEVariable, ExprPrinter, Kernel, KernelArgs
+
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
@@ -309,9 +309,8 @@ def rewrite_index_for_function(
     global_buf_name: str,
 ):
     # Local buffer at the inner dimensions
-    snode = V.graph.scheduler.name_to_node.get(global_buf_name)
+    snode = V.graph.scheduler.name_to_buf[global_buf_name].defining_op
     local_buf = localize_buffer_handler.global_to_local[global_buf_name]
-    assert snode is not None
     scheduler_nodes = snode.get_nodes()
     _, (group, reduction_group) = max(
         scheduler_nodes, key=lambda x: int(x.is_reduction())

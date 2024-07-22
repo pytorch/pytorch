@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import torch
 from torch._dynamo.utils import counters
 
+
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 

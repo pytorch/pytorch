@@ -28,6 +28,7 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 
+
 try:
     # importing this will register fbgemm lowerings for inductor
     import deeplearning.fbgemm.fbgemm_gpu.fb.inductor_lowerings  # noqa: F401

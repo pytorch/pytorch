@@ -22,6 +22,8 @@ from torch import (  # noqa: F401
     layout as _layout,
     qscheme as _qscheme,
     Size as Size,
+    SymBool as SymBool,
+    SymFloat as SymFloat,
     SymInt as SymInt,
     Tensor as Tensor,
 )
@@ -49,6 +51,9 @@ _dispatchkey: TypeAlias = Union[str, DispatchKey]  # noqa: PYI042,PYI047
 
 # int or SymInt
 IntLikeType = Union[int, SymInt]
+
+py_sym_types = (SymInt, SymFloat, SymBool)
+PySymType = Union[SymInt, SymFloat, SymBool]
 
 # Meta-type for "numeric" things; matches our docs
 Number: TypeAlias = Union[int, float, bool]

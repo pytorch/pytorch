@@ -6,6 +6,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/Storage.h>
 #include <c10/util/Exception.h>
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
 struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
@@ -59,3 +60,4 @@ TORCH_API const at::PrivateUse1HooksInterface& getPrivateUse1Hooks();
 } // namespace detail
 
 } // namespace at
+C10_DIAGNOSTIC_POP()
