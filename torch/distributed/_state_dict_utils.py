@@ -17,23 +17,17 @@ from typing import (
     Union,
 )
 import weakref
-import logging
 
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from logging import getLogger
 
 
 if dist.is_available() or TYPE_CHECKING:
     from torch.distributed import distributed_c10d
     from torch.distributed._shard.sharded_tensor import ShardedTensor
     from torch.distributed._tensor import distribute_tensor, DTensor, Replicate
-
-
-logger = getLogger()
-logger.setLevel(logging.INFO)
 
 
 def _identity_func(
@@ -410,7 +404,7 @@ def _create_cpu_state_dict(
         _: Any,
     ) -> torch.Tensor:
         if len(obj.size()) == 0:
-            return torch.tensor(0, dtype=obj.dtype) 
+            return torch.tensor(0, dtype=obj.dtype)
 
         if share_memory:
             t = torch.empty(*tuple(obj.size()), dtype=obj.dtype)
