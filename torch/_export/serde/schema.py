@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (5, 3)
+SCHEMA_VERSION = (6, 1)
 TREESPEC_VERSION = 1
 
 
@@ -376,4 +376,5 @@ class ExportedProgram:
     opset_version: Dict[str, int]
     range_constraints: Dict[str, RangeConstraint]
     schema_version: SchemaVersion
-    dialect: str
+    verifiers: List[str] = field(default_factory=list)
+    dialect: str = ""  # TODO deprecated

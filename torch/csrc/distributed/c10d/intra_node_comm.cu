@@ -132,6 +132,8 @@ struct P2pState {
   uint32_t signals1[kMaxAllReduceBlocks][kMaxDevices];
 };
 
+static_assert(sizeof(P2pState) <= kP2pStateSize);
+
 template <uint32_t kWorldSize, bool kAligned>
 static __global__ void oneShotAllReduceKernel(
     at::BFloat16* input,
@@ -174,7 +176,10 @@ static __global__ void oneShotAllReduceKernel(
     bf16x8 vals[kWorldSize];
 #pragma unroll kWorldSize
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      streamLoad128(vals[ii], &srcs[ii][i]);
+      // Make sure the values in `vals` are order by rank so that the reduction
+      // results are consistent across ranks.
+      int srcRank = (ii + kWorldSize - rank) % kWorldSize;
+      streamLoad128(vals[srcRank], &srcs[ii][i]);
     }
 
     bf16x8 sums;
@@ -232,7 +237,10 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
     bf16x8 vals[kWorldSize];
 #pragma unroll kWorldSize
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      streamLoad128(vals[ii], &srcs[ii][N_start + i]);
+      // Make sure the values in `vals` are order by rank so that the reduction
+      // results are consistent across ranks.
+      int srcRank = (ii + kWorldSize - rank) % kWorldSize;
+      streamLoad128(vals[srcRank], &srcs[ii][N_start + i]);
     }
 
     bf16x8 sums;
@@ -436,13 +444,18 @@ static inline size_t alignUp(uint32_t a, uint32_t b) {
   return divUp(a, b) * b;
 }
 
-static void checkInput(const at::Tensor& input, size_t rank) {
+static void checkInput(const at::Tensor& input, int deviceIdx) {
   TORCH_CHECK(
       input.dtype() == at::kBFloat16,
       "oneShotAllReduce only supports bf16 for now");
   TORCH_CHECK(input.is_non_overlapping_and_dense());
   TORCH_CHECK(input.device().is_cuda());
-  TORCH_CHECK(static_cast<size_t>(input.get_device()) == rank);
+  TORCH_CHECK(
+      input.get_device() == deviceIdx,
+      "IntraNodeComm: expect input to be on device ",
+      deviceIdx,
+      ", got device ",
+      input.get_device());
 }
 
 static void getLaunchConfig(
@@ -502,7 +515,7 @@ void* initTopoInfo(Topology topology, NvlMesh nvlMesh, size_t rank) {
 at::Tensor IntraNodeComm::oneShotAllReduce(
     const at::Tensor& input,
     at::cuda::CUDAStream& stream) {
-  checkInput(input, rank_);
+  checkInput(input, deviceIdx_);
 
   const size_t numelPerWarp =
       kBytesPerThread / input.element_size() * kWarpSize;
@@ -522,7 +535,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
   const bool fuseInputCopy = isAligned && blocks.x < kMaxAllReduceBlocks;
   if (!fuseInputCopy) {
     AT_CUDA_CHECK(cudaMemcpyAsync(
-        buffers_[rank_],
+        symmetricMemory_->get_buffer_ptrs()[rank_],
         input.data_ptr(),
         input.numel() * input.element_size(),
         cudaMemcpyDeviceToDevice,
@@ -566,7 +579,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
 at::Tensor IntraNodeComm::twoShotAllReduce(
     const at::Tensor& input,
     at::cuda::CUDAStream& stream) {
-  checkInput(input, rank_);
+  checkInput(input, deviceIdx_);
 
   size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
   size_t N_aligned = alignUp(input.numel(), worldSize_ * numelPerWarp);
@@ -582,7 +595,7 @@ at::Tensor IntraNodeComm::twoShotAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      buffers_[rank_],
+      symmetricMemory_->get_buffer_ptrs()[rank_],
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
@@ -621,7 +634,7 @@ at::Tensor IntraNodeComm::twoShotAllReduce(
 at::Tensor IntraNodeComm::hybridCubeMeshAllReduce(
     const at::Tensor& input,
     at::cuda::CUDAStream& stream) {
-  checkInput(input, rank_);
+  checkInput(input, deviceIdx_);
 
   size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
   size_t N_aligned = alignUp(input.numel(), numelPerWarp);
@@ -632,7 +645,7 @@ at::Tensor IntraNodeComm::hybridCubeMeshAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      buffers_[rank_],
+      symmetricMemory_->get_buffer_ptrs()[rank_],
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
@@ -755,15 +768,7 @@ at::Tensor IntraNodeComm::getBuffer(
     const std::vector<int64_t>& sizes,
     c10::ScalarType dtype,
     int64_t storageOffset) {
-  const auto numel = std::accumulate(sizes.begin(), sizes.end(), 0);
-  const auto elementSize = c10::elementSize(dtype);
-  TORCH_CHECK((numel + storageOffset) * elementSize <= bufferSize_);
-  auto options = at::TensorOptions().dtype(dtype).device(
-      at::kCUDA, at::cuda::current_device());
-  return at::for_blob(buffers_[rank], sizes)
-      .storage_offset(storageOffset)
-      .options(options)
-      .make_tensor();
+  return symmetricMemory_->get_buffer(rank, sizes, dtype, storageOffset);
 }
 
 } // namespace intra_node_comm

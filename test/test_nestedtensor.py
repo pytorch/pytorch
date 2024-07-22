@@ -15,7 +15,6 @@ import torch._dynamo
 import torch._dynamo.testing
 import torch.nn
 import torch.nn.functional as F
-
 from torch.nested._internal.nested_tensor import (
     buffer_from_jagged,
     jagged_from_list,
@@ -57,6 +56,8 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
+from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
+
 
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
@@ -65,6 +66,21 @@ from torch.testing._internal.common_utils import (
 def _iter_constructors():
     # yield as_nested_tensor
     yield torch.nested.nested_tensor
+
+
+# Returns True if the function recompiles between inputs1 and inputs2 with the
+# specified dynamic setting.
+def _recompiles_for_inputs(fn, inputs1, inputs2, dynamic=True):
+    compile_count = [0]
+
+    def counter(gm, example_inputs):
+        compile_count[0] += 1
+        return gm
+
+    compiled_f = torch.compile(fn, fullgraph=True, backend=counter, dynamic=dynamic)
+    compiled_f(*inputs1)
+    compiled_f(*inputs2)
+    return compile_count[0] > 1
 
 
 # Helper function to generate a pair of random nested tensors
@@ -3546,10 +3562,24 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.dim(), 3)
         self.assertEqual(nt.numel(), 27)
 
-    def test_linear(self, device):
-        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
-        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
-        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+    @parametrize("nt_dim", [3, 4, 5])
+    def test_linear(self, device, nt_dim):
+        if nt_dim == 3:
+            fixed_shape = (3,)
+        elif nt_dim == 4:
+            fixed_shape = (4, 3)
+        elif nt_dim == 5:
+            fixed_shape = (5, 4, 3)
+
+        a = torch.randn(
+            2, *fixed_shape, requires_grad=True, dtype=torch.float64, device=device
+        )
+        b = torch.randn(
+            3, *fixed_shape, requires_grad=True, dtype=torch.float64, device=device
+        )
+        c = torch.randn(
+            4, *fixed_shape, requires_grad=True, dtype=torch.float64, device=device
+        )
         weight = torch.randn(
             4, 3, requires_grad=True, dtype=torch.float64, device=device
         )
@@ -3730,7 +3760,11 @@ class TestNestedTensorSubclass(TestCase):
 
     def test_softmax(self, device):
         nt = random_nt_from_dims(
-            [3, None, 5], device=device, dtype=torch.float32, layout=torch.jagged
+            [3, None, 5],
+            device=device,
+            dtype=torch.float32,
+            layout=torch.jagged,
+            requires_grad=True,
         )
 
         # operate on dim=2
@@ -3748,6 +3782,15 @@ class TestNestedTensorSubclass(TestCase):
         output2 = nt.softmax(dim=-1)
         torch._dynamo.disable(self.assertEqual)(output, output2)
         _compare_to_ref(nt, output2, dim=-1)
+
+        def grad_test_func(a, b):
+            nt = torch.nested.as_nested_tensor([a, b], layout=torch.jagged)
+            out = nt.softmax(dim=-1)
+            return out.values()
+
+        a = torch.rand(4, 5, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.rand(8, 5, requires_grad=True, dtype=torch.float64, device=device)
+        gradcheck(grad_test_func, inputs=(a, b), check_batched_grad=False)
 
     def test_views_inherit_ragged_dim(self, device):
         # view
@@ -3966,34 +4009,32 @@ class TestNestedTensorSubclass(TestCase):
 
         self.assertEqual(res_dense, res_nt.values())
 
+    @dtypes(torch.float32)
     @parametrize("keepdim", [False, True])
-    def test_sum_int_DimList(self, device, keepdim):
-        # (B, j0, 3, 4)
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_sum_dim(
+        self, device, dtype, keepdim, requires_grad, components_require_grad
+    ):
         ts = self._get_list_for_jagged_tensor(
             ((2, 3, 4), 3, 4), device=device, requires_grad=True
-        )
+        )  # (B, j0, 3, 4)
 
-        # Check shape correctness
+        # verify correctness of shapes (assuming that ragged_idx == 1)
         reduce_dims = (
-            # dims, expected shape, expected keepdim shape
-            # j0 is represented as None
-            ((0, 1), (3, 4), (1, 1, 3, 4)),
-            ((1, 2), None, None),
-            ((2, 3), (3, None), (3, None, 1, 1)),
-            ((0, 1, 3), (3,), (1, 1, 3, 1)),
-            ((0, 1, 2), (4,), (1, 1, 1, 4)),
-            ((0, 1, 2, 3), tuple(), (1, 1, 1, 1)),
-        )
-        for rd, ref_shape_no_keepdim, ref_shape_keepdim in reduce_dims:
-            if (0 in rd) ^ (1 in rd):
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "applying over the ragged dimension, but not the batch dimension",
-                ):
-                    nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
-                    out = torch.sum(nt, dim=rd, keepdim=keepdim)
-                continue
-
+            ((0, 1), (3, 4), (1, 1, 3, 4), (0,)),  # batch, ragged
+            ((2, 3), (3, None), (3, None, 1, 1), (1, 2)),  # non-batch, non-batch
+            ((0, 1, 3), (3,), (1, 1, 3, 1), (0, 2)),  # batch, ragged, non-batch
+            ((0, 1, 2), (4,), (1, 1, 1, 4), (0, 1)),  # batch, ragged, non-batch
+            (
+                (0, 1, 2, 3),
+                (),
+                (1, 1, 1, 1),
+                (0, 1, 2),
+            ),  # batch, ragged, non-batch, non-batch
+            ((2,), (3, None, 4), (3, None, 1, 4), (1,)),  # non-batch
+        )  # (dims, expected shape, expected keepdim shape, reduce_dim_expected), where j0 is represented as None
+        for rd, ref_shape_no_keepdim, ref_shape_keepdim, _ in reduce_dims:
             nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
             out = torch.sum(nt, dim=rd, keepdim=keepdim)
             ref_shape = ref_shape_keepdim if keepdim else ref_shape_no_keepdim
@@ -4004,21 +4045,289 @@ class TestNestedTensorSubclass(TestCase):
                 else:
                     self.assertTrue(isinstance(o, torch.SymInt))
 
-        # Check values correctness
-        # raggedness not reduced
-        nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
-        out = torch.sum(nt, dim=(2, 3), keepdim=keepdim)
-        out_ref = torch.sum(nt.values(), dim=(1, 2))
-        self.assertIsInstance(out, NestedTensor)
-        # flatten to avoid having to replicate unsqueeze logic depending on keepdim
-        self.assertTrue(torch.allclose(out.values().view(-1), out_ref.view(-1)))
+        # verify correctness of values
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False,
+            include_requires_grad=components_require_grad,
+        )
+        for tensor_list, reduce_dim_tuple in itertools.product(
+            tensor_lists, reduce_dims
+        ):
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
 
-        # raggedness reduced away
-        nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
-        out = torch.sum(nt, dim=(0, 1), keepdim=keepdim)
-        out_ref = torch.sum(nt.values(), dim=(0,))
-        self.assertNotIsInstance(out, NestedTensor)
-        self.assertTrue(torch.allclose(out, out_ref))
+            reduce_dim, _, _, reduce_dim_expected = reduce_dim_tuple
+
+            if nt.dim() > reduce_dim[-1]:
+                if nt._ragged_idx in reduce_dim:  # raggedness reduced away
+                    out_actual = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
+                    out_expected = torch.sum(
+                        nt.values(), dim=reduce_dim_expected, keepdim=keepdim
+                    )
+                    self.assertTrue(torch.allclose(out_actual, out_expected))
+                else:  # raggedness preserved
+                    out_actual = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
+                    out_expected = torch.sum(nt.values(), dim=reduce_dim_expected)
+                    self.assertTrue(
+                        torch.allclose(
+                            out_actual.values().view(-1), out_expected.view(-1)
+                        )
+                    )
+
+    @dtypes(torch.float32)
+    @parametrize("keepdim", [False, True])
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_sum_dim_reduce_ragged_dim_1(
+        self,
+        device,
+        dtype,
+        keepdim,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Sum on NestedTensor passes when trying to reduce across ragged dimension, where ragged_idx == 1
+        """
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False, include_requires_grad=components_require_grad
+        )
+        reduce_dim = (1,)  # ragged
+
+        for tensor_list in tensor_lists:
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            out_actual = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
+            out_expected = torch.cat(
+                [
+                    torch.sum(t, dim=(reduce_dim[0] - 1)).unsqueeze(0)
+                    for t in nt.unbind()
+                ]
+            )
+
+            self.assertFalse(
+                out_actual.is_nested,
+                "sum(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
+            )  # output is a dense tensor
+            self.assertTrue(torch.allclose(out_actual, out_expected))
+
+    @dtypes(torch.float32)
+    @parametrize("keepdim", [False, True])
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_sum_dim_reduce_ragged_and_non_batch(
+        self,
+        device,
+        dtype,
+        keepdim,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Sum on NestedTensor fails when trying to reduce across ragged and non-batch dimensions
+        """
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False, include_requires_grad=components_require_grad
+        )
+        reduce_dims = (
+            (1, 2),  # ragged, non-batch
+            (1, 3),  # ragged, non-batch
+        )
+
+        for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            if nt.dim() > reduce_dim[-1]:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "not supported along a ragged and non-batch dimension for NestedTensor",
+                ):
+                    out = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
+
+    @dtypes(torch.float32)
+    @parametrize("keepdim", [False, True])
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_sum_dim_reduce_batch_and_non_batch(
+        self,
+        device,
+        dtype,
+        keepdim,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Sum on NestedTensor fails when trying to reduce across batch and non-batch dimensions
+        """
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False, include_requires_grad=components_require_grad
+        )
+        reduce_dims = (
+            (0, 2),  # batch, non-batch
+            (0, 3),  # batch, non-batch
+        )
+
+        for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            if nt.dim() > reduce_dim[-1]:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "not supported along only the batch dimension for NestedTensor",
+                ):
+                    out = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
+
+    @dtypes(torch.float32)
+    @parametrize("keepdim", [False, True])
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_sum_dim_reduce_batch(
+        self,
+        device,
+        dtype,
+        keepdim,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Sum on NestedTensor fails when trying to reduce across batch dimension
+        """
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False, include_requires_grad=components_require_grad
+        )
+        reduce_dim = (0,)  # batch
+
+        for tensor_list in tensor_lists:
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "not supported along only the batch dimension for NestedTensor",
+            ):
+                out = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
+
+    @dtypes(torch.float32)
+    @parametrize("keepdim", [False, True])
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_sum_dim_ragged_dim_not_1(
+        self,
+        device,
+        dtype,
+        keepdim,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Sum on NestedTensor fails when trying to reduce a nested tensor with ragged_idx != 1
+        """
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False, include_requires_grad=components_require_grad
+        )
+        reduce_dims = (
+            (1,),
+            (2, 3),
+        )
+
+        for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            if (
+                nt.dim() > 2 and nt.dim() > reduce_dim[-1]
+            ):  # ensure that we can transpose dims 1 and 2
+                nt_transposed = nt.transpose(1, 2)
+
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "not supported when ragged_idx != 1 for NestedTensor",
+                ):
+                    out = torch.sum(nt_transposed, dim=reduce_dim, keepdim=keepdim)
+
+    @dtypes(torch.float32)
+    @parametrize("keepdim", [False, True])
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_sum_dim_with_lengths(
+        self,
+        device,
+        dtype,
+        keepdim,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Sum on NestedTensor fails when trying to reduce a nested tensor with lengths,
+        i.e. a nested tensor with holes, when reducing on the ragged dimension
+        """
+        reduce_dims = (
+            (1,),
+            (2,),
+            (2, 3),
+        )
+
+        lengths = torch.randint(5, 10, (20,), device=device)
+        offsets = torch.zeros((21,), device=device, dtype=torch.int)
+        torch.cumsum(lengths, dim=0, out=offsets[1:])
+
+        values = torch.randn(
+            (offsets[-1].item(), 20),
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+
+        nt_with_holes = torch.nested.nested_tensor_from_jagged(
+            values,
+            offsets,
+            lengths=offsets.diff() - 2,  # arbitrary subtraction to create holes
+        )
+
+        for reduce_dim in reduce_dims:
+            if nt_with_holes.dim() > reduce_dim[-1]:
+                if nt_with_holes._ragged_idx in reduce_dim:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "not supported where lengths is not None "
+                        + "if reducing across the ragged dimension for NestedTensor",
+                    ):
+                        out = torch.sum(nt_with_holes, dim=reduce_dim, keepdim=keepdim)
+                else:
+                    out = torch.sum(nt_with_holes, dim=reduce_dim, keepdim=keepdim)
 
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
@@ -4063,7 +4372,19 @@ class TestNestedTensorSubclass(TestCase):
 
     @torch.compiler.disable
     def _validate_nt(
-        self, nt, device, dtype, layout, requires_grad, dim, batch_size, base=None
+        self,
+        nt,
+        device,
+        dtype,
+        layout,
+        requires_grad,
+        dim,
+        batch_size,
+        contiguous,
+        cached_min_seqlen=None,
+        cached_max_seqlen=None,
+        base=None,
+        ref_nt=None,
     ):
         # Validate a bunch of properties after NT construction.
         device = torch.device(device)
@@ -4072,6 +4393,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.dtype, dtype)
         self.assertEqual(nt.layout, layout)
         self.assertEqual(nt.requires_grad, requires_grad)
+        self.assertEqual(nt.is_contiguous(), contiguous)
 
         if layout == torch.jagged:
             self.assertEqual(nt._values.device, device)
@@ -4079,8 +4401,33 @@ class TestNestedTensorSubclass(TestCase):
             self.assertEqual(nt.shape[0], batch_size)
             self.assertTrue(isinstance(nt.shape[1], torch.SymInt))
 
-        if base is not None:
-            self.assertTrue(nt._is_view() and nt._base is base)
+            if base is not None:
+                self.assertTrue(nt._is_view() and nt._base is base)
+                replay_cache = nt._view_func(torch.randn_like(nt._base))._metadata_cache
+                self.assertEqual(
+                    "min_seqlen" in replay_cache, cached_min_seqlen is not None
+                )
+                self.assertEqual(
+                    "max_seqlen" in replay_cache, cached_max_seqlen is not None
+                )
+
+            self.assertEqual(
+                "min_seqlen" in nt._metadata_cache, cached_min_seqlen is not None
+            )
+            self.assertEqual(
+                "max_seqlen" in nt._metadata_cache, cached_max_seqlen is not None
+            )
+
+            if cached_min_seqlen is not None:
+                self.assertEqual(nt._min_seqlen, cached_min_seqlen)
+
+            if cached_max_seqlen is not None:
+                self.assertEqual(nt._max_seqlen, cached_max_seqlen)
+
+        if ref_nt is not None:
+            self.assertEqual(nt.size(0), ref_nt.size(0))
+            for n1, n2 in zip(nt.unbind(), ref_nt.unbind()):
+                self.assertEqual(n1, n2)
 
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
@@ -4101,6 +4448,19 @@ class TestNestedTensorSubclass(TestCase):
 
             expected_dim = torch.as_tensor(tensor_list[0]).dim() + 1
             expected_batch_size = len(tensor_list)
+            expected_contiguous = True
+            expected_min_seqlen = min(
+                [
+                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                    for t in tensor_list
+                ]
+            )
+            expected_max_seqlen = max(
+                [
+                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                    for t in tensor_list
+                ]
+            )
             self._validate_nt(
                 nt,
                 device,
@@ -4109,6 +4469,9 @@ class TestNestedTensorSubclass(TestCase):
                 requires_grad,
                 expected_dim,
                 expected_batch_size,
+                expected_contiguous,
+                expected_min_seqlen,
+                expected_max_seqlen,
             )
 
             # Make sure grads -don't- flow back into original tensors for nested_tensor()
@@ -4134,6 +4497,19 @@ class TestNestedTensorSubclass(TestCase):
             # nt.requires_grad=True should be set if at least one component requires grad
             expected_dim = tensor_list[0].dim() + 1
             expected_batch_size = len(tensor_list)
+            expected_contiguous = True
+            expected_min_seqlen = min(
+                [
+                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                    for t in tensor_list
+                ]
+            )
+            expected_max_seqlen = max(
+                [
+                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                    for t in tensor_list
+                ]
+            )
             self._validate_nt(
                 nt,
                 device,
@@ -4142,6 +4518,9 @@ class TestNestedTensorSubclass(TestCase):
                 components_require_grad,
                 expected_dim,
                 expected_batch_size,
+                expected_contiguous,
+                expected_min_seqlen,
+                expected_max_seqlen,
             )
 
             # Make sure grads flow back into original tensors for as_nested_tensor()
@@ -4166,6 +4545,18 @@ class TestNestedTensorSubclass(TestCase):
 
             expected_dim = torch.as_tensor(tensor_list[0]).dim() + 1
             expected_batch_size = len(tensor_list)
+            expected_min_seqlen = min(
+                [
+                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                    for t in tensor_list
+                ]
+            )
+            expected_max_seqlen = max(
+                [
+                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                    for t in tensor_list
+                ]
+            )
             self._validate_nt(
                 nt,
                 device="cpu",
@@ -4174,6 +4565,9 @@ class TestNestedTensorSubclass(TestCase):
                 requires_grad=False,
                 dim=expected_dim,
                 batch_size=expected_batch_size,
+                contiguous=True,
+                cached_min_seqlen=expected_min_seqlen,
+                cached_max_seqlen=expected_max_seqlen,
             )
             self.assertTrue(nt.is_pinned())
 
@@ -4200,6 +4594,7 @@ class TestNestedTensorSubclass(TestCase):
         expected_dim = values.dim() + 1
         expected_batch_size = offsets.shape[0] - 1
         expected_base = base if values_is_view else values
+        lengths = offsets.diff()
         self._validate_nt(
             nt,
             device,
@@ -4210,6 +4605,10 @@ class TestNestedTensorSubclass(TestCase):
             expected_batch_size,
             # ensure NT is a proper view
             base=expected_base,
+            contiguous=True,
+            # if no min / max are passed, expect the metadata cache to be empty
+            cached_min_seqlen=None,
+            cached_max_seqlen=None,
         )
 
         if requires_grad:
@@ -4224,56 +4623,128 @@ class TestNestedTensorSubclass(TestCase):
             _check_grad(base if values_is_view else values)
 
     @dtypes(torch.float)
-    def test_nested_tensor_from_jagged(self, device, dtype):
-        # construct from (values, offsets)
+    @parametrize("pass_min_max", [False, True])
+    def test_nested_tensor_from_jagged(self, device, dtype, pass_min_max):
+        # === construct from (values, offsets) ===
         values = torch.randn(10, 5, device=device, dtype=dtype)
         offsets = torch.tensor([0, 2, 4, 6, 10], device=device, dtype=torch.int64)
-        nt = torch.nested.nested_tensor_from_jagged(values, offsets=offsets)
-        self.assertTrue(isinstance(nt, NestedTensor))
-        self.assertTrue(nt._is_view() and nt._base is values)
-        self.assertEqual(nt.dim(), 3)
-        self.assertEqual(nt.size(0), offsets.size(0) - 1)
-        self.assertEqual(nt.size(-1), values.size(-1))
-        self.assertIsNone(nt._lengths)
-        self.assertTrue(nt.is_contiguous())
 
-        # construct from (values, offsets, lengths)
-        lengths = torch.tensor([2, 1, 1, 2], device=device)
-        nt = torch.nested.nested_tensor_from_jagged(
-            values, offsets=offsets, lengths=lengths
+        # compute min / max seqlen
+        lengths = offsets.diff()
+        min_seqlen = lengths.min().item()
+        max_seqlen = lengths.max().item()
+
+        if pass_min_max:
+            nt = torch.nested.nested_tensor_from_jagged(
+                values, offsets=offsets, min_seqlen=min_seqlen, max_seqlen=max_seqlen
+            )
+        else:
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets=offsets)
+        self._validate_nt(
+            nt,
+            device,
+            dtype,
+            torch.jagged,
+            requires_grad=False,
+            dim=3,
+            batch_size=4,
+            contiguous=True,
+            cached_min_seqlen=(min_seqlen if pass_min_max else None),
+            cached_max_seqlen=(max_seqlen if pass_min_max else None),
+            base=values,
         )
-        self.assertTrue(isinstance(nt, NestedTensor))
-        self.assertTrue(nt._is_view() and nt._base is values)
-        self.assertEqual(nt.dim(), 3)
-        self.assertEqual(nt.size(0), offsets.size(0) - 1)
-        self.assertEqual(nt.size(-1), values.size(-1))
-        self.assertEqual(nt._lengths, lengths)
-        # when both offsets / lengths are specified, expect non-contiguous
-        self.assertFalse(nt.is_contiguous())
 
-        # construct from (values, lengths)
+        # === construct from (values, offsets, lengths) ===
+        lengths = torch.tensor([2, 1, 1, 2], device=device)
+
+        # compute min / max seqlen
+        min_seqlen = lengths.min().item()
+        max_seqlen = lengths.max().item()
+
+        if pass_min_max:
+            nt = torch.nested.nested_tensor_from_jagged(
+                values,
+                offsets=offsets,
+                lengths=lengths,
+                min_seqlen=min_seqlen,
+                max_seqlen=max_seqlen,
+            )
+        else:
+            nt = torch.nested.nested_tensor_from_jagged(
+                values, offsets=offsets, lengths=lengths
+            )
+
+        # when both offsets / lengths are specified, expect non-contiguous
+        self._validate_nt(
+            nt,
+            device,
+            dtype,
+            torch.jagged,
+            requires_grad=False,
+            dim=3,
+            batch_size=4,
+            contiguous=False,
+            cached_min_seqlen=(min_seqlen if pass_min_max else None),
+            cached_max_seqlen=(max_seqlen if pass_min_max else None),
+            base=values,
+        )
+        self.assertIs(nt.lengths(), lengths)
+
+        # === construct from (values, lengths) ===
         values = torch.randn(14, 5, device=device, dtype=dtype)
         lengths = torch.tensor([2, 3, 4, 5], device=device)
-        nt = torch.nested.nested_tensor_from_jagged(values, lengths=lengths)
-        self.assertTrue(isinstance(nt, NestedTensor))
-        self.assertTrue(nt._is_view() and nt._base is values)
-        self.assertEqual(nt.dim(), 3)
-        self.assertEqual(nt.size(0), lengths.size(0))
-        self.assertEqual(nt.size(-1), values.size(-1))
+
+        # compute min / max seqlen
+        min_seqlen = lengths.min().item()
+        max_seqlen = lengths.max().item()
+
+        if pass_min_max:
+            nt = torch.nested.nested_tensor_from_jagged(
+                values, lengths=lengths, min_seqlen=min_seqlen, max_seqlen=max_seqlen
+            )
+        else:
+            nt = torch.nested.nested_tensor_from_jagged(values, lengths=lengths)
+
         # for now, if only lengths is specified, convert to offsets to integrate best with the
         # existing kernels
         expected_offsets = torch.tensor([0, 2, 5, 9, 14], device=device)
         expected_nt = torch.nested.nested_tensor_from_jagged(
             values, offsets=expected_offsets
         )
-        for n1, n2 in zip(nt.unbind(), expected_nt.unbind()):
-            self.assertEqual(n1, n2)
+        self._validate_nt(
+            nt,
+            device,
+            dtype,
+            torch.jagged,
+            requires_grad=False,
+            dim=3,
+            batch_size=4,
+            contiguous=True,
+            cached_min_seqlen=(min_seqlen if pass_min_max else None),
+            cached_max_seqlen=(max_seqlen if pass_min_max else None),
+            base=values,
+            ref_nt=expected_nt,
+        )
 
         # error case: no offsets or lengths
         with self.assertRaisesRegex(
             RuntimeError, "At least one of offsets or lengths is required"
         ):
             torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
+
+    @onlyCPU
+    def test_nested_tensor_from_jagged_fx_trace(self, device):
+        def fn(x, y):
+            return torch.nested.nested_tensor_from_jagged(x, y)
+
+        def user_unwrapped(x, y):
+            return fn(x, y)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "torch.nested.nested_tensor_from_jagged does not support tracing with fx.symbolic_trace",
+        ):
+            torch.fx.symbolic_trace(user_unwrapped)
 
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("dim", range(5))
@@ -4310,8 +4781,18 @@ class TestNestedTensorSubclass(TestCase):
         nt = torch.nested.as_nested_tensor(t, device=device, dtype=dtype, layout=layout)
         expected_dim = t.dim()
         expected_batch_size = t.size(0)
+        expected_seqlen = t.size(1) if layout == torch.jagged else None
         self._validate_nt(
-            nt, device, dtype, layout, requires_grad, expected_dim, expected_batch_size
+            nt,
+            device,
+            dtype,
+            layout,
+            requires_grad=requires_grad,
+            dim=dim,
+            batch_size=expected_batch_size,
+            contiguous=True,
+            cached_min_seqlen=expected_seqlen,
+            cached_max_seqlen=expected_seqlen,
         )
 
         if torch.device(device) == t.device and dtype == t.dtype and contiguous:
@@ -4329,6 +4810,26 @@ class TestNestedTensorSubclass(TestCase):
             nt, device=device, dtype=dtype, layout=layout
         )
         self.assertTrue(nt is nt2)
+
+        # ensure call with device=None uses input tensor device
+        nt3 = torch.nested.as_nested_tensor(
+            t.to(device=device, dtype=dtype),
+            device=None,
+            dtype=None,
+            layout=layout,
+        )
+        self._validate_nt(
+            nt3,
+            device,
+            dtype,
+            layout,
+            requires_grad=requires_grad,
+            dim=dim,
+            batch_size=expected_batch_size,
+            contiguous=True,
+            cached_min_seqlen=expected_seqlen,
+            cached_max_seqlen=expected_seqlen,
+        )
 
         # we don't support conversion between layouts this way atm
         other_layout = torch.strided if layout == torch.jagged else torch.jagged
@@ -4818,19 +5319,18 @@ class TestNestedTensorSubclass(TestCase):
         check_results(fn, compiled_fn, generate_inp(20))
         self.assertEqual(compile_counter.frame_count, frame_count_2)
 
-    # Doesn't work until we have real views
-    @xfailIfTorchDynamo
     # Note 1: Math fallback doesn't work with bfloat16 on CUDA
     # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
     @unittest.skipIf(
         TEST_WITH_ROCM,
         "ROCm doesn't support flash attention or mem_efficient attention for NT",
     )
-    @parametrize(
-        "dtype",
-        [torch.float16, torch.bfloat16, torch.float32]
-        if SM80OrLater
-        else [torch.float16, torch.float32],
+    @dtypes(
+        *(
+            [torch.float16, torch.bfloat16, torch.float32]
+            if SM80OrLater
+            else [torch.float16, torch.float32]
+        )
     )
     def test_sdpa(self, device, dtype):
         batch_size = 1
@@ -4997,6 +5497,15 @@ class TestNestedTensorSubclass(TestCase):
         d1_grads = torch.autograd.grad(attn_d1.sum(), (q_d1, k_d1, v_d1))
         d2_grads = torch.autograd.grad(attn_d2.sum(), (q_d2, k_d2, v_d2))
 
+        # Simple case 3: batch_size = 1, seq_len = 1
+        q_3 = torch.randn(1, 8, 16, dtype=dtype, device=device)
+        q_nt_3 = torch.nested.as_nested_tensor([q_3], layout=torch.jagged)
+        q_nt_3 = q_nt_3.transpose(1, 2)
+        attn_out = torch.nn.functional.scaled_dot_product_attention(
+            q_nt_3, q_nt_3, q_nt_3
+        )
+        self.assertEqual(attn_out.shape, q_nt_3.shape)
+
         def check_forward_backward():
             attn_nt = torch.nn.functional.scaled_dot_product_attention(
                 q_nt_t, k_nt_t, v_nt_t
@@ -5160,21 +5669,27 @@ class TestNestedTensorSubclass(TestCase):
         # S: (constant) sequence length
         # D: embedding size
         query = random_nt_from_dims(
-            [4, None, 8, 10], device=device, dtype=dtype, layout=torch.jagged
+            [4, None, 8, 10],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
         )
         key = random_nt_from_similar(query)
         value = random_nt_from_similar(query)
         output = F.scaled_dot_product_attention(query, key, value)
         self.assertTrue(isinstance(output, NestedTensor))
+        output.values().sum().backward()
 
+        query_dense = query.clone().detach().requires_grad_(True)
         # should be equivalent to just running the buffers through
         output_dense = F.scaled_dot_product_attention(
-            query._values, key._values, value._values
+            query_dense.values(), key.values(), value.values()
         )
-        self.assertEqual(output._values, output_dense)
+        torch._dynamo.disable(self.assertEqual)(output._values, output_dense)
+        output_dense.sum().backward()
+        torch._dynamo.disable(self.assertEqual)(query.grad, query_dense.grad)
 
-    # Doesn't work until we have real views
-    @xfailIfTorchDynamo
     @onlyCUDA
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
@@ -5261,6 +5776,40 @@ class TestNestedTensorSubclass(TestCase):
         output = f(values, offsets)
         output.sum().backward()
         self.assertEqual(values.grad, torch.ones_like(values))
+
+    @skipIfTorchDynamo()
+    def test_nested_tensor_activation_checkpoint(self, device):
+        values = torch.randn(
+            9, 3, 256, requires_grad=True, device=device, dtype=torch.float32
+        )
+        lengths = torch.tensor([1, 2, 3, 3], device=device, dtype=torch.int64)
+        offsets = F.pad(lengths, pad=(1, 0)).cumsum(dim=0)
+
+        def fn(values, offsets):
+            nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
+            return convert_nt_to_jagged(nt).sum()
+
+        checkpoint(fn, values, offsets, use_reentrant=False).backward()
+        self.assertIsNotNone(values.grad)
+
+        context_fn = partial(
+            create_selective_checkpoint_contexts,
+            [
+                torch.ops.aten.cumsum.default,
+            ],
+        )
+
+        values.grad = None
+
+        def fn(values, lengths):
+            offsets = F.pad(lengths, pad=(1, 0)).cumsum(dim=0)
+            nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
+            return convert_nt_to_jagged(nt).sum()
+
+        checkpoint(
+            fn, values, lengths, use_reentrant=False, context_fn=context_fn
+        ).backward()
+        self.assertIsNotNone(values.grad)
 
     # Internally-defined NT use cases are lifted to here for maximum test realism.
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
@@ -5450,6 +5999,172 @@ class TestNestedTensorSubclass(TestCase):
                 torch.ops.aten._padded_dense_to_jagged_forward(
                     padded, [offsets_wrong], total_L
                 )
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
+    def test_compile_preserves_metadata_cache(self, device, dtype):
+        # shape (B, *, D)
+        nt = random_nt_from_dims(
+            [4, None, 3, 16],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+
+        # expect min / max seqlen to be stored here
+        cache = dict(nt._metadata_cache)
+
+        @torch.compile
+        def f(nt):
+            q = nt.transpose(-3, -2)
+            output = F.scaled_dot_product_attention(q, q, q).transpose(-3, -2)
+            return output
+
+        output = f(nt)
+        output.backward(torch.ones_like(output))
+        self.assertEqual(output._metadata_cache, cache)
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
+    def test_compile_with_dynamic_max_seq_len(self, device, dtype):
+        # shape (B, *, D)
+        # max seq len: 18
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(18, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        # max seq len: 19
+        nt2 = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(19, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        def f(nt):
+            # TODO: Replace with public API when we can use @properties
+            return torch.ones_like(nt) * nt._get_max_seqlen()
+
+        for dynamic in [False, True, None]:
+            self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
+    def test_compile_with_dynamic_min_seq_len(self, device, dtype):
+        # shape (B, *, D)
+        # min seq len: 7
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(7, 5),
+                torch.randn(8, 5),
+                torch.randn(9, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        # min seq len: 8
+        nt2 = torch.nested.nested_tensor(
+            [
+                torch.randn(8, 5),
+                torch.randn(9, 5),
+                torch.randn(10, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        def f(nt):
+            # TODO: Replace with public API when we can use @properties
+            return torch.ones_like(nt) * nt._get_min_seqlen()
+
+        for dynamic in [False, True, None]:
+            self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
+    def test_compile_with_propagated_dynamic_max_seq_len(self, device, dtype):
+        # shape (B, *, D)
+        # max seq len: 18
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(18, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        # max seq len: 19
+        nt2 = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(19, 5),
+            ],
+            layout=torch.jagged,
+        )
+
+        def f(nt):
+            nt2 = nt.sin() + 1
+            # TODO: Replace with public API when we can use @properties
+            return torch.ones_like(nt2) * nt2._get_max_seqlen()
+
+        ref = f(nt)
+        output = torch.compile(f, fullgraph=True, dynamic=False)(nt)
+        self.assertEqual(ref, output)
+
+        for dynamic in [False, True, None]:
+            self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
+
+    @dtypes(torch.float32, torch.double, torch.half)
+    def test_unbind_backward(self, device, dtype):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 4, device=device),
+                torch.randn(5, 4, device=device),
+                torch.randn(3, 4, device=device),
+            ],
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+
+        a, b, c = nt.unbind()
+        b.sum().backward()
+
+        expected_grad = torch.zeros_like(nt)
+        expected_grad.unbind()[1].add_(1.0)
+        torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
 
 
 instantiate_parametrized_tests(TestNestedTensor)

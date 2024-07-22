@@ -34,7 +34,7 @@ from torch.nn.functional import (
     GRID_SAMPLE_PADDING_MODES,
 )
 from torch.onnx import _type_utils, errors, symbolic_helper, utils
-from torch.onnx._internal import _beartype, jit_utils, registration
+from torch.onnx._internal import jit_utils, registration
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=16)
 
@@ -43,7 +43,6 @@ _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=16)
 # Because `torch.nn.functional.grid_sample` calls `torch.grid_sampler`.
 @_onnx_symbolic("aten::grid_sampler")
 @symbolic_helper.parse_args("v", "v", "i", "i", "b")
-@_beartype.beartype
 def grid_sampler(
     g: jit_utils.GraphContext,
     input,
@@ -69,11 +68,7 @@ def grid_sampler(
 
 @_onnx_symbolic("aten::scatter_add")
 @symbolic_helper.parse_args("v", "i", "v", "v")
-@_beartype.beartype
 def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at("scatter", self, dim, index, src, overload_name="src")
-
     src_type = _type_utils.JitScalarType.from_value(
         src, _type_utils.JitScalarType.UNDEFINED
     )
@@ -120,7 +115,6 @@ def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
 
 @_onnx_symbolic("aten::scatter_reduce")
 @symbolic_helper.parse_args("v", "i", "v", "v", "s", "b")
-@_beartype.beartype
 def scatter_reduce(
     g: jit_utils.GraphContext,
     self: torch._C.Value,

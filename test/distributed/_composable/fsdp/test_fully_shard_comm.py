@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import copy
 import functools
 import itertools
 import unittest
@@ -9,7 +10,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.distributed._composable import checkpoint, replicate
 from torch.distributed._composable.fsdp import (
     FSDPModule,
@@ -43,6 +43,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPTestMultiThread,
     MLP,
     patch_post_backward,
+    patch_reshard,
     patch_unshard,
 )
 from torch.testing._internal.common_utils import run_tests
@@ -51,6 +52,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
     TransformerBlock,
 )
+
 
 c10d_ops = torch.ops.c10d
 
@@ -102,7 +104,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         )
         fsdp_param_group = FSDPParamGroup(
             list(module.parameters()),
-            module,
+            (module,),
             mesh_info,
             post_forward_mesh_info,
             self.device,
@@ -174,7 +176,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             orig_params, reshard_after_forward
         )
         fsdp_params = fsdp_param_group.fsdp_params
-        module = fsdp_param_group.module
+        module = fsdp_param_group.modules[0]
 
         # Sanity check that the parameter sharding is as expected
         for orig_param, param in zip(orig_params, module.parameters()):
@@ -232,7 +234,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         orig_params = self._init_params(param_sizes)
         fsdp_param_group = self._init_fsdp_param_group(orig_params, True)
         fsdp_params = fsdp_param_group.fsdp_params
-        fsdp_param_group.comm_ctx.init()
+        fsdp_param_group.comm_ctx.lazy_init()
 
         # Run one unshard to initialize metadata
         fsdp_param_group.unshard()
@@ -245,7 +247,12 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = torch.cuda.Stream()
-        post_reduce_event, _ = foreach_reduce(
+        (
+            reduce_scatter_input,
+            reduce_scatter_event,
+            post_reduce_event,
+            _,
+        ) = foreach_reduce(
             fsdp_params,
             unsharded_grads,
             group,
@@ -372,7 +379,7 @@ class TestFullyShardCommunication(FSDPTest):
         )
 
 
-class TestFullyShardBackwardPrefetch(FSDPTest):
+class TestFullyShardPrefetch(FSDPTest):
     @property
     def world_size(self) -> int:
         return min(4, torch.cuda.device_count())
@@ -578,6 +585,331 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
             self.assertEqual(events, expected_events)
             events.clear()
 
+    @skip_if_lt_x_gpu(2)
+    def test_set_modules_to_forward_prefetch(self):
+        n_layers = 4
+        reshard_after_forward = True
+        checkpoint_impl = "utils"
+        model, _, inp = self._init_transformer(
+            n_layers, reshard_after_forward, checkpoint_impl
+        )
+
+        def set_forward_prefetch(model: Transformer, num_to_prefetch: int) -> None:
+            # Use model-specific knowledge to configure forward prefetching:
+            # each transformer block (layer) prefetches for the next few
+            for i, layer in enumerate(model.layers):
+                if i >= len(model.layers) - num_to_prefetch:
+                    break
+                layers_to_prefetch = [
+                    model.layers[i + j] for j in range(1, num_to_prefetch + 1)
+                ]
+                layer.set_modules_to_forward_prefetch(layers_to_prefetch)
+
+        events: List[EventType] = []
+        unshard_with_record = self._get_unshard_with_record(
+            FSDPParamGroup.unshard, events
+        )
+        reshard_with_record = self._get_reshard_with_record(
+            FSDPParamGroup.reshard, events
+        )
+        post_backward_with_record = self._get_post_backward_with_record(
+            FSDPParamGroup.post_backward, events
+        )
+        expected_backward_events = [
+            # Default backward prefetching
+            ("unshard", "layers.3", TrainingState.PRE_BACKWARD),
+            ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
+            ("reshard", "layers.3", TrainingState.POST_BACKWARD),
+            ("post_backward", "layers.3", TrainingState.POST_BACKWARD),
+            ("unshard", "layers.1", TrainingState.PRE_BACKWARD),
+            ("reshard", "layers.2", TrainingState.POST_BACKWARD),
+            ("post_backward", "layers.2", TrainingState.POST_BACKWARD),
+            ("unshard", "layers.0", TrainingState.PRE_BACKWARD),
+            ("reshard", "layers.1", TrainingState.POST_BACKWARD),
+            ("post_backward", "layers.1", TrainingState.POST_BACKWARD),
+            ("reshard", "layers.0", TrainingState.POST_BACKWARD),
+            ("post_backward", "layers.0", TrainingState.POST_BACKWARD),
+            ("reshard", "", TrainingState.POST_BACKWARD),
+            ("post_backward", "", TrainingState.POST_BACKWARD),
+        ]
+        with patch_unshard(unshard_with_record), patch_reshard(
+            reshard_with_record
+        ), patch_post_backward(post_backward_with_record):
+            set_forward_prefetch(model, num_to_prefetch=1)
+            loss = model(inp)
+            expected_forward_events = [
+                ("unshard", "", TrainingState.FORWARD),
+                # `layers.i` prefetches `layers.i+1`
+                ("unshard", "layers.0", TrainingState.FORWARD),
+                ("unshard", "layers.1", TrainingState.FORWARD),
+                ("reshard", "layers.0", TrainingState.FORWARD),
+                ("unshard", "layers.2", TrainingState.FORWARD),
+                ("reshard", "layers.1", TrainingState.FORWARD),
+                ("unshard", "layers.3", TrainingState.FORWARD),
+                ("reshard", "layers.2", TrainingState.FORWARD),
+                ("reshard", "layers.3", TrainingState.FORWARD),
+            ]
+            self.assertEqual(events, expected_forward_events)
+            events.clear()
+            loss.sum().backward()
+            self.assertEqual(events, expected_backward_events)
+            events.clear()
+
+            set_forward_prefetch(model, num_to_prefetch=2)
+            loss = model(inp)
+            expected_forward_events = [
+                ("unshard", "", TrainingState.FORWARD),
+                # `layers.i` prefetches `layers.i+1` and `layers.i+2`
+                ("unshard", "layers.0", TrainingState.FORWARD),
+                ("unshard", "layers.1", TrainingState.FORWARD),
+                ("unshard", "layers.2", TrainingState.FORWARD),
+                ("reshard", "layers.0", TrainingState.FORWARD),
+                ("unshard", "layers.3", TrainingState.FORWARD),
+                ("reshard", "layers.1", TrainingState.FORWARD),
+                ("reshard", "layers.2", TrainingState.FORWARD),
+                ("reshard", "layers.3", TrainingState.FORWARD),
+            ]
+            self.assertEqual(events, expected_forward_events)
+            events.clear()
+            loss.sum().backward()
+            self.assertEqual(events, expected_backward_events)
+            events.clear()
+
+    @skip_if_lt_x_gpu(2)
+    def test_set_modules_to_backward_prefetch(self):
+        n_layers = 4
+        reshard_after_forward = True
+        checkpoint_impl = "utils"
+        model, _, inp = self._init_transformer(
+            n_layers, reshard_after_forward, checkpoint_impl
+        )
+
+        def set_backward_prefetch(model: Transformer, num_to_prefetch: int) -> None:
+            # Use model-specific knowledge to configure backward prefetching:
+            # each transformer block (layer) prefetches for the previous few
+            for i, layer in enumerate(model.layers):
+                if i < num_to_prefetch:
+                    continue
+                layers_to_prefetch = [
+                    model.layers[i - j] for j in range(1, num_to_prefetch + 1)
+                ]
+                layer.set_modules_to_backward_prefetch(layers_to_prefetch)
+
+        events: List[EventType] = []
+        unshard_with_record = self._get_unshard_with_record(
+            FSDPParamGroup.unshard, events
+        )
+        reshard_with_record = self._get_reshard_with_record(
+            FSDPParamGroup.reshard, events
+        )
+        post_backward_with_record = self._get_post_backward_with_record(
+            FSDPParamGroup.post_backward, events
+        )
+        expected_forward_events = [
+            # Default forward prefetching
+            ("unshard", "", TrainingState.FORWARD),  # root
+            ("unshard", "layers.0", TrainingState.FORWARD),
+            ("reshard", "layers.0", TrainingState.FORWARD),
+            ("unshard", "layers.1", TrainingState.FORWARD),
+            ("reshard", "layers.1", TrainingState.FORWARD),
+            ("unshard", "layers.2", TrainingState.FORWARD),
+            ("reshard", "layers.2", TrainingState.FORWARD),
+            ("unshard", "layers.3", TrainingState.FORWARD),
+            ("reshard", "layers.3", TrainingState.FORWARD),
+        ]
+        with patch_unshard(unshard_with_record), patch_reshard(
+            reshard_with_record
+        ), patch_post_backward(post_backward_with_record):
+            set_backward_prefetch(model, num_to_prefetch=1)
+            loss = model(inp)
+            self.assertEqual(events, expected_forward_events)
+            events.clear()
+            loss.sum().backward()
+            expected_backward_events = [
+                # Root prefetches `layers.3` per default
+                ("unshard", "layers.3", TrainingState.PRE_BACKWARD),
+                # `layers.i` prefetches for `layers.i-1` (same as default)
+                ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
+                ("reshard", "layers.3", TrainingState.POST_BACKWARD),
+                ("post_backward", "layers.3", TrainingState.POST_BACKWARD),
+                ("unshard", "layers.1", TrainingState.PRE_BACKWARD),
+                ("reshard", "layers.2", TrainingState.POST_BACKWARD),
+                ("post_backward", "layers.2", TrainingState.POST_BACKWARD),
+                ("unshard", "layers.0", TrainingState.PRE_BACKWARD),
+                ("reshard", "layers.1", TrainingState.POST_BACKWARD),
+                ("post_backward", "layers.1", TrainingState.POST_BACKWARD),
+                ("reshard", "layers.0", TrainingState.POST_BACKWARD),
+                ("post_backward", "layers.0", TrainingState.POST_BACKWARD),
+                ("reshard", "", TrainingState.POST_BACKWARD),
+                ("post_backward", "", TrainingState.POST_BACKWARD),
+            ]
+            self.assertEqual(events, expected_backward_events)
+            events.clear()
+
+            set_backward_prefetch(model, num_to_prefetch=2)
+            loss = model(inp)
+            self.assertEqual(events, expected_forward_events)
+            events.clear()
+            loss.sum().backward()
+            expected_backward_events = [
+                # Root prefetches `layers.3` per default
+                ("unshard", "layers.3", TrainingState.PRE_BACKWARD),
+                # `layers.i` prefetches for `layers.i-1` and `layers.i-2`
+                ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
+                ("unshard", "layers.1", TrainingState.PRE_BACKWARD),
+                ("reshard", "layers.3", TrainingState.POST_BACKWARD),
+                ("post_backward", "layers.3", TrainingState.POST_BACKWARD),
+                ("unshard", "layers.0", TrainingState.PRE_BACKWARD),
+                ("reshard", "layers.2", TrainingState.POST_BACKWARD),
+                ("post_backward", "layers.2", TrainingState.POST_BACKWARD),
+                ("reshard", "layers.1", TrainingState.POST_BACKWARD),
+                ("post_backward", "layers.1", TrainingState.POST_BACKWARD),
+                ("reshard", "layers.0", TrainingState.POST_BACKWARD),
+                ("post_backward", "layers.0", TrainingState.POST_BACKWARD),
+                ("reshard", "", TrainingState.POST_BACKWARD),
+                ("post_backward", "", TrainingState.POST_BACKWARD),
+            ]
+            self.assertEqual(events, expected_backward_events)
+            events.clear()
+
+    @skip_if_lt_x_gpu(2)
+    def test_fully_shard_multi_module_backward_prefetch(self):
+        n_layers = 5
+        model_args = ModelArgs(n_layers=n_layers, checkpoint_activations=True)
+        model = Transformer(model_args)
+        for i in range(n_layers):
+            if i == 0:
+                fully_shard(model.layers[i])
+            elif i % 2 == 1:
+                fully_shard([model.layers[i], model.layers[i + 1]])
+        fully_shard([model.tok_embeddings, model.pos_embeddings])
+        fully_shard([model.norm, model.output], reshard_after_forward=False)
+        fully_shard(model)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        events: List[EventType] = []
+        unshard_with_record = self._get_unshard_with_record(
+            FSDPParamGroup.unshard, events
+        )
+        post_backward_with_record = self._get_post_backward_with_record(
+            FSDPParamGroup.post_backward, events
+        )
+        inp = torch.randint(
+            0, model_args.vocab_size, (2, model_args.max_seq_len), device="cuda"
+        )
+        with patch_unshard(unshard_with_record), patch_post_backward(
+            post_backward_with_record
+        ):
+            for iter_idx in range(3):
+                loss = model(inp)
+                expected_events = [
+                    (
+                        "unshard",
+                        "tok_embeddings, pos_embeddings",
+                        TrainingState.FORWARD,
+                    ),
+                    ("unshard", "layers.0", TrainingState.FORWARD),
+                    ("unshard", "layers.1, layers.2", TrainingState.FORWARD),
+                    ("unshard", "layers.3, layers.4", TrainingState.FORWARD),
+                    ("unshard", "norm, output", TrainingState.FORWARD),
+                ]
+                self.assertEqual(events, expected_events)
+                events.clear()
+                loss.sum().backward()
+                expected_events = [
+                    # (norm, output) does not reshard after forward, so there is
+                    # no unshard to begin backward
+                    ("unshard", "layers.3, layers.4", TrainingState.PRE_BACKWARD),
+                    ("post_backward", "norm, output", TrainingState.POST_BACKWARD),
+                    ("unshard", "layers.1, layers.2", TrainingState.PRE_BACKWARD),
+                    (
+                        "post_backward",
+                        "layers.3, layers.4",
+                        TrainingState.POST_BACKWARD,
+                    ),
+                    ("unshard", "layers.0", TrainingState.PRE_BACKWARD),
+                    (
+                        "post_backward",
+                        "layers.1, layers.2",
+                        TrainingState.POST_BACKWARD,
+                    ),
+                    (
+                        "unshard",
+                        "tok_embeddings, pos_embeddings",
+                        TrainingState.PRE_BACKWARD,
+                    ),
+                    ("post_backward", "layers.0", TrainingState.POST_BACKWARD),
+                    (
+                        "post_backward",
+                        "tok_embeddings, pos_embeddings",
+                        TrainingState.POST_BACKWARD,
+                    ),
+                ]
+                events.clear()
+                optim.step()
+                optim.zero_grad()
+
+    @skip_if_lt_x_gpu(2)
+    def test_fully_shard_multi_module_unused_module(self):
+        class ModuleWithUnusedLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unused_lin = nn.Linear(1, 1)
+                self.lin = nn.Linear(16, 16)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return nn.functional.relu(self.lin(x))
+
+        model = nn.Sequential(
+            ModuleWithUnusedLinear(), ModuleWithUnusedLinear(), nn.Linear(16, 16)
+        )
+        fully_shard([model[0].unused_lin, model[0].lin], reshard_after_forward=True)
+        fully_shard([model[1].unused_lin, model[1].lin], reshard_after_forward=True)
+        fully_shard(model)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        events: List[EventType] = []
+        unshard_with_record = self._get_unshard_with_record(
+            FSDPParamGroup.unshard, events
+        )
+        post_backward_with_record = self._get_post_backward_with_record(
+            FSDPParamGroup.post_backward, events
+        )
+        inp = torch.randn((2, 16), device="cuda")
+        with patch_unshard(unshard_with_record), patch_post_backward(
+            post_backward_with_record
+        ):
+            for iter_idx in range(3):
+                loss = model(inp)
+                expected_events = [
+                    ("unshard", "", TrainingState.FORWARD),
+                    ("unshard", "0.unused_lin, 0.lin", TrainingState.FORWARD),
+                    ("unshard", "1.unused_lin, 1.lin", TrainingState.FORWARD),
+                ]
+                self.assertEqual(events, expected_events)
+                events.clear()
+                loss.sum().backward()
+                expected_events = [
+                    # Since both `model[0]` and `model[1]` have unused modules
+                    # that never ran forward, they do not reshard after forward
+                    # despite setting it to `True`. Check that there are no
+                    # unshards in backward.
+                    (
+                        "post_backward",
+                        "1.unused_lin, 1.lin",
+                        TrainingState.POST_BACKWARD,
+                    ),
+                    (
+                        "post_backward",
+                        "0.unused_lin, 0.lin",
+                        TrainingState.POST_BACKWARD,
+                    ),
+                    ("post_backward", "", TrainingState.POST_BACKWARD),
+                ]
+                events.clear()
+                optim.step()
+                optim.zero_grad()
+
     def _init_transformer(
         self,
         n_layers: int,
@@ -613,6 +945,21 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
             return orig_unshard(self, *args, **kwargs)
 
         return unshard_with_record
+
+    def _get_reshard_with_record(
+        self, orig_reshard: Callable, events: List[EventType]
+    ) -> Callable:
+        def reshard_with_record(self, *args, **kwargs):
+            nonlocal events
+            if (
+                self._training_state == TrainingState.FORWARD
+                and not self._reshard_after_forward
+            ):  # skip no-ops
+                return
+            events.append(("reshard", self._module_fqn, self._training_state))
+            return orig_reshard(self, *args, **kwargs)
+
+        return reshard_with_record
 
     def _get_post_backward_with_record(
         self, orig_post_backward: Callable, events: List[EventType]
@@ -726,6 +1073,18 @@ class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
         fully_shard(model)
         handle = model.unshard(async_op=True)
         handle.wait()
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_unshard_without_lazy_init(self):
+        torch.manual_seed(42)
+        model = MLP(4)
+        for param in model.parameters():
+            dist.broadcast(param, src=0)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model)
+        model.unshard()  # no lazy init yet
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            self.assertEqual(ref_param, param)
 
 
 if __name__ == "__main__":
