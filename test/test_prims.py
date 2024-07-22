@@ -405,6 +405,10 @@ class TestRefs(TestCase):
             x = torch.ones(4)
             y = x.to(device="meta")
 
+    def test_inferred_tags(self):
+        self.assertEqual(torch.ops.prims.normal.default.tags, (torch.Tag.nondeterministic_seeded, torch.Tag.pt2_compliant_tag))
+
+
 
 instantiate_device_type_tests(TestRefs, globals())
 

@@ -44,9 +44,11 @@ from .api import (
     StateDictType,
 )
 
+
 if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
     from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
+
     from ._flat_param import FlatParamHandle
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"

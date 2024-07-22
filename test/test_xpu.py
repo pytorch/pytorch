@@ -1,6 +1,7 @@
 # Owner(s): ["module: intel"]
 
 import collections
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -23,6 +24,8 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     TestCase,
 )
+from torch.utils.checkpoint import checkpoint_sequential
+
 
 if not TEST_XPU:
     print("XPU not available, skipping tests", file=sys.stderr)
@@ -129,6 +132,47 @@ if __name__ == "__main__":
 """
         )
         self.assertRegex(stderr, "Cannot re-initialize XPU in forked subprocess.")
+
+    def test_lazy_init(self):
+        """Validate that no XPU calls are made during `import torch` call"""
+
+        def check_output(script: str) -> str:
+            return (
+                subprocess.check_output([sys.executable, "-c", script])
+                .decode("ascii")
+                .strip()
+            )
+
+        test_script = """\
+import torch
+from torch.multiprocessing import Process
+import copy
+
+def run_model(model, input):
+    input_xpu = input.clone().to('xpu')
+    model_xpu = copy.deepcopy(model).to('xpu')
+    loss_xpu = model_xpu(input_xpu).sum()
+    loss = model(input).sum()
+    torch.testing.assert_close(loss_xpu.cpu(), loss)
+
+def test_multi_process(model, input):
+    p = Process(target=run_model, args=(model, input))
+    p.start()
+    p.join()
+    assert p.exitcode == 0
+
+input = torch.rand(32, 3, 224, 224)
+model = torch.nn.Sequential(
+    torch.nn.Conv2d(3, 64, 3, stride=2),
+    torch.nn.ReLU(),
+    torch.nn.MaxPool2d(2, 2),
+)
+test_multi_process(model, input)
+test_multi_process(model, input)
+print(torch.xpu.device_count())
+"""
+        rc = check_output(test_script)
+        self.assertEqual(rc, str(torch.xpu.device_count()))
 
     def test_streams(self):
         s0 = torch.xpu.Stream()
@@ -308,7 +352,7 @@ if __name__ == "__main__":
             self.assertEqual(copy.get_device(), original.get_device())
 
 
-instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
+instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
 
 
 class TestXpuAutocast(TestCase):
@@ -437,6 +481,20 @@ class TestXpuAutocast(TestCase):
     def test_autocast_torch_expect_builtin_promote(self):
         for op, args, out_type in self.autocast_lists.torch_expect_builtin_promote:
             self._run_autocast_outofplace(op, args, torch.float32, out_type=out_type)
+
+    def test_autocast_checkpointing(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(8, 8), torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)
+        ).xpu()
+        input = torch.rand(
+            (8, 8), device="xpu", dtype=torch.float16, requires_grad=True
+        )
+        for reentrant in (True, False):
+            with torch.autocast("xpu"):
+                output = checkpoint_sequential(model, 2, input, use_reentrant=reentrant)
+            self.assertTrue(output.requires_grad)
+            self.assertTrue(output.dtype is torch.float16)
+            output.sum().backward()
 
     def test_xpu_autocast_dtype(self):
         dtype = torch.get_autocast_dtype("xpu")

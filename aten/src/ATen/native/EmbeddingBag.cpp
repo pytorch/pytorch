@@ -50,12 +50,6 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace {
-  const int MODE_SUM = 0;
-  const int MODE_MEAN = 1;
-  const int MODE_MAX = 2;
-}
-
 namespace at::native {
 
 template<typename scalar_t>
@@ -916,7 +910,8 @@ void check_arguments(
   });
 
   if (per_sample_weights.has_value() && per_sample_weights.value().defined()) {
-    TORCH_CHECK(mode == MODE_SUM,
+    TORCH_CHECK(
+        mode == EmbeddingBagMode::SUM,
         "embedding_bag: per_sample_weights only supported with mode='sum'");
     auto per_input_weights_arg = TensorArg(
         per_sample_weights.value(),"per_sample_weights", 1);
@@ -939,10 +934,12 @@ void make_bag_size_out(
     const int64_t mode,
     const bool include_last_offset,
     const bool requires_grad) {
-  if (requires_grad || mode == MODE_MEAN || mode == MODE_MAX) {
+  if (requires_grad || mode == EmbeddingBagMode::MEAN ||
+      mode == EmbeddingBagMode::MAX) {
     auto num_bags = offsets.size(0) - (include_last_offset ? 1 : 0);
-    at::native::resize_(bag_size_out, {num_bags}, c10::nullopt);
-    // Compute this for MODE_MEAN and MODE_MAX (latter needed for backwards)
+    at::native::resize_(bag_size_out, {num_bags}, std::nullopt);
+    // Compute this for EmbeddingBagMode::MEAN and EmbeddingBagMode::MAX (latter
+    // needed for backwards)
     if (num_bags != 1) {
       bag_size_out.slice(0, 0, bag_size_out.size(0) - 1, 1) =
           offsets.slice(0, 1, num_bags, 1) -
@@ -952,7 +949,7 @@ void make_bag_size_out(
       bag_size_out[-1] = indices.size(0) - offsets[num_bags - 1];
     }
   } else {
-    at::native::resize_(bag_size_out, offsets.sizes(), c10::nullopt);
+    at::native::resize_(bag_size_out, offsets.sizes(), std::nullopt);
   }
 }
 
@@ -965,16 +962,16 @@ void make_max_indices_out(
     const int64_t mode,
     bool include_last_offset) {
   int64_t numBags = offsets.size(0);
-  if (mode == MODE_MAX) {
+  if (mode == EmbeddingBagMode::MAX) {
     if (include_last_offset) {
       TORCH_CHECK(
         numBags >= 1, "include_last_offset: numBags should be at least 1");
       numBags -= 1;
     }
-    at::native::resize_(max_indices_out, {numBags, weight.sizes()[1]}, c10::nullopt);
+    at::native::resize_(max_indices_out, {numBags, weight.sizes()[1]}, std::nullopt);
     at::native::zero_(max_indices_out);
   } else {
-      at::native::resize_(max_indices_out, bag_size.sizes(), c10::nullopt);
+    at::native::resize_(max_indices_out, bag_size.sizes(), std::nullopt);
   }
 }
 
@@ -991,8 +988,9 @@ void make_offset2bag_out(
   // mode, we skip calculating offset2bag, since it is not going to be used.
   bool fast_path_sum = is_fast_path(weight, per_sample_weights, output, padding_idx);
 
-  if (mode == MODE_MEAN || mode == MODE_MAX || !fast_path_sum) {
-    at::native::resize_(offset2bag, {indices.size(0) + 1}, c10::nullopt);
+  if (mode == EmbeddingBagMode::MEAN || mode == EmbeddingBagMode::MAX ||
+      !fast_path_sum) {
+    at::native::resize_(offset2bag, {indices.size(0) + 1}, std::nullopt);
     at::native::zero_(offset2bag);
 
     int64_t offsets_size = offsets.size(0);
@@ -1005,7 +1003,7 @@ void make_offset2bag_out(
       _offsets = offsets.narrow(0, 0, offsets_size - 1);
     }
     make_offset2bag(_offsets, offset2bag);
-    at::native::resize_(offset2bag, {indices.size(0)}, c10::nullopt);
+    at::native::resize_(offset2bag, {indices.size(0)}, std::nullopt);
     // only initialize output in slow path
     at::native::zero_(output);
   }
@@ -1051,7 +1049,7 @@ static Tensor apply_bag_size(
     const int64_t mode,
     Tensor &output,
     const Tensor &bag_size) {
-  if (mode == MODE_MEAN) {
+  if (mode == EmbeddingBagMode::MEAN) {
     auto bag_size_ = at::max(bag_size, at::ones_like(bag_size, LEGACY_CONTIGUOUS_MEMORY_FORMAT))
                          .to(output.options())
                          .unsqueeze(1)
@@ -1066,7 +1064,7 @@ static Tensor apply_bag_size_backward(
     Tensor &output,
     const Tensor &offset2bag,
     const Tensor &bag_size) {
-  if (mode == MODE_MEAN) {
+  if (mode == EmbeddingBagMode::MEAN) {
     auto inv_bag_size_ = (1 / bag_size.to(output.options()))
                            .unsqueeze(1)
                            .index_select(0, offset2bag);
@@ -1146,13 +1144,13 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
                             const Tensor &offsets, const int64_t mode,
                             const std::optional<Tensor>& per_sample_weights,
                             bool include_last_offset, int64_t padding_idx, _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
-  if (mode == MODE_MEAN || mode == MODE_SUM) {
+  if (mode == EmbeddingBagMode::MEAN || mode == EmbeddingBagMode::SUM) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, weight.scalar_type(), "embedding_bag_no_grad_cpu_out",
       [&indices, &offset2bag, &per_sample_weights, &weight, &output, &offsets, &include_last_offset, &mode, &bag_size, &padding_idx, &fbgemm_kernel_cache]() {
       AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_no_grad_cpu_out",
         [&indices, &offset2bag, &per_sample_weights, &weight, &output, &offsets, &include_last_offset, &mode, &bag_size, &padding_idx, &fbgemm_kernel_cache]() {
         if (per_sample_weights.has_value() && per_sample_weights.value().defined()) {
-          TORCH_INTERNAL_ASSERT(mode == MODE_SUM);
+          TORCH_INTERNAL_ASSERT(mode == EmbeddingBagMode::SUM);
           index_select_scale_add<scalar_t, index_t>(
             indices, offset2bag, per_sample_weights.value(), weight, output, offsets, include_last_offset, bag_size, padding_idx, fbgemm_kernel_cache);
         } else {
@@ -1161,14 +1159,14 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
       });
     });
     apply_bag_size(mode, output, bag_size);
-    if (mode == MODE_SUM) {
+    if (mode == EmbeddingBagMode::SUM) {
       // make bag_size output deterministic
       at::native::zero_(bag_size);
     }
     if (max_indices) {
       max_indices->copy_(bag_size);
     }
-  } else { // MODE_MAX
+  } else { // EmbeddingBagMode::MAX
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -1276,7 +1274,7 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
               const int64_t mode, bool sparse, const std::optional<Tensor>& per_sample_weights_opt,
               bool include_last_offset) {
   return at::native::embedding_bag(weight, indices, offsets, scale_grad_by_freq,
-      mode, sparse, per_sample_weights_opt, include_last_offset, c10::nullopt);
+      mode, sparse, per_sample_weights_opt, include_last_offset, std::nullopt);
 }
 
 // Assumes all input tensors except for `weight` are contiguous.
@@ -1536,10 +1534,10 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
   auto ind_sort = std::get<1>(ind_sort_);
   auto offset2bag = offset2bag_.index_select(0, ind_sort);
 
-  optional<Tensor> per_sample_weights;
+  std::optional<Tensor> per_sample_weights;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const scalar_t* per_sample_weights_data;
-  optional<int64_t> per_sample_weights_stride;
+  std::optional<int64_t> per_sample_weights_stride;
   if (per_sample_weights_.defined()) {
     per_sample_weights = per_sample_weights_.index_select(0, ind_sort);
     per_sample_weights_data = per_sample_weights->const_data_ptr<scalar_t>();
@@ -1576,13 +1574,13 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
             index_t source = offset2bag_data[j];
             double scale = 1.0;
             if (per_sample_weights) {
-              AT_ASSERT(mode == MODE_SUM);
+              AT_ASSERT(mode == EmbeddingBagMode::SUM);
               scale = per_sample_weights_data[*per_sample_weights_stride * j];
             }
             if (scale_grad_by_freq) {
               scale /= counts[indices_data[i]];
             }
-            if (mode == MODE_MEAN) {
+            if (mode == EmbeddingBagMode::MEAN) {
               auto bag_size = bag_size_data[source];
               if (bag_size != 0) {
                 scale /= bag_size;
@@ -1625,11 +1623,11 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
   checkScalarTypes(
       "embedding_bag", grad_arg, {kHalf, kBFloat16, kFloat, kDouble});
 
-  if (mode == MODE_MAX) {
+  if (mode == EmbeddingBagMode::MAX) {
     return _embedding_bag_dense_backward_cpu_max(
         grad_, bag_size_, max_indices_, num_weights);
   }
-  AT_ASSERT(mode == MODE_MEAN || mode == MODE_SUM);
+  AT_ASSERT(mode == EmbeddingBagMode::MEAN || mode == EmbeddingBagMode::SUM);
 
   auto index_grad_weight =
       at::zeros({num_weights, grad.sizes()[1]}, grad.options());
@@ -1665,7 +1663,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
     int64_t mode,
     int64_t padding_idx) {
   TORCH_CHECK(
-      mode == MODE_SUM,
+      mode == EmbeddingBagMode::SUM,
       "embedding_bag_backward: per_sample_weights only supported for mode='sum'");
 
   AT_ASSERT(grad.dim() == 2);
@@ -1694,7 +1692,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
 
     make_offset2bag(offsets, offset2bag_);
 
-    at::native::resize_(offset2bag_, {indices.size(0)}, c10::nullopt);
+    at::native::resize_(offset2bag_, {indices.size(0)}, std::nullopt);
   } else {
     auto offset2bag_arg = TensorArg(offset2bag, "offset2bag", 1);
     checkScalarTypes("embedding_bag", offset2bag_arg, {kLong, kInt});
@@ -1783,7 +1781,7 @@ Tensor _embedding_bag_sparse_backward_symint(
   index_grad = apply_bag_size_backward(mode, index_grad, offset2bag, bag_size_);
 
   if (per_sample_weights.defined()) {
-    AT_ASSERT(mode == MODE_SUM);
+    AT_ASSERT(mode == EmbeddingBagMode::SUM);
     index_grad.mul_(per_sample_weights.unsqueeze(1));
   }
   return native::embedding_backward_symint(index_grad, indices, std::move(num_weights), padding_idx,

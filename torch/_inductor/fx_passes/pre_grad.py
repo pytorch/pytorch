@@ -18,7 +18,6 @@ from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 
 from .. import config
-
 from ..fx_utils import matches_module_function_pattern
 from ..pattern_matcher import (
     init_once_fakemode,
@@ -30,38 +29,32 @@ from .group_batch_fusion import group_batch_fusion_passes, PRE_GRAD_FUSIONS
 from .misc_patterns import numpy_compat_normalization
 from .split_cat import PRE_GRAD_PATTERNS
 
+
 log = logging.getLogger(__name__)
 
 efficient_conv_bn_eval_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="efficient_conv_bn_eval_pass"
+    pass_name="efficient_conv_bn_eval_pass"
 )
 
 fuse_split_linear_add_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True,
     pass_name="fuse_split_linear_add_pass",
 )
 fuse_chunk_squeeze_cat_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True,
     pass_name="fuse_chunk_squeeze_cat_pass",
 )
 remove_reshape_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True,
     pass_name="remove_reshape_pass",
 )
 
 # based on predispatch aten IR
-normalization_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
-merge_splits_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
-split_cat_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
-unbind_stack_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
-merge_getitem_cat_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
-merge_stack_tahn_unbind_pass_aten = PatternMatcherPass(
-    prevent_match_across_mutations=True
-)
-mutate_cat_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
-remove_split_with_size_one_pass_aten = PatternMatcherPass(
-    prevent_match_across_mutations=True
-)
+normalization_pass_aten = PatternMatcherPass()
+merge_splits_pass_aten = PatternMatcherPass()
+split_cat_pass_aten = PatternMatcherPass()
+unbind_stack_pass_aten = PatternMatcherPass()
+merge_getitem_cat_pass_aten = PatternMatcherPass()
+merge_stack_tahn_unbind_pass_aten = PatternMatcherPass()
+mutate_cat_pass_aten = PatternMatcherPass()
+remove_split_with_size_one_pass_aten = PatternMatcherPass()
 
 
 def save_inductor_dict(pass_to_compare=None):
