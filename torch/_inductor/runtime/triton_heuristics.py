@@ -664,7 +664,7 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        return float(benchmarker.lazy_benchmark_gpu(kernel_call, ranking_key=f"bench [{hash(self)}]"))
+        return benchmarker.lazy_benchmark_gpu(kernel_call, ranking_key=f"bench [{hash(self)}]")
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides
