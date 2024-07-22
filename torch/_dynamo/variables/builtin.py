@@ -1253,7 +1253,17 @@ class BuiltinVariable(VariableTracker):
             return variables.ConstantVariable.create(True)
         elif isinstance(arg, UserDefinedVariable):
             return variables.ConstantVariable.create(callable(arg.value))
-        elif isinstance(arg, (ConstantVariable, SymNodeVariable, TensorVariable)):
+        elif isinstance(
+            arg,
+            (
+                ConstantVariable,
+                SymNodeVariable,
+                TensorVariable,
+                ListVariable,
+                TupleVariable,
+                ListIteratorVariable,
+            ),
+        ):
             return variables.ConstantVariable.create(False)
 
     def call_cast(self, _, *args, **kwargs):
