@@ -4,8 +4,8 @@ import inspect
 from typing import Dict, List
 
 import torch
+from torch.fx.experimental._backward_state import BackwardState
 
-from ...fx.experimental._backward_state import BackwardState
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented

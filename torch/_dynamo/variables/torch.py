@@ -11,10 +11,10 @@ import torch._refs
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._guards import TracingContext
 from torch._logging import warning_once
 from torch._streambase import _StreamBase
 
-from ..._guards import TracingContext
 from .. import config, polyfill, variables
 from ..codegen import PyCodegen
 from ..create_parameter_op import (

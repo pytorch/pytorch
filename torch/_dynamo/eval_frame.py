@@ -44,6 +44,7 @@ import torch.utils.checkpoint
 from torch import _guards
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import _process_dynamic_shapes
+from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -53,14 +54,13 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
-from ..fx import GraphModule
 from .backends.registry import CompilerFn, lookup_backend
 from .hooks import Hooks
 
 
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 reset_code = torch._C._dynamo.eval_frame.reset_code  # noqa: F401
-set_eval_frame = torch._C._dynamo.eval_frame.set_eval_frame  # noqa: F401
+
 set_guard_error_hook = torch._C._dynamo.eval_frame.set_guard_error_hook  # noqa: F401
 skip_code = torch._C._dynamo.eval_frame.skip_code  # noqa: F401
 unsupported = torch._C._dynamo.eval_frame.unsupported  # noqa: F401
@@ -98,6 +98,19 @@ class Unset(Enum):
 cached_backends: Dict[int, CompilerFn] = {}
 
 unset = Unset.token
+
+
+def _maybe_set_eval_frame(callback: DynamoCallback):
+    # A wrapper on set_eval_frame that is guarded by a Justknob.
+    # Users can disable torchDynamo by setting the JK to False.
+    set_eval_frame = torch._C._dynamo.eval_frame.set_eval_frame  # noqa: F401
+    if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
+        log.warning(
+            "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
+        )
+        return callback
+    else:
+        return set_eval_frame(callback)
 
 
 def _reset_guarded_backend_cache():
@@ -325,11 +338,11 @@ class _TorchDynamoContext:
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
-        self.prior = set_eval_frame(self.callback)
+        self.prior = _maybe_set_eval_frame(self.callback)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
-        set_eval_frame(self.prior)
+        _maybe_set_eval_frame(self.prior)
         self.prior = unset
         for cleanup in self.cleanup_fns:
             cleanup()
@@ -423,7 +436,7 @@ class _TorchDynamoContext:
                     return fn(*args, **kwargs)
 
             cleanups = [enter() for enter in self.enter_exit_hooks]
-            prior = set_eval_frame(callback)
+            prior = _maybe_set_eval_frame(callback)
 
             # Ensure that if an assertion occurs after graph pushes
             # something onto the DynamicLayerStack then we pop it off (the
@@ -443,7 +456,7 @@ class _TorchDynamoContext:
                     saved_dynamic_layer_stack_depth
                 )
 
-                set_eval_frame(prior)
+                _maybe_set_eval_frame(prior)
                 for cleanup in cleanups:
                     cleanup()
 
@@ -601,11 +614,11 @@ class DisableContext(_TorchDynamoContext):
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            prior = set_eval_frame(callback)
+            prior = _maybe_set_eval_frame(callback)
             try:
                 return fn(*args, **kwargs)
             finally:
-                set_eval_frame(prior)
+                _maybe_set_eval_frame(prior)
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
 
@@ -1607,7 +1620,7 @@ class TorchPatcher:
         )
         torch.distributions.Distribution.set_default_validate_args(False)
 
-        from ..optim import (
+        from torch.optim import (
             adadelta,
             adagrad,
             adam,

@@ -52,7 +52,7 @@ from typing import (
 )
 from typing_extensions import TypeGuard
 
-from ..utils.hooks import RemovableHandle
+from torch.utils.hooks import RemovableHandle
 
 
 T = TypeVar("T")
