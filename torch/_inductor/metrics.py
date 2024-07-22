@@ -8,11 +8,11 @@ import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-
 from typing import Dict, List, Set, Tuple, TYPE_CHECKING, Union
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
+
 
 # Prevent circular import
 if TYPE_CHECKING:

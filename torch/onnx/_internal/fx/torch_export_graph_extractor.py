@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping, Optional, Sequence, TYPE_CHECKING, Union
+from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING
 
 import torch._dynamo
 import torch.fx
@@ -27,7 +27,7 @@ class TorchExport(exporter.FXGraphExtractor):
 
     def __init__(
         self,
-        aten_graph: Optional[bool] = None,
+        aten_graph: bool | None = None,
     ):
         super().__init__()
         self.aten_graph = aten_graph or True
@@ -99,7 +99,7 @@ class TorchExport(exporter.FXGraphExtractor):
     def pre_export_passes(
         self,
         options: exporter.ResolvedExportOptions,
-        original_model: Union[torch.nn.Module, Callable],
+        original_model: torch.nn.Module | Callable,
         fx_module: torch.fx.GraphModule,
         fx_module_args: Sequence[Any],
     ):
