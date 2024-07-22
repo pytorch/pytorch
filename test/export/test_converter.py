@@ -9,7 +9,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
-from torch.testing._internal.common_utils import run_tests, IS_WINDOWS
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
