@@ -4,7 +4,7 @@ import functools
 
 import inspect
 import traceback
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Mapping, Sequence
 
 from torch.onnx._internal.diagnostics.infra import _infra, formatter
 
@@ -41,7 +41,7 @@ def python_call_stack(frames_to_skip: int = 0, frames_to_log: int = 16) -> _infr
 
 
 @functools.lru_cache
-def _function_source_info(fn: Callable) -> Tuple[Sequence[str], int, Optional[str]]:
+def _function_source_info(fn: Callable) -> tuple[Sequence[str], int, str | None]:
     """Returns the source lines, line number, and source file path for the given function.
 
     Essentially, inspect.getsourcelines() and inspect.getsourcefile() combined.
@@ -64,7 +64,7 @@ def function_location(fn: Callable) -> _infra.Location:
 
 
 def function_state(
-    fn: Callable, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    fn: Callable, args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> Mapping[str, Any]:
     bind = inspect.signature(fn).bind(*args, **kwargs)
     return bind.arguments
