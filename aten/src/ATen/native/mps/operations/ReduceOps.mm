@@ -247,15 +247,19 @@ static void reduction_out_mps(const Tensor& input_t,
         castOutputTensor = [mpsGraph reductionSumWithTensor:nonZeros axes:wrappedAxes name:nil];
       } else if (reduction_type == MPSReductionType::AMAX) {
         if (macOS15_0_plus) {
-            castOutputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axes:wrappedAxes name:nil];
+          castOutputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor
+                                                                         axes:wrappedAxes
+                                                                         name:nil];
         } else {
-            castOutputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axes:wrappedAxes name:nil];
+          castOutputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axes:wrappedAxes name:nil];
         }
       } else if (reduction_type == MPSReductionType::AMIN) {
         if (macOS15_0_plus) {
-            castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor axes:wrappedAxes name:nil];
+          castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor
+                                                                         axes:wrappedAxes
+                                                                         name:nil];
         } else {
-            castOutputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor axes:wrappedAxes name:nil];
+          castOutputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor axes:wrappedAxes name:nil];
         }
       } else if (reduction_type == MPSReductionType::TRACE) {
         MPSGraphTensor* bandPartWithTensor = [mpsGraph bandPartWithTensor:castInputTensor
@@ -640,16 +644,16 @@ static Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction
 
       NSArray<NSNumber*>* axes = getTensorAxes(input_t);
       if (reduction_type == MPSReductionType::MAX) {
-        if(macOS15_0_plus) {
-            castOutputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axes:axes name:nil];
+        if (macOS15_0_plus) {
+          castOutputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axes:axes name:nil];
         } else {
-            castOutputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axes:axes name:nil];
+          castOutputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axes:axes name:nil];
         }
       } else if (reduction_type == MPSReductionType::MIN) {
-        if(macOS15_0_plus) {
-            castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor axes:axes name:nil];
+        if (macOS15_0_plus) {
+          castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor axes:axes name:nil];
         } else {
-            castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor axes:axes name:nil];
+          castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor axes:axes name:nil];
         }
       }
 
@@ -725,15 +729,19 @@ static void min_max_out_mps(const Tensor& input_t,
 
       if (reduction_type == MPSReductionType::MAX) {
         if (macOS15_0_plus) {
-            outputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
+          outputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor
+                                                                     axis:(NSInteger)dim_
+                                                                     name:nil];
         } else {
-            outputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
+          outputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
         }
       } else if (reduction_type == MPSReductionType::MIN) {
         if (macOS15_0_plus) {
-            outputTensor = [mpsGraph reductionMinimumPropagateNanWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
+          outputTensor = [mpsGraph reductionMinimumPropagateNanWithTensor:castInputTensor
+                                                                     axis:(NSInteger)dim_
+                                                                     name:nil];
         } else {
-            outputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
+          outputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
         }
       }
 
