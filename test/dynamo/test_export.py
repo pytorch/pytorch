@@ -4504,7 +4504,7 @@ def forward(self, x):
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
     add = l_args_0_ + 1;  l_args_0_ = None
     _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
-    return pytree.tree_unflatten([add], self._out_spec)""",
+    return pytree.tree_unflatten([add], self._out_spec)""",  # NOQA: B950
         )
         self.assertEqual(out.requires_grad, False)
         with self.assertRaisesRegex(
@@ -4527,7 +4527,7 @@ def forward(self, x):
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(False)
     add = l_args_0_ + 1;  l_args_0_ = None
     _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
-    return pytree.tree_unflatten([add], self._out_spec)""",
+    return pytree.tree_unflatten([add], self._out_spec)""",  # NOQA: B950
         )
 
         inp = torch.randn(2, 2)
@@ -4549,7 +4549,7 @@ def forward(self, x):
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
     add = l_x_ + 1;  l_x_ = None
     _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
-    return pytree.tree_unflatten([add], self._out_spec)""",
+    return pytree.tree_unflatten([add], self._out_spec)""",  # NOQA: B950
         )
         inp = torch.randn(2, 2, requires_grad=True)
         out = gm(inp)
@@ -4602,7 +4602,7 @@ def forward(self, x, b, y):
     x = l_x_.clone();  l_x_ = None
     x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = setitem = None
     _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
-    return pytree.tree_unflatten([x], self._out_spec)""",
+    return pytree.tree_unflatten([x], self._out_spec)""",  # NOQA: B950
         )
 
         with self.assertRaisesRegex(
