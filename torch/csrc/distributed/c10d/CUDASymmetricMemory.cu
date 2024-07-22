@@ -9,6 +9,8 @@
 #include <c10/cuda/driver_api.h>
 #endif
 
+#include <filesystem>
+
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/un.h>
@@ -21,14 +23,16 @@ class IpcChannel {
   IpcChannel() : socket_name_(get_socket_name(getpid())) {
     TORCH_CHECK(
         (socket_ = socket(AF_UNIX, SOCK_DGRAM, 0)) != 0,
-        "Failed to create socket");
+        "Failed to create socket: ",
+        strerror(errno));
 
     struct sockaddr_un addr = {.sun_family = AF_UNIX};
     std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
 
     TORCH_CHECK(
         bind(socket_, (struct sockaddr*)&addr, SUN_LEN(&addr)) == 0,
-        "Failed to bind socket");
+        "Failed to bind socket: ",
+        strerror(errno));
   }
 
   ~IpcChannel() {
@@ -58,7 +62,10 @@ class IpcChannel {
     cmsg->cmsg_type = SCM_RIGHTS;
     memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
 
-    TORCH_CHECK(sendmsg(socket_, &msg, 0) > 0, "Failed to send fd");
+    TORCH_CHECK(
+        sendmsg(socket_, &msg, 0) > 0,
+        "Failed to send fd: ",
+        strerror(errno));
   }
 
   int recv_fd() {
@@ -74,7 +81,10 @@ class IpcChannel {
         .msg_control = cbuf,
         .msg_controllen = sizeof(cbuf)};
 
-    TORCH_CHECK(recvmsg(socket_, &msg, 0) > 0, "Failed to receive fd");
+    TORCH_CHECK(
+        recvmsg(socket_, &msg, 0) > 0,
+        "Failed to receive fd: ",
+        strerror(errno));
 
     auto cmsg = CMSG_FIRSTHDR(&msg);
     TORCH_CHECK(cmsg != NULL);
@@ -105,7 +115,8 @@ class IpcChannel {
  private:
   static std::string get_socket_name(int pid) {
     std::ostringstream oss;
-    oss << "symm_mem-" << pid;
+    oss << std::filesystem::temp_directory_path().string() << "/symm_mem-"
+        << pid;
     return oss.str();
   }
 
