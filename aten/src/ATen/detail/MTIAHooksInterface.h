@@ -9,7 +9,7 @@
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
 #include <string>
-
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 class Context;
 }
@@ -101,3 +101,4 @@ TORCH_API const MTIAHooksInterface& getMTIAHooks();
 TORCH_API bool isMTIAHooksBuilt();
 } // namespace detail
 } // namespace at
+C10_DIAGNOSTIC_POP()
