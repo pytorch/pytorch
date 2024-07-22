@@ -464,16 +464,6 @@ def enforce_comm_ordering_for_fsdp(
 ) -> List[torch._inductor.scheduler.BaseSchedulerNode]:
     from . import scheduler
 
-    snode_to_users = defaultdict(set)
-
-    # def buf_name_to_snode(buf_name):
-    #     return name_to_buf[buf_name].defining_op
-    # TODO(yf225): we should try to just use snode.users
-    for snode in snodes:
-        for dep in snode.unmet_dependencies:
-            dep_snode = name_to_fused_node[dep.name]
-            snode_to_users[dep_snode].add(snode)
-
     def _find_all_recursive_deps_of_node_up_to_criteria(
         snode, collected_node_set, criteria_cb=None
     ):
@@ -481,7 +471,6 @@ def enforce_comm_ordering_for_fsdp(
             return
         collected_node_set.add(snode)
         for dep in snode.unmet_dependencies:
-            # dep_node = name_to_fused_node[buf_name_to_snode(dep.name).get_name()]
             dep_node = name_to_fused_node[dep.name]
             if dep_node in collected_node_set:
                 continue
@@ -495,7 +484,7 @@ def enforce_comm_ordering_for_fsdp(
         if criteria_cb and criteria_cb(snode):
             return
         collected_node_set.add(snode)
-        for user in snode_to_users[snode]:
+        for user in snode.users:
             assert user.node is not None
             if user.node.get_name() == "OUTPUT":
                 continue
