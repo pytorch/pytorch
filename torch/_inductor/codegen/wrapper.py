@@ -182,7 +182,9 @@ def user_defined_kernel_grid_fn_code(
         return (
             wrapper.codegen_shape_tuple(sympy_grid),
             wrapper.codegen_shape_tuple(
-                tuple(wrapper.generate_example_arg_value(g) for g in sympy_grid)
+                tuple(
+                    wrapper.generate_example_arg_value(g, type(g)) for g in sympy_grid
+                )
             )
             if config.triton.autotune_at_compile_time
             else None,
@@ -1521,7 +1523,7 @@ class WrapperCodeGen(CodeGen):
 
         return device_index, call_args
 
-    def generate_example_arg_value(self, arg, arg_type=None, raw_arg=None, index=None):
+    def generate_example_arg_value(self, arg, arg_type, raw_arg=None, index=None):
         if isinstance(arg_type, torch_dtype):
             if V.graph.get_buffer(arg) is not None:
                 buf_name = arg
@@ -1550,12 +1552,7 @@ class WrapperCodeGen(CodeGen):
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
             return buf_name
-        elif (
-            issubclass(type(arg), sympy.Basic)
-            or isinstance(arg, SymbolicCallArg)
-            or arg_type
-            and issubclass(arg_type, sympy.Basic)
-        ):
+        elif issubclass(arg_type, sympy.Basic) or isinstance(arg, SymbolicCallArg):
             # arg is a symbol or symbolic expression
             if isinstance(arg, str):
                 if arg in self._meta_vars:
@@ -1576,6 +1573,7 @@ class WrapperCodeGen(CodeGen):
         elif isinstance(arg, (str, int, float, bool)):
             return str(arg)
         else:
+            breakpoint()
             raise NotImplementedError(f"Unsupported type {type(arg)}")
 
     def generate_kernel_call(
@@ -1661,7 +1659,7 @@ class WrapperCodeGen(CodeGen):
                         grid_str = grid_fn
                     else:
                         grid_str = ", ".join(
-                            self.generate_example_arg_value(g) for g in grid
+                            self.generate_example_arg_value(g, type(g)) for g in grid
                         )
                         grid_str = f"{grid_fn}({grid_str})"
 
