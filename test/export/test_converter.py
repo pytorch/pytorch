@@ -418,6 +418,11 @@ class TestConverter(TestCase):
         inp = ((torch.zeros(1, 4), torch.ones(1, 4)),)
         self._check_equal_ts_ep_converter(MUnpackTuple(), inp)
 
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "torch.cond doesn't go through torch.compile on windows"
+        "causing output not normalized as list",
+    )
     def test_convert_retrace_nested_scripted_modules(self):
         class Wrapper(torch.nn.Module):
             def __init__(self, mod) -> None:
