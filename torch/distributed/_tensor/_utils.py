@@ -226,14 +226,3 @@ def compute_local_stride(
     return tuple(
         global_stride[i] // stride_divisors[i] for i in range(len(global_stride))
     )
-
-
-def compute_shard_coordinate(
-    mesh: DeviceMesh, placements: Sequence[Placement]
-) -> Tuple[int, ...]:
-    """
-    Compute the coordinate of the local tensor shard in its global view.
-    NOTE: Currently this function is assuming the DTensor is evenly shardable.
-    """
-    strided_sharding_is_present = any(isinstance(placement, StridedShard) for placement in self.placements)
-    return (0,)

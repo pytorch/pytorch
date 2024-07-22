@@ -2,6 +2,7 @@ import sys
 import unittest
 from pathlib import Path
 
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 try:
     # using tools/ to optimize test run.

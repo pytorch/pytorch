@@ -155,7 +155,7 @@ class CommDebugModeExample:
     def example_MLP_module_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module level tracing using a MLP model.
-        Prints a table of module level collective tracing information and logs table to output.txt
+        Prints a table of module level collective tracing information and logs table to comm_mode_log.txt
 
         Expected Output:
         Global
@@ -182,13 +182,13 @@ class CommDebugModeExample:
             output_tp.sum().backward()
 
         # print the module level collective tracing information
-        print(comm_mode.generate_module_tracing_table())
-        comm_mode.log_module_tracing_table_to_file()
+        print(comm_mode.generate_comm_debug_tracing_table(noise_level=1))
+        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=1)
 
     def example_transformer_module_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module level tracing using a distributed Transformer model.
-        Prints a table of module level collective tracing information and logs table to output.txt
+        Prints a table of module level collective tracing information and logs table to comm_mode_log.txt
 
         Expected output:
         Global
@@ -270,22 +270,30 @@ class CommDebugModeExample:
             output = model(inp)
 
         # print the module level collective tracing information
-        print(comm_mode.generate_module_tracing_table())
-        comm_mode.log_module_tracing_table_to_file()
+        print(comm_mode.generate_comm_debug_tracing_table(noise_level=1))
+        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=1)
 
     def example_MLP_operation_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module operation level tracing using a distributed MLP model.
-        Prints a table of module opoeration level collective tracing information and logs table to output.txt
+        Prints a table of module opoeration level collective tracing information and logs table to comm_mode_log.txt
 
         Expected output:
         Global
           FORWARD PASS
             *c10d_functional.all_reduce: 1
+            **aten.view.default
+            **aten.sum.default
+            **aten.ones_like.default
+          BACKWARD PASS
+            **aten.expand.default
             MLPModule
             *module type: class 'torch.testing._internal.distributed._tensor.common_dtensor.MLPModule'
               FORWARD PASS
                 *c10d_functional.all_reduce: 1
+                **aten.view.default
+                **aten.view.default
+                **aten.view.default
                 MLPModule.net1
                 *module type: class 'torch.nn.modules.linear.Linear'
                 *Parameter List
@@ -352,11 +360,68 @@ class CommDebugModeExample:
                       device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.addmm.default
                     **aten.view.default
+                  BACKWARD PASS
+                    **aten.t.default
+                      shape: [torch.Size([8, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.t.default
+                    **aten.mm.default
+                      shape: [torch.Size([16, 8]), torch.Size([8, 10])]
+                      sharding: [(Shard(dim=0),), (Replicate(),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.mm.default
+                    **aten.t.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.t.default
+                    **aten.sum.dim_IntList
+                      shape: [torch.Size([8, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.sum.dim_IntList
+                    **aten.view.default
+                      shape: [torch.Size([1, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.view.default
+                    **aten.detach.default
+                      shape: [torch.Size([16])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                    **aten.t.default
+                      shape: [torch.Size([10, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.t.default
+                    **aten.detach.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
+                      shape: [torch.Size([16, 10])]
+                      sharding: [(Shard(dim=0),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.detach.default
+                    **aten.detach.default
                 MLPModule.relu
                 *module type: class 'torch.nn.modules.activation.ReLU'
                   FORWARD PASS
+                    **aten.view.default
                     **aten.relu.default
                     **aten.detach.default
+                  BACKWARD PASS
+                    **aten.detach.default
+                    **aten.threshold_backward.default
                 MLPModule.net2
                 *module type: class 'torch.nn.modules.linear.Linear'
                 *Parameter List
@@ -413,6 +478,11 @@ class CommDebugModeExample:
                     **aten.detach.default
                     **aten.detach.default
                     **aten.view.default
+                    **aten.view.default
+                      shape: [torch.Size([8, 16])]
+                      sharding: [(Shard(dim=1),)]
+                      device mesh: DeviceMesh([0, 1, 2, 3])
+                    **aten.view.default
                     **aten.t.default
                       shape: [torch.Size([10, 16])]
                       sharding: [(Shard(dim=1),)]
@@ -426,10 +496,7 @@ class CommDebugModeExample:
                     **aten.addmm.default
                     **_c10d_functional.all_reduce.default
                     **aten.view.default
-                    **aten.sum.default
-                    **aten.ones_like.default
                   BACKWARD PASS
-                    **aten.expand.default
                     **aten.t.default
                       shape: [torch.Size([16, 10])]
                       sharding: [(Shard(dim=0),)]
@@ -492,60 +559,6 @@ class CommDebugModeExample:
                       device mesh: DeviceMesh([0, 1, 2, 3])
                     **aten.detach.default
                     **aten.detach.default
-                    **aten.detach.default
-                    **aten.threshold_backward.default
-                    **aten.t.default
-                      shape: [torch.Size([8, 16])]
-                      sharding: [(Shard(dim=1),)]
-                      device mesh: DeviceMesh([0, 1, 2, 3])
-                    **aten.t.default
-                    **aten.mm.default
-                      shape: [torch.Size([16, 8]), torch.Size([8, 10])]
-                      sharding: [(Shard(dim=0),), (Replicate(),)]
-                      device mesh: DeviceMesh([0, 1, 2, 3])
-                    **aten.mm.default
-                    **aten.t.default
-                      shape: [torch.Size([16, 10])]
-                      sharding: [(Shard(dim=0),)]
-                      device mesh: DeviceMesh([0, 1, 2, 3])
-                    **aten.t.default
-                    **aten.sum.dim_IntList
-                      shape: [torch.Size([8, 16])]
-                      sharding: [(Shard(dim=1),)]
-                      device mesh: DeviceMesh([0, 1, 2, 3])
-                    **aten.sum.dim_IntList
-                    **aten.view.default
-                      shape: [torch.Size([1, 16])]
-                      sharding: [(Shard(dim=1),)]
-                      device mesh: DeviceMesh([0, 1, 2, 3])
-                    **aten.view.default
-                    **aten.detach.default
-                      shape: [torch.Size([16])]
-                      sharding: [(Shard(dim=0),)]
-                      device mesh: DeviceMesh([0, 1, 2, 3])
-                    **aten.detach.default
-                    **aten.detach.default
-                      shape: [torch.Size([16])]
-                      sharding: [(Shard(dim=0),)]
-                      device mesh: DeviceMesh([0, 1, 2, 3])
-                    **aten.detach.default
-                    **aten.detach.default
-                    **aten.t.default
-                      shape: [torch.Size([10, 16])]
-                      sharding: [(Shard(dim=1),)]
-                      device mesh: DeviceMesh([0, 1, 2, 3])
-                    **aten.t.default
-                    **aten.detach.default
-                      shape: [torch.Size([16, 10])]
-                      sharding: [(Shard(dim=0),)]
-                      device mesh: DeviceMesh([0, 1, 2, 3])
-                    **aten.detach.default
-                    **aten.detach.default
-                      shape: [torch.Size([16, 10])]
-                      sharding: [(Shard(dim=0),)]
-                      device mesh: DeviceMesh([0, 1, 2, 3])
-                    **aten.detach.default
-                    **aten.detach.default
 
         """
         torch.manual_seed(0)
@@ -559,15 +572,16 @@ class CommDebugModeExample:
             output_tp.sum().backward()
 
         # print the operation level collective tracing information
-        print(comm_mode.generate_operation_tracing_table())
-        comm_mode.log_operation_tracing_table_to_file()
+        print(comm_mode.generate_comm_debug_tracing_table(noise_level=3))
+        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=3)
 
     def example_transformer_operation_tracing(
         self, is_seq_parallel: bool = False
     ) -> None:
         """
         Example code to demonstrate CommModeDebug's module operation level tracing using a distributed transformer model.
-        Prints a table of module opoeration level collective tracing information and logs table to output.txt
+        Prints a table of module opoeration level collective tracing information, excluding trivial operations and logs
+        table to transformer_operation_log.txt
         """
 
         torch.manual_seed(0)
@@ -579,8 +593,10 @@ class CommDebugModeExample:
             output = model(inp)
 
         # print the operation level collective tracing information
-        print(comm_mode.generate_operation_tracing_table())
-        comm_mode.log_operation_tracing_table_to_file()
+        print(comm_mode.generate_comm_debug_tracing_table(noise_level=2))
+        comm_mode.log_comm_debug_tracing_table_to_file(
+            noise_level=2, file_name="transformer_operation_log.txt"
+        )
 
     def example_MLP_json_dump(self) -> None:
         """
@@ -600,8 +616,8 @@ class CommDebugModeExample:
 
     def example_transformer_json_dump(self, is_seq_parallel: bool = False) -> None:
         """
-        Example code to demonstrate CommModeDebug's json dump using a transformer model. Sends the information to
-        user-passed transformer_log.json file
+        Example code to demonstrate CommModeDebug's json dump using a transformer model, excluding the trivial
+        operations. Sends the information to user-passed transformer_log.json file
         """
 
         torch.manual_seed(0)
@@ -612,7 +628,7 @@ class CommDebugModeExample:
         with comm_mode:
             output = model(inp)
 
-        comm_mode.generate_json_dump(file_name="transformer_log.json")
+        comm_mode.generate_json_dump(file_name="transformer_log.json", noise_level=2)
 
 
 def run_example(world_size: int, rank: int, example_name: str) -> None:
