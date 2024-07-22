@@ -281,19 +281,19 @@ FractionalMaxPool2dImpl::FractionalMaxPool2dImpl(
 void FractionalMaxPool2dImpl::reset() {
   _random_samples =
       register_buffer("_random_samples", options._random_samples());
-  if (options.output_size() == c10::nullopt &&
-      options.output_ratio() == c10::nullopt) {
+  if (options.output_size() == std::nullopt &&
+      options.output_ratio() == std::nullopt) {
     TORCH_CHECK(
         false,
         "FractionalMaxPool2d requires specifying either ",
         "an output size, or a pooling ratio");
   }
-  if (options.output_size() != c10::nullopt &&
-      options.output_ratio() != c10::nullopt) {
+  if (options.output_size() != std::nullopt &&
+      options.output_ratio() != std::nullopt) {
     TORCH_CHECK(
         false, "only one of output_size and output_ratio may be specified");
   }
-  if (options.output_ratio() != c10::nullopt) {
+  if (options.output_ratio() != std::nullopt) {
     at::ArrayRef<double> output_ratio =
         at::ArrayRef<double>(options.output_ratio().value());
     if (!(0 < output_ratio[0] && output_ratio[0] < 1 && 0 < output_ratio[1] &&
@@ -340,19 +340,19 @@ FractionalMaxPool3dImpl::FractionalMaxPool3dImpl(
 void FractionalMaxPool3dImpl::reset() {
   _random_samples =
       register_buffer("_random_samples", options._random_samples());
-  if (options.output_size() == c10::nullopt &&
-      options.output_ratio() == c10::nullopt) {
+  if (options.output_size() == std::nullopt &&
+      options.output_ratio() == std::nullopt) {
     TORCH_CHECK(
         false,
         "FractionalMaxPool3d requires specifying either ",
         "an output size, or a pooling ratio");
   }
-  if (options.output_size() != c10::nullopt &&
-      options.output_ratio() != c10::nullopt) {
+  if (options.output_size() != std::nullopt &&
+      options.output_ratio() != std::nullopt) {
     TORCH_CHECK(
         false, "only one of output_size and output_ratio may be specified");
   }
-  if (options.output_ratio() != c10::nullopt) {
+  if (options.output_ratio() != std::nullopt) {
     at::ArrayRef<double> output_ratio =
         at::ArrayRef<double>(options.output_ratio().value());
     if (!(0 < output_ratio[0] && output_ratio[0] < 1 && 0 < output_ratio[1] &&
