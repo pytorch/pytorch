@@ -1,6 +1,9 @@
 name: operator_benchmark
 
 on:
+  pull_request:
+    branches-ignore:
+      - nightly
   push:
     branches:
       - main

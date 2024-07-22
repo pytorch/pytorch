@@ -1230,7 +1230,7 @@ test_operator_benchmark() {
   TEST_DIR=$(pwd)
   cd benchmarks/operator_benchmark/pt_extension
   python setup.py install
-  cd ${TEST_DIR}
+  cd "${TEST_DIR}"
   taskset -c 0-"$end_core" python -m benchmarks/operator_benchmark/benchmark_all_test.py --output "${TEST_REPORTS_DIR}/operator_benchmark.csv"
 }
 
