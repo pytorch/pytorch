@@ -531,9 +531,6 @@ class BaseSchedulerNode:
         """
         Returns estimated op runtime in nanoseconds (ns)
         """
-        if isinstance(self, GroupedSchedulerNode):
-            return sum(snode.get_estimated_runtime() for snode in self.snodes)
-
         layout = None
         dtype = None
         if not hasattr(self, "node") or not self.node:
@@ -928,12 +925,6 @@ def init_group_snode(
         for dep in set.union(*[x.unmet_dependencies for x in snodes])
         if dep.name not in group_snode.get_names()
     } - group_snode.read_writes.writes
-
-    for x in group_snode.snodes:
-        try:
-            x.min_order
-        except:
-            print(f"x: {x}, x.node: {x.node}, x.debug_str(): {x.debug_str()}")
 
     group_snode.min_order = min(x.min_order for x in group_snode.snodes)
     group_snode.max_order = max(x.max_order for x in group_snode.snodes)
@@ -1499,8 +1490,8 @@ class Scheduler:
         self.compute_dependencies()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.dead_node_elimination()
-        self.compute_ancestors()
         self.compute_order()
+        self.compute_ancestors()
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.decide_global_ordering_of_comms(self.nodes, self.name_to_fused_node)
             self.compute_ancestors()

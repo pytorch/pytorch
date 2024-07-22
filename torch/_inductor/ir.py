@@ -5756,7 +5756,6 @@ class FallbackKernel(ExternKernelAlloc):
             )
         else:
             self.codegen_comment(wrapper)
-            wrapper.writeline(f"{wrapper.comment} name: {self.name}")  # Very useful for debugging!
             args = [*self.codegen_args(), *self.codegen_kwargs()]
             V.graph.wrapper_code.generate_fallback_kernel(self, args)
             if isinstance(self.layout, Layout):
