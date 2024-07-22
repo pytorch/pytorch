@@ -3,7 +3,11 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 from torch._subclasses import FakeTensor
-from torch.ao.quantization import ObserverOrFakeQuantize, QConfigMapping
+from torch.ao.quantization import (
+    NUMERIC_DEBUG_HANDLE_KEY,
+    ObserverOrFakeQuantize,
+    QConfigMapping,
+)
 from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
 from torch.ao.quantization.fx.prepare import (
     _create_obs_or_fq_from_qspec,
@@ -412,8 +416,6 @@ def _maybe_insert_input_observers_for_node(
     # Look through every input arg.  If that arg's target dtype does not
     # match the current node's target dtype, insert an observer.
     new_args = []
-    # map from old arg to new arg, used for updating the numeric debug handle map
-    remap = {}
     for arg in node.args:
         new_arg = _maybe_insert_input_observer_for_arg_or_kwarg(
             node,
@@ -425,17 +427,6 @@ def _maybe_insert_input_observers_for_node(
             is_qat,
         )
         new_args.append(new_arg)
-        remap[arg] = new_arg
-
-    if "numeric_debug_handle" in node.meta:
-
-        def remap_fn(x):
-            return remap.get(x, x)
-
-        numeric_debug_handle = node.meta["numeric_debug_handle"]
-        node.meta["numeric_debug_handle"] = {
-            remap_fn(k): v for k, v in numeric_debug_handle.items()
-        }
 
     # Clone has a memory_format kwarg, zeros_like has a pin_memory kwarg, and
     # gelu has a has an approximate kwarg that persist in exported graph.
@@ -461,9 +452,19 @@ def _maybe_insert_output_observer_for_node(
 ) -> Optional[Node]:
     if node in obs_or_fq_map:
         output_act_obs_or_fq = obs_or_fq_map[node]
-        return _insert_obs_or_fq(
+        new_output = _insert_obs_or_fq(
             node, output_act_obs_or_fq, model, named_modules, graph
         )
+        # propagate numeric debug handle from original node to observer/fake_quant node
+        if (
+            isinstance(node, Node)
+            and isinstance(new_output, Node)
+            and NUMERIC_DEBUG_HANDLE_KEY in node.meta
+        ):
+            new_output.meta[NUMERIC_DEBUG_HANDLE_KEY] = node.meta[
+                NUMERIC_DEBUG_HANDLE_KEY
+            ]
+        return new_output
     return None
 
 

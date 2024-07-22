@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-# flake8: noqa: F403
 
 from typing import Callable, List, Optional, Tuple, Union
 
@@ -7,21 +6,25 @@ import torch
 from torch import Tensor
 
 from .fake_quantize import *  # noqa: F403
-from .fuse_modules import fuse_modules, fuse_modules_qat  # noqa: F403  # noqa: F403
+from .fuse_modules import fuse_modules, fuse_modules_qat  # noqa: F403
 from .fuser_method_mappings import *  # noqa: F403
 from .observer import *  # noqa: F403
+from .pt2e._numeric_debugger import (  # noqa: F401
+    compare_results,
+    extract_results_from_loggers,
+    generate_numeric_debug_handle,
+    NUMERIC_DEBUG_HANDLE_KEY,
+    prepare_for_propagation_comparison,
+)
 from .pt2e.export_utils import (
     _allow_exported_model_train_eval as allow_exported_model_train_eval,
     _move_exported_model_to_eval as move_exported_model_to_eval,
     _move_exported_model_to_train as move_exported_model_to_train,
 )
-from .pt2e.generate_numeric_debug_handle import (  # noqa: F401
-    generate_numeric_debug_handle,
-)
 from .qconfig import *  # noqa: F403
 from .qconfig_mapping import *  # noqa: F403
 from .quant_type import *  # noqa: F403
-from .quantization_mappings import *  # type: ignore[no-redef]
+from .quantization_mappings import *  # noqa: F403 # type: ignore[no-redef]
 from .quantize import *  # noqa: F403
 from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
@@ -151,6 +154,10 @@ __all__ = [
     "swap_module",
     "weight_observer_range_neg_127_to_127",
     "generate_numeric_debug_handle",
+    "NUMERIC_DEBUG_HANDLE_KEY",
+    "prepare_for_propagation_comparison",
+    "extract_results_from_loggers",
+    "compare_results",
 ]
 
 
