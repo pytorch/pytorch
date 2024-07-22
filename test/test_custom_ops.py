@@ -3494,7 +3494,6 @@ Please use `add.register_fake` to add an fake impl.""",
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap_library_decorator(self):
-
         @torch.library.custom_op("mylib::f", mutates_args=())
         def f(x: Tensor, y: Tensor) -> Tensor:
             return x * y
@@ -3521,7 +3520,6 @@ Please use `add.register_fake` to add an fake impl.""",
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap_op_decorator(self):
-
         @torch.library.custom_op("mylib::f", mutates_args=())
         def f(x: Tensor, y: Tensor) -> Tensor:
             return x * y
@@ -3548,7 +3546,6 @@ Please use `add.register_fake` to add an fake impl.""",
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap_register_multiple_times(self):
-
         @torch.library.custom_op("mylib::f", mutates_args=())
         def f(x: Tensor, y: Tensor) -> Tensor:
             return x * y
@@ -3591,7 +3588,6 @@ Please use `add.register_fake` to add an fake impl.""",
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap_register_multiple_times_2(self):
-
         @torch.library.custom_op("mylib::f", mutates_args=())
         def f(x: Tensor, y: Tensor) -> Tensor:
             return x * y

@@ -1618,7 +1618,6 @@ class TestAutogradFunctionVmapAPI(TestCase):
             result = vmap(Zeros.apply)(x)
 
     def test_kwarg_only_tensors(self, device):
-
         with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
 
             class MyClass(torch.autograd.Function):
