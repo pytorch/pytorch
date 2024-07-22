@@ -690,7 +690,7 @@ class GraphLowering(torch.fx.Interpreter):
                     data.device, data.dtype, *V.graph.static_sizes_strides(data)
                 ),
             )
-        return None
+        raise RuntimeError(f"Could not find buffer {buffer_name}")
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
