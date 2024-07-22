@@ -605,7 +605,11 @@ def create_block_mask(
     r"""This function creates a block mask tuple from a mask_mod function.
 
     Args:
-        mask_mod (Callable): mask_mod function.
+        mask_mod (Callable): mask_mod function. This is a callable that defines the
+            masking pattern for the attention mechanism. It takes four arguments:
+            b (batch size), h (number of heads), q_idx (query index), and kv_idx (key/value index).
+            It should return a boolean tensor indicating which attention connections are allowed (True)
+            or masked out (False).
         B (int): Batch size.
         H (int): Number of heads.
         Q_LEN (int): Sequence length of query.
@@ -618,6 +622,20 @@ def create_block_mask(
     Returns:
         block_mask (tuple): A tuple of (kv_num_blocks, kv_indices, q_num_blocks, q_indices,
                             KV_BLOCK_SIZE, Q_BLOCK_SIZE) which represents the block mask.
+
+    Example Usage:
+    .. code-block:: python
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(causal_mask, 1, 1, 8192, 8192, device="cuda")
+
+        query = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+        key = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+        value = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+
+        output = flex_attention(query, key, value, block_mask=block_mask)
     """
     mod_type = _get_mod_type(mask_mod)
     assert (
