@@ -567,15 +567,18 @@ class Benchmarker:
         # that we only benchmark callables that should run under the same conditions
         # with respect to warmup, benchmarking, etc.
         kwargs_hash = str(hash(tuple(sorted(kwargs.items()))))
+        # we've seen that just hash(_callable) and the kwargs_hash are not enough to
+        # differentiate callables; if _callable is something like a lambda, which then
+        # goes out of scope and gets garbage collected, its memory address may be later
+        # reused for a different _callable. if this is the case, the latter _callable would
+        # incorrectly exist in the memory cache, which could lead to memory leaks if we
+        # have a lazy benchmark grouping of one, because we would never remove _callable
+        # from the lazy benchmark queue and as such any memory referenced by _callable
+        # would remain allocated
         key = str(hash(_callable) + random.randint(-(2**100), 2**100)) + kwargs_hash
         self.kwargs_hash_to_futures_gpu[
             kwargs_hash
         ] = self.kwargs_hash_to_futures_gpu.get(kwargs_hash, []) + [(_callable, key)]
-
-        futures_gpu = self.kwargs_hash_to_futures_gpu.pop(kwargs_hash)
-        del futures_gpu
-
-        return self.benchmark_gpu(_callable, **kwargs)
 
         def benchmark() -> float:
             # all but the first benchmark in a grouping of lazy benchmarks
@@ -586,14 +589,22 @@ class Benchmarker:
             futures_gpu = self.kwargs_hash_to_futures_gpu.pop(kwargs_hash)
             callables, keys = zip(*futures_gpu)
             callables, keys = list(callables), list(keys)
-            timings_ms = self.benchmark_many_gpu(
-                callables, ranking_key=ranking_key, pruning_key=pruning_key, **kwargs
-            )
-            self.memory_cache.update(zip(keys, timings_ms))
-            # we may or may not have to delete the futures explicitly to
-            # cleanup the memory, just do it now for safety
-            del futures_gpu
-            return self.memory_cache[key]
+
+            try:
+                timings_ms = self.benchmark_many_gpu(
+                    callables, ranking_key=ranking_key, pruning_key=pruning_key, **kwargs
+                )
+            except Exception as e:
+                raise e
+            else:
+                self.memory_cache.update(zip(keys, timings_ms))
+                return self.memory_cache[key]
+            finally:
+                # we have seen cases where not explicitly deleting the GPU futures
+                # can prevent the memory allocated for the callables from being
+                # properly and timely cleaned up, which can have fatal interactions
+                # in cudagraphs mode
+                del futures_gpu
 
         return LazyBenchmark(benchmark)
 
