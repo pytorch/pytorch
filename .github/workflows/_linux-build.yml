@@ -53,7 +53,7 @@ on:
           The empty list means we are going to keep every configurations by defaults
         required: false
         type: string
-        default: ""
+        default: "3960e26644852e53e6b538e61dc1fe23ebcd0c18"
       s3-bucket:
         description: S3 bucket to download artifact
         required: false
