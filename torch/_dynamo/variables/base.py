@@ -282,9 +282,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
         raise NotImplementedError
 
+    def force_unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+        # like unpack_var_sequence, but should only be used when it is
+        # safe to eagerly (vs. lazily) unpack this variable.
+        # e.g. map(f, x) is normally evaluated lazily but sometimes
+        # we want to force eager unpacking, e.g. when converting to a list.
+        return self.unpack_var_sequence(tx)
+
     def has_unpack_var_sequence(self, tx) -> bool:
         try:
             self.unpack_var_sequence(tx)
+            return True
+        except NotImplementedError:
+            return False
+
+    def has_force_unpack_var_sequence(self, tx) -> bool:
+        try:
+            self.force_unpack_var_sequence(tx)
             return True
         except NotImplementedError:
             return False

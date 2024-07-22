@@ -336,11 +336,11 @@ class CommonListMethodsVariable(BaseListVariable):
             name == "extend"
             and self.mutable_local
             and args
-            and args[0].has_unpack_var_sequence(tx)
+            and args[0].has_force_unpack_var_sequence(tx)
         ):
             assert not kwargs
             (arg,) = args
-            seq = arg.unpack_var_sequence(tx)
+            seq = arg.force_unpack_var_sequence(tx)
             tx.output.side_effects.mutation(self)
             self.items.extend(seq)
             return ConstantVariable.create(None)
@@ -424,11 +424,13 @@ class ListVariable(CommonListMethodsVariable):
             key, value = args
             tx.output.side_effects.mutation(self)
             if isinstance(key, SliceVariable):
-                if not value.has_unpack_var_sequence(tx):
+                if not value.has_force_unpack_var_sequence(tx):
                     unimplemented(
                         f"Missing dynamo support for expanding {value} into a list for slice assignment."
                     )
-                self.items[key.as_python_constant()] = value.unpack_var_sequence(tx)
+                self.items[key.as_python_constant()] = value.force_unpack_var_sequence(
+                    tx
+                )
             else:
                 self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
@@ -483,7 +485,7 @@ class DequeVariable(CommonListMethodsVariable):
             assert not kwargs
 
             (arg,) = args
-            prefix = arg.unpack_var_sequence(tx)
+            prefix = arg.force_unpack_var_sequence(tx)
             prefix.reverse()
             tx.output.side_effects.mutation(self)
             self.items = prefix + list(self.items)
