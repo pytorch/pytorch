@@ -9,7 +9,13 @@ import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._C._functorch import _add_batch_dim, get_unwrapped, maybe_get_bdim
-from torch._higher_order_ops.utils import reenter_make_fx, unique_graph_id
+from torch._higher_order_ops.utils import (
+    autograd_not_implemented,
+    make_fx,
+    reenter_make_fx,
+    unique_graph_id,
+)
+from torch._inductor.utils import is_pointwise_subgraph
 
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -73,23 +79,22 @@ def check_args(combine_fn, leaves, tree, dim):
             "The pytree of the output of the operator needs to match the input pytree"
         )
 
-    generic_scan_required = False
-    # TODO: This check has to be moved
-    # combine_fn = make_fx(combine_fn)(pytree.tree_unflatten(
-    #         [e[slice_along_axis(0, 1, stride=None, dim=0)] for e in leaves], tree
-    #     ),
-    #     pytree.tree_unflatten(
-    #         [e[slice_along_axis(0, 1, stride=None, dim=0)] for e in leaves], tree
-    #     ),)
-    # for node in combine_fn.graph.nodes:
-    #     if not all(is_pointwise_use(use) or use.op == 'output' for use in node.users):
-    #         generic_scan_required = True
-    #         break
+    # Check that all leaves are on CUDA
+    if not all([l.device.type == "cuda" for l in leaves]):  # noqa: C419
+        return True
 
-    if not all([l.device.type == "cuda" for l in leaves]):
-        generic_scan_required = True
+    # Check that the combine_fn is pointwise
+    with disable_proxy_modes_tracing():
+        sample_inputs = [
+            torch.ones_like(x, dtype=x.dtype, device=x.device) for x in leaves
+        ]
+        sample_inputs = pytree.tree_unflatten(sample_inputs, tree)
+        combine_graph = make_fx(combine_fn)(sample_inputs, sample_inputs)
 
-    return generic_scan_required
+    if not is_pointwise_subgraph(combine_graph.graph):
+        return True
+
+    return False
 
 
 def _interleave(a, b, dim):
@@ -172,7 +177,6 @@ def associative_scan(
     """
     leaves, spec = pytree.tree_flatten(input)
 
-    # generic_scan_required is currently only true if any of the input is a CUDA tensor
     generic_scan_required = check_args(combine_fn, leaves, spec, dim)
 
     if reverse:
@@ -194,6 +198,9 @@ def associative_scan(
 
 
 def generic_associative_scan(operator, elems_flat, dim=0):
+    # TODO: The recursion involved here "unrolls" the scan
+    # function for all inputs. Could there be a more efficient
+    # way instead of running over the operation in sequence?
     def _scan(elems):
         """Perform scan on `elems`."""
         num_elems = elems[0].shape[dim]
@@ -287,9 +294,7 @@ def trace_associative_scan(
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
     args = (combine_graph, input, dim)
-    out = maybe_handle_decomp(
-        proxy_mode, associative_scan_op, args, {}
-    )
+    out = maybe_handle_decomp(proxy_mode, associative_scan_op, args, {})
     if out is not NotImplemented:
         return out
 
@@ -306,14 +311,12 @@ def trace_associative_scan(
 
 @associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def associative_scan_op_dense(combine_fn, input, dim):
-    result_flat = generic_associative_scan(combine_fn, input, dim)
-    return result_flat
+    return generic_associative_scan(combine_fn, input, dim)
 
 
-@associative_scan_op.py_impl(DispatchKey.Autograd)
-def associative_scan_op_autograd(combine_fn, input, dim):
-    result_flat = generic_associative_scan(combine_fn, input, dim)
-    return result_flat
+associative_scan_op.py_impl(DispatchKey.Autograd)(
+    autograd_not_implemented(associative_scan_op, deferred_error=True)
+)
 
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)

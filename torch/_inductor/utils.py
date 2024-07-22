@@ -311,6 +311,13 @@ def is_view(op: torch._ops.OpOverload):
     return any(a.alias_info is not None for a in op._schema.arguments)
 
 
+def is_pointwise_subgraph(subgraph):
+    for node in subgraph.nodes:
+        if not all(is_pointwise_use(use) or use.op == "output" for use in node.users):
+            return False
+    return True
+
+
 def is_pointwise_use(use):
     if not use.op == "call_function":
         return False

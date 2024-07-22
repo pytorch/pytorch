@@ -21,8 +21,11 @@ from torch._decomp.decompositions import (
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._dynamo.utils import counters
+from torch._higher_order_ops.associative_scan import (
+    associative_scan_op,
+    generic_associative_scan,
+)
 from torch._higher_order_ops.out_dtype import out_dtype
-from torch._higher_order_ops.associative_scan import associative_scan, associative_scan_op
 from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
     elementwise_dtypes,
@@ -34,6 +37,7 @@ from torch.fx.experimental.symbolic_shapes import definitely_true, guard_size_ob
 from . import config, inductor_prims
 from .utils import (
     is_gpu,
+    is_pointwise_subgraph,
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
 )
@@ -789,9 +793,13 @@ def max_pool2d_with_indices(
     )
     return vals, indices
 
+
 @register_decomposition(associative_scan_op)
-def associative_scan_op(combine_fn, leaves, dim):
-    # TODO: This will handle the fallback to eager in case there 
+def associative_scan_op_decomp(combine_fn, leaves, dim):
+    # TODO: This will handle the fallback to eager in case there
     # are non-pointwise operations involved in combine_fn
-    out = combine_fn(leaves)
-    return out
+    if is_pointwise_subgraph(combine_fn.graph):
+        return NotImplemented  # Don't decompose, use the lowering of associative_scan
+
+    # Decompose into generic_associative_scan
+    return generic_associative_scan(combine_fn, leaves, dim)
