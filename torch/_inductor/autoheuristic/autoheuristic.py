@@ -249,7 +249,8 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
             precondition,
         )
 
-        self.register_global_feedback(input_nodes, choices)
+        if self.satisfies_precondition():
+            self.register_global_feedback(input_nodes, choices)
 
     def register_global_feedback(
         self, input_nodes: List[Any], choices: List[ChoiceCaller]
