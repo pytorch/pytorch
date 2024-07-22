@@ -108,10 +108,10 @@ aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
 torch/csrc/mtia/ @egienvalue
 
 # Profiler
-torch/csrc/autograd/profiler* @aaronenyeshi
-torch/autograd/profiler* @aaronenyeshi
-torch/csrc/profiler/ @aaronenyeshi
-torch/profiler/ @aaronenyeshi
+torch/csrc/autograd/profiler* @aaronenyeshi @sraikund16
+torch/autograd/profiler* @aaronenyeshi @sraikund16
+torch/csrc/profiler/ @aaronenyeshi @sraikund16
+torch/profiler/ @aaronenyeshi @sraikund16
 
 # AOTDispatch tests
 test/functorch/test_aotdispatch.py @ezyang @Chillee
@@ -143,8 +143,8 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /third_party/xpu.txt @EikanWang @gujinghui
 
 # torch.export
-/torch/export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
-/torch/_export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
+/torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
+/torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 
 # serialization-related files
 /aten/src/ATen/MapAllocator* @mikaylagawarecki
@@ -156,12 +156,12 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /torch/csrc/jit/python/init.cpp @mikaylagawarecki
 
 # CUDA and CUDA math libraries
-aten/src/ATen/cuda/ @eqy
-aten/src/ATen/cudnn/ @eqy
-aten/src/ATen/native/cuda/ @eqy
-aten/src/ATen/native/cudnn/ @eqy
-c10/cuda @eqy
-torch/cuda/ @eqy
-torch/csrc/cuda/ @eqy
-torch/backends/cuda/ @eqy
-torch/backends/cudnn/ @eqy
+aten/src/ATen/cuda/ @eqy @syed-ahmed
+aten/src/ATen/cudnn/ @eqy @syed-ahmed
+aten/src/ATen/native/cuda/ @eqy @syed-ahmed
+aten/src/ATen/native/cudnn/ @eqy @syed-ahmed
+c10/cuda @eqy @syed-ahmed
+torch/cuda/ @eqy @syed-ahmed
+torch/csrc/cuda/ @eqy @syed-ahmed
+torch/backends/cuda/ @eqy @syed-ahmed
+torch/backends/cudnn/ @eqy @syed-ahmed

@@ -1,4 +1,4 @@
-from typing import List, Union
+from __future__ import annotations
 
 from torchgen.api import cpp
 from torchgen.api.types import (
@@ -97,7 +97,7 @@ def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
 
 
 # Structured kernels are never defaulted
-def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> List[Binding]:
+def argument(a: Argument | SelfArgument | TensorOptionsArguments) -> list[Binding]:
     if isinstance(a, Argument):
         return [
             Binding(
@@ -115,15 +115,15 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> List[B
         assert_never(a)
 
 
-def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
-    args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
+def impl_arguments(g: NativeFunctionsGroup) -> list[Binding]:
+    args: list[Argument | TensorOptionsArguments | SelfArgument] = []
 
     if g.out.precomputed:
         # A list of parameters for the impl function with
         # certain parameters replaced with precomputed counterparts
         # as specified in native_functions.yaml.
-        non_out_args_replaced: List[
-            Union[Argument, TensorOptionsArguments, SelfArgument]
+        non_out_args_replaced: list[
+            Argument | TensorOptionsArguments | SelfArgument
         ] = []
         for a in g.out.func.arguments.non_out:
             if isinstance(a, Argument) and a.name in g.out.precomputed.replace:
@@ -145,13 +145,13 @@ def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
     return [r for arg in args for r in argument(arg)]
 
 
-def meta_arguments(g: NativeFunctionsGroup) -> List[Binding]:
-    args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
+def meta_arguments(g: NativeFunctionsGroup) -> list[Binding]:
+    args: list[Argument | TensorOptionsArguments | SelfArgument] = []
     args.extend(g.functional.func.arguments.non_out)
     return [r for arg in args for r in argument(arg)]
 
 
-def out_arguments(g: NativeFunctionsGroup) -> List[Binding]:
-    args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
+def out_arguments(g: NativeFunctionsGroup) -> list[Binding]:
+    args: list[Argument | TensorOptionsArguments | SelfArgument] = []
     args.extend(g.out.func.arguments.out)
     return [r for arg in args for r in argument(arg)]

@@ -17,7 +17,7 @@ class Broadcast(Function):
         target_gpus = [_get_device_index(x, True) for x in target_gpus]
         ctx.target_gpus = target_gpus
         if len(inputs) == 0:
-            return tuple()
+            return ()
         ctx.num_inputs = len(inputs)
         ctx.input_device = inputs[0].get_device()
         outputs = comm.broadcast_coalesced(inputs, ctx.target_gpus)

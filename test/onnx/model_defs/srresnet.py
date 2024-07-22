@@ -51,7 +51,7 @@ class UpscaleBlock(nn.Module):
 class SRResNet(nn.Module):
     def __init__(self, rescale_factor, n_filters, n_blocks):
         super().__init__()
-        self.rescale_levels = int(math.log(rescale_factor, 2))
+        self.rescale_levels = int(math.log(rescale_factor, 2))  # noqa: FURB163
         self.n_filters = n_filters
         self.n_blocks = n_blocks
 
