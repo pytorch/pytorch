@@ -3,8 +3,9 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Protocol
 
-from .. import _C, _ops, autograd, Tensor
-from ..utils import _pytree
+from torch import _C, _ops, autograd, Tensor
+from torch.utils import _pytree
+
 from . import utils
 
 
