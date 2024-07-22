@@ -520,23 +520,30 @@ class SymInt:
         return self.node.expr
 
     def __hash__(self) -> builtins.int:
-        return hash(self._get_int())
+        if self.node.is_nested_int():
+            return hash(self.node.nested_int())
+        else:
+            # We could support constant SymInts as well, but not doing it for now
+            raise TypeError("unhashable type: non-nested SymInt")
+            # TODO: Force specialization
+            # This can't be done because the TypeError here is load bearing
+            # for einops
+            # https://github.com/arogozhnikov/einops/blob/6181e1e95dc58c00a3143c1726da1c6ee0463164/einops/einops.py#L237
+            # return hash(builtins.int(self))
 
-    def as_integer_ratio(self) -> _Tuple[builtins.int, builtins.int]:
+    def as_integer_ratio(self) -> _Tuple["SymInt", builtins.int]:
         """Represent this int as an exact integer ratio"""
-        return self._get_int(), 1
+        return self, 1
 
-    def bit_length(self) -> "SymInt":
-        return SymInt(self.node.wrap_int(self._get_int().bit_length()))
+    def bit_length(self) -> builtins.int:
+        # TODO: A more relaxed guard is possible here, where you guard to
+        # allow all integer quantities which would result in the same bit
+        # length.  We can also just make a dedicated Sympy function for
+        # computing this quantity and represent it symbolically.
+        return builtins.int(self).bit_length()
 
     def conjugate(self) -> "SymInt":
         return self
-
-    def _get_int(self) -> builtins.int:
-        if self.node.is_nested_int():
-            return self.node.nested_int()
-        else:
-            return builtins.int(self)
 
 
 class SymFloat:
@@ -638,7 +645,7 @@ class SymFloat:
 
     def as_integer_ratio(self) -> _Tuple[builtins.int, builtins.int]:
         """Represent this float as an exact integer ratio"""
-        return self._get_float().as_integer_ratio()
+        return builtins.float(self).as_integer_ratio()
 
     def __repr__(self):
         return self.node._graph_repr()
@@ -647,10 +654,7 @@ class SymFloat:
         return self.node.expr
 
     def __hash__(self):
-        return hash(self._get_float())
-
-    def _get_float(self) -> builtins.float:
-        return self.node.float_() if self.node.is_constant() else builtins.float(self)
+        return hash(builtins.float(self))
 
 
 class SymBool:

@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import functools
-
 import sys
 import unittest
 from typing import Optional
@@ -20,8 +19,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_quantization import _generate_qdq_quantized_model
-
 from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
+
 
 try:
     try:
@@ -194,6 +193,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (384,))
+    @parametrize("in_features", (196,))
+    @parametrize("out_features", (384, 385))
     @parametrize("bias", (True, False))
     @parametrize(
         "epilogue",
@@ -214,11 +216,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
-    def test_linear_with_pointwise(self, bias, epilogue, dtype):
-        batch_size = 384
-        in_features = 196
-        out_features = 384
-
+    def test_linear_with_pointwise(
+        self, batch_size, in_features, out_features, bias, epilogue, dtype
+    ):
         class M(torch.nn.Module):
             def __init__(self, bias, epilogue, other):
                 super().__init__()
@@ -235,33 +235,47 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-        if (
-            (
-                dtype == torch.bfloat16
-                or (
-                    dtype == torch.float16
-                    and torch.ops.mkldnn._is_mkldnn_fp16_supported()
+        cpp_epilogue_fusion_counter = counters["inductor"][
+            "cpp_epilogue_fusion_counter"
+        ]
+        if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
+            if (
+                (
+                    dtype == torch.bfloat16
+                    or (
+                        dtype == torch.float16
+                        and torch.ops.mkldnn._is_mkldnn_fp16_supported()
+                    )
                 )
-            )
-            and epilogue != "mul"
-            and epilogue != "div"
-            or (dtype == torch.half and epilogue == "add" and not bias)
-        ):
-            # Several scenarios where epilogue fusion is not counted in:
-            # 1. For bfloat16, the epilogue fusion is part of the template,
-            #    not fused via scheduler. This will also be true for float16 when
-            #    hardware has the float16 instruction. The exception is mul or
-            #    div fusion which is not supported for oneDNN linear.
-            # 2. For float16, since oneDNN linear is not applied, linear w/o bias
-            #    plus epilogue add is treated as linear w/ bias.
-            self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
+                and epilogue != "mul"
+                and epilogue != "div"
+                or (dtype == torch.half and epilogue == "add" and not bias)
+            ):
+                # Several scenarios where epilogue fusion is not counted in:
+                # 1. For bfloat16, the epilogue fusion is part of the template,
+                #    not fused via scheduler. This will also be true for float16 when
+                #    hardware has the float16 instruction. The exception is mul or
+                #    div fusion which is not supported for oneDNN linear.
+                # 2. For float16, since oneDNN linear is not applied, linear w/o bias
+                #    plus epilogue add is treated as linear w/ bias.
+                self.assertEqual(cpp_epilogue_fusion_counter, 0)
+            else:
+                self.assertEqual(cpp_epilogue_fusion_counter, 1)
         else:
-            self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+            # If mkldnn is not enabled or not available, epilogue fusion is not counted in only when:
+            #    linear w/o bias plus epilogue add
+            if epilogue == "add" and not bias:
+                self.assertEqual(cpp_epilogue_fusion_counter, 0)
+            else:
+                self.assertEqual(cpp_epilogue_fusion_counter, 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (384,))
+    @parametrize("in_features", (196,))
+    @parametrize("out_features", (128, 129))
     @parametrize("bias", (True, False))
     @parametrize(
         "epilogue",
@@ -274,11 +288,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
-    def test_linear_with_transpose(self, bias, epilogue, dtype):
-        batch_size = 384
-        in_features = 196
-        out_features = 128
-
+    def test_linear_with_transpose(
+        self, batch_size, in_features, out_features, bias, epilogue, dtype
+    ):
         class M(torch.nn.Module):
             def __init__(self, bias, epilogue, other):
                 super().__init__()
@@ -302,6 +314,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (384,))
+    @parametrize("in_features", (196,))
+    @parametrize("out_features", (384, 385))
     @parametrize("bias", (True, False))
     @parametrize(
         "unary",
@@ -317,11 +332,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
-    def test_linear_with_unary_binary(self, bias, unary, binary, dtype):
-        batch_size = 384
-        in_features = 196
-        out_features = 384
-
+    def test_linear_with_unary_binary(
+        self, batch_size, in_features, out_features, bias, unary, binary, dtype
+    ):
         class M(torch.nn.Module):
             def __init__(self, bias, unary, binary, other):
                 super().__init__()
@@ -344,13 +357,12 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @parametrize("batch_size", (1024,))
+    @parametrize("in_features", (1024,))
+    @parametrize("out_features", (1024, 1025))
     @parametrize("bias", (True, False))
-    def test_linear_amx(self, bias):
-        batch_size = 1024
-        in_features = 1024
-        out_features = 1024
-        dtype = torch.bfloat16
-
+    @dtypes(torch.bfloat16)
+    def test_linear_amx(self, batch_size, in_features, out_features, bias, dtype):
         class M(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
@@ -371,13 +383,14 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @parametrize("batch_size", (384,))
+    @parametrize("in_features", (196,))
+    @parametrize("out_features", (384,))
     @parametrize("bias", (True, False))
-    def test_linear_with_embedding(self, bias):
-        batch_size = 384
-        in_features = 196
-        out_features = 384
-        dtype = torch.bfloat16
-
+    @dtypes(torch.bfloat16)
+    def test_linear_with_embedding(
+        self, batch_size, in_features, out_features, bias, dtype
+    ):
         class M(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
@@ -403,7 +416,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (32,))
     @parametrize("in_features", (128,))
-    @parametrize("out_features", (64,))
+    @parametrize("out_features", (64, 65))
     @parametrize("bias", (False, True))
     @parametrize("input_3d", (False, True))
     @dtypes(torch.float32, torch.bfloat16)
@@ -469,7 +482,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (32,))
     @parametrize("in_features", (128,))
-    @parametrize("out_features", (64,))
+    @parametrize("out_features", (64, 65))
     @parametrize("bias", (False, True))
     @parametrize("input_3d", (False, True))
     @parametrize("int8_mixed_bf16", (False, True))
@@ -559,7 +572,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @parametrize("batch_size", (3, 16, 32, 49))
     @parametrize("in_features", (4, 68, 128))  # k should be a multiple of 4
-    @parametrize("out_features", (32, 64))  # n should be a multiple of block_n
+    @parametrize("out_features", (64, 65))
     @parametrize("bias", (True, False))
     def test_quantized_linear_amx(self, batch_size, in_features, out_features, bias):
         class M(torch.nn.Module):
