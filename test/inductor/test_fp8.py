@@ -444,7 +444,7 @@ class TestFP8Lowering(TestCase):
         )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
-        torch.testing.assert_close(y_eager, y_compiled, rtol=5e-1, atol=5e-1)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=5e-2, atol=0)
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
@@ -499,7 +499,7 @@ class TestFP8Lowering(TestCase):
         )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
-        torch.testing.assert_close(y_eager, y_compiled, rtol=5e-1, atol=5e-1)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0)
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
@@ -548,7 +548,7 @@ class TestFP8Lowering(TestCase):
         )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
-        torch.testing.assert_close(y_eager, y_compiled, rtol=5e-1, atol=5e-1)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=6e-2, atol=0)
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
@@ -597,7 +597,7 @@ class TestFP8Lowering(TestCase):
         )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
-        torch.testing.assert_close(y_eager, y_compiled, rtol=5e-1, atol=5e-1)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=5e-2, atol=0)
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")

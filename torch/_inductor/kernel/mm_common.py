@@ -189,7 +189,6 @@ scaled_mm_kernel_configs = [
     {"config": (64, 128, 32, 4, 4), "cond": True},
     {"config": (128, 32, 32, 4, 4), "cond": True},
     {"config": (64, 32, 32, 5, 2), "cond": True},
-    {"config": (128, 256, 128, 3, 8), "cond": True},
     {"config": (256, 128, 128, 3, 8), "cond": True},
     {"config": (256, 64, 128, 4, 4), "cond": True},
     {"config": (64, 256, 128, 4, 4), "cond": True},
