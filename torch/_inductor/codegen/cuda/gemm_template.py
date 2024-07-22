@@ -17,10 +17,10 @@ from ...ir import (
     ReinterpretView,
 )
 from ..common import IndentedBuffer
-
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
 from .cuda_template import CUTLASSTemplate
+
 
 log = logging.getLogger(__name__)
 
