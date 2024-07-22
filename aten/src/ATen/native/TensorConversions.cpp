@@ -338,8 +338,8 @@ Tensor _to_copy(
         options);
   }
 
-  bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
-                  (options.layout() == c10::kStrided));
+  bool pin_out = (non_blocking && (self.is_cuda() || self.is_privateuseone())
+                  && options.device().is_cpu() && (options.layout() == c10::kStrided));
 
   if (memory_format == MemoryFormat::Preserve) {
     if (options.device().supports_as_strided()) {

@@ -21,8 +21,8 @@ from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
-from ..._dynamo.utils import counters
 
+from ..._dynamo.utils import counters
 from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
@@ -46,7 +46,6 @@ from ..utils import (
     sympy_product,
     sympy_subs,
 )
-
 from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
     BackendFeature,
@@ -63,7 +62,6 @@ from .common import (
     OpOverrides,
     OptimizationContext,
 )
-
 from .cpp_utils import (
     cexpr,
     cexpr_index,
@@ -73,6 +71,7 @@ from .cpp_utils import (
     unify_mask_base_type,
     value_to_cpp,
 )
+
 
 _IS_WINDOWS = sys.platform == "win32"
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
@@ -190,19 +189,6 @@ def reduction_project(reduction_type, acc):
     elif reduction_type in {"argmin", "argmax"}:
         return f"{acc}.index"
     return acc
-
-
-def is_to_lowp_dtype(expr):
-    to_exprs = ["convert<half>", "convert<bfloat16>"]
-    return any(to_expr in expr for to_expr in to_exprs)
-
-
-def get_lowp_to_high_prec_expr(lowp_var, dtype, kernel):
-    if isinstance(kernel, CppVecKernel):
-        return f"at::vec::convert<{DTYPE_TO_CPP[dtype]}>({lowp_var})"
-    else:
-        assert isinstance(kernel, CppKernel)
-        return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({lowp_var})"
 
 
 index_value_name_counter = 1
@@ -600,8 +586,46 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None):
-        assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
-        return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({x})"
+        assert isinstance(x, CppCSEVariable)
+        if src_dtype is None:
+            src_dtype = x.dtype
+        expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
+        csevar = V.kernel.cse.generate(V.kernel.compute, expr)
+        csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
+        if dtype in [torch.bfloat16, torch.float16] and src_dtype == torch.float:
+            """
+            https://github.com/pytorch/pytorch/issues/115260
+            For FusedSchedulerNode[node1, node2], the node2 loads what node1 stores and the buffer is
+            in low-precision floating point data type. When the output of node1 also serves as the output of the
+            kernel, the result of nodes would be different from the case when output of node1 is not the output
+            of the kernel (where we don't need to insert `to_dtype` for legalization). To address the problem, on
+            storing the lowp node1 output, we also add the inverse dtype conversion to high precision data type
+            to the cse cache.
+
+            Example (pseudo code):
+                node1_output = ...
+                node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+                store(buf, node1_output_lowp)
+                node2_input_lowp = load(buf)
+                node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
+
+            Without cse cache trick:
+                node1_output = ...
+                node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+                store(buf, node1_output_lowp)
+                node2_input_lowp = node_output_lowp # hit store cache
+                node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
+
+            With cse cache trick:
+                node1_output = ...
+                node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+                # also add `to_dtype(node1_input_lowp, dtype=torch.float)` -> `node1_output` to cse cache
+                store(buf, node1_output_lowp)
+                node2_input_lowp = node_output_lowp # hit store cache
+                node2_input = node1_output # hit cse cache
+            """
+            V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
+        return csevar
 
     @staticmethod
     def to_dtype_bitcast(x, dtype, src_dtype):
@@ -1413,20 +1437,12 @@ class CppVecOverrides(CppOverrides):
         assert opt_ctx_x.dtype is not None
         assert isinstance(V.kernel, CppVecKernel)
         src_dtype = opt_ctx_x.dtype
-        src_cpp_type = DTYPE_TO_CPP[src_dtype]
-        src_num_vectors = V.kernel._get_num_vectors(src_dtype)
-        dst_cpp_type = DTYPE_TO_CPP[dtype]
-        dst_num_vectors = V.kernel._get_num_vectors(dtype)
-        if src_dtype != torch.bool and dtype == torch.bool:
-            return f"{V.kernel._get_mask_type(src_dtype)}::from<{src_cpp_type},{src_num_vectors}>({x})"
-        if opt_ctx_x.dtype == torch.bool and dtype != torch.bool:
-            return f"{x}.to<{dst_cpp_type},{dst_num_vectors}>()"
-        if src_dtype != dtype:
-            if src_num_vectors == dst_num_vectors == 1:
-                return f"at::vec::convert<{dst_cpp_type}>({x})"
-            else:
-                return f"at::vec::convert<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({x})"
-        return f"({x})"
+        expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
+        csevar = V.kernel.cse.generate(V.kernel.compute, expr)
+        csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
+        if dtype in [torch.bfloat16, torch.float16] and src_dtype == torch.float:
+            V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
+        return csevar
 
     @staticmethod
     def log1p(x):
@@ -1660,67 +1676,6 @@ class CppKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    def cache_high_prec_cse_var_before_lowp_store(self, var_to_store):
-        """
-        https://github.com/pytorch/pytorch/issues/115260
-        For FusedSchedulerNode[node1, node2], the node2 loads what node1 stores and the buffer is
-        in low-precision floating point data type. When the output of node1 also serves as the output of the
-        kernel, the result of nodes would be different from the case when output of node1 is not the output
-        of the kernel (where we don't need to insert `to_dtype` for legalization). To address the problem, on
-        storing the lowp node1 output, we also add the inverse dtype conversion to high precision data type
-        to the cse cache.
-
-        Example (pseudo code):
-            node1_output = ...
-            node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
-            store(buf, node1_output_lowp)
-            node2_input_lowp = load(buf)
-            node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
-
-        Without cse cache trick:
-            node1_output = ...
-            node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
-            store(buf, node1_output_lowp)
-            node2_input_lowp = node_output_lowp # hit store cache
-            node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
-
-        With cse cache trick:
-            node1_output = ...
-            node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
-            # also add `to_dtype(node1_input_lowp, dtype=torch.float)` -> `node1_output` to cse cache
-            store(buf, node1_output_lowp)
-            node2_input_lowp = node_output_lowp # hit store cache
-            node2_input = node1_output # hit cse cache
-        """
-
-        if var_to_store.dtype not in DTYPE_LOWP_FP:
-            # only need to cache fp32 cse var while var_to_store is lowp data
-            return
-
-        def find_high_prec_var(var, cache):
-            high_prec_cse_var = None
-            high_prec_cse_var_name = None
-            for expr, cse_var in cache.items():
-                if cse_var == var:
-                    if is_to_lowp_dtype(expr):
-                        m = re.search(r"tmp\d+", expr)
-                        if m is not None:
-                            high_prec_cse_var_name = m.group()
-            if high_prec_cse_var_name:
-                for cse_var in cache.values():
-                    if cse_var.name == high_prec_cse_var_name:
-                        high_prec_cse_var = cse_var
-                        break
-                assert high_prec_cse_var is not None
-            return high_prec_cse_var
-
-        high_prec_var = find_high_prec_var(var_to_store, self.cse.cache)
-        if high_prec_var and high_prec_var.dtype in DTYPE_TO_CPP:
-            cache_key = get_lowp_to_high_prec_expr(
-                var_to_store, high_prec_var.dtype, self
-            )
-            self.cse.cache[cache_key] = high_prec_var
-
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
     ):
@@ -1782,7 +1737,9 @@ class CppKernel(Kernel):
 
         size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
 
-        line = self.indirect_assert(csevar, "0" if lower else None, size_str)
+        line = self.indirect_assert(
+            csevar, "0" if lower else None, size_str, self._load_mask
+        )
         self.cse.generate(buffer, line, assignment=False)
 
     def load(self, name: str, index: sympy.Expr):
@@ -1798,7 +1755,6 @@ class CppKernel(Kernel):
     def store(self, name, index, value, mode=None):
         assert "buf" in name
         var = self.args.output(name)
-        self.cache_high_prec_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
         if mode is None:
             line = f"{var}[{cexpr_index(index)}] = {value};"
@@ -2127,6 +2083,13 @@ class CppKernel(Kernel):
     def create_cse_var(self, *args, **kwargs):
         return CppCSEVariable(*args, **kwargs)
 
+    def get_to_dtype_expr(self, src, dtype, src_dtype):
+        return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({src})"
+
+    def cache_dtype_convert(self, dst, dst_dtype, src, src_dtype):
+        expr = self.get_to_dtype_expr(src, dst_dtype, src_dtype)
+        self.cse.cache[expr] = dst
+
 
 class CppVecKernel(CppKernel):
     overrides = CppVecOverrides  # type: ignore[assignment]
@@ -2420,7 +2383,6 @@ class CppVecKernel(CppKernel):
             value = self.broadcast(value)
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
-        self.cache_high_prec_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
         code = self._get_store_line(value, var, index, V.graph.get_dtype(name))
         self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
@@ -2635,10 +2597,11 @@ class CppVecKernel(CppKernel):
             raise NotImplementedError
 
     def indirect_assert(self, var, lower, upper, mask=None):
-        assert not mask, "do not support mask in indirect_indexing assertion"
         assert isinstance(var, CppCSEVariable)
         assert var.dtype is not None
         if not var.is_vec:
+            if isinstance(mask, CppCSEVariable) and mask.is_vec:
+                mask = f"({mask}).all_masked()"
             return super().indirect_assert(var, lower, upper, mask)
         lower_scalar = lower
         upper_scalar = upper
@@ -2656,8 +2619,34 @@ class CppVecKernel(CppKernel):
             assert upper
             cond = f"{var} < {upper}"
             cond_print = f"{var} < {upper_scalar}"
-        cond = f"({self._get_mask_type(var.dtype)}({cond})).all_masked()"
+        cond = f"{self._get_mask_type(var.dtype)}({cond})"
+        if mask:
+            if not mask.is_vec:
+                mask = f"{self._get_mask_type(var.dtype)}({mask})"
+            # We need not check when the mask is False
+            cond = f"({cond}) | ~({mask})"
+        cond = f"({cond}).all_masked()"
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
+
+    def get_to_dtype_expr(self, src, dtype, src_dtype):
+        assert isinstance(src, CppCSEVariable)
+        if not src.is_vec:
+            return super().get_to_dtype_expr(src, dtype, src_dtype)
+        src_cpp_type = DTYPE_TO_CPP[src_dtype]
+        src_num_vectors = self._get_num_vectors(src_dtype)
+        dst_cpp_type = DTYPE_TO_CPP[dtype]
+        dst_num_vectors = self._get_num_vectors(dtype)
+        expr = f"({src})"
+        if src_dtype != torch.bool and dtype == torch.bool:
+            expr = f"{self._get_mask_type(src_dtype)}::from<{src_cpp_type},{src_num_vectors}>({src})"
+        elif src_dtype == torch.bool and dtype != torch.bool:
+            expr = f"{src}.to<{dst_cpp_type},{dst_num_vectors}>()"
+        elif src_dtype != dtype:
+            if src_num_vectors == dst_num_vectors == 1:
+                expr = f"at::vec::convert<{dst_cpp_type}>({src})"
+            else:
+                expr = f"at::vec::convert<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})"
+        return expr
 
 
 class CppTile2DKernel(CppVecKernel):
@@ -3820,7 +3809,7 @@ class CppScheduling(BaseScheduling):
         return (
             not node1.is_template()
             and not node2.is_template()
-            and node1.get_names() & node2.ancestors
+            and node1.get_operation_names() & node2.ancestors
             and not (
                 self._can_fuse_horizontal_impl(node1, node2)
                 and not node1.is_reduction()
@@ -3893,18 +3882,26 @@ class CppScheduling(BaseScheduling):
                 visited_scheduler_nodes: Set[str] = set()
                 for scheduler_node in node.get_nodes():
                     # all users inside same OuterLoopFusedSchedulerNode
+                    assert isinstance(scheduler_node, SchedulerNode)
                     visited_scheduler_nodes.add(scheduler_node.get_name())
-                    if not scheduler_node.is_reduction() and all(
-                        user.node in node.get_nodes() for user in scheduler_node.users
+                    if (
+                        scheduler_node.is_reduction()
+                        or len(scheduler_node.get_outputs()) != 1
                     ):
-                        global_buffer = scheduler_node.node
+                        continue
+
+                    scheduler_buffer = scheduler_node.get_outputs()[0]
+                    if all(
+                        user.node in node.get_nodes() for user in scheduler_buffer.users
+                    ):
+                        global_buffer = scheduler_buffer.node
                         assert isinstance(global_buffer, ir.ComputedBuffer)
                         global_buffer_layout = global_buffer.get_layout()
                         size_offset = node.outer_loop_fusion_depth - len(
                             get_call_ranges(scheduler_node)
                         )
 
-                        def is_all_write_read_contiguous(scheduler_node):
+                        def is_all_write_read_contiguous():
                             contiguous_index_expr = 0
                             stride = 1
                             for var, range in reversed(
@@ -3913,25 +3910,25 @@ class CppScheduling(BaseScheduling):
                                 contiguous_index_expr += stride * var
                                 stride *= range
                             write_index_expr = scheduler_node._body.writes_name2expr[
-                                scheduler_node.get_name()
+                                scheduler_buffer.get_name()
                             ]
 
                             def is_contiguous_index(x):
                                 return x == contiguous_index_expr
 
                             return is_contiguous_index(write_index_expr) and all(
-                                is_contiguous_index(
+                                isinstance(user.node, SchedulerNode)
+                                and is_contiguous_index(
                                     user.node._body.reads_name2expr[
-                                        scheduler_node.get_name()
+                                        scheduler_buffer.get_name()
                                     ],
                                 )
-                                for user in scheduler_node.users
+                                for user in scheduler_buffer.users
                             )
 
                         if not (
                             global_buffer_layout.is_contiguous()
-                            and not scheduler_node.is_reduction()
-                            and is_all_write_read_contiguous(scheduler_node)
+                            and is_all_write_read_contiguous()
                         ):
                             continue
                         # Local Buffer is a view of global buffer
@@ -3947,7 +3944,7 @@ class CppScheduling(BaseScheduling):
                                 if local_buffer_layout == local_buf.layout and all(
                                     all(
                                         user.node.get_name() in visited_scheduler_nodes
-                                        for user in V.graph.scheduler.name_to_node[
+                                        for user in V.graph.scheduler.name_to_buf[
                                             global_buffer.name
                                         ].users
                                     )
@@ -4068,7 +4065,9 @@ class CppScheduling(BaseScheduling):
         _, (_, rnumel) = template_node.group
         assert rnumel == ()
         ctb: ir.CppTemplateBuffer = cast(ir.CppTemplateBuffer, template_node.node)
-        epilogue_ir_nodes: List[Optional[ir.Buffer]] = [n.node for n in epilogue_nodes]
+        epilogue_ir_nodes: List[Optional[ir.Operation]] = [
+            n.node for n in epilogue_nodes
+        ]
         assert all(
             isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
         ), "Epilogue nodes must all be instances of ir.ComputedBuffer"

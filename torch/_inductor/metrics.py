@@ -8,11 +8,11 @@ import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-
 from typing import Dict, List, Set, Tuple, TYPE_CHECKING, Union
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
+
 
 # Prevent circular import
 if TYPE_CHECKING:
@@ -90,6 +90,7 @@ class CachedMetricsDeltas:
     ir_nodes_pre_fusion: int
     cpp_to_dtype_count: int
     num_bytes_accessed: int
+    num_matches_for_scatter_upon_const_tensor: int
 
 
 def get_metric_fields():
