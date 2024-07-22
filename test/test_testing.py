@@ -1395,7 +1395,7 @@ class TestMakeTensor(TestCase):
     )
 
     @supported_dtypes
-    @parametrize("shape", [tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
+    @parametrize("shape", [(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
     @parametrize("splat_shape", [False, True])
     def test_smoke(self, dtype, device, shape, splat_shape):
         t = torch.testing.make_tensor(*shape if splat_shape else shape, dtype=dtype, device=device)
@@ -1426,7 +1426,7 @@ class TestMakeTensor(TestCase):
 
     @supported_dtypes
     @parametrize("noncontiguous", [False, True])
-    @parametrize("shape", [tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
+    @parametrize("shape", [(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
     def test_noncontiguous(self, dtype, device, noncontiguous, shape):
         numel = functools.reduce(operator.mul, shape, 1)
 
@@ -2216,7 +2216,7 @@ class TestImports(TestCase):
     @classmethod
     def _check_python_output(cls, program) -> str:
         return subprocess.check_output(
-            [sys.executable, "-W", "all", "-c", program],
+            [sys.executable, "-W", "always", "-c", program],
             stderr=subprocess.STDOUT,
             # On Windows, opening the subprocess with the default CWD makes `import torch`
             # fail, so just set CWD to this script's directory
@@ -2232,7 +2232,7 @@ class TestImports(TestCase):
                            "torch.testing._internal.distributed.",  # just fails
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal.fx",  # depends on onnx-script
-                           "torch._inductor.triton_helpers",  # depends on triton
+                           "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801

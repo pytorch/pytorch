@@ -32,8 +32,8 @@
 
 #include <torch/csrc/jit/ir/constants.h>
 
-#include <c10/util/Optional.h>
 #include <c10/util/hash.h>
+#include <optional>
 
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
@@ -292,7 +292,7 @@ struct Environment {
     if (msg != runner->error_messages.end()) {
       return msg->second();
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
 
@@ -502,42 +502,42 @@ struct Environment {
           {"len",
            makeMagic(
                "__len__",
-               std::make_shared<BuiltinFunction>(aten::len, at::nullopt))},
+               std::make_shared<BuiltinFunction>(aten::len, std::nullopt))},
           {"hex",
            makeMagic(
                "__hex__",
-               std::make_shared<BuiltinFunction>(aten::hex, at::nullopt))},
+               std::make_shared<BuiltinFunction>(aten::hex, std::nullopt))},
           {"oct",
            makeMagic(
                "__oct__",
-               std::make_shared<BuiltinFunction>(aten::oct, at::nullopt))},
+               std::make_shared<BuiltinFunction>(aten::oct, std::nullopt))},
           {"round",
            makeMagic(
                "__round__",
-               std::make_shared<BuiltinFunction>(aten::round, at::nullopt))},
-          {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
-          {"id", std::make_shared<BuiltinFunction>(prim::id, at::nullopt)},
-          {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
-          {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
-          {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
-          {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
-          {"any", std::make_shared<BuiltinFunction>(aten::any, at::nullopt)},
+               std::make_shared<BuiltinFunction>(aten::round, std::nullopt))},
+          {"hash", std::make_shared<BuiltinFunction>(aten::hash, std::nullopt)},
+          {"id", std::make_shared<BuiltinFunction>(prim::id, std::nullopt)},
+          {"min", std::make_shared<BuiltinFunction>(prim::min, std::nullopt)},
+          {"max", std::make_shared<BuiltinFunction>(prim::max, std::nullopt)},
+          {"abs", std::make_shared<BuiltinFunction>(prim::abs, std::nullopt)},
+          {"all", std::make_shared<BuiltinFunction>(aten::all, std::nullopt)},
+          {"any", std::make_shared<BuiltinFunction>(aten::any, std::nullopt)},
           {"divmod",
-           std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
-          {"sum", std::make_shared<BuiltinFunction>(aten::sum, at::nullopt)},
+           std::make_shared<BuiltinFunction>(aten::divmod, std::nullopt)},
+          {"sum", std::make_shared<BuiltinFunction>(aten::sum, std::nullopt)},
           {"list", SpecialFormValue::create(prim::list)},
           {"dict", SpecialFormValue::create(prim::dict)},
-          {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
-          {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
-          {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
-          {"pow", std::make_shared<BuiltinFunction>(aten::pow, at::nullopt)},
+          {"ord", std::make_shared<BuiltinFunction>(aten::ord, std::nullopt)},
+          {"chr", std::make_shared<BuiltinFunction>(aten::chr, std::nullopt)},
+          {"bin", std::make_shared<BuiltinFunction>(aten::bin, std::nullopt)},
+          {"pow", std::make_shared<BuiltinFunction>(aten::pow, std::nullopt)},
           {"range", SpecialFormValue::create(prim::range)},
           {"zip", SpecialFormValue::create(prim::zip)},
           {"enumerate", SpecialFormValue::create(prim::enumerate)},
           {"rangelist",
-           std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
+           std::make_shared<BuiltinFunction>(prim::rangelist, std::nullopt)},
           {"sorted",
-           std::make_shared<BuiltinFunction>(aten::sorted, at::nullopt)},
+           std::make_shared<BuiltinFunction>(aten::sorted, std::nullopt)},
           // Only AssertionError is bound so that we can use it from emitAssert,
           // all other exceptions should be resolved at the Python level
           {"AssertionError",
@@ -1267,7 +1267,7 @@ struct to_ir {
               {});
           auto refinements = RefinementSet(findIsNoneRefinements(
               cond_op.lhs(), lhs_val, cond_op.rhs(), rhs_val, expr.kind()));
-          return CondValue(cond_value, refinements, c10::nullopt);
+          return CondValue(cond_value, refinements, std::nullopt);
         }
       } break;
       default: {
@@ -1294,7 +1294,7 @@ struct to_ir {
           }
         }
         auto expr_out = emitToBool(expr.range(), emitExpr(expr));
-        std::optional<bool> static_if = c10::nullopt;
+        std::optional<bool> static_if = std::nullopt;
         auto kind = expr_out->node()->kind();
         if (kind == aten::is_scripting) {
           static_if = true;
@@ -2291,7 +2291,7 @@ struct to_ir {
     Value* result =
         graph->insertNode(graph->createIsInstance(lhs_val, rhs_types))
             ->output();
-    return CondValue(result, std::move(refinement), c10::nullopt);
+    return CondValue(result, std::move(refinement), std::nullopt);
   }
 
   void emitIf(const If& stmt) {
@@ -2633,8 +2633,7 @@ struct to_ir {
       case '^':
         return use_inplace_op ? aten::bitwise_xor : aten::__xor__;
       case TK_LSHIFT:
-        // NOLINTNEXTLINE(bugprone-branch-clone)
-        return use_inplace_op ? aten::__lshift__ : aten::__lshift__;
+        return use_inplace_op ? aten::__ilshift__ : aten::__lshift__;
       case TK_RSHIFT:
         return use_inplace_op ? aten::__irshift__ : aten::__rshift__;
       case TK_POW:
@@ -2752,7 +2751,7 @@ struct to_ir {
           getAugOp(stmt, lhs->type()),
           /*args=*/{lhs, rhs},
           /*kwargs=*/{},
-          /*self=*/c10::nullopt);
+          /*self=*/std::nullopt);
     }
   }
 
@@ -2945,7 +2944,7 @@ struct to_ir {
       args.push_back(rhs);
       makeMagic(
           "__setitem__",
-          std::make_shared<BuiltinFunction>(aten::_set_item, at::nullopt))
+          std::make_shared<BuiltinFunction>(aten::_set_item, std::nullopt))
           ->call(stmtRange, method, args, {}, 0);
     }
   }
@@ -2968,7 +2967,7 @@ struct to_ir {
     auto outputs = rhs_output->asTuple(
         rhs_loc,
         method,
-        starred_unpack ? c10::nullopt : std::optional<size_t>{n_binders});
+        starred_unpack ? std::nullopt : std::optional<size_t>{n_binders});
     if (outputs.size() < n_binders) {
       throw ErrorReport(tl)
           << "need " << (starred_unpack ? "at least " : "") << n_binders
@@ -4110,7 +4109,7 @@ struct to_ir {
     auto val =
         asSimple(makeMagic(
                      magicMethod,
-                     std::make_shared<BuiltinFunction>(opSymbol, at::nullopt))
+                     std::make_shared<BuiltinFunction>(opSymbol, std::nullopt))
                      ->call(tree->range(), method, named_values, {}, 0));
 
     // if we emitted the unary op and not some other overloaded function,
@@ -4362,7 +4361,7 @@ struct to_ir {
 
     return asSimple(
         makeMagic(
-            overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
+            overload, std::make_shared<BuiltinFunction>(kind, std::nullopt))
             ->call(tree->range(), method, named_values, {}, 0));
   }
 
@@ -4790,17 +4789,17 @@ struct to_ir {
     }
 
     if (sliceable->type()->cast<TupleType>()) {
-      std::vector<at::optional<NamedValue>> tuple_args;
+      std::vector<std::optional<NamedValue>> tuple_args;
       // since we are only dealing with tuple slicing, we try to keep
       // tuple args separate for now
       tuple_args.reserve(3);
 
       start ? tuple_args.emplace_back(start)
-            : tuple_args.emplace_back(c10::nullopt);
+            : tuple_args.emplace_back(std::nullopt);
       end ? tuple_args.emplace_back(end)
-          : tuple_args.emplace_back(c10::nullopt);
+          : tuple_args.emplace_back(std::nullopt);
       step ? tuple_args.emplace_back(step)
-           : tuple_args.emplace_back(c10::nullopt);
+           : tuple_args.emplace_back(std::nullopt);
 
       return emitTupleSlice(loc, args[0], tuple_args);
     }
@@ -4886,7 +4885,7 @@ struct to_ir {
     };
     std::vector<int64_t> dims(subscript_exprs.size());
     std::vector<std::optional<Value*>> exprs(
-        subscript_exprs.size(), c10::nullopt);
+        subscript_exprs.size(), std::nullopt);
 
     auto handle_indexing = [&](const Expr& subscript_expr,
                                int expr_idx,
@@ -5170,7 +5169,7 @@ struct to_ir {
   Value* emitTupleSlice(
       const SourceRange& loc,
       const NamedValue& tuple_val,
-      const std::vector<at::optional<NamedValue>>& tuple_args) {
+      const std::vector<std::optional<NamedValue>>& tuple_args) {
     auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
     int64_t tuple_len = tuple_type->elements().size();
     auto beg_val = tuple_args[0];
@@ -5224,14 +5223,14 @@ struct to_ir {
         auto s_tuple_val =
             sv->asTupleValue(val_range, method)->asValue(val_range, method);
         const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
-        std::vector<at::optional<NamedValue>> tuple_args;
+        std::vector<std::optional<NamedValue>> tuple_args;
         tuple_args.reserve(3);
         if (slice.start().present()) {
           auto begin = NamedValue(
               val_range, "begin", emitExpr(Expr(slice.start().get())));
           tuple_args.emplace_back(begin);
         } else {
-          tuple_args.emplace_back(c10::nullopt);
+          tuple_args.emplace_back(std::nullopt);
         }
 
         if (slice.end().present()) {
@@ -5239,7 +5238,7 @@ struct to_ir {
               NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
           tuple_args.emplace_back(end);
         } else {
-          tuple_args.emplace_back(c10::nullopt);
+          tuple_args.emplace_back(std::nullopt);
         }
 
         if (slice.step().present()) {
@@ -5247,7 +5246,7 @@ struct to_ir {
               NamedValue(val_range, "step", emitExpr(Expr(slice.step().get())));
           tuple_args.emplace_back(step);
         } else {
-          tuple_args.emplace_back(c10::nullopt);
+          tuple_args.emplace_back(std::nullopt);
         }
         auto tupleSliceValue =
             emitTupleSlice(val_range, s_tuple_val, tuple_args);
@@ -5327,7 +5326,7 @@ struct FunctionResolver : public Resolver {
 CompilationUnit::CompilationUnit(const std::string& source)
     : CompilationUnit() {
   // calles the define with native resolver to generate the graph for functions
-  define(c10::nullopt, source, nativeResolver(), nullptr);
+  define(std::nullopt, source, nativeResolver(), nullptr);
 }
 
 // This pair represents a pair of functions (getter and setter) obtained from

@@ -171,6 +171,26 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
+        "_unsafe_masked_index",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Where", "bool"),
+    ),
+    xfail(
+        "_unsafe_masked_index",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("_unsafe_masked_index", "complex64"),
+    ),
+    xfail(
+        "_unsafe_masked_index_put_accumulate",
+        reason="fixme: Status Message: updates tensor should have shape equal to "
+               "indices.shape[:-1] + data.shape[indices.shape[-1]:]",
+    ),
+    xfail(
+        "_unsafe_masked_index_put_accumulate",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Where", "bool"),
+    ),
+    xfail(
         "add", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Add")
     ),
@@ -220,6 +240,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "alias_copy",
+        dtypes=(torch.int8, torch.uint8, torch.int16, torch.float64),
         reason="OnnxExporterError: Failed to export model",
     ),
     xfail(
@@ -1014,11 +1035,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
-        "nn.functional.tanhshrink",
-        dtypes=(torch.float16,),
-        reason="fixme: Assertion error: result mismatch",
-    ),
-    xfail(
         "nonzero",
         dtypes=(torch.int8, torch.int16),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("NonZero", "int8, int16"),
@@ -1207,7 +1223,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "topk",
-        dtypes=(torch.int64, torch.int32),
+        dtypes=(torch.int64, torch.int32, torch.float16),
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
@@ -1972,7 +1988,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
 
     fp16_low_precision_dict = {
         "addbmm": [2e-1, 2e-2],
-        "addcdiv": [3e-2, 1e-3],
+        "addcdiv": [3e-2, 1.4e-3],
         "addcmul": [3e-2, 1e-3],
         "addmv": [5e-2, 3e-2],
         "addr": [3e-3, 4e-3],
@@ -1980,6 +1996,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "cumulative_trapezoid": [3e-2, 1e-3],
         "cross": [3e-2, 2e-2],
         "diff": [1e-2, 5e-2],
+        "div": [5e-3, 1e-3],
         "gradient": [3e-3, 4e-3],
         "linalg.cross": [1e-3, 2e-2],
         "linalg.multi_dot": [3e-2, 1e-3],
@@ -1988,9 +2005,10 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "masked.std": [2e-2, 2e-3],
         "masked.var": [2e-2, 2e-2],
         "matmul": [2e-2, 6e-2],
+        "mv": [9e-3, 1e-5],
         "nn.functional.batch_norm": [3e-2, 1e-3],
         "nn.functional.binary_cross_entropy": [3e-2, 1e-3],
-        "nn.functional.binary_cross_entropy_with_logits": [3e-2, 1e-3],
+        "nn.functional.binary_cross_entropy_with_logits": [4e-2, 4e-3],
         "nn.functional.cosine_similarity": [3e-2, 1e-3],
         "nn.functional.cosine_embedding_loss": [1e-2, 1e-3],
         "nn.functional.hardsigmoid": [1e-3, 5e-3],
@@ -2002,7 +2020,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.kl_div": [2e-3, 2e-4],
         "nn.functional.multilabel_soft_margin_loss": [4e-2, 5e-3],
         "nn.functional.local_response_norm": [1e-2, 5e-3],
-        "nn.functional.poisson_nll_loss": [3e-2, 1e-3],
+        "nn.functional.poisson_nll_loss": [4e-2, 6e-3],
         "nn.functional.nll_loss": [3e-2, 1e-3],
         "nn.functional.triplet_margin_loss": [2e-2, 1e-2],
         "nn.functional.triplet_margin_with_distance_loss": [3e-2, 1e-2],

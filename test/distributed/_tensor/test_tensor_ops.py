@@ -628,6 +628,33 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(hits, 1)
         self.assertEqual(misses, 2)
 
+    @with_comms
+    def test_slice(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))  # 1D mesh
+        comm_mode = CommDebugMode()
+
+        shard_spec = [Shard(1)]
+        global_tensor = torch.randn(8, 16, requires_grad=True)
+        sharded_dtensor = distribute_tensor(global_tensor, mesh, shard_spec)
+
+        global_out = global_tensor[:, 8:]
+        with comm_mode:
+            sharded_out = sharded_dtensor[:, 8:]
+
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+
+        global_out.backward(gradient=torch.ones_like(global_out))
+        with comm_mode:
+            sharded_out_grad = torch.distributed._tensor.ones(
+                sharded_out.shape, device_mesh=mesh, placements=[Shard(1)]
+            )
+            sharded_out.backward(gradient=sharded_out_grad)
+
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+
+        self.assertEqual(sharded_out.full_tensor(), global_out)
+        self.assertEqual(sharded_dtensor.grad.full_tensor(), global_tensor.grad)
+
 
 if __name__ == "__main__":
     run_tests()
