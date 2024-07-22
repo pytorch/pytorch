@@ -69,7 +69,7 @@ class TestPipeline(FSDPTest):
         # Save state_dict
         model_state_dict, optim_state_dict = get_state_dict(model, optimizers=optim)
         saved_state_dict = {"model": model_state_dict, "optim": optim_state_dict}
-        dcp.save_state_dict(
+        dcp.save(
             state_dict=saved_state_dict,
             storage_writer=dcp.FileSystemWriter(pipeline_dir),
         )
@@ -80,7 +80,7 @@ class TestPipeline(FSDPTest):
 
         # Load the checkpoint
         model_state_dict, optim_state_dict = get_state_dict(model, optimizers=optim)
-        dcp.load_state_dict(
+        dcp.load(
             {"model": model_state_dict, "optim": optim_state_dict},
             storage_reader=dcp.FileSystemReader(pipeline_dir),
         )

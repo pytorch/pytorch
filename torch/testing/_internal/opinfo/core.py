@@ -680,10 +680,10 @@ class OpInfo:
     # the following metadata are test directives for skipping or modifying tests
 
     # information about which tests to skip
-    skips: Tuple = tuple()
+    skips: Tuple = ()
 
     # decorators to apply to generated tests
-    decorators: Tuple = tuple()
+    decorators: Tuple = ()
 
     # the following are pointers to functions to generate certain classes of inputs
 
@@ -728,6 +728,8 @@ class OpInfo:
     # dtypes this function is expected to work with on ROCM
     dtypesIfROCM: _dispatch_dtypes = None
 
+    dtypesIfHpu: _dispatch_dtypes = None
+
     # dtypes this function is expected to work with on XPU
     dtypesIfXPU: _dispatch_dtypes = None
 
@@ -739,6 +741,8 @@ class OpInfo:
 
     # backward dtypes this function is expected to work with on ROCM
     backward_dtypesIfROCM: _dispatch_dtypes = None
+
+    backward_dtypesIfHpu: _dispatch_dtypes = None
 
     # the following metadata describes the operators out= support
 
@@ -955,6 +959,16 @@ class OpInfo:
                 else self.dtypes
             )
         )
+        self.backward_dtypesIfHpu = (
+            set(self.backward_dtypesIfHpu)
+            if self.backward_dtypesIfHpu is not None
+            else (
+                self.backward_dtypes
+                if self.backward_dtypes is not None
+                else self.dtypes
+            )
+        )
+
         self.backward_dtypes = (
             set(self.backward_dtypes)
             if self.backward_dtypes is not None
@@ -971,6 +985,10 @@ class OpInfo:
         )
         self.dtypesIfXPU = (
             set(self.dtypesIfXPU) if self.dtypesIfXPU is not None else self.dtypesIfCUDA
+        )
+
+        self.dtypesIfHpu = (
+            set(self.dtypesIfHpu) if self.dtypesIfHpu is not None else self.dtypes
         )
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
@@ -1388,6 +1406,8 @@ class OpInfo:
             return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
         if device_type == "xpu":
             return self.dtypesIfXPU
+        if device_type == "hpu":
+            return self.dtypesIfHpu
         return self.dtypes
 
     def supported_backward_dtypes(self, device_type):
@@ -1404,6 +1424,8 @@ class OpInfo:
                 if TEST_WITH_ROCM
                 else self.backward_dtypesIfCUDA
             )
+        elif device_type == "hpu":
+            backward_dtype = self.backward_dtypesIfHpu
         else:
             backward_dtypes = self.backward_dtypes
 
@@ -1475,7 +1497,7 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
     # TODO(@heitorschueroff) Once all reduction operators are using ReductionOpInfo
     # use op_info.generate_args_kwargs directly.
     generate_args_kwargs = kwargs.get(
-        "generate_args_kwargs", lambda *args, **kwargs: (yield tuple(), {})
+        "generate_args_kwargs", lambda *args, **kwargs: (yield (), {})
     )
 
     for t in _generate_reduction_inputs(device, dtype, requires_grad):
@@ -1555,7 +1577,7 @@ class ReductionOpInfo(OpInfo):
         # kwargs to use when calling the op. This is required for operators that
         # have other required parameters besides the input tensor.
         generate_args_kwargs: Callable = lambda t, dim=None, keepdim=False: (
-            yield tuple(),
+            yield (),
             {},
         ),
         # Options from the OpInfo base class
@@ -2160,7 +2182,7 @@ class BinaryUfuncInfo(OpInfo):
                 "test_numpy_refs",
             ),
         )
-        kwargs["skips"] = kwargs.get("skips", tuple()) + common_skips
+        kwargs["skips"] = kwargs.get("skips", ()) + common_skips
         super().__init__(
             name,
             sample_inputs_func=sample_inputs_func,
