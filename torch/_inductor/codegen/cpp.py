@@ -1651,14 +1651,14 @@ class CppKernel(Kernel):
         indirect = free_symbol_is_type(expr, SymT.TMP)
         if indirect:
             # indexing in compute
-            csevar = ops.index_expr(expr, torch.int32).value
+            csevar = ops.index_expr(expr, torch.int64).value
             buffer = V.kernel.compute
         else:
             # indexing in loads
             prior_compute = V.kernel.compute
             try:
                 V.kernel.compute = self.loads
-                csevar = ops.index_expr(expr, torch.int32).value
+                csevar = ops.index_expr(expr, torch.int64).value
             finally:
                 V.kernel.compute = prior_compute
             buffer = self.loads
