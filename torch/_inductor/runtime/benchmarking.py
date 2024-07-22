@@ -3,7 +3,7 @@ import random
 import time
 from functools import cached_property
 from statistics import median
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import torch
 from torch._dynamo.utils import counters
@@ -113,7 +113,9 @@ class LazyBenchmark:
 class Benchmarker:
     def __init__(self) -> None:
         self.memory_cache: Dict[str, float] = {}
-        self.kwargs_hash_to_futures_gpu: Dict[str, Tuple[Callable[[], Any], str]] = {}
+        self.kwargs_hash_to_futures_gpu: Dict[
+            str, List[Tuple[Callable[[], Any], str]]
+        ] = {}
 
     @cached_property
     def L2_cache_size(self) -> int:
@@ -603,8 +605,8 @@ class Benchmarker:
         # from the lazy benchmark queue and as such any memory referenced by _callable
         # would remain allocated
         key = str(hash(_callable) + random.randint(-(2**100), 2**100)) + kwargs_hash
-        self.kwargs_hash_to_futures_gpu[kwargs_hash] = (
-            self.kwargs_hash_to_futures_gpu.get(kwargs_hash, []) + [(_callable, key)]
+        self.kwargs_hash_to_futures_gpu.setdefault(kwargs_hash, []).append(
+            (_callable, key)
         )
 
         def benchmark() -> float:
@@ -732,9 +734,12 @@ class Benchmarker:
         self,
         interleaved_event_pairs: List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]],
     ) -> List[float]:
+        deinterleaved_event_pairs: Iterator[
+            List[Tuple[torch.cuda.Event, torch.cuda.Event]]
+        ] = zip(*interleaved_event_pairs)
         return [
             self.get_min_timing_ms(event_pairs)
-            for event_pairs in zip(*interleaved_event_pairs)
+            for event_pairs in deinterleaved_event_pairs
         ]
 
 

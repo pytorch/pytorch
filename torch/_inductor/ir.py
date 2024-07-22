@@ -68,7 +68,7 @@ from .dependencies import (
     var_builder,
 )
 from .ops_handler import OpCounterCSE
-from .runtime.benchmarking import benchmarker
+from .runtime.benchmarking import benchmarker, LazyBenchmark
 from .runtime.hints import ReductionHint
 from .utils import (
     argsort,
@@ -3844,7 +3844,7 @@ class ChoiceCaller:
         self.layout = layout
         self.input_nodes = input_nodes
 
-    def benchmark(self, *args, out) -> float:
+    def benchmark(self, *args, out) -> Union[LazyBenchmark, float]:
         algo = self.to_callable()
         return benchmarker.lazy_benchmark(
             algo, args, {"out": out}, pruning_key="max-autotune-gemm"
