@@ -26,6 +26,7 @@ class TestModule(TestCase):
     rel_tol = 1e-5
 
     def setUp(self):
+        TestCase.setUp(self)
         # reset dynamo cache to avoid issues like
         # https://github.com/pytorch/pytorch/issues/125967#issuecomment-2118483919
         # which depends on test order.
