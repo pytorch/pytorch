@@ -5,12 +5,12 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from train import AHTrain
+from train_decision import AHTrainDecisionTree
 
-from torch._inductor.fx_passes.pad_mm import pad_mm_operations
+from torch._inductor.autoheuristic.autoheuristic_utils import pad_mm_operations
 
 
-class AHTrainPadMM(AHTrain):
+class AHTrainDecisionTreePadMM(AHTrainDecisionTree):
     def __init__(self):
         super().__init__()
 
@@ -23,5 +23,5 @@ class AHTrainPadMM(AHTrain):
 
 
 if __name__ == "__main__":
-    train = AHTrainPadMM()
+    train = AHTrainDecisionTreePadMM()
     train.generate_heuristic()
