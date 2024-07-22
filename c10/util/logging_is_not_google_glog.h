@@ -52,7 +52,7 @@ class C10_API LoggerVoidify {
   LoggerVoidify() = default;
   // This has to be an operator with a precedence lower than << but
   // higher than ?:
-  void operator&(const std::ostream& s) {}
+  void operator&(const std::ostream& s [[maybe_unused]]) {}
 };
 
 // Log a message and terminate.
