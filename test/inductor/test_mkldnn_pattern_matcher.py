@@ -2575,7 +2575,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     self._test_code_common(mod, (x,), include_ops, exclude_ops)
 
     @skipIfNoDynamoSupport
-    def test_woq_int8(self):
+    def test_woq_int8_v1(self):
         class M(torch.nn.Module):
             def forward(self, x, weight, scales):
                 return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
@@ -2604,6 +2604,34 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 atol=0.001,
                 rtol=0.07,
             )
+
+    @skipIfNoDynamoSupport
+    def test_woq_int8_v2(self):
+        class M(torch.nn.Module):
+            def forward(self, x, weight, scales):
+                return (
+                    torch.matmul(x, weight.permute([1, 0]).to(dtype=x.dtype)) * scales
+                )
+
+        mod = M().eval()
+        x_shape = (1, 256)
+        w_shape = (12, 256)
+        s_shape = 12
+        x = torch.randn(x_shape, dtype=torch.bfloat16)
+        w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
+        s = torch.randn(s_shape, dtype=torch.float32)
+
+        def matcher_check_fn():
+            self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
+
+        self._test_common(
+            mod,
+            (x, w, s),
+            matcher_check_fn=matcher_check_fn,
+            check_quantization=False,
+            atol=0.001,
+            rtol=0.07,
+        )
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})

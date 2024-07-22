@@ -1471,7 +1471,8 @@ def _register_woq_lowering(pattern, computation_woq, computation_reshape=None):
         scales = kwargs["scales"]
         counters["inductor"]["woq_matcher_count"] += 1
         counters["inductor"]["woq_matcher_nodes"] += len(match.nodes)
-        if scales.dtype == torch.float32:
+        scales_dtype = scales.dtype
+        if scales_dtype == torch.float32:
             scales = L[prims.convert_element_type.default](scales, torch.bfloat16)
         if computation_reshape:
             out_features = weight.get_size()[0]
@@ -1485,7 +1486,7 @@ def _register_woq_lowering(pattern, computation_woq, computation_reshape=None):
             func = L[computation_reshape](func2, out_shape)
         else:
             func = L[computation_woq](x, weight, scales)
-        if scales.dtype == torch.float32:
+        if scales_dtype == torch.float32:
             func = L[prims.convert_element_type.default](func, torch.float32)
         return func
 
