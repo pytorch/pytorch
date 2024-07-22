@@ -1,7 +1,7 @@
 #include <c10/core/Allocator.h>
-#include <c10/util/Optional.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/llvmMathExtras.h>
+#include <optional>
 
 #include <deque>
 #include <mutex>
@@ -258,7 +258,6 @@ struct CachingHostAllocatorImpl {
   }
 
   virtual void process_events() {
-
     while (true) {
       // Avoid calling cudaEventDestroy while holding a mutex, so move
       // intermediate events out of the lock into this object.
@@ -350,7 +349,7 @@ struct CachingHostAllocatorImpl {
 
 template <typename T>
 struct CachingHostAllocatorInterface : public at::Allocator {
-  CachingHostAllocatorInterface() :impl_(std::make_unique<T>()) {}
+  CachingHostAllocatorInterface() : impl_(std::make_unique<T>()) {}
 
   at::DataPtr allocate(size_t size) override {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for allocate");

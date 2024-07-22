@@ -233,7 +233,7 @@ TEST(TestXNNPackOps, TestConvolution2dMultiThreaded) {
       {weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
 
   auto context = at::native::xnnpack::XNNPackConv2dOpContext::create_context(
-      std::move(weights_cpu), std::move(bias_cpu), {1, 1}, {2, 2}, {1, 1}, groups, c10::nullopt, c10::nullopt);
+      std::move(weights_cpu), std::move(bias_cpu), {1, 1}, {2, 2}, {1, 1}, groups, std::nullopt, std::nullopt);
   std::atomic<int64_t> count{0};
   int64_t num_workers = 5;
   std::mutex lock;
