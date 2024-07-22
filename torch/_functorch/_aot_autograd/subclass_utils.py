@@ -237,7 +237,6 @@ def wrap_tensor_subclasses_maybe_joint(
         wrapped_primals = wrap_tensor_subclasses(
             primals,
             subclass_metas=meta.subclass_inp_meta,
-            num_tokens=len(meta.tokens),
         )
         wrapped_tangents = wrap_tensor_subclasses(
             tangents, subclass_metas=meta.subclass_tangent_meta
@@ -247,7 +246,6 @@ def wrap_tensor_subclasses_maybe_joint(
         wrapped_args = wrap_tensor_subclasses(
             unwrapped_args,
             subclass_metas=meta.subclass_inp_meta,
-            num_tokens=len(meta.tokens),
         )
         return wrapped_args
 

@@ -438,15 +438,15 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
                     return DoubleTensor(out_inner)
 
-            def fn(x):
-                return torch.ops._mylib.foo(x)
+            def fn(x, y):
+                return torch.ops._mylib.foo(x) + y
 
-            ins = (DoubleTensor(torch.tensor([1.0, 2.0, 3.0])),)
+            ins = DoubleTensor(torch.tensor([1.0, 2.0, 3.0])), torch.tensor(
+                [4.0, 5.0, 6.0]
+            )
             ref_out = fn(*ins)
-
             compiled_fn = torch.compile(fn, backend="aot_eager")
             out = compiled_fn(*ins)
-
             self.assertEqual(ref_out, out)
 
 

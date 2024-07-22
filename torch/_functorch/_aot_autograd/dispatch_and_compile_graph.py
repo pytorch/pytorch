@@ -73,28 +73,29 @@ def aot_dispatch_base_graph(
         keep_data_input_mutations=aot_config.keep_inference_input_mutations,
     )
 
-    fn_to_trace, updated_flat_args = create_functionalized_fn(
-        fn_to_trace,
-        flat_args,
-        meta=fw_metadata,
-        aot_config=aot_config,
-        trace_joint=False,
-    )
-
     # TODO: replace with AOTDispatchSubclassWrapper once we refactor
     # fn_input_mutations_to_outputs and create_functionalized_fn
     # into CompilerWrappers.
     (
         fn_to_trace,
-        updated_flat_args_subclasses_desugared,
+        updated_flat_args,
         maybe_subclass_meta,
     ) = aot_dispatch_subclass(
         fn_to_trace,
-        updated_flat_args,
+        flat_args,
         is_joint_structure=False,
         meta=fw_metadata,
         fw_only=flat_fn,
     )
+
+    fn_to_trace, updated_flat_args_subclasses_desugared = create_functionalized_fn(
+        fn_to_trace,
+        updated_flat_args,
+        meta=fw_metadata,
+        aot_config=aot_config,
+        trace_joint=False,
+    )
+
     aot_graphs_log.debug(
         "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
         str(aot_config.aot_id),
