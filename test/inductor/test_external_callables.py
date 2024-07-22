@@ -1,9 +1,11 @@
 # Owner(s): ["module: inductor"]
 import torch
+import unittest
 
 from torch._inductor import config
-
 from torch._inductor.test_case import run_tests, TestCase
+
+from torch.testing._internal.common_cuda import TEST_CUDA
 
 
 class MatMulModule(torch.nn.Module):
@@ -48,6 +50,7 @@ class TestInductorExternalCallable(TestCase):
             msg=f"torch.compile(..., external_matmul = {matmul_cpu}) failed",
         )
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")   
     def test_matmul_cuda(self):
         device = torch.device("cuda")
         x = (torch.eye(128, 128) * 2).to(device=device)
