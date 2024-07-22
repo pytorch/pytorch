@@ -3,11 +3,13 @@ import itertools
 import logging
 import typing
 from collections import Counter
-from typing import Dict, List, Set, Union
+from typing import Any, Dict, List, Set, Union
 
 import torch
 import torch._guards
+import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
+from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -24,6 +26,7 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 from .replace_random import replace_random_passes
+
 
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
@@ -201,21 +204,120 @@ class UniformValueConstantFolder(ConstantFolder):
         # see: [constant folding refining of symints]
         self.node_replacements_shapes: Dict[torch.fx.Node, List[int]] = {}
 
+        # initialize symint -> node mapping so that we can
+        # use symint nodes in full constructors
+        self.symint_nodes = _SymHashingDict()
+        for n in self.module.graph.nodes:
+            if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
+                self.symint_nodes[n.meta["val"]] = n
+
+        # reference from torch/_funtorch/partitioners.py:get_default_op_list
+        self.view_op_packets = [
+            aten.squeeze,
+            aten.unsqueeze,
+            aten.alias,
+            aten.view,
+            aten.slice,
+            aten.t,
+            prims.broadcast_in_dim,
+            aten.expand,
+            aten.as_strided,
+            aten.permute,
+        ]
+
+        self.indexing_op_packets = {
+            aten.slice,
+        }
+
+    def _support_dynamic_shape(self):
+        return True
+
     def insertable_tensor_check(self, t: torch.Tensor) -> bool:
-        # TODO - we could also Tensors which get replaced with arange here
-        return (
-            t.numel() != 0
-            and bool((t == t.flatten()[0]).all())
-            and torch._C._has_storage(t)
-            and t.layout == torch.strided
-        )
+        return True
 
     def add_node_replacement(self, node: torch.fx.Node, tensor: torch.Tensor) -> None:
         self.node_replacements[node] = tensor.flatten()[0].item()
+        self.node_replacements_shapes[node] = node.meta["val"].shape
         self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
-        shape = list(tensor.shape)
-        assert all(type(dim) is int for dim in shape)
-        self.node_replacements_shapes[node] = shape
+
+    def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
+        for n in self.module.graph.find_nodes(op="placeholder"):
+            if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
+                env[n] = n.meta["val"]
+            else:
+                env[n] = self.unknown_value
+
+    def _deduce_value(self, node: torch.fx.Node):
+        # deduce value for full-like nodes
+        # 1. for constructors, substitute value is a tensor of size [1]
+        # 2. for view ops/indexing, substitute value is the same as the input
+        # 3. for pointwise ops, run node to get the substitute value
+        # 4. deal with some special ops
+        # otherwise, stop deduce value and return unknown value
+
+        # TODO: cat, more indexing
+        # TODO - do on cpu to avoid syncs
+
+        # single-elem attrs
+        if node.op == "get_attr" or (
+            node.op == "call_function"
+            and node.target == torch.ops.aten.lift_fresh_copy.default
+        ):
+            out = super(ConstantFolder, self).run_node(node)
+            if isinstance(out, torch.Tensor) and out.numel() == 1:
+                return out
+
+        # handle device_put op
+        if node.target == prims.device_put.default:
+            return super(ConstantFolder, self).run_node(node)
+
+        # constructors ops
+        if (
+            node.op == "call_function"
+            and node.target == aten.full.default
+            and len(node.args) == 2
+        ):
+            args, kwargs = self.fetch_args_kwargs_from_env(node)
+            new_args = [[1], args[1]]
+            return aten.full.default(*new_args, **node.kwargs)
+
+        # handle before view ops because this changes value
+        if node.target == aten.view.dtype:
+            return super(ConstantFolder, self).run_node(node)
+
+        # view ops, return input tensor, the first argument
+        if hasattr(node.target, "overloadpacket") and (
+            node.target.overloadpacket in self.view_op_packets
+            or node.target.overloadpacket in self.indexing_op_packets
+        ):
+            assert isinstance(node.args[0], torch.fx.Node)
+            return self.env[node.args[0]]
+
+        # we don't want to return unknown value for symints so that we can
+        # still constant fold through their use in constructors or views
+        # if we see them in a pointwise node (e.g., tensor * symint)
+        # we will bail
+        if "val" in node.meta and isinstance(node.meta["val"], torch.SymInt):
+            return node.meta["val"]
+
+        # pointwise ops
+        if isinstance(node.target, torch._ops.OpOverload) and (
+            torch.Tag.pointwise in node.target.tags
+            or node.target is torch.ops.aten.scalar_tensor.default
+        ):
+            args, kwargs = self.fetch_args_kwargs_from_env(node)
+            flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
+
+            if any(isinstance(inp, torch.SymInt) for inp in flattened_inputs):
+                return self.unknown_value
+
+            # we run the ops with dim 1, so remove memory_format to avoid error
+            kwargs = dict(kwargs)
+            kwargs.pop("memory_format", None)
+
+            return node.target(*args, **kwargs)
+
+        return self.unknown_value
 
 
 @torch.utils._python_dispatch._disable_current_modes()
@@ -262,6 +364,10 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
         if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
             continue
 
+        # TODO - not sure about lossy uint->python value->uint conversions
+        if fake_tensor.dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+            continue
+
         if constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1:
             continue
 
@@ -280,10 +386,24 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             ):
                 torch._check(runtime_size == compile_time_size)
 
+            # replace SymInt as Node before creating a new full node
+            # e.g. (1, s0) -> (1, arg0_1)
+            node_shape = node_replacements_shapes[node]
+            if not all(
+                not isinstance(s, torch.SymInt) or s in cf.symint_nodes
+                for s in node_shape
+            ):
+                continue
+
+            shapes = [
+                cf.symint_nodes[s] if isinstance(s, torch.SymInt) else s
+                for s in node_replacements_shapes[node]
+            ]
+
             # zeros and ones just get traced into full, so we insert those
             new_node = graph.call_function(
                 aten.full.default,
-                args=(node_replacements_shapes[node], value),
+                args=(shapes, value),
                 kwargs={
                     "dtype": fake_tensor.dtype,
                     "layout": torch.strided,

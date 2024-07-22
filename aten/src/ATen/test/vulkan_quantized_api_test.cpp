@@ -1852,8 +1852,8 @@ static void test_quantized_conv_transpose2d(
       output_padding,
       dilation,
       groups,
-      c10::nullopt,
-      c10::nullopt);
+      std::nullopt,
+      std::nullopt);
 
   const auto input_vk_q = at::quantize_per_tensor(
       input.vulkan(), input_scale, input_zero_point, c10::ScalarType::QUInt8);
@@ -2661,8 +2661,8 @@ void test_quantized_conv2d(
         padding,
         dilation,
         groups,
-        c10::nullopt,
-        c10::nullopt);
+        std::nullopt,
+        std::nullopt);
     const auto vulkan_output = callOpByName(
         "vulkan_prepack::run_qconv2d_context",
         "",

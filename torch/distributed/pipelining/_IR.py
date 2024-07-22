@@ -5,7 +5,7 @@ import logging
 import operator
 from collections import defaultdict
 from enum import Enum
-from inspect import Parameter, signature, Signature
+from inspect import Parameter, Signature, signature
 from types import MethodType
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -13,6 +13,7 @@ import torch
 import torch.fx as fx
 from torch.distributed import ProcessGroup
 from torch.export import ExportedProgram
+from torch.export._trace import _export
 from torch.export.unflatten import (
     _assign_attr,
     _AttrKind,
@@ -21,6 +22,7 @@ from torch.export.unflatten import (
 )
 from torch.fx.node import map_aggregate
 from torch.fx.passes.split_module import split_module
+
 from ._backward import _null_coalesce_accumulate, stage_backward
 from ._unflatten import _outline_submodules
 from ._utils import PipeInfo
@@ -770,7 +772,7 @@ class Pipe(torch.nn.Module):
 
         # A list of param referrals for deferred deletion.
         # To be accumulated in `move_param_to_callee`.
-        to_delete = list()
+        to_delete = []
 
         def _recursive_getattr_with_parent(mod, fqn):
             # Returns getattr call given a nested FQN, and the last parent
@@ -1003,11 +1005,14 @@ class Pipe(torch.nn.Module):
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
         try:
-            ep = torch.export.export(
-                mod,
-                example_args,
-                example_kwargs,
-            )
+            with torch.no_grad():
+                ep = _export(
+                    mod,
+                    example_args,
+                    example_kwargs,
+                    strict=True,
+                    pre_dispatch=False,
+                )
         except Exception as e:
             raise RuntimeError(
                 "It seems that we cannot capture your model as a full graph. "
@@ -1176,7 +1181,8 @@ def annotate_split_points(mod: torch.nn.Module, spec: Dict[str, SplitPoint]):
                 predecessor_module = getattr(predecessor_module, atom)
             except AttributeError as e:
                 raise AttributeError(
-                    f'Specified target {qualname} referenced nonexistent module {".".join(atoms[:i+1])}'
+                    f"Specified target {qualname} referenced "
+                    f'nonexistent module {".".join(atoms[: i + 1])}'
                 ) from e
 
         mod_to_wrap = getattr(predecessor_module, atoms[-1])
