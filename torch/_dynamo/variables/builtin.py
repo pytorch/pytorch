@@ -25,7 +25,7 @@ from ..exc import (
 )
 from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
-from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
+from ..source import AttrSource, is_constant_source, TypeSource
 from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
@@ -123,7 +123,6 @@ class BuiltinVariable(VariableTracker):
             chr,
             divmod,
             float,
-            getattr,
             int,
             len,
             max,
@@ -1527,7 +1526,6 @@ class BuiltinVariable(VariableTracker):
         from .. import trace_rules
         from . import (
             ConstantVariable,
-            GetAttrVariable,
             PythonModuleVariable,
             TorchInGraphFunctionVariable,
             UserFunctionVariable,
@@ -1574,40 +1572,8 @@ class BuiltinVariable(VariableTracker):
         else:
             source = None
 
-        if name == "__bases__":
-            try:
-                value = obj.as_python_constant()
-                if isinstance(value, type):
-                    bases = value.__bases__
-                    if source is not None:
-                        tuple_args = [
-                            VariableBuilder(tx, GetItemSource(source, i))(b)
-                            for i, b in enumerate(bases)
-                        ]
-                    else:
-                        tuple_args = [SourcelessBuilder.create(tx, b) for b in bases]
-
-                    return variables.TupleVariable(tuple_args, **options)
-            except NotImplementedError:
-                pass
-
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name)
-        elif isinstance(
-            obj,
-            (
-                variables.TensorVariable,
-                variables.NamedTupleVariable,
-                variables.ConstantVariable,
-                variables.DistributedVariable,
-                variables.UserDefinedClassVariable,
-                variables.UserDefinedObjectVariable,
-            ),
-        ):
-            try:
-                return obj.var_getattr(tx, name)
-            except NotImplementedError:
-                return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchInGraphFunctionVariable):
             # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
             member = getattr(obj.value, name)
@@ -1630,11 +1596,8 @@ class BuiltinVariable(VariableTracker):
                 return SourcelessBuilder.create(tx, member)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable.create(getattr(obj.fn, name))
-        else:
-            try:
-                return obj.var_getattr(tx, name)
-            except NotImplementedError:
-                return GetAttrVariable(obj, name, **options)
+
+        return obj.var_getattr(tx, name)
 
     def call_setattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, val: VariableTracker

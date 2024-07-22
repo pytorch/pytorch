@@ -235,14 +235,20 @@ class TensorVariable(VariableTracker):
                 return SourcelessBuilder.create(tx, example_value)
 
         if not (self.source and self.source.subguards_allowed()):
-            raise NotImplementedError
+            return
+
+        from ..guards import CLOSURE_VARS, GuardBuilder
 
         # For local source, we associate the real value. We use this real value
         # for implementing getattr fallthrough on the variable tracker base class.
 
         # Note - this scope construction is mirrored in guards
         # A subsequent PR will introduce a util.
-        scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
+        scope = {
+            "L": tx.output.local_scope,
+            "G": tx.output.global_scope,
+            **CLOSURE_VARS,
+        }
         try:
             # We raise in case we get a typerror bug w/ SuperSource.
             # SuperSource has bugs in it atm, and can produce code like
@@ -254,22 +260,21 @@ class TensorVariable(VariableTracker):
             raise NotImplementedError from exc
 
         if _input_associated_real_value is None:
-            raise NotImplementedError
+            return
 
         if object_has_getattribute(_input_associated_real_value):
-            raise NotImplementedError
+            return
 
         if get_custom_getattr(_input_associated_real_value):
-            raise NotImplementedError
+            return
 
         real_value = getattr(_input_associated_real_value, name)
         if callable(real_value):
             # Callables have more nuanced handling, and we should let the existing system delegate here.
             # Raising was past behavior and so should always be sound to fall back.
             # Note - at a certain point we may want to handle
-            raise NotImplementedError
+            return
 
-        from ..guards import GuardBuilder
         from .builder import VariableBuilder
 
         attr_source = AttrSource(self.source, name)
@@ -430,9 +435,10 @@ class TensorVariable(VariableTracker):
         if result is None:
             result = self.dynamic_getattr(tx, name)
 
-        if result is None:
-            raise NotImplementedError
-        return result
+        if result is not None:
+            return result
+
+        return super().var_getattr(tx, name)
 
     def has_unpack_var_sequence(self, tx):
         return self.ndim > 0
@@ -1167,9 +1173,9 @@ class NumpyNdarrayVariable(TensorVariable):
             unimplemented(f"TODO: add support for ndarray.{name}")
         elif name in ["__version__"]:
             unimplemented("delegate np.__version__ to NumPy")
-        if result is None:
-            raise NotImplementedError
-        return result
+        if result is not None:
+            return result
+        return super().var_getattr(tx, name)
 
     @staticmethod
     def patch_args(name, args, kwargs):
