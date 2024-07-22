@@ -3017,8 +3017,6 @@ coverage_ignore_classes = [
     "OnnxTestCaseRepro",
     # torch.optim.adadelta
     "Adadelta",
-    # torch.optim.adafactor
-    "Adafactor",
     # torch.optim.adagrad
     "Adagrad",
     # torch.optim.adam
