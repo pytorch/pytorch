@@ -7,7 +7,7 @@ import os
 import torch
 import torch.fx
 from torch.testing._internal.common_utils import TestCase
-
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 class TestDCE(TestCase):
     def _custom_is_impure_node(self, node: torch.fx.Node) -> bool:
@@ -228,12 +228,6 @@ class TestDCE(TestCase):
         """
 
         class TestModule(torch.nn.Module):
-            def __init__(self, *args, **kwargs) -> None:
-                super().__init__(*args, **kwargs)
-                os.environ['MASTER_ADDR'] = '127.0.0.1'
-                os.environ['MASTER_PORT'] = '29500'
-                torch.distributed.init_process_group("gloo", rank=0, world_size=1)
-
             def forward(self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
                 d = torch.ops.aten.mul.Tensor(a, b)
                 e = torch.ops.aten.mul.Tensor(a, c)
@@ -241,5 +235,12 @@ class TestDCE(TestCase):
                 synced_e = torch.ops._c10d_functional.wait_tensor.default(future)  # synced_e is not used
                 return d
 
+        torch.distributed.init_process_group(
+            backend="fake",
+            world_size=2,
+            rank=0,
+            store=FakeStore(),
+        )
         # collective nodes should not be removed because they have side effects.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False, custom=False)
+        torch.distributed.destroy_process_group()
