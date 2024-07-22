@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
@@ -125,12 +126,12 @@ def functional_call(
             raise ValueError(
                 "Expected all elements of parameter_and_buffer_dicts to be dictionaries"
             )
-        all_keys = sorted([k for d in parameter_and_buffer_dicts for k in d.keys()])
-        repeated_keys = []
-        for i in range(len(all_keys)):
-            if i + 1 < len(all_keys) and all_keys[i] == all_keys[i + 1]:
-                repeated_keys.append(all_keys[i])
-        if len(repeated_keys):
+        all_keys = [k for d in parameter_and_buffer_dicts for k in d.keys()]
+        all_keys_counter: Dict[str, int] = defaultdict(int)
+        for k in all_keys:
+            all_keys_counter[k] += 1
+        repeated_keys = [key for key, n in all_keys_counter.items() if n > 1]
+        if len(repeated_keys) > 0:
             raise ValueError(
                 f"{repeated_keys} appeared in multiple dictionaries; behavior of functional call is ambiguous"
             )
