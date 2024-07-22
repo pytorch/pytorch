@@ -57,11 +57,7 @@ struct Sections {
   Section symtab;
   Section strtab;
 
-  const char* readString(
-      CheckedLexer& data,
-      uint64_t encoding,
-      bool is_64bit,
-      uint64_t str_offsets_base) {
+  const char* readString(CheckedLexer& data, uint64_t encoding, bool is_64bit) {
     switch (encoding) {
       case DW_FORM_string: {
         return data.readCString();
@@ -94,7 +90,7 @@ struct Sections {
     debug_info_offsets_.add(start, debug_info_offset, false);
     debug_info_offsets_.add(end, std::nullopt, false);
   }
-  optional<std::string> findSubprogramName(uint64_t address) {
+  std::optional<std::string> findSubprogramName(uint64_t address) {
     if (auto e = symbol_table_.find(address)) {
       return demangle(strtab.string(*e));
     }

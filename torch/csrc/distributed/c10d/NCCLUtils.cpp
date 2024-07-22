@@ -21,7 +21,7 @@ namespace c10d {
 ncclComm_t NCCLComm::getNcclComm() {
   std::unique_lock<std::mutex> lock(mutex_);
   if (aborted_) {
-    auto commFailureMsg = commFailureReason_ != c10::nullopt
+    auto commFailureMsg = commFailureReason_ != std::nullopt
         ? c10::str(" Original reason for failure was: ", *commFailureReason_)
         : "";
     TORCH_CHECK_WITH(
@@ -79,7 +79,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   C10D_NCCL_CHECK(
       ncclCommSplit(
           source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
-      c10::nullopt);
+      std::nullopt);
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
   return comm;
@@ -189,11 +189,11 @@ std::string ncclGetErrorWithVersion(ncclResult_t error) {
 // thrown in the NCCL codebase.
 std::string getNcclErrorDetailStr(
     ncclResult_t error,
-    std::optional<std::string> processGroupFailureReason /* = c10::nullopt */
+    std::optional<std::string> processGroupFailureReason /* = std::nullopt */
 ) {
   // Prioritize failure reason provided by PG NCCL first, as it can abort
   // communicators when it encounters collective timeouts, etc.
-  if (processGroupFailureReason != c10::nullopt) {
+  if (processGroupFailureReason != std::nullopt) {
     return *processGroupFailureReason;
   }
   std::string interpret;
@@ -252,14 +252,14 @@ control_plane::RegisterHandler dumpHandler{
       const std::string includeStackTracesStr = "includestacktraces";
       const std::string onlyActiveStr = "onlyactive";
 
-      std::unordered_map<std::string, bool> expectedParams = {
+      std::unordered_map<std::string, bool> processedParams = {
           {includeCollectivesStr, true},
           {includeStackTracesStr, true},
           {onlyActiveStr, false}};
 
       for (const auto& [paramName, paramValue] : params) {
-        auto it = expectedParams.find(paramName);
-        if (it != expectedParams.end()) {
+        auto it = processedParams.find(paramName);
+        if (it != processedParams.end()) {
           validParamCount++;
           if (paramValue == "true") {
             it->second = true;
@@ -283,10 +283,55 @@ control_plane::RegisterHandler dumpHandler{
       }
       res.setContent(
           dump_nccl_trace(
-              expectedParams[includeCollectivesStr],
-              expectedParams[includeStackTracesStr],
-              expectedParams[onlyActiveStr]),
+              processedParams[includeCollectivesStr],
+              processedParams[includeStackTracesStr],
+              processedParams[onlyActiveStr]),
           "application/octet-stream");
+    }};
+
+control_plane::RegisterHandler jsonDumpHandler{
+    "dump_nccl_trace_json",
+    [](const control_plane::Request& req, control_plane::Response& res) {
+      const auto params = req.params();
+      size_t validParamCount = 0;
+
+      // valid params
+      const std::string includeCollectivesStr = "includecollectives";
+      const std::string onlyActiveStr = "onlyactive";
+
+      std::unordered_map<std::string, bool> processedParams = {
+          {includeCollectivesStr, true}, {onlyActiveStr, false}};
+
+      for (const auto& [paramName, paramValue] : params) {
+        auto it = processedParams.find(paramName);
+        if (it != processedParams.end()) {
+          validParamCount++;
+          if (paramValue == "true") {
+            it->second = true;
+          } else if (paramValue == "false") {
+            it->second = false;
+          } else {
+            res.setStatus(400);
+            res.setContent(
+                "Invalid value for " + paramName +
+                    " valid values are true or false",
+                "text/plain");
+            return;
+          }
+        }
+      }
+      if (validParamCount < params.size()) {
+        res.setStatus(400);
+        res.setContent(
+            "Invalid parameters - unexpected param passed in", "text/plain");
+        return;
+      }
+      res.setStatus(200);
+      res.setContent(
+          dump_nccl_trace_json(
+              processedParams[includeCollectivesStr],
+              processedParams[onlyActiveStr]),
+          "application/json");
     }};
 
 void DebugInfoWriter::write(const std::string& ncclTrace) {
