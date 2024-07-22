@@ -125,7 +125,8 @@ mm_template = TritonTemplate(
 # prevent duplication registration of extern functions
 @functools.lru_cache(None)
 def lazy_register_extern_choice(fn):
-   return ExternKernelChoice(fn)
+    return ExternKernelChoice(fn)
+
 
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
