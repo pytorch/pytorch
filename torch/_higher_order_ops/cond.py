@@ -371,10 +371,10 @@ class CondAutogradOp(torch.autograd.Function):
 def cond_autograd(pred, true_fn, false_fn, operands):
     # A shortcut for the case where all inputs don't require gradient,
     # we skip tracing the forward and backward graph.
-    if all(
-        not t.requires_grad
-        for t in pytree.tree_flatten((pred, operands))[0]
-        if isinstance(t, torch.Tensor)
+    if pytree.tree_all_only(
+        torch.Tensor,
+        lambda t: not t.requires_grad,
+        (pred, operands),
     ):
         with torch._C._AutoDispatchBelowAutograd():
             return cond_op(pred, true_fn, false_fn, operands)
