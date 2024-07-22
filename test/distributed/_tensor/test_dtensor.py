@@ -1,12 +1,13 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import os
+
 from numpy.testing import assert_array_equal
 
 import torch
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-
 from torch.distributed._tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -26,12 +27,12 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.logging_utils import LoggingTestCase
 
 
 c10d_functional = torch.ops.c10d_functional
@@ -536,6 +537,16 @@ class DTensorTest(DTensorTestBase):
         buffer.seek(0)
         reloaded_st = torch.load(buffer)
         self.assertEqual(sharded_tensor, reloaded_st)
+        # Test weights_only load
+        try:
+            torch.serialization.add_safe_globals(
+                [DTensor, DeviceMesh, Shard, DTensorSpec, TensorMeta]
+            )
+            buffer.seek(0)
+            reloaded_st = torch.load(buffer, weights_only=True)
+            self.assertEqual(sharded_tensor, reloaded_st)
+        finally:
+            torch.serialization.clear_safe_globals()
 
 
 class DTensorMeshTest(DTensorTestBase):
@@ -774,7 +785,9 @@ class DTensorMeshTest(DTensorTestBase):
         from torch.distributed._tensor.experimental import implicit_replication
 
         with implicit_replication():
-            out_dt = sharded_dtensor + torch.ones(3, device=self.device_type)
+            # We put the scalar tensor as the left operand so we can test out
+            # when a non-dtensor is a the arg in the args list.
+            out_dt = torch.ones(3, device=self.device_type) + sharded_dtensor
             self.assertEqual(out_dt.placements, [Shard(0)])
             self.assertEqual(out_dt.shape, (4 * self.world_size, 3))
             local_shard = out_dt.to_local()
@@ -792,7 +805,7 @@ class DTensorMeshTest(DTensorTestBase):
         ndim_0_tensor = torch.tensor(1, device=self.device_type)
 
         def add_scalar_tensor_with_dtensor():
-            return sharded_dtensor + ndim_0_tensor
+            return ndim_0_tensor + sharded_dtensor
 
         result = add_scalar_tensor_with_dtensor().to_local()
         self.assertEqual(result, local_tensor + ndim_0_tensor)
@@ -804,8 +817,55 @@ class DTensorMeshTest(DTensorTestBase):
         # automatically turn tensor to DTensor replicate when ndim = 1 and numel = 1
         numel_1_tensor = torch.tensor([1], device=self.device_type)
         self.assertEqual(
-            (sharded_dtensor + numel_1_tensor).to_local(), local_tensor + numel_1_tensor
+            (numel_1_tensor + sharded_dtensor).to_local(), numel_1_tensor + local_tensor
         )
+
+    @with_comms
+    def test_metadata_consistency_check(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        placements = [Shard(0)]
+
+        # Create a local tensor with specific metadata and check dtype change
+        local_tensor = torch.randn(3, 3, requires_grad=True, dtype=torch.float32)
+
+        if self.rank == 0:
+            local_tensor = local_tensor.to(dtype=torch.float64)
+
+        with self.assertRaises(ValueError):
+            DTensor.from_local(local_tensor, device_mesh, placements, run_check=True)
+
+        try:
+            DTensor.from_local(local_tensor, device_mesh, placements, run_check=False)
+        except ValueError:
+            self.fail("Unexpected ValueError raised with run_check=False")
+
+        # Create a local tensor with specific metadata and check requires_grad change
+        local_tensor = torch.randn(3, 3, requires_grad=True, dtype=torch.float32)
+
+        if self.rank == 0:
+            local_tensor.requires_grad = False
+
+        with self.assertRaises(ValueError):
+            DTensor.from_local(local_tensor, device_mesh, placements, run_check=True)
+
+        try:
+            DTensor.from_local(local_tensor, device_mesh, placements, run_check=False)
+        except ValueError:
+            self.fail("Unexpected ValueError raised with run_check=False")
+
+        # Create a local tensor with specific metadata and check stride change
+        local_tensor = torch.randn(3, 4, requires_grad=True, dtype=torch.float32)
+
+        if self.rank == 0:
+            local_tensor = local_tensor.t()  # transpose changes the stride
+
+        with self.assertRaises(ValueError):
+            DTensor.from_local(local_tensor, device_mesh, placements, run_check=True)
+
+        try:
+            DTensor.from_local(local_tensor, device_mesh, placements, run_check=False)
+        except ValueError:
+            self.fail("Unexpected ValueError raised with run_check=False")
 
 
 class TestDTensorPlacementTypes(DTensorTestBase):
@@ -870,6 +930,36 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                     for unpadded_tensor in unpadded_list
                 ]
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
+
+
+class DTensorLogTest(LoggingTestCase):
+    def test_dtensor_log(self):
+        if not torch.distributed.is_available() or not torch.cuda.is_available():
+            return
+
+        env = dict(os.environ)
+        env["TORCH_LOGS"] = "+dtensor"
+        env["RANK"] = "0"
+        env["WORLD_SIZE"] = "1"
+        env["MASTER_PORT"] = "12345"
+        env["MASTER_ADDR"] = "localhost"
+
+        stdout, stderr = self.run_process_no_exception(
+            """\
+import logging
+import torch
+from torch.distributed._tensor import  init_device_mesh, distribute_tensor, Shard
+
+mesh = init_device_mesh("cuda", (1,), mesh_dim_names=("dp",))
+placements = [Shard(0)]
+tensor = torch.randn(12, 8, 8)
+dtensor = distribute_tensor(tensor, mesh, placements)
+dtensor.max()
+""",
+            env=env,
+        )
+        self.assertIn("_dispatch.py", stderr.decode("utf-8"))
+        self.assertIn("redistribute=False", stderr.decode("utf-8"))
 
 
 if __name__ == "__main__":
