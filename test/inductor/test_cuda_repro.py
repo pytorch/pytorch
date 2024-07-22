@@ -29,8 +29,8 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ASAN,
 )
-
 from torch.testing._internal.inductor_utils import skipCUDAIf
+
 
 try:
     try:
@@ -56,6 +56,7 @@ aten = torch.ops.aten
 
 
 class CudaReproTests(TestCase):
+    device = "cuda"
     common = check_model_cuda
 
     def test_index_put_issue(self):

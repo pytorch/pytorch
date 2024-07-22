@@ -1,11 +1,11 @@
 from typing import cast
 
 import torchvision_models as models
-
 from utils import check_for_functorch, extract_weights, GetterReturnType, load_weights
 
 import torch
 from torch import Tensor
+
 
 has_functorch = check_for_functorch()
 

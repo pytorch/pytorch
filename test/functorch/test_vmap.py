@@ -36,7 +36,6 @@ from common_utils import (
 from functorch_additional_op_db import additional_op_db
 
 import functorch
-
 import torch
 import torch.nn.functional as F
 from functorch import grad, grad_and_value, jacfwd, jvp, vjp, vmap
@@ -70,6 +69,7 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 from torch.utils import _pytree as pytree
+
 
 FALLBACK_REGEX = "There is a performance drop"
 
@@ -212,6 +212,29 @@ class TestVmapAPI(TestCase):
         y = torch.randn(5)
         output = vmap(lambda x: vmap(lambda y: x)(y))(x)
         self.assertEqual(output, x.view(3, 1).expand(3, 5))
+
+    def test_checkpoint(self):
+        A = torch.randn((3, 8, 8), dtype=torch.float64, requires_grad=True)
+
+        def get_grad(checkpoint):
+            A.grad = None
+
+            def get_loss(A):
+                ortho_A, _ = torch.func.vmap(torch.linalg.qr)(A)
+                return torch.sum(ortho_A)
+
+            if checkpoint:
+                loss = torch.utils.checkpoint.checkpoint(
+                    get_loss, A, use_reentrant=False
+                )
+            else:
+                loss = get_loss(A)
+            loss.backward()
+            return A.grad
+
+        expected = get_grad(checkpoint=False)
+        result = get_grad(checkpoint=True)
+        self.assertEqual(result, expected)
 
     def test_unsupported_op_err_msg(self):
         # Unsupported view op
