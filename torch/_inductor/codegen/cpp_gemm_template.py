@@ -7,22 +7,22 @@ from unittest.mock import patch
 
 import torch
 import torch.utils
+
 from ..._dynamo.utils import counters
 from .. import config, ir, lowering as L
-
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
 from ..virtualized import ops, V
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
-
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
     DTYPE_TO_CPP,
     GemmBlocking,
     get_gemm_template_output_and_compute_dtype,
 )
+
 
 GEMM_TEMPLATE = r"""
 {{template.header().getvalue()}}
@@ -330,10 +330,11 @@ class CppPackedGemmTemplate(CppTemplate):
         if best_blocking is None:
             for n_factor in factors:
                 m_factor = self.num_threads // n_factor
-                blocking = get_blocking(
-                    m_factor, n_factor, 1, m_blocks, n_blocks, k_blocks
-                )
-                best_blocking = get_better_blocking(blocking, best_blocking)
+                if n_blocks >= n_factor or m_blocks >= m_factor:
+                    blocking = get_blocking(
+                        m_factor, n_factor, 1, m_blocks, n_blocks, k_blocks
+                    )
+                    best_blocking = get_better_blocking(blocking, best_blocking)
 
         assert best_blocking is not None
         m = self.num_threads // (
