@@ -2789,7 +2789,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @requires_nccl_version(
-        (2, 17), "Need NCCL 2.17+ for configuring NCCL communicators"
+        (2, 18), "Need NCCL 2.17+ for configuring NCCL communicators"
     )
     @skip_if_lt_x_gpu(2)
     def test_pass_nccl_options_config(self):
