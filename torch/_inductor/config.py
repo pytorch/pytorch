@@ -1078,5 +1078,6 @@ if TYPE_CHECKING:
 
 from torch.utils._config_module import install_config_module
 
+
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
