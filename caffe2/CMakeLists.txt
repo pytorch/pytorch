@@ -1530,7 +1530,9 @@ if(USE_XPU)
   target_link_libraries(
       torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
 
-  target_link_libraries(torch_xpu PUBLIC torch_cpu_library)
+  target_link_libraries(
+      torch_xpu
+      PRIVATE "-Wl,--no-as-needed,\"$<TARGET_FILE:torch_cpu>\" -Wl,--as-needed")
 endif()
 
 # ---[ Metal(OSX) modification
