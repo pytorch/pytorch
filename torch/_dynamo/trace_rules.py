@@ -3125,6 +3125,7 @@ BUILTIN_SKIPLIST = (
 # third party libraries skiplist is defined by str, because users may not use these libraries.
 # we should use lazy import & skip in the future.
 THIRDPARTY_SKIPLIST = (
+    "_pytest",
     "fx2trt_oss",
     "hypothesis",
     "networkx",
@@ -3134,6 +3135,7 @@ THIRDPARTY_SKIPLIST = (
     "onnxruntime",
     "onnx_tf",
     "pandas",
+    "pytest",
     "sklearn",
     "tabulate",
     "tensorflow",
