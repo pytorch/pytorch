@@ -708,8 +708,6 @@ aten::bmm.out
 aten::ccol_indices
 aten::ccol_indices_copy
 aten::ccol_indices_copy.out
-aten::channel_shuffle
-aten::channel_shuffle.out
 aten::cholesky
 aten::cholesky.out
 aten::cholesky_inverse
@@ -1297,6 +1295,8 @@ aten::squeeze_copy.dims_out
 aten::squeeze_copy.out
 aten::sspaddmm.out
 aten::t_
+aten::t_copy
+aten::t_copy.out
 aten::to_mkldnn
 aten::to_mkldnn.out
 aten::to_padded_tensor

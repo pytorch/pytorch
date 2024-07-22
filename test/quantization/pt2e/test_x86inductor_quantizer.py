@@ -540,6 +540,21 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         is_qat=False,
         debug=False,
     ):
+        def recreate_m(m_eager, is_qat, run_convert_pt2e):
+            m = copy.deepcopy(m_eager)
+            m = capture_pre_autograd_graph(
+                m,
+                example_inputs,
+            )
+
+            m = prepare_qat_pt2e(m, quantizer) if is_qat else prepare_pt2e(m, quantizer)
+            # Calibrate
+            m(*example_inputs)
+            if run_convert_pt2e:
+                torch.ao.quantization.move_exported_model_to_eval(m)
+                m = convert_pt2e(m)
+            return m
+
         m_eager = model.train() if is_qat else model.eval()
 
         # program capture
@@ -554,9 +569,12 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         m = prepare_qat_pt2e(m, quantizer) if is_qat else prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
-        prepare_model = copy.deepcopy(m)
+        prepare_model = recreate_m(m_eager, is_qat, False)
+        # Change mutable operations, e.g. change `aten._native_batch_norm_legit.default`
+        # to `aten._native_batch_norm_legit_no_training.default`, for DCE pass.
+        torch.ao.quantization.move_exported_model_to_eval(m)
         m = convert_pt2e(m)
-        convert_model = copy.deepcopy(m)
+        convert_model = recreate_m(m_eager, is_qat, True)
         if debug:
             convert_model.print_readable(True)
         pt2_quant_output = m(*example_inputs)
@@ -1720,6 +1738,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
                 # BN should be folded into Conv
                 torch.ops.aten._native_batch_norm_legit.default: 0,
+                torch.ops.aten._native_batch_norm_legit_no_training.default: 0,
             }
             node_list = [
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
@@ -1793,6 +1812,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
                     # BN should be folded into Conv
                     torch.ops.aten._native_batch_norm_legit.default: 0,
+                    torch.ops.aten._native_batch_norm_legit_no_training.default: 0,
                 }
                 node_list = [
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
@@ -1838,6 +1858,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
                     # BN should be folded into Conv
                     torch.ops.aten._native_batch_norm_legit.default: 0,
+                    torch.ops.aten._native_batch_norm_legit_no_training.default: 0,
                 }
                 node_list = [
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
@@ -1886,6 +1907,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
                     # BN should be folded into Conv
                     torch.ops.aten._native_batch_norm_legit.default: 0,
+                    torch.ops.aten._native_batch_norm_legit_no_training.default: 0,
                 }
                 node_list = [
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
@@ -1931,6 +1953,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
                 # BN should be folded into Conv
                 torch.ops.aten._native_batch_norm_legit.default: 0,
+                torch.ops.aten._native_batch_norm_legit_no_training.default: 0,
             }
             node_list = [
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
