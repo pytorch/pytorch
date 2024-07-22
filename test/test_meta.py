@@ -674,7 +674,6 @@ meta_function_expected_failures = {
     torch.functional.unique_consecutive : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32, u16, u32, u64},
     torch.histogram : {f64, f32},
     torch.histogramdd : {f64, f32},
-    torch.kthvalue : {f64, i32, i64, u8, i16, f16, bf16, i8, f32},
     torch.nn.functional.ctc_loss : {f64, f32},
     torch.nn.functional.gaussian_nll_loss : {f16, f64, bf16, f32},
     torch.linalg.lstsq : {f64, f32, c128, c64},
@@ -748,7 +747,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.functional.unique: {f16},  # aten::_unique2, aten::unique_dim
     torch.functional.unique_consecutive: {f16},  # aten::unique_consecutive
     torch.geqrf: {f32, f64},  # aten::geqrf
-    torch.kthvalue: {f16},  # aten::kthvalue.values
 }
 
 meta_function_device_skips['cpu'] = {
@@ -846,7 +844,6 @@ meta_dispatch_expected_failures = {
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.histogram.bin_ct : {f32, f64},
     aten.histogram.bins_tensor : {f32, f64},
-    aten.kthvalue.default : {i8, f64, i64, f16, bf16, f32, i32, i16, u8},
     aten.unique_consecutive.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8, u16, u32, u64},
     aten.unique_dim.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8, u16, u32, u64},
     aten.upsample_nearest3d.vec : {bf16, f32, f64, u8},
@@ -895,7 +892,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten._use_cudnn_ctc_loss.Tensor: {f32, f64},  # aten::_use_cudnn_ctc_loss.Tensor
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
     aten.geqrf.default: {f32, f64},  # aten::geqrf
-    aten.kthvalue.default: {f16},  # aten::kthvalue.values
     aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
     aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
     aten.log_sigmoid_forward.output : {bf16, f16, f64, f32},  # aten::log_sigmoid_forward.output
@@ -1158,6 +1154,8 @@ class TestMeta(TestCase):
     @suppress_warnings
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_meta_outplace(self, device, dtype, op):
+        if "_scaled_mm" in op.name:
+            raise unittest.SkipTest("_scaled_mm dose not support meta device")
         skip_op_names = (
             "fft.ihfft",
             "fft.ihfft2",
@@ -1221,6 +1219,8 @@ class TestMeta(TestCase):
                 expected = func(*args, **kwargs)
 
     def _run_dispatch_meta_test(self, device, dtype, op, symbolic_meta, inplace, all_stride_variants=False):
+        if "_scaled_mm" in op.name:
+            raise unittest.SkipTest("_scaled_mm dose not support meta device")
         if inplace:
             func = op.get_inplace()
             if not func:

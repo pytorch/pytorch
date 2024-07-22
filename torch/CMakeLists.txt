@@ -312,6 +312,10 @@ if(USE_NUMPY)
   target_compile_definitions(torch_python PRIVATE USE_NUMPY)
 endif()
 
+if(USE_CUFILE AND NOT USE_ROCM)
+  target_compile_definitions(torch_python PRIVATE USE_CUFILE)
+endif()
+
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -352,12 +356,6 @@ if(BUILD_LIBTORCHLESS)
   if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
     target_compile_definitions(torch_python PRIVATE "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
   endif()
-
-  if(MSVC AND NOT BUILD_SHARED_LIBS)
-    target_compile_definitions(torch_python PRIVATE "AT_CORE_STATIC_WINDOWS=1")
-  endif()
-
-
 
 endif()
 

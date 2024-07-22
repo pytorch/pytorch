@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import importlib
 import logging
 import os
@@ -7,15 +8,16 @@ import subprocess
 import sys
 import warnings
 
+
 try:
     from .common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
 except ImportError:
     from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
 
 import torch
-
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs
+
 
 log = logging.getLogger(__name__)
 
@@ -86,7 +88,7 @@ finally:
 # combination of models supported by HF Fx parser and some manually supplied
 # models. For these models, we already know the largest batch size that can fit
 # on A100 GPUs - 40 GB.
-BATCH_SIZE_KNOWN_MODELS = dict()
+BATCH_SIZE_KNOWN_MODELS = {}
 
 
 # Get the list of models and their batch sizes
@@ -619,7 +621,7 @@ def refresh_model_names_and_batch_sizes():
     """
     import transformers.utils.fx as hf_fx
 
-    family = dict()
+    family = {}
     lm_seen = set()
     family_seen = set()
     for cls_name in hf_fx._SUPPORTED_MODELS:
