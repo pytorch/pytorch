@@ -1,7 +1,10 @@
 # mypy: allow-untyped-defs
 import copy
 import io
+import logging
 import math
+import weakref
+from logging import getLogger
 from typing import (
     Any,
     Callable,
@@ -22,11 +25,14 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
-
 if dist.is_available() or TYPE_CHECKING:
     from torch.distributed import distributed_c10d
     from torch.distributed._shard.sharded_tensor import ShardedTensor
     from torch.distributed._tensor import distribute_tensor, DTensor, Replicate
+
+
+logger = getLogger()
+logger.setLevel(logging.INFO)
 
 
 def _identity_func(
@@ -406,8 +412,17 @@ def _create_cpu_state_dict(
             return torch.tensor(0, dtype=obj.dtype)
 
         if share_memory:
-            t = torch.empty(*tuple(obj.size()), dtype=obj.dtype).share_memory_()
+            t = torch.empty(*tuple(obj.size()), dtype=obj.dtype)
+            t = t.share_memory_()
             if pin_memory:
+
+                def unpin_memory(t):
+                    succ = torch.cuda.cudart().cudaHostUnregister(t.data_ptr())
+                    assert (
+                        succ == 0
+                    ), f"Unpinning shared memory failed with error-code: {succ}"
+
+                weakref.finalize(t, unpin_memory, t)
                 succ = torch.cuda.cudart().cudaHostRegister(
                     t.data_ptr(),
                     t.numel() * t.element_size(),
