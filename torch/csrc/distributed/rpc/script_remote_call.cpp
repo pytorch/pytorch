@@ -3,9 +3,7 @@
 
 #include <torch/csrc/jit/serialization/pickle.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 ScriptRemoteCall::ScriptRemoteCall(
     std::shared_ptr<Operator> op,
@@ -80,6 +78,4 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
   return fromIValues(values);
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
