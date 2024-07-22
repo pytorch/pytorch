@@ -45,7 +45,7 @@ jobs:
 
   linux-focal-cuda12_4-py3_10-gcc9-sm86-build:
     name: linux-focal-cuda12.4-py3.10-gcc9-sm86
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
@@ -214,7 +214,7 @@ jobs:
 
   linux-focal-rocm6_1-py3_8-build:
     name: linux-focal-rocm6.1-py3.8
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -245,7 +245,7 @@ jobs:
 
   linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build:
     name: linux-focal-cuda12.4-py3.10-gcc9-experimental-split-build
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     with:
       use_split_build: true
       build-environment: linux-focal-cuda12.4-py3.10-gcc9
@@ -275,7 +275,7 @@ jobs:
 
   linux-focal-cuda11_8-py3_10-gcc9-experimental-split-build:
     name: linux-focal-cuda11.8-py3.10-gcc9-experimental-split-build
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     with:
       use_split_build: true
       build-environment: linux-focal-cuda11.8-py3.10-gcc9
