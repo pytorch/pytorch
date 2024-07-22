@@ -11,6 +11,7 @@ from benchmark_runner import BenchmarkRunner  # type: ignore[import-not-found]
 from benchmark_utils import (  # type: ignore[import-not-found]
     fits_in_memory,
     get_mm_tensors,
+    set_precision,
     transpose_tensors,
 )
 
@@ -31,7 +32,7 @@ class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimpo
 
     def create_input(self) -> Tuple[Any, ...]:
         dtype = self.get_dtype()
-        self.set_precision(dtype)
+        set_precision(dtype)
         m, k, n = self.get_m_k_n(dtype)
 
         (transpose_left, transpose_right) = transpose_tensors()
@@ -141,15 +142,6 @@ class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimpo
     def get_dtype(self) -> Any:
         dtype_choices = [torch.float16, torch.bfloat16, torch.float32]
         return random.choices(dtype_choices)[0]
-
-    def set_precision(self, dtype: Any, p_float32_prec_highest: float = 0.8) -> None:
-        if dtype == torch.float32:
-            precisions = ["high", "highest"]
-            weights = [1 - p_float32_prec_highest, p_float32_prec_highest]
-            precision = random.choices(precisions, weights)[0]
-        else:
-            precision = "high"
-        torch.set_float32_matmul_precision(precision)
 
 
 if __name__ == "__main__":
