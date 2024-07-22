@@ -1,5 +1,6 @@
 #!/bin/bash
 # Helper utilities for build
+# Script used only in CD pipeline
 
 OPENSSL_DOWNLOAD_URL=https://www.openssl.org/source/old/1.1.1/
 CURL_DOWNLOAD_URL=https://curl.askapache.com/download

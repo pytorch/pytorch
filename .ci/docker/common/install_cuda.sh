@@ -1,5 +1,5 @@
 #!/bin/bash
-
+# Script used only in CD pipeline
 set -ex
 
 CUDNN_VERSION=9.1.0.70

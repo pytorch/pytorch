@@ -45,7 +45,7 @@ jobs:
       - name: Purge tools folder (free space for build)
         run: rm -rf /opt/hostedtoolcache
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@move_docker_conda
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
       - name: Calculate docker image
@@ -80,7 +80,7 @@ jobs:
       - name: Purge tools folder (free space for build)
         run: rm -rf /opt/hostedtoolcache
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@move_docker_conda
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
       - name: Calculate docker image
@@ -142,7 +142,7 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.rocm_version }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@move_docker_conda
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
       - name: Calculate docker image
@@ -168,7 +168,7 @@ jobs:
     runs-on: linux.4xlarge
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@move_docker_conda
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
       - name: Calculate docker image
@@ -196,7 +196,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-manylinux_2_28
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@move_docker_conda
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
       - name: Calculate docker image
@@ -224,7 +224,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-aarch64
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@move_docker_conda
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
       - name: Calculate docker image
@@ -252,7 +252,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-aarch64-2_28
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@move_docker_conda
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
       - name: Calculate docker image
@@ -280,7 +280,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@move_docker_conda
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
       - name: Calculate docker image
@@ -308,7 +308,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@move_docker_conda
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
       - name: Calculate docker image

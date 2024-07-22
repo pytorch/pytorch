@@ -1,5 +1,6 @@
 #!/bin/bash
 # Top-level build script called from Dockerfile
+# Script used only in CD pipeline
 
 # Stop at any error, show all commands
 set -ex

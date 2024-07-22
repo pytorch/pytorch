@@ -1,5 +1,6 @@
 #!/bin/bash
 set -xe
+# Script used in CI and CD pipeline
 
 # Intel® software for general purpose GPU capabilities.
 # Refer to https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html

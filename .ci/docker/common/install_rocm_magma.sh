@@ -1,4 +1,5 @@
 #!/bin/bash
+# Script used in CI and CD pipeline
 
 set -ex
 

@@ -1,4 +1,5 @@
 #!/bin/bash
+# Script used only in CD pipeline
 set -uex -o pipefail
 
 PYTHON_DOWNLOAD_URL=https://www.python.org/ftp/python
