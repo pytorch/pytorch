@@ -9,8 +9,6 @@
 #include <ostream>
 #include <string>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
-
 namespace c10 {
 
 class SymNodeImpl;
@@ -239,5 +237,3 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
 };
 
 } // namespace c10
-
-C10_CLANG_DIAGNOSTIC_POP()

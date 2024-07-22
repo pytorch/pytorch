@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import heapq
 import operator
+
 import sys
 from collections import defaultdict
 from typing import Dict, List, Set, TYPE_CHECKING
@@ -13,7 +14,6 @@ import torch
 from . import config, ir
 from .dependencies import WeakDep
 from .utils import is_collective, is_wait
-
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
@@ -96,16 +96,14 @@ def _schedule_for_comm(
     # When only raise_comms is True, only score_0 and score_2 are considered.
     # When only sink_waits is True, only score_1 and score_2 are considered.
     # When neither is True, the original order is yielded.
-    buf_name_to_snode = {}
+    name_to_snode = {}
     scores_0, scores_1, scores_2 = {}, {}, {}
     for idx, snode in enumerate(snodes):
-        for buf_name in snode.get_buffer_names():
-            buf_name_to_snode[buf_name] = snode
-
-        node_name = snode.get_name()
-        scores_0[node_name] = sys.maxsize
-        scores_1[node_name] = 0
-        scores_2[node_name] = idx
+        for name in snode.get_names():
+            name_to_snode[name] = snode
+            scores_0[name] = sys.maxsize
+            scores_1[name] = 0
+            scores_2[name] = idx
 
     comm_idx = 0
     for snode in snodes:
@@ -120,7 +118,7 @@ def _schedule_for_comm(
     class Runnable:
         def __init__(self, snode):
             self.snode = snode
-            name = next(iter(snode.get_operation_names()))
+            name = next(iter(snode.get_names()))
             self.score = (
                 scores_0[name],
                 scores_1[name],
@@ -142,7 +140,7 @@ def _schedule_for_comm(
     for snode in snodes:
         if isinstance(snode.node, ir.MutationOutput):
             src_name = snode.node.node_doing_mutating.get_name()
-            src_snode = buf_name_to_snode[src_name]
+            src_snode = name_to_snode[src_name]
             assert src_snode in unmet_deps
             unmet_deps[src_snode] |= {
                 dep.name for dep in snode.unmet_dependencies if dep.name != src_name
@@ -167,7 +165,7 @@ def _schedule_for_comm(
         Schedules `snode` and put all unblocked nodes onto the ready queue.
         """
         scheduled.append(snode)
-        for buf_name in snode.get_buffer_names():
+        for buf_name in snode.get_names():
             for snode in buffer_users[buf_name]:
                 unmet_deps[snode].remove(buf_name)
                 if len(unmet_deps[snode]) == 0:
@@ -228,14 +226,9 @@ def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
     TODO: Come up with a better approach
     """
     comm_nodes = [n for n in nodes if is_collective(n.node)]
-
-    def item(x: Set[str]) -> str:
-        assert len(x) == 1
-        return next(iter(x))
-
     for i in range(1, len(comm_nodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
-        comm_nodes[i].add_fake_dep(WeakDep(item(comm_nodes[i - 1].get_buffer_names())))
+        comm_nodes[i].add_fake_dep(WeakDep(comm_nodes[i - 1].get_name()))
 
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:

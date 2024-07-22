@@ -1020,6 +1020,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         q, k, v = (torch.randn(1, 8, 1024, 64, device="cuda") for _ in range(3))
         metrics.reset()
         _, code = run_and_get_code(f, q, k, v)
+        # TODO: attention output is not being DCE'd
         fc = FileCheck()
         fc.check("triton_tem_fused")  # template call
         fc.check_not("poi_fused_cos")  # No cos pointwise operation
@@ -1027,8 +1028,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         accessed_bytes = 1 * 8 * 1024 * 64 * torch.float32.itemsize
         num_accesses = 4  # q, k, v reads, one output.
         # TODO: Get rid of this fudge factor
-        # We need this fudge factor for now as we write the extraneous logsumexp
-        num_accesses += 1
+        # We need this fudge factor for now, since
+        # 1. For some reason we materialize the output of the attention unnecessarily (it's related to the mutation somehow)
+        # 2. We also write the extraneous logsumexp
+        num_accesses += 2
         self.assertLess(metrics.num_bytes_accessed, accessed_bytes * num_accesses)
 
     @supported_platform
@@ -1618,9 +1621,9 @@ class GraphModule(torch.nn.Module):
             NotImplementedError, "NYI: L must be a multiple of 128"
         ):
             flex_attention(
-                torch.randn((1, 2, 3, 4)),
-                torch.randn((1, 2, 10, 5)),
-                torch.randn((1, 2, 10, 5)),
+                torch.randn((2, 3, 4)),
+                torch.randn((2, 10, 5)),
+                torch.randn((2, 10, 5)),
                 score_mod=_identity,
             )
 
@@ -1629,9 +1632,9 @@ class GraphModule(torch.nn.Module):
         ):
             compiled_flex = torch.compile(flex_attention)
             compiled_flex(
-                torch.randn((1, 2, 3, 4)),
-                torch.randn((1, 2, 10, 5)),
-                torch.randn((1, 2, 10, 5)),
+                torch.randn((2, 3, 4)),
+                torch.randn((2, 10, 5)),
+                torch.randn((2, 10, 5)),
                 score_mod=_identity,
             )
 

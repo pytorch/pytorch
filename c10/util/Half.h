@@ -462,7 +462,7 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 template <typename To, typename From>
 std::enable_if_t<std::is_same_v<From, bool>, bool> overflows(
     From /*f*/,
-    bool strict_unsigned [[maybe_unused]] = false) {
+    bool strict_unsigned = false) {
   return false;
 }
 
@@ -487,7 +487,7 @@ overflows(From f, bool strict_unsigned = false) {
 template <typename To, typename From>
 std::enable_if_t<std::is_floating_point_v<From>, bool> overflows(
     From f,
-    bool strict_unsigned [[maybe_unused]] = false) {
+    bool strict_unsigned = false) {
   using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
   if (limit::has_infinity && std::isinf(static_cast<double>(f))) {
     return false;
@@ -519,10 +519,10 @@ std::enable_if_t<is_complex<From>::value, bool> overflows(
   // able to figure it out.)
   return overflows<
              typename scalar_value_type<To>::type,
-             typename From::value_type>(f.real(), strict_unsigned) ||
+             typename From::value_type>(f.real()) ||
       overflows<
              typename scalar_value_type<To>::type,
-             typename From::value_type>(f.imag(), strict_unsigned);
+             typename From::value_type>(f.imag());
 }
 
 C10_API inline std::ostream& operator<<(std::ostream& out, const Half& value) {

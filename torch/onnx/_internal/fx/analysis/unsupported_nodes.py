@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import Dict
 
 from torch.onnx._internal.fx import _pass, diagnostics, registration
 
 
 @dataclasses.dataclass
 class UnsupportedFxNodesAnalysisResult(_pass.AnalysisResult):
-    unsupported_op_to_target_mapping: dict[str, dict[str, None]]
+    unsupported_op_to_target_mapping: Dict[str, Dict[str, None]]
 
 
 class UnsupportedFxNodesAnalysis(_pass.Analysis):
@@ -52,7 +53,7 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
                 level is `ERROR`.
         """
 
-        op_to_target_mapping: dict[str, dict[str, None]] = {}
+        op_to_target_mapping: Dict[str, Dict[str, None]] = {}
         for node in self.module.graph.nodes:
             if node.op == "call_function":
                 # NOTE: OPSchema matcher is not in this analysis scope.

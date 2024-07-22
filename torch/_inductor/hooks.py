@@ -2,7 +2,6 @@
 import contextlib
 from typing import Callable, List, TYPE_CHECKING
 
-
 if TYPE_CHECKING:
     import torch
 
