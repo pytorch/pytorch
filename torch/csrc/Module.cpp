@@ -27,7 +27,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
-#include <c10/util/Feature.h>
+#include <c10/util/Knobs.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
@@ -1149,11 +1149,12 @@ PyObject* THPModule_setCheckSparseTensorInvariants(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_c10_feature_enabled(PyObject* _unused, PyObject* args) {
+PyObject* THPModule_c10_justknobs_check(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject* the_namespace = nullptr;
   PyObject* feature = nullptr;
-  if (!PyArg_ParseTuple(args, "OO", &the_namespace, &feature)) {
+  int default_value = 0;
+  if (!PyArg_ParseTuple(args, "OOp", &the_namespace, &feature, &default_value)) {
     return nullptr;
   }
   if (!PyUnicode_Check(the_namespace) || !PyUnicode_Check(feature)) {
@@ -1168,7 +1169,7 @@ PyObject* THPModule_c10_feature_enabled(PyObject* _unused, PyObject* args) {
   if (!c_feature) {
     return nullptr;
   }
-  if (c10::FeatureEnabled(c_namespace, c_feature)) {
+  if (c10::justknobs_check(c_namespace, c_feature, default_value)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -1574,7 +1575,7 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      (PyCFunction)(void (*)())THPModule_has_torch_function_variadic,
      METH_FASTCALL,
      nullptr},
-    {"_c10_feature_enabled", THPModule_c10_feature_enabled, METH_VARARGS, nullptr},
+    {"_c10_justknobs_check", THPModule_c10_justknobs_check, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 void THCPStream_init(PyObject* module);

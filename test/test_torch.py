@@ -10681,11 +10681,11 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     del os.environ[feature]
 
         # check that an unset environment variable default is true
-        self.assertTrue(torch._C._c10_feature_enabled(namespace, feature))
+        self.assertTrue(torch._C._c10_justknobs_check(namespace, feature, True))
         with mocksetting(True):
-            self.assertTrue(torch._C._c10_feature_enabled(namespace, feature))
+            self.assertTrue(torch._C._c10_justknobs_check(namespace, feature, True))
         with mocksetting(False):
-            self.assertFalse(torch._C._c10_feature_enabled(namespace, feature))
+            self.assertFalse(torch._C._c10_justknobs_check(namespace, feature, True))
 
 
 # The following block extends TestTorch with negative dim wrapping tests

@@ -1,20 +1,18 @@
 #include <c10/util/Exception.h>
-#include <c10/util/Feature.h>
+#include <c10/util/Knobs.h>
 #include <cstdlib>
 #include <string>
 
 namespace c10 {
-static std::function<bool(const char*, const char*)> feature_resolver =
-    FeatureEnabledDefaultResolver;
-bool FeatureEnabled(const char* the_namespace, const char* feature_name) {
-  return feature_resolver(the_namespace, feature_name);
+static std::function<bool(const char*, const char*, bool)> resolver =
+    justknobs_check_default;
+bool justknobs_check(const char* the_namespace, const char* feature_name, bool default_value) {
+  return resolver(the_namespace, feature_name, default_value);
 }
-bool FeatureEnabledDefaultResolver(const char* the_namespace, const char* feature_name) {
+bool justknobs_check_default(const char* the_namespace, const char* feature_name, bool default_value) {
   const char* env_val = std::getenv(feature_name);
   if (env_val == nullptr) {
-    // FeatureEnabled is used for killswitches so the
-    // default is true
-    return true;
+    return default_value;
   }
   std::string val = std::string(env_val);
   for (auto& x : val) {
@@ -36,7 +34,7 @@ bool FeatureEnabledDefaultResolver(const char* the_namespace, const char* featur
         feature_name);
   }
 }
-void SetFeatureResolver(std::function<bool(const char*, const char*)> resolver) {
-  feature_resolver = std::move(resolver);
+void set_justknobs_check_resolver(std::function<bool(const char*, const char*, bool)> new_resolver) {
+  resolver = std::move(new_resolver);
 }
 } // namespace c10
