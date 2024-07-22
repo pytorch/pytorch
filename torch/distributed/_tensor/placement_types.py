@@ -406,10 +406,9 @@ class _StridedShard(Shard):
     split_factor: int
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Shard):
-            return False
-        # question: does sharding order matter here???
-        return self.dim == other.dim and self.split_factor == other.split_factor
+        if isinstance(other, _StridedShard):
+            return self.dim == other.dim and self.split_factor == other.split_factor
+        return False
 
     def __hash__(self) -> int:
         return hash((self.dim, self.split_factor))

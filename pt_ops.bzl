@@ -3,7 +3,6 @@ load("//tools/build_defs:fb_native_wrapper.bzl", "fb_native")
 load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
 
-# @lint-ignore BUCKRESTRICTEDSYNTAX
 IS_OSS = read_config("pt", "is_oss", "0") == "1"  # True for OSS BUCK build, and False for internal BUCK build
 
 USED_PT_BACKENDS = [
