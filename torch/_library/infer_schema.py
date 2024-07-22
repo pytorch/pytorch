@@ -4,9 +4,8 @@ import typing
 from typing import List, Optional, Sequence, Union  # noqa: F401
 
 import torch
+from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
-
-from .. import device, dtype, Tensor, types
 
 
 @exposed_in("torch.library")
