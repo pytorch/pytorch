@@ -20,6 +20,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
 )
 
+
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
         "Windows CI does not have necessary dependencies for test_torchinductor_codegen_dynamic_shapes yet\n"

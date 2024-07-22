@@ -1435,10 +1435,7 @@ def _check_and_build_extension_h_precompiler_headers(
             # read all content of a file
             content = file.read()
             # check if string present in a file
-            if signature == content:
-                return True
-            else:
-                return False
+            return signature == content
 
     def _create_if_not_exist(path_dir):
         if not os.path.exists(path_dir):

@@ -38,7 +38,7 @@ from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
 from jit.test_torchbind import TestTorchbind  # noqa: F401
-from jit.test_module_interface import TestModuleInterface  # noqa: F401  # noqa: F401
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
 from jit.test_enum import TestEnum  # noqa: F401
 from jit.test_string_formatting import TestStringFormatting  # noqa: F401
@@ -167,7 +167,7 @@ def doAutodiffCheck(testname):
     # these tests are disabled because BailOut nodes
     # inserted by ProfilingExecutor interfere with
     # subgraph slicing of Differentiable Graphs
-    test_exceptions = [
+    test_exceptions = (
         # functional
         'test_nn_dropout',
         'test_nn_log_softmax',
@@ -195,11 +195,9 @@ def doAutodiffCheck(testname):
         'test_split_with_sizes_dim_neg0',
         'test_split_with_sizes_size_0',
         'test_nn_max_pool2d_with_indices',
-    ]
+    )
 
-    if testname in test_exceptions:
-        return False
-    return True
+    return testname not in test_exceptions
 
 
 # TODO: enable TE in PE when all tests are fixed

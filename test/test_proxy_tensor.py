@@ -1999,7 +1999,6 @@ symbolic_tensor_failures = {
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
-    xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -2064,7 +2063,6 @@ out_symbolic_tensor_failures = {
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
     xfail('triangular_solve', ''),
-    xfail('view_copy', ''),
 
     # SymIntArrayRef expected to contain only concrete
     xfail('ones', ''),
