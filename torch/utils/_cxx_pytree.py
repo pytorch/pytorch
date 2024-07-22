@@ -29,11 +29,6 @@ from typing import (
 )
 from typing_extensions import deprecated
 
-import torch
-
-if torch._running_with_deploy():  # type: ignore[no-untyped-call]
-    raise ImportError("C++ pytree utilities do not work with torch::deploy.")
-
 import optree
 from optree import PyTreeSpec  # direct import for type annotations
 
@@ -273,7 +268,7 @@ def tree_flatten(
     >>> from collections import OrderedDict
     >>> tree = OrderedDict([('b', (2, [3, 4])), ('a', 1), ('c', None), ('d', 5)])
     >>> tree_flatten(tree)
-    ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict([('b', (*, [*, *])), ('a', *), ('c', *), ('d', *)]), NoneIsLeaf))
+    ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}), NoneIsLeaf))
 
     Args:
         tree (pytree): A pytree to flatten.

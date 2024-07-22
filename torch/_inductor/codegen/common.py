@@ -29,6 +29,7 @@ import torch
 import torch.fx
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
+from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
 
@@ -1744,7 +1745,7 @@ class Kernel(CodeGen):
         var: Union[CSEVariable, str],
         lower: Optional[str],
         upper: Optional[str],
-        mask: Optional[str] = None,
+        mask: Optional[Union[CSEVariable, str]] = None,
     ) -> str:
         if isinstance(var, CSEVariable):
             var = str(var)
@@ -1868,13 +1869,13 @@ class Kernel(CodeGen):
                         # Take the negative part of the bound and add size to it
                         # Then take union of that and the positive part
                         # This is a tighter bound than that of a generic ops.where, as we have info on the cond
-                        neg_bounds = var.bounds & ValueRanges(-sympy.oo, -1)
+                        neg_bounds = var.bounds & ValueRanges(-int_oo, -1)
                         new_bounds = ValueRanges(
                             neg_bounds.lower + size, neg_bounds.upper + size
                         )
                         # We don't have a good way of representing the empty range
                         if var.bounds.upper >= 0:  # type: ignore[operator]
-                            pos = var.bounds & ValueRanges(0, sympy.oo)
+                            pos = var.bounds & ValueRanges(0, int_oo)
                             new_bounds = new_bounds | pos
 
                     var = self.cse.generate(self.compute, stm, bounds=new_bounds)
@@ -1914,15 +1915,20 @@ class Kernel(CodeGen):
                 return out
 
             @staticmethod
+            def _update_store_cache(name: str, value: CSEVariable):
+                self.cse.store_cache[name] = value
+                if self.current_node and name in V.graph.name_to_buffer:
+                    buf = self.current_node.get_output(name)
+                    for other_name in buf.get_mutations():
+                        self.cse.store_cache[other_name] = value
+
+            @staticmethod
             def store(
                 name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
             ) -> None:
                 self.store_buffer_names.add(name)
                 if mode is None:
-                    self.cse.store_cache[name] = value
-                    if self.current_node:
-                        for other_name in self.current_node.get_mutations():
-                            self.cse.store_cache[other_name] = value
+                    CSEProxy._update_store_cache(name, value)
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
                 else:
@@ -1931,10 +1937,7 @@ class Kernel(CodeGen):
             @staticmethod
             def store_reduction(name: str, index: sympy.Expr, value: CSEVariable):
                 self.store_buffer_names.add(name)
-                self.cse.store_cache[name] = value
-                if self.current_node:
-                    for other_name in self.current_node.get_mutations():
-                        self.cse.store_cache[other_name] = value
+                CSEProxy._update_store_cache(name, value)
 
                 if name not in V.graph.removed_buffers:
                     return self.store_reduction(name, index, value)
