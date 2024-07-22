@@ -7,7 +7,9 @@ import itertools
 import math
 import operator
 import re
+import unittest
 
+import numpy as np
 import sympy
 
 import torch
@@ -47,6 +49,7 @@ from torch.utils._sympy.functions import (
     IsNonOverlappingAndDenseIndicator,
     Mod,
 )
+
 
 aten = torch.ops.aten
 
@@ -257,6 +260,15 @@ class TestPySymInt(TestCase):
 
         a = create_symint(shape_env, 2)
         self.assertTrue(5 * a == 5 * 2)
+
+    def test_sympify_symint(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 2)
+        self.assertIs(sympy.sympify(a), a.node.expr)
+        b = create_symfloat(shape_env, 3.0)
+        self.assertIs(sympy.sympify(b), b.node.expr)
+        c = create_symbool(shape_env, True)
+        self.assertIs(sympy.sympify(c), c.node.expr)
 
     def test_roundtrip(self):
         shape_env = ShapeEnv()
@@ -816,6 +828,22 @@ def forward(self, x_1):
             )
         )
 
+    def test_numpy_sym_max(self):
+        self.assertEqual(torch.sym_max(np.int64(10), 12), 12)
+        self.assertEqual(torch.sym_max(np.int64(12), 10), 12)
+        self.assertEqual(torch.sym_max(np.int64(10), 12.5), 12.5)
+        self.assertEqual(torch.sym_max(np.int64(14), 12.5), 14.0)
+        self.assertEqual(torch.sym_max(np.float64(14.0), 12), 14.0)
+        self.assertEqual(torch.sym_max(np.float64(14.0), 16), 16.0)
+
+    def test_numpy_sym_min(self):
+        self.assertEqual(torch.sym_min(np.int64(10), 12), 10)
+        self.assertEqual(torch.sym_min(np.int64(12), 10), 10)
+        self.assertEqual(torch.sym_min(np.int64(10), 12.5), 10.0)
+        self.assertEqual(torch.sym_min(np.int64(14), 12.5), 12.5)
+        self.assertEqual(torch.sym_min(np.float64(14.0), 12), 12.0)
+        self.assertEqual(torch.sym_min(np.float64(14.0), 16), 14.0)
+
     def test_debug_has_internal_overlap_unbacked(self):
         shape_env = ShapeEnv()
         u0 = shape_env.create_unbacked_symint()
@@ -1235,21 +1263,19 @@ class TestSymNumberMagicMethods(TestCase):
     def get_constant_bool(self, val):
         return SymBool(torch._C._get_constant_bool_symnode(val))
 
+    @unittest.expectedFailure
+    def test_symint_hashing(self):
+        shape_env = ShapeEnv()
+        hash(create_symint(shape_env, 3))
+
     def test_symnode_hashing(self):
         shape_env = ShapeEnv()
 
-        # SymInt, SymBool, SymFloat are unhashable
-        unhashable = (
-            create_symint(shape_env, 3),
-            create_symbool(shape_env, True),
-            # We should be passing in float here, but create_symbol currently
-            # only supports int
-            create_symfloat(shape_env, 3.0),
-        )
-
-        for x in unhashable:
-            with self.assertRaisesRegex(TypeError, "unhashable"):
-                hash(x)
+        # These all trigger specialization when hashed
+        hash(create_symbool(shape_env, True))
+        # We should be passing in float here, but create_symbol currently
+        # only supports int
+        hash(create_symfloat(shape_env, 3.0))
 
         # NestedInt (SymInt), constant SymBool, SymNode are hashable
         j1 = torch._C._get_nested_int(1, 1)
@@ -1343,6 +1369,96 @@ class TestSymNumberMagicMethods(TestCase):
         sz2 = torch.Size([3, j2, 4])
         self.assertIs(sz1 == sz2, True)
         self.assertIs(sz1 != sz2, False)
+
+    def test_stride_symnode(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+
+        def _create_symbolic_tensor(x, dynamic_sizes, dynamic_strides):
+            with FakeTensorMode(shape_env=shape_env) as fake_mode:
+                return fake_mode.from_tensor(
+                    x,
+                    symbolic_context=StatelessSymbolicContext(
+                        dynamic_sizes=dynamic_sizes,
+                        dynamic_strides=dynamic_strides,
+                    ),
+                )
+
+        # check everything static
+        t = _create_symbolic_tensor(
+            x=torch.ones(3, 6),
+            dynamic_sizes=[
+                DimDynamic.STATIC,
+                DimDynamic.STATIC,
+            ],
+            dynamic_strides=[
+                DimDynamic.INFER_STRIDE,
+                DimDynamic.INFER_STRIDE,
+            ],
+        )
+        self.assertTrue(all(isinstance(size, int) for size in t.size()))
+        self.assertTrue(all(isinstance(stride, int) for stride in t.stride()))
+
+        # check dynamic size but static dims
+        t = _create_symbolic_tensor(
+            x=torch.ones(3, 6),
+            dynamic_sizes=[
+                DimDynamic.DYNAMIC,
+                DimDynamic.DYNAMIC,
+            ],
+            dynamic_strides=[
+                DimDynamic.INFER_STRIDE,
+                DimDynamic.INFER_STRIDE,
+            ],
+        )
+        # Expect stride to be inferred
+        s0, s1 = t.size()
+        s2, s3 = t.stride()
+        self.assertTrue(isinstance(s0, torch.SymInt))
+        self.assertTrue(isinstance(s1, torch.SymInt))
+        self.assertTrue(isinstance(s2, torch.SymInt))
+        self.assertTrue(s1 == s2)
+        self.assertEqual(s3, 1)
+
+        # Check dynamic stride but static dims
+        t = _create_symbolic_tensor(
+            x=torch.ones(3, 6),
+            dynamic_sizes=[
+                DimDynamic.STATIC,
+                DimDynamic.STATIC,
+            ],
+            dynamic_strides=[
+                DimDynamic.DYNAMIC,
+                DimDynamic.INFER_STRIDE,
+            ],
+        )
+        s0, s1 = t.size()
+        s2, s3 = t.stride()
+        self.assertTrue(isinstance(s0, int))
+        self.assertTrue(isinstance(s1, int))
+        self.assertTrue(isinstance(s2, torch.SymInt))
+        self.assertTrue(isinstance(s3, int))
+
+        # Check dynamic sizes and dims, and ensure different symbol
+        t = _create_symbolic_tensor(
+            x=torch.ones(3, 6),
+            dynamic_sizes=[
+                DimDynamic.DYNAMIC,
+                DimDynamic.DYNAMIC,
+            ],
+            dynamic_strides=[
+                DimDynamic.DYNAMIC,
+                DimDynamic.INFER_STRIDE,
+            ],
+        )
+        s0, s1 = t.size()
+        s2, s3 = t.stride()
+        self.assertTrue(isinstance(s0, torch.SymInt))
+        self.assertTrue(isinstance(s1, torch.SymInt))
+        self.assertTrue(isinstance(s2, torch.SymInt))
+        self.assertTrue(isinstance(s3, int))
+        self.assertTrue(str(s1.node.expr) != str(s2.node.expr))
 
 
 instantiate_parametrized_tests(TestSymNumberMagicMethods)
@@ -2487,6 +2603,13 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s2)]))
+
+    def test_guards_float_print(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 3)
+        guard_bool(2 / s0 == 2 / 3)
+        guards = shape_env.produce_guards_expression([s0])
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
 
     def test_guards_float_div(self):
         shape_env = ShapeEnv()

@@ -2,6 +2,8 @@
 Generic linter that greps for a pattern and optionally suggests replacements.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import logging
@@ -10,7 +12,7 @@ import subprocess
 import sys
 import time
 from enum import Enum
-from typing import Any, List, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 
 IS_WINDOWS: bool = os.name == "nt"
@@ -28,15 +30,15 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: Optional[str]
-    line: Optional[int]
-    char: Optional[int]
+    path: str | None
+    line: int | None
+    char: int | None
     code: str
     severity: LintSeverity
     name: str
-    original: Optional[str]
-    replacement: Optional[str]
-    description: Optional[str]
+    original: str | None
+    replacement: str | None
+    description: str | None
 
 
 def as_posix(name: str) -> str:
@@ -44,8 +46,8 @@ def as_posix(name: str) -> str:
 
 
 def run_command(
-    args: List[str],
-) -> "subprocess.CompletedProcess[bytes]":
+    args: list[str],
+) -> subprocess.CompletedProcess[bytes]:
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
@@ -65,7 +67,7 @@ def lint_file(
     linter_name: str,
     error_name: str,
     error_description: str,
-) -> Optional[LintMessage]:
+) -> LintMessage | None:
     # matching_line looks like:
     #   tools/linter/clangtidy_linter.py:13:import foo.bar.baz
     split = matching_line.split(":")

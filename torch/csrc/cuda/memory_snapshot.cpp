@@ -101,27 +101,23 @@ void _initRecordAnnotations() {
   static c10::once_flag ra_init;
   c10::call_once(ra_init, [&] {
     // Save user annotations to CCA memory snapshot tool
-    at::addThreadLocalCallback(at::RecordFunctionCallback(
-        [](const at::RecordFunction& fn)
-            -> std::unique_ptr<at::ObserverContext> {
-          if (fn.scope() != at::RecordScope::USER_SCOPE) {
-            return nullptr; // only record user-defined scopes.
-          }
-          unwind::Frame frame{fn.name(), "START", 0};
-          auto r = std::make_shared<CapturedTraceback>();
-          r->recordUserDefinedFrame(frame);
-          c10::cuda::CUDACachingAllocator::recordAnnotation(r);
-          return nullptr;
-        },
-        [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
-          if (fn.scope() != at::RecordScope::USER_SCOPE) {
-            return; // only record user-defined scopes.
-          }
-          unwind::Frame frame{fn.name(), "END", 0};
-          auto r = std::make_shared<CapturedTraceback>();
-          r->recordUserDefinedFrame(frame);
-          c10::cuda::CUDACachingAllocator::recordAnnotation(r);
-        }));
+    at::addThreadLocalCallback(
+        at::RecordFunctionCallback(
+            [](const at::RecordFunction& fn)
+                -> std::unique_ptr<at::ObserverContext> {
+              unwind::Frame frame{fn.name(), "START", 0};
+              auto r = std::make_shared<CapturedTraceback>();
+              r->recordUserDefinedFrame(frame);
+              c10::cuda::CUDACachingAllocator::recordAnnotation(r);
+              return nullptr;
+            },
+            [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+              unwind::Frame frame{fn.name(), "END", 0};
+              auto r = std::make_shared<CapturedTraceback>();
+              r->recordUserDefinedFrame(frame);
+              c10::cuda::CUDACachingAllocator::recordAnnotation(r);
+            })
+            .scopes({at::RecordScope::USER_SCOPE}));
   });
 }
 
