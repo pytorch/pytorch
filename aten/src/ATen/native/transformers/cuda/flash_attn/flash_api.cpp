@@ -38,7 +38,6 @@
 
 #include <c10/util/Exception.h>
 
-
 namespace pytorch_flash {
 
 #define CHECK_DEVICE(x) TORCH_CHECK(x.is_cuda(), #x " must be on CUDA")
@@ -317,8 +316,8 @@ std::tuple<at::Tensor, at::Tensor> set_params_splitkv(Flash_fwd_params &params, 
         if (params.num_splits > 1) {
             softmax_lse_accum = at::empty({params.num_splits, batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
             out_accum = at::empty({params.num_splits, batch_size, num_heads, max_seqlen_q, head_size_rounded}, opts.dtype(at::kFloat));
-            // params.softmax_lseaccum_ptr = softmax_lse_accum.data_ptr();
-            // params.oaccum_ptr = out_accum.data_ptr();
+            params.softmax_lseaccum_ptr = softmax_lse_accum.data_ptr();
+            params.oaccum_ptr = out_accum.data_ptr();
         }
         TORCH_CHECK(params.num_splits <= 128, "num_splits > 128 not supported");
     }
@@ -479,23 +478,6 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     std::tie(softmax_lse_accum, out_accum) = set_params_splitkv(params, batch_size, num_heads,
                         head_size, seqlen_k, seqlen_q,
                         head_size_rounded, p_dropout, /*num_splits*/0, dprops, opts);
-    if (softmax_lse_accum.defined()){
-       params.softmax_lseaccum_ptr = softmax_lse_accum.data_ptr();
-    }
-    if (out_accum.defined()){
-       params.oaccum_ptr = out_accum.data_ptr();
-    }
-
-    // std::cout<<"softmax_lseaccum_ptr =" << softmax_lse_accum.data_ptr() << std::endl;
-    // std::cout<<"oaccum_ptr =" << out_accum.data_ptr() << std::endl;
-    // std::cout <<"softmax_lse_ptr = "<< params.softmax_lse_ptr << std::endl;
-
-    // Keep references to these tensors to extend their lifetime
-    // params.softmax_lse_accum = softmax_lse_accum;
-    // params.out_accum = out_accum;
-    // set_params_splitkv(params, batch_size, num_heads,
-    //                    head_size, seqlen_k, seqlen_q,
-    //                    head_size_rounded, p_dropout, /*num_splits*/0, dprops, opts);
 
     // We want to checkpoint and save the RNG state for backward if dropout
     // We get the default generator and return the seed and offset which will
@@ -548,7 +530,6 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
-
     softmax_lse = softmax_lse.slice(2, 0, seqlen_q);
     return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, p};
 }
