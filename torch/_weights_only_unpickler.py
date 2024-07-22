@@ -78,6 +78,7 @@ _blocklisted_modules = [
     "sys",
     "os",
     "posix",
+    "nt",
 ]
 
 _marked_safe_globals_list: List[Any] = []
