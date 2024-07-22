@@ -27,6 +27,7 @@ import torch._C
 from torch.types import Device
 from .. import device as _device
 from .._utils import _dummy_type, _LazySeedTracker, classproperty
+from . import gds
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -1108,7 +1109,11 @@ def _get_amdsmi_temperature(device: Optional[Union[Device, int]] = None) -> int:
 
 def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
+    socket_power = amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
+    if socket_power != "N/A":
+        return socket_power
+    else:
+        return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
 
 
 def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
