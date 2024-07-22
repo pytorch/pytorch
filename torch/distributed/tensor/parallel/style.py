@@ -287,10 +287,10 @@ class SequenceParallel(ParallelStyle):
     This style implements the operation that is described in the paper
     `Reducing Activation Recomputation in Large Transformer Models <https://arxiv.org/abs/2205.05198>`__
 
-    If the input passed in to this ``nn.Module`` is a :class:`torch.Tensor`, it assumes the input already sharded on the
-    sequence dimension and convert the input to a :class:`DTensor` sharded on the sequence dimension. If input passed in
-    to this ``nn.Module`` is already a :class:`DTensor` but not sharded on the sequence dimension, it would redistribute
-    the input to be sharded on the sequence dimension.
+    If the input passed in to this ``nn.Module`` is a :class:`torch.Tensor`, it assumes that the input is already sharded
+    on the sequence dimension and converts the input to a :class:`DTensor` sharded on the sequence dimension. If the input
+    passed in to this ``nn.Module`` is already a :class:`DTensor` but is not sharded on the sequence dimension, it would
+    redistribute the input to be sharded on the sequence dimension.
 
     The output of the ``nn.Module`` will be sharded on the sequence dimension.
 
