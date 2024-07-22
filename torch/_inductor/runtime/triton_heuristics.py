@@ -19,7 +19,6 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import torch
 
 from .coordinate_descent_tuner import CoordescTuner
-
 from .hints import (
     _NUM_THREADS_PER_WARP,
     AutotuneHint,
@@ -43,6 +42,7 @@ from .runtime_utils import (
     triton_config_to_hashable,
 )
 
+
 try:
     import triton
 except ImportError:
@@ -50,6 +50,7 @@ except ImportError:
 
 if triton is not None:
     from triton import Config
+    from triton.compiler import CompiledKernel
     from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
 
@@ -209,6 +210,7 @@ class CachingAutotuner(KernelInterface):
                 "triton",
                 str(self.triton_meta.get("device", 0)),
             )
+        log.debug("Triton cache dir: %s", os.environ["TRITON_CACHE_DIR"])
 
         self.size_hints = size_hints
         self.coordesc_tuner = CoordescTuner(
@@ -340,7 +342,7 @@ class CachingAutotuner(KernelInterface):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
         for k, v in cfg.kwargs.items():
-            if self.device_props.type != "hip":
+            if self.device_props.type == "hip":
                 if k == "matrix_instr_nonkdim":
                     compile_meta["matrix_instr_nonkdim"] = v
                     continue
@@ -453,8 +455,8 @@ class CachingAutotuner(KernelInterface):
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
-            "launch_enter_hook": binary.launch_enter_hook,
-            "launch_exit_hook": binary.launch_exit_hook,
+            "launch_enter_hook": CompiledKernel.launch_enter_hook,
+            "launch_exit_hook": CompiledKernel.launch_exit_hook,
             "metadata": binary.packed_metadata
             if hasattr(binary, "packed_metadata")
             else binary.metadata,
@@ -721,7 +723,7 @@ class CachingAutotuner(KernelInterface):
         if self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config, time_taken_ns)
 
-    def save_cuda_kernel(self, grid, stream, launcher):
+    def save_gpu_kernel(self, grid, stream, launcher):
         if callable(grid):
             grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
         else:
@@ -751,12 +753,9 @@ class CachingAutotuner(KernelInterface):
         }
         from torch._inductor.codecache import CudaKernelParamCache
 
-        binary = (
-            launcher.bin.asm["cubin"]
-            if self.device_props.type != "hip"
-            else launcher.bin.asm["hsaco"]
-        )
-        CudaKernelParamCache.set(key, params, binary)
+        bin_type = {"hip": "hsaco", "xpu": "spv"}.get(self.device_props.type, "cubin")
+        binary = launcher.bin.asm[bin_type]
+        CudaKernelParamCache.set(key, params, binary, bin_type)
 
         self.cuda_kernel_saved = True
 
@@ -778,7 +777,6 @@ class CachingAutotuner(KernelInterface):
             # skip triton template
             return launcher
 
-        cloned_args, _ = self.clone_args(*args)
         config2launcher = {launcher.config: launcher}
 
         def benchmark_one_config(config):
@@ -786,7 +784,7 @@ class CachingAutotuner(KernelInterface):
                 _, launcher = self._precompile_config(config, False)
             config2launcher[config] = launcher
 
-            out = self.bench(launcher, *cloned_args, **kwargs)
+            out = self.bench(launcher, *args, **kwargs)
             log.debug(
                 "COORDESC: %s: %f, nreg %d, nspill %d, #shared-mem %d",
                 launcher.config,
@@ -830,7 +828,7 @@ class CachingAutotuner(KernelInterface):
 
         (launcher,) = self.launchers
         if launcher.store_cubin:
-            self.save_cuda_kernel(grid, stream, launcher)
+            self.save_gpu_kernel(grid, stream, launcher)
 
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
@@ -1758,7 +1756,7 @@ def grid(*numels):
             z_grid,
         )
 
-    setattr(grid_fn, "grid_fn_str", f"grid({numels})")  # noqa: B010
+    setattr(grid_fn, "grid_fn_str", f"grid{numels}")  # noqa: B010
 
     return grid_fn
 

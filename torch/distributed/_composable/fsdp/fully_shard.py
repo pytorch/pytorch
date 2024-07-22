@@ -1,12 +1,12 @@
 # mypy: allow-untyped-defs
 import functools
-
-from typing import Any, cast, NoReturn, Optional, Union
+from typing import Any, cast, Iterable, List, NoReturn, Optional, Union
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
 from torch.distributed._tensor import DeviceMesh
+from torch.distributed.utils import _get_root_modules
 
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
@@ -26,7 +26,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 # `fully_shard.state(module)`. The state object and module are 1:1.
 @contract(state_cls=FSDPState)  # type: ignore[operator]
 def fully_shard(
-    module: nn.Module,
+    module: Union[nn.Module, List[nn.Module]],
     *,
     mesh: Optional[DeviceMesh] = None,
     reshard_after_forward: Union[bool, int] = True,
@@ -61,6 +61,8 @@ def fully_shard(
     gather parameters and later free parameters/reduce gradients.
 
     Args:
+        module (Union[nn.Module, List[nn.Module]): The module or modules to
+            shard with FSDP and group together for communication.
         mesh (Optional[DeviceMesh]): This data parallel mesh defines the
             sharding and device. If 1D, then parameters are fully sharded
             across the 1D mesh (FSDP). If 2D, then parameters are sharded
@@ -112,16 +114,20 @@ def fully_shard(
         reshard_after_forward, mesh_info
     )
 
-    state = fully_shard.state(module)
-    state.init(module, device, mp_policy)
+    arg_module = module
+    modules = (
+        (module,) if isinstance(module, nn.Module) else tuple(_get_root_modules(module))
+    )
+    state = fully_shard.state(modules[0])
+    state.init(modules, device, mp_policy)
 
-    managed_modules = _get_managed_modules(module)
+    managed_modules = _get_managed_modules(modules)
     params, buffers = _get_managed_states(managed_modules)
     _move_states_to_device(params, buffers, device)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
             params,
-            module,
+            modules,
             mesh_info,
             post_forward_mesh_info,
             device,
@@ -135,11 +141,12 @@ def fully_shard(
         managed_module._fsdp_use_orig_params = True  # type: ignore[assignment]
 
     # Place FSDP leftmost for highest priority in the method resolution order
-    cls = module.__class__
-    dct = {"__deepcopy__": unimplemented_deepcopy}
-    new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
-    module.__class__ = new_cls
-    return module
+    for module in modules:
+        cls = module.__class__
+        dct = {"__deepcopy__": unimplemented_deepcopy}
+        new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
+        module.__class__ = new_cls
+    return arg_module
 
 
 def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
@@ -270,6 +277,65 @@ class FSDPModule:
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.reshard_after_backward = reshard_after_backward
 
+    def set_modules_to_forward_prefetch(self, modules: List["FSDPModule"]) -> None:
+        """
+        Sets the FSDP modules for which this FSDP module should explicitly
+        prefetch all-gathers in forward. The prefetching runs after this
+        module's all-gather copy-out.
+
+        Passing a singleton list containing the next FSDP module gives the same
+        all-gather overlap behavior as the default overlap behavior, except the
+        prefetched all-gather is issued earlier from the CPU. Passing a list
+        with at least length two is required for more aggressive overlap and
+        will use more reserved memory.
+
+        Args:
+            modules (List[FSDPModule]): FSDP modules to prefetch.
+        """
+        _assert_all_fsdp_modules(modules)
+        self._get_fsdp_state()._states_to_forward_prefetch = [
+            module._get_fsdp_state() for module in modules
+        ]
+
+    def set_modules_to_backward_prefetch(self, modules: List["FSDPModule"]) -> None:
+        """
+        Sets the FSDP modules for which this FSDP module should explicitly
+        prefetch all-gathers in backward. This overrides the default backward
+        pretching implementation that prefetches the next FSDP module based on
+        the reverse post-forward order.
+
+        Passing a singleton list containing the previous FSDP module gives the
+        same all-gather overlap behavior as the default overlap behavior.
+        Passing a list with at least length two is required for more aggressive
+        overlap and will use more reserved memory.
+
+        Args:
+            modules (List[FSDPModule]): FSDP modules to prefetch.
+        """
+        _assert_all_fsdp_modules(modules)
+        self._get_fsdp_state()._states_to_backward_prefetch = [
+            module._get_fsdp_state() for module in modules
+        ]
+
+    def set_post_optim_event(self, event: torch.cuda.Event) -> None:
+        """
+        Sets a post-optimizer-step event for the root FSDP module to wait the
+        all-gather streams on.
+
+        By default, the root FSDP module waits the all-gather streams on the
+        current stream to ensure that the optimizer step has finished before
+        all-gathering. However, this may introduce false dependencies if
+        there is unrelated computation after the optimizer step. This API
+        allows the user to provide their own event to wait on. After the root
+        waits on the event, the event is discarded, so this API should be
+        called with a new event each iteration.
+
+        Args:
+            event (torch.cuda.Event): Event recorded after the optimizer step
+                to wait all-gather streams on.
+        """
+        self._get_fsdp_state()._state_ctx.post_optim_event = event
+
     def _get_fsdp_state(self) -> FSDPState:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
             raise AssertionError(f"No FSDP state found on {self}")
@@ -350,3 +416,9 @@ def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
         method_name,
         wrapped_method.__get__(module, type(module)),  # type:ignore[attr-defined]
     )
+
+
+def _assert_all_fsdp_modules(modules: Iterable[Any]) -> None:
+    for module in modules:
+        if not isinstance(module, FSDPModule):
+            raise ValueError(f"Expects FSDPModule but got {type(module)}: {module}")

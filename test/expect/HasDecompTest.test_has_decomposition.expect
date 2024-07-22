@@ -96,6 +96,7 @@ aten::_efficientzerotensor
 aten::_efficientzerotensor.out
 aten::_embedding_bag
 aten::_embedding_bag.out
+aten::_embedding_bag_backward
 aten::_embedding_bag_dense_backward
 aten::_embedding_bag_dense_backward.out
 aten::_embedding_bag_forward_only
@@ -446,6 +447,8 @@ aten::_nested_from_padded_and_nested_example
 aten::_nested_from_padded_and_nested_example.out
 aten::_nested_get_jagged_dummy
 aten::_nested_get_lengths
+aten::_nested_get_max_seqlen
+aten::_nested_get_min_seqlen
 aten::_nested_get_offsets
 aten::_nested_get_ragged_idx
 aten::_nested_get_values
@@ -500,6 +503,8 @@ aten::_scaled_dot_product_efficient_attention_backward
 aten::_scaled_dot_product_flash_attention
 aten::_scaled_dot_product_flash_attention_backward
 aten::_scaled_dot_product_flash_attention_for_cpu_backward
+aten::_scaled_dot_product_fused_attention_overrideable
+aten::_scaled_dot_product_fused_attention_overrideable_backward
 aten::_scaled_mm
 aten::_scaled_mm.out
 aten::_segment_reduce_backward
@@ -654,8 +659,6 @@ aten::argmax
 aten::argmax.out
 aten::argmin
 aten::argmin.out
-aten::argsort.stable
-aten::argsort.stable_out
 aten::as_strided
 aten::as_strided_
 aten::avg_pool2d
@@ -705,8 +708,6 @@ aten::bmm.out
 aten::ccol_indices
 aten::ccol_indices_copy
 aten::ccol_indices_copy.out
-aten::channel_shuffle
-aten::channel_shuffle.out
 aten::cholesky
 aten::cholesky.out
 aten::cholesky_inverse
@@ -1103,12 +1104,6 @@ aten::range.out
 aten::range.out_
 aten::range.step
 aten::record_stream
-aten::reflection_pad1d_backward
-aten::reflection_pad1d_backward.grad_input
-aten::reflection_pad2d_backward
-aten::reflection_pad2d_backward.grad_input
-aten::reflection_pad3d_backward
-aten::reflection_pad3d_backward.grad_input
 aten::repeat_interleave.Tensor
 aten::repeat_interleave.Tensor_out
 aten::replication_pad1d_backward
@@ -1165,8 +1160,6 @@ aten::set_.source_Tensor
 aten::slice_copy.Tensor
 aten::slice_copy.Tensor_out
 aten::slice_inverse
-aten::slice_scatter
-aten::slice_scatter.out
 aten::slow_conv3d_forward
 aten::slow_conv3d_forward.output
 aten::slow_conv_dilated2d
@@ -1352,10 +1345,6 @@ aten::view_as_complex_copy.out
 aten::view_as_real
 aten::view_as_real_copy
 aten::view_as_real_copy.out
-aten::view_copy
-aten::view_copy.dtype
-aten::view_copy.dtype_out
-aten::view_copy.out
 aten::zeros.names
 aten::zeros.names_out
 aten::zeros.out

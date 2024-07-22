@@ -16,6 +16,7 @@ import torch
 
 import torch._prims as prims
 import torch._prims_common as utils
+import torch.utils._pytree as pytree
 from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
@@ -292,6 +293,7 @@ __all__ = [
     "unsqueeze",
     "view",
     "view_as",
+    "view_copy",
     "vsplit",
     "vstack",
     "view_as_complex",
@@ -354,9 +356,7 @@ aten = torch._ops.ops.aten
 
 
 def is_noncontiguous_supported(device):
-    if device is not None and device.type == "hpu":
-        return False
-    return True
+    return device is None or device.type != "hpu"
 
 
 def handle_noncontiguous_outputs(input_tlist, output):
@@ -1712,6 +1712,15 @@ def sub(
 
     a, b = _maybe_broadcast(a, b)
 
+    if isinstance(a, TensorLike) and isinstance(b, TensorLike):
+        torch._check(
+            not utils.is_boolean_dtype(a.dtype) and not utils.is_boolean_dtype(b.dtype),
+            lambda: (
+                "Subtraction, the `-` operator, with two bool tensors is not supported. "
+                "Use the `^` or `logical_xor()` operator instead."
+            ),
+        )
+
     if alpha != 1:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
@@ -2191,18 +2200,25 @@ def _make_copy_from_view(fn):
     """
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
-    name = fn.__name__
-    fn = out_wrapper()(fn)
+    aten_fn = getattr(aten, fn.__name__)
+    annotations = getattr(fn, "__annotations__", {})
+    fn = out_wrapper()(aten_fn)
 
+    @wraps(fn)
     def _fn(*args, out=None, **kwargs):
         result = fn(*args, out=out, **kwargs)
-        if out is None:
-            return result.clone(memory_format=torch.contiguous_format)
-        return result
+        if out is not None:
+            return result
 
-    copy_name = f"{name}_copy"
+        return pytree.tree_map(
+            lambda x: x.clone(memory_format=torch.contiguous_format),
+            result,
+        )
+
+    copy_name = f"{fn.__name__}_copy"
     _fn.__name__ = copy_name
-    _fn = register_decomposition(getattr(aten, copy_name))(_fn)
+    _fn.__annotations__.update(annotations)
+    register_decomposition(getattr(aten, copy_name))(_fn)
     return _fn
 
 
@@ -2556,6 +2572,14 @@ def addr(
         vec2.ndim == 1,
         lambda: f"addr: Expected 1-D argument vec2, but got {vec2.ndim}-D",
     )
+    for arg, arg_name in ((alpha, "alpha"), (beta, "beta")):
+        if isinstance(arg, bool):
+            torch._check(
+                utils.is_boolean_dtype(self.dtype)
+                and utils.is_boolean_dtype(vec1.dtype)
+                and utils.is_boolean_dtype(vec2.dtype),
+                lambda: f"Boolean {arg_name} only supported for Boolean results.",
+            )
     self = self.expand(vec1.shape[0], vec2.shape[0])
     if utils.is_boolean_dtype(self.dtype):
         # Integers are accepted for booleans
@@ -2654,9 +2678,6 @@ def as_strided(
         storage_offset if storage_offset is not None else a.storage_offset()
     )
     return prims.as_strided(a, size, stride, storage_offset_int)
-
-
-as_strided_copy = _make_copy_from_view(as_strided)
 
 
 @register_decomposition(aten.as_strided_scatter)
@@ -3054,11 +3075,6 @@ def narrow(
         lambda: f"start ({start}) + length ({length}) exceeds dimension size ({dim_length}).",
     )
     return prims.slice_in_dim(a, start, start + length, axis=dim)
-
-
-# TODO: This must return a sparse tensor if the input is sparse, but refs have
-# no sparse support. See narrow_copy_sparse in core.
-narrow_copy = _make_copy_from_view(narrow)
 
 
 def _normalize(
@@ -3761,9 +3777,7 @@ def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
 
 @register_decomposition(aten.roll)
 @out_wrapper()
-def roll(
-    a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
-) -> TensorLikeType:
+def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
     dims = utils.canonicalize_dims(a.ndim, dims)
     # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
@@ -3839,7 +3853,7 @@ def rot90(
     elif k == 3:
         return torch.transpose(torch.flip(a, (dims[0],)), dims[0], dims[1])
     else:
-        return clone(a, memory_format=torch.contiguous_format)
+        return a.clone(memory_format=torch.contiguous_format)
 
 
 def _check_stack_inputs(tensors: TensorSequenceType) -> None:
@@ -3923,7 +3937,7 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
         lambda: "Dimension specified as 0 but tensor has no dimensions",
     )
     if guard_size_oblivious(t.shape[dim] == 0):
-        return tuple()
+        return ()
     else:
         return tuple(
             torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim)
@@ -4309,9 +4323,6 @@ def diagonal(
     return result
 
 
-diagonal_copy = _make_copy_from_view(diagonal)
-
-
 @register_decomposition(aten.diag_embed)
 @out_wrapper()
 def diag_embed(
@@ -4465,9 +4476,6 @@ def T(a: TensorLikeType) -> TensorLikeType:
 @register_decomposition(aten.alias)
 def alias(a: TensorLikeType) -> TensorLikeType:
     return prims.view_of(a)
-
-
-alias_copy = _make_copy_from_view(alias)
 
 
 @register_decomposition(aten.transpose)
@@ -5986,7 +5994,18 @@ def exponential(self, rate=1, generator=None):
         rate > 0.0,
         lambda: f"exponential_ expects lambda > 0.0, but found lambda={rate}",
     )
-    return -1 / rate * torch.log1p(-torch.rand_like(self))
+
+    uniform_val = torch.rand_like(self)
+
+    # copying numerics of transformation::exponential see comment:
+    # curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
+    # we need log to be not 0, and not underflow when converted to half
+    # fast __logf approximation can underflow, so set log to -epsilon/2 for 1 or close to 1 args
+    epsilon = torch.finfo(uniform_val.dtype).eps / 2
+    condition = uniform_val >= 1.0 - epsilon
+    log_uniform = torch.where(condition, -epsilon, torch.log(uniform_val))
+
+    return -1 / rate * log_uniform
 
 
 @register_decomposition(aten.geometric)
@@ -6292,6 +6311,14 @@ exponential_ = _make_inplace(exponential)
 geometric_ = _make_inplace(geometric)
 log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
+
+alias_copy = _make_copy_from_view(aten.alias)
+as_strided_copy = _make_copy_from_view(aten.as_strided)
+diagonal_copy = _make_copy_from_view(aten.diagonal)
+# TODO: This must return a sparse tensor if the input is sparse, but refs have
+# no sparse support. See narrow_copy_sparse in core.
+narrow_copy = _make_copy_from_view(aten.narrow)
+view_copy = _make_copy_from_view(aten.view)
 
 
 # xref: isStorage in torch/csrc/DynamicTypes.cpp

@@ -11,7 +11,6 @@ from functools import partial
 from unittest.mock import patch
 
 import torch
-
 from torch._dispatch.python import enable_python_dispatcher
 from torch._inductor.test_case import run_tests, TestCase
 from torch._subclasses.fake_tensor import (
@@ -44,6 +43,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
+
 
 try:
     try:
@@ -225,6 +225,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
+    "normal": {f16, f32, f64},
     ("sparse.mm", "reduce"): {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {
@@ -241,6 +242,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "multinomial": {f16, f32, f64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
+    "normal": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
@@ -260,6 +262,7 @@ intentionally_not_handled = {
 # This is only fixed when this config is set
 # We should eventually always turn it on
 import torch._functorch.config as functorch_config
+
 
 if not functorch_config.view_replay_for_aliased_outputs:
     intentionally_not_handled['("as_strided", "partial_views")'] = {
@@ -382,6 +385,8 @@ inductor_override_kwargs = {
     },
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
+    ("_unsafe_masked_index_put_accumulate", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("_unsafe_masked_index_put_accumulate", "cpu", f16): {"atol": 1e-4, "rtol": 0.01},
     # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
     ("nn.functional.interpolate.bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.upsample_bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
@@ -411,10 +416,7 @@ inductor_one_sample = {
     "_segment_reduce.lengths": {f16},
     "_segment_reduce.offsets": {f16},
     "addmv": {f16},
-    "argsort": {b8, f16, f32, f64, i32, i64},
     "as_strided.partial_views": {f16},
-    "clamp_max": {b8},
-    "clamp_min": {b8},
     "corrcoef": {f16},
     "diff": {f16},
     "einsum": {f16, i32},
@@ -428,12 +430,7 @@ inductor_one_sample = {
     "logspace": {f16},
     "logspace.tensor_overload": {f16, f32, f64, i32, i64},
     "masked_logsumexp": {i64},
-    "max.binary": {b8},
     "max_pool2d_with_indices_backward": {f16, f32, f64},
-    "maximum": {b8},
-    "min.binary": {b8},
-    "minimum": {b8},
-    "ne": {b8},
     "new_empty_strided": {f16},
     "nn.functional.adaptive_avg_pool3d": {f16},
     "nn.functional.adaptive_max_pool1d": {f16, f32},
@@ -447,17 +444,16 @@ inductor_one_sample = {
     "nn.functional.gaussian_nll_loss": {f16},
     "nn.functional.grid_sample": {f32, f64},
     "nn.functional.interpolate.area": {f16},
-    "nn.functional.max_pool2d": {f16, f32, f64, i32, i64},
     "nn.functional.nll_loss": {f16, f32, f64},
     "normal": {f16, f32, f64},
     "put": {f16, f32, f64},
-    "rot90": {b8, f16, f32, f64, i32, i64},
-    "scatter": {b8, i64},
     "take": {b8, f16, f32, f64, i32, i64},
     ("__rdiv__", "cuda"): {f16},
     ("__rmod__", "cuda"): {f16, i64},
     ("__rmul__", "cuda"): {f16},
     ("__rpow__", "cuda"): {f16},
+    ("_unsafe_masked_index", "cuda"): {f16},
+    ("_unsafe_masked_index_put_accumulate", "cuda"): {f16},
     ("addcdiv", "cuda"): {f16},
     ("addcmul", "cuda"): {f16},
     ("atan2", "cuda"): {f16},
@@ -499,6 +495,9 @@ inductor_one_sample = {
     ("nn.functional.grid_sample", "cuda"): {f16},
     ("nn.functional.group_norm", "cuda"): {f16},
     ("nn.functional.hinge_embedding_loss", "cuda"): {f16},
+    # Enabling all tests for this test fails randomly
+    # See https://github.com/pytorch/pytorch/issues/129238
+    ("nn.functional.huber_loss", "cuda"): {f16},
     ("nn.functional.interpolate.bicubic", "cuda"): {f16},
     ("nn.functional.interpolate.bilinear", "cuda"): {f16},
     ("nn.functional.interpolate.trilinear", "cuda"): {f16},

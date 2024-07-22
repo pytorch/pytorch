@@ -17,6 +17,7 @@ from torch._library.custom_ops import (
     CustomOpDef,
     device_types_t,
 )
+from torch._library.infer_schema import infer_schema  # noqa: F401
 from torch._ops import OpOverload
 
 
@@ -27,8 +28,10 @@ __all__ = [
     "fallthrough_kernel",
     "impl_abstract",
     "register_fake",
+    "register_torch_dispatch",
     "get_ctx",
     "custom_op",
+    "infer_schema",
 ]
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
@@ -178,6 +181,27 @@ class Library:
             func_to_register = fn
 
         handle = entry.fake_impl.register(func_to_register, source)
+        self._registration_handles.append(handle)
+
+    def _register_torch_dispatch_rule(self, op_name, torch_dispatch_class, fn):
+        r"""Registers a torch_dispatch rule for the given operator and torch_dispatch_class.
+
+        This allows for open registration to specify the behavior between the operator
+        and the torch_dispatch_class without needing to modify the torch_dispatch_class
+        or the operator directly.
+
+        The torch_dispatch_class is either a Tensor subclass with `__torch_dispatch__` or a
+        TorchDispatchMode.
+
+        If it is a Tensor subclass, we expect fn to have the following signature:
+        (cls, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any
+
+        If it is a TorchDispatchMode, we expect fn to have the following signature:
+        (mode, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any
+        """
+        qualname = f"{self.ns}::{op_name}"
+        entry = torch._library.simple_registry.singleton.find(qualname)
+        handle = entry.torch_dispatch_rules.register(torch_dispatch_class, fn)
         self._registration_handles.append(handle)
 
     def _impl_with_aoti_compile(self, op_name, dispatch_key=""):
@@ -330,7 +354,11 @@ class Library:
 
 
 def _del_library(
-    captured_impls, op_impls, captured_defs, op_defs, registration_handles
+    captured_impls,
+    op_impls,
+    captured_defs,
+    op_defs,
+    registration_handles,
 ):
     captured_impls -= op_impls
     captured_defs -= op_defs
@@ -631,7 +659,7 @@ def register_fake(
     This API may be used as a decorator (see examples).
 
     For a detailed guide on custom ops, please see
-    https://pytorch.org/docs/main/notes/custom_operators.html
+    https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html
 
     Examples:
         >>> import torch
@@ -843,6 +871,87 @@ def register_autograd(
         lib = Library(namespace, "FRAGMENT")
         _keep_alive.append(lib)
     lib.impl(opname, autograd_kernel, "Autograd", with_keyset=True)
+
+
+def register_torch_dispatch(
+    op: _op_identifier,
+    torch_dispatch_class: Any,
+    func: Optional[Callable] = None,
+    /,
+    *,
+    lib: Optional[Library] = None,
+):
+    r"""Registers a torch_dispatch rule for the given operator and ``torch_dispatch_class``.
+
+    This allows for open registration to specify the behavior between the operator
+    and the ``torch_dispatch_class`` without needing to modify the ``torch_dispatch_class``
+    or the operator directly.
+
+    The ``torch_dispatch_class`` is either a Tensor subclass with ``__torch_dispatch__`` or a
+    TorchDispatchMode.
+
+    If it is a Tensor subclass, we expect ``func`` to have the following signature:
+    ``(cls, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any``
+
+    If it is a TorchDispatchMode, we expect ``func`` to have the following signature:
+    ``(mode, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any``
+
+    ``args`` and ``kwargs`` will have been normalized the same way they are
+    in ``__torch_dispatch__`` (see :ref:`torch-dispatch-calling-convention`).
+
+    Examples:
+
+        >>> import torch
+        >>>
+        >>> @torch.library.custom_op("mylib::foo", mutates_args={})
+        >>> def foo(x: torch.Tensor) -> torch.Tensor:
+        >>>     return x.clone()
+        >>>
+        >>> class MyMode(torch.utils._python_dispatch.TorchDispatchMode):
+        >>>     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        >>>         return func(*args, **kwargs)
+        >>>
+        >>> @torch.library.register_torch_dispatch("mylib::foo", MyMode)
+        >>> def _(mode, func, types, args, kwargs):
+        >>>     x, = args
+        >>>     return x + 1
+        >>>
+        >>> x = torch.randn(3)
+        >>> y = foo(x)
+        >>> assert torch.allclose(y, x)
+        >>>
+        >>> with MyMode():
+        >>>     y = foo(x)
+        >>> assert torch.allclose(y, x + 1)
+
+    """
+    if not isinstance(
+        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
+    ):
+        raise ValueError(
+            "register_torch_dispatch(op): got unexpected type for op: {type(op)}"
+        )
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None:
+        return opdef.register_torch_dispatch(torch_dispatch_class, func)
+    assert isinstance(op, str)
+
+    def register(func):
+        namespace, op_name = torch._library.utils.parse_namespace(op)
+        if lib is None:
+            use_lib = Library(namespace, "FRAGMENT")
+            _keep_alive.append(use_lib)
+        else:
+            use_lib = lib
+        use_lib._register_torch_dispatch_rule(op_name, torch_dispatch_class, func)
+        return func
+
+    if func is None:
+        return register
+    else:
+        return register(func)
 
 
 # If the op was defined in C++, then we want to make sure there was an

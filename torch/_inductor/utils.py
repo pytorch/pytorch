@@ -58,8 +58,10 @@ from torch.utils._sympy.functions import (
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+
 from . import config
 from .runtime.runtime_utils import ceildiv as runtime_ceildiv
+
 
 log = logging.getLogger(__name__)
 
@@ -277,9 +279,7 @@ def convert_shape_to_inductor(
     trivial. But for symbolic tensors, we need to map from SymIntNode into
     sympy.Expr.
     """
-    return [
-        i.node.expr if isinstance(i, torch.SymInt) else sympy.Integer(i) for i in lst
-    ]
+    return [sympy.sympify(i) for i in lst]
 
 
 def convert_shape_to_symint(
@@ -309,7 +309,15 @@ def is_view(op: torch._ops.OpOverload):
     return any(a.alias_info is not None for a in op._schema.arguments)
 
 
-def is_pointwise_use(use):
+def is_pointwise_use(
+    use, is_pointwise_fn: Optional[Callable[[torch._ops.OpOverload], bool]] = None
+):
+    """
+    Do all uses of this op have torch.Tag.pointwise or return True for optional `is_pointwise_fn`
+
+    Uses in views ops will follow the views uses
+    """
+
     if not use.op == "call_function":
         return False
 
@@ -319,9 +327,11 @@ def is_pointwise_use(use):
         return False
 
     if use.target is operator.getitem or is_view(use.target):
-        return all(is_pointwise_use(u) for u in use.users)
+        return all(is_pointwise_use(u, is_pointwise_fn) for u in use.users)
 
-    return torch.Tag.pointwise in use.target.tags
+    return torch.Tag.pointwise in use.target.tags or (
+        is_pointwise_fn is not None and is_pointwise_fn(use.target)
+    )
 
 
 def gen_gm_and_inputs(target, args, kwargs):
@@ -679,6 +689,7 @@ def get_first_incompatible_cudagraph_node(gm):
         forbidden_set.update(
             {
                 "aten._unsafe_index_put.default",
+                "aten._unsafe_masked_index_put_accumulate.default",
                 "aten.index_put.default",
                 "aten.index_put_.default",
                 "aten.scatter.src",
@@ -734,7 +745,7 @@ def clear_inductor_caches():
 
 
 @contextlib.contextmanager
-def fresh_inductor_cache(cache_entries=None):
+def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
     """
     Contextmanager that provides a clean tmp cachedir for inductor.
 
@@ -743,11 +754,12 @@ def fresh_inductor_cache(cache_entries=None):
     """
     clear_inductor_caches()
 
-    inductor_cache_dir = tempfile.mkdtemp()
+    inductor_cache_dir = tempfile.mkdtemp(dir=dir)
     try:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
         ):
+            log.debug("Using inductor cache dir %s", inductor_cache_dir)
             triton_cache_dir = os.path.join(inductor_cache_dir, "triton")
             with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
                 yield
@@ -762,7 +774,8 @@ def fresh_inductor_cache(cache_entries=None):
                                 if ".lock" not in f
                             }
                         )
-        shutil.rmtree(inductor_cache_dir)
+        if delete:
+            shutil.rmtree(inductor_cache_dir)
     except Exception:
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
@@ -1006,11 +1019,15 @@ def _use_autotune_backend(backend: str) -> bool:
 
 
 def use_triton_template(layout, *, enable_int32=False):
+    from .codegen.common import BackendFeature, has_backend_feature
+
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
-    return _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
-        "TRITON"
+    return (
+        _use_template_for_cuda(layout, layout_dtypes)
+        and _use_autotune_backend("TRITON")
+        and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
 
 
@@ -1042,6 +1059,92 @@ def use_cutlass_template(layout, m, n, k):
     return res
 
 
+@functools.lru_cache(None)
+def _rocm_native_device_arch_name(device):
+    return torch.cuda.get_device_properties(device).gcnArchName
+
+
+@functools.lru_cache(None)
+def try_import_ck_lib():
+    try:
+        import ck4inductor  # type: ignore[import]
+        from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
+            gen_ops_library,
+            gen_ops_preselected,
+        )
+        from ck4inductor.universal_gemm.op import (  # type: ignore[import]
+            CKGemmOperation,
+        )
+
+        package_dirname = os.path.dirname(ck4inductor.__file__)
+    except ImportError:
+
+        def gen_ops_library():
+            return []
+
+        def gen_ops_preselected():
+            return []
+
+        class CKGemmOperation:  # type: ignore[no-redef]
+            pass
+
+        package_dirname = None
+    return package_dirname, gen_ops_library, gen_ops_preselected, CKGemmOperation
+
+
+def use_ck_template(layout, m, n, k):
+    # config knobs check 1
+    if not use_max_autotune():
+        return False
+    # config knobs check 2
+    if not _use_autotune_backend("CK"):
+        return False
+    # platform check
+    if not torch.version.hip:
+        return False
+    # tensors must be on GPU
+    if not layout.device.type == "cuda":
+        return False
+    # hardware check
+    # if config arch list is not specified, get the native arch from the device properties
+    native_arch = _rocm_native_device_arch_name(layout.device)
+    requested_archs = {k.split(":")[0]: k for k in config.rocm.arch} or {
+        native_arch.split(":")[0]: native_arch
+    }
+    requested_supported_archs = [
+        requested_archs[k] for k in requested_archs.keys() & config.rocm.supported_arch
+    ]
+    if not requested_supported_archs:
+        return False
+    # supported input dtypes
+    if layout.dtype not in [torch.float16, torch.bfloat16]:
+        return False
+    # TBD: investigate if we need to disable backend based on number of available CUs similar to `is_big_gpu`
+    # check if shape is static and gemm size is not 0
+    from .virtualized import V
+
+    gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
+    if gemm_size <= 0:
+        return False
+    # TBD: investigate if backend needs to be disabled for small gemms similar to CUTLASS
+
+    ck_package_dirname, _, _, _ = try_import_ck_lib()
+
+    if not ck_package_dirname:
+        log.warning("Please pip install Composable Kernel package")
+        return False
+
+    if not config.rocm.ck_dir:
+        log.warning("Please set TORCHINDUCTOR_CK_DIR env variable")
+        return False
+
+    if ck_package_dirname != config.rocm.ck_dir:
+        log.warning("Invalid path to CK library")
+        return False
+
+    return True
+
+
 def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 
@@ -1049,6 +1152,7 @@ def _use_template_for_cpu(layout):
 def use_cpp_packed_gemm_template(layout, mat1, mat2):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
+    from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
     from .kernel.mm_common import mm_args
 
     if not _use_template_for_cpu(layout) or not _use_autotune_backend("CPP"):
@@ -1057,27 +1161,31 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     if not config.cpp.weight_prepack:
         return False
 
-    layout_dtypes = [torch.float32, torch.bfloat16, torch.half]
-    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2)
+    int8_gemm = mat1.get_dtype() == torch.uint8
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
+    m, n, k, layout, mat1, mat2 = mm_args(
+        mat1, mat2, out_dtype=layout.dtype if int8_gemm else None
+    )
     # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
         return False
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
+
+    output_dtype, _ = get_gemm_template_output_and_compute_dtype(mat1.get_dtype())
     micro_gemm = create_micro_gemm(
         "micro_gemm",
         m,
         n,
         k,
-        input_dtype=layout.dtype,
-        output_dtype=torch.float,
+        input_dtype=mat1.get_dtype(),
+        input2_dtype=mat2.get_dtype(),
+        output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
     )
-    # TODO(jgong5): support n % n_block_size != 0
     return (
         layout.dtype in layout_dtypes
         and micro_gemm is not None
-        and n % micro_gemm.register_blocking[1] == 0
         and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and mat2.is_module_buffer()
@@ -1436,6 +1544,15 @@ def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int)
     num_rng_seed_offset_inputs = (
         2 if torch._functorch.config.functionalize_rng_ops else 0
     )
+    # AOT won't lift any parameters if we're inlining NN Modules
+    # however desugaring subclasses will still add arguments
+    # resulted in extra fixed inputs https://github.com/pytorch/pytorch/issues/130502
+    if (
+        torch._dynamo.config.inline_inbuilt_nn_modules
+        and not torch._dynamo.utils.is_parameter_freezing()
+    ):
+        return 0
+
     return aot_fw_gm_num_inputs - dynamo_gm_num_inputs - num_rng_seed_offset_inputs
 
 
@@ -1520,6 +1637,13 @@ def use_scatter_fallback(
     src_device_type,
     src_is_tensor,
 ):
+    if (
+        op_overload.overloadpacket
+        in (torch.ops.aten.scatter_reduce_, torch.ops.aten.scatter_reduce)
+        and reduction_type is None
+    ):
+        return False
+
     reduce_ty = (
         "add" if op_overload.overloadpacket == torch.ops.aten.scatter_ else "sum"
     )
@@ -1624,7 +1748,7 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
 
         log_capture_string = io.StringIO()
         ch = logging.StreamHandler(log_capture_string)
-        from torch._inductor.graph import output_code_log
+        from torch._inductor.codecache import output_code_log
 
         output_code_log.addHandler(ch)
         prev_level = output_code_log.level

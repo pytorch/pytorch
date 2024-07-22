@@ -299,7 +299,9 @@ class RangeVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         assert "range" not in codegen.tx.f_globals
-        codegen.append_output(codegen.create_load_python_module(range, True))
+        codegen.add_push_null(
+            lambda: codegen.append_output(codegen.create_load_python_module(range))
+        )
         codegen.foreach(self.items)
         codegen.extend_output(create_call_function(3, False))
 
@@ -322,6 +324,8 @@ class CommonListMethodsVariable(BaseListVariable):
         args: List["VariableTracker"],
         kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
+        from .tensor import SymNodeVariable
+
         if name == "append" and self.mutable_local:
             assert not kwargs
             (arg,) = args
@@ -343,7 +347,10 @@ class CommonListMethodsVariable(BaseListVariable):
         elif name == "insert" and self.mutable_local:
             assert not kwargs
             idx, value = args
-            const_idx = idx.as_python_constant()
+            if isinstance(idx, SymNodeVariable):
+                const_idx = idx.evaluate_expr()
+            else:
+                const_idx = idx.as_python_constant()
             tx.output.side_effects.mutation(self)
             self.items.insert(const_idx, value)
             return ConstantVariable.create(None)
@@ -443,8 +450,10 @@ class DequeVariable(CommonListMethodsVariable):
 
     def reconstruct(self, codegen):
         assert "deque" not in codegen.tx.f_globals
-        codegen.append_output(
-            codegen.create_load_python_module(collections.deque, True)
+        codegen.add_push_null(
+            lambda: codegen.append_output(
+                codegen.create_load_python_module(collections.deque)
+            )
         )
         codegen.foreach(self.items)
         codegen.extend_output(create_call_function(len(self.items), False))
@@ -592,11 +601,11 @@ class SizeVariable(TupleVariable):
         return proxy
 
     def reconstruct(self, codegen):
-        codegen.load_import_from("torch", "Size")
+        codegen.add_push_null(lambda: codegen.load_import_from("torch", "Size"))
         codegen.foreach(self.items)
         build_torch_size = [
             create_instruction("BUILD_TUPLE", arg=len(self.items)),
-        ] + create_call_function(1, True)
+        ] + create_call_function(1, False)
         codegen.extend_output(build_torch_size)
 
     def unpack_var_sequence(self, tx):
@@ -689,13 +698,15 @@ class NamedTupleVariable(TupleVariable):
 
     def reconstruct(self, codegen):
         create_fn = getattr(self.tuple_cls, "_make", self.tuple_cls)
-        codegen.append_output(codegen._create_load_const(create_fn))
+        codegen.add_push_null(
+            lambda: codegen.append_output(codegen._create_load_const(create_fn))
+        )
         codegen.foreach(self.items)
         codegen.extend_output(
             [
                 create_instruction("BUILD_TUPLE", arg=len(self.items)),
             ]
-            + create_call_function(1, True)
+            + create_call_function(1, False)
         )
 
     def var_getattr(self, tx, name):
@@ -812,6 +823,9 @@ class ListIteratorVariable(VariableTracker):
 
         return super().call_method(tx, name, args, kwargs)
 
+    def python_type(self):
+        return type(iter([]))
+
     def as_python_constant(self):
         if self.index > 0:
             raise NotImplementedError
@@ -924,9 +938,9 @@ class RestrictedListSubclassVariable(ListVariable):
         )
 
     def reconstruct(self, codegen):
-        codegen(self.user_cls_source)
+        codegen.add_push_null(lambda: codegen(self.user_cls_source))
         super().reconstruct(codegen)
-        codegen.extend_output(create_call_function(1, True))
+        codegen.extend_output(create_call_function(1, False))
 
     def call_method(
         self,

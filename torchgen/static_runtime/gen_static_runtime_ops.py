@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import itertools
 import os
@@ -9,6 +11,7 @@ from torchgen import gen
 from torchgen.context import native_function_manager
 from torchgen.model import DispatchKey, NativeFunctionsGroup, NativeFunctionsViewGroup
 from torchgen.static_runtime import config, generator
+
 
 # Given a list of `grouped_native_functions` sorted by their op names, return a list of
 # lists each of which groups ops that share the base name. For example, `mean` and
@@ -27,7 +30,7 @@ def group_functions_by_op_name(
         return []
     groups = []
 
-    def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bool:
+    def is_supported(g: NativeFunctionsGroup | NativeFunctionsViewGroup) -> bool:
         with native_function_manager(g):
             return generator.is_supported(g)
 

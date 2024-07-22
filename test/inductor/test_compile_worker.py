@@ -4,10 +4,9 @@ import os
 
 from torch._inductor.compile_worker.subproc_pool import (
     raise_testexc,
+    SubprocException,
     SubprocPool,
-    TestException,
 )
-
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU
 
@@ -27,7 +26,10 @@ class TestCompileWorker(TestCase):
         pool = SubprocPool(2)
         try:
             a = pool.submit(raise_testexc)
-            with self.assertRaises(TestException):
+            with self.assertRaisesRegex(
+                SubprocException,
+                "torch._inductor.compile_worker.subproc_pool.TestException",
+            ):
                 a.result()
         finally:
             pool.shutdown()

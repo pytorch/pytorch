@@ -27,14 +27,13 @@ import sympy
 import torch
 import torch._logging
 from torch._dynamo.utils import preserve_rng_state
-
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._triton import has_triton_package
+
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
-
 from .. import config, ir
 from ..codecache import code_hash, get_path, PyCodeCache
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
@@ -72,6 +71,7 @@ from .simd import (
     SIMDScheduling,
 )
 from .triton_utils import config_of, signature_of, signature_to_meta
+
 
 if TYPE_CHECKING:
     from ..ir import IRNode
@@ -536,7 +536,7 @@ def triton_compute_type(dtype):
         triton_type_name = "float8e5"
     elif triton_type_name == "float8_e4m3fnuz":
         triton_type_name = "float8e4b8"
-    elif triton_type_name == "float8_e5m2":
+    elif triton_type_name == "float8_e5m2fnuz":
         triton_type_name = "float8e5b16"
     return f"tl.{triton_type_name}"
 
@@ -720,6 +720,16 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def where(a, b, c):
         return f"tl.where({a}, {b}, {c})"
+
+    @staticmethod
+    def inline_asm_elementwise(
+        *inputs, asm, constraints=None, dtype=torch.float32, is_pure=True, pack=1
+    ):
+        triton_type = triton_compute_type(dtype)
+        input_refs = ", ".join([str(i) for i in inputs])
+        if constraints is None:
+            constraints = ", ".join(["=r"] + ["r" for _ in inputs])
+        return f"tl.inline_asm_elementwise('{asm}', '{constraints}', [{input_refs}], dtype={triton_type}, is_pure={is_pure}, pack={pack})"  # noqa: B950
 
     @staticmethod
     def cos(x):
@@ -1005,6 +1015,12 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def masked(mask, body, other):
+        if mask is not None and torch.version.hip is not None:
+            mask = V.kernel.cse.generate(
+                V.kernel.compute,
+                f"{mask}.to(tl.int1)",
+            )
+
         nodes = body.graph.find_nodes(op="output")
         assert nodes, "graph for body does not contain an output"
 
@@ -1135,7 +1151,7 @@ class TritonKernel(SIMDKernel):
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
-        disable_persistent_reduction=False,
+        override_persistent_reduction=None,
     ):
         super().__init__(
             *groups,
@@ -1143,7 +1159,7 @@ class TritonKernel(SIMDKernel):
             mutations=mutations,
             reduction_hint=reduction_hint,
             pid_cache=pid_cache,
-            disable_persistent_reduction=disable_persistent_reduction,
+            override_persistent_reduction=override_persistent_reduction,
         )
         self.suffix: IndentedBuffer = IndentedBuffer()  # type: ignore[assignment]
         self.outside_loop_vars: Set[Any] = set()
@@ -1771,7 +1787,7 @@ class TritonKernel(SIMDKernel):
         elif mode is None:
             line = f"tl.store({var} + ({indexing.index_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
-            line = f"tl.atomic_add({var} + ({indexing.index_str}), {value}, {indexing.mask_str})"
+            line = f"tl.atomic_add({var} + ({indexing.index_str}), {value}, {indexing.mask_str}, sem='relaxed')"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(DeferredLine(name, line))
@@ -2231,6 +2247,66 @@ class TritonKernel(SIMDKernel):
 
         return tuple(result_vars)
 
+    def sort(
+        self,
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[CSEVariable, ...],
+        stable: bool,
+        descending: bool,
+    ) -> Tuple[CSEVariable, ...]:
+        assert self.inside_reduction
+        masks = {f"{tree.prefix}mask" for tree in self.range_trees}
+        self.filter_masks(masks)
+        masks = sorted(masks)
+        assert not self._load_mask, "ops.sort not supported inside ops.masked"
+        assert (
+            self.persistent_reduction
+        ), "ops.sort is only supported in persistent reductions"
+        reduction_range_prefix = self.range_trees[-1].prefix
+
+        cse_compute = functools.partial(self.cse.generate, self.compute)
+        dim = self.triton_tensor_ndim() - 1
+
+        broadcasted_values = [
+            cse_compute(f"tl.broadcast_to({value}, {self.dense_size_str()})")
+            for value in values
+        ]
+
+        def csv(values):
+            return " ".join(f"{value}," for value in values)
+
+        def cse_multiple(line, n, masks):
+            cache_keys = [f"{line}, {i}, {masks}" for i in range(n)]
+            if all(cache_key in self.cse.cache for cache_key in cache_keys):
+                return [self.cse.cache[cache_key] for cache_key in cache_keys]
+            result_vars = [self.cse.newvar() for _ in range(n)]
+            self.compute.writeline(
+                f"{csv(result_vars)} = {line}",
+            )
+            for result_var, cache_key in zip(result_vars, cache_keys):
+                if masks:
+                    result_var.mask_vars = masks  # type: ignore[attr-defined]
+                self.cse.cache[cache_key] = result_var
+            return tuple(result_vars)
+
+        assert self.range_trees[-1].prefix == "r"
+        rmask = "None" if self._has_constant_mask(self.range_trees[-1]) else "rmask"
+
+        if len(values) == 2:
+            line = (
+                f"triton_helpers.sort_with_index({broadcasted_values[0]}, {broadcasted_values[1]},"
+                f" {rmask}, {dim}, stable={stable}, descending={descending})"
+            )
+            result_vars = cse_multiple(line, len(values), masks)
+        else:
+            raise AssertionError("Unhandled sort")
+
+        for result_var, input_var in zip(result_vars, values):
+            result_var.mask_vars = masks  # type: ignore[attr-defined]
+            result_var.bounds = input_var.bounds
+
+        return tuple(result_vars)
+
     def codegen_body(self):
         """
         Concat output code from index_code, loads, compute, stores,
@@ -2657,19 +2733,10 @@ class TritonKernel(SIMDKernel):
             if tree.grid_dim is not None:
                 grid.append(expr)
 
-    def get_call_args(self):
-        # arg_types is needed for cpp wrapper codegen
-        _, call_args, _, arg_types = self.args.python_argdefs()
-        # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
-        for i in range(len(call_args)):
-            if V.graph.is_unspec_arg(call_args[i]):
-                call_args[i] = call_args[i] + ".item()"
-
-        return call_args, arg_types
-
     def call_kernel(self, name: str, node: Optional[IRNode] = None):
         wrapper = V.graph.wrapper_code
-        call_args, arg_types = self.get_call_args()
+        wrapper.write_triton_header_once()
+        _, call_args, _, arg_types = self.args.python_argdefs()
         grid: List[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
         current_device = V.graph.scheduler.get_current_device_or_throw()
@@ -2746,7 +2813,7 @@ class TritonKernel(SIMDKernel):
         if (
             entry.grid_dim == 1
             and not entry.has_zdim
-            and not (isinstance(entry.numel, int) and entry.numel <= get_max_y_grid())
+            and not V.graph.sizevars.statically_known_leq(entry.numel, get_max_y_grid())
         ):
             # For ynumel larger than max_ygrid, we need to use zdim.
             # For each z dimension, there are tl.num_programs(1) yblocks which is passed by grad(x,y,z).
@@ -2820,6 +2887,7 @@ class TritonScheduling(SIMDScheduling):
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.MASKED_SCATTER_WITH_INDEX,
             BackendFeature.SCAN,
+            BackendFeature.TRITON_TEMPLATES,
         ]
     )
     if torch.version.hip is None:
@@ -2828,6 +2896,7 @@ class TritonScheduling(SIMDScheduling):
                 [
                     # TODO: Move this above when ROCm triton adds support for multiple inputs
                     BackendFeature.TUPLE_REDUCTION,
+                    BackendFeature.SORT,
                 ]
             )
         )

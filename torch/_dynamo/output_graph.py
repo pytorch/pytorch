@@ -294,7 +294,7 @@ class OutputGraph:
             allow_scalar_outputs=config.capture_scalar_outputs,
             allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
             prefer_deferred_runtime_asserts_over_guards=config.prefer_deferred_runtime_asserts_over_guards,
-            _allow_complex_guards_as_runtime_asserts=config._allow_complex_guards_as_runtime_asserts,
+            allow_complex_guards_as_runtime_asserts=config.allow_complex_guards_as_runtime_asserts,
             co_fields=self.co_fields,
         )
 
@@ -321,7 +321,7 @@ class OutputGraph:
             int, List[Source]
         ] = collections.defaultdict(list)
         # Stores the full fqn of a param or buffer to the relevant source.
-        self.param_name_to_source: Optional[Dict[str, Source]] = dict()
+        self.param_name_to_source: Optional[Dict[str, Source]] = {}
         self.side_effects = SideEffects()
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
@@ -476,12 +476,14 @@ class OutputGraph:
         example_value = fn(*args)
         varname = self.new_var()
         cg = PyCodegen(self.root_tx)
-        cg.load_import_from(
-            fn.__module__,
-            fn.__name__,
+        cg.add_push_null(
+            lambda: cg.load_import_from(
+                fn.__module__,
+                fn.__name__,
+            )
         )
         cg.foreach(map(variables.ConstantVariable.create, args))
-        cg.call_function(len(args), True)
+        cg.call_function(len(args), False)
         cg.store(varname)
         self.pregraph_bytecode.extend(cg.get_instructions())
         source = SyntheticLocalSource(varname)
@@ -793,7 +795,7 @@ class OutputGraph:
 
                 vt = wrap_fx_proxy(
                     self.root_tx,
-                    tracer.create_proxy("get_attr", module_key, tuple(), {}),
+                    tracer.create_proxy("get_attr", module_key, (), {}),
                     example_value=target,
                     **options,
                 )
@@ -801,6 +803,10 @@ class OutputGraph:
                 # Track the object so to avoid duplicate registration in case of
                 # different sources pointing to the same tensor object.
                 vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
+
+                assert "tensor_dict" not in vt.proxy.node.meta
+                vt.proxy.node.meta["tensor_dict"] = target.__dict__.copy()
+
                 return vt
 
         elif isinstance(target, torch.nn.Module):
@@ -831,7 +837,7 @@ class OutputGraph:
             def wrap_name(module_key):
                 return SymNodeVariable.create(
                     self,
-                    self.create_proxy("get_attr", module_key, tuple(), {}),
+                    self.create_proxy("get_attr", module_key, (), {}),
                     sym_num=target,
                     **options,
                 )
@@ -1028,7 +1034,7 @@ class OutputGraph:
         restore_vars = []
         val_to_names: Dict[VariableTracker, List[str]] = {}
         if stack_values:
-            val_to_names[stack_values[-1]] = list()
+            val_to_names[stack_values[-1]] = []
         # NB: Typically (i.e., for graph compile from RETURN_VALUE),
         # symbolic_locals will be empty at this point, as prune_dead_locals
         # will clear out all of symbolic_locals because RETURN_VALUE is the
@@ -1051,7 +1057,7 @@ class OutputGraph:
                 # A variable should never be NULL in < 3.12
                 assert not type.__instancecheck__(NullVariable, v)
             if v not in val_to_names:
-                val_to_names[v] = list()
+                val_to_names[v] = []
             val_to_names[v].append(k)
         for v in val_to_names.keys():
             restore_vars.extend(val_to_names[v])
@@ -1155,10 +1161,10 @@ class OutputGraph:
 
         # Return variables used for logging at the end
         for debug_var, args in tx.debug_locals:
-            cg(debug_var)
+            cg.add_push_null(lambda: cg(debug_var))
             for arg in args:
                 cg(arg)
-            cg.extend_output(create_call_function(len(args), True))
+            cg.extend_output(create_call_function(len(args), False))
             cg.extend_output([create_instruction("POP_TOP")])
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
@@ -1575,14 +1581,19 @@ class OutputGraph:
                     if isinstance(node.meta["grapharg"].example, torch.ScriptObject):
                         real_script_obj = node.meta["grapharg"].example
                         fake_script_obj = node.meta["grapharg"].example_strong_ref
-                        flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
-                        for attr in flat_dict.keys():
-                            fake_attr_val = getattr(fake_script_obj.wrapped_obj, attr)
-                            pytree.tree_map_only(
-                                (torch.SymInt, torch.Tensor),
-                                lambda t: update_used_symbols(used_symbols, t),
-                                fake_attr_val,
-                            )
+                        if not torch._library.fake_class_registry.tracing_with_real(
+                            real_script_obj
+                        ):
+                            flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
+                            for attr in flat_dict.keys():
+                                fake_attr_val = getattr(
+                                    fake_script_obj.wrapped_obj, attr
+                                )
+                                pytree.tree_map_only(
+                                    (torch.SymInt, torch.Tensor),
+                                    lambda t: update_used_symbols(used_symbols, t),
+                                    fake_attr_val,
+                                )
                         continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
@@ -1684,7 +1695,7 @@ err_epilogue = (
     "(and fall back to eager-mode PyTorch) on all ops "
     "that have do not have the 'pt2_compliant_tag'. "
     "Please see the following doc for how to mark this op as PT2 compliant "
-    "https://pytorch.org/docs/main/notes/custom_operators.html"
+    "https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html"
 )
 
 

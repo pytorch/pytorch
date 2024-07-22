@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import os  # noqa: C101
 import sys
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING, Union
 
 import torch
 
@@ -98,6 +98,9 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# set to True to enable the back-to-back GEMM pass
+b2b_gemm_pass = False
+
 # register custom graph optimization pass hook. so far, pre/post passes are
 # only applied before/after pattern_matcher in post_grad_passes.
 #
@@ -122,6 +125,16 @@ joint_custom_post_pass: Optional[Callable[[torch.fx.Graph], None]] = None
 # non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
 # use post-grad passes.
 pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
+
+# Registers a custom pass to be run right before fusion in Inductor scheduler.
+# WARNING: Inductor scheduler IR is at prototype stage and subject to change,
+# hence custom IR passes built on top of it might break in the future.
+_pre_fusion_custom_pass: Optional[
+    Callable[
+        [List["torch._inductor.scheduler.BaseSchedulerNode"]],
+        List["torch._inductor.scheduler.BaseSchedulerNode"],
+    ]
+] = None
 
 # Deprecated
 split_cat_fx_passes = True
@@ -216,6 +229,8 @@ reorder_for_compute_comm_overlap = False
 
 # passes (in execution order) for increasing overlap between compute and communication
 # for built-in passes, use string name; for user-defined passes, pass in the function handle
+# WARNING: Inductor scheduler IR is at prototype stage and subject to change,
+# hence custom IR passes built on top of it might break in the future.
 reorder_for_compute_comm_overlap_passes = [
     "reorder_compute_for_overlap",
     "sink_waits",
@@ -252,10 +267,11 @@ force_same_precision = (
 )
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CPP.
 # ATen: default Pytorch ATen kernels.
-# Triton: Triton templates defined in torch inductor.
-# CUTLASS: Cutlass templates and kernels.
+# Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
+# CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
+# CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CPP: CPP templates and kernels for CPU.
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
@@ -305,6 +321,32 @@ coordinate_descent_check_all_directions = (
 )
 coordinate_descent_search_radius = int(
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
+)
+
+# AutoHeuristic is a framework that allows one to collect data from autotuning, use the data to learn a heuristic, and
+# generate the learned heursitic to code which is shipped with the compiler
+# Specify a list of comma separated optimizations to collect data for
+autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
+# Specify a list of comma separated optimizations to use learned heuristics for
+autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "")
+
+
+def run_autoheuristic(name):
+    return collect_autoheuristic(name) or use_autoheuristic(name)
+
+
+def collect_autoheuristic(name):
+    return name in torch._inductor.config.autoheuristic_collect.split(",")
+
+
+def use_autoheuristic(name):
+    return name in torch._inductor.config.autoheuristic_use.split(",")
+
+
+# If set to "DEFAULT", this will use the default log path specified in autoheuristic.py.
+# If set to another path, autoheuristic will instead log results to the given path.
+autoheuristic_log_path = os.environ.get(
+    "TORCHINDUCTOR_AUTOHEURISTIC_LOG_PATH", "DEFAULT"
 )
 
 # Disabled by default on ROCm, opt-in if model utilises NHWC convolutions
@@ -401,18 +443,27 @@ debug_index_asserts = False
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
 developer_warnings = is_fbcode() or is_nightly_or_source
 
+# This pattern matches a special usage of scatter
+# 1. It's applied to a constant tensor
+# 2. The index tensor has size 1 in the scatter dimension
+# Such pattern generates a sparse matrix when the const tensor is all-zero.
+# We can lower this pattern to a pointwise kernel for more fusion opportunities
+# and saving memory footprint.
+optimize_scatter_upon_const_tensor = (
+    os.environ.get("TORCHINDUCTOR_OPTIMIZE_SCATTER_UPON_CONST_TENSOR", "1") == "1"
+)
+
 
 # The multiprocessing start method to use for inductor workers in the codecache.
-# "subprocess", "fork", or "spawn"
+# Can be "subprocess" or "fork".
 def decide_worker_start_method():
     start_method = os.environ.get(
         "TORCHINDUCTOR_WORKER_START", "fork" if is_fbcode() else "subprocess"
     )
-    assert start_method in [
+    assert start_method in (
         "subprocess",
         "fork",
-        "spawn",
-    ], f"Invalid start method: {start_method}"
+    ), f"Invalid start method: {start_method}"
     return start_method
 
 
@@ -449,12 +500,14 @@ def decide_compile_threads():
     Here are the precedence to decide compile_threads
     1. User can override it by TORCHINDUCTOR_COMPILE_THREADS.  One may want to disable async compiling by
        setting this to 1 to make pdb happy.
-    2. Set to 1 if it's win32 platform or it's a fbcode build
+    2. Set to 1 if it's win32 platform
     3. decide by the number of CPU cores
     """
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
-    elif sys.platform == "win32" or is_fbcode():
+    elif sys.platform == "win32":
+        return 1
+    elif is_fbcode() and worker_start_method != "subprocess":
         return 1
     else:
         cpu_count = (
@@ -659,7 +712,14 @@ class triton:
     cudagraph_trees_history_recording = False
 
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
-    cudagraph_support_input_mutation = False
+    cudagraph_support_input_mutation = False if is_fbcode() else True
+
+    # Maximal number of allowed cudagraph re-record for a function and
+    # a cudagraph node due to static input tensor address changes or
+    # cudagraph managed tensor data pointer changed.
+    # i.e., allow num_recording <= cudagraph_unexpected_rerecord_limit
+    # note: we are conservative here and choose a large limit.
+    cudagraph_unexpected_rerecord_limit = 128
 
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
@@ -692,6 +752,9 @@ class triton:
 
     # max autotune gemm with cublasLt
     autotune_cublasLt = True
+
+    # Tune the generated Triton kernels at compile time instead of first time they run
+    autotune_at_compile_time = False
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
@@ -781,6 +844,8 @@ class aot_inductor:
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
 
+    package: bool = False
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
@@ -855,6 +920,78 @@ class cuda:
     cutlass_op_denylist_regex: Optional[str] = "pingpong"
 
 
+class rocm:
+    # Offload arch list for device code compilation, e.g. ["gfx941", "gfx942"].
+    # If empty, the `native` arch is used
+    arch: List[str] = []
+
+    # Enable for CDNA3 only for now
+    # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
+    supported_arch: Set[str] = {"gfx940", "gfx941", "gfx942"}
+
+    # Optimization level, use to balance compilation speed and runtime performance
+    compile_opt_level = "-O2"
+
+    # Flag to keep debug information in compiled objects
+    is_debug = False
+
+    # Flag to keep intermediate files (assembly listings, preprocessed sources, etc.)
+    save_temps = False
+
+    # Flag to add `-ffast-math`` to compile flags
+    use_fast_math = True
+
+    # Flag to add `-fgpu-flush-denormals-to-zero` to compile flags
+    flush_denormals = True
+
+    # Flag to print register and LDS usage during compilation
+    print_kernel_resource_usage = False
+
+    # Path to ROCm installation, if None, use env variable ROCM_HOME
+    rocm_home: Optional[str] = None
+
+    # Path to Composable Kernel library.
+    # Install with `pip install git+https://github.com/rocm/composable_kernel@develop`.
+    ck_dir = os.environ.get("TORCHINDUCTOR_CK_DIR")
+
+    # Number of op instance choices to trade off between runtime perf and compilation time
+    n_max_profiling_configs: Optional[int] = None
+
+    # Flag to use a short list of CK instances which perform well across a variety of shapes.
+    # Currently RCR and F16 only
+    use_preselected_instances: bool = False
+
+
+# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
+cpu_backend = "cpp"
+
+# Backend to use for CUDA codegen either "triton" or "halide" (experimental)
+cuda_backend = "triton"
+
+
+class halide:
+    # Base halide target to use for CPU devices
+    cpu_target = "host"
+
+    # Base halide target to use for CUDA devices
+    gpu_target = "host-cuda"
+
+    # Halide autoscheduler to use, choices are:
+    # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
+    scheduler_cuda = "Anderson2021"
+    scheduler_cpu = "Adams2019"
+
+    # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
+    asserts = False
+
+    # Controls `debug` flag passed to Halide target
+    debug = False
+
+    # Enable (or fallback on) scan kernels such as cumsum
+    # Halide autoschedulers struggle with these kernels
+    scan_kernels = False
+
+
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
@@ -920,6 +1057,11 @@ class trace:
 _save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
+    "post_grad_custom_post_pass",
+    "post_grad_custom_pre_pass",
+    "joint_custom_pre_pass",
+    "joint_custom_post_pass",
+    "pre_grad_custom_pass",
 ]
 
 _cache_config_ignore_prefix = [
@@ -935,6 +1077,7 @@ if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
+
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
