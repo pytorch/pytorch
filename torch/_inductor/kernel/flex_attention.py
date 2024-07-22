@@ -7,6 +7,12 @@ from typing import Any, List, Tuple
 import sympy
 
 import torch
+from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
+from torch._inductor.autoheuristic.autoheuristic_utils import (
+    AHContext,
+    context_add_strides,
+    flex_attention_operations,
+)
 from torch._inductor.virtualized import V
 from torch.utils._pytree import tree_map
 
@@ -482,6 +488,14 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
     return default_config
 
 
+def _get_default_configs_fwd() -> List[Tuple[int, int, int, int]]:
+    if torch.cuda.get_device_capability() >= (9, 0):  # H100
+        return list(_h100_default_config.values())
+    elif torch.cuda.get_device_capability() >= (8, 0):  # A100
+        return list(_a100_default_config.values())
+    return []
+
+
 def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
     head_dim = query.get_size()[-1]
     dtype = query.get_dtype()
@@ -648,7 +662,7 @@ def flex_attention(
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
     configs.append(_get_default_config_fwd(query))
-    if config.max_autotune:
+    if config.max_autotune or config.run_autoheuristic("flex_attention"):
         configs += [
             (128, 64, 4, 3),
             (128, 128, 4, 3),
@@ -656,6 +670,12 @@ def flex_attention(
             (64, 128, 4, 3),
             (64, 64, 4, 3),
         ]
+
+    if config.run_autoheuristic("flex_attention"):
+        configs += _get_default_configs_fwd()
+        # autotuning results do not match actual performance for this config
+        configs.remove((64, 16, 4, 3))
+        configs = list(set(configs))
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
@@ -700,6 +720,7 @@ def flex_attention(
             call_sizes=query.get_size(),
             **kernel_options,
         )
+
     inputs_for_autotuning = (
         [
             query,
@@ -718,6 +739,49 @@ def flex_attention(
         4: create_num_blocks_fake_generator(full_kv_indices),
         5: create_indices_fake,
     }
+
+    if config.run_autoheuristic("flex_attention"):
+
+        def get_context(query, key, value, subgraph):
+            context = AHContext()
+            b, h, m, n = query.get_size()
+            kv_seq_length = key.get_size()[2]
+            context.add_feature("b", b)
+            context.add_feature("h", h)
+            context.add_feature("m", m)
+            context.add_feature("n", n)
+            context.add_feature("kv_seq_length", kv_seq_length)
+            context.add_feature("dtype", query.get_dtype(), is_categorical=True)
+            context_add_strides(context, "q", query.get_stride())
+            context.add_feature(
+                "subgraph_num_nodes", len(subgraph.graph_module.graph.nodes)
+            )
+
+            def arg_is_used(node):
+                return node.op == "placeholder" and len(node.users) > 0
+
+            num_args_used = sum(
+                1 for node in subgraph.graph_module.graph.nodes if arg_is_used(node)
+            )
+            context.add_feature("subgraph_num_args_used", num_args_used)
+            return context
+
+        def fallback():
+            return None
+
+        context = get_context(query, key, value, subgraph)
+        autoheuristic = AutoHeuristicSelectAlgorithm(
+            fallback=fallback,
+            choices=choices,
+            input_nodes=inputs_for_autotuning,
+            context=context,
+            name="flex_attention",
+            augment_context=flex_attention_operations(),
+        )
+        choice = autoheuristic.get_choice_caller()
+        if choice is not None:
+            choices = [choice]
+
     return (
         autotune_select_algorithm(
             "flex_attention",

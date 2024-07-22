@@ -199,7 +199,8 @@ class AHTrainDecisionTree(AHTrain):
                         eval_result["top_k_unsure"],
                         eval_result["max_speedup_default"],
                         eval_result["gmean_speedup_default"],
-                        eval_result["max_slowdown_default"],
+                        eval_result["max_speedup_default_over_heuristic"],
+                        eval_result["gmean_speedup_default_over_heuristic"],
                         eval_result["non_default_predictions"],
                         eval_result["default_better"],
                     )
@@ -226,9 +227,10 @@ class AHTrainDecisionTree(AHTrain):
                     "wrong_max_spdup_k",
                     "wrong_gman_spdup_k",
                     "top_k_unsure",
-                    "max_spdup_default",
-                    "gman_spdup_default",
-                    "max_slowdown_default",
+                    "max_spdup_over_default",
+                    "gman_spdup_over_default",
+                    "max_speedup_default_over_heuristic",
+                    "gmean_speedup_default_over_heuristic",
                     "non_default_preds",
                     "default_better",
                 ],
@@ -356,10 +358,16 @@ class AHTrainDecisionTree(AHTrain):
 
         def calculate_stats(group):
             count = len(group)
-            mean = group["feedback"].mean()
-            std = group["feedback"].std()
-            relative_std = (std / mean) * 100 if mean != 0 else np.inf
-            median = group["feedback"].median()
+            has_infinity = group["feedback"].isin([np.inf, -np.inf]).any()
+            if has_infinity:
+                mean = np.inf
+                relative_std = np.inf
+                median = np.inf
+            else:
+                mean = group["feedback"].mean()
+                std = group["feedback"].std()
+                relative_std = (std / mean) * 100 if mean != 0 else np.inf
+                median = group["feedback"].median()
             return pd.Series(
                 {
                     "count": count,
@@ -461,7 +469,11 @@ class AHTrainDecisionTree(AHTrain):
                     num_non_default_predictions += 1
                 default_time = self.get_time(df.iloc[i], default_config)
                 # TODO: We should keep track of how often this happens
-                if default_time is not None and not math.isinf(default_time):
+                if (
+                    default_time is not None
+                    and not math.isinf(default_time)
+                    and not math.isinf(predicted_time)
+                ):
                     speedup_over_default = default_time / predicted_time
                     if speedup_over_default < 1:
                         num_default_better += 1
@@ -553,8 +565,18 @@ class AHTrainDecisionTree(AHTrain):
         gmean_speedup_over_default = (
             gmean(speedups_over_default) if speedups_over_default else 0
         )
+        speedups_default_over_heuristic = [
+            1 / x for x in speedups_over_default if x < 1
+        ]
         max_slowdown_over_defalt = (
-            min(speedups_over_default) if speedups_over_default else 0
+            max(speedups_default_over_heuristic)
+            if speedups_default_over_heuristic
+            else 0
+        )
+        gmean_speedup_default_over_heuristic = (
+            gmean(speedups_default_over_heuristic)
+            if speedups_default_over_heuristic
+            else 0
         )
         return {
             "correct": num_correct,
@@ -569,7 +591,8 @@ class AHTrainDecisionTree(AHTrain):
             "top_k_unsure": top_k_unsure,
             "max_speedup_default": max_speedup_over_default,
             "gmean_speedup_default": gmean_speedup_over_default,
-            "max_slowdown_default": max_slowdown_over_defalt,
+            "max_speedup_default_over_heuristic": max_slowdown_over_defalt,
+            "gmean_speedup_default_over_heuristic": gmean_speedup_default_over_heuristic,
             "non_default_predictions": num_non_default_predictions,
             "default_better": num_default_better,
         }

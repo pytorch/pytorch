@@ -72,11 +72,11 @@ class AHTrain:
         (df, metadata) = self.deserialize_data(log_path)
         numerical_features = metadata["numerical_features"]
         categorical_features = metadata["categorical_features"]
-        choices = df[CHOICE_COL].unique().tolist()
         features = numerical_features + categorical_features
         if nrows is not None:
             df = df.head(nrows)
         df = self.filter_df(df)
+        choices = df[CHOICE_COL].unique().tolist()
         return (df, metadata, features, categorical_features, choices)
 
     def generate_heuristic(self):

@@ -219,6 +219,16 @@ def pow2_op(data: Any, dim: str, exponent: int) -> bool:
     return data[dim] == 2**exponent
 
 
+def flex_attention_operations() -> List[AHOperation]:
+    op1 = AHOperation("b*h", lambda data: data["b"] * data["h"])
+    op2 = AHOperation("b*m", lambda data: data["b"] * data["m"])
+    op3 = AHOperation("b*n", lambda data: data["b"] * data["n"])
+    op4 = AHOperation("h*m", lambda data: data["h"] * data["m"])
+    op5 = AHOperation("h*n", lambda data: data["h"] * data["n"])
+    op6 = AHOperation("m*n", lambda data: data["m"] * data["n"])
+    return [op1, op2, op3, op4, op5, op6]
+
+
 def mixed_mm_operations() -> List[AHOperation]:
     mult_dims_ops = get_mult_dims_ops()
     arith_intensity_op = AHOperation("arith_intensity", get_arith_intensity)
