@@ -460,7 +460,7 @@ def get_buf_idx(snode):
 
 def enforce_comm_ordering_for_fsdp(
     snodes: List[torch._inductor.scheduler.BaseSchedulerNode],
-    name_to_fused_node,
+    name_to_fused_node: Dict[str, BaseSchedulerNode],
 ) -> List[torch._inductor.scheduler.BaseSchedulerNode]:
     from . import scheduler
 
