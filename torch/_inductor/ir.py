@@ -3941,6 +3941,9 @@ class CppTemplateBuffer(TemplateBuffer):
 class InputsKernel(OperationBuffer):
     inputs: List[Buffer]
 
+    def get_read_writes_input(self, x):
+        return dependencies.StarDep(x.get_name())
+
     def get_read_writes(self) -> ReadWrites:
         reads: Set[dependencies.Dep] = set()
         StarDep = dependencies.StarDep
@@ -5004,12 +5007,6 @@ class MutationOperation(InputsKernel):
         self.device = node_doing_mutating.get_device()
         self.outputs: List[Buffer] = [MutationOutput(layout, mutated_node, self)]
         V.graph.register_operation(self)
-
-    def get_device(self):
-        return self.device
-
-    def get_outputs(self) -> List[Buffer]:
-        return self.outputs
 
     def should_allocate(self) -> bool:
         return False
