@@ -5,6 +5,7 @@ import inspect
 import json
 import os
 import pkgutil
+import subprocess
 import unittest
 from typing import Callable
 
@@ -278,7 +279,14 @@ class TestPublicBindings(TestCase):
                 # which calls sys.exit() when we try to import it
                 if "__main__" in modname:
                     continue
-                importlib.import_module(modname)
+
+                subprocess.check_call(
+                    [
+                        "python",
+                        "-c",
+                        f"import {modname}",
+                    ]
+                )
             except Exception as e:
                 # Some current failures are not ImportError
 
