@@ -27,6 +27,7 @@ from ..pattern_matcher import (
 )
 from .replace_random import replace_random_passes
 
+
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
 aten = torch.ops.aten

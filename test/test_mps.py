@@ -353,6 +353,7 @@ def mps_ops_modifier(ops):
         'view_as',
         'view_as_real',
         'view',
+        'view_copy',
         'vsplit',
         'zero_',
         'zeros',
@@ -11598,7 +11599,7 @@ class TestFallbackWarning(TestCase):
     # TODO: Remove once test_testing.py is running on MPS devices
     def test_no_warning_on_import(self):
         out = subprocess.check_output(
-            [sys.executable, "-W", "all", "-c", "import torch"],
+            [sys.executable, "-W", "always", "-c", "import torch"],
             stderr=subprocess.STDOUT,
             # On Windows, opening the subprocess with the default CWD makes `import torch`
             # fail, so just set CWD to this script's directory
@@ -11640,11 +11641,10 @@ with warnings.catch_warnings(record=True) as w:
 if len(w) != 1:
     print(w)
     exit(2)
-
 """
         try:
             subprocess.check_output(
-                [sys.executable, '-W', 'all', '-c', script],
+                [sys.executable, '-W', 'always', '-c', script],
                 stderr=subprocess.STDOUT,
                 # On Windows, opening the subprocess with the default CWD makes `import torch`
                 # fail, so just set CWD to this script's directory
