@@ -173,7 +173,7 @@ def increment_op_count(cnt: int) -> None:
 
 # Calculate total time spent so far for each phase
 # For example, {'entire_frame_compile':8.574629999999999, 'backend_compile':5.26806}
-def calculate_time_spent() -> dict[str, float]:
+def calculate_time_spent() -> Dict[str, float]:
     total_wall_time = 0.0
     total_by_key = {}
     for timings in frame_phase_timing.values():
@@ -411,7 +411,7 @@ class DuplicateWarningChecker:
     def reset(self):
         self.set = collections.OrderedDict()
 
-    def add(self, key: str) -> bool:
+    def add(self, key: Union[str, Tuple[object, object]]) -> bool:
         if key in self.set:
             self.set.move_to_end(key, last=True)
             if not config.verbose:
