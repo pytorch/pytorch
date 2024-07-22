@@ -4694,8 +4694,8 @@ class TestLinalg(TestCase):
         # Tune a single GEMM and verify that we get a new tuning result
         import os
         os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS"] = "0"
-        assert(torch.cuda.tunable.get_max_tuning_iterations() > 0)
-        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS"] = "30" # reset to default
+        assert (torch.cuda.tunable.get_max_tuning_iterations() > 0)
+        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS"] = "30"  # reset to default
 
         # Reference number of results
         ref_num_results = len(torch.cuda.tunable.get_results())
@@ -4709,13 +4709,13 @@ class TestLinalg(TestCase):
         total_num_results = len(torch.cuda.tunable.get_results())
 
         # There must be a new tuning result
-        assert( (total_num_results - ref_num_results) == 1)
+        assert ((total_num_results - ref_num_results) == 1)
 
         # Set tuning iterations to zero
         # Tune a single GEMM and verify that we get a new tuning result
         os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "0"
-        assert(torch.cuda.tunable.get_max_tuning_iterations() > 0)
-        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "100" # reset to default
+        assert (torch.cuda.tunable.get_max_tuning_iterations() > 0)
+        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "100"  # reset to default
 
         # Reference number of results
         ref_num_results = total_num_results
@@ -4729,7 +4729,7 @@ class TestLinalg(TestCase):
         total_num_results = len(torch.cuda.tunable.get_results())
 
         # There must be a new tuning result
-        assert( (total_num_results - ref_num_results) == 1)
+        assert ((total_num_results - ref_num_results) == 1)
 
         # disables TunableOp
         torch.cuda.tunable.enable(False)
@@ -4763,7 +4763,7 @@ class TestLinalg(TestCase):
         # Take the difference to calculate the number of results from
         # the this test and verify that it agrees with the number of
         # GEMMs.
-        assert( (total_num_results - ref_num_results) == count_matmul)
+        assert ((total_num_results - ref_num_results) == count_matmul)
 
         # disables TunableOp
         torch.cuda.tunable.enable(False)
