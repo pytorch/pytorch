@@ -3,7 +3,7 @@ import random
 import time
 from functools import cached_property
 from statistics import median
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch._dynamo.utils import counters
