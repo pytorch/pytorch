@@ -340,6 +340,27 @@ class TensorVariable(VariableTracker):
             tx, [self], {}
         )
 
+    def call_hasattr(self, tx, name):
+        from . import GetAttrVariable
+        from .builtin import BuiltinVariable
+
+        try:
+            var = BuiltinVariable(getattr).call_function(
+                tx, [self, ConstantVariable(name)], {}
+            )
+            # in the event that TensorVariable returns NotImplemented
+            # BuiltinVariable.call_getattr returns GetAttrVariable
+            ret_val = not isinstance(var, GetAttrVariable)
+        except AttributeError:
+            ret_val = False
+
+        if self.source:
+            install_guard(
+                AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+            )
+
+        return ConstantVariable(ret_val)
+
     def var_getattr(self, tx, name):
         from . import UserDefinedClassVariable
 
@@ -1180,8 +1201,8 @@ class NumpyNdarrayVariable(TensorVariable):
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
-        if name == "tobytes":
-            unimplemented("tobytes is not modelled in torch._numpy")
+        if name in ("tostring", "tobytes"):
+            unimplemented(f"{name} is not modelled in torch._numpy")
         proxy = tx.output.create_proxy(
             "call_function",
             numpy_method_wrapper(name),
