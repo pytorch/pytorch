@@ -37,6 +37,7 @@ from .utils import (
     use_scatter_fallback,
 )
 
+
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -89,12 +90,15 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 # the Inductor decomp table.
 decomps_to_exclude = [
     aten._unsafe_index,
+    aten._unsafe_masked_index,
+    aten._unsafe_masked_index_put_accumulate,
     aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
     aten._softmax_backward_data,
     aten.clamp_max,
     aten.clamp_min,
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
+    aten.slice_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.split.Tensor,  # inductor lowers this directly
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
@@ -297,7 +301,13 @@ def cat(tensors, dim=0):
         # runtime assert forcing u0 to be zero.  So if this hasn't happened,
         # we know that the unbacked SymInt has appropriate size and there are
         # no problems.
-        return len(x.shape) != 1 or guard_size_oblivious(x.shape[0] > 0)
+        if len(x.shape) == 1 and guard_size_oblivious(x.shape[0] == 0):
+            return False
+
+        if dim < len(x.shape) and guard_size_oblivious(x.shape[dim] == 0):
+            return False
+
+        return True
 
     filtered_tensors = list(filter(non_empty_tensor, tensors))
 
@@ -332,6 +342,7 @@ def angle(x):
 
 @register_decomposition([aten.add])
 def add(x, y, *, alpha=None):
+    # Require both x and y to be complex tensors.
     x_is_complex_tensor = torch.is_tensor(x) and x.is_complex()
     y_is_complex_tensor = torch.is_tensor(y) and y.is_complex()
     if not x_is_complex_tensor or not y_is_complex_tensor:
@@ -340,7 +351,30 @@ def add(x, y, *, alpha=None):
     if alpha is not None:
         z = alpha * y
     complex_type = torch.promote_types(x.dtype, y.dtype)
-    return (x.view(x.real.dtype) + z.view(y.real.dtype)).view(complex_type)
+
+    # For complex typed `x`, `x.view(x.real.dtype)` doubles the last dimension and can cause problem
+    # when broadcasting the add.
+    def reshape_tensor_complex(tensor):
+        """Reshape tensor from [*initial_dims, last_dim] to *initial_dims, last_dim/2, 2]"""
+        # Get the current shape of the tensor
+        *initial_dims, last_dim = tensor.shape
+
+        # Check if the last dimension is even. We should never reach here since `x.view(x.real.dtype)`
+        # doubles the last dimension for complex numbers.
+        if last_dim % 2 != 0:
+            raise AssertionError(
+                "The size of the last dimension must be even to reshape it to [..., last_dim/2, 2]"
+            )
+
+        # Reshape the tensor
+        new_shape = (*initial_dims, last_dim // 2, 2)
+        reshaped_tensor = tensor.view(new_shape)
+        return reshaped_tensor
+
+    x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
+    z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
+    result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
+    return result
 
 
 @register_decomposition([aten.conj_physical])
@@ -619,7 +653,9 @@ def masked_scatter(self, mask, source):
         # use a 1-shot serial iteration.
         self, mask = aten.broadcast_tensors([self, mask])
         source_idx = mask.reshape(-1).cumsum(0) - 1
-        return inductor_prims.masked_scatter_with_index(self, mask, source_idx, source)
+        self_flat, mask_flat, source_flat = (x.flatten() for x in (self, mask, source))
+        result = aten._unsafe_masked_index(source_flat, mask_flat, [source_idx], 0)
+        return torch.where(mask_flat, result, self_flat).view(self.shape)
     return NotImplemented
 
 
@@ -724,7 +760,7 @@ def max_pool2d_with_indices(
     if padding == 0:
         padding = [0, 0]
 
-    if stride is None:
+    if not stride:
         stride = kernel_size
 
     kernel_size = pad_listlike(kernel_size, 2)

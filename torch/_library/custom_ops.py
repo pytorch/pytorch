@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
 import inspect
+import logging
 import weakref
+from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
@@ -10,6 +12,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Union,
 )
@@ -21,6 +24,7 @@ from . import utils
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
+log = logging.getLogger(__name__)
 
 
 @exposed_in("torch.library")
@@ -29,7 +33,7 @@ def custom_op(
     fn: Optional[Callable] = None,
     /,
     *,
-    mutates_args: Iterable[str],
+    mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
 ) -> Callable:
@@ -50,12 +54,15 @@ def custom_op(
             in PyTorch subsystems (e.g. torch.export, FX graphs).
             To avoid name collisions, please use your project name as the namespace;
             e.g. all custom ops in pytorch/fbgemm use "fbgemm" as the namespace.
-        mutates_args (Iterable[str]): The names of args that the function mutates.
-            This MUST be accurate, otherwise, the behavior is undefined.
+        mutates_args (Iterable[str] or "unknown"): The names of args that the function mutates.
+            This MUST be accurate, otherwise, the behavior is undefined. If "unknown",
+            it pessimistically assumes that all inputs to the operator are being mutated.
         device_types (None | str | Sequence[str]): The device type(s) the function
             is valid for. If no device type is provided, then the function
             is used as the default implementation for all device types.
             Examples: "cpu", "cuda".
+            When registering a device-specific implementation for an operator that accepts no Tensors,
+            we require the operator to have a "device: torch.device argument".
         schema (None | str): A schema string for the operator. If None
             (recommended) we'll infer a schema for the operator from its type
             annotations. We recommend letting us infer a schema unless you
@@ -107,6 +114,13 @@ def custom_op(
         >>> expected = x.sin()
         >>> numpy_sin_inplace(x)
         >>> assert torch.allclose(x, expected)
+        >>>
+        >>> # Example of a factory function
+        >>> @torch.library.custom_op("mylib::bar", mutates_args={}, device_types="cpu")
+        >>> def bar(device: torch.device) -> Tensor:
+        >>>     return torch.ones(3)
+        >>>
+        >>> bar("cpu")
 
     """
 
@@ -119,6 +133,7 @@ def custom_op(
             schema_str = torch._custom_op.impl.infer_schema(fn, mutates_args)
         else:
             schema_str = schema
+
         namespace, opname = name.split("::")
         result = CustomOpDef(namespace, opname, schema_str, fn)
         if schema is not None:
@@ -164,9 +179,11 @@ class CustomOpDef:
         self._abstract_fn: Optional[Callable] = None
         self._setup_context_fn: Optional[Callable] = None
         self._backward_fn: Optional[Callable] = None
+        self._torch_dispatch_fns: Dict[type, Callable] = {}
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher()
+        self._disabled_kernel: Set = set()
         OPDEFS[self._qualname] = self
 
     @property
@@ -175,6 +192,76 @@ class CustomOpDef:
 
     def __repr__(self) -> str:
         return f"<CustomOpDef({self._qualname})>"
+
+    @contextmanager
+    def set_kernel_enabled(self, device_type: str, enabled: bool = True):
+        """
+        Disable or re-enable an already registered kernel for this custom operator.
+
+        If the kernel is already disabled/enabled, this is a no-op.
+
+        Note:
+            If a kernel is first disabled and then registered, it is disabled until enabled again.
+
+        Args:
+            device_type (str): The device type to disable/enable the kernel for.
+            disable (bool): Whether to disable or enable the kernel.
+
+        Example:
+            >>> inp = torch.randn(1)
+            >>>
+            >>> # define custom op `f`.
+            >>> @custom_op("mylib::f", mutates_args=())
+            >>> def f(x: Tensor) -> Tensor:
+            >>>     return torch.zeros(1)
+            >>>
+            >>> print(f(inp))  # tensor([0.]), default kernel
+            >>>
+            >>> @f.register_kernel("cpu")
+            >>> def _(x):
+            >>>     return torch.ones(1)
+            >>>
+            >>> print(f(inp))  # tensor([1.]), CPU kernel
+            >>>
+            >>> # temporarily disable the CPU kernel
+            >>> with f.set_kernel_enabled("cpu", enabled = False):
+            >>>     print(f(inp))  # tensor([0.]) with CPU kernel disabled
+
+        """
+        action = "enable" if enabled else "disable"
+        originally_disabled = device_type in self._disabled_kernel
+        if device_type not in self._backend_fns:
+            log.warning(
+                "Attempted to %s kernel for %s but no kernel was registered for this device type.",
+                action,
+                device_type,
+            )
+
+        if not enabled:
+            if originally_disabled:
+                log.warning(
+                    "Attempted to disable kernel for %s but it was already disabled.",
+                    device_type,
+                )
+            else:
+                self._disabled_kernel.add(device_type)
+        else:  # enable the kernel
+            if not originally_disabled:
+                log.warning(
+                    "Attempted to enable kernel for  %s but it was already enabled.",
+                    device_type,
+                )
+            else:
+                self._disabled_kernel.remove(device_type)
+
+        try:
+            yield
+        finally:
+            # restore original state
+            if originally_disabled:
+                self._disabled_kernel.add(device_type)
+            else:
+                self._disabled_kernel.discard(device_type)
 
     def register_kernel(
         self, device_types: device_types_t, fn: Optional[Callable] = None, /
@@ -264,8 +351,27 @@ class CustomOpDef:
                             backend_impl,
                             _C._dispatch_key_for_device(device_type),
                         )
-                self._backend_fns[device_type] = fn
+
+                # Wrap function to choose between the default implementation or the device-specific
+                # implementation depending on if the kernel is disabled.
+                def wrapped_fn(*args, **kwargs):
+                    if device_type in self._disabled_kernel:
+                        return self._init_fn(*args, **kwargs)
+                    else:
+                        return fn(*args, **kwargs)
+
+                self._backend_fns[device_type] = wrapped_fn
             return fn
+
+        from torch._library.utils import get_device_arg_index, has_tensor_arg
+
+        if device_types is not None and not has_tensor_arg(self._opoverload._schema):
+            device_arg_index = get_device_arg_index(self._opoverload._schema)
+            if device_arg_index is None:
+                raise ValueError(
+                    "Functions without tensor inputs are required to have a `device: torch.device` argument"
+                )
+            self._register_backend_select_dispatcher(device_arg_index)
 
         # See NOTE: [Supporting decorator and non-decorator usage]
         if fn is None:
@@ -345,6 +451,37 @@ class CustomOpDef:
         """
         self._abstract_fn = fn
         return fn
+
+    def register_torch_dispatch(
+        self, torch_dispatch_class: Any, fn: Optional[Callable] = None, /
+    ) -> Callable:
+        r"""Registers a torch_dispatch rule for the given operator and ``torch_dispatch_class``.
+
+        This allows for open registration to specify the behavior between the operator
+        and the ``torch_dispatch_class`` without needing to modify the ``torch_dispatch_class``
+        or the operator directly.
+
+        Please see :func:`torch.library.register_torch_dispatch` for examples and more details.
+        """
+
+        def register(fn):
+            if torch_dispatch_class not in self._torch_dispatch_fns:
+
+                def inner(*args, **kwargs):
+                    return self._torch_dispatch_fns[torch_dispatch_class](
+                        *args, **kwargs
+                    )
+
+                self._lib._register_torch_dispatch_rule(
+                    self._name, torch_dispatch_class, inner
+                )
+            self._torch_dispatch_fns[torch_dispatch_class] = fn
+            return fn
+
+        if fn is None:
+            return register
+        else:
+            return register(fn)
 
     def register_autograd(
         self,
@@ -501,6 +638,26 @@ class CustomOpDef:
                 "ADInplaceOrView",
                 with_keyset=True,
             )
+
+    def _register_backend_select_dispatcher(self, device_arg_index: int):
+        """
+        Switch on the device argument to select the correct backend to dispatch to.
+        """
+
+        def backend_select(keyset, *args, **kwargs):
+            device = args[device_arg_index].type
+            if device not in self._backend_fns:
+                raise RuntimeError(
+                    f"{self._name} does not have a kernel registered for {device}. "
+                    "Please use register_kernel to do so."
+                )
+            dispatch_key = _C._dispatch_key_for_device(device)
+            dispatch_key = getattr(_C.DispatchKey, dispatch_key)
+            return self._opoverload.redispatch(
+                _C.DispatchKeySet(dispatch_key), *args, **kwargs
+            )
+
+        self._lib.impl(self._name, backend_select, "BackendSelect", with_keyset=True)
 
     def __call__(self, *args, **kwargs):
         return self._opoverload(*args, **kwargs)

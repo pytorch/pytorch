@@ -155,7 +155,7 @@ std::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
         Symbol::fromQualString("alias::$" + std::to_string(next_id++)));
     alias_info.setIsWrite(true);
   } else {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   return alias_info;
@@ -168,11 +168,12 @@ std::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
   static std::unordered_map<std::string, at::ScalarType> type_map = {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 
+#undef DEFINE_SCALAR_TYPE
   auto type = type_map.find(dtype);
   if (type != type_map.end()) {
     return type->second;
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 std::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
@@ -297,7 +298,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     // Parsing ranks, supports mix of sized and unsized ranks, or, just strided
     // ranks
     if (L.cur().kind == '*') {
-      dims.emplace_back(c10::nullopt);
+      dims.emplace_back(std::nullopt);
       L.next();
       if (L.cur().kind == ':') {
         throw ErrorReport(L.cur()) << "Strides for unsized ranks not supported";

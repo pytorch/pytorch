@@ -144,7 +144,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     py::gil_scoped_acquire acquire;
     const auto& r = getPyObj().attr("maybe_as_int")();
     if (r.is_none()) {
-      return c10::nullopt;
+      return std::nullopt;
     } else {
       return r.cast<int64_t>();
     }
@@ -153,6 +153,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   std::string str() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("str")().cast<std::string>();
+  }
+
+  std::string _graph_repr() override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("_graph_repr")().cast<std::string>();
   }
 
   c10::SymNode dispatch_sym_ite_(
