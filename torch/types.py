@@ -50,10 +50,14 @@ _symsize: TypeAlias = Union[Size, Sequence[Union[int, SymInt]]]  # noqa: PYI042,
 _dispatchkey: TypeAlias = Union[str, DispatchKey]  # noqa: PYI042,PYI047
 
 # int or SymInt
-IntLikeType = Union[int, SymInt]
+IntLikeType: TypeAlias = Union[int, SymInt]
+# float or SymFloat
+FloatLikeType: TypeAlias = Union[float, SymFloat]
+# bool or SymBool
+BoolLikeType: TypeAlias = Union[bool, SymBool]
 
 py_sym_types = (SymInt, SymFloat, SymBool)
-PySymType = Union[SymInt, SymFloat, SymBool]
+PySymType: TypeAlias = Union[SymInt, SymFloat, SymBool]
 
 # Meta-type for "numeric" things; matches our docs
 Number: TypeAlias = Union[int, float, bool]
