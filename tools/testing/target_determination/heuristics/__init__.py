@@ -23,7 +23,6 @@ from tools.testing.target_determination.heuristics.previously_failed_in_pr impor
     PreviouslyFailedInPR,
 )
 from tools.testing.target_determination.heuristics.profiling import Profiling
-from tools.testing.target_determination.heuristics.public_bindings import PublicBindings
 
 
 if TYPE_CHECKING:
@@ -44,5 +43,4 @@ HEURISTICS: list[HeuristicInterface] = [
     Profiling(),
     LLM(),
     Filepath(),
-    PublicBindings(),
 ]
