@@ -25,6 +25,7 @@ from typing import (
 from torch._higher_order_ops.utils import autograd_not_implemented
 
 from torch._library.fake_class_registry import FakeScriptObject
+
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -160,7 +161,7 @@ _AUTOGRAD_ALIAS_BACKEND_KEYS_TO_OVERRIDE = [
 
 
 @contextmanager
-def _override_composite_implicit_decomp(ops_to_preserve):
+def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops that user specified. Ideally we want to not-decompose
     # ALL composite ops but today's C++ functinalization relies on
@@ -170,6 +171,7 @@ def _override_composite_implicit_decomp(ops_to_preserve):
     # functional but not really aka dropout), for these cases, we just decompose.
     saved_tables = {}
     patched_ops = set()
+    removed_decomps = {}
     for op_overload in ops_to_preserve:
         # Our strategy for deciding if we can preserve CIA is following:
         # 1. The op should be known statically that it is functional
@@ -239,6 +241,15 @@ def _override_composite_implicit_decomp(ops_to_preserve):
             op_overload.py_impl(torch._C.DispatchKey.Meta)(
                 functools.partial(_register_cia_to_meta, kernel=op_overload)
             )
+
+        if op_overload in decomp_table:
+            warnings.warn(
+                f"Deleting decomposition registered for operator `{op_overload}`, "
+                "which was sepecified in the `preserve_ops` list."
+            )
+            removed_decomps[op_overload] = decomp_table[op_overload]
+            del decomp_table[op_overload]
+
     try:
         yield
     finally:
@@ -246,6 +257,9 @@ def _override_composite_implicit_decomp(ops_to_preserve):
             op.py_kernels.clear()
             op.py_kernels.update(saved_tables[op])
             op._dispatch_cache.clear()
+
+        for op, decomp in removed_decomps.items():
+            decomp_table[op] = decomp
 
 
 def _rename_without_collisions(
@@ -330,6 +344,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
     from torch._functorch.aot_autograd import aot_export_module
     from torch._guards import detect_fake_mode
+    from torch._subclasses.fake_tensor import FakeTensorMode
 
     from torch.export._trace import (
         _export_to_aten_ir,
@@ -339,16 +354,16 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_placeholder_names,
         _verify_stack_trace,
     )
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     if ep.verifier.dialect == "TRAINING":
         mod = ep.module()
-        fake_args = []
-        for node in mod.graph.nodes:
-            if node.op == "placeholder":
-                fake_args.append(node.meta["val"])
-
-        fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
-        fake_mode = detect_fake_mode(fake_args)
+        fake_args = [
+            node.meta["val"] for node in mod.graph.nodes if node.op == "placeholder"
+        ]
+        fake_mode = torch._export.utils._detect_fake_mode_from_gm(mod)
+        if fake_mode is None:
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
 
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
@@ -395,17 +410,19 @@ def _decompose_and_get_gm_with_new_signature_constants(
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(mod)
         )
-        aten_export_artifact = _export_to_aten_ir(
-            mod,
-            # this requires empty kwargs, but not in pytree.flattened format
-            (
-                *fake_args_unwrapped[0],
-                *fake_args_unwrapped[1].values(),
-            ),
-            {},
-            fake_params_buffers,
-            constant_attrs,
-        )
+        with fake_mode:
+            fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
+            aten_export_artifact = _export_to_aten_ir(
+                mod,
+                # this requires empty kwargs, but not in pytree.flattened format
+                (
+                    *fake_args_unwrapped[0],
+                    *fake_args_unwrapped[1].values(),
+                ),
+                {},
+                fake_params_buffers,
+                constant_attrs,
+            )
 
         gm = aten_export_artifact.gm
         new_graph_signature = aten_export_artifact.sig
@@ -439,14 +456,12 @@ def _decompose_and_get_gm_with_new_signature_constants(
     for name in buffers_to_remove:
         delattr(ep.graph_module, name)
 
-    from torch._guards import detect_fake_mode
-
     # TODO(zhxhchen17) Return the new graph_signature directly.
-
     fake_mode = detect_fake_mode(fake_args)
     fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode
     with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
-        _preserve_ops
+        _preserve_ops,
+        decomp_table,
     ):
         gm, graph_signature = aot_export_module(
             ep.graph_module,
@@ -489,14 +504,13 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     # Run this pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
     # Overwrite output specs afterwards.
-    from torch._dynamo import config as _dynamo_config
     from torch._export.passes._node_metadata_hook import (
         _node_metadata_hook,
         _set_node_metadata_hook,
     )
     from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
 
-    if not _dynamo_config.do_not_emit_runtime_asserts:
+    if not torch._dynamo.config.do_not_emit_runtime_asserts:
         stack_trace = (
             'File "torch/fx/passes/runtime_assert.py", line 24, '
             "in insert_deferred_runtime_asserts"
@@ -1112,23 +1126,26 @@ class ExportedProgram:
 
     @final
     def _validate(self):
+        assert (
+            len(self.verifiers) > 0
+        ), "ExportedProgram must have at least one verifier."
         for v in self.verifiers:
             v().check(self)
 
     # TODO(zhxchen17) Formalize this.
     def _update(
-        self, graph_module, graph_signature, state_dict=None
+        self, graph_module, graph_signature, *, state_dict=None, verifiers=None
     ) -> "ExportedProgram":
         return ExportedProgram(
             root=graph_module,
             graph=graph_module.graph,
             graph_signature=graph_signature,
-            state_dict=state_dict or self.state_dict,
+            state_dict=state_dict if state_dict is not None else self.state_dict,
             range_constraints=copy.deepcopy(self.range_constraints),
             module_call_graph=copy.deepcopy(self._module_call_graph),
             example_inputs=self.example_inputs,
-            verifier=self.verifier,
-            tensor_constants=self.tensor_constants,
+            verifiers=verifiers if verifiers is not None else self.verifiers,
+            constants=self.constants,
         )
 
 
