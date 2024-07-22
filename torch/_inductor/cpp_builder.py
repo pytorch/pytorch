@@ -24,6 +24,7 @@ from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
 
+
 if config.is_fbcode():
     from triton.fb import build_paths  # noqa: F401
 

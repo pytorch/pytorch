@@ -27,6 +27,7 @@ from torch._export.utils import (
     is_param,
     register_dataclass_as_pytree_node,
 )
+from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
 from torch.export import Dim, dynamic_dim, export, unflatten
 from torch.export._trace import (
@@ -315,9 +316,6 @@ graph():
     return (x,)""",
         )
 
-    # Errors because fake mode is not detected from non-tensor inputs
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
-    @testing.expectedFailureTrainingIRToRunDecomp
     def test_no_tensor_computation_3(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -3112,6 +3110,7 @@ def forward(self, x):
     bn_bias = self.bn.bias
     bn_running_mean = self.bn.running_mean
     bn_running_var = self.bn.running_var
+    bn_num_batches_tracked = self.bn.num_batches_tracked
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
     _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
@@ -3859,7 +3858,6 @@ def forward(self, b_a_buffer, x):
         ):
             graph_module.eval()
 
-    @testing.expectedFailureRetraceability  # T183144788
     def test_lifted_constants(self) -> None:
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -3893,9 +3891,6 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
-    @testing.expectedFailureRetraceability  # T183144788
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193701164
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):
@@ -4241,9 +4236,9 @@ graph():
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
-    @testing.expectedFailureRetraceability  # Retracing tensor constants results in buffers
-    @testing.expectedFailureTrainingIRToRunDecomp  # detach() is not present
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    @testing.expectedFailureRetraceability  # expectedInline graph doesn't match
+    @testing.expectedFailureTrainingIRToRunDecomp  # expectedInline graph doesn't match
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # expectedInline graph doesn't match
     def test_nested_module_with_constant_buffer(self):
         class M1(torch.nn.Module):
             def __init__(self):
@@ -5529,9 +5524,6 @@ def forward(self, x):
     return (foo_functional,)""",
         )
 
-    # original input names aren't retraceable:
-    # compilation will succeed, but names won't match forward() signature.
-    @testing.expectedFailureRetraceability
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
         class Foo(torch.nn.Module):
@@ -6235,6 +6227,49 @@ def forward(self, x, y):
             r"Runtime assertion failed for expression \(s0//2\) \<\= s1",
         ):
             ep.module()(torch.ones(10), torch.ones(4))
+
+    def test_split_const_gm_with_lifted_constants(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4)
+                self.b = torch.randn(4)
+
+            def forward(self, x):
+                w_transpose = torch.transpose(self.w_pre, 0, 1)
+                w_relu = torch.nn.functional.relu(w_transpose)
+                w = w_relu + self.b
+                return torch.matmul(x, w)
+
+        example_inputs = (torch.randn(4, 4),)
+        mod = Model()
+        ep = torch.export.export(mod, example_inputs)
+        new_gm = copy.deepcopy(ep.graph_module)
+        new_sig = copy.deepcopy(ep.graph_signature)
+        placeholder_nodes = [
+            node for node in new_gm.graph.nodes if node.op == "placeholder"
+        ]
+        constants = {**ep.state_dict, **ep.constants}
+        lifted_constants = {
+            n.name: constants[spec.target]
+            for n, spec in zip(placeholder_nodes, new_sig.input_specs)
+            if spec.target is not None
+        }
+        const_gm, _ = split_const_gm(new_gm, lifted_constants)
+        counter = 0
+        for node in const_gm.graph.nodes:
+            if node.op == "call_function":
+                counter += 1
+        self.assertTrue(counter > 0)
+        test_input = torch.randn(4, 4)
+        expected = new_gm(None, None, test_input)[0]
+        actual = mod(test_input)
+        self.assertEqual(actual, expected)
+        const_gm, _ = split_const_gm(ep.graph_module, lifted_constants, lambda x: True)
+        counter = 0
+        for node in const_gm.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(False)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
