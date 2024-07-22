@@ -324,6 +324,8 @@ class CommonListMethodsVariable(BaseListVariable):
         args: List["VariableTracker"],
         kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
+        from .tensor import SymNodeVariable
+
         if name == "append" and self.mutable_local:
             assert not kwargs
             (arg,) = args
@@ -345,7 +347,10 @@ class CommonListMethodsVariable(BaseListVariable):
         elif name == "insert" and self.mutable_local:
             assert not kwargs
             idx, value = args
-            const_idx = idx.as_python_constant()
+            if isinstance(idx, SymNodeVariable):
+                const_idx = idx.evaluate_expr()
+            else:
+                const_idx = idx.as_python_constant()
             tx.output.side_effects.mutation(self)
             self.items.insert(const_idx, value)
             return ConstantVariable.create(None)
@@ -817,6 +822,9 @@ class ListIteratorVariable(VariableTracker):
             return iter_contains(self.items[self.index :], args[0], tx)
 
         return super().call_method(tx, name, args, kwargs)
+
+    def python_type(self):
+        return type(iter([]))
 
     def as_python_constant(self):
         if self.index > 0:

@@ -1520,6 +1520,15 @@ def _extract_tensors(obj):
     return tensors
 
 
+def _get_model_id(obj) -> Optional[str]:
+    if isinstance(obj, torch.jit.ScriptModule):
+        return str(obj._c._type())
+    elif isinstance(obj, torch.jit.ScriptFunction):
+        return obj.qualified_name
+    else:
+        return None
+
+
 # In Python-3.11+ typed enums (i.e. IntEnum for example) retain number of base class methods in subclass
 # that were previously dropped. To preserve the behavior, explicitly drop them there
 

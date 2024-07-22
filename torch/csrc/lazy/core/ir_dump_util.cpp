@@ -1,10 +1,10 @@
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
 #include <torch/csrc/lazy/core/ir_util.h>
+#include <optional>
 
 #include <regex>
 #include <sstream>
@@ -37,7 +37,7 @@ std::optional<AttrTag> ParseAttrTag(
   // @lint-ignore-every CLANGTIDY facebook-hte-StdRegexIsAwful
   if (!std::regex_search(
           node_string.begin() + pos, node_string.end(), match, tag_regex)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   std::string::size_type vpos = match[1].second - node_string.begin() + 1;
@@ -102,7 +102,7 @@ std::optional<size_t> GetRootNodeId(
     const std::unordered_map<const Node*, size_t>& roots_ids) {
   auto it = roots_ids.find(node);
   if (it == roots_ids.end()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return it->second;
 }

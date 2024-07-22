@@ -118,12 +118,12 @@ static void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
 
 static Tensor _mps_convolution_impl(const Tensor& input_t,
                                     const Tensor& weight_t,
-                                    const c10::optional<Tensor>& bias_opt,
+                                    const std::optional<Tensor>& bias_opt,
                                     IntArrayRef padding,
                                     IntArrayRef stride,
                                     IntArrayRef dilation,
                                     int64_t groups,
-                                    c10::optional<IntArrayRef> input_shape) {
+                                    std::optional<IntArrayRef> input_shape) {
   const bool is_macOS_13_2_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS);
 
   TORCH_CHECK(((input_t.dim() < 5) || is_macOS_13_2_or_newer),
@@ -140,7 +140,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
 
   bool bias_defined;
 
-  if (bias_opt == c10::nullopt)
+  if (bias_opt == std::nullopt)
     bias_defined = false;
   else
     bias_defined = bias_opt->defined();
@@ -151,15 +151,25 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
       at::empty(input_shape.has_value() ? input_shape.value()
                                         : conv_output_size(input->sizes(), weight->sizes(), padding, stride, dilation),
                 input->scalar_type(),
-                c10::nullopt,
+                std::nullopt,
                 kMPS,
-                c10::nullopt,
-                c10::nullopt);
+                std::nullopt,
+                std::nullopt);
 
   if (output_t.numel() == 0) {
     return output_t;
   }
   TensorArg output{output_t, "result", 0};
+
+  // TODO: MPS convolution kernel currently does not support output channels > 2^16
+  for (auto elem : output_t.sizes()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        elem <= (1 << 16),
+        "Output channels > 65536 not supported at the MPS device. ",
+        "As a temporary fix, you can set the environment variable `PYTORCH_ENABLE_MPS_FALLBACK=1` ",
+        "to use the CPU as a fallback for this op. WARNING: this will be slower than running natively ",
+        "on MPS.");
+  }
 
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
 
@@ -326,12 +336,12 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
 
 Tensor _mps_convolution(const Tensor& input_t,
                         const Tensor& weight_t,
-                        const c10::optional<Tensor>& bias_opt,
+                        const std::optional<Tensor>& bias_opt,
                         IntArrayRef padding,
                         IntArrayRef stride,
                         IntArrayRef dilation,
                         int64_t groups) {
-  return _mps_convolution_impl(input_t, weight_t, bias_opt, padding, stride, dilation, groups, c10::nullopt);
+  return _mps_convolution_impl(input_t, weight_t, bias_opt, padding, stride, dilation, groups, std::nullopt);
 }
 
 static Tensor mps_convolution_backward_input(IntArrayRef input_size,
@@ -346,6 +356,16 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   using namespace mps;
   bool is3DConv = grad_output_t.dim() == 5;
 
+  // TODO: MPS convolution kernel currently does not support output channels > 2^16
+  for (auto elem : grad_output_t.sizes()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        elem <= (1 << 16),
+        "Output channels > 65536 not supported at the MPS device. ",
+        "As a temporary fix, you can set the environment variable `PYTORCH_ENABLE_MPS_FALLBACK=1` ",
+        "to use the CPU as a fallback for this op. WARNING: this will be slower than running natively ",
+        "on MPS.");
+  }
+
   TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
   CheckedFrom c = "mps_convolution_backward_input";
   TensorArg grad_output{grad_output_t, "grad_output", 1}, weight{weight_t, "weight", 2};
@@ -353,7 +373,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   checkAllSameGPU(c, {grad_output, weight});
   auto memory_format = grad_output_t.suggest_memory_format();
   bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast) && !is3DConv;
-  auto grad_input_t = at::empty(input_size, grad_output_t.options(), c10::nullopt);
+  auto grad_input_t = at::empty(input_size, grad_output_t.options(), std::nullopt);
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{grad_input_t, "result", 0};
@@ -516,7 +536,7 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   checkAllSameGPU(c, {grad_output, input});
 
   auto grad_weight_t =
-      at::empty(weight_size, grad_output_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+      at::empty(weight_size, grad_output_t.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   TensorArg grad_weight{grad_weight_t, "result", 0};
 
   convolution_shape_check(c, input, grad_weight, grad_output, padding, stride, dilation, groups);
@@ -710,7 +730,7 @@ static Tensor mps_convolution_transpose_backward_input(const Tensor& grad_output
                                                        IntArrayRef dilation,
                                                        int64_t groups,
                                                        IntArrayRef input_shape) {
-  return _mps_convolution_impl(grad_output_t, weight_t, c10::nullopt, padding, stride, dilation, groups, input_shape);
+  return _mps_convolution_impl(grad_output_t, weight_t, std::nullopt, padding, stride, dilation, groups, input_shape);
 }
 
 static Tensor mps_convolution_transpose_backward_weight(IntArrayRef weight_size,
