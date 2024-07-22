@@ -8,15 +8,12 @@ import sys
 import time
 import warnings
 from itertools import count
-
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from unittest import mock
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
-
 import torch.fx
 import torch.utils._pytree as pytree
-
 from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo import (
     compiled_autograd,
@@ -77,6 +74,7 @@ from .utils import (
 )
 from .virtualized import V
 
+
 if config.is_fbcode():
     from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
 else:
@@ -136,7 +134,7 @@ def get_static_input_idxs(num_fixed):
     if not context or not context.fw_metadata:
         return fixed
 
-    return fixed + context.fw_metadata.static_parameter_indices
+    return fixed + context.fw_metadata.static_input_indices
 
 
 @functools.lru_cache(None)
@@ -277,12 +275,20 @@ def _recursive_post_grad_passes(gm, is_inference: bool = False):
 
 def split_const_gm(
     gm: torch.fx.GraphModule,
+    lifted_constants: Optional[Dict[str, Any]] = None,
+    skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> Tuple[torch.fx.GraphModule, Dict[str, int]]:
     """
     This function takes an GraphModule input "gm".
     The gm will be split into 2 components,
       1) const_gm, which consists the subgraph of gm that can be constant folded.
       2) gm (being inplace modified,) which returns the graph after constant folding.
+
+    If an additional "lifted_constants" argument is passed in, we will assume the gm has
+    been lifted and run the transformation accordingly.
+
+    When a "skip_folding_node_fn" callback is passed, we will skip constant folding on
+    the nodes for which the callback returns True.
 
     const_output_index is a mapping of corresponding node name from gm to the
     output index of const_gm.
@@ -296,8 +302,9 @@ def split_const_gm(
         run_and_get_constant_graph,
     )
 
-    const_gm = run_and_get_constant_graph(gm)
-    const_result = const_gm()
+    const_gm, const_result = run_and_get_constant_graph(
+        gm, lifted_constants, skip_folding_node_fn
+    )
 
     const_outputs = {
         x.name: idx for idx, x in enumerate(tuple(const_gm.graph.nodes)[-1].args[0])
@@ -309,7 +316,7 @@ def split_const_gm(
     for node in gm.graph.nodes:
         if node.name in const_outputs:
             to_replace_node.append(node)
-        elif node.meta[META_TAG] == CONST_MODULE_TAG:
+        elif node.meta[META_TAG] == CONST_MODULE_TAG and node.op != "placeholder":
             to_erase_node.append(node)
 
     for node in to_replace_node:
@@ -726,6 +733,8 @@ def fx_codegen_and_compile(
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
 
+    inductor_counters = counters["inductor"].copy()
+
     # lift the maximum depth of the Python interpreter stack
     # to adapt large/deep models
     sys.setrecursionlimit(max(sys.getrecursionlimit(), 2000))
@@ -912,6 +921,7 @@ def fx_codegen_and_compile(
                 output_strides,
                 V.graph.disable_cudagraphs_reason,
                 metrics_helper.get_deltas(),
+                counters["inductor"] - inductor_counters,
             )
 
     return compiled_graph
@@ -1246,7 +1256,7 @@ def fw_compiler_freezing(
                 params_flat[i] = None
 
         if tracing_context.fw_metadata:
-            static_input_idxs += tracing_context.fw_metadata.static_parameter_indices
+            static_input_idxs += tracing_context.fw_metadata.static_input_indices
 
     with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
