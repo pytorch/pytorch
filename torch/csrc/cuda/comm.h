@@ -3,8 +3,8 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/Export.h>
+#include <optional>
 
 #include <cstddef>
 #include <vector>
@@ -29,15 +29,15 @@ TORCH_CUDA_CU_API std::vector<at::Tensor>& scatter_out(
     std::vector<at::Tensor>& out_tensors,
     int64_t dim = 0,
     const std::optional<std::vector<std::optional<at::cuda::CUDAStream>>>&
-        streams = c10::nullopt);
+        streams = std::nullopt);
 
 TORCH_CUDA_CU_API std::vector<at::Tensor> scatter(
     const at::Tensor& tensor,
     at::IntArrayRef devices,
-    const std::optional<std::vector<int64_t>>& chunk_sizes = c10::nullopt,
+    const std::optional<std::vector<int64_t>>& chunk_sizes = std::nullopt,
     int64_t dim = 0,
     const std::optional<std::vector<std::optional<at::cuda::CUDAStream>>>&
-        streams = c10::nullopt);
+        streams = std::nullopt);
 
 TORCH_CUDA_CU_API at::Tensor& gather_out(
     at::TensorList tensors,
