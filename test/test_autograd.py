@@ -14024,7 +14024,9 @@ class TestAutogradMultipleDispatch(TestCase):
             @staticmethod
             def backward(ctx, gO):
                 nonlocal retain_graph_set
-                retain_graph_set = torch._C._autograd._get_current_graph_task_keep_graph()
+                retain_graph_set = (
+                    torch._C._autograd._get_current_graph_task_keep_graph()
+                )
                 return gO, None
 
         inp = torch.rand(10, requires_grad=True)
