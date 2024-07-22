@@ -7,6 +7,7 @@
 #include <torch/csrc/distributed/c10d/socket.h>
 
 #include <cstring>
+#include <optional>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -31,13 +32,13 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <fmt/chrono.h>
 C10_DIAGNOSTIC_POP()
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <torch/csrc/distributed/c10d/error.h>
 #include <torch/csrc/distributed/c10d/exception.h>
 #include <torch/csrc/distributed/c10d/logging.h>
 
 #include <c10/util/CallOnce.h>
-#include <c10/util/Optional.h>
 
 namespace c10d::detail {
 namespace {
@@ -142,7 +143,7 @@ class SocketImpl {
 
   explicit SocketImpl(
       Handle hnd,
-      c10::optional<::addrinfo> remote = c10::nullopt) noexcept
+      std::optional<::addrinfo> remote = std::nullopt) noexcept
       : hnd_{hnd}, remote_(remote) {}
 
   SocketImpl(const SocketImpl& other) = delete;
@@ -181,7 +182,7 @@ class SocketImpl {
     return hnd_;
   }
 
-  const c10::optional<::addrinfo>& remote() const noexcept {
+  const std::optional<::addrinfo>& remote() const noexcept {
     return remote_;
   }
 
@@ -191,7 +192,7 @@ class SocketImpl {
   bool setSocketFlag(int level, int optname, bool value) noexcept;
 
   Handle hnd_;
-  const c10::optional<::addrinfo> remote_;
+  const std::optional<::addrinfo> remote_;
 };
 } // namespace c10d::detail
 

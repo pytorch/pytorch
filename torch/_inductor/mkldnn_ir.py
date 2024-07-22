@@ -4,7 +4,6 @@ from typing import Any, List, Optional, Set
 import sympy
 
 import torch
-
 from torch._prims_common import make_channels_last_strides_for
 
 from .ir import (
@@ -22,9 +21,7 @@ from .ir import (
     NoneLayout,
     TensorBox,
 )
-
 from .utils import convert_shape_to_inductor, pad_listlike
-
 from .virtualized import V
 
 
@@ -113,7 +110,7 @@ def _prepare_convolution_fusion_create(
         else:
             assert 0 < len(output_padding) <= dims
             output_padding = pad_listlike(output_padding, dims)
-        assert isinstance(groups, int)
+        assert isinstance(groups, (int, sympy.core.numbers.Integer))
         if transposed:
             # When transposed, the size of the prepacked oneDNN weight is different
             # from the PyTorch weight. We're not able to run aten conv with such

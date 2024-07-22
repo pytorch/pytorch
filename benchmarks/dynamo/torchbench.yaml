@@ -42,6 +42,7 @@ tolerance:
     - tacotron2
     - yolov3
     - timm_efficientdet
+    - squeezenet1_1
 
   higher_fp16:
     - doctr_reco_predictor
