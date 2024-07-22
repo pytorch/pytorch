@@ -42,8 +42,8 @@ from torch.utils._sympy.functions import (
     IntTrueDiv,
     ModularIndexing,
 )
-from .._dynamo.utils import import_submodule
 
+from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
 from .ir import (
@@ -71,6 +71,7 @@ from .utils import (
     use_scatter_fallback,
 )
 from .virtualized import ops, V
+
 
 log = logging.getLogger(__name__)
 lowerings: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
@@ -6108,6 +6109,7 @@ def resize(x, size, *, memory_format=None):
 
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 
+
 make_fallback(auto_functionalized)
 
 
@@ -6395,17 +6397,21 @@ except (AttributeError, ImportError):
 # populate lowerings defined in kernel/*
 from . import kernel
 
+
 import_submodule(kernel)
 
 from . import quantized_lowerings
+
 
 quantized_lowerings.register_quantized_ops()
 quantized_lowerings.register_woq_mm_ops()
 
 from . import mkldnn_lowerings
 
+
 mkldnn_lowerings.register_onednn_fusion_ops()
 
 from . import jagged_lowerings
+
 
 jagged_lowerings.register_jagged_ops()
