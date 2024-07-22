@@ -50,7 +50,6 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.fx.graph import Graph
-from torch.fx.immutable_collections import immutable_dict
 from torch.fx.node import Node
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._sympy.numbers import int_oo
@@ -1018,7 +1017,7 @@ class GraphLowering(torch.fx.Interpreter):
         return len(t.shape) == 1 and t.shape[0] <= 8
 
     def get_attr(
-        self, target: str, args: Tuple[()], kwargs: immutable_dict
+        self, target: str, args: Tuple[()], kwargs: Dict[str, object]
     ) -> Union[Constant, TensorBox, ir.Subgraph, TorchBindObject]:
         # this is a constant
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
@@ -1057,7 +1056,9 @@ class GraphLowering(torch.fx.Interpreter):
     def call_method(self, target: Any, args: Any, kwargs: Any) -> NoReturn:
         raise AssertionError
 
-    def output(self, target: str, args: Tuple[Any], kwargs: immutable_dict) -> None:
+    def output(
+        self, target: str, args: Tuple[object], kwargs: Dict[str, object]
+    ) -> None:
         result = super().output(target, args, kwargs)
         if not isinstance(result, (tuple, list)):
             # nested subgraphs can have singleton outputs
