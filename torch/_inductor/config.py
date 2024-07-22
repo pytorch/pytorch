@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING, Unio
 import torch
 
 
-def is_fbcode():
+def is_fbcode() -> bool:
     return not hasattr(torch.version, "git_version")
 
 

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import base64
@@ -448,7 +447,7 @@ def _ident(x: Any) -> Any:
     return x
 
 
-def extract_tensor_metadata_for_cache_key(device_map, t):
+def extract_tensor_metadata_for_cache_key(device_map: Dict[device, device], t: Union[Tensor, FakeTensor]) -> TensorMetadata:
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
     that are not needed for caching
@@ -471,7 +470,7 @@ def extract_tensor_metadata_for_cache_key(device_map, t):
     return meta
 
 
-def _reduce_fake_tensor(device_map, t):
+def _reduce_fake_tensor(device_map: Dict[device, device], t: FakeTensor) -> Tuple[Callable, Tuple[TensorMetadata]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
@@ -479,7 +478,7 @@ def _reduce_fake_tensor(device_map, t):
     return (_ident, (metadata,))
 
 
-def _reduce_tensor(device_map, t):
+def _reduce_tensor(device_map: Dict[device, device], t: Tensor) -> Tuple[Callable, Tuple[TensorMetadataAndValues]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     If we see tensors, we know they're constants stored as attributes on
@@ -510,7 +509,7 @@ def _reduce_tensor(device_map, t):
     return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
-def _reduce_symint(s):
+def _reduce_symint(s: SymInt) -> Tuple[Callable, Tuple[str]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle SymInts.
     """
@@ -610,7 +609,7 @@ class FxGraphCachePickler(pickle.Pickler):
         return lines
 
 
-def build_code_hash(roots, prefix, hasher):
+def build_code_hash(roots: List[str], prefix: str, hasher: HASH) -> None:
     for lib in sorted(pkgutil.iter_modules(roots, prefix), key=lambda x: x.name):
         spec = lib.module_finder.find_spec(lib.name, None)
         assert spec is not None
@@ -625,7 +624,7 @@ def build_code_hash(roots, prefix, hasher):
 
 
 @functools.lru_cache(None)
-def torch_key():
+def torch_key() -> bytes:
     """
     Compute a key that contains relevant information about torch source files
     """
@@ -3470,8 +3469,8 @@ class TritonFuture(CodeCacheFuture):
 
 
 class LambdaFuture(CodeCacheFuture):
-    def __init__(self, result_fn):
+    def __init__(self, result_fn: Callable) -> None:
         self.result_fn = result_fn
 
-    def result(self):
+    def result(self) -> builtin_function_or_method:
         return self.result_fn()
