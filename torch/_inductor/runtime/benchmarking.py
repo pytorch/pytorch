@@ -734,12 +734,9 @@ class Benchmarker:
         self,
         interleaved_event_pairs: List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]],
     ) -> List[float]:
-        deinterleaved_event_pairs: Iterator[
-            List[Tuple[torch.cuda.Event, torch.cuda.Event]]
-        ] = zip(*interleaved_event_pairs)
         return [
-            self.get_min_timing_ms(event_pairs)
-            for event_pairs in deinterleaved_event_pairs
+            self.get_min_timing_ms(list(event_pairs))
+            for event_pairs in zip(*interleaved_event_pairs)
         ]
 
 
