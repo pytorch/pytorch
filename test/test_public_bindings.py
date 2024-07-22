@@ -595,7 +595,7 @@ class TestPublicBindings(TestCase):
 
         for mod in pkgutil.walk_packages(torch.__path__, "torch."):
             mod = mod.name
-            test_module(modname)
+            test_module(mod)
         test_module("torch")
 
         msg = (

@@ -214,6 +214,9 @@ jobs:
         run: |
           # Run test_vulkan, which is a fast noop on Linux
           python3 test/run_test.py --include test_vulkan --verbose
+      - name: Verify that the public API tests function
+        run: |
+          python3 .github/scripts/check_public_API_tests.py
 
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
