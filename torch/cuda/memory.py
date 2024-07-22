@@ -13,9 +13,9 @@ from typing_extensions import deprecated
 
 import torch
 from torch import _C
+from torch._utils import _dummy_type
 from torch.types import Device
 
-from .._utils import _dummy_type
 from . import (
     _get_amdsmi_device_index,
     _get_device_index,

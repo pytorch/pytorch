@@ -4,13 +4,13 @@ This package enables an interface for accessing MTIA backend in python
 """
 
 import threading
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
+from torch import device as _device, Tensor
+from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 from torch.types import Device
 
-from .. import device as _device, Tensor
-from .._utils import _dummy_type, _LazySeedTracker, classproperty
 from ._utils import _get_device_index
 
 

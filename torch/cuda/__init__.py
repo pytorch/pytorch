@@ -11,11 +11,8 @@ It is lazily initialized, so you can always import it, and use
 :ref:`cuda-semantics` has more details about working with CUDA.
 """
 
-
-import contextlib
 import importlib
 import os
-import sys
 import threading
 import traceback
 import warnings
@@ -24,10 +21,10 @@ from typing import Any, Callable, cast, List, Optional, Tuple, Union
 
 import torch
 import torch._C
+from torch import device as _device
+from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 from torch.types import Device
 
-from .. import device as _device
-from .._utils import _dummy_type, _LazySeedTracker, classproperty
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,

@@ -3,8 +3,7 @@ from functools import lru_cache as _lru_cache
 from typing import Optional
 
 import torch
-
-from ...library import Library as _Library
+from torch.library import Library as _Library
 
 
 __all__ = ["is_built", "is_available", "is_macos13_or_newer", "is_macos_or_newer"]
@@ -46,10 +45,11 @@ def _init():
     global _lib
     if is_built() is False or _lib is not None:
         return
-    from ..._decomp.decompositions import (
+
+    from torch._decomp.decompositions import (
         native_group_norm_backward as _native_group_norm_backward,
     )
-    from ..._refs import native_group_norm as _native_group_norm
+    from torch._refs import native_group_norm as _native_group_norm
 
     _lib = _Library("aten", "IMPL")
     _lib.impl("native_group_norm", _native_group_norm, "MPS")
