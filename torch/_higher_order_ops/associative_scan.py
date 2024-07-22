@@ -172,6 +172,7 @@ def associative_scan(
     """
     leaves, spec = pytree.tree_flatten(input)
 
+    # generic_scan_required is currently only true if any of the input is a CUDA tensor
     generic_scan_required = check_args(combine_fn, leaves, spec, dim)
 
     if reverse:
@@ -247,6 +248,8 @@ associative_scan_op = HigherOrderOperator("associative_scan")
 def trace_associative_scan(
     proxy_mode, func_overload, combine_fn: Callable, input: List[torch.Tensor], dim: int
 ):
+    from torch.fx.experimental.proxy_tensor import maybe_handle_decomp
+
     with disable_proxy_modes_tracing():
         sample_inputs = [
             torch.full((), False, dtype=x.dtype, device=x.device)
@@ -284,6 +287,12 @@ def trace_associative_scan(
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
     args = (combine_graph, input, dim)
+    out = maybe_handle_decomp(
+        proxy_mode, associative_scan_op, args, {}
+    )
+    if out is not NotImplemented:
+        return out
+
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}, name="associative_scan"

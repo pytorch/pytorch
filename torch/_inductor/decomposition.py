@@ -22,6 +22,7 @@ from torch._decomp.decompositions import (
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.out_dtype import out_dtype
+from torch._higher_order_ops.associative_scan import associative_scan, associative_scan_op
 from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
     elementwise_dtypes,
@@ -787,3 +788,10 @@ def max_pool2d_with_indices(
         padding,
     )
     return vals, indices
+
+@register_decomposition(associative_scan_op)
+def associative_scan_op(combine_fn, leaves, dim):
+    # TODO: This will handle the fallback to eager in case there 
+    # are non-pointwise operations involved in combine_fn
+    out = combine_fn(leaves)
+    return out
