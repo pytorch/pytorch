@@ -628,7 +628,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(f(input, True), input + 1)
             self.assertEqual(f(input, input), input + 1)
 
-
     def test_callable_list(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x, arg):
