@@ -12,10 +12,9 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._inductor import comms
 from torch._inductor.virtualized import ops
-
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
-
 from torch._utils_internal import upload_graph
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
@@ -23,7 +22,6 @@ from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from .. import config, ir, pattern_matcher
 from ..codegen.common import BackendFeature, has_backend_feature
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
-
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     _return_true,
@@ -52,6 +50,7 @@ from .micro_pipeline_tp import patterns as micro_pipeline_tp_patterns
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
+
 
 if TYPE_CHECKING:
     from sympy import Expr
@@ -140,6 +139,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
     decompose_auto_functionalized(gm.graph)
+
+    comms.reinplace_fsdp_all_gather(gm.graph)
 
     gm.recompile()
     optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
@@ -536,6 +537,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
 
     kernel.name = V.graph.register_buffer(kernel)
     kernel.inputs = ir.ConcatKernel.unwrap_storage(kernel.inputs)
+    V.graph.register_operation(kernel)
     return kernel_tensor
 
 
