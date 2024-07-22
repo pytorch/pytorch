@@ -899,7 +899,7 @@ class SchedulerNode(BaseSchedulerNode):
         return buffers_store_as_atomic_add
 
 
-def is_group_snode(snode: BaseSchedulerNode):
+def is_group_snode(snode: BaseSchedulerNode) -> bool:
     return isinstance(snode, (FusedSchedulerNode, GroupedSchedulerNode))
 
 
@@ -909,7 +909,7 @@ def init_group_snode(
     snodes: List[BaseSchedulerNode],
 ) -> None:
     assert is_group_snode(group_snode)
-    group_snode.snodes = snodes
+    group_snode.snodes = snodes  # type: ignore[attr-defined]
     group_snode.scheduler = scheduler
     group_snode.node = None
     group_snode.ancestors = set.union(
@@ -926,8 +926,8 @@ def init_group_snode(
         if dep.name not in group_snode.get_names()
     } - group_snode.read_writes.writes
 
-    group_snode.min_order = min(x.min_order for x in group_snode.snodes)
-    group_snode.max_order = max(x.max_order for x in group_snode.snodes)
+    group_snode.min_order = min(x.min_order for x in group_snode.snodes)  # type: ignore[attr-defined]
+    group_snode.max_order = max(x.max_order for x in group_snode.snodes)  # type: ignore[attr-defined]
 
 
 class FusedSchedulerNode(BaseSchedulerNode):
@@ -1493,7 +1493,9 @@ class Scheduler:
         self.compute_order()
         self.compute_ancestors()
         if config.reorder_for_compute_comm_overlap:
-            self.nodes = comms.decide_global_ordering_of_comms(self.nodes, self.name_to_fused_node)
+            self.nodes = comms.decide_global_ordering_of_comms(
+                self.nodes, self.name_to_fused_node
+            )
             self.compute_ancestors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)

@@ -291,9 +291,13 @@ class TestFullyShardCompile(FSDPTest):
             def __init__(self, hidden_dim):
                 super().__init__()
                 self.param1 = nn.Parameter(
-                    torch.zeros(hidden_dim, hidden_dim, dtype=torch.float, device="cuda")
+                    torch.zeros(
+                        hidden_dim, hidden_dim, dtype=torch.float, device="cuda"
+                    )
                 )
-                self.param2 = nn.Parameter(torch.zeros(hidden_dim, dtype=torch.float, device="cuda"))
+                self.param2 = nn.Parameter(
+                    torch.zeros(hidden_dim, dtype=torch.float, device="cuda")
+                )
 
             def forward(self, x):
                 ret = torch.matmul(x, self.param1)
