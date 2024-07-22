@@ -285,14 +285,9 @@ def collect_bw_donated_buffer_idxs(
     bw_outs = next(reversed(bw_module.graph.find_nodes(op="output"))).args[0]
     fw_outs = next(reversed(fw_module.graph.find_nodes(op="output"))).args[0]
 
-    # check if every node has meta["val"] since meta["val"] may be lost during
-    # graph transformation.
-    try:
-        fw_ins = [n.meta["val"] if hasattr(n, "meta") else None for n in fw_ins]
-        fw_outs = [n.meta["val"] if hasattr(n, "meta") else None for n in fw_outs]
-        bw_outs = [n.meta["val"] if hasattr(n, "meta") else None for n in bw_outs]
-    except KeyError:
-        return []
+    fw_ins = [n.meta["val"] if hasattr(n, "meta") else None for n in fw_ins]
+    fw_outs = [n.meta["val"] if hasattr(n, "meta") else None for n in fw_outs]
+    bw_outs = [n.meta["val"] if hasattr(n, "meta") else None for n in bw_outs]
 
     user_fw_outs = fw_outs[: fw_metadata.num_forward]
     saved_tensors = fw_outs[fw_metadata.tensors_saved_for_backwards_slice]
