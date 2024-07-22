@@ -26,7 +26,7 @@ from .sym_node import SymNode
 from collections import defaultdict
 from contextlib import contextmanager, nullcontext, AbstractContextManager, ExitStack
 from dataclasses import dataclass
-from torch import SymInt, SymFloat, SymBool, Tensor
+from torch import SymInt, SymBool, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
@@ -111,8 +111,7 @@ class _NoDefault:
 
 no_default = _NoDefault()
 
-py_sym_types = (SymInt, SymFloat, SymBool)
-PySymType = Union[SymInt, SymFloat, SymBool]
+from torch.types import py_sym_types, PySymType
 
 class _HasMeta(Protocol):
     meta: Dict[str, PySymType]
