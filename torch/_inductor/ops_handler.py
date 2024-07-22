@@ -18,7 +18,9 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
+
 from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sympy_str
+
 
 T = TypeVar("T")
 StoreMode = Optional[Literal["atomic_add"]]
@@ -932,6 +934,20 @@ class WrapperHandler(Generic[T]):
 
 # Use mypy to check protocol implemented correctly
 def _typecheck_WrapperHandler(h: WrapperHandler[T]) -> OpsHandler[T]:
+    return h
+
+
+class AddParenHandler(WrapperHandler[T]):
+    def __getattr__(self, name):
+        def inner(*args, **kwargs):
+            val = getattr(self._inner, name)(*args, **kwargs)
+            return f"({val})"
+
+        return inner
+
+
+# Use mypy to check protocol implemented correctly
+def _typecheck_AddParenHandler(h: AddParenHandler[T]) -> OpsHandler[T]:
     return h
 
 

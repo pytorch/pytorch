@@ -58,8 +58,10 @@ from torch.utils._sympy.functions import (
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+
 from . import config
 from .runtime.runtime_utils import ceildiv as runtime_ceildiv
+
 
 log = logging.getLogger(__name__)
 
@@ -277,9 +279,7 @@ def convert_shape_to_inductor(
     trivial. But for symbolic tensors, we need to map from SymIntNode into
     sympy.Expr.
     """
-    return [
-        i.node.expr if isinstance(i, torch.SymInt) else sympy.Integer(i) for i in lst
-    ]
+    return [sympy.sympify(i) for i in lst]
 
 
 def convert_shape_to_symint(
@@ -309,7 +309,15 @@ def is_view(op: torch._ops.OpOverload):
     return any(a.alias_info is not None for a in op._schema.arguments)
 
 
-def is_pointwise_use(use):
+def is_pointwise_use(
+    use, is_pointwise_fn: Optional[Callable[[torch._ops.OpOverload], bool]] = None
+):
+    """
+    Do all uses of this op have torch.Tag.pointwise or return True for optional `is_pointwise_fn`
+
+    Uses in views ops will follow the views uses
+    """
+
     if not use.op == "call_function":
         return False
 
@@ -319,9 +327,11 @@ def is_pointwise_use(use):
         return False
 
     if use.target is operator.getitem or is_view(use.target):
-        return all(is_pointwise_use(u) for u in use.users)
+        return all(is_pointwise_use(u, is_pointwise_fn) for u in use.users)
 
-    return torch.Tag.pointwise in use.target.tags
+    return torch.Tag.pointwise in use.target.tags or (
+        is_pointwise_fn is not None and is_pointwise_fn(use.target)
+    )
 
 
 def gen_gm_and_inputs(target, args, kwargs):
@@ -1173,11 +1183,9 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
     )
-    # TODO(jgong5): support n % n_block_size != 0
     return (
         layout.dtype in layout_dtypes
         and micro_gemm is not None
-        and n % micro_gemm.register_blocking[1] == 0
         and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and mat2.is_module_buffer()
@@ -1536,6 +1544,15 @@ def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int)
     num_rng_seed_offset_inputs = (
         2 if torch._functorch.config.functionalize_rng_ops else 0
     )
+    # AOT won't lift any parameters if we're inlining NN Modules
+    # however desugaring subclasses will still add arguments
+    # resulted in extra fixed inputs https://github.com/pytorch/pytorch/issues/130502
+    if (
+        torch._dynamo.config.inline_inbuilt_nn_modules
+        and not torch._dynamo.utils.is_parameter_freezing()
+    ):
+        return 0
+
     return aot_fw_gm_num_inputs - dynamo_gm_num_inputs - num_rng_seed_offset_inputs
 
 
