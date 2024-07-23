@@ -49,7 +49,6 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: conda-builder${{ matrix.cuda_version == 'cpu' && '-' || '-cuda' }}${{matrix.cuda_version}}
-            working-directory: pytorch
             docker-build-dir:  .ci/docker/conda
             always-rebuild: true
             push: true
