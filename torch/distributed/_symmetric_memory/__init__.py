@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 import socket
 import uuid
 
