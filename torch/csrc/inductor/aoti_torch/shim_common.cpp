@@ -109,6 +109,9 @@ int32_t aoti_torch_layout__mkldnn() {
     });                                                        \
   }
 
+#ifdef USE_CUDA
+AOTI_TORCH_ITEM_IMPL(float16, half)
+#endif
 AOTI_TORCH_ITEM_IMPL(float32, float)
 AOTI_TORCH_ITEM_IMPL(float64, double)
 AOTI_TORCH_ITEM_IMPL(uint8, uint8_t)
