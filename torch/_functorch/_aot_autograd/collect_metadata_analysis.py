@@ -694,15 +694,16 @@ from a multi-output view call"
         # inference and training paths decide which inputs/output to ask for subclass info on.
         # However, we currently stash indexing information on each SubclassMeta about its order
         # in the graph outputs list.
-        f_fw_graph_outs = list(flat_f_outs)
+        f_fw_graph_outs_orig = list(flat_f_outs)
         if is_train or not keep_input_mutations:
-            f_fw_graph_outs = f_mutated_inputs + f_fw_graph_outs
+            f_fw_graph_outs = f_mutated_inputs + f_fw_graph_outs_orig
         else:
             # even when "keep_input_mutations" is True,
             # we never keep metadata-only mutations in the fw graph
-            f_fw_graph_outs = f_metadata_mutated_inputs + f_fw_graph_outs
+            f_fw_graph_outs = f_metadata_mutated_inputs + f_fw_graph_outs_orig
         if is_train:
-            f_fw_graph_outs = f_fw_graph_outs + intermediate_bases
+            f_fw_graph_outs = f_fw_graph_outs_orig + intermediate_bases
+        fw_graph_outs_orig = pytree.tree_map(from_fun, f_fw_graph_outs_orig)
         fw_graph_outs = pytree.tree_map(from_fun, f_fw_graph_outs)
 
         grad_enabled_mutation = None
@@ -719,6 +720,7 @@ from a multi-output view call"
                 grad_enabled_mutation,
             )
 
+        subclass_fw_graph_out_meta = create_subclass_meta(fw_graph_outs_orig)
         metadata = ViewAndMutationMeta(
             input_info=input_info,
             output_info=output_info,
@@ -726,7 +728,7 @@ from a multi-output view call"
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
             subclass_inp_meta=create_subclass_meta(flat_args),
-            subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
+            subclass_fw_graph_out_meta=subclass_fw_graph_out_meta,
             subclass_tangent_meta=create_subclass_meta(traced_tangents),
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,
