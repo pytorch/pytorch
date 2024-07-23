@@ -1133,6 +1133,9 @@ class VariableBuilder:
                 source_i = GetItemSource(base=source, index=i, index_is_slice=False)
                 # access unpacked tensor from this list instead of from a lifted arg
                 self.tx.output.input_source_to_var[source_i] = tensor_variable
+                tensor_variable.proxy.node.meta["tensor_dict"] = value[
+                    i
+                ].__dict__.copy()
 
                 guard = functools.partial(
                     GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
