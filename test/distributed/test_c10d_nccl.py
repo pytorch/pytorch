@@ -236,6 +236,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self.test_nan_assert_float16.__wrapped__,
             self.test_nan_assert_float32.__wrapped__,
             self.test_nan_assert_float64.__wrapped__,
+            self.test_nan_assert_bfloat16.__wrapped__,
         ]
 
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -346,7 +347,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         not (TEST_MULTIGPU and CUDA_12_AND_ABOVE),
         "NCCL test requires 2+ GPUs and Device side assert could cause unexpected errors in lower versions of CUDA",
     )
-    @parametrize("type", [torch.float16, torch.float32, torch.float64])
+    @parametrize("type", [torch.float16, torch.float32, torch.float64, torch.bfloat16])
     @skip_if_rocm
     def test_nan_assert(self, type):
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
@@ -2789,7 +2790,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @requires_nccl_version(
-        (2, 17), "Need NCCL 2.17+ for configuring NCCL communicators"
+        (2, 18), "Need NCCL 2.17+ for configuring NCCL communicators"
     )
     @skip_if_lt_x_gpu(2)
     def test_pass_nccl_options_config(self):
@@ -2798,6 +2799,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         pg_opts.config.min_ctas = 2
         pg_opts.config.cga_cluster_size = 2
         pg_opts.config.net_name = "Socket"
+        pg_opts.config.split_share = 1
         nccl_debug_file = tempfile.NamedTemporaryFile()
         os.environ["NCCL_DEBUG"] = "INFO"
         os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
@@ -2809,6 +2811,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         nccl_debug_file_content = nccl_debug_file.read()
         max_ctas = re.search(rb"Max CTAs.*(\d+)|$", nccl_debug_file_content).group(1)
         min_ctas = re.search(rb"Min CTAs.*(\d+)|$", nccl_debug_file_content).group(1)
+        split_share = re.search(
+            rb"Split share.*(\d+)|$", nccl_debug_file_content
+        ).group(1)
         cga_cluster_size = re.search(
             rb"CGA cluster.*(\d+)|$", nccl_debug_file_content
         ).group(1)
@@ -2819,6 +2824,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(pg_opts.config.min_ctas, int(min_ctas))
         self.assertEqual(pg_opts.config.cga_cluster_size, int(cga_cluster_size))
         self.assertEqual(pg_opts.config.net_name, net_name.decode())
+        self.assertEqual(pg_opts.config.split_share, int(split_share))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)

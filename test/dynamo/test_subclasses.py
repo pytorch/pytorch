@@ -1378,6 +1378,15 @@ s1 > 3""",
         _check_recompiles(self, lambda x: x * x, (x,), (x2,), False)
         _check_recompiles(self, lambda x: x * x, (x,), (x3,), True)
 
+    def test_tensor_subclass_ctx_recursive_guards(self):
+        x0 = torch.ones(2, 2)
+        x1 = CtxSubclassTensor(x0.clone(), 2)
+        x2 = CtxSubclassTensor(x0.clone(), 3)
+        tt0 = TwoTensor(x0.clone(), x1)
+        tt1 = TwoTensor(x0.clone(), x2)
+
+        _check_recompiles(self, lambda x: x * x, (tt0,), (tt1,), True)
+
     def test_tensor_subclass_ctx_custom_guards_override(self):
         class CtxSubclassTensorCustomGuardFn(CtxSubclassTensor):
             @classmethod
