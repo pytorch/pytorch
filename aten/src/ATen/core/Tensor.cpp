@@ -3,6 +3,7 @@
 #include <ATen/core/VariableHooksInterface.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/ScalarOps.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/MethodOperators.h>
@@ -166,6 +167,39 @@ const std::shared_ptr<torch::autograd::Node>& TensorBase::grad_fn() const {
 
 void TensorBase::remove_hook(unsigned pos) const {
   impl::GetVariableHooks()->remove_hook(*this, pos);
+}
+
+// Manually go through scalar intermediate path here, so we don't dispatch to
+// at::_conj(scalar_tensor).
+// Otherwise, if we hit __torch_dispatch__ self will be converted to a plain python scalar and error.
+at::Tensor TensorBase::conj_physical_scalar() const {
+  TORCH_INTERNAL_ASSERT(this->unsafeGetTensorImpl()->is_wrapped_number());
+  auto scalar_type_ = scalar_type();
+  at::Scalar scalar_in;
+  switch (scalar_type_) {
+    case at::ScalarType::Bool:
+      scalar_in = at::Scalar(*const_data_ptr<bool>());
+      break;
+    case at::ScalarType::Long:
+      scalar_in = at::Scalar(*const_data_ptr<int64_t>());
+      break;
+    case at::ScalarType::Double:
+      scalar_in = at::Scalar(*const_data_ptr<double>());
+      break;
+    case at::ScalarType::ComplexDouble:
+      scalar_in = at::Scalar(*const_data_ptr<c10::complex<double>>());
+      break;
+    default:
+      TORCH_CHECK(
+          false,
+          "Missing cases in 'conj_physical_scalar' wrapped number handling! Can't convert ",
+          scalar_type_,
+          " to a c10::Scalar");
+  }
+  auto scalar_out = scalar_in.conj();
+  auto out = c10::scalar_to_tensor(scalar_out);
+  out.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return out;
 }
 
 unsigned TensorBase::_register_hook(std::function<TensorBase(const TensorBase&)> hook) const {

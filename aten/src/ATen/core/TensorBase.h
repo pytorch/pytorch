@@ -388,6 +388,8 @@ class TORCH_API TensorBase {
     impl_->_set_conj(conjugate);
   }
 
+  at::Tensor conj_physical_scalar() const;
+
   inline bool is_neg() const {
     return impl_->is_neg();
   }
