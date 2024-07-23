@@ -51,6 +51,7 @@ def have_compatible_glibc(major, minimum_minor):
 
 import sys
 
+
 if is_manylinux1_compatible():
     print(f"{sys.executable} is manylinux1 compatible")
     sys.exit(0)

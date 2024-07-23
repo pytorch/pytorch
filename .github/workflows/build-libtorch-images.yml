@@ -49,7 +49,6 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: libtorch-cxx11-builder-cuda${{matrix.cuda_version}}
-            working-directory: pytorch
             docker-build-dir:  .ci/docker/libtorch
             always-rebuild: true
             push: true
@@ -81,7 +80,6 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: libtorch-cxx11-builder-rocm${{matrix.rocm_version}}
-            working-directory: pytorch
             docker-build-dir:  .ci/docker/libtorch
             always-rebuild: true
             push: true
@@ -107,7 +105,6 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: libtorch-cxx11-builder-cpu
-            working-directory: pytorch
             docker-build-dir:  .ci/docker/libtorch
             always-rebuild: true
             push: true
