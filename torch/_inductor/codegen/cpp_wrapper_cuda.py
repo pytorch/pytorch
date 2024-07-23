@@ -43,6 +43,7 @@ class CppWrapperCuda(CppWrapperCpu):
         super().write_header()
 
         self.header.splice("#include <filesystem>")
+        self.header.splice("#include <cuda_fp16.h>")
         if config.abi_compatible:
             self.header.splice(
                 "#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>"
