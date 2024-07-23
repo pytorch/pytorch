@@ -294,7 +294,7 @@ class OutputGraph:
             allow_scalar_outputs=config.capture_scalar_outputs,
             allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
             prefer_deferred_runtime_asserts_over_guards=config.prefer_deferred_runtime_asserts_over_guards,
-            _allow_complex_guards_as_runtime_asserts=config._allow_complex_guards_as_runtime_asserts,
+            allow_complex_guards_as_runtime_asserts=config.allow_complex_guards_as_runtime_asserts,
             co_fields=self.co_fields,
         )
 
@@ -803,6 +803,10 @@ class OutputGraph:
                 # Track the object so to avoid duplicate registration in case of
                 # different sources pointing to the same tensor object.
                 vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
+
+                assert "tensor_dict" not in vt.proxy.node.meta
+                vt.proxy.node.meta["tensor_dict"] = target.__dict__.copy()
+
                 return vt
 
         elif isinstance(target, torch.nn.Module):
@@ -1577,14 +1581,19 @@ class OutputGraph:
                     if isinstance(node.meta["grapharg"].example, torch.ScriptObject):
                         real_script_obj = node.meta["grapharg"].example
                         fake_script_obj = node.meta["grapharg"].example_strong_ref
-                        flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
-                        for attr in flat_dict.keys():
-                            fake_attr_val = getattr(fake_script_obj.wrapped_obj, attr)
-                            pytree.tree_map_only(
-                                (torch.SymInt, torch.Tensor),
-                                lambda t: update_used_symbols(used_symbols, t),
-                                fake_attr_val,
-                            )
+                        if not torch._library.fake_class_registry.tracing_with_real(
+                            real_script_obj
+                        ):
+                            flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
+                            for attr in flat_dict.keys():
+                                fake_attr_val = getattr(
+                                    fake_script_obj.wrapped_obj, attr
+                                )
+                                pytree.tree_map_only(
+                                    (torch.SymInt, torch.Tensor),
+                                    lambda t: update_used_symbols(used_symbols, t),
+                                    fake_attr_val,
+                                )
                         continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
