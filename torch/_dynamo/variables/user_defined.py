@@ -65,6 +65,29 @@ def is_standard_setattr(val):
     return val in (object.__setattr__,)
 
 
+def is_forbidden_context_manager(ctx):
+    f_ctxs = []
+
+    try:
+        import _pytest
+
+        f_ctxs.append(_pytest.python_api.RaisesContext)
+        f_ctxs.append(_pytest.recwarn.WarningsChecker)
+    except ImportError:
+        pass
+
+    try:
+        from torch.testing._internal.jit_utils import (
+            _AssertRaisesRegexWithHighlightContext,
+        )
+
+        f_ctxs.append(_AssertRaisesRegexWithHighlightContext)
+    except ImportError:
+        pass
+
+    return ctx in f_ctxs
+
+
 class UserDefinedVariable(VariableTracker):
     pass
 
@@ -333,6 +356,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.value.__new__ == object.__new__
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source is not None
+            and not is_forbidden_context_manager(self.value)
         ):
             # import here to avoid an unfortunate circular dependency.
             from .ctx_manager import GenericContextWrappingVariable
