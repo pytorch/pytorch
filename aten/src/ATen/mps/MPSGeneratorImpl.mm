@@ -63,24 +63,32 @@ void MPSGeneratorImpl::update_philox_counters() {
 }
 
 c10::intrusive_ptr<c10::TensorImpl> MPSGeneratorImpl::get_state() const {
-  static const size_t states_size = mps::detail::PHILOX_STATE_N * sizeof(uint32_t);
-  static const size_t seed_size = sizeof(uint64_t);
-  static const size_t total_size = states_size + seed_size;
+  constexpr size_t states_size = mps::detail::PHILOX_STATE_N * sizeof(uint32_t);
+  constexpr size_t seed_size = sizeof(uint64_t);
+  constexpr size_t offset_size = sizeof(uint64_t);
+  constexpr size_t total_size = states_size + seed_size + offset_size;
 
   auto state_tensor = at::detail::empty_cpu(
       {(int64_t)total_size}, ScalarType::Byte, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
   auto rng_state = state_tensor.data_ptr<uint8_t>();
   auto current_seed = this->current_seed();
+  auto current_offset = this->get_offset();
+
+  static_assert(sizeof(decltype(current_seed)) == seed_size, "current_seed size is wrong");
+  static_assert(sizeof(decltype(current_offset)) == offset_size, "current_offset size is wrong");
+
   memcpy(rng_state, this->data_.state.data(), states_size);
   memcpy(rng_state + states_size, &current_seed, seed_size);
+  memcpy(rng_state + states_size + seed_size, &current_offset, offset_size);
 
   return state_tensor.getIntrusivePtr();
 }
 
 void MPSGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
-  static const size_t states_size = mps::detail::PHILOX_STATE_N * sizeof(uint32_t);
-  static const size_t seed_size = sizeof(uint64_t);
-  static const size_t total_size = states_size + seed_size;
+  constexpr size_t states_size = mps::detail::PHILOX_STATE_N * sizeof(uint32_t);
+  constexpr size_t seed_size = sizeof(uint64_t);
+  constexpr size_t offset_size = sizeof(uint64_t);
+  constexpr size_t total_size = states_size + seed_size + offset_size;
 
   detail::check_rng_state(new_state);
 
@@ -88,9 +96,12 @@ void MPSGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   TORCH_CHECK(new_state_size == total_size, "RNG state is wrong size");
 
   uint64_t input_seed = default_rng_seed_val;
+  uint64_t input_offset = 0;
   auto new_rng_state = new_state.data_dtype_initialized<uint8_t>();
   memcpy(&input_seed, new_rng_state + states_size, seed_size);
   this->set_current_seed(input_seed);
+  memcpy(&input_offset, new_rng_state + states_size + seed_size, offset_size);
+  this->set_offset(input_offset);
   // state.data must be copied after input_seed to not reset the state in set_current_seed()
   memcpy(this->state_data(), new_rng_state, states_size);
 }

@@ -342,11 +342,9 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
+std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
+getNCCLCommDumpMap() {
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
-std::string dump_nccl_trace(
-    bool includeCollectives,
-    bool includeStackTraces,
-    bool onlyActive) {
   std::unordered_map<
       std::string /* ncclUniqueID */,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
@@ -366,19 +364,28 @@ std::string dump_nccl_trace(
     std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
     ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
   }
-  return NCCLTraceBuffer::get()->dump(
-      ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
+  return ncclDumpMap;
+#else
+  return std::unordered_map<
+      std::string,
+      std::unordered_map<std::string, std::string>>();
+#endif
 }
 
-#else
 std::string dump_nccl_trace(
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive) {
+  auto ncclDumpMap = getNCCLCommDumpMap();
   return NCCLTraceBuffer::get()->dump(
-      std::nullopt, includeCollectives, includeStackTraces, onlyActive);
+      ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
-#endif
+
+std::string dump_nccl_trace_json(bool includeCollectives, bool onlyActive) {
+  auto ncclDumpMap = getNCCLCommDumpMap();
+  return NCCLTraceBuffer::get()->dump_json(
+      ncclDumpMap, includeCollectives, onlyActive);
+}
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
@@ -568,6 +575,11 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
 
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   // Checking the work's corresponding CUDA event's status
+  // It calls `cudaEventQuery` eventually. Although this seems to be a
+  // non-blocking call, but we did notice hangs in the past. It can
+  // hang if another thread is holding the CUDA global context lock. For
+  // example, when doing a `cudaDeviceSynchronize` or even
+  // `cudaStreamSynchronize`.
   if (!ncclEndEvent_->query()) {
     return false;
   }
@@ -2108,6 +2120,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // Get the device index
   auto deviceIndex = device.index();
   gpuGuard.set_index(deviceIndex);
+
 #ifdef NCCL_HAS_COMM_SPLIT
   if (options_->split_from) {
     TORCH_CHECK(
@@ -2170,8 +2183,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       size_); // worldSize
 
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
-            << ncclComm->ncclComm_
-            << " on CUDA device: " << static_cast<int>(deviceIndex);
+            << ncclComm->ncclComm_ << " on CUDA device: " << deviceIndex;
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file

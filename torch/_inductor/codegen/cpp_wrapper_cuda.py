@@ -19,6 +19,7 @@ from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import SymbolicCallArg
 
+
 if TYPE_CHECKING:
     from ..graph import GraphLowering
 
@@ -78,8 +79,15 @@ class CppWrapperCuda(CppWrapperCpu):
         return super().generate(is_inference)
 
     def generate_user_defined_triton_kernel(
-        self, kernel_name, grid, configs, args, triton_meta, raw_args
+        self, kernel_name, raw_args, grid, configs, triton_meta, constexprs
     ):
+        # in C++ wrapper, we don't pass constexpr args, as they don't
+        # get added as parameters to the PTX code compiled from the
+        # user-defined Triton kernel (only non-constexpr args do)
+        raw_args = [
+            raw_arg for i, raw_arg in enumerate(raw_args) if i not in constexprs
+        ]
+
         assert len(grid) != 0
         if len(grid) == 1:
             grid_decision = grid[0]
@@ -93,6 +101,7 @@ class CppWrapperCuda(CppWrapperCpu):
                     break
             assert grid_decision is not None
 
+        args = [self.val_to_arg_str(v) for v in raw_args]
         arg_types = [
             arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
             for arg in raw_args

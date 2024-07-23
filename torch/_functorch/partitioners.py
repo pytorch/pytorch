@@ -204,7 +204,7 @@ def _extract_graph_with_inputs_outputs(
             output_values.append(env[x])
         else:
             output_values.append(x)
-    new_graph.output(tuple(output_values))
+    new_graph.output(output_values)
 
     new_graph.eliminate_dead_code()
     new_graph.lint()
@@ -645,7 +645,7 @@ def functionalize_rng_ops(
     joint_graph_rng_ops = get_rng_ops(joint_module)
     fw_graph_rng_ops = get_rng_ops(fw_module)
     bw_graph_rng_ops = get_rng_ops(bw_module)
-    recomputable_rng_ops_map = dict()
+    recomputable_rng_ops_map = {}
     for node in joint_module.graph.nodes:
         if (
             must_recompute(node)
@@ -727,7 +727,7 @@ def functionalize_rng_ops(
     sym_node_start_idx = len(fw_outputs) - num_sym_nodes
     outputs = (
         fw_outputs[:sym_node_start_idx]
-        + tuple(fw_rng_state_outputs)
+        + fw_rng_state_outputs
         + fw_outputs[sym_node_start_idx:]
     )
     fw_module.graph.output(outputs)

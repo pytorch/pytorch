@@ -1154,16 +1154,19 @@ class HistogramObserver(UniformQuantizationObserverBase):
             ].to(histogram.device)
             + 0.5 * bin_size
         )
-        new_bin_size = (update_min - update_max) / self.bins
         boundaries_new_histogram = torch.linspace(update_min, update_max, self.bins + 1, device=update_min.device).to(
             histogram.device
         )
         # this maps the mid-poits of the histogram to the new histogram's space
         bucket_assignments = (
-            torch.bucketize(mid_points_histogram, boundaries_new_histogram) - 1
+            torch.bucketize(mid_points_histogram, boundaries_new_histogram, right=True) - 1
         )
         # this then maps the histogram mid-points in the new space, weighted by the original histogram's values
         # this is just the old histogram in the new histogram's space
+
+        # In case due to numerical issues the values land higher/lower than the maximum/minimum
+        bucket_assignments[bucket_assignments >= self.bins] = self.bins - 1
+        bucket_assignments[bucket_assignments < 0] = 0
 
         update_histogram = torch.bincount(
             bucket_assignments, weights=histogram, minlength=self.bins
