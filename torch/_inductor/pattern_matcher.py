@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 """
 # Inductor Pattern Matcher
 
