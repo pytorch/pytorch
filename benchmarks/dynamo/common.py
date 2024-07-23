@@ -2643,6 +2643,8 @@ class BenchmarkRunner:
             for k, v in dynamo_stats.items():
                 headers.append(k)
                 fields.append(v)
+            headers.append("cpp_to_python_exceptions_raised")
+            fields.append(torch._C._get_cpp_to_python_translated_exception_count())
 
             output_csv(output_filename, headers, fields)
             return accuracy_status
