@@ -38,7 +38,6 @@
 
 #include <c10/util/Exception.h>
 
-
 namespace pytorch_flash {
 
 #define CHECK_DEVICE(x) TORCH_CHECK(x.is_cuda(), #x " must be on CUDA")
@@ -295,8 +294,7 @@ inline int num_splits_heuristic(int batch_nheads_mblocks, int num_SMs, int num_n
     }
     return 1;
 }
-
-void set_params_splitkv(Flash_fwd_params &params, const int batch_size,
+std::tuple<at::Tensor, at::Tensor> set_params_splitkv(Flash_fwd_params &params, const int batch_size,
     const int num_heads, const int head_size, const int max_seqlen_k, const int max_seqlen_q,
     const int head_size_rounded, const float p_dropout,
     const int num_splits, cudaDeviceProp *dprops, struct c10::TensorOptions opts) {
@@ -308,18 +306,23 @@ void set_params_splitkv(Flash_fwd_params &params, const int batch_size,
     // In any case we don't expect seqlen_q to be larger than 64 for inference.
     const int num_m_blocks = (max_seqlen_q + 64 - 1) / 64;
     params.num_splits = num_splits;
+    at::Tensor softmax_lse_accum;
+    at::Tensor out_accum;
+
     if (p_dropout == 0.0f) {  // SplitKV is not implemented for dropout
         if (num_splits < 1) {
             params.num_splits = num_splits_heuristic(batch_size * num_heads * num_m_blocks, dprops->multiProcessorCount, num_n_blocks, 128);
         }
         if (params.num_splits > 1) {
-            at::Tensor softmax_lse_accum = at::empty({params.num_splits, batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
-            at::Tensor out_accum = at::empty({params.num_splits, batch_size, num_heads, max_seqlen_q, head_size_rounded}, opts.dtype(at::kFloat));
+            softmax_lse_accum = at::empty({params.num_splits, batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
+            out_accum = at::empty({params.num_splits, batch_size, num_heads, max_seqlen_q, head_size_rounded}, opts.dtype(at::kFloat));
             params.softmax_lseaccum_ptr = softmax_lse_accum.data_ptr();
             params.oaccum_ptr = out_accum.data_ptr();
         }
         TORCH_CHECK(params.num_splits <= 128, "num_splits > 128 not supported");
     }
+
+    return std::make_tuple(softmax_lse_accum, out_accum);
 }
 
 void set_params_alibi(Flash_fwd_params &params, std::optional<at::Tensor> &alibi_slopes_, int batch_size, int num_heads){
@@ -443,7 +446,8 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
     auto opts = q.options();
 
-    auto softmax_lse = at::empty({batch_size, num_heads, seqlen_q}, opts.dtype(at::kFloat));
+    auto softmax_lse = at::empty({batch_size, num_heads, seqlen_q }, opts.dtype(at::kFloat));
+
     at::Tensor p;
     // Only return softmax if there's dropout to reduce compilation time
     if (return_softmax) {
@@ -470,9 +474,11 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
                      window_size_right);
 
 
-    set_params_splitkv(params, batch_size, num_heads,
-                       head_size, seqlen_k, seqlen_q,
-                       head_size_rounded, p_dropout, /*num_splits*/0, dprops, opts);
+    // Keep references to these tensors to extend their lifetime
+    at::Tensor softmax_lse_accum, out_accum;
+    std::tie(softmax_lse_accum, out_accum) = set_params_splitkv(params, batch_size, num_heads,
+                        head_size, seqlen_k, seqlen_q,
+                        head_size_rounded, p_dropout, /*num_splits*/0, dprops, opts);
 
     // We want to checkpoint and save the RNG state for backward if dropout
     // We get the default generator and return the seed and offset which will
@@ -686,9 +692,11 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                      window_size_left,
                      window_size_right,
                      seqlenq_ngroups_swapped);
+    // Keep references to these tensors to extend their lifetime
+    at::Tensor softmax_lse_accum, out_accum;
     if (seqlenq_ngroups_swapped) {
         // Only apply split-k for decoding
-        set_params_splitkv(params, batch_size, num_heads,
+        std::tie(softmax_lse_accum, out_accum) = set_params_splitkv(params, batch_size, num_heads,
                            head_size, max_seqlen_k, max_seqlen_q,
                            head_size_rounded, p_dropout, /*num_splits*/0, dprops, opts);
     }
@@ -1441,7 +1449,9 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
         params.cache_batch_idx = reinterpret_cast<int *>(cache_batch_idx.data_ptr());
     }
 
-    set_params_splitkv(params, batch_size, num_heads,
+    // Keep references to these tensors to extend their lifetime
+    at::Tensor softmax_lse_accum, out_accum;
+    std::tie(softmax_lse_accum, out_accum) = set_params_splitkv(params, batch_size, num_heads,
                        head_size, seqlen_k, seqlen_q,
                        head_size_rounded, /*dropout*/0.f, num_splits, dprops, opts);
 

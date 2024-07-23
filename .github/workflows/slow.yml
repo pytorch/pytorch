@@ -152,14 +152,14 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
       build-environment: linux-jammy-py3.10-clang15-asan
       docker-image-name: pytorch-linux-jammy-py3-clang15-asan
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "slow", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge" },
         ]}
       sync-tag: asan-build
 
