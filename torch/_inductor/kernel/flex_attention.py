@@ -188,8 +188,8 @@ def forward_inner(
                 m="m",
                 n="n",
             ) | indent_except_first(3) }}
-        # apply mask for partially unmasked blocks
-        post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
+            # apply mask for partially unmasked blocks
+            post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
 
         # TODO: In the case that score_mod is linear, this can be LICMed
         if not PRESCALE_QK:
