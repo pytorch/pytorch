@@ -1128,6 +1128,11 @@ def native_layer_norm_default(func, *args, **kwargs):
         "normalized_shape"
     ]  # denote -1 as the ragged dimension, i.e. normalize on the ragged dimension
 
+    if len(normalized_shape) < 2:
+        raise RuntimeError(
+            "layer_norm(): not supported for a normalized shape of length less than 2"
+        )
+
     num_output_dims = inp.dim() - len(normalized_shape)
 
     if num_output_dims == 0:  # error if trying to normalize over the batch dimension
@@ -1142,17 +1147,27 @@ def native_layer_norm_default(func, *args, **kwargs):
 
     if (
         -1 in normalized_shape
-    ):  # special handling for normalizing over the ragged dimension
+    ):  # special handling for normalizing over the ragged dimension, assuming that -1 represents the ragged shape
+        values_transposed_backward = inp._values.permute(
+            inp._ragged_idx - 1,
+            *range(0, inp._ragged_idx - 1),
+            *range(inp._ragged_idx, inp.dim() - 1),
+        )  # move ragged_idx to the front of the values tensor
+
         padded_input = torch.ops.aten._jagged_to_padded_dense_forward(
-            inp._values,
+            values_transposed_backward.reshape(
+                values_transposed_backward.shape[0], -1
+            ),  # _jagged_to_padded_dense_forward requires values to be a 2D tensor
             [inp._offsets],
-            max_lengths=[inp._max_seqlen],  # max length of ragged dimension
-        ).flatten(
-            start_dim=inp._ragged_idx + 1
-        )  # create a 2D layer by flattening all dimensions after the ragged dimension into 1 dimension; e.g. (B, *, W, H) --> (B, *, WH)
+            max_lengths=[inp._max_seqlen],
+        )  # pad the transposed values tensor, ensuring that raggedness is in the 0-th dimension
 
         padded_mask = torch.ops.aten._jagged_to_padded_dense_forward(
-            torch.ones((inp._values.shape[0], 1), device=inp.device, dtype=inp.dtype),
+            torch.ones(
+                (values_transposed_backward.shape[0], 1),
+                device=inp.device,
+                dtype=inp.dtype,
+            ),
             [inp._offsets],
             max_lengths=[inp._max_seqlen],  # max length of ragged dimension
         ).expand(
@@ -1189,20 +1204,25 @@ def native_layer_norm_default(func, *args, **kwargs):
         padded_layer_norm = padded_normalized / std
 
         jagged_layer_norm_values = torch.ops.aten._padded_dense_to_jagged_forward(
-            padded_layer_norm.unflatten(
-                -1, inp.shape[inp._ragged_idx + 1 :]
-            ),  # unflatten last dimension back into original nested tensor shape, e.g. (B, *, WH) --> (B, *, W, H)
+            padded_layer_norm,
             [inp._offsets],
             total_L=inp._values.shape[
-                0
+                inp._ragged_idx - 1
             ],  # providing this parameter helps avoid a GPU/CPU sync
-        )
+        ).reshape(
+            -1, *values_transposed_backward.shape[1:]
+        )  # reshape from 2D values tensor to original values tensor shape
+
+        jagged_values_transposed_forward = jagged_layer_norm_values.permute(
+            *range(1, inp._ragged_idx), 0, *range(inp._ragged_idx, inp.dim() - 1)
+        )  # move ragged_idx back into original position
 
         return (
             torch.nested.nested_tensor_from_jagged(
-                jagged_layer_norm_values,
+                jagged_values_transposed_forward,
                 inp._offsets,
-            ),
+                jagged_dim=inp._ragged_idx,
+            ),  # create nested tensor from jagged values, offsets, and ragged dimension
             mean,
             std,
         )
