@@ -122,6 +122,8 @@ __all__ = [
     "is_enabled",
     "tuning_enable",
     "tuning_is_enabled",
+    "record_untuned_enable",
+    "record_untuned_is_enabled",
     "set_max_tuning_duration",
     "get_max_tuning_duration",
     "set_max_tuning_iterations",

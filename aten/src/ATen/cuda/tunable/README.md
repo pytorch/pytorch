@@ -90,7 +90,7 @@ programmatically since the settings become fixed. Use the C++ or Python APIs ins
 | -------------------- | ----------- |
 | PYTORCH_TUNABLEOP_ENABLED | Default is 0. Set to 1 to enable. |
 | PYTORCH_TUNABLEOP_TUNING | Default is 1. Set to 0 to disable. |
-| PYTORCH_TUNABLEOP_RECORD_UNTUNED | Default is 0. Set to 1 to enable. |
+| PYTORCH_TUNABLEOP_RECORD_UNTUNED | Default is 1. Set to 0 to disable. |
 | PYTORCH_TUNABLEOP_UNTUNED_FILENAME | Default is 'tunableop_untuned.csv'. |
 | PYTORCH_TUNABLEOP_VERBOSE | Default is 0. Set to 1 to enable basic logging. 2 for basic tuning status. 3 for full trace. |
 | PYTORCH_TUNABLEOP_VERBOSE_FILENAME | Default is "err" for stderr. Set to "out" for stdout or a filename for capturing verbose logging. |
