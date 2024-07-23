@@ -312,6 +312,10 @@ if(USE_NUMPY)
   target_compile_definitions(torch_python PRIVATE USE_NUMPY)
 endif()
 
+if(USE_CUFILE AND NOT USE_ROCM)
+  target_compile_definitions(torch_python PRIVATE USE_CUFILE)
+endif()
+
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -352,12 +356,6 @@ if(BUILD_LIBTORCHLESS)
   if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
     target_compile_definitions(torch_python PRIVATE "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
   endif()
-
-  if(MSVC AND NOT BUILD_SHARED_LIBS)
-    target_compile_definitions(torch_python PRIVATE "AT_CORE_STATIC_WINDOWS=1")
-  endif()
-
-
 
 endif()
 
@@ -417,6 +415,12 @@ if(BUILD_ONEDNN_GRAPH)
   if(NOT BUILD_LIBTORCHLESS)
     target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
   endif()
+endif()
+
+if(${CMAKE_BUILD_TYPE} STREQUAL "RelWithAssert")
+   # Workaround numerous decret-without-a-gil warnings from JIT
+   # see https://github.com/pytorch/pytorch/issues/130073
+   target_compile_definitions(torch_python PRIVATE "-DPYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF")
 endif()
 
 if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")

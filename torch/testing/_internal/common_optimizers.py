@@ -1027,7 +1027,7 @@ def optim_error_inputs_func_sparseadam(device, dtype):
             ErrorOptimizerInput(
                 OptimizerInput(
                     params=[torch.rand(2, 3, device=device, dtype=torch.complex64)],
-                    kwargs=dict(),
+                    kwargs={},
                     desc="complex not supported",
                 ),
                 error_type=ValueError,
@@ -1824,13 +1824,6 @@ optim_db: List[OptimizerInfo] = [
             DecorateInfo(
                 skipIfMps,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
-            ),
-            DecorateInfo(
-                unittest.skip(
-                    "SparseAdam does not support dense gradients, see #116507"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),

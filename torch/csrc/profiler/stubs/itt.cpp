@@ -1,8 +1,8 @@
-#include <sstream>
-
 #include <c10/util/irange.h>
 #include <torch/csrc/itt_wrapper.h>
 #include <torch/csrc/profiler/stubs/base.h>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
 namespace torch {
 namespace profiler {
@@ -54,3 +54,4 @@ RegisterITTMethods reg;
 } // namespace impl
 } // namespace profiler
 } // namespace torch
+C10_CLANG_DIAGNOSTIC_POP()

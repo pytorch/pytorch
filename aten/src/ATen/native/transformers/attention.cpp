@@ -65,6 +65,7 @@
 #include <ATen/ops/softmax.h>
 #include <ATen/ops/split_native.h>
 #include <ATen/ops/split_with_sizes_native.h>
+#include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #endif
@@ -414,7 +415,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
   // Fuse transform_0213 inside
   auto proj = transform0213_gemm_nt_bias(
       attn_ctx, proj_weight, proj_bias, query);
-#ifndef NDEBUG
+// TODO: Remove me when https://github.com/pytorch/pytorch/issues/130073 is fixed
+#if !defined(NDEBUG) && 0
   debug_assert_shape(__LINE__, proj, {B, T, D});
 #endif
   if (need_weights && average_attn_weights) {
@@ -520,16 +522,13 @@ inline void validate_sdpa_input(
 std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
   // Pass through
   if(!attn_mask.has_value()){
-    return c10::nullopt;
+    return std::nullopt;
   }
   // Convert boolean mask to additive mask; need to invert mask to indicate what
   // to mask *out*.
   if (attn_mask->dtype() == at::kBool) {
-    auto new_attn_mask = at::zeros_like(attn_mask.value(), dtype);
     // TODO Use the max type of the input and output
-    new_attn_mask.masked_fill_(
-        attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
-    return new_attn_mask;
+    return at::where(attn_mask->logical_not(), -std::numeric_limits<double>::infinity(), at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
   }
   // Otherwise, attn_mask represents an additive attention tensor
   return attn_mask;
@@ -700,7 +699,7 @@ Tensor scaled_dot_product_attention(
           attn_mask,
           dropout_p,
           is_causal,
-          c10::nullopt, /*dropout_mask*/
+          std::nullopt, /*dropout_mask*/
           scale));
     default:
       TORCH_CHECK(
@@ -852,7 +851,7 @@ _scaled_dot_product_fused_attention_overrideable(
     const at::Tensor & query,
     const at::Tensor & key,
     const at::Tensor & value,
-    const c10::optional<at::Tensor> & attn_bias,
+    const std::optional<at::Tensor> & attn_bias,
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
