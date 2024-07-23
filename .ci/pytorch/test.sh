@@ -644,6 +644,10 @@ test_inductor_torchbench_smoketest_perf() {
   done
 }
 
+test_laith() {
+  echo "just doing echo for now"
+}
+
 test_inductor_torchbench_cpu_smoketest_perf(){
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -1288,6 +1292,8 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   elif [[ "${TEST_CONFIG}" == *torchbench_gcp_smoketest* ]]; then
     checkout_install_torchbench
     TORCHBENCHPATH=$(pwd)/torchbench test_torchbench_gcp_smoketest
+  elif [[ "${TEST_CONFIG}" == *laith_test* ]]; then
+    test_laith
   else
     checkout_install_torchbench
     # Do this after checkout_install_torchbench to ensure we clobber any
