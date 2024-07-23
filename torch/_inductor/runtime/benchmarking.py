@@ -135,7 +135,7 @@ class Benchmarker:
         # we really shouldn't see any significant slowdowns
         torch.cuda._sleep(
             int(
-                (self.get_cpu_launch_overhead_ms_per_event_record() * 2500)
+                (self.cpu_launch_overhead_ms_per_event_record() * 2500)
                 / self.gpu_time_ms_per_gpu_clock_cycle
             )
         )
@@ -150,10 +150,10 @@ class Benchmarker:
         torch.cuda.synchronize()
         return idx
 
-    @functools.lru_cache(None)  # noqa: B019
-    def get_cpu_launch_overhead_ms_per_event_record(self) -> float:
+    @cached_property
+    def cpu_launch_overhead_ms_per_event_record(self) -> float:
         counters["inductor"][
-            "benchmarking_get_cpu_launch_overhead_ms_per_event_record"
+            "benchmarking_cpu_launch_overhead_ms_per_event_record"
         ] += 1
         # ensures the queue is empty
         torch.cuda.synchronize()
@@ -165,18 +165,18 @@ class Benchmarker:
 
     @cached_property
     def cpu_launch_overhead_ms_per_gpu_cache_clear(self) -> float:
-        return self.get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear()[0]
+        return self.cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear[0]
 
     @cached_property
     def gpu_time_ms_per_gpu_cache_clear(self) -> float:
-        return self.get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear()[1]
+        return self.cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear[1]
 
-    @functools.lru_cache(None)  # noqa: B019
-    def get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear(
+    @cached_property
+    def cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear(
         self,
     ) -> Tuple[float, float]:
         counters["inductor"][
-            "benchmarking_get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear"
+            "benchmarking_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear"
         ] += 1
         buffer = torch.empty(
             int(self.L2_cache_size // 4), dtype=torch.int, device="cuda"
@@ -280,7 +280,7 @@ class Benchmarker:
         torch.cuda.synchronize()
 
         # initialize here, avoids double buffer allocation
-        self.get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear()
+        self.cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear
 
         _callable()
         torch.cuda.synchronize()
@@ -384,7 +384,7 @@ class Benchmarker:
         torch.cuda.synchronize()
 
         # initialize here, avoids double buffer allocation
-        self.get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear()
+        self.cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear
 
         # this will fail the entire group if any of the callables fail,
         # in the case that users directly call this method they should
