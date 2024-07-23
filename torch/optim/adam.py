@@ -43,12 +43,15 @@ class Adam(Optimizer):
         differentiable: bool = False,
         fused: Optional[bool] = None,
     ):
+        if isinstance(lr, Tensor):
+            if foreach and not capturable:
+                raise ValueError(
+                    "lr as a Tensor is not supported for capturable=False and foreach=True"
+                )
+            if lr.numel() != 1:
+                raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
-        if isinstance(lr, Tensor) and foreach and not capturable:
-            raise ValueError(
-                "lr as a Tensor is not supported for capturable=False and foreach=True"
-            )
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= betas[0] < 1.0:
@@ -664,7 +667,6 @@ def _fused_adam(
     ) in grouped_tensors.items():
         if device.type == "mps":  # type: ignore[union-attr]
             assert found_inf is None and grad_scale is None
-            assert not isinstance(lr, Tensor)
 
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:

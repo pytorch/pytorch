@@ -68,17 +68,18 @@ from struct import unpack
 from sys import maxsize
 from typing import Any, Dict, List
 
-try:
-    # We rely on this module in private cPython which provides dicts of
-    # modules/functions that had their names changed from Python 2 to 3
-    has_compat_pickle = True
-    from _compat_pickle import IMPORT_MAPPING, NAME_MAPPING
-except ImportError:
-    # To prevent warning on import torch, we warn in the Unpickler.load below
-    has_compat_pickle = False
-    IMPORT_MAPPING, NAME_MAPPING = dict(), dict()
-
 import torch
+from torch._utils import IMPORT_MAPPING, NAME_MAPPING
+
+
+# modules in this list are never allowed, even if the user attempts to allowlist
+# functions/classes from them
+_blocklisted_modules = [
+    "sys",
+    "os",
+    "posix",
+    "nt",
+]
 
 _marked_safe_globals_list: List[Any] = []
 
@@ -96,6 +97,24 @@ def _get_safe_globals() -> List[Any]:
 def _clear_safe_globals():
     global _marked_safe_globals_list
     _marked_safe_globals_list = []
+
+
+def _remove_safe_globals(globals_to_remove: List[Any]):
+    global _marked_safe_globals_list
+    _marked_safe_globals_list = list(
+        set(_marked_safe_globals_list) - set(globals_to_remove)
+    )
+
+
+class _safe_globals:
+    def __init__(self, safe_globals: List[Any]):
+        self.safe_globals = safe_globals
+
+    def __enter__(self):
+        _add_safe_globals(self.safe_globals)
+
+    def __exit__(self, type, value, tb):
+        _remove_safe_globals(self.safe_globals)
 
 
 # Separate from _get_allowed_globals because of the lru_cache on _get_allowed_globals
@@ -189,13 +208,6 @@ class Unpickler:
 
         Return the reconstituted object hierarchy specified in the file.
         """
-        if not has_compat_pickle:
-            warnings.warn(
-                "Could not import IMPORT_MAPPING and NAME_MAPPING from _compat_pickle. "
-                "If the default `pickle_protocol` was used at `torch.save` time, any functions or "
-                "classes that are in these maps might not behave correctly if allowlisted via "
-                "`torch.serialization.add_safe_globals()`."
-            )
         self.metastack = []
         self.stack: List[Any] = []
         self.append = self.stack.append
@@ -212,12 +224,16 @@ class Unpickler:
                 name = readline()[:-1].decode("utf-8")
                 # Patch since torch.save default protocol is 2
                 # users will be running this code in python > 3
-                if self.proto == 2 and has_compat_pickle:
+                if self.proto == 2:
                     if (module, name) in NAME_MAPPING:
                         module, name = NAME_MAPPING[(module, name)]
                     elif module in IMPORT_MAPPING:
                         module = IMPORT_MAPPING[module]
                 full_path = f"{module}.{name}"
+                if module in _blocklisted_modules:
+                    raise RuntimeError(
+                        f"Trying to load unsupported GLOBAL {full_path} whose module {module} is blocked."
+                    )
                 if full_path in _get_allowed_globals():
                     self.append(_get_allowed_globals()[full_path])
                 elif full_path in _get_user_allowed_globals():
@@ -225,8 +241,8 @@ class Unpickler:
                 else:
                     raise RuntimeError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
-                        "Please use `torch.serialization.add_safe_globals` to allowlist this global "
-                        "if you trust this class/function."
+                        f"Please use `torch.serialization.add_safe_globals([{name}])` to allowlist "
+                        "this global if you trust this class/function."
                     )
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()

@@ -415,7 +415,7 @@ struct GraphFuser {
     return group;
   }
 
-  at::optional<Node*> tryFuse(Node* consumer, Value* producer) {
+  std::optional<Node*> tryFuse(Node* consumer, Value* producer) {
     // this handles cases where producer can be moved _into_ the fusion group of
     // consumer.
     // TODO: extend to fusion of consumer into _producer's_ fusion blob
@@ -431,13 +431,13 @@ struct GraphFuser {
         aliasDb_->moveBeforeTopologicallyValid(producer->node(), consumer);
 
     if (!shouldFuse) {
-      return at::nullopt;
+      return std::nullopt;
     }
 
     if ((consumer->inputs().size() + consumer->outputs().size() +
          producer->node()->inputs().size() +
          producer->node()->outputs().size()) > subgraph_arg_limit_) {
-      return at::nullopt;
+      return std::nullopt;
     }
 
     auto group = consumer;
@@ -494,7 +494,7 @@ struct GraphFuser {
     AT_ASSERT(group->kind() == prim::FusionGroup);
     auto it = std::find(group->inputs().begin(), group->inputs().end(), input);
     if (it == group->inputs().end()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     size_t input_index = it - group->inputs().begin();
     auto& subgraph = getSubgraph(group);
@@ -505,7 +505,7 @@ struct GraphFuser {
       AT_ASSERT(subgraph_input->uses().size() == 1);
       return node;
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   void fuseChunkByReusingExistingFusedChunk(
