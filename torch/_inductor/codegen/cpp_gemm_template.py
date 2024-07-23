@@ -194,7 +194,7 @@ extern "C"
                             }
                         }
                     }
-                    {%- set tile_acc_m_slice = kernel.slice_nd(acc, [("m_offset", "m_offset + m_end - m_start"), ()]) %}
+                    {%- set tile_acc_m_slice = kernel.slice_nd(tile_acc, [("m_offset", "m_offset + m_end - m_start"), ()]) %}
                     {{ kernel.store_output(
                         tile_Y, tile_acc_m_slice, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                     )|indent(20, false)

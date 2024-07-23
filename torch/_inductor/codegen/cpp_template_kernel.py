@@ -272,7 +272,7 @@ class CppTemplateKernel(CppKernel):
            c) If `src` is local, we need to add a local buffer for it and localize the `orig_src` buffer
               in `epilogue_nodes` with `src`.
         """
-        assert dst.get_size() == src.get_size()
+        assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
         if epilogue_nodes:
