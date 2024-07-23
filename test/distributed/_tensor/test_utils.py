@@ -7,6 +7,7 @@ from torch.distributed._tensor import distribute_tensor, DTensor
 from torch.distributed._tensor._utils import (
     compute_local_shape,
     compute_local_shape_and_global_offset,
+    compute_padded_and_unpadded_local_shape,
 )
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import (
@@ -125,6 +126,61 @@ class UtilTest(DTensorTestBase):
                     dtensor.to_local(),
                     global_tensor[dim0_start:dim0_end, dim1_start:dim1_end],
                 )
+
+    @with_comms
+    def test_compute_padded_and_unpadded_local_shape(self):
+        """
+        Tests 3 scenarios under 2D with (Shard(0), Shard(0)) placements:
+            1) even sharding case, 2) uneven sharding dim_size < number of shards,
+            3) uneven sharding dim_size > number of shards.
+
+        TODO: make this test more generic once distributed_tensor switches to static padding.
+        Then we can test `compute_padded_and_unpadded_local_shape` with distribute_tensor result.
+        """
+        device_mesh = init_device_mesh(self.device_type, (2, 4))
+
+        global_tensor = torch.randn(8, 8)
+        (
+            local_padded_shape,
+            local_unpadded_shape,
+        ) = compute_padded_and_unpadded_local_shape(
+            global_tensor.shape, device_mesh, (Shard(0), Shard(0))
+        )
+        # For even sharding case, the padded and unpadded local shape should be the same on all ranks.
+        self.assertEqual(local_padded_shape, local_unpadded_shape)
+
+        global_tensor = torch.randn(6, 8)
+        tensor_list = torch.chunk(global_tensor, 8, dim=0)
+        (
+            local_padded_shape,
+            local_unpadded_shape,
+        ) = compute_padded_and_unpadded_local_shape(
+            global_tensor.shape, device_mesh, (Shard(0), Shard(0))
+        )
+        if self.rank < 6:
+            self.assertEqual(local_padded_shape, local_unpadded_shape)
+            self.assertEqual(local_padded_shape, list(tensor_list[self.rank].shape))
+        else:
+            self.assertEqual(local_padded_shape, list(tensor_list[0].shape))
+            self.assertEqual(local_unpadded_shape, [0])
+
+        global_tensor = torch.randn(13, 8)
+        tensor_list = torch.chunk(global_tensor, 8, dim=0)
+        (
+            local_padded_shape,
+            local_unpadded_shape,
+        ) = compute_padded_and_unpadded_local_shape(
+            global_tensor.shape, device_mesh, (Shard(0), Shard(0))
+        )
+        if self.rank < 6:
+            self.assertEqual(local_padded_shape, local_unpadded_shape)
+            self.assertEqual(local_padded_shape, list(tensor_list[self.rank].shape))
+        elif self.rank == 6:
+            self.assertEqual(local_padded_shape, list(tensor_list[0].shape))
+            self.assertEqual(local_unpadded_shape, [1])
+        else:
+            self.assertEqual(local_padded_shape, list(tensor_list[0].shape))
+            self.assertEqual(local_unpadded_shape, [0])
 
 
 class Test2DStridedLocalShard(DTensorTestBase):

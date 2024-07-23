@@ -224,3 +224,67 @@ def compute_local_stride(
     return tuple(
         global_stride[i] // stride_divisors[i] for i in range(len(global_stride))
     )
+
+
+def compute_padded_and_unpadded_local_shape(
+    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
+) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    """
+    This util computes the padded and unpadded local shape of a DTensor. The padded shape is computed by considering
+    applying padding to the global tensor such that each padded shard would have the exact same shape across all ranks.
+    This means sharding happens after padding.
+
+    This differs from `compute_local_shape`. The local shape from `compute_local_shape` considers padding after sharding,
+    meaning padding is applied on each placements instead of globally. Therefore, the local shape on each shard
+    after padding could be different. The local shape returned from `compute_local_shape` is different from the
+    unpadded local shape.
+
+    Padded and unpadded local shape could be the same depending on whether padding is needed on the current shard.
+    """
+
+    # Calculate globally how many chunks a given tensor dim will have globally.
+    num_chunks_by_dim = [1 for _ in enumerate(global_shape)]
+    for mesh_idx, placement in enumerate(placements):
+        if placement.is_shard():
+            tensor_dim = placement.dim  # type: ignore[attr-defined]
+            mesh_dim_size = mesh.size(mesh_idx)
+            num_chunks_by_dim[tensor_dim] *= mesh_dim_size
+
+    full_shard_size, cur_unpadded_shard_size = [], []
+    for size_on_dim, num_chunks in zip(global_shape, num_chunks_by_dim):
+        if num_chunks == 1:
+            # This means no sharding is happening on the ith dimension of the global tensor.
+            # Therefore, the padded and unpadded size of the ith dimension is the same as global_shape[i].
+            full_shard_size.append(size_on_dim)
+            cur_unpadded_shard_size.append(size_on_dim)
+        else:
+            # Calculate the full chunk size and the number of full chunks on a given tensor dim
+            full_chunk_size = (size_on_dim + num_chunks - 1) // num_chunks
+            num_full_chunks = size_on_dim // full_chunk_size
+            tail_chunk_size = size_on_dim % full_chunk_size
+            full_shard_size.append(full_chunk_size)
+
+            # We can't use get_coordinate() here because get_coordinate() returns the ith shard on each
+            # mesh dimension. When we move to global padding, we need to know the index of the shard on the tensor
+            # dimension, because the ith tensor dimension could be sharded multiple times on different mesh dimension.
+            # TODO: we would need a `get_coordinate_on_tensor_dim()` API to calculate this.
+            # `get_rank()` would only work for 1D and 2D scenario.
+            cur_chunk = mesh.get_rank()
+
+            # If the index of cur chunk is smaller than num_full_chunks,
+            # this means cur_chunk would be a full chunk on the given tensor dimension.
+            if cur_chunk < num_full_chunks:
+                cur_unpadded_shard_size.append(full_chunk_size)
+            # If the index of cur_chunk is num_full_chunks and the tail_chunk_size is not 0,
+            # this means the cur_chunk is the non-empty tail chunk.
+            # There should be only 1 non-empty tail chunk.
+            # For example, shard [1, 1, 1, 1, 1] to 4 chunks, we would have [1, 1], [1, 1], [1].
+            # The third shard is a non-empty tail chunk and the last shard is an empty chunk.
+            elif cur_chunk == num_full_chunks and tail_chunk_size != 0:
+                cur_unpadded_shard_size.append(tail_chunk_size)
+            # Otherwise, the cur_chunk is an empty chunk on the tensor_dim. There could be more than 1 empty chunks.
+            # For example, chunk a tensor([1, 1]) into 4 chunks, the last two chunks would be empty.
+            else:
+                cur_unpadded_shard_size.append(0)
+
+    return tuple(full_shard_size), tuple(cur_unpadded_shard_size)
