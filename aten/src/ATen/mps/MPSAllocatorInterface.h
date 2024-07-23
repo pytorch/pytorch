@@ -59,4 +59,6 @@ C10_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
 
 IMPSAllocator* getIMPSAllocator(bool sharedAllocator = false);
 
+bool isMPSPinnedPtr(const void* data);
+
 } // namespace at::mps
