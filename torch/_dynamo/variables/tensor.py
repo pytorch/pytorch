@@ -333,6 +333,27 @@ class TensorVariable(VariableTracker):
             tx, [self], {}
         )
 
+    def call_hasattr(self, tx, name):
+        from . import GetAttrVariable
+        from .builtin import BuiltinVariable
+
+        try:
+            var = BuiltinVariable(getattr).call_function(
+                tx, [self, ConstantVariable(name)], {}
+            )
+            # in the event that TensorVariable returns NotImplemented
+            # BuiltinVariable.call_getattr returns GetAttrVariable
+            ret_val = not isinstance(var, GetAttrVariable)
+        except AttributeError:
+            ret_val = False
+
+        if self.source:
+            install_guard(
+                AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+            )
+
+        return ConstantVariable(ret_val)
+
     def var_getattr(self, tx, name):
         from . import UserDefinedClassVariable
 
