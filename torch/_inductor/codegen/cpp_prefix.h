@@ -253,19 +253,21 @@ inline IndexValueVec<T, L>& argmax_combine_vec(IndexValueVec<T, L>& a, at::vec::
 }
 
 template <typename T, int L>
-inline IndexValue<T>& argmin_combine_vec(IndexValue<T>& a, const IndexValueVec<T, L>& vec_b){
-  for (int i = 0; i < L; i++){
-    a = argmin_combine(a, vec_b[i]);
+inline IndexValue<T> argmin_vec_reduce_all(const IndexValueVec<T, L>& vec){
+  auto res = vec[0];
+  for (int i = 1; i < L; i++){
+    res = argmin_combine(res, vec[i]);
   }
-  return a;
+  return res;
 }
 
 template <typename T, int L>
-inline IndexValue<T>& argmax_combine_vec(IndexValue<T>& a, const IndexValueVec<T, L>& vec_b){
-  for (int i = 0; i < L; i++){
-    a = argmax_combine(a, vec_b[i]);
+inline IndexValue<T> argmax_vec_reduce_all(const IndexValueVec<T, L>& vec){
+  auto res = vec[0];
+  for (int i = 1; i < L; i++){
+    res = argmax_combine(res, vec[i]);
   }
-  return a;
+  return res;
 }
 
 template <typename T, int L>

@@ -2395,14 +2395,14 @@ class CppVecKernel(CppKernel):
             index = self.itervars[self.reduction_depth]
             for i in range(self.reduction_depth + 1, len(self.itervars)):
                 index = index * self.ranges[i] + self.itervars[i]
-            combile = self.reduction_combine_vec(
+            combine = self.reduction_combine_vec(
                 reduction_type,
                 acc_vec,
                 value,
                 index=index,
                 horizontal_reduction=horizontal_reduction,
             )
-            self.stores.writeline(f"{acc_vec} = {combile};")
+            self.stores.writeline(f"{acc_vec} = {combine};")
         self._gen_parallel_reduction_buffers(
             acc,
             acc_type,
@@ -2427,7 +2427,7 @@ class CppVecKernel(CppKernel):
                 ), "Welford reduction does not support VectorizedN (N>1)"
                 next_value = f"welford_vec_reduce_all({acc_vec})"
             elif argmax_or_argmin:
-                next_value = acc_vec
+                next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
             else:
                 reduce_all_body = (
                     "{ return "
@@ -2439,7 +2439,7 @@ class CppVecKernel(CppKernel):
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
 
             self.reduction_suffix.writeline(
-                f"{acc} = {self.reduction_combine_vec(reduction_type, acc, next_value)};"
+                f"{acc} = {reduction_combine(reduction_type, acc, next_value)};"
             )
             tmpvar = acc
         else:
@@ -2579,8 +2579,7 @@ class CppVecKernel(CppKernel):
         elif reduction_type in ("argmin", "argmax"):
             if index is not None:
                 assert horizontal_reduction is not None
-                horizontal_str = "true" if horizontal_reduction else "false"
-                return f"{reduction_type}_combine_vec({var}, {next_value}, {index}, {horizontal_str})"
+                return f"{reduction_type}_combine_vec({var}, {next_value}, {index}, {str(horizontal_reduction).lower()})"
             else:
                 return f"{reduction_type}_combine_vec({var}, {next_value})"
         else:
