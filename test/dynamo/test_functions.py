@@ -1577,7 +1577,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a + b
 
     # https://github.com/pytorch/pytorch/issues/103602
-    @expectedFailureDynamic
     @make_test
     def test_fstrings2(x):
         tmp = f"{x.shape[0]} bar"
