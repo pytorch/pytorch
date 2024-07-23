@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """Functions to verify exported ONNX model is functionally equivalent to original PyTorch model.
 

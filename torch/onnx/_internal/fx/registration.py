@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 """Module for handling ATen to ONNX functions registration."""
 
 from __future__ import annotations

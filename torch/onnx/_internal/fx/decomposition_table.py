@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """Dispatcher for AtenLib functions from onnx-script."""
 
