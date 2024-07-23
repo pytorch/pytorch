@@ -276,8 +276,8 @@ else
   ( ! get_exit_code python setup.py clean] )
   ( ! get_exit_code python setup.py clean bad_argument )
 
-  if [[ -n "$TRITON_VERSION" ]]; then
-    checkout_install_triton_at_commit "$TRITON_VERSION"
+  if [[ -n "$CUSTOM_TRITON_VERSION_COMMIT" ]]; then
+    sh scripts/install_triton_wheel.sh "${CUSTOM_TRITON_VERSION_COMMIT}"
   fi
 
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then

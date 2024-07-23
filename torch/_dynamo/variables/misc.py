@@ -758,7 +758,11 @@ class GetAttrVariable(VariableTracker):
             and args[0].is_python_constant()
             and isinstance(
                 self.obj,
-                (variables.UserDefinedObjectVariable, variables.NNModuleVariable),
+                (
+                    variables.UserDefinedObjectVariable,
+                    variables.NNModuleVariable,
+                    variables.UserDefinedClassVariable,
+                ),
             )
         ):
             obj = self.obj
@@ -782,7 +786,11 @@ class GetAttrVariable(VariableTracker):
             and not kwargs
             and isinstance(
                 self.obj,
-                (variables.UserDefinedObjectVariable, variables.NNModuleVariable),
+                (
+                    variables.UserDefinedObjectVariable,
+                    variables.NNModuleVariable,
+                    variables.UserDefinedClassVariable,
+                ),
             )
         ):
             obj = self.obj

@@ -208,28 +208,6 @@ function clone_pytorch_xla() {
   fi
 }
 
-# install trition-lang/triton at a specific commit taken as argument
-function checkout_install_triton_at_commit() {
-
-  # assert that the commit is passed as an argument
-  if [ $# -ne 1 ]; then
-    echo "Usage: checkout_install_triton_at_commit <commit>"
-    exit 1
-  fi
-  local commit
-  commit=$1
-  pushd ..
-  git clone --recurse-submodules https://github.com/triton-lang/triton.git
-  pushd triton
-
-  git checkout "${commit}"
-  # taken from triton README
-  pip install ninja cmake wheel; # build-time dependencies
-  pip install -e python
-  popd
-  popd
-}
-
 function checkout_install_torchbench() {
   local commit
   commit=$(get_pinned_commit torchbench)
