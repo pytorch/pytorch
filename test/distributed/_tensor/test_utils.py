@@ -4,10 +4,15 @@ import itertools
 
 import torch
 from torch.distributed._tensor import distribute_tensor, DTensor
+from torch.distributed._tensor._collective_utils import (
+    get_padded_tensor,
+    get_unpadded_tensor,
+)
 from torch.distributed._tensor._utils import (
     compute_local_shape,
     compute_local_shape_and_global_offset,
     compute_padded_and_unpadded_local_shape,
+    compute_padding_size,
 )
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import (
@@ -181,6 +186,17 @@ class UtilTest(DTensorTestBase):
         else:
             self.assertEqual(local_padded_shape, list(tensor_list[0].shape))
             self.assertEqual(local_unpadded_shape, [0])
+
+    def test_padding_and_unpadding(self):
+        tensor = torch.randn(7, 13)
+        unpadded_shape = tensor.shape
+        padded_shape = [8, 16]
+
+        padding_size = compute_padding_size(padded_shape, unpadded_shape)
+        padded_tensor = get_padded_tensor(tensor, padding_size)
+        self.assertEqual(padded_shape, padded_tensor.shape)
+        unpadded_tensor = get_unpadded_tensor(padded_tensor, unpadded_shape)
+        self.assertEqual(tensor, unpadded_tensor)
 
 
 class Test2DStridedLocalShard(DTensorTestBase):
