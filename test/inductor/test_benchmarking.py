@@ -237,6 +237,26 @@ class TestBenchmarking(TestCase):
     
     @requires_gpu()
     @patches
+    def test_L2_cache_size(self):
+        benchmarker = Benchmarker()
+        self.assertEqual(benchmarker.L2_cache_size > 0)
+    
+    @requires_gpu()
+    @patches
+    def test_gpu_queue_limit(self):
+        benchmarker = Benchmarker()
+        gpu_queue_limit = benchmarker.gpu_queue_limit
+        torch.cuda.synchronize()
+        torch.cuda._sleep(10000000)
+        for _ in range(gpu_queue_limit):
+            torch.cuda.Event(enable_timing=True).record()
+        start_time = time.perf_counter()
+        torch.cuda.Event(enable_timing=True).record()
+        elapsed_time_ms = (time.perf_counter() - start_time) * 1000
+        self.assertEqual(elapsed_time_ms > 1)
+    
+    @requires_gpu()
+    @patches
     def test_benchmark_validity(self):
         benchmarker = Benchmarker()
 
@@ -260,6 +280,7 @@ class TestBenchmarking(TestCase):
         timing_ms = benchmarker.benchmark_cpu(_callable)
         self.sanity_check_cpu_benchmark(_callable, timing_ms)
     
+    @requires_gpu()
     @patches
     def test_benchmark_gpu_validity(self):
         benchmarker = Benchmarker()
@@ -277,6 +298,7 @@ class TestBenchmarking(TestCase):
         for _callable, timing_ms in zip(callables, timings_ms):
             self.sanity_check_cpu_benchmark(_callable, timing_ms)
     
+    @requires_gpu()
     @patches
     def test_benchmark_many_gpu_validity(self):
         benchmarker = Benchmarker()
