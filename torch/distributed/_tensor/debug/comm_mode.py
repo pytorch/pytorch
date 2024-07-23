@@ -2,6 +2,7 @@
 import copy
 import json
 import re
+import weakref
 
 from collections import defaultdict
 from typing import Any, Dict
@@ -12,6 +13,8 @@ import torch.nn
 
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed._tensor.api import DTensor
+from torch.distributed._tools.mod_tracker import ModTracker
+
 from torch.nn.modules.module import (
     register_module_forward_hook,
     register_module_forward_pre_hook,
@@ -19,7 +22,6 @@ from torch.nn.modules.module import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
-from torch.utils.module_tracker import ModuleTracker
 
 funcol_native = torch.ops._c10d_functional
 funcol_py = torch.ops.c10d_functional
@@ -69,7 +71,7 @@ trivial_ops = {
 }
 
 
-class CommModeModuleTracker(ModuleTracker):
+class CommModeModuleTracker(ModTracker):
     """
     Inherits ModuleTracker and expands on its functionality to track the
     parameters and sharding information of a model at a module-level
@@ -105,14 +107,17 @@ class CommModeModuleTracker(ModuleTracker):
         stores it in a dictionary.
         """
         self.name = super()._get_mod_name(mod)
+        w_mod = weakref.ref(mod)
 
         # adds current sub-module to module tracker parent class
-        super()._get_append_fn(self.name, False)()
+        super()._get_append_fn(w_mod, self.name, False)()
 
         args, _ = tree_flatten(input)
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
-        if tensors:
-            register_multi_grad_hook(tensors, super()._get_pop_fn(self.name, True))
+        if not self.is_bw and tensors:
+            register_multi_grad_hook(
+                tensors, super()._get_pop_fn(w_mod, self.name, True)
+            )
 
         # contains information about module ordering and depth in the module tree
         if self.name not in self.module_helper_dict:
@@ -161,6 +166,7 @@ class CommModeModuleTracker(ModuleTracker):
         This function is called when the forward pass of a module is called.
         It updates the module tracker and removes the module from parent data
         """
+
         super()._fw_post_hook(mod, input, output)
 
     def _bw_hook(self, mod, output):
