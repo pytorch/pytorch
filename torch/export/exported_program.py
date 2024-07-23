@@ -941,7 +941,7 @@ class ExportedProgram:
 
     def __str__(self) -> str:
         graph_module = self.graph_module.print_readable(
-            print_output=False, colored=True
+            print_output=False, colored=False
         ).replace("\n", "\n    ")
         string = (
             "ExportedProgram:\n"
