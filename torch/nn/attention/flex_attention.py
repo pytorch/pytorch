@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # flake8: noqa C101
 """This module implements the user facing API for flex_attention in PyTorch."""
