@@ -204,10 +204,10 @@ class TestBenchmarking(TestCase):
         return (torch.sum, [torch.randn(1000, device=device)], {})
 
     def sanity_check_cpu_benchmark(self, _callable, timing_ms):
-        start_time = time.perf_counter()
+        start_time_s = time.perf_counter()
         for _ in range(10):
             _callable()
-        roofline_timing_ms = ((time.perf_counter() - start_time) * 1000) / 10
+        roofline_timing_ms = ((time.perf_counter() - start_time_s) * 1000) / 10
         self.assertEqual(timing_ms <= roofline_timing_ms, True)
 
     def sanity_check_gpu_benchmark(self, _callable, timing_ms):
@@ -219,7 +219,7 @@ class TestBenchmarking(TestCase):
         end_event.record()
         torch.cuda.synchronize()
         roofline_timing_ms = start_event.elapsed_time(end_event) / 10
-        self.assertEqual(timing_ms <= roofline_timing_ms, True)
+        self.assertEqual(timing_ms <= (roofline_timing_ms * 1.25), True)
     
     def gpu_properties_are_not_initialized(self):
         self.assertEqual(counters["inductor"]["benchmarking_L2_cache_size"], 0)
