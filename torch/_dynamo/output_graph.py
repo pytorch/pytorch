@@ -803,6 +803,10 @@ class OutputGraph:
                 # Track the object so to avoid duplicate registration in case of
                 # different sources pointing to the same tensor object.
                 vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
+
+                assert "tensor_dict" not in vt.proxy.node.meta
+                vt.proxy.node.meta["tensor_dict"] = target.__dict__.copy()
+
                 return vt
 
         elif isinstance(target, torch.nn.Module):
@@ -1327,7 +1331,7 @@ class OutputGraph:
 
         if isinstance(compiled_fn, _LazyGraphModule) or (
             isinstance(getattr(compiled_fn, "__self__", None), _LazyGraphModule)
-            and compiled_fn.__name__ == "_lazy_forward"
+            and compiled_fn.__name__ == "_lazy_forward"  # type: ignore[attr-defined]
         ):
             # Since dynamo will run the forward method for the GraphModule shortly
             # anyways, it does not hurt to do the real recompilation here if
@@ -1337,7 +1341,7 @@ class OutputGraph:
             lazy_gm = (
                 compiled_fn
                 if isinstance(compiled_fn, _LazyGraphModule)
-                else compiled_fn.__self__
+                else compiled_fn.__self__  # type: ignore[attr-defined]
             )
 
             _LazyGraphModule.force_recompile(lazy_gm)
