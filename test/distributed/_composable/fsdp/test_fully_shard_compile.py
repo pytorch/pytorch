@@ -13,7 +13,7 @@ import torch.distributed._composable.fsdp._fsdp_param
 from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._inductor import comms
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import is_fallback_op, run_and_get_code
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
@@ -31,6 +31,10 @@ from torch.utils._triton import has_triton
 
 def _is_op_in_graph(graph, op):
     return any(node.target is op for node in graph.nodes)
+
+
+def _is_fallback_op_in_snodes(snodes, op):
+    return any(is_fallback_op(snode.node, op) for snode in snodes)
 
 
 class TestFullyShardCompileCompute(FSDPTest):
@@ -161,6 +165,69 @@ class TestFullyShardCompile(FSDPTest):
                 torch.ops._c10d_functional.all_gather_into_tensor_out.default,
             )
         )
+
+    def _is_fwd_graph(self, snodes):
+        ag_copy_in_snode = None
+        for snode in snodes:
+            if is_fallback_op(snode.node, torch.ops.fsdp.all_gather_copy_in.default):
+                ag_copy_in_snode = snode
+                break
+        self.assertTrue(ag_copy_in_snode is not None)
+        if any(
+            dep.name.startswith("primals_")
+            for dep in ag_copy_in_snode.read_writes.reads
+        ):
+            return True
+        else:
+            return False
+
+    def _check_fsdp_ops_in_snodes(self, snodes, is_fwd_graph, expect=True):
+        assert_method = self.assertTrue if expect else self.assertFalse
+        common_ops = {
+            torch.ops.fsdp.all_gather_copy_in.default,
+            torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+            torch.ops.fsdp.split_with_sizes_copy.default,
+        }
+        bwd_only_ops = {
+            torch.ops.fsdp.chunk_cat.default,
+            torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        }
+        if not expect:
+            for snode in snodes:
+                if (
+                    isinstance(snode.node, torch._inductor.ir.FallbackKernel)
+                    and snode.node.op_overload
+                    is torch.ops.fsdp.split_with_sizes_copy.default
+                ):
+                    print(
+                        f"snode: {snode}, snode.node: {snode.node}, snode.debug_str(): {snode.debug_str()}"
+                    )
+        for op in common_ops:
+            assert_method(
+                _is_fallback_op_in_snodes(
+                    snodes,
+                    op,
+                ),
+                msg=f"{op}",
+            )
+        if not is_fwd_graph:
+            for op in bwd_only_ops:
+                assert_method(
+                    _is_fallback_op_in_snodes(
+                        snodes,
+                        op,
+                    ),
+                    msg=f"{op}",
+                )
+
+    def _decide_global_ordering_of_comms_with_checks(
+        self, snodes, name_to_buf, name_to_fused_node, orig_fn
+    ):
+        is_fwd_graph = self._is_fwd_graph(snodes)
+        self._check_fsdp_ops_in_snodes(snodes, is_fwd_graph, expect=True)
+        new_snodes = orig_fn(snodes, name_to_buf, name_to_fused_node)
+        self._check_fsdp_ops_in_snodes(new_snodes, is_fwd_graph, expect=False)
+        return new_snodes
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._functorch.config.patch(recompute_views=True)
@@ -366,6 +433,13 @@ class TestFullyShardCompile(FSDPTest):
                 self._reinplace_all_gather_with_checks,
                 orig_fn=comms.reinplace_fsdp_all_gather,
             ),
+        ), mock.patch.object(
+            comms,
+            "decide_global_ordering_of_comms",
+            functools.partial(
+                self._decide_global_ordering_of_comms_with_checks,
+                orig_fn=comms.decide_global_ordering_of_comms,
+            ),
         ):
             _, triton_codes = run_and_get_code(
                 lambda: self._test_traceable_fsdp(
@@ -443,6 +517,13 @@ class TestFullyShardCompile(FSDPTest):
             functools.partial(
                 self._reinplace_all_gather_with_checks,
                 orig_fn=comms.reinplace_fsdp_all_gather,
+            ),
+        ), mock.patch.object(
+            comms,
+            "decide_global_ordering_of_comms",
+            functools.partial(
+                self._decide_global_ordering_of_comms_with_checks,
+                orig_fn=comms.decide_global_ordering_of_comms,
             ),
         ):
             _, triton_codes = run_and_get_code(
