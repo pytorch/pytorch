@@ -172,6 +172,10 @@ def import_transformers_or_skip():
     return decorator
 
 
+def at_least_x_gpu(x):
+    return torch.cuda.is_available() and torch.cuda.device_count() >= x
+
+
 def skip_if_lt_x_gpu(x):
     def decorator(func):
         @wraps(func)
@@ -1219,14 +1223,24 @@ class SaveForwardInputsModel(nn.Module):
         return self.c2(self.c1(x))
 
 @contextmanager
-def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True):
+def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True, fake_pg=False):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
-    torch.cuda.set_device(rank)
+    if not fake_pg:
+        torch.cuda.set_device(rank)
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '6789'
     if init_pg:
-        c10d.init_process_group("nccl", rank=rank, world_size=world_size)
+        if fake_pg:
+            store = torch.testing._internal.distributed.fake_pg.FakeStore()
+            c10d.init_process_group(
+                backend="fake",
+                world_size=world_size,
+                rank=rank,
+                store=store,
+            )
+        else:
+            c10d.init_process_group("nccl", rank=rank, world_size=world_size)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
     try:

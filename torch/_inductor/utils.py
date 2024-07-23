@@ -1547,7 +1547,7 @@ def is_fallback_op(node, op):
     return isinstance(node, ir.FallbackKernel) and node.op_overload in op
 
 
-def buf_name_to_fused_op(buf_name, name_to_buf, name_to_fused_node):
+def buf_name_to_fused_snode(buf_name, name_to_buf, name_to_fused_node):
     return name_to_fused_node[name_to_buf[buf_name].defining_op.get_name()]
 
 
@@ -1558,7 +1558,7 @@ def find_recursive_deps_of_node(
         return
     collected_node_set.add(snode)
     for dep in snode.unmet_dependencies:
-        defining_op_for_dep = buf_name_to_fused_op(
+        defining_op_for_dep = buf_name_to_fused_snode(
             dep.name, name_to_buf, name_to_fused_node
         )
         if defining_op_for_dep in collected_node_set:

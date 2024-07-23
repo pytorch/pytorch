@@ -19,7 +19,7 @@ from torch.distributed._composable.fsdp._fsdp_common import TrainingState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import init_device_mesh
 from torch.testing import FileCheck
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu, _dynamo_dist_per_rank_init, at_least_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -276,18 +276,21 @@ class TestFullyShardCompile(FSDPTest):
             res = run_iters(model, optim)
             return res
 
-        losses_compiled = test_compiled()
-        losses_eager = test_eager()
-        for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
-            self.assertTrue(
-                torch.allclose(
-                    torch.tensor(loss_compiled),
-                    torch.tensor(loss_eager),
-                    rtol=1e-5,
-                    atol=1e-8,
-                ),
-                f"{loss_compiled} vs {loss_eager}",
-            )
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
+        ):
+            losses_compiled = test_compiled()
+            losses_eager = test_eager()
+            for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
+                self.assertTrue(
+                    torch.allclose(
+                        torch.tensor(loss_compiled),
+                        torch.tensor(loss_eager),
+                        rtol=1e-5,
+                        atol=1e-8,
+                    ),
+                    f"{loss_compiled} vs {loss_eager}",
+                )
 
     def _create_simple_mlp_factory_fns(self):
         hidden_dim = 16
@@ -314,14 +317,12 @@ class TestFullyShardCompile(FSDPTest):
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
-    @skip_if_lt_x_gpu(2)
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @skipIfRocm
-    @skip_if_lt_x_gpu(2)
     def test_simple_mlp_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(),
@@ -331,7 +332,6 @@ class TestFullyShardCompile(FSDPTest):
 
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
     def test_simple_mlp_fullgraph_backend_inductor(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
@@ -397,14 +397,12 @@ class TestFullyShardCompile(FSDPTest):
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
-    @skip_if_lt_x_gpu(2)
     def test_nested_fully_shard_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_nested_fully_shard_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @skipIfRocm
-    @skip_if_lt_x_gpu(2)
     def test_nested_fully_shard_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
             *self._create_nested_fully_shard_factory_fns(),
@@ -414,7 +412,6 @@ class TestFullyShardCompile(FSDPTest):
 
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
     def test_nested_fully_shard_fullgraph_backend_inductor(self):
         with mock.patch.object(
             comms,
@@ -478,14 +475,12 @@ class TestFullyShardCompile(FSDPTest):
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
-    @skip_if_lt_x_gpu(2)
     def test_transformer_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_transformer_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @skipIfRocm
-    @skip_if_lt_x_gpu(2)
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_fullgraph_backend_aot_eager_decomp_partition(self):
@@ -497,7 +492,6 @@ class TestFullyShardCompile(FSDPTest):
 
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_fullgraph_backend_inductor(self):
