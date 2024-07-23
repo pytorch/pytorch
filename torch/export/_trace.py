@@ -34,7 +34,11 @@ from torch._export.passes.lift_constants_pass import (
     lift_constants_pass,
     rewrite_script_object_meta,
 )
-from torch._export.utils import placeholder_naming_pass, placeholder_prefixes
+from torch._export.utils import (
+    placeholder_naming_pass,
+    placeholder_prefixes,
+    runtime_asserts_naming_pass,
+)
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch._aot_autograd.traced_function_transforms import (
@@ -1761,6 +1765,9 @@ def _export_for_training(
     fake_mode = export_artifact.fake_mode
     module_call_specs = export_artifact.module_call_specs
 
+    # Prettify runtime asserts with sources
+    runtime_asserts_naming_pass(gm, fake_mode.shape_env, forward_arg_names, strict)
+
     # Add forward args metadata.
     gm.meta["forward_arg_names"] = forward_arg_names
 
@@ -1930,6 +1937,9 @@ def _export(
     out_spec = export_artifact.out_spec
     fake_mode = export_artifact.fake_mode
     module_call_specs = export_artifact.module_call_specs
+
+    # Prettify runtime asserts with sources
+    runtime_asserts_naming_pass(gm, fake_mode.shape_env, forward_arg_names, strict)
 
     # Add forward args metadata.
     gm.meta["forward_arg_names"] = forward_arg_names

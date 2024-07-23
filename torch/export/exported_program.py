@@ -489,30 +489,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # propagate names to higher order op subgraphs
     _name_hoo_subgraph_placeholders(gm)
 
-    # Run this pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
-    # Overwrite output specs afterwards.
-    from torch._export.passes._node_metadata_hook import (
-        _node_metadata_hook,
-        _set_node_metadata_hook,
-    )
     from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
-
-    if not torch._dynamo.config.do_not_emit_runtime_asserts:
-        stack_trace = (
-            'File "torch/fx/passes/runtime_assert.py", line 24, '
-            "in insert_deferred_runtime_asserts"
-        )
-        shape_env = _get_shape_env(gm)
-        if shape_env is not None:
-            with _set_node_metadata_hook(
-                gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-            ):
-                insert_deferred_runtime_asserts(
-                    gm,
-                    shape_env,
-                    f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
-                    export=True,
-                )
 
     # update output specs
     gm.recompile()

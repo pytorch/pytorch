@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import ast
+import copy
 import dataclasses
 import inspect
 import math
@@ -617,3 +618,59 @@ def placeholder_naming_pass(
             ):
                 constants[new_name] = constant
                 del constants[name]
+
+
+def runtime_asserts_naming_pass(gm, shape_env, forward_arg_names, strict):
+    import sympy
+
+    if shape_env.dim_constraints is None or forward_arg_names is None:  # no dynamic shapes/names
+        return
+
+    symbol_to_source = shape_env.dim_constraints._dcp.symbol_to_source
+
+    # get actual names for symbols
+    symbol_to_src_name = {}
+    for symbol, sources in symbol_to_source.items():
+        name = sources[0].name()
+        if not isinstance(sources[0], torch._dynamo.source.ConstantSource):
+            if strict:
+                name = re.sub(
+                    r"L\['([A-Za-z0-9_]+)'\]", r"\1", name  # replace L['foo']... with foo...
+                )
+            else:
+                index = re.match(r"L\['args'\]\[0\]\[(\d+)\].*", name).group(1)  # extract index from L['args'][x]...
+                name = re.sub(
+                    r"L\['args'\]\[0\]\[(\d+)\]", f"{forward_arg_names[int(index)]}", name  # replace with arg name
+                )
+            name = re.sub(
+                r"size\(\)\[(\d+)\]", r"size(\1)", name  # replace size()[..] with size(..)
+            )
+        symbol_to_src_name[symbol.name] = name
+
+    def _replace_sympy_expr_symbols(expr):
+        if expr.args:
+            return expr.func(*[_replace_sympy_expr_symbols(arg) for arg in expr.args])
+        if hasattr(expr, "name") and expr.name in symbol_to_src_name:
+            return sympy.Symbol(symbol_to_src_name[expr.name])
+        return expr
+
+    for node in list(gm.graph.nodes):
+        if node.target == torch.ops.aten._assert_scalar.default:
+            # duplicate sympy expression and replace with a new symbol,
+            # so we don't mess with actual symbols/assert expressions
+            expr = copy.deepcopy(node.args[0].meta["val"].node.expr)
+            expr = _replace_sympy_expr_symbols(expr)
+            # we can't simply re-assign error message or node.args,
+            # so create new node and replace
+            with gm.graph.inserting_before(node):
+                new_node = gm.graph.call_function(
+                    torch.ops.aten._assert_scalar.default,
+                    (
+                        node.args[0],
+                        f"Runtime assertion failed for expression {expr} on node '{node.args[0]}'",
+                    ),
+                )
+            node.replace_all_uses_with(new_node)
+            new_node.name = node.name
+            new_node.meta = node.meta
+            gm.graph.erase_node(node)

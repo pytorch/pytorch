@@ -1907,7 +1907,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         em.module()(torch.randn(4, 3))
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(Mod\(s0\*s1, s0 \- 1\), 0\)",
+            r"Runtime assertion failed for expression Eq\(Mod\(x.size\(0\)\*x.size\(1\), x.size\(0\) \- 1\), 0\)",
         ):
             em.module()(torch.randn(4, 5))
 
@@ -5726,11 +5726,15 @@ def forward(self, x, y):
     sin = torch.ops.aten.sin.default(y)
     sum_1 = torch.ops.aten.sum.dim_IntList(sin, []);  sin = None
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
-    ge_1 = _local_scalar_dense >= 3
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u3 >= 3 on node 'ge_1'");  ge_1 = None
-    le_1 = _local_scalar_dense <= 5;  _local_scalar_dense = None
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u3 <= 5 on node 'le_1'");  le_1 = None
+    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
+    ge = _local_scalar_dense >= 3
+    _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 3 on node 'ge'");  ge = None
+    le = _local_scalar_dense <= 5
+    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u1 <= 5 on node 'le'");  le = None
+    gt = _local_scalar_dense > 2
+    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = None
+    lt = _local_scalar_dense < 6;  _local_scalar_dense = None
+    _assert_scalar_3 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = None
     full = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(full, []);  full = None
@@ -5791,7 +5795,7 @@ def forward(self, x, y):
         self.assertEqual(out2.shape, torch.ones(11, 4, 3).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(Mod\(s0\*s1, 4\*s0 \- 4\), 0\) on node 'eq.*'",
+            r"Runtime assertion failed for expression Eq\(Mod\(x.size\(0\)\*x.size\(1\), 4\*x.size\(0\) \- 4\), 0\) on node 'eq.*'",
         ):
             ep.module()(torch.randn(8, 8))  # fail
 
@@ -5823,7 +5827,7 @@ def forward(self, x, y):
         self.assertEqual(out2.shape, torch.ones(40).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\*s1, s2\*s3\) on node 'eq.*'",
+            r"Runtime assertion failed for expression Eq\(x.size\(0\)\*x.size\(1\), y.size\(0\)\*y.size\(1\)\) on node 'eq.*'",
         ):  # fail only at runtime
             ep.module()(torch.randn(5, 8), torch.randn(4, 5), torch.randn(30))  # fail
 
@@ -5850,7 +5854,7 @@ def forward(self, x, y):
         self.assertEqual(out1.shape, torch.ones(126).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\*s1\*s2, s3\) on node 'eq.*'",
+            r"Runtime assertion failed for expression Eq\(x.size\(0\)\*x.size\(1\)\*x.size\(2\), y.size\(0\)\) on node 'eq.*'",
         ):  # fail only at runtime
             ep.module()(torch.randn(4, 3, 2), torch.randn(10))  # fail
 
@@ -5933,12 +5937,12 @@ def forward(self, x, y):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Ne\(s0, 20\)",
+            r"Runtime assertion failed for expression Ne\(x.size\(0\), 20\)",
         ):
             ep.module()(torch.randn(20, 20, 16))
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Ne\(Mod\(s0, 20\), 0\)",
+            r"Runtime assertion failed for expression Ne\(Mod\(x.size\(0\), 20\), 0\)",
         ):
             ep.module()(torch.randn(400, 20, 16))
         ep.module()(torch.randn(42, 20, 16))
@@ -5969,17 +5973,17 @@ def forward(self, x, y):
         self.assertEqual(out1.shape, torch.ones(27).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Ne\(s0, s1\)",
+            r"Runtime assertion failed for expression Ne\(x.size\(0\), y.size\(0\)\)",
         ):  # fail only at runtime
             ep.module()(torch.randn(4), torch.randn(4))  # fail
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Ne\(s0, s1\**3\)",
+            r"Runtime assertion failed for expression Ne\(x.size\(0\), y.size\(0\)\**3\)",
         ):
             ep.module()(torch.randn(64), torch.randn(4))  # fail
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\**2, 3\*s1\)",
+            r"Runtime assertion failed for expression Eq\(x.size\(0\)\**2, 3\*y.size\(0\)\)",
         ):
             ep.module()(torch.randn(10), torch.randn(9))  # fail
 
@@ -6225,7 +6229,7 @@ def forward(self, x, y):
         ep.module()(torch.ones(8), torch.ones(5))
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression \(s0//2\) \<\= s1",
+            r"Runtime assertion failed for expression \(x.size\(0\)//2\) \<\= y.size\(0\)",
         ):
             ep.module()(torch.ones(10), torch.ones(4))
 
