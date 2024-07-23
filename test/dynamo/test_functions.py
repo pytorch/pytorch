@@ -1378,6 +1378,38 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             y = a - b
         return x, y
 
+    def test_set_keys_view(self):
+        from collections.abc import KeysView
+
+        class StringKeys(KeysView):
+            def __init__(self, keys):
+                self.keys = keys
+
+            def __getitem__(self, key):
+                return self.keys.__getitem__(key)
+
+            def __iter__(self):
+                yield from self.keys
+
+            def __repr__(self):
+                return f"{type(self).__name__}({self.keys})"
+
+            def __len__(self):
+                return len(self.keys)
+
+            def __contains__(self, item):
+                return self.keys.__contains__(item)
+
+        a = StringKeys([1, 2, 3, 3])
+
+        def fn(x):
+            set_a = set(a)
+            return len(set_a) * x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.rand(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     @make_test
     def test_tuple_iadd(a, b):
         output = (a, b)

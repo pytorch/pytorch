@@ -9,7 +9,7 @@ import math
 import operator
 import types
 from collections import defaultdict, OrderedDict
-from collections.abc import MutableMapping
+from collections.abc import KeysView, MutableMapping
 from typing import Dict, List
 
 import torch
@@ -1362,6 +1362,17 @@ class BuiltinVariable(VariableTracker):
         elif arg.has_unpack_var_sequence(tx):
             items = arg.unpack_var_sequence(tx)
             return SetVariable(items, mutable_local=MutableLocal())
+        elif isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
+            arg.value, KeysView
+        ):
+            iter_fn = arg.var_getattr(tx, "__iter__")
+            if isinstance(iter_fn, variables.UserMethodVariable):
+                out = tx.inline_user_function_return(iter_fn, args, kwargs)
+                if isinstance(out, SetVariable):
+                    return out
+                return BuiltinVariable(set).call_set(tx, out)
+            else:
+                unimplemented(f"set(): {args} {kwargs}")
         else:
             unimplemented(f"set(): {args} {kwargs}")
 
