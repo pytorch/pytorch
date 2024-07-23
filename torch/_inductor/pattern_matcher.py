@@ -33,8 +33,6 @@ implements a `_match` method which returns either a `Match` object for a
 successful match or a `FailedMatch` object for a failure to match.
 """
 
-# mypy: disallow-untyped-defs
-
 from __future__ import annotations
 
 import contextlib
