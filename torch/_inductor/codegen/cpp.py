@@ -2037,7 +2037,7 @@ class CppKernel(Kernel):
 
     @property
     def assert_function(self) -> str:
-        if config.abi_compatible:
+        if V.graph.aot_mode or config.abi_compatible:
             # TODO: Using AOTI_TORCH_CHECK is causing performance drop for some models
             # compared with JIT Inductor which uses TORCH_CHECK
             return "AOTI_TORCH_CHECK"
