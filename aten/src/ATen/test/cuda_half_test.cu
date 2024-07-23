@@ -54,7 +54,7 @@ __device__ void test(){
   assert(::abs(::asinh(Half(1.0)) - ::asinh(1.0f)) <= threshold);
   // See note below about VC++ and isinf
 #ifndef  _MSC_VER
-  assert(::isinf(::atanh(Half(1.0));
+  assert(::isinf(::atanh(Half(1.0))));
 #endif
   assert(::abs(::atanh(Half(.5)) - ::atanh(.5f)) <= threshold);
   assert(::abs(::asin(Half(1.0)) - ::asin(1.0f)) <= threshold);
