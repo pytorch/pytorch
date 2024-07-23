@@ -53,7 +53,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: manylinux-builder-cuda${{matrix.cuda_version}}
-            working-directory: /home/ec2-user/actions-runner/_work/pytorch/pytorch/
+            working-directory: pytorch
             docker-build-dir:  .ci/docker/manywheel
             always-rebuild: true
             push: true
@@ -88,7 +88,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: manylinux2_28-builder-cuda${{matrix.cuda_version}}
-            working-directory: /home/ec2-user/actions-runner/_work/pytorch/pytorch/
+            working-directory: pytorch
             docker-build-dir:  .ci/docker/manywheel
             always-rebuild: true
             push: true
@@ -118,7 +118,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: manylinuxaarch64-builder-cuda${{matrix.cuda_version}}
-            working-directory: /home/ec2-user/actions-runner/_work/pytorch/pytorch/
+            working-directory: pytorch
             docker-build-dir:  .ci/docker/manywheel
             always-rebuild: true
             push: true
@@ -150,7 +150,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: manylinux-builder-rocm${{matrix.rocm_version}}
-            working-directory: /home/ec2-user/actions-runner/_work/pytorch/pytorch/
+            working-directory: pytorch
             docker-build-dir:  .ci/docker/manywheel
             always-rebuild: true
             push: true
@@ -176,7 +176,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: manylinux-builder-cpu
-            working-directory: /home/ec2-user/actions-runner/_work/pytorch/pytorch/
+            working-directory: pytorch
             docker-build-dir:  .ci/docker/manywheel
             always-rebuild: true
             push: true
@@ -204,7 +204,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: manylinux2_28-builder-cpu
-            working-directory: /home/ec2-user/actions-runner/_work/pytorch/pytorch/
+            working-directory: pytorch
             docker-build-dir:  .ci/docker/manywheel
             always-rebuild: true
             push: true
@@ -232,7 +232,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: manylinuxaarch64-builder-cpu-aarch64
-            working-directory: /home/ec2-user/actions-runner/_work/pytorch/pytorch/
+            working-directory: pytorch
             docker-build-dir:  .ci/docker/manywheel
             always-rebuild: true
             push: true
@@ -260,7 +260,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: manylinux2_28_aarch64-builder-cpu-aarch64
-            working-directory: /home/ec2-user/actions-runner/_work/pytorch/pytorch/
+            working-directory: pytorch
             docker-build-dir:  .ci/docker/manywheel
             always-rebuild: true
             push: true
@@ -288,7 +288,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: manylinuxcxx11-abi-builder-cpu-cxx11-abi
-            working-directory: /home/ec2-user/actions-runner/_work/pytorch/pytorch/
+            working-directory: pytorch
             docker-build-dir:  .ci/docker/manywheel
             always-rebuild: true
             push: true
@@ -316,7 +316,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: manylinux2_28-builder-xpu
-            working-directory: /home/ec2-user/actions-runner/_work/pytorch/pytorch/
+            working-directory: pytorch
             docker-build-dir:  .ci/docker/manywheel
             always-rebuild: true
             push: true

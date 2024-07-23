@@ -5,6 +5,7 @@ BAD_SSL = "https://self-signed.badssl.com"
 
 import sys
 
+
 print("Testing SSL certificate checking for Python:", sys.version)
 
 if sys.version_info[:2] < (2, 7) or sys.version_info[:2] < (3, 4):
