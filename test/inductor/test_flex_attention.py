@@ -1331,6 +1331,30 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @common_utils.parametrize("mode", ["eager", "aot_eager"])
+    def test_document_masking_edge_case(self, mode):
+        document_masks = torch.full((2, 128), 0, dtype=torch.int32, device="cuda")
+        document_masks[:, 64:] = 1
+
+        def mask_mod(b, h, q, kv):
+            same_doc = document_masks[b, q] == document_masks[b, kv]
+            return same_doc
+
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 1, 128, 4),
+            device="cuda",
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        func = torch.compile(flex_attention, backend=mode, fullgraph=True)
+
+        block_mask = create_block_mask(mask_mod, 2, 1, 128, 128)
+        out = func(query, key, value, block_mask=block_mask)
+        out.sum().backward()
+
+    @supported_platform
     def test_comparison_vs_sdpa(self):
         def causal(score, b, h, q_idx, kv_idx):
             return torch.where(q_idx >= kv_idx, score, -float("inf"))
@@ -1597,9 +1621,9 @@ class GraphModule(torch.nn.Module):
             NotImplementedError, "NYI: L must be a multiple of 128"
         ):
             flex_attention(
-                torch.randn((2, 3, 4)),
-                torch.randn((2, 10, 5)),
-                torch.randn((2, 10, 5)),
+                torch.randn((1, 2, 3, 4)),
+                torch.randn((1, 2, 10, 5)),
+                torch.randn((1, 2, 10, 5)),
                 score_mod=_identity,
             )
 
@@ -1608,9 +1632,9 @@ class GraphModule(torch.nn.Module):
         ):
             compiled_flex = torch.compile(flex_attention)
             compiled_flex(
-                torch.randn((2, 3, 4)),
-                torch.randn((2, 10, 5)),
-                torch.randn((2, 10, 5)),
+                torch.randn((1, 2, 3, 4)),
+                torch.randn((1, 2, 10, 5)),
+                torch.randn((1, 2, 10, 5)),
                 score_mod=_identity,
             )
 

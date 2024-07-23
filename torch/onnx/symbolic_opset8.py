@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """
 Note [ONNX operators that are added/updated from opset 8 to opset 9]
@@ -165,7 +166,7 @@ def _try_cast_integer_to_float(g: jit_utils.GraphContext, *args):
     if arg0_type != _type_utils.JitScalarType.UNDEFINED:
         old_type = arg0_type
         if old_type not in floating_scalar_types:
-            old_type = old_type.scalar_name()
+            old_type = old_type.scalar_name()  # type: ignore[assignment]
             args = tuple(
                 g.op("Cast", arg, to_i=_C_onnx.TensorProtoDataType.FLOAT)
                 for arg in args
