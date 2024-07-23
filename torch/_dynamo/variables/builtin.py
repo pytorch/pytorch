@@ -9,6 +9,7 @@ import math
 import operator
 import types
 from collections import defaultdict, OrderedDict
+from collections.abc import MutableMapping
 from typing import Dict, List
 
 import torch
@@ -1298,6 +1299,18 @@ class BuiltinVariable(VariableTracker):
                     x.unpack_var_sequence(tx) for x in arg.unpack_var_sequence(tx)
                 )
                 return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
+            elif isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
+                arg.value, MutableMapping
+            ):
+                # This is applicable for user defined objects which seem like dict, but are not really dicts. For
+                # example, TensorDict derives from MutableMapping. For such cases, we can directly inline the .items
+                # method and create a new dict.
+                out = tx.inline_user_function_return(
+                    arg.var_getattr(tx, "items"), args, kwargs
+                )
+                if isinstance(out, ConstDictVariable):
+                    return out
+                return BuiltinVariable(user_cls).call_custom_dict(tx, user_cls, out)
         elif not args and kwargs:
             items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
             return variables.ConstDictVariable(
