@@ -120,8 +120,6 @@ if has_triton():
     @triton.autotune(
         configs=[
             triton.Config({"BLOCK_SIZE": 128}, num_stages=3, num_warps=8),
-            triton.Config({"BLOCK_SIZE": 128}, num_stages=4, num_warps=4),
-            triton.Config({"BLOCK_SIZE": 64}, num_stages=3, num_warps=8),
             triton.Config({"BLOCK_SIZE": 64}, num_stages=4, num_warps=4),
         ],
         key=[],

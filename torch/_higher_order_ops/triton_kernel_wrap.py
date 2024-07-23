@@ -809,7 +809,8 @@ class TritonHOPifier:
             # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
             # The call to get_first_attr is to maintain backward-compatibility.
             if (
-                (
+                not torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args
+                and (
                     (
                         "warmup" in defaults
                         and defaults["warmup"].default
@@ -835,7 +836,6 @@ class TritonHOPifier:
                         and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
                     )
                 )
-                and not torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args
             ):
                 self.raise_unsupported(
                     "Only configs and keys are supported for triton.autotune"
