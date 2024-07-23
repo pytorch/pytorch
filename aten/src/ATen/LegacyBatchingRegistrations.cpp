@@ -558,7 +558,7 @@ static void checkBasicAsStridedValidForSlice(
       "rewrite the `as_strided` call as a sequence of PyTorch view operations");
 }
 
-Tensor _reshape_alias_batching_rule(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
+Tensor _reshape_alias_batching_rule(const Tensor& self, IntArrayRef sizes, IntArrayRef strides [[maybe_unused]]) {
   return reshape_batching_rule(self, sizes);
 }
 

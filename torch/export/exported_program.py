@@ -206,14 +206,6 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
                     f"{op_overload} is a TorchScript op, we can't preserve it as is"
                 )
 
-            if not torch._C._dispatch_has_kernel_for_dispatch_key(
-                op_overload.name(), torch._C.DispatchKey.CompositeImplicitAutograd
-            ):
-                raise RuntimeError(
-                    f"{op_overload} is not CompositeImplicitAutograd op, so we will preserve "
-                    "it as long as there is no python decomposition"
-                )
-
             return True
 
         # If we didn't error, it means we can go ahead
@@ -221,6 +213,7 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
 
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
+
         for override_dispatch_key in _AUTOGRAD_ALIAS_BACKEND_KEYS_TO_OVERRIDE:
             if override_dispatch_key not in op_overload.py_kernels:
                 # TODO (tmanlaibaatar)https://github.com/pytorch/pytorch/issues/129430
@@ -242,10 +235,6 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
             )
 
         if op_overload in decomp_table:
-            warnings.warn(
-                f"Deleting decomposition registered for operator `{op_overload}`, "
-                "which was sepecified in the `preserve_ops` list."
-            )
             removed_decomps[op_overload] = decomp_table[op_overload]
             del decomp_table[op_overload]
 

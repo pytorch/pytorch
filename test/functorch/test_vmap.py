@@ -213,6 +213,29 @@ class TestVmapAPI(TestCase):
         output = vmap(lambda x: vmap(lambda y: x)(y))(x)
         self.assertEqual(output, x.view(3, 1).expand(3, 5))
 
+    def test_checkpoint(self):
+        A = torch.randn((3, 8, 8), dtype=torch.float64, requires_grad=True)
+
+        def get_grad(checkpoint):
+            A.grad = None
+
+            def get_loss(A):
+                ortho_A, _ = torch.func.vmap(torch.linalg.qr)(A)
+                return torch.sum(ortho_A)
+
+            if checkpoint:
+                loss = torch.utils.checkpoint.checkpoint(
+                    get_loss, A, use_reentrant=False
+                )
+            else:
+                loss = get_loss(A)
+            loss.backward()
+            return A.grad
+
+        expected = get_grad(checkpoint=False)
+        result = get_grad(checkpoint=True)
+        self.assertEqual(result, expected)
+
     def test_unsupported_op_err_msg(self):
         # Unsupported view op
         tensor = torch.randn(2, 3)
@@ -4306,6 +4329,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("histc"),
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
+                xfail("t_copy"),
                 xfail("istft"),
                 xfail("nonzero"),
                 xfail("nn.functional.fractional_max_pool2d"),

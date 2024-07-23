@@ -6,7 +6,6 @@ from typing import cast, Dict, List, Set, Tuple, Union
 
 import torch
 from .. import config, inductor_prims
-
 from ..pattern_matcher import (
     CallFunction,
     Ignored,
@@ -17,6 +16,7 @@ from ..pattern_matcher import (
     PatternExpr,
     PatternMatcherPass,
 )
+
 
 aten = torch.ops.aten
 patterns = PatternMatcherPass()
