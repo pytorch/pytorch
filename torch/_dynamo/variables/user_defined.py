@@ -897,10 +897,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 
-        # TODO(mlazos,anijain2305) - We should probably move the creation of UserMethodVariable to VariableBuilder.
-        if isinstance(subobj, property) and not is_wrapper_or_member_descriptor(
-            subobj.fget
-        ):
+        if isinstance(subobj, property):
             if self.source:
                 # Read the class attribute to reach the property
                 source = AttrSource(AttrSource(self.source, "__class__"), name)
