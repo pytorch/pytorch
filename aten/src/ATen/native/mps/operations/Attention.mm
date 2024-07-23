@@ -34,6 +34,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
             "_scaled_dot_product_attention: Nested tensors for query / key are not supported when is_causal=True");
   }
 
+  TORCH_CHECK(dropout_p == 0.0, "_scaled_dot_product_attention_math_for_mps: dropout_p != 0.0 is not supported");
+  TORCH_CHECK(query.is_contiguous() && key.is_contiguous() && value.is_contiguous(),
+              "_scaled_dot_product_attention_math_for_mps: query, key, and value must be contiguous");
+
   using namespace mps;
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -63,6 +67,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
 
       auto maskedMM = [mpsGraph matrixMultiplicationWithPrimaryTensor:qTensor secondaryTensor:kT name:nil];
 
+      // upcasting to float32 if needed to improve precision when multiplying by the scale factor
       if ([maskedMM dataType] != MPSDataTypeFloat32) {
         maskedMM = [mpsGraph castTensor:maskedMM toType:MPSDataTypeFloat32 name:nil];
       }
