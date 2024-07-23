@@ -329,7 +329,7 @@ class IndexPropagation:
         return bool(evaluated)
 
     def indirect_indexing(
-        self, index: Union[Any, IndexPropVar], size: Any, check: bool = True
+        self, index: Union[Any, IndexPropVar], size: Any, check: bool = True, wrap=True
     ) -> Any:
         if isinstance(index, IndexPropVar) and index.is_symbolic:
             # If we find something we can convert into a direct indexing we do so
@@ -364,6 +364,6 @@ class IndexPropagation:
             return expr
 
         indirect_var = self.fallback(
-            "indirect_indexing", (index, size, check), {}
+            "indirect_indexing", (index, size, check, wrap), {}
         ).value
         return indirect_var
