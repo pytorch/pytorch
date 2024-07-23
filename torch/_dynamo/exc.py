@@ -89,12 +89,13 @@ class BackendCompilerFailed(TorchDynamoException):
 
 
 class Unsupported(TorchDynamoException):
-    def __init__(self, msg):
+    def __init__(self, msg, *, case_name=None):
         super().__init__(msg)
         self.real_stack = torch._guards.TracingContext.extract_stack()
         self.msg = msg
         self.category: Optional[str] = None
         self.add_to_stats()
+        self.case_name: Optional[str] = case_name
 
     def remove_from_stats(self):
         assert self.category is not None
@@ -217,11 +218,13 @@ def unimplemented_with_warning(e: Exception, code, msg: str) -> NoReturn:
 _NOTHING = object()
 
 
-def unimplemented(msg: str, *, from_exc: Any = _NOTHING) -> NoReturn:
+def unimplemented(
+    msg: str, *, from_exc: Any = _NOTHING, case_name: Optional[str] = None
+) -> NoReturn:
     assert msg != os.environ.get("BREAK", False)
     if from_exc is not _NOTHING:
-        raise Unsupported(msg) from from_exc
-    raise Unsupported(msg)
+        raise Unsupported(msg, case_name=case_name) from from_exc
+    raise Unsupported(msg, case_name=case_name)
 
 
 def warning(msg: str) -> None:
