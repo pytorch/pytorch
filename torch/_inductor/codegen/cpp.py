@@ -217,6 +217,11 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
 
 @functools.lru_cache
 def stride_at(index: sympy.Expr, var: sympy.Symbol):
+    if not index.has(var):
+        # see test_torchinductor_dynamic_shapes.py::test_full_boolean_dynamic_shapes_cpu
+        # which has tmp0 = ops.index_expr(s0 >= 1024, torch.bool) and fails below calculation.
+        # in this case, there is no dependencies between index and var.
+        return sympy.Integer(0)
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)  # type: ignore[arg-type]
     return sympy.simplify(new_index - index)
@@ -3000,22 +3005,13 @@ class TilingSelect:
 
                 def _try_get_stride(
                     index,
+                    itervars,
                     tiling_factor,
                     tiling_indices,
                 ):
-                    assert len(tiling_indices) == 1, "Doesn't support Tile2D yet."
-                    free_symbols = sorted(index.free_symbols, key=lambda s: s.name)
-                    if len(free_symbols) <= 0 or tiling_indices[0] > (
-                        len(free_symbols) - 1
-                    ):
-                        return None
-                    itervar = free_symbols[tiling_indices[0]]
-                    try:
-                        return stride_at_vec_range(index, itervar, tiling_factor)
-                    except Exception:
-                        # see test_torchinductor_dynamic_shapes.py::test_full_boolean_dynamic_shapes_cpu
-                        # which has tmp0 = ops.index_expr(s0 >= 1024, torch.bool)
-                        return None
+                    itervar = itervars[tiling_indices[0]]
+                    stride = stride_at_vec_range(index, itervar, tiling_factor)
+                    return stride if stride.is_number else None
 
                 def _update_negative_op_count(
                     node_name, non_contig_indexing_op_counter
@@ -3025,8 +3021,37 @@ class TilingSelect:
                     else:
                         non_contig_indexing_op_counter[node_name] += 1
 
+                def _is_valid_indices(
+                    itervars,
+                    tiling_indices,
+                ):
+                    return (
+                        len(tiling_indices) == 1
+                        and len(itervars) > 0
+                        and (
+                            (
+                                tiling_indices[0] >= 0
+                                and tiling_indices[0] < len(itervars)
+                            )
+                            or (
+                                tiling_indices[0] < 0
+                                and tiling_indices[0] + len(itervars) < len(itervars)
+                            )
+                        )
+                    )
+
                 group, reduction_group = max(
                     var_sizes_list, key=lambda sizes: len(sizes[1])
+                )
+                call_ranges = tuple(group) + tuple(reduction_group)
+                itervars = [
+                    sympy_index_symbol_with_prefix(SymT.XBLOCK, n)
+                    for n in range(len(call_ranges))
+                ]
+                reduction_depth = len(group)
+                vars, reduction_vars = (
+                    itervars[:reduction_depth],
+                    itervars[reduction_depth:],
                 )
                 op_counter: Dict[str, int] = {}
                 # ops may not cause overhead with vectorization, like non-contiguous
@@ -3038,38 +3063,39 @@ class TilingSelect:
                     for sub_block in sub_blocks:
                         for _node in sub_block.graph.nodes:
                             if _node.target == "index_expr":
-                                index = sub_block.body.indexing_exprs[
-                                    _node.args[-2].args[0]
-                                ]
-                                if len(tiling_indices) == 1:
+                                # Get the index and replace prefix from z to x
+                                index = sub_block.body.indexing_from_args(
+                                    (vars, reduction_vars)
+                                )[_node.args[-2].args[0]]
+                                if _is_valid_indices(itervars, tiling_indices):
                                     stride = _try_get_stride(
-                                        index, tiling_factor, tiling_indices
+                                        index, itervars, tiling_factor, tiling_indices
                                     )
-                                    if stride is not None and not stride.is_number:
+                                    if not (stride == 0 or stride is not None):
                                         _update_negative_op_count(
                                             _node.target, non_contig_indexing_op_counter
                                         )
                             elif _node.target == "load":
-                                index = sub_block.body.indexing_exprs[
-                                    _node.args[-1].args[0]
-                                ]
-                                if len(tiling_indices) == 1:
+                                index = sub_block.body.indexing_from_args(
+                                    (vars, reduction_vars)
+                                )[_node.args[-1].args[0]]
+                                if _is_valid_indices(itervars, tiling_indices):
                                     stride = _try_get_stride(
-                                        index, tiling_factor, tiling_indices
+                                        index, itervars, tiling_factor, tiling_indices
                                     )
-                                    if stride is not None and stride not in [0, 1]:
+                                    if stride not in [0, 1]:
                                         _update_negative_op_count(
                                             _node.target, non_contig_indexing_op_counter
                                         )
                             elif _node.target == "store":
-                                index = sub_block.body.indexing_exprs[
-                                    _node.args[2].args[0]
-                                ]
-                                if len(tiling_indices) == 1:
+                                index = sub_block.body.indexing_from_args(
+                                    (vars, reduction_vars)
+                                )[_node.args[2].args[0]]
+                                if _is_valid_indices(itervars, tiling_indices):
                                     stride = _try_get_stride(
-                                        index, tiling_factor, tiling_indices
+                                        index, itervars, tiling_factor, tiling_indices
                                     )
-                                    if stride is not None and stride != 1:
+                                    if stride != 1:
                                         _update_negative_op_count(
                                             _node.target, non_contig_indexing_op_counter
                                         )
@@ -3088,7 +3114,7 @@ class TilingSelect:
                 non_contig_indexing_op_num = sum(
                     non_contig_indexing_op_counter.values()
                 )
-                threshold = 0.03
+                threshold = 0.08
                 if op_num > 0 and non_contig_indexing_op_num / op_num >= threshold:
                     # Too many non-contiguous load/store/index_expr which hurts the
                     # vectorization performance. Disable vectorization when exceeding
