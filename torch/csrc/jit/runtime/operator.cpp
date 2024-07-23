@@ -67,6 +67,19 @@ struct OperatorRegistry {
     to_register.push_back(std::make_shared<Operator>(std::move(op)));
   }
 
+  void fakeRegisterOperator(Operator&& op) {
+    std::lock_guard<std::mutex> guard(lock);
+#ifdef C10_MOBILE
+    TORCH_INTERNAL_ASSERT(
+        0 == registered_operator_names.count(op.schema().operator_name()),
+        "Tried to register operator \"",
+        op.schema(),
+        "\" to JIT but the operator name was already registered before. Please add or change the overload name.");
+    registered_operator_names.insert(op.schema().operator_name());
+#endif
+    to_register.push_back(std::make_shared<Operator>(std::move(op)));
+  }
+
   void deregisterOperator(const FunctionSchema& schema) {
     Symbol sym = Symbol::fromQualString(schema.name());
     auto sig = canonicalSchemaString(schema);

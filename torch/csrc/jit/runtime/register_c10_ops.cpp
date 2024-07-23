@@ -26,9 +26,6 @@ class RegistrationListener final : public c10::OpRegistrationListener {
       return;
     }
     if (op.schema().name() == "fake")
-    {
-      return
-    }
     torch::jit::registerOperator(createOperatorFromC10(op));
   }
 
