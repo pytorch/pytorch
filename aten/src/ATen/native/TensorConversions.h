@@ -17,6 +17,14 @@ bool to_will_alias(
     bool copy,
     std::optional<c10::MemoryFormat> optional_memory_format);
 
+bool to_will_cow(
+    const Tensor& self,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    bool copy,
+    std::optional<c10::MemoryFormat> optional_memory_format);
+
 Tensor to_meta(const Tensor& tensor);
 std::optional<Tensor> to_meta(const std::optional<Tensor>& tensor);
 std::vector<Tensor> to_meta(at::ITensorListRef t_list);

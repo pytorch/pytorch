@@ -3,6 +3,10 @@
 #include <ATen/MapAllocator.h>
 #include <c10/util/SmallBuffer.h>
 #include <c10/core/impl/COW.h>
+#ifdef USE_MPS
+#include <ATen/mps/MPSDevice.h>
+#include <c10/core/CPUAllocator.h>
+#endif // USE_MPS
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -96,13 +100,15 @@ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
   return base.storage().sym_nbytes() / base.itemsize() == other.storage().sym_nbytes() / other.itemsize();
 }
 
-static Tensor _lazy_clone_impl(Tensor const& self, bool future) {
+static Tensor _lazy_clone_impl(Tensor const& self,
+                   std::optional<at::Device> device, bool future) {
   c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
 
   // If data pointer is shared between processes, we cannot convert it to
   // a COW data pointer. So for future behavior, we just clone it, and for
   // simulated behavior, we view it and emit a warning.
   if (MapAllocator::fromDataPtr(self_storage->_data_ptr_no_checks())) {
+    std::cout << "DataPointer is shared between processes" << std::endl;
     if (future) {
       return self.clone();
     } else {
@@ -116,6 +122,50 @@ static Tensor _lazy_clone_impl(Tensor const& self, bool future) {
 
   c10::intrusive_ptr<c10::StorageImpl> storage =
     c10::impl::cow::lazy_clone_storage(*self_storage, future);
+
+#if USE_MPS
+  // if (device == std::nullopt) {
+  //   std::cout << "Device is NON" << std::endl;
+  // } else if (device.value().is_mps()) {
+  //   std::cout << "Device is MPS" << std::endl;
+  // } else if (device.value().is_cpu()) {
+  //   std::cout << "Device is CPU" << std::endl;
+  // }
+  if (c10::impl::cow::get_future_lazy_clone()) {  // TODO(Frank): This is assuming future.
+    if (device == std::nullopt) {
+      device = c10::Device("cpu");
+    }
+    // TODO(Frank): Set MPS if guard?
+    at::Allocator* allocator = nullptr;
+    if (device.value().is_cpu()) {
+      allocator = c10::GetDefaultCPUAllocator();
+    } else if (device.value().is_mps()) {
+      allocator = at::mps::GetMPSAllocator();
+    } else {
+      std::cout << "AutograComposite" << std::endl;
+      assert(false);
+    }
+    if (storage->allocator() == at::mps::GetMPSAllocator()) {
+      std::cout << "Changing from MPS Allocator to CPU Allocator" << std::endl;
+    } else {
+      std::cout << "Changing from CPU Allocator to MPS Allocator" << std::endl;
+    }
+
+    allocator = c10::GetAllocator(device.value().type());
+    if (allocator == nullptr) {
+      std::cout << "Allocator is nullptr" << std::endl;
+    } else if (allocator == at::mps::GetMPSAllocator()) {
+      std::cout << "Allocator is MPS allocator" << std::endl;
+    } else {
+      std::cout << "Allocator is CPU allocator" << std::endl;
+    }
+
+    storage->set_allocator(c10::GetAllocator(device.value().type()));
+    storage->_mutable_data_ptr_no_checks().unsafe_set_device(device.value());
+  }
+#endif  // USE_MPS
+
+
 
   if (storage == nullptr) {
     if (future) {
@@ -131,23 +181,36 @@ static Tensor _lazy_clone_impl(Tensor const& self, bool future) {
       return self.view_symint(self.sym_sizes());
     }
   }
+
   auto tensor = self.view_symint(self.sym_sizes());
+  // TensorImpl's device should be updated with the storage as well.
   tensor.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
+
+  std::cout << "Tensor Device: ";
+  if (tensor.device().is_cpu()) {
+    std::cout << "cpu";
+  } else if (tensor.device().is_mps()) {
+    std::cout << "mps";
+  }
+  std::cout << std::endl;
   return tensor;
 }
 
 Tensor _lazy_clone_alias(Tensor const& self) {
-  return _lazy_clone_impl(self, /*future=*/false);
+  return _lazy_clone_impl(self, std::nullopt, /*future=*/false);
 }
 
-Tensor _lazy_clone_future(Tensor const& self) {
-  return _lazy_clone_impl(self, /*future=*/true);
+Tensor _lazy_clone_future(Tensor const& self,
+                   std::optional<at::Device> device) {
+  return _lazy_clone_impl(self, device, /*future=*/true);
 }
 
-Tensor _lazy_clone(Tensor const& self) {
+Tensor _lazy_clone(Tensor const& self,
+                   std::optional<at::Device> device) {
   if (c10::impl::cow::get_future_lazy_clone()) {
-    return self._lazy_clone_future();
+    return self._lazy_clone_future(device);
   } else {
+    // TODO(Frank): Classic behavior does not need device.
     return self._lazy_clone_alias();
   }
 }

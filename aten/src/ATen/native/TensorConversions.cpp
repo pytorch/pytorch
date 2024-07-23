@@ -414,6 +414,46 @@ bool to_will_alias(
      self.suggest_memory_format() == memory_format);
 }
 
+// TODO(Frank): Expand this logic to other useful conditions.
+// Currently only for MPS <-> CPU if shared.
+bool to_will_cow(
+    const Tensor& self,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    bool copy,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
+  // TODO(Frank): Refactor the conditions such that we don't need to
+  // copy and paste here.
+  auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
+
+  // TODO(Frank): Do we need to check if the MTL device has UnifiedMemoryArch?
+  auto is_shared_memory = ((self.device().is_cpu() && device->is_mps()) ||
+  (self.device().is_mps() && (device == std::nullopt || device->is_cpu())));
+
+  std::cout << "ToWillCOW" << std::endl;
+  if (self.device().is_mps()) {
+    std::cout << "\tCurrent Device is MPS" << std::endl;
+  } else if (self.device().is_cpu()) {
+    std::cout << "\tCurrent Device is CPU" << std::endl;
+  }
+  if (device == std::nullopt) {
+    std::cout << "\tTarget  Device is NON" << std::endl;
+  } else if (device.value().is_mps()) {
+    std::cout << "\tTarget  Device is MPS" << std::endl;
+  } else if (device.value().is_cpu()) {
+    std::cout << "\tTarget  Device is CPU" << std::endl;
+  }
+  std::cout << "IsSharedMemory:" << is_shared_memory << std::endl;
+
+
+  return is_null_or_equal_to(dtype, self.dtype().toScalarType()) &&
+    is_null_or_equal_to(layout, self.layout()) &&
+    !copy &&
+    (memory_format == MemoryFormat::Preserve ||
+     self.suggest_memory_format() == memory_format);
+}
+
 static inline Tensor to_impl(
     const Tensor& self,
     std::optional<ScalarType> dtype,
@@ -428,6 +468,28 @@ static inline Tensor to_impl(
   if (to_will_alias(self, dtype, layout, device, copy, optional_memory_format)) {
     return self;
   }
+
+  bool to_will_cow_result = to_will_cow(self, dtype, layout, device, copy, optional_memory_format);
+  std::cout << "ToWillCOWResult: " << to_will_cow_result << std::endl;
+  // create a copy-on-write context
+  if (c10::impl::cow::get_future_lazy_clone() && to_will_cow_result) {
+
+    std::cout << "IsFutureLazyClone: " << c10::impl::cow::get_future_lazy_clone() << std::endl;
+    std::cout << "self, is_cow_data_ptr: " << c10::impl::cow::is_cow_data_ptr(
+      self.storage().data_ptr()
+    ) << std::endl;
+
+    auto lazy_clone = self._lazy_clone(device);
+
+    std::cout << "self._lazy_clone(), is_cow_data_ptr: " << c10::impl::cow::is_cow_data_ptr(
+      lazy_clone.storage().data_ptr()
+    ) << std::endl;
+
+    std::cout << "debug break" << std::endl;
+
+    return lazy_clone;
+  }
+
   return at::_to_copy(
       self, dtype, layout, device, pin_memory, non_blocking, optional_memory_format);
 }

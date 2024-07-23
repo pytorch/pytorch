@@ -3,6 +3,8 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Backtrace.h>
+#include <iostream>
 
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
@@ -208,6 +210,7 @@ void* DispatchStubImpl::get_call_ptr(
     auto error = std::get<ErrorType>(result);
     switch (error) {
       case ErrorType::MissingDeviceKernel:
+        std::cout << c10::get_backtrace() << std::endl;
         TORCH_INTERNAL_ASSERT(
             false, "DispatchStub: missing kernel for ", device_type);
         return nullptr;

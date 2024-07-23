@@ -1244,6 +1244,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   Device device() const {
+    std::cout << "InquiryDevice" << std::endl;
     if (C10_UNLIKELY(device_policy_)) {
       return device_custom();
     }
@@ -2343,6 +2344,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         err_msg_tensor_metadata_change_not_allowed);
     storage_ = std::move(storage);
     device_opt_ = storage_.device();
+    std::cout << "Storage's Device " << device_opt_.value() << std::endl;
   }
 
   void set_storage_and_dtype(
