@@ -534,13 +534,13 @@ class Benchmarker:
         fn_kwargs: Dict[str, Any],
         **kwargs: Any,
     ) -> Union[LazyBenchmark, float]:
-        counters["inductor"]["benchmarking_lazy_benchmark"] += 1
         _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
         if not benchmarking_config.enable_lazy_benchmarking:
             log.debug(
                 "Lazy benchmarking is disabled. Immediately proceeding to CPU benchmarking."
             )
             return self.benchmark_cpu(_callable, **kwargs)
+        counters["inductor"]["benchmarking_lazy_benchmark"] += 1
         fn_args_and_kwargs = list(fn_args) + list(fn_kwargs.values())
         if is_cpu_device(fn_args_and_kwargs):
             return self.lazy_benchmark_cpu(_callable, **kwargs)
@@ -555,12 +555,12 @@ class Benchmarker:
         pruning_key: Optional[str] = None,
         **kwargs: Any,
     ) -> Union[LazyBenchmark, float]:
-        counters["inductor"]["benchmarking_lazy_benchmark_cpu"] += 1
         if not benchmarking_config.enable_lazy_benchmarking:
             log.debug(
                 "Lazy benchmarking is disabled. Immediately proceeding to CPU benchmarking."
             )
             return self.benchmark_cpu(_callable, **kwargs)
+        counters["inductor"]["benchmarking_lazy_benchmark_cpu"] += 1
         # should we just immediately benchmark on CPU?
         return LazyBenchmark(lambda: self.benchmark_cpu(_callable, **kwargs))
 
@@ -572,13 +572,13 @@ class Benchmarker:
         pruning_key: Optional[str] = None,
         **kwargs: Any,
     ) -> Union[LazyBenchmark, float]:
-        counters["inductor"]["benchmarking_lazy_benchmark_gpu"] += 1
-
         if not benchmarking_config.enable_lazy_benchmarking:
             log.debug(
                 "Lazy benchmarking is disabled. Immediately proceeding to GPU benchmarking."
             )
             return self.benchmark_gpu(_callable, **kwargs)
+        
+        counters["inductor"]["benchmarking_lazy_benchmark_gpu"] += 1
 
         # we should try the callable before queueing it for benchmarking, in
         # case it throws an exception. we could catch and handle any exception
