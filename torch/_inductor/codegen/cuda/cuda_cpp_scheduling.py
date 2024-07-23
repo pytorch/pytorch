@@ -1,16 +1,16 @@
+# mypy: allow-untyped-defs
 import logging
 from typing import cast, Sequence
 
 from ...._dynamo.utils import counters
-
 from ... import config
 from ...codecache import code_hash, get_path
-
 from ...ir import CUDATemplateBuffer
 from ...scheduler import BaseSchedulerNode, BaseScheduling, Scheduler, SchedulerNode
 from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer
+
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +27,10 @@ class CUDACPPScheduling(BaseScheduling):
     def __init__(self, scheduler: Scheduler):
         super().__init__()
         self.scheduler = scheduler
+
+    @classmethod
+    def get_backend_features(cls, device):
+        return {}
 
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)

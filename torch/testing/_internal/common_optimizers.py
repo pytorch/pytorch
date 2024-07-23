@@ -39,7 +39,6 @@ from torch.testing._internal.common_device_type import tol, toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
-    set_single_threaded_if_parallel_tbb,
     skipIfMps,
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
@@ -161,7 +160,7 @@ class OptimizerInfo:
         self.supports_fused_on = supports_fused_on
 
     def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
-        result = [set_single_threaded_if_parallel_tbb]
+        result = []
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
                 if decorator.is_active(
@@ -229,7 +228,7 @@ class optims(_TestParametrizer):
 
 # Helper function for generating error inputs for all optimizers, used below.
 def get_error_inputs_for_all_optims(device, dtype):
-    if str(device) == "cpu":
+    if _get_device_type(device) == "cpu":
         sample_param = Parameter(torch.randn(1, device=device, dtype=dtype))
         return [
             ErrorOptimizerInput(
@@ -319,12 +318,12 @@ def optim_inputs_func_adadelta(device, dtype=None):
         OptimizerInput(
             params=None, kwargs={"rho": 0.95, "weight_decay": 0.9}, desc="rho"
         ),
-    ] + (cuda_supported_configs if "cuda" in str(device) else [])
+    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
 
 
 def optim_error_inputs_func_adadelta(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if str(device) == "cpu":
+    if _get_device_type(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -371,7 +370,7 @@ def optim_inputs_func_adagrad(device, dtype=None):
 
 def optim_error_inputs_func_adagrad(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if str(device) == "cpu":
+    if _get_device_type(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -402,22 +401,33 @@ def optim_inputs_func_adam(device, dtype=None):
             desc="Tensor lr with capturable and amsgrad",
         ),
     ]
+    mps_supported_configs = [
+        OptimizerInput(
+            params=None, kwargs={"lr": torch.tensor(0.01)}, desc="Tensor lr"
+        ),
+    ]
 
-    total = [
-        OptimizerInput(params=None, kwargs={}, desc="default"),
-        OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
-        OptimizerInput(
-            params=None, kwargs={"weight_decay": 0.1}, desc="nonzero weight_decay"
-        ),
-        OptimizerInput(
-            params=None,
-            kwargs={"weight_decay": 0.1, "maximize": True},
-            desc="maximize",
-        ),
-        OptimizerInput(
-            params=None, kwargs={"weight_decay": 0.1, "amsgrad": True}, desc="amsgrad"
-        ),
-    ] + (cuda_supported_configs if "cuda" in str(device) else [])
+    total = (
+        [
+            OptimizerInput(params=None, kwargs={}, desc="default"),
+            OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
+            OptimizerInput(
+                params=None, kwargs={"weight_decay": 0.1}, desc="nonzero weight_decay"
+            ),
+            OptimizerInput(
+                params=None,
+                kwargs={"weight_decay": 0.1, "maximize": True},
+                desc="maximize",
+            ),
+            OptimizerInput(
+                params=None,
+                kwargs={"weight_decay": 0.1, "amsgrad": True},
+                desc="amsgrad",
+            ),
+        ]
+        + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+        + (mps_supported_configs if _get_device_type(device) == "mps" else [])
+    )
     if dtype in (torch.float16,):
         for input in total:
             """
@@ -435,7 +445,7 @@ def optim_inputs_func_adam(device, dtype=None):
 
 def optim_error_inputs_func_adam(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if str(device) == "cpu":
+    if _get_device_type(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -465,7 +475,7 @@ def optim_error_inputs_func_adam(device, dtype):
                 error_regex="lr as a Tensor is not supported for capturable=False and foreach=True",
             ),
         ]
-    if "cuda" in str(device):
+    if _get_device_type(device) == "cuda":
         sample_tensor = torch.empty((), device=device, dtype=dtype)
         error_inputs += [
             ErrorOptimizerInput(
@@ -531,12 +541,12 @@ def optim_inputs_func_adamax(device, dtype=None):
             kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize",
         ),
-    ] + (cuda_supported_configs if "cuda" in str(device) else [])
+    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
 
 
 def optim_error_inputs_func_adamax(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if str(device) == "cpu":
+    if _get_device_type(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -602,12 +612,12 @@ def optim_inputs_func_asgd(device, dtype=None):
             kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize, nonzero weight_decay",
         ),
-    ] + (cuda_supported_configs if "cuda" in str(device) else [])
+    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
 
 
 def optim_error_inputs_func_asgd(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if str(device) == "cpu":
+    if _get_device_type(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -642,7 +652,6 @@ def optim_error_inputs_func_lbfgs(device, dtype):
     return error_inputs
 
 
-# Weird story bro, NAdam and RAdam do not have maximize.
 def optim_inputs_func_nadam(device, dtype=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
@@ -695,12 +704,17 @@ def optim_inputs_func_nadam(device, dtype=None):
             },
             desc="decoupled_weight_decay",
         ),
-    ] + (cuda_supported_configs if "cuda" in str(device) else [])
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "maximize": True},
+            desc="maximize",
+        ),
+    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
 
 
 def optim_error_inputs_func_nadam(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if str(device) == "cpu":
+    if _get_device_type(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -768,12 +782,17 @@ def optim_inputs_func_radam(device=None, dtype=None):
             kwargs={"weight_decay": 0.1, "decoupled_weight_decay": True},
             desc="decoupled_weight_decay",
         ),
-    ] + (cuda_supported_configs if "cuda" in str(device) else [])
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "maximize": True},
+            desc="maximize",
+        ),
+    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
 
 
 def optim_error_inputs_func_radam(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if str(device) == "cpu":
+    if _get_device_type(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -838,12 +857,12 @@ def optim_inputs_func_rmsprop(device, dtype=None):
             },
             desc="maximize",
         ),
-    ] + (cuda_supported_configs if "cuda" in str(device) else [])
+    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
 
 
 def optim_error_inputs_func_rmsprop(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if str(device) == "cpu":
+    if _get_device_type(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -880,12 +899,12 @@ def optim_inputs_func_rprop(device, dtype=None):
             desc="non-default step_sizes",
         ),
         OptimizerInput(params=None, kwargs={"maximize": True}, desc="maximize"),
-    ] + (cuda_supported_configs if "cuda" in str(device) else [])
+    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
 
 
 def optim_error_inputs_func_rprop(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if str(device) == "cpu":
+    if _get_device_type(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -933,7 +952,7 @@ def optim_inputs_func_sgd(device, dtype=None):
 
 def optim_error_inputs_func_sgd(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if str(device) == "cpu":
+    if _get_device_type(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -961,14 +980,7 @@ def optim_inputs_func_sparseadam(device, dtype=None):
 def optim_error_inputs_func_sparseadam(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
 
-    if str(device) == "cpu":
-        # SparseAdam raises a warning and not an error for the first entry. We
-        # update it here:
-        error_inputs[0].error_type = FutureWarning
-        error_inputs[
-            0
-        ].error_regex = "Passing in a raw Tensor as ``params`` to SparseAdam"
-
+    if _get_device_type(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -1015,7 +1027,7 @@ def optim_error_inputs_func_sparseadam(device, dtype):
             ErrorOptimizerInput(
                 OptimizerInput(
                     params=[torch.rand(2, 3, device=device, dtype=torch.complex64)],
-                    kwargs=dict(),
+                    kwargs={},
                     desc="complex not supported",
                 ),
                 error_type=ValueError,
@@ -1231,7 +1243,7 @@ optim_db: List[OptimizerInfo] = [
         ),
         optim_error_inputs_func=optim_error_inputs_func_adam,
         supported_impls=("foreach", "differentiable", "fused"),
-        supports_fused_on=("cpu", "cuda"),
+        supports_fused_on=("cpu", "cuda", "mps"),
         decorators=(
             # Expected floating point error between fused and compiled forloop
             DecorateInfo(
@@ -1255,6 +1267,17 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
+            ),
+            DecorateInfo(
+                # Note on tolerances:
+                # Tracking through #127000
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=3e-5, rtol=1.3e-06),
+                    }
+                ),
+                "TestCudaOptims",
+                "test_grad_scaling_autocast_fused_optimizers",
             ),
         ),
         skips=(
@@ -1312,11 +1335,6 @@ optim_db: List[OptimizerInfo] = [
                 active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
-                skipIfTorchDynamo("Mismatched _foreach_addcdiv_ types, see #118159"),
-                "TestOptimRenewed",
-                "test_complex",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
@@ -1347,7 +1365,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamw,
         optim_error_inputs_func=optim_error_inputs_func_adamw,
         supported_impls=("foreach", "differentiable", "fused"),
-        supports_fused_on=("cpu", "cuda"),
+        supports_fused_on=("cpu", "cuda", "mps"),
         decorators=(
             # Expected error between compiled forloop and fused optimizers
             DecorateInfo(
@@ -1371,6 +1389,20 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
+            ),
+            # Note on tolerances:
+            # Tracking through #127000
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(
+                            atol=3e-5,
+                            rtol=1.3e-06,
+                        )
+                    }
+                ),
+                "TestCudaOptims",
+                "test_grad_scaling_autocast_fused_optimizers",
             ),
         ),
         skips=(
@@ -1551,13 +1583,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_load_nontensor_step",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Errors, see https://github.com/pytorch/pytorch/issues/117150"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_with_cuda_params",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1745,6 +1770,7 @@ optim_db: List[OptimizerInfo] = [
         supports_fused_on=(
             "cpu",
             "cuda",
+            "mps",
         ),
         skips=(
             DecorateInfo(
@@ -1798,13 +1824,6 @@ optim_db: List[OptimizerInfo] = [
             DecorateInfo(
                 skipIfMps,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
-            ),
-            DecorateInfo(
-                unittest.skip(
-                    "SparseAdam does not support dense gradients, see #116507"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),

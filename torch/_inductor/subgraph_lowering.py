@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Utilities for lowering subgraphs used by higher order operators
 
 """
@@ -13,6 +14,7 @@ from . import ir
 from .exc import SubgraphLoweringException
 from .ops_handler import SimpleCSEHandler
 from .virtualized import ops, V, WrapperHandler
+
 
 T = TypeVar("T")
 

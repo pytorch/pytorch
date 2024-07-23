@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import contextlib
@@ -11,7 +12,6 @@ import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
-from types import ModuleType
 from typing import (
     Any,
     Callable,
@@ -25,9 +25,9 @@ from typing import (
 )
 
 import torch
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
-
 from torch._inductor import ir
 from torch._inductor.codecache import (
     CppCodeCache,
@@ -37,15 +37,18 @@ from torch._inductor.codecache import (
     PyCodeCache,
 )
 
+
 if TYPE_CHECKING:
     from multiprocessing.process import BaseProcess
     from multiprocessing.queues import Queue
+    from types import ModuleType
 
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
 from .runtime.runtime_utils import do_bench_cpu, do_bench_gpu
 from .virtualized import V
+
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
 EXIT_HANDLER_REGISTERED = False
@@ -839,7 +842,11 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
             self.extra_args,
         )
         run_method = getattr(self.DLL, self.kernel_name)
-        run_method.argtypes = [ctypes.c_ulonglong] * len(args)
+        # Assume only size with type ctypes.c_ulonglong in extra_args
+        assert all(isinstance(arg, ctypes.c_ulonglong) for arg in self.extra_args)
+        run_method.argtypes = [ctypes.c_ulonglong] * (
+            len(args) + len(list(self.extra_args))
+        )
 
         # Generate partial function.
         return functools.partial(

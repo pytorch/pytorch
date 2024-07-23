@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 class Equality:
     def __init__(self, lhs, rhs):
         self.lhs = lhs

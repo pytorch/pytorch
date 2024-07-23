@@ -871,58 +871,6 @@ Tensor slow_conv_transpose3d_cpu(
   return output;
 }
 
-static std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cpu(const Tensor& grad_output,
-    const Tensor& input,
-    const Tensor& weight,
-    IntArrayRef kernel_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef output_padding,
-    IntArrayRef dilation,
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias) {
-  if (grad_input.defined()) {
-    slow_conv_transpose3d_backward_out_cpu_template(
-        input,
-        grad_output,
-        grad_input,
-        weight,
-        kernel_size,
-        stride,
-        padding,
-        output_padding,
-        dilation);
-  }
-
-  if (grad_weight.defined()) {
-    grad_weight.resize_(weight.sizes());
-    grad_weight.zero_();
-  }
-
-  if (grad_bias.defined()) {
-    grad_bias.resize_({weight.size(1)});
-    grad_bias.zero_();
-  }
-
-  if (grad_weight.defined() || grad_bias.defined()) {
-    slow_conv_transpose3d_acc_grad_parameters_cpu(
-        input,
-        grad_output,
-        grad_weight,
-        grad_bias,
-        kernel_size,
-        stride,
-        padding,
-        output_padding,
-        dilation,
-        1);
-  }
-
-  return std::tuple<Tensor&, Tensor&, Tensor&>(
-      grad_input, grad_weight, grad_bias);
-}
-
 static std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose3d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,

@@ -8,6 +8,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_collectives/ControlCollectives.hpp>
 #include <torch/csrc/distributed/c10d/control_collectives/StoreCollectives.hpp>
+#include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <vector>
 #ifndef _WIN32
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
@@ -38,7 +39,9 @@
 
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
+#include <torch/csrc/distributed/c10d/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
@@ -316,6 +319,36 @@ class PythonStore : public ::c10d::Store {
   bool hasExtendedApi() const override {
     PYBIND11_OVERLOAD_NAME(
         bool, ::c10d::Store, "has_extended_api", hasExtendedApi);
+  }
+};
+
+class PythonRequest : public ::c10d::control_plane::Request {
+ public:
+  const std::string& body() const override {
+    PYBIND11_OVERRIDE_PURE(
+        const std::string&, ::c10d::control_plane::Request, body);
+  }
+
+  const std::multimap<std::string, std::string>& params() const override {
+    using MultiMap = const std::multimap<std::string, std::string>&;
+    PYBIND11_OVERRIDE_PURE(MultiMap, ::c10d::control_plane::Request, params);
+  }
+};
+class PythonResponse : public ::c10d::control_plane::Response {
+ public:
+  void setContent(std::string&& content, const std::string& content_type)
+      override {
+    PYBIND11_OVERRIDE_PURE_NAME(
+        void,
+        ::c10d::control_plane::Response,
+        "set_content",
+        setContent,
+        content,
+        content_type);
+  }
+  void setStatus(int status) override {
+    PYBIND11_OVERRIDE_PURE_NAME(
+        void, ::c10d::control_plane::Response, "set_status", setStatus, status);
   }
 };
 
@@ -973,6 +1006,54 @@ This class does not support ``__members__`` property.)");
           "global_ranks_in_group",
           &::c10d::DistributedBackendOptions::global_ranks_in_group);
 
+  py::class_<
+      ::c10d::DMAConnectivity,
+      c10::intrusive_ptr<::c10d::DMAConnectivity>>(module, "_DMAConnectivity")
+      .def_readonly("device_type", &::c10d::DMAConnectivity::device_type)
+      .def_readonly(
+          "connection_type", &::c10d::DMAConnectivity::connection_type)
+      .def_readonly("matrix", &::c10d::DMAConnectivity::matrix);
+
+  module.def("_detect_dma_connectivity", ::c10d::detect_dma_connectivity);
+
+  using SymmetricMemory = ::c10d::symmetric_memory::SymmetricMemory;
+  py::class_<SymmetricMemory, c10::intrusive_ptr<SymmetricMemory>>(
+      module, "_SymmetricMemory")
+      .def_static("set_group_info", &::c10d::symmetric_memory::set_group_info)
+      .def_static(
+          "empty_strided_p2p",
+          ::c10d::symmetric_memory::empty_strided_p2p,
+          py::arg("size"),
+          py::arg("stride"),
+          py::arg("dtype"),
+          py::arg("device"),
+          py::arg("group_name"),
+          py::arg("alloc_id") = py::none())
+      .def_static("rendezvous", &::c10d::symmetric_memory::rendezvous)
+      .def_static(
+          "get_symmetric_memory",
+          &::c10d::symmetric_memory::get_symmetric_memory)
+      .def_property_readonly("rank", &SymmetricMemory::get_rank)
+      .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
+      .def(
+          "get_buffer",
+          &SymmetricMemory::get_buffer,
+          py::arg("rank"),
+          py::arg("sizes"),
+          py::arg("dtype"),
+          py::arg("storage_offset") = 0)
+      .def("barrier", &SymmetricMemory::barrier, py::arg("channel") = 0)
+      .def(
+          "put_signal",
+          &SymmetricMemory::put_signal,
+          py::arg("dst_rank"),
+          py::arg("channel") = 0)
+      .def(
+          "wait_signal",
+          &SymmetricMemory::wait_signal,
+          py::arg("src_rank"),
+          py::arg("channel") = 0);
+
   auto store =
       py::class_<::c10d::Store, c10::intrusive_ptr<::c10d::Store>, PythonStore>(
           module,
@@ -1014,11 +1095,13 @@ Example::
                  const std::string& key,
                  const std::string& expected_value,
                  const std::string& desired_value) -> py::bytes {
-                auto value = store.compareSet(
-                    key, toVec8(expected_value), toVec8(desired_value));
+                auto value = [&]() {
+                  py::gil_scoped_release guard;
+                  return store.compareSet(
+                      key, toVec8(expected_value), toVec8(desired_value));
+                }();
                 return toPyBytes(value);
               },
-              py::call_guard<py::gil_scoped_release>(),
               R"(
 Inserts the key-value pair into the store based on the supplied ``key`` and
 performs comparison between ``expected_value`` and ``desired_value`` before inserting. ``desired_value``
@@ -1389,6 +1472,7 @@ Arguments:
     wait_for_workers (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
     master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. Useful to avoid port assignment races in some scenarios. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
+    use_libuv (bool, optional): If True, use libuv for ``TCPServer`` backend. Default is True.
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
@@ -1410,7 +1494,7 @@ Example::
                       bool multiTenant,
                       std::optional<int> masterListenFd,
                       bool useLibUV) {
-            std::optional<std::size_t> numWorkers = c10::nullopt;
+            std::optional<std::size_t> numWorkers = std::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
@@ -1438,7 +1522,7 @@ Example::
           py::arg("wait_for_workers") = true,
           py::arg("multi_tenant") = false,
           py::arg("master_listen_fd") = py::none(),
-          py::arg("use_libuv") = false,
+          py::arg("use_libuv") = true,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "collect_client_counters",
@@ -2030,7 +2114,7 @@ communication mechanism.
                 self->registerOnCompletionHook(
                     [hookWrapper = ::c10d::PythonOnCompletionHook(std::move(
                          hook))](std::shared_ptr<::c10d::WorkInfo> workInfo) {
-                      hookWrapper(std::move(workInfo));
+                      hookWrapper(workInfo);
                     });
               },
               py::arg("hook"),
@@ -2643,15 +2727,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           py::arg("store"),
           py::arg("rank"),
           py::arg("world_size"),
-          py::arg("buffer_size") = c10::nullopt)
-      .def("barrier", &IntraNodeComm::barrier, py::arg("ranks") = py::none())
-      .def("put", &IntraNodeComm::put, py::arg("input"), py::arg("offset") = 0)
-      .def(
-          "get",
-          &IntraNodeComm::get,
-          py::arg("rank"),
-          py::arg("tensor"),
-          py::arg("offset") = 0);
+          py::arg("buffer_size") = std::nullopt)
+      .def("barrier", &IntraNodeComm::barrier, py::arg("ranks") = py::none());
 
 #ifdef NCCL_HAS_COMM_CTA_CGA
   py::class_<ncclConfig_t>(
@@ -2667,6 +2744,9 @@ for details.
       .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
       .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
       .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
+#ifdef NCCL_HAS_COMM_SPLIT
+      .def_readwrite("split_share", &ncclConfig_t::splitShare)
+#endif
       .def_property(
           "net_name",
           [](const ncclConfig_t& self) { return self.netName; },
@@ -2707,6 +2787,7 @@ Example::
     >>> nccl_options.config.cga_cluster_size = 2
     >>> nccl_options.config.max_ctas = 4
     >>> nccl_options.config.min_ctas = 2
+    >>> nccl_options.config.split_share = 1
     >>> # initialize a nccl process group with the options just created
     >>> dist.init_process_group("nccl", pg_options=nccl_options)
       )")
@@ -2726,7 +2807,6 @@ Example::
           &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group)
       .def_readwrite(
           "group_name", &::c10d::ProcessGroupNCCL::Options::group_name);
-
 #endif
 
 #ifdef USE_C10D_MPI
@@ -3118,10 +3198,113 @@ such as `dist.all_reduce(tensor, async_op=True)`.
         Arguments:
           tensors(List[torch.Tensor]): List of tensors we want to hash.
       )");
-  module.def("_dump_nccl_trace", []() {
-    return py::bytes(::c10d::dump_nccl_trace());
-  });
+  module.def(
+      "_dump_nccl_trace_json",
+      [](std::optional<bool> includeCollectives,
+         std::optional<bool> onlyActive) {
+        return py::bytes(::c10d::dump_nccl_trace_json(
+            includeCollectives.value_or(true), onlyActive.value_or(false)));
+      },
+      py::arg("includeCollectives") = std::optional<bool>(),
+      py::arg("onlyActive") = std::optional<bool>(),
+      R"(
+      Arguments:
+            includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+            onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+      Returns:
+            Stringified json work traces.
+            Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
+      )");
+  module.def(
+      "_dump_nccl_trace",
+      [](std::optional<bool> includeCollectives,
+         std::optional<bool> includeStackTraces,
+         std::optional<bool> onlyActive) {
+        return py::bytes(::c10d::dump_nccl_trace(
+            includeCollectives.value_or(true),
+            includeStackTraces.value_or(true),
+            onlyActive.value_or(false)));
+      },
+      py::arg("includeCollectives") = std::optional<bool>(),
+      py::arg("includeStackTraces") = std::optional<bool>(),
+      py::arg("onlyActive") = std::optional<bool>(),
+      R"(
+        Arguments:
+            includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+            includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
+            onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+        Returns:
+            Stringified pickle work traces.
+            Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
+      )");
 #endif
+
+  intrusive_ptr_class_<::c10d::control_plane::WorkerServer>(
+      module, "_WorkerServer", R"(
+)")
+      .def(
+          py::init([](const std::string& hostOrFile, int port) {
+            return c10::make_intrusive<::c10d::control_plane::WorkerServer>(
+                hostOrFile, port);
+          }),
+          py::arg("host_or_file"),
+          py::arg("port") = -1)
+      .def("shutdown", &::c10d::control_plane::WorkerServer::shutdown);
+
+  module.def(
+      "_get_handler",
+      [](const std::string& name) -> py::cpp_function {
+        return py::cpp_function(
+            ::c10d::control_plane::getHandler(name),
+            py::arg("request"),
+            py::arg("response"),
+            py::call_guard<py::gil_scoped_release>());
+      },
+      py::arg("name"),
+      R"(
+      Returns the handler with the specified name.
+    )");
+
+  module.def(
+      "_get_handler_names",
+      &::c10d::control_plane::getHandlerNames,
+      R"(
+      Returns the names of all handlers.
+    )",
+      py::call_guard<py::gil_scoped_release>());
+
+  py::class_<::c10d::control_plane::Request, PythonRequest>(
+      module,
+      "_Request",
+      R"(
+      See c10d::control_plane::Request for docs.
+)")
+      // Default constructor.
+      .def(py::init<>())
+      .def("body", &::c10d::control_plane::Request::body)
+      .def("params", &::c10d::control_plane::Request::params);
+
+  py::class_<
+      ::c10d::control_plane::Response,
+      std::shared_ptr<::c10d::control_plane::Response>,
+      PythonResponse>(
+      module,
+      "_Response",
+      R"(
+      See c10d::control_plane::Response for docs.
+)")
+      // Default constructor.
+      .def(py::init<>())
+      .def(
+          "set_content",
+          &::c10d::control_plane::Response::setContent,
+          py::arg("content"),
+          py::arg("content_type"))
+      .def(
+          "set_status",
+          &::c10d::control_plane::Response::setStatus,
+          py::arg("status"));
+
   Py_RETURN_TRUE;
 }
 

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
@@ -18,6 +19,11 @@ def conditional_product(*args):
 
 def ceildiv(numer: int, denom: int) -> int:
     return -(numer // -denom)
+
+
+def is_power_of_2(n: int) -> bool:
+    """Returns whether n = 2 ** m for some integer m."""
+    return n > 0 and n & n - 1 == 0
 
 
 def next_power_of_2(n: int) -> int:
@@ -133,20 +139,26 @@ def do_bench_cpu(fn, warmup=5, times=20):
 def cache_dir() -> str:
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
     if cache_dir is None:
-        sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
-        os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir = os.path.join(
-            tempfile.gettempdir(),
-            "torchinductor_" + sanitized_username,
-        )
+        os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir = default_cache_dir()
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
 
-HAS_COLORAMA = True
+def default_cache_dir():
+    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
+    return os.path.join(
+        tempfile.gettempdir(),
+        "torchinductor_" + sanitized_username,
+    )
+
+
 try:
     import colorama
-except ImportError:
+
+    HAS_COLORAMA = True
+except ModuleNotFoundError:
     HAS_COLORAMA = False
+    colorama = None  # type: ignore[assignment]
 
 
 def _color_text(msg, color):
@@ -187,7 +199,7 @@ try:
     dynamo_timed = torch._dynamo.utils.dynamo_timed
 except AttributeError:  # Compile workers only have a mock version of torch
 
-    def dynamo_timed(original_function=None, phase_name=None):
+    def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
         if original_function:
             return original_function
         return dynamo_timed

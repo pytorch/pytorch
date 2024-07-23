@@ -3,9 +3,11 @@
 import functools
 import itertools
 import os
-import pathlib
+from pathlib import Path
 from typing import Sequence
 from unittest import skip
+
+import yaml
 
 import torch
 import torch._lazy
@@ -13,15 +15,14 @@ import torch._lazy.config
 import torch._lazy.ir_cache
 import torch._lazy.metrics
 import torch._lazy.ts_backend
-import yaml
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
+
 
 torch._lazy.ts_backend.init()
 
@@ -35,7 +36,7 @@ def remove_suffixes(l):
 
 
 def init_lists():
-    path_to_script = pathlib.Path(os.path.abspath(os.path.dirname(__file__)))
+    path_to_script = Path(os.path.abspath(os.path.dirname(__file__)))
     TS_NATIVE_FUNCTIONS_PATH = (
         path_to_script.parent.parent / "aten/src/ATen/native/ts_native_functions.yaml"
     )
