@@ -7,7 +7,7 @@ from typing import Any, Callable
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
-from torch._ops import HigherOrderOperator
+from torch._ops import OperatorBase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -18,20 +18,20 @@ class UnsupportedAliasMutationException(RuntimeError):
 
 
 def autograd_not_implemented_inner(
-    operator: HigherOrderOperator, delayed_error: bool, *args: Any, **kwargs: Any
+    operator: OperatorBase, delayed_error: bool, *args: Any, **kwargs: Any
 ) -> Any:
     """If autograd is enabled and any of the arguments require grad this will either
     raise an error or return a DelayedError depending on the value of delayed.
 
     Args:
-        operator: The HigherOrderOperator to call with the *args and **kwargs with
-        op_name: The name of the HigherOrderOperator
+        operator: The Operator to call with the *args and **kwargs with
+        op_name: The name of the Operator
         delayed_error: If True, return a DelayedError instead of raising an error
-        args: The flattened operands to the HigherOrderOperator
-        kwargs: The keyword arguments to the HigherOrderOperator
+        args: The flattened operands to the Operator
+        kwargs: The keyword arguments to the Operator
 
     Raises:
-        RuntimeError: If autograd is enabled and any of the arguments to the HigherOrderOperator
+        RuntimeError: If autograd is enabled and any of the arguments to the Operator
     """
     with torch._C._AutoDispatchBelowAutograd():
         result = operator(*args, **kwargs)
@@ -59,7 +59,7 @@ def autograd_not_implemented_inner(
         return result
 
 
-def autograd_not_implemented(op: HigherOrderOperator, deferred_error: bool) -> Callable:
+def autograd_not_implemented(op: OperatorBase, deferred_error: bool) -> Callable:
     def inner(*args, **kwargs):
         return autograd_not_implemented_inner(op, deferred_error, *args, **kwargs)
 

@@ -70,17 +70,24 @@ struct VecConvert<float, 1, int64_t, 2> {
 };
 
 template <>
-inline Vectorized<int32_t> convert_to_int_of_same_size<float>(
-    const Vectorized<float>& src);
-
-template <>
 struct VecConvert<int64_t, 2, float, 1> {
   static inline VectorizedN<int64_t, 2> apply(
       const VectorizedN<float, 1>& src) {
+    // Scalarization is the most reliable way of converting fp to int64 on AVX2.
+    // Check: https://stackoverflow.com/questions/41144668
+    float buffer[8];
+    src.store(buffer);
     at::vec::VectorizedN<int64_t, 2> result;
-    auto int32_vec = at::vec::convert_to_int_of_same_size(src[0]);
-    result[0] = _mm256_cvtepi32_epi64(_mm256_castsi256_si128(int32_vec));
-    result[1] = _mm256_cvtepi32_epi64(_mm256_extracti128_si256(int32_vec, 1));
+    result[0] = Vectorized<int64_t>(
+      static_cast<int64_t>(buffer[0]),
+      static_cast<int64_t>(buffer[1]),
+      static_cast<int64_t>(buffer[2]),
+      static_cast<int64_t>(buffer[3]));
+    result[1] = Vectorized<int64_t>(
+      static_cast<int64_t>(buffer[4]),
+      static_cast<int64_t>(buffer[5]),
+      static_cast<int64_t>(buffer[6]),
+      static_cast<int64_t>(buffer[7]));
     return result;
   }
 };

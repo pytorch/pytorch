@@ -222,8 +222,10 @@ dtype_abbrs = {
     torch.int64: 'i64',
     torch.bool: 'b8',
     torch.uint8: 'u8',
+    torch.uint16: 'u16',
     torch.uint32: 'u32',
     torch.uint64: 'u64',
+    torch.bits16: 'b16',
 }
 
 @compatibility(is_backward_compatible=True)
@@ -1572,11 +1574,16 @@ class Graph:
                             m_itr = new_m_itr
 
     @compatibility(is_backward_compatible=True)
-    def eliminate_dead_code(self):
+    def eliminate_dead_code(self, is_impure_node: Optional[Callable[[Node], bool]] = None):
         """
         Remove all dead code from the graph, based on each node's number of
         users, and whether the nodes have any side effects. The graph must be
         topologically sorted before calling.
+
+        Args:
+            is_impure_node (Optional[Callable[[Node], bool]]): A function that returns
+            whether a node is impure. If this is None, then the default behavior is to
+            use Node.is_impure.
 
         Returns:
           bool: Whether the graph was changed as a result of the pass.
@@ -1606,18 +1613,24 @@ class Graph:
             side-effectful nodes (see Node.is_impure) but in general coverage
             is very bad, so you should assume that this method is not sound
             to call unless you know that your FX graph consists entirely
-            of functional operations.
+            of functional operations or you supply your own custom
+            function for detecting side-effectful nodes.
         """
         # Lint the graph first to make sure its topologically sorted, otherwise
         # DCE below will not behave as expected.
         self.lint()
+
+        def has_side_effect(node):
+            if is_impure_node is not None:
+                return is_impure_node(node)
+            return node.is_impure()
 
         # Reverse iterate so that when we remove a node, any nodes used as an
         # input to that node have an updated user count that no longer reflects
         # the removed node.
         changed = False
         for node in reversed(self.nodes):
-            if not node.is_impure() and len(node.users) == 0:
+            if not has_side_effect(node) and len(node.users) == 0:
                 self.erase_node(node)
                 changed = True
 
