@@ -4,9 +4,12 @@
 import functools
 import textwrap
 import warnings
+from typing import Callable, TypeVar
+
+T = TypeVar("T", bound=Callable)
 
 
-def deprecated(since: str, removed_in: str, instructions: str):
+def deprecated(since: str, removed_in: str, instructions: str) -> Callable[[T], T]:
     """Marks functions as deprecated.
 
     It will result in a warning when the function is called and a note in the
@@ -18,7 +21,7 @@ def deprecated(since: str, removed_in: str, instructions: str):
         instructions: The action users should take.
     """
 
-    def decorator(function):
+    def decorator(function: T) -> T:
         @functools.wraps(function)
         def wrapper(*args, **kwargs):
             warnings.warn(
@@ -60,6 +63,6 @@ def deprecated(since: str, removed_in: str, instructions: str):
 
         wrapper.__doc__ = "".join(new_docstring_parts)
 
-        return wrapper
+        return wrapper  # type: ignore
 
     return decorator

@@ -528,7 +528,7 @@ def export(
             "autograd_inlining are not supported for dynamo export at the moment."
         )
         if isinstance(model, torch.export.ExportedProgram):
-            # We the model is already exported program, so the args, kwargs, and dynamic_shapes
+            # The model is already exported program, so the args, kwargs, and dynamic_shapes
             # are not used
             args = ()
             kwargs = {}
