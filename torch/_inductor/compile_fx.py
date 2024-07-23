@@ -646,7 +646,9 @@ def compile_fx_inner(
             # In that case, we don't need to run all post compilation steps, we just need
             # to return the string directly.
             return compiled_graph
-        compiled_graph = FxGraphCache.post_compile(compiled_graph, example_inputs)
+        compiled_graph = FxGraphCache.post_compile(
+            compiled_graph, example_inputs, cudagraphs
+        )
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
