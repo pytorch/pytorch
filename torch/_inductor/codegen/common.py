@@ -1837,7 +1837,7 @@ class Kernel(CodeGen):
                 var: CSEVariable,
                 size: Union[sympy.Expr, int],
                 check: bool = True,
-                wrap=True,
+                wrap_neg=True,
             ):
                 if isinstance(size, int):
                     size = sympy.Integer(size)
@@ -1845,7 +1845,7 @@ class Kernel(CodeGen):
                 # Skip CSE since this doesn't return an expression
 
                 if var.bounds.lower < 0:  # type: ignore[operator]
-                    if wrap:
+                    if wrap_neg:
                         stm = ops.add(var, ops.index_expr(size, torch.long))
                         # Mixed negative and non-negative
                         if var.bounds.upper >= 0:  # type: ignore[operator]
