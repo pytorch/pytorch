@@ -47,6 +47,9 @@ if(WIN32)
       20
       CACHE STRING
             "The C++ standard whose features are requested to build this target.")
+  # https://devblogs.microsoft.com/cppblog/c17-feature-removals-and-deprecations/
+  add_compile_definitions(_HAS_FEATURES_REMOVED_IN_CXX20)
+  add_compile_definitions(_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS)
 else()
   set(CMAKE_CXX_STANDARD
       17
