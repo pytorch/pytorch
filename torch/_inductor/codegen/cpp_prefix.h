@@ -407,7 +407,6 @@ void mm_get_thread_blocking(
 
 inline void mm_get_thread_blocks(
     int thread_id,
-    int num_threads,
     int64_t M_blocks,
     int64_t N_blocks,
     int64_t K_blocks,
@@ -421,14 +420,10 @@ inline void mm_get_thread_blocks(
     int64_t& k_block_start,
     int64_t& k_block_end) {
   int64_t num_Kt = (K_blocks + Kt_blocks - 1) / Kt_blocks;
-  num_Kt = num_threads / (num_threads / num_Kt);
-  num_threads /= num_Kt;
   k_block_start = (thread_id % num_Kt) * Kt_blocks;
   k_block_end = std::min(k_block_start + Kt_blocks, K_blocks);
   thread_id /= num_Kt;
   int64_t num_Nt = (N_blocks + Nt_blocks - 1) / Nt_blocks;
-  num_Nt = num_threads / (num_threads / num_Nt);
-  num_threads /= num_Nt;
   n_block_start = (thread_id % num_Nt) * Nt_blocks;
   n_block_end = std::min(n_block_start + Nt_blocks, N_blocks);
   thread_id /= num_Nt;

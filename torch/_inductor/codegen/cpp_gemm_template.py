@@ -65,7 +65,7 @@ extern "C"
     const int64_t Kc_blocks = Kt_blocks;
     const int64_t num_Mc_blocks = (M0_blocks + Mc_blocks - 1) / Mc_blocks;
     const int64_t num_Nc_blocks = N0_blocks;
-    const int64_t num_k_slices = {{num_threads}} / ({{num_threads}} / ((K0_blocks + Kt_blocks - 1) / Kt_blocks));
+    const int64_t num_k_slices = (K0_blocks + Kt_blocks - 1) / Kt_blocks;
     {%- else %}
     constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
     constexpr int64_t M0_blocks = (M + M0 - 1) / M0;
@@ -76,7 +76,7 @@ extern "C"
     constexpr int64_t Kc_blocks = {{template.cache_blocking().block_k}};
     constexpr int64_t num_Mc_blocks = (M0_blocks + Mc_blocks - 1) / Mc_blocks;
     constexpr int64_t num_Nc_blocks = N0_blocks;
-    constexpr int64_t num_k_slices = {{num_threads}} / ({{num_threads}} / ((K0_blocks + Kt_blocks - 1) / Kt_blocks));
+    constexpr int64_t num_k_slices = (K0_blocks + Kt_blocks - 1) / Kt_blocks;
     {%- endif %}
 
     // make sure all partitions are assigned
@@ -88,10 +88,6 @@ extern "C"
     {%- if maybe_k_slicing %}
     std::unique_ptr<std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[]> local_buf_ptrs;
     if (num_k_slices > 1) {
-        {{kernel.assert_function}}(
-            {{num_threads}} % num_k_slices == 0,
-            "Number of threads should be divisible by number of k slices."
-        );
         local_buf_ptrs.reset(new std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[num_Mc_blocks * num_Nc_blocks * num_k_slices]);
     }
     {%- endif %}
@@ -102,7 +98,7 @@ extern "C"
         const int tid = omp_get_thread_num();
         int64_t m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end;
         mm_get_thread_blocks(
-            tid, {{num_threads}}, M0_blocks, N0_blocks, K0_blocks, Mt_blocks, Nt_blocks, Kt_blocks,
+            tid, M0_blocks, N0_blocks, K0_blocks, Mt_blocks, Nt_blocks, Kt_blocks,
             m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end);
         {%- if maybe_k_slicing %}
         const int64_t k_group_id = tid / num_k_slices;
@@ -191,7 +187,7 @@ extern "C"
                     auto {{acc_buf_name}} = local_buf_ptrs[mxn_cache_block_id * num_k_slices].get();
                     for (int64_t other_slice = 1; other_slice < num_k_slices; other_slice++) {
                         auto other_acc = local_buf_ptrs[mxn_cache_block_id * num_k_slices + other_slice].get();
-                        for (int64_t m = m_offset; m < m_size; m++) {
+                        for (int64_t m = m_offset; m < m_offset + m_size; m++) {
                             #pragma omp simd
                             for (int64_t n = 0; n < n_size; n++) {
                                 {{acc_buf_name}}[m*N0 + n] += other_acc[m*N0 + n];
