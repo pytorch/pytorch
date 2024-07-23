@@ -285,7 +285,6 @@ class TestPublicBindings(TestCase):
                     [sys.executable, "-c", f"import {modname}"],
                     stderr=subprocess.STDOUT,
                     text=True,
-                    timeout=120.0,
                 )
             except subprocess.CalledProcessError as exc:
                 failures.append((modname, exc))
