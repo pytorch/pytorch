@@ -155,6 +155,7 @@ class TensorVariable(VariableTracker):
         stride=None,
         is_contiguous=None,
         _is_name_set=None,
+        is_data_attr=False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -175,7 +176,7 @@ class TensorVariable(VariableTracker):
             # no need to rename inputs
             _is_name_set = self.proxy.node.op == "placeholder"
         self._is_name_set: bool = _is_name_set
-        self.is_data_attr = False
+        self.is_data_attr = is_data_attr
 
     def debug_repr(self):
         # TODO: strip off fake tensor from repr here
