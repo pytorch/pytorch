@@ -301,7 +301,7 @@ class TestArgmaxArgminCommon(TestCase):
             axes.remove(i)
             assert np.all(a_maxmin == aarg_maxmin.choose(*a.transpose(i, *axes)))
 
-    @skipIfTorchDynamo('assert_raises')
+    @skipIfTorchDynamo("assert_raises")
     @parametrize("method", ["argmax", "argmin"])
     def test_output_shape(self, method):
         # see also gh-616
