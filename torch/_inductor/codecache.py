@@ -1080,11 +1080,11 @@ class FxGraphCache:
                 cache_id = "fx-graph-v1"
                 try:
                     if config.is_fbcode():
-                        from triton.fb.fb_memcache import (
-                            FbMemcacheRemoteFxGraphCacheBackend,
+                        from torch._inductor.fb.remote_cache import (
+                            FbRemoteFxGraphCacheBackend,
                         )
 
-                        remote_cache = FbMemcacheRemoteFxGraphCacheBackend(cache_id)
+                        remote_cache = FbRemoteFxGraphCacheBackend(cache_id)
                     else:
                         from torch._inductor.remote_cache import RedisRemoteCacheBackend
 

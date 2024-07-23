@@ -10,7 +10,11 @@ if [[ -z "${USE_XPU}" ]]; then
     if [[ "$BRANCH" =~ .*release.* ]]; then
         pip install --index-url ${DOWNLOAD_PYTORCH_ORG}/test/ $TRITON_VERSION
     else
-        pip install --index-url ${DOWNLOAD_PYTORCH_ORG}/nightly/ $TRITON_VERSION+$(head -c 10 .ci/docker/ci_commit_pins/triton.txt)
+        if [[ -n "${CUSTOM_TRITON_VERSION_COMMIT}" ]]; then
+           pip install --force-reinstall "git+https://github.com/triton-lang/triton@${CUSTOM_TRITON_VERSION_COMMIT}#subdirectory=python"
+        else
+            pip install --index-url ${DOWNLOAD_PYTORCH_ORG}/test/ $TRITON_VERSION+$(head -c 10 .ci/docker/ci_commit_pins/triton.txt)
+        fi
     fi
 else
     # Always install Triton for XPU from source
