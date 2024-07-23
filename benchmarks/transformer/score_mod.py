@@ -104,9 +104,7 @@ def generate_inputs(
         torch.rand, kv_shape, device=device, dtype=dtype, requires_grad=requires_grad
     )
     query = (
-        make_q()
-        .view(batch_size, num_h_groups * q_sequence_length, kv_heads, head_dim)
-        .transpose(1, 2)
+        make_q().view(batch_size, q_sequence_length, q_heads, head_dim).transpose(1, 2)
     )
     key = (
         make_kv()
@@ -139,7 +137,8 @@ def run_single_experiment(
     )
 
     def eager_sdpa(query, key, value, _):
-        return F.scaled_dot_product_attention(query, key, value)
+        flattened_query = query.reshape(batch_size, kv_heads, -1, head_dim)
+        return F.scaled_dot_product_attention(flattened_query, key, value)
 
     if max_autotune:
         compiled_sdpa = torch.compile(
@@ -161,7 +160,12 @@ def run_single_experiment(
         eager_sdpa, query, key, value, score_mod
     )
     forward_compiled_time = benchmark_torch_function_in_microseconds(
-        compiled_sdpa, query, key, value, score_mod, block_mask
+        compiled_sdpa,
+        query.reshape(batch_size, kv_heads, -1, head_dim),
+        key,
+        value,
+        score_mod, 
+        block_mask,
     )
 
     if config.calculate_bwd_time:
@@ -171,8 +175,13 @@ def run_single_experiment(
             out_eager.backward, dOut, retain_graph=True
         )
 
-        out_compile = compiled_sdpa(query, key, value, score_mod)
-        dOut = torch.randn_like(out_eager)
+        out_compile = compiled_sdpa(
+            query.reshape(batch_size, kv_heads, -1, head_dim),
+            key,
+            value,
+            score_mod,
+        )
+        dOut = torch.randn_like(out_compile)
         backward_compile_time = benchmark_torch_function_in_microseconds(
             out_compile.backward, dOut, retain_graph=True
         )
