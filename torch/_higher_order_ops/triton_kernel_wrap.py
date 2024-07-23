@@ -810,25 +810,32 @@ class TritonHOPifier:
             # The call to get_first_attr is to maintain backward-compatibility.
             if (
                 (
-                    "warmup" in defaults
-                    and defaults["warmup"].default
-                    != torch._dynamo.utils.get_first_attr(
-                        kernel, "num_warmups", "warmup"
+                    (
+                        "warmup" in defaults
+                        and defaults["warmup"].default
+                        != torch._dynamo.utils.get_first_attr(
+                            kernel, "num_warmups", "warmup"
+                        )
+                    )
+                    or (
+                        "rep" in defaults
+                        and defaults["rep"].default
+                        != torch._dynamo.utils.get_first_attr(kernel, "num_reps", "rep")
+                    )
+                    or (
+                        "prune_configs_by" in defaults
+                        and defaults["prune_configs_by"].default
+                        != kernel.early_config_prune
+                    )
+                    # Set via reset_to_zero argument
+                    or len(kernel.reset_idx) != 0
+                    or len(kernel.restore_idx) != 0
+                    or (
+                        "use_cuda_graph" in defaults
+                        and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
                     )
                 )
-                or (
-                    "rep" in defaults
-                    and defaults["rep"].default
-                    != torch._dynamo.utils.get_first_attr(kernel, "num_reps", "rep")
-                )
-                or (
-                    "prune_configs_by" in defaults
-                    and defaults["prune_configs_by"].default
-                    != kernel.early_config_prune
-                )
-                # Set via reset_to_zero argument
-                or len(kernel.reset_idx) != 0
-                or len(kernel.restore_idx) != 0
+                and not torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args
             ):
                 self.raise_unsupported(
                     "Only configs and keys are supported for triton.autotune"

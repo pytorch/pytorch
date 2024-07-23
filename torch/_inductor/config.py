@@ -620,6 +620,12 @@ decompose_mem_bound_mm: bool = False
 # In the common case, most inputs will be aligned.
 assume_aligned_inputs: bool = False
 
+# For the user-written Triton kernels compiled with the model, ignore the unsupported
+# arguments passed to the @triton.autotune in the user's code; this is unsafe, as
+# ignoring the unsupported args may lead to unexpected autotuning behavior: don't
+# set unless you know what you're doing.
+unsafe_ignore_unsupported_triton_autotune_args: bool = False
+
 
 # config specific to codegen/cpp.py
 class cpp:
