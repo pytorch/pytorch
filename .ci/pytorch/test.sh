@@ -657,7 +657,6 @@ test_laith() {
   echo "just doing echo for now"
 }
 
-
 test_inductor_set_cpu_affinity(){
   #set jemalloc
   JEMALLOC_LIB="/usr/lib/x86_64-linux-gnu/libjemalloc.so.2"
