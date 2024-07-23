@@ -19,6 +19,7 @@ import textwrap
 import types
 import weakref
 from contextlib import contextmanager
+from copy import deepcopy
 from inspect import currentframe, getframeinfo
 from typing import (
     Any,
@@ -94,7 +95,6 @@ from .source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
     TypeSource,
-    UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     WeakRefCallSource,
 )
@@ -112,6 +112,7 @@ from .utils import (
     tuple_iterator_getitem,
     tuple_iterator_len,
     unpatched_nn_module_getattr,
+    verify_guard_fn_signature,
 )
 
 if TYPE_CHECKING:
@@ -864,7 +865,6 @@ class GuardBuilder(GuardBuilderBase):
                 NNModuleSource,
                 UnspecializedNNModuleSource,
                 FSDPNNModuleSource,
-                UnspecializedBuiltinNNModuleSource,
             ),
         ):
             assert base_guard_manager  # to make mypy happy
@@ -1370,6 +1370,33 @@ class GuardBuilder(GuardBuilderBase):
         else:
             self._produce_guard_code(guard, code)
 
+    def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard):
+        value = self.get(guard.name)
+        original_metadata = deepcopy(self.get(guard.name).__tensor_flatten__()[1])
+        if hasattr(value, "__metadata_guard__"):
+            verify_guard_fn_signature(value)
+
+            def metadata_checker(x):
+                return value.__metadata_guard__(
+                    original_metadata, x.__tensor_flatten__()[1]
+                )
+
+        else:
+
+            def metadata_checker(x):
+                return x.__tensor_flatten__()[1] == original_metadata
+
+        global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
+        if config.enable_cpp_guard_manager:
+            self.get_guard_manager(guard).add_lambda_guard(
+                metadata_checker, get_verbose_code_parts(global_name, guard)
+            )
+        else:
+            global_scope = self.get("G")
+            global_scope[global_name] = metadata_checker
+            code = [f"{global_name}({self.get(guard.name)})"]
+            self._produce_guard_code(guard, code)
+
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
@@ -1653,6 +1680,13 @@ class GuardBuilder(GuardBuilderBase):
                 self.guard_on_dict_keys_and_ignore_order(value, guard)
         else:
             self._produce_guard_code(guard, code)
+
+    def EMPTY_NN_MODULE_HOOKS_DICT(self, guard):
+        """Special guard to skip guards on empty hooks. This is controlled by skip_nnmodule_hook_guards"""
+        if config.skip_nnmodule_hook_guards:
+            # This is unsafe if you add/remove a hook on nn module variable
+            return
+        self.SEQUENCE_LENGTH(guard)
 
     def OBJECT_MUTATION(self, guard: Guard):
         mutation_guard.watch(self.get(guard.name), self.check_fn_manager)

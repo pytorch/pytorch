@@ -109,17 +109,28 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def can_constant_fold_through(self):
         return self.value in self._constant_fold_classes()
 
+    def has_key_in_generic_dict(self, tx, key):
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
+            mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
+            return not isinstance(mutated_attr, variables.DeletedVariable)
+
+        return key in self.value.__dict__
+
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from .. import trace_rules
         from . import ConstantVariable, EnumVariable
         from .builder import VariableBuilder
 
+        source = AttrSource(self.source, name) if self.source is not None else None
+
         if name == "__name__":
             return ConstantVariable.create(self.value.__name__)
         elif name == "__qualname__":
             return ConstantVariable.create(self.value.__qualname__)
+        elif name == "__dict__":
+            options = {"source": source}
+            return variables.GetAttrVariable(self, name, **options)
 
-        source = AttrSource(self.source, name) if self.source is not None else None
         try:
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:

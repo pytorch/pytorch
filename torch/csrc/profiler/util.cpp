@@ -5,6 +5,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #ifdef USE_KINETO
 #include <libkineto.h>

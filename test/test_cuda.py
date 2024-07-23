@@ -17,9 +17,10 @@ from copy import deepcopy
 from itertools import product
 from random import randint
 
+import psutil
+
 import torch
 import torch.cuda
-
 from torch import inf, nan
 from torch.cuda._memory_viz import (
     _profile_to_snapshot,
@@ -41,6 +42,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_optimizers import optim_db, optims, TensorTracker
 from torch.testing._internal.common_utils import (
+    EXPANDABLE_SEGMENTS,
     freeze_rng_state,
     gcIfJetson,
     get_cycles_per_ms,
@@ -62,6 +64,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     slowTest,
     subtest,
+    TemporaryFileName,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
     TEST_NUMPY,
@@ -70,6 +73,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils.checkpoint import checkpoint_sequential
 from torch.utils.viz._cycles import observe_tensor_cycles
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -116,6 +120,10 @@ class TestCuda(TestCase):
     def tearDown(self):
         del self.autocast_lists
         super().tearDown()
+
+    @property
+    def expandable_segments(self):
+        return EXPANDABLE_SEGMENTS
 
     def test_pinned_memory_with_cudaregister(self):
         torch.cuda.memory._set_allocator_settings(
@@ -2978,6 +2986,21 @@ exit(2)
                 for stat, expected in zip(stats_to_check, expecteds):
                     stat = stat + pool_string + ".current"
                     current = postcapture_stats[stat] - precapture_stats[stat]
+
+                    # There will only ever be one expandable segment in each of the small and large pools. The way the
+                    # bookeeping is done in the allocator means that we never increment the number of segments.
+                    if self.expandable_segments and "segment" in stat:
+                        expected = 0
+                    # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an
+                    # expandable segment (and as a result reduce the number of reserved bytes) if the block to unmap is
+                    # smaller than the page size
+                    if (
+                        self.expandable_segments
+                        and "reserved" in stat
+                        and (numel == cases[3][0] or numel == cases[4][0])
+                    ):
+                        expected = 2 * kLargeBuffer
+
                     self.assertEqual(
                         current,
                         expected,
@@ -3004,6 +3027,27 @@ exit(2)
             for stat, expected in zip(stats_to_check, expecteds):
                 stat = stat + pool_string + ".current"
                 current = postdel_stats[stat] - precapture_stats[stat]
+
+                # There will only ever be one expandable segment in each of the small and large pools. The way the
+                # bookeeping is done in the allocator means that we never increment the number of segments.
+                if self.expandable_segments and "segment" in stat:
+                    expected = 0
+                # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an
+                # expandable segment (and as a result reduce the number of reserved bytes) if the block to unmap is
+                # smaller than the page size
+                if (
+                    self.expandable_segments
+                    and "reserved" in stat
+                    and numel == cases[3][0]
+                ):
+                    expected = 2 * kLargeBuffer
+                if (
+                    self.expandable_segments
+                    and "reserved" in stat
+                    and numel == cases[4][0]
+                ):
+                    expected = kLargeBuffer
+
                 self.assertEqual(
                     current,
                     expected,
@@ -3981,6 +4025,15 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
+    def test_gds_fails_in_ci(self):
+        if IS_WINDOWS or TEST_WITH_ROCM:
+            error_msg = "is not supported on this platform"
+        else:
+            error_msg = "cuFileHandleRegister failed"
+        with TemporaryFileName() as f:
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                file = torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
+
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaMallocAsync(TestCase):
@@ -4595,6 +4648,10 @@ def reconstruct_from_tensor_metadata(metadata):
 @unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "NYI")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBlockStateAbsorption(TestCase):
+    @property
+    def expandable_segments(self):
+        return EXPANDABLE_SEGMENTS
+
     def checkCheckpointedBlock(self, before_block, after_block):
         for field in ("size", "state"):
             self.assertEqual(before_block[field], after_block[field])
@@ -4922,7 +4979,9 @@ class TestBlockStateAbsorption(TestCase):
         graph_thread.join()
         no_graph_thread.join()
 
-        self.assertEqual(len(get_cudagraph_segments(pool)), 4)
+        self.assertEqual(
+            len(get_cudagraph_segments(pool)), 2 if self.expandable_segments else 4
+        )
 
         del graph
 
@@ -5120,6 +5179,40 @@ class TestCudaOptims(TestCase):
             scaler.update()
             self.assertEqual(scaler._scale, scale)
             self.assertEqual(scaler._growth_tracker, growth_tracker)
+
+
+class TestGDS(TestCase):
+    def _get_tmp_dir_fs_type(self):
+        my_path = os.path.realpath("/tmp")
+        root_type = ""
+        for part in psutil.disk_partitions():
+            if part.mountpoint == "/":
+                root_type = part.fstype
+                continue
+            if part.mountpoint == my_path:
+                return part.fstype
+        return root_type
+
+    @unittest.skipIf(IS_WINDOWS or TEST_WITH_ROCM, "Not supported on Windows or ROCm")
+    def test_gds_read_write_tensors(self):
+        if self._get_tmp_dir_fs_type() not in ("ext4", "xfs"):
+            self.skipTest("GPUDirect Storage requires ext4/xfs for local filesystem")
+        src1 = torch.randn(1024, device="cuda")
+        src2 = torch.randn(2, 1024, device="cuda")
+        torch.cuda.gds._gds_register_buffer(src1.untyped_storage())
+        torch.cuda.gds._gds_register_buffer(src2.untyped_storage())
+        dest1 = torch.empty(1024, device="cuda")
+        dest2 = torch.empty(2, 1024, device="cuda")
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
+            file.save_storage(src1.untyped_storage(), offset=0)
+            file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
+            file.load_storage(dest1.untyped_storage(), offset=0)
+            file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
+        self.assertEqual(src1, dest1)
+        self.assertEqual(src2, dest2)
+        torch.cuda.gds._gds_deregister_buffer(src1.untyped_storage())
+        torch.cuda.gds._gds_deregister_buffer(src2.untyped_storage())
 
 
 instantiate_parametrized_tests(TestCuda)

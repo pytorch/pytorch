@@ -27,7 +27,7 @@ class Adamax(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: float = 2e-3,
+        lr: Union[float, Tensor] = 2e-3,
         betas: Tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0,
@@ -37,6 +37,8 @@ class Adamax(Optimizer):
         differentiable: bool = False,
         capturable: bool = False,
     ):
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -201,7 +203,7 @@ Adamax.__doc__ = (
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float, optional): learning rate (default: 2e-3)
+        lr (float, Tensor, optional): learning rate (default: 2e-3)
         betas (Tuple[float, float], optional): coefficients used for computing
             running averages of gradient and its square
         eps (float, optional): term added to the denominator to improve
