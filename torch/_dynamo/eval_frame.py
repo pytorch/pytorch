@@ -197,6 +197,11 @@ class OptimizedModule(torch.nn.Module):
         self.__dict__ = state
         self._initialize()
 
+    def __getattribute__(self, name):
+        if name == "training":
+            return getattr(self._orig_mod, name)
+        return super().__getattribute__(name)
+
     def __getattr__(self, name):
         if name == "_orig_mod":
             return self._modules["_orig_mod"]
