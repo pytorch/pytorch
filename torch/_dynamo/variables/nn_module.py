@@ -23,7 +23,7 @@ from ..source import (
     FSDPNNModuleSource,
     GetItemSource,
     NNModuleSource,
-    NotNNModuleSource,
+    UnspecializedNNModuleSource,
 )
 from ..utils import (
     get_custom_getattr,
@@ -455,7 +455,7 @@ class NNModuleVariable(VariableTracker):
             mod_proxy = tx.output.create_proxy(
                 "get_attr",
                 self.module_key,
-                tuple(),
+                (),
                 {},
             )
             set_example_value(mod_proxy.node, module)
@@ -668,31 +668,38 @@ class NNModuleVariable(VariableTracker):
             assert self.source
 
             if isinstance(args[0], SliceVariable):
-                # Build a TupleVariable of NNModules
-                result = []
+                # TODO(anijain2305,export-team) - Remove this if condition when inlining of inbuilt nn modules is
+                # enabled for export.
+                if tx.output.export:
+                    # Build a TupleVariable of NNModules
+                    result = []
 
-                # Turn the slice into the list of integers
-                keys = list(range(len(module)))[args[0].as_python_constant()]
-                for idx, submod in enumerate(module[args[0].as_python_constant()]):
-                    key = keys[idx]
-                    src = NNModuleSource(GetItemSource(self.source, key))
-                    result.append(
-                        tx.output.register_attr_or_module(
-                            submod,
-                            key,
-                            source=src,
+                    # Turn the slice into the list of integers
+                    keys = list(range(len(module)))[args[0].as_python_constant()]
+                    for idx, submod in enumerate(module[args[0].as_python_constant()]):
+                        key = keys[idx]
+                        src = NNModuleSource(GetItemSource(self.source, key))
+                        result.append(
+                            tx.output.register_attr_or_module(
+                                submod,
+                                key,
+                                source=src,
+                            )
                         )
-                    )
 
-                new_module = module[args[0].as_python_constant()]
-                new_module_variable = tx.output.register_attr_or_module(
-                    new_module,
-                    f"{self}.__getitem__(slice)",
-                    source=NNModuleSource(
-                        GetItemSource(self.source, args[0].as_python_constant())
-                    ),
-                )
-                return new_module_variable
+                    new_module = module[args[0].as_python_constant()]
+                    new_module_variable = tx.output.register_attr_or_module(
+                        new_module,
+                        f"{self}.__getitem__(slice)",
+                        source=NNModuleSource(
+                            GetItemSource(self.source, args[0].as_python_constant())
+                        ),
+                    )
+                    return new_module_variable
+                else:
+                    # slice on nn module results in a creation of new module instance, so we need to make it sourceless.
+                    # Convert to unspecialized so that UnspecializedNNModule variable can take care of it.
+                    self.convert_to_unspecialized(tx)
 
             from .tensor import SymNodeVariable
 
@@ -920,7 +927,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             params_list = collect_parameters(self, recurse=recurse)
 
             # Account for duplicated params
-            deduplicated_params = list({param: None for param in params_list}.keys())
+            deduplicated_params = list(dict.fromkeys(params_list).keys())
 
             return variables.ListIteratorVariable(
                 deduplicated_params, mutable_local=MutableLocal()
@@ -1030,6 +1037,29 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             return dict_vt.maybe_getitem_const(name_vt)
         return None
 
+    def var_getattr(self, tx, name):
+        # Allow skipping of empty hook dict guards on inbuilt nn modules
+        if name in (
+            "_backward_hooks",
+            "_backward_pre_hooks",
+            "_forward_hooks",
+            "_forward_pre_hooks",
+        ):
+            if not tx.output.side_effects.has_pending_mutation_of_attr(
+                self, name
+            ) and self.value.__module__.startswith(("torch.nn.", "torch.ao.")):
+                hooks_dict = getattr(self.value, name)
+                if isinstance(hooks_dict, dict) and len(hooks_dict) == 0:
+                    if self.source:
+                        hooks_source = AttrSource(self.source, name)
+                        install_guard(
+                            hooks_source.make_guard(
+                                GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
+                            )
+                        )
+                    return variables.ConstDictVariable({})
+        return super().var_getattr(tx, name)
+
     def manually_trace_nn_module_getattr(self, tx, name):
         """
         Dynamo tracing of nn.Module __getattr__ can be expensive if the model
@@ -1071,12 +1101,12 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
 
     @staticmethod
     def _wrap_source(source):
-        if not isinstance(source, (FSDPNNModuleSource, NotNNModuleSource)):
+        if not isinstance(source, (FSDPNNModuleSource, UnspecializedNNModuleSource)):
             if torch._dynamo.config.skip_fsdp_guards:
                 return FSDPNNModuleSource(source)
             else:
                 # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
-                return NotNNModuleSource(source)
+                return UnspecializedNNModuleSource(source)
         else:
             return source
 

@@ -114,7 +114,7 @@ static PyObject* THCPEvent_get_cuda_event(THCPEvent* self, void* unused) {
 
 static PyObject* THCPEvent_get_device(THCPEvent* self, void* unused) {
   HANDLE_TH_ERRORS
-  at::optional<at::Device> device = self->cuda_event.device();
+  std::optional<at::Device> device = self->cuda_event.device();
   if (!device) {
     Py_RETURN_NONE;
   }

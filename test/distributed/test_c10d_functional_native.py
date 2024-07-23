@@ -4,7 +4,6 @@ import unittest
 from typing import List
 
 import torch
-
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 from torch._C import FileCheck
@@ -48,6 +47,7 @@ def load_test_module(name):
 AOTIRunnerUtil = load_test_module("inductor.test_aot_inductor_utils").AOTIRunnerUtil
 
 import sys
+
 
 if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
@@ -380,6 +380,22 @@ class TestWithNCCL(MultiProcessTestCase):
             "avg",
             "default",
         )
+
+    @skip_if_lt_x_gpu(2)
+    def test_py_work(self) -> None:
+        self._init_process_group()
+
+        wait_called = False
+
+        class MyWork(dist.Work):
+            def wait(self, _):
+                nonlocal wait_called
+                wait_called = True
+
+        tensor = torch.rand(2, 2)
+        torch._C._distributed_c10d._register_work(tensor, MyWork())
+        torch.ops._c10d_functional.wait_tensor(tensor)
+        self.assertTrue(wait_called)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)

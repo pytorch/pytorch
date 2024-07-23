@@ -90,7 +90,7 @@ def _iterate_state_dict(
     device: Optional[torch.device] = None,
     cpu_offload: bool = False,
     companion_obj: Any = None,
-    ranks_only: Tuple[int, ...] = tuple(),
+    ranks_only: Tuple[int, ...] = (),
     type_check: bool = True,
     non_blocking: bool = True,
 ) -> Dict[str, Any]:
@@ -207,7 +207,7 @@ def _gather_state_dict(
     pg: Optional[dist.ProcessGroup] = None,
     device: Optional[torch.device] = None,
     cpu_offload: bool = False,
-    ranks_only: Tuple[int, ...] = tuple(),
+    ranks_only: Tuple[int, ...] = (),
     type_check: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -292,7 +292,7 @@ def _gather_state_dict(
 def _offload_state_dict_to_cpu(
     state_dict: Dict[str, Any],
     *,
-    ranks_only: Tuple[int, ...] = tuple(),
+    ranks_only: Tuple[int, ...] = (),
     type_check: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -371,7 +371,7 @@ def _copy_state_dict(
         pg=None,
         device=None,
         cpu_offload=False,
-        ranks_only=tuple(),
+        ranks_only=(),
         companion_obj=copy_state_dict,
         type_check=type_check,
         non_blocking=non_blocking,
@@ -430,7 +430,7 @@ def _create_cpu_state_dict(
         pg=None,
         device=None,
         cpu_offload=False,
-        ranks_only=tuple(),
+        ranks_only=(),
         type_check=False,
     )
     return ret
@@ -468,7 +468,7 @@ def _check_state_dict_similarity(
             pg=None,
             device=None,
             cpu_offload=False,
-            ranks_only=tuple(),
+            ranks_only=(),
             companion_obj=compared_state_dict,
             type_check=False,
         )
