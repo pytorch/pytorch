@@ -628,10 +628,6 @@ Tensor conj_physical(const Tensor& self) {
   return at::_conj_physical(self);
 }
 
-Scalar conj_physical(const Scalar& self) {
-  return self.conj();
-}
-
 Tensor& conj_physical_(Tensor& self) {
   if (!self.is_complex()) return self;
   return unary_op_impl_out(self, self, conj_physical_stub);
