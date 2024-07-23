@@ -21,7 +21,7 @@ from torch._jit_internal import _copy_to_script_wrapper
 from torch.nn.parameter import Parameter
 
 from .module import Module
-
+from .SequentialSplit import SequentialSplit
 
 __all__ = [
     "Container",
@@ -30,6 +30,7 @@ __all__ = [
     "ModuleDict",
     "ParameterList",
     "ParameterDict",
+    "SequentialSplit",
 ]
 
 T = TypeVar("T", bound=Module)
