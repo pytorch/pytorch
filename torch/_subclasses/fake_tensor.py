@@ -954,7 +954,7 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         memory_format,
         storage_offset,
         # Only set storage_bytes for tensors that have storage (not sparse)
-        t.untyped_storage().nbytes() if not t.is_sparse else None,
+        t.untyped_storage().nbytes() if not is_sparse_any(t) else None,
         t.requires_grad,
         t.is_quantized,
         t.is_conj(),
@@ -962,8 +962,8 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         t.is_inference(),
         t.is_sparse,
         t.is_coalesced() if t.is_sparse else None,
-        t.dense_dim() if t.is_sparse else None,
-        t.sparse_dim() if t.is_sparse else None,
+        t.dense_dim() if is_sparse_any(t) else None,
+        t.sparse_dim() if is_sparse_any(t) else None,
     )
 
 
@@ -1394,19 +1394,8 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("not our fake")
                 if arg.constant is not None:
                     raise _BypassDispatchCache("constant attribute")
-                if arg.is_sparse:
-                    raise _BypassDispatchCache("sparse tensor")
-                if arg.layout in [
-                    torch.sparse_csr,
-                    torch.sparse_csc,
-                    torch.sparse_bsr,
-                    torch.sparse_bsc,
-                ]:
-                    # Does this subsume arg.is_sparse?
-                    raise _BypassDispatchCache("sparse tensor layout")
-                # sparse tensors don't have storage, so check is after
-                if is_sparse_compressed(arg):
-                    raise _BypassDispatchCache("sparse compressed tensor")
+                if is_sparse_any(arg):
+                    raise _BypassDispatchCache(f"{arg.layout} tensor")
                 metadata = extract_tensor_metadata(arg)
                 metadata._flatten_into(result, self, state)
             elif isinstance(arg, Tensor):
@@ -1532,7 +1521,7 @@ class FakeTensorMode(TorchDispatchMode):
         if metadata is None:
             return None
 
-        assert not metadata.is_sparse
+        assert not is_sparse_any(metadata)
 
         def check_value(
             value: _MetadataIntLike, state: _CacheKeyState
@@ -1901,7 +1890,7 @@ class FakeTensorMode(TorchDispatchMode):
                     # TODO: Remove these exclusions, so that we can remove
                     # this leg entirely
                     torch_decomp_decompositions(func)
-                    and all(not e.is_sparse for e in flat_arg_fake_tensors)
+                    and all(not is_sparse_any(e) for e in flat_arg_fake_tensors)
                 )
             ):
                 with self:
@@ -2131,7 +2120,7 @@ class FakeTensorMode(TorchDispatchMode):
     def may_turn_const(self, t: Tensor) -> bool:
         return (
             t.numel() <= CONSTANT_NUMEL_LIMIT
-            and not t.is_sparse
+            and not is_sparse_any(t)
             and not self.is_our_fake(t)
             and not t.device.type == "meta"
         )
@@ -2226,7 +2215,7 @@ def run_fallback_kernel(
 
     for e in flat_args:
         if isinstance(e, Tensor):
-            if not e.is_sparse:
+            if not is_sparse_any(e):
                 storages.add(e._typed_storage()._cdata)
 
     # TODO: also check metadata change on inputs
@@ -2237,7 +2226,7 @@ def run_fallback_kernel(
     def map_out(e: T) -> Union[T, FakeTensor]:
         if id(e) not in inp_impls and (
             isinstance(e, Tensor)
-            and not e.is_sparse
+            and not is_sparse_any(e)
             and e._typed_storage()._cdata in storages
         ):
             raise orig_not_implemented_exception
