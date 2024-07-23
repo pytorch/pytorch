@@ -1118,23 +1118,94 @@ def native_layer_norm_default(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
-    normalized_shape = new_kwargs["normalized_shape"]
 
-    # # Ensure we're not trying to normalize over the ragged dim
-    # if inp.dim() < 3 or (inp.dim() - len(normalized_shape)) < 2:
-    #     raise RuntimeError(
-    #         "layer_norm(): normalizing over ragged dim not supported for nested tensors"
-    #     )
-
-    new_kwargs["dim"], reduce_on_batch, reduce_on_ragged, reduce_on_non_batch = (
-        _wrap_jagged_dims(
-            inp.dim(),
-            (new_kwargs["dim"],),
-            "softmax",
-            inp._ragged_idx,
-            allow_batch_dim=True,
+    if inp.dim() <= 2:
+        raise RuntimeError(
+            "layer_norm(): not supported for NestedTensor objects with 2 or fewer dimensions"
         )
-    )
+
+    normalized_shape = new_kwargs[
+        "normalized_shape"
+    ]  # denote -1 as the ragged dimension, i.e. normalize on the ragged dimension
+
+    num_output_dims = inp.dim() - len(normalized_shape)
+
+    if num_output_dims == 0:  # error if trying to normalize over the batch dimension
+        raise RuntimeError(
+            "layer_norm(): not supported when normalizing over the batch dimension for NestedTensor"
+        )
+
+    if -1 in normalized_shape and inp._lengths is not None:
+        raise RuntimeError(
+            "layer_norm(): not supported where lengths is not None if operating on the ragged dimension for NestedTensor"
+        )
+
+    if (
+        -1 in normalized_shape
+    ):  # special handling for normalizing over the ragged dimension
+        padded_input = torch.ops.aten._jagged_to_padded_dense_forward(
+            inp._values,
+            [inp._offsets],
+            max_lengths=[inp._max_seqlen],  # max length of ragged dimension
+        ).flatten(
+            start_dim=inp._ragged_idx + 1
+        )  # create a 2D layer by flattening all dimensions after the ragged dimension into 1 dimension; e.g. (B, *, W, H) --> (B, *, WH)
+
+        padded_mask = torch.ops.aten._jagged_to_padded_dense_forward(
+            torch.ones((inp._values.shape[0], 1), device=inp.device, dtype=inp.dtype),
+            [inp._offsets],
+            max_lengths=[inp._max_seqlen],  # max length of ragged dimension
+        ).expand(
+            padded_input.shape
+        )  # mask elements outside of the ragged dimension and expand to the same shape as padded input (3D dense tensor)
+
+        ragged_lengths = (
+            inp._offsets.diff().unsqueeze(1).unsqueeze(1) * padded_input.shape[2]
+        )  # ragged dim * inner dim, since we sum over dims (1, 2) (the layer on which we normalize)
+
+        mean = (
+            torch.sum(
+                padded_input,
+                dim=(1, 2),
+                keepdim=True,
+            )
+            / ragged_lengths
+        )  # a sum over (1, 2) ensures layer norm, whereas a sum over (1) would be an instance norm
+
+        padded_normalized = (
+            padded_input - mean
+        ) * padded_mask  # mask elements outside of the ragged dimension size for correct variance calculation
+
+        variance = (
+            torch.sum(
+                torch.square(padded_normalized),
+                dim=(1, 2),
+                keepdim=True,
+            )
+            / ragged_lengths
+        )  # a sum over (1, 2) ensures layer norm, whereas a sum over (1) would be an instance norm
+
+        std = torch.sqrt(variance + new_kwargs["eps"])
+        padded_layer_norm = padded_normalized / std
+
+        jagged_layer_norm_values = torch.ops.aten._padded_dense_to_jagged_forward(
+            padded_layer_norm.unflatten(
+                -1, inp.shape[inp._ragged_idx + 1 :]
+            ),  # unflatten last dimension back into original nested tensor shape, e.g. (B, *, WH) --> (B, *, W, H)
+            [inp._offsets],
+            total_L=inp._values.shape[
+                0
+            ],  # providing this parameter helps avoid a GPU/CPU sync
+        )
+
+        return (
+            torch.nested.nested_tensor_from_jagged(
+                jagged_layer_norm_values,
+                inp._offsets,
+            ),
+            mean,
+            std,
+        )
 
     output, mean, std = func(inp._values, **new_kwargs)
     return (NestedTensor(output, **extract_kwargs(inp)), mean, std)
