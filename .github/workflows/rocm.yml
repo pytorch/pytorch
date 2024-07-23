@@ -40,6 +40,7 @@ jobs:
           { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.2" },
           { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.2" },
           { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.2" },
+          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
         ]}
 
   linux-focal-rocm6_1-py3_8-test:

@@ -344,3 +344,29 @@ jobs:
       build-environment: linux-focal-cuda11.8-py3.9-gcc9-experimental-split-build
       docker-image: ${{ needs.linux-focal-cuda11_8-py3_9-gcc9-experimental-split-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda11_8-py3_9-gcc9-experimental-split-build.outputs.test-matrix }}
+
+  linux-focal-rocm6_1-py3_8-inductor-build:
+    name: rocm6.1-py3.8-inductor
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-rocm6.1-py3.8
+      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      test-matrix: |
+        { include: [
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.2" },
+        ]}
+
+  linux-focal-rocm6_1-py3_8-inductor-test:
+    permissions:
+      id-token: write
+      contents: read
+    name: rocm6.1-py3.8-inductor
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-focal-rocm6_1-py3_8-inductor-build
+      - target-determination
+    with:
+      build-environment: linux-focal-rocm6.1-py3.8
+      docker-image: ${{ needs.linux-focal-rocm6_1-py3_8-inductor-build.outputs.docker-image }}
+      test-matrix:  ${{ needs.linux-focal-rocm6_1-py3_8-inductor-build.outputs.test-matrix }}
