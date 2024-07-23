@@ -25,7 +25,6 @@ from typing import (
 from torch._higher_order_ops.utils import autograd_not_implemented
 
 from torch._library.fake_class_registry import FakeScriptObject
-
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -207,14 +206,6 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
                     f"{op_overload} is a TorchScript op, we can't preserve it as is"
                 )
 
-            if not torch._C._dispatch_has_kernel_for_dispatch_key(
-                op_overload.name(), torch._C.DispatchKey.CompositeImplicitAutograd
-            ):
-                raise RuntimeError(
-                    f"{op_overload} is not CompositeImplicitAutograd op, so we will preserve "
-                    "it as long as there is no python decomposition"
-                )
-
             return True
 
         # If we didn't error, it means we can go ahead
@@ -222,6 +213,7 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
 
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
+
         for override_dispatch_key in _AUTOGRAD_ALIAS_BACKEND_KEYS_TO_OVERRIDE:
             if override_dispatch_key not in op_overload.py_kernels:
                 # TODO (tmanlaibaatar)https://github.com/pytorch/pytorch/issues/129430
@@ -243,10 +235,6 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
             )
 
         if op_overload in decomp_table:
-            warnings.warn(
-                f"Deleting decomposition registered for operator `{op_overload}`, "
-                "which was sepecified in the `preserve_ops` list."
-            )
             removed_decomps[op_overload] = decomp_table[op_overload]
             del decomp_table[op_overload]
 
@@ -344,7 +332,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
     from torch._functorch.aot_autograd import aot_export_module
     from torch._guards import detect_fake_mode
-    from torch._subclasses.fake_tensor import FakeTensorMode
 
     from torch.export._trace import (
         _export_to_aten_ir,
@@ -354,16 +341,16 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_placeholder_names,
         _verify_stack_trace,
     )
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     if ep.verifier.dialect == "TRAINING":
         mod = ep.module()
-        fake_args = [
-            node.meta["val"] for node in mod.graph.nodes if node.op == "placeholder"
-        ]
-        fake_mode = torch._export.utils._detect_fake_mode_from_gm(mod)
-        if fake_mode is None:
-            fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
+        fake_args = []
+        for node in mod.graph.nodes:
+            if node.op == "placeholder":
+                fake_args.append(node.meta["val"])
+
+        fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
+        fake_mode = detect_fake_mode(fake_args)
 
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
@@ -410,19 +397,17 @@ def _decompose_and_get_gm_with_new_signature_constants(
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(mod)
         )
-        with fake_mode:
-            fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
-            aten_export_artifact = _export_to_aten_ir(
-                mod,
-                # this requires empty kwargs, but not in pytree.flattened format
-                (
-                    *fake_args_unwrapped[0],
-                    *fake_args_unwrapped[1].values(),
-                ),
-                {},
-                fake_params_buffers,
-                constant_attrs,
-            )
+        aten_export_artifact = _export_to_aten_ir(
+            mod,
+            # this requires empty kwargs, but not in pytree.flattened format
+            (
+                *fake_args_unwrapped[0],
+                *fake_args_unwrapped[1].values(),
+            ),
+            {},
+            fake_params_buffers,
+            constant_attrs,
+        )
 
         gm = aten_export_artifact.gm
         new_graph_signature = aten_export_artifact.sig
@@ -455,6 +440,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
     buffers_to_remove = [name for name, _ in ep.graph_module.named_buffers()]
     for name in buffers_to_remove:
         delattr(ep.graph_module, name)
+
+    from torch._guards import detect_fake_mode
 
     # TODO(zhxhchen17) Return the new graph_signature directly.
     fake_mode = detect_fake_mode(fake_args)
