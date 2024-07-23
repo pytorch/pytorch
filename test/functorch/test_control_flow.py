@@ -505,10 +505,10 @@ def forward(self, pred_1, x_1):
     _param_constant1_1 = self._param_constant1
     _tensor_constant0_1 = self._tensor_constant0
     cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, _param_constant0_1, _param_constant1_1, x_1, _tensor_constant0_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = _param_constant0_1 = _param_constant1_1 = x_1 = _tensor_constant0_1 = None
-    getitem_1 = cond_1[0]
+    getitem_1 = cond_1[0];  getitem_1 = None
     getitem_2 = cond_1[1]
-    getitem_3 = cond_1[2]
-    getitem_4 = cond_1[3];  cond_1 = None
+    getitem_3 = cond_1[2];  getitem_3 = None
+    getitem_4 = cond_1[3];  cond_1 = getitem_4 = None
     return (getitem_2,)""",  # noqa: B950
         )
 
