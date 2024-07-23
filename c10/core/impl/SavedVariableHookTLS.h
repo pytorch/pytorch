@@ -5,6 +5,7 @@
 
 #include <vector>
 #include <optional>
+#include <string>
 
 
 namespace c10::impl {
