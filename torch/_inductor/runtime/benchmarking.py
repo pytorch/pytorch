@@ -374,7 +374,8 @@ class Benchmarker:
         max_benchmark_duration_ms: int = 25,
         ranking_key: Optional[str] = None,
         pruning_key: Optional[str] = None,
-        pruning_factor: float = 1.25,
+        pruning_factor: float = 1.1,
+        pruning_limit: int = 5,
     ) -> List[float]:
         # we don't want any outside errors propagating into benchmarking
         torch.cuda.synchronize()
@@ -442,11 +443,12 @@ class Benchmarker:
                     cpu_launch_overhead_ms_per_iter / len(callables)
                 )
                 target_timing_ms = min(estimated_timings_ms) * pruning_factor
-                callables_to_benchmark = [
-                    _callable
-                    for _callable in callables
-                    if callable_to_timing_ms[_callable] < target_timing_ms
-                ]
+                callables_to_benchmark = []
+                for idx, (_callable, timing_ms) in enumerate(sorted(callable_to_timing_ms.items(), key=lambda x: x[1])):
+                    if len(callables_to_benchmark) == pruning_limit:
+                        break
+                    if timing_ms <= target_timing_ms:
+                        callables_to_benchmark.append(_callable)
                 log.debug(
                     "Pruned to {num_callables} callables for pruning key {pruning_key}.",
                     extra=dict(num_callables=len(callables), pruning_key=pruning_key),
@@ -550,6 +552,8 @@ class Benchmarker:
         _callable: Callable[[], Any],
         ranking_key: Optional[str] = None,
         pruning_key: Optional[str] = None,
+        pruning_factor: Optional[float] = 1.25,
+        pruning_limit: int = 5,
         **kwargs: Any,
     ) -> Union[LazyBenchmark, float]:
         if not benchmarking_config.enable_lazy_benchmarking:
@@ -567,6 +571,8 @@ class Benchmarker:
         _callable: Callable[[], Any],
         ranking_key: Optional[str] = None,
         pruning_key: Optional[str] = None,
+        pruning_factor: Optional[float] = 1.25,
+        pruning_limit: int = 5,
         **kwargs: Any,
     ) -> Union[LazyBenchmark, float]:
         if not benchmarking_config.enable_lazy_benchmarking:
