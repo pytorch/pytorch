@@ -200,7 +200,6 @@ class ComposabilityTest(MultiProcContinousTest):
                     parts = name.split(".")
                     parts[0] = str(int(parts[0]) + offset)
                     name = ".".join(parts)
-                    ref_p = ref_parameters[name]
                     self.assertTrue(isinstance(p.grad, DTensor))
                     self.assertEqual(ref_p.grad, p.grad.full_tensor())
         elif dp_type == "DDP":
@@ -209,7 +208,6 @@ class ComposabilityTest(MultiProcContinousTest):
                     parts = name.split(".")[1:]  # remove the "module." prefix
                     parts[0] = str(int(parts[0]) + offset)
                     name = ".".join(parts)
-                    ref_p = ref_parameters[name]
                     self.assertEqual(ref_p.grad, p.grad)
 
 
