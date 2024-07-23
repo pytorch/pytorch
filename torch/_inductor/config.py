@@ -703,6 +703,13 @@ class cpp:
         == "1"
     )
 
+    # Maximal allowed number of slices on K-dim for a GEMM kernel. This controls
+    # the maximal parallelism of K-slicing. Since K-slicing requires extra thread
+    # synchronization and buffers,  the maximal number of slices is limited to
+    # mitigate the sync overhead and memory usage.
+    # When set to 0, the number of slices is unlimited.
+    gemm_max_k_slices = int(os.environ.get("TORCHINDUCTOR_CPP_GEMM_MAX_K_SLICES", "1"))
+
 
 # config specific to codegen/triton.py
 class triton:
