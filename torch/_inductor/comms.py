@@ -131,8 +131,7 @@ def _schedule_for_comm(
             return self.score < other.score
 
     unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {
-        snode: {dep.name for dep in snode.unmet_dependencies}
-        for snode in snodes
+        snode: {dep.name for dep in snode.unmet_dependencies} for snode in snodes
     }
 
     ready: List[Runnable] = []
