@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
 import copy
@@ -206,14 +207,6 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
                     f"{op_overload} is a TorchScript op, we can't preserve it as is"
                 )
 
-            if not torch._C._dispatch_has_kernel_for_dispatch_key(
-                op_overload.name(), torch._C.DispatchKey.CompositeImplicitAutograd
-            ):
-                raise RuntimeError(
-                    f"{op_overload} is not CompositeImplicitAutograd op, so we will preserve "
-                    "it as long as there is no python decomposition"
-                )
-
             return True
 
         # If we didn't error, it means we can go ahead
@@ -221,6 +214,7 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
 
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
+
         for override_dispatch_key in _AUTOGRAD_ALIAS_BACKEND_KEYS_TO_OVERRIDE:
             if override_dispatch_key not in op_overload.py_kernels:
                 # TODO (tmanlaibaatar)https://github.com/pytorch/pytorch/issues/129430
@@ -242,10 +236,6 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
             )
 
         if op_overload in decomp_table:
-            warnings.warn(
-                f"Deleting decomposition registered for operator `{op_overload}`, "
-                "which was sepecified in the `preserve_ops` list."
-            )
             removed_decomps[op_overload] = decomp_table[op_overload]
             del decomp_table[op_overload]
 
@@ -339,14 +329,13 @@ def _decompose_and_get_gm_with_new_signature_constants(
     _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
-    from torch._export.non_strict_utils import make_fake_params_buffers
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
     from torch._functorch.aot_autograd import aot_export_module
     from torch._guards import detect_fake_mode
 
     from torch.export._trace import (
         _export_to_aten_ir,
-        _get_params_buffers,
+        _fakify_params_buffers,
         _ignore_backend_decomps,
         _verify_nn_module_stack,
         _verify_placeholder_names,
@@ -405,9 +394,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
             constant_attrs.add(value, name)
 
         # get params & buffers after excluding constants
-        fake_params_buffers = make_fake_params_buffers(
-            fake_mode, _get_params_buffers(mod)
-        )
+        fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
         aten_export_artifact = _export_to_aten_ir(
             mod,
             # this requires empty kwargs, but not in pytree.flattened format
@@ -952,7 +939,7 @@ class ExportedProgram:
 
     def __str__(self) -> str:
         graph_module = self.graph_module.print_readable(
-            print_output=False, colored=True
+            print_output=False, colored=False
         ).replace("\n", "\n    ")
         string = (
             "ExportedProgram:\n"
