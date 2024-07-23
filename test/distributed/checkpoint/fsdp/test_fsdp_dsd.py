@@ -187,11 +187,16 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
         self.assertEqual(fsdp2_full_msd, fsdp1_full_msd)
         self.assertEqual(fsdp1_full_osd, fsdp2_full_osd)
 
+    @skip_if_lt_x_gpu(4)
     @with_temp_dir
     def test_save_with_fsdp1_and_load_with_fsdp2_tp(self):
         """
         Test that we can save a model with FSDP1 and load it with FSDP2 + TP on 2d mesh.
         """
+
+        def _get_base_model(mlp_dim: int = 2):
+            base_model = nn.Sequential(MLP(mlp_dim), MLP(mlp_dim), MLP(mlp_dim))
+            return base_model
 
         state_dict_type_list = [
             StateDictType.FULL_STATE_DICT,
@@ -201,7 +206,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
         for state_dict_type in state_dict_type_list:
             # Save state dict with model wrapped with FSDP1
             fsdp1_model = FSDP(
-                self._get_base_model().cuda(),
+                _get_base_model().cuda(),
                 use_orig_params=True,
                 auto_wrap_policy=always_wrap_policy,
             )
@@ -242,7 +247,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
 
             # FSDP + TP
-            fsdp2_tp_model = self._get_base_model()
+            fsdp2_tp_model = _get_base_model()
             fsdp2_tp_model = parallelize_module(
                 fsdp2_tp_model,
                 device_mesh=tp_mesh,
@@ -292,7 +297,6 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             # Compare full state dict to make sure they are the same.
             self.assertEqual(fsdp2_tp_full_msd, fsdp1_full_msd)
             self.assertEqual(fsdp2_tp_full_osd, fsdp1_full_osd)
-
 
 
 if __name__ == "__main__":
