@@ -9251,28 +9251,57 @@ class TestLinalgMPS(TestCaseMPS):
 
 
 class TestSDPA(TestCaseMPS):
-    def test_sdpa_1(self):
+    def _compare_tensors(self, y, ref):
+        denom = torch.maximum(ref.abs(), torch.tensor([1e-6], device=ref.device, dtype=ref.dtype))
+        err = ((y - ref).abs() / denom).max().item()
+        self.assertLess(err, 0.01)
+
+    def _test_sdpa_no_mask(self, is_causal: bool):
+        torch.manual_seed(1729)
+        max_seq_length = 72
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            q = torch.randn([1, 32, 1, 128], dtype=torch.float16, device="mps")
+            k = torch.randn([1, 32, max_seq_length, 128], dtype=q.dtype, device="mps")
+            v = torch.randn([1, 32, max_seq_length, 128], dtype=q.dtype, device="mps")
+                       
+            y, attn = torch.ops.aten._scaled_dot_product_attention_math_for_mps(q, k, v, dropout_p=0.0, is_causal=is_causal)
+            y_ref, attn_ref = torch.ops.aten._scaled_dot_product_attention_math(q, k, v, dropout_p=0.0, is_causal=is_causal)
+
+            self._compare_tensors(y, y_ref)
+            self._compare_tensors(attn, attn_ref)
+
+    def test_sdpa_no_mask_no_causal(self):
+        self._test_sdpa_no_mask(False)
+
+    def test_sdpa_no_mask_causal(self):
+        self._test_sdpa_no_mask(True)
+
+    def test_sdpa_mask(self):
         torch.manual_seed(1729)
         max_seq_length = 72
         causal_mask = torch.tril(
             torch.ones(max_seq_length, max_seq_length, dtype=torch.bool, device='mps'),
         )
         with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
-            for i in range(6, max_seq_length):
-                input_pos = torch.tensor([i], dtype=torch.int32, device='mps')
-                mask = causal_mask[None, None, input_pos]
-                q = torch.randn([1, 32, 1, 128], dtype=torch.float16, device="mps")
-                k = torch.randn([1, 32, max_seq_length, 128], dtype=torch.float16, device="mps")
-                v = torch.randn([1, 32, max_seq_length, 128], dtype=torch.float16, device="mps")
-                
-                y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False)
-                ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), dropout_p=0.0, is_causal=False)
-                mean_err = ((y.cpu() - ref).abs() / ref).mean().item()
-                if mean_err > 0.01:
-                    print(f"Error for i: {i} is: {mean_err}")
-                self.assertLess(mean_err, 0.01)
+            i = 42
 
-    def test_sdpa_2(self):
+            q = torch.randn([1, 32, 1, 128], dtype=torch.float16, device="mps")
+            k = torch.randn([1, 32, max_seq_length, 128], dtype=q.dtype, device="mps")
+            v = torch.randn([1, 32, max_seq_length, 128], dtype=q.dtype, device="mps")
+            
+            input_pos = torch.tensor([i], dtype=torch.int32, device='mps')
+            mask = causal_mask[None, None, input_pos]
+
+            attn_bias = torch.zeros(mask.shape, dtype=q.dtype, device="mps")
+            attn_bias.masked_fill_(mask.logical_not(), float("-inf"))
+            
+            y, attn = torch.ops.aten._scaled_dot_product_attention_math_for_mps(q, k, v, attn_mask=attn_bias, dropout_p=0.0, is_causal=False)
+            y_ref, attn_ref = torch.ops.aten._scaled_dot_product_attention_math(q, k, v, attn_mask=attn_bias, dropout_p=0.0, is_causal=False)
+
+            self._compare_tensors(y, y_ref)
+            self._compare_tensors(attn, attn_ref)
+
+    def test_sdpa_vs_cpu(self):
         torch.manual_seed(1729)
         max_seq_length = 72
         causal_mask = torch.tril(
