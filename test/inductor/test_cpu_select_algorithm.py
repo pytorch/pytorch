@@ -235,28 +235,52 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-        if (
-            (
-                dtype == torch.bfloat16
-                or (
-                    dtype == torch.float16
-                    and torch.ops.mkldnn._is_mkldnn_fp16_supported()
+        cpp_epilogue_fusion_counter = counters["inductor"][
+            "cpp_epilogue_fusion_counter"
+        ]
+        if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
+            if (
+                (
+                    (
+                        dtype == torch.bfloat16
+                        and torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                    )
+                    or (
+                        dtype == torch.float16
+                        and torch.ops.mkldnn._is_mkldnn_fp16_supported()
+                    )
                 )
-            )
-            and epilogue != "mul"
-            and epilogue != "div"
-            or (dtype == torch.half and epilogue == "add" and not bias)
-        ):
-            # Several scenarios where epilogue fusion is not counted in:
-            # 1. For bfloat16, the epilogue fusion is part of the template,
-            #    not fused via scheduler. This will also be true for float16 when
-            #    hardware has the float16 instruction. The exception is mul or
-            #    div fusion which is not supported for oneDNN linear.
-            # 2. For float16, since oneDNN linear is not applied, linear w/o bias
-            #    plus epilogue add is treated as linear w/ bias.
-            self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
+                and epilogue != "mul"
+                and epilogue != "div"
+                or (
+                    (
+                        dtype == torch.half
+                        or (
+                            dtype == torch.bfloat16
+                            and not torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                        )
+                    )
+                    and epilogue == "add"
+                    and not bias
+                )
+            ):
+                # Several scenarios where epilogue fusion is not counted in:
+                # 1. For bfloat16, the epilogue fusion is part of the template,
+                #    not fused via scheduler. This will also be true for float16 when
+                #    hardware has the float16 instruction. The exception is mul or
+                #    div fusion which is not supported for oneDNN linear.
+                # 2. For float16, since oneDNN linear is not applied, linear w/o bias
+                #    plus epilogue add is treated as linear w/ bias.
+                self.assertEqual(cpp_epilogue_fusion_counter, 0)
+            else:
+                self.assertEqual(cpp_epilogue_fusion_counter, 1)
         else:
-            self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+            # If mkldnn is not enabled or not available, epilogue fusion is not counted in only when:
+            #    linear w/o bias plus epilogue add
+            if epilogue == "add" and not bias:
+                self.assertEqual(cpp_epilogue_fusion_counter, 0)
+            else:
+                self.assertEqual(cpp_epilogue_fusion_counter, 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
