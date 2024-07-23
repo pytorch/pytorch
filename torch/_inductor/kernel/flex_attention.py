@@ -9,7 +9,6 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 from torch.utils._pytree import tree_map
-
 from .. import config
 from ..ir import (
     ComputedBuffer,
@@ -23,7 +22,6 @@ from ..ir import (
 )
 from ..lowering import empty, empty_strided, lowerings, register_lowering
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
-
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
