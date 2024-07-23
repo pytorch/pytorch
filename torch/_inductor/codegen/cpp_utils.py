@@ -97,21 +97,24 @@ def get_promote_dtype(args):
     )
 
 
-def promote_vec_args(new_args):
-    def promote_vec_arg(arg, promote_type):
+def promote_args(new_args):
+    def promote_arg(arg, promote_type):
         if (
             isinstance(arg, CppCSEVariable)
             and arg.dtype
             and promote_type
             and arg.dtype != promote_type
         ):
-            assert arg.is_vec, "expect vec arg"
             arg = ops.to_dtype(arg, promote_type)
             arg = arg.value if isinstance(arg, OpsValue) else arg
             arg.dtype = promote_type
         return arg
 
     promote_type = get_promote_dtype(new_args)
+    promote_fn = functools.partial(
+        promote_arg,
+        promote_type=promote_type,
+    )
     if (
         all(
             new_arg.dtype is not None
@@ -120,15 +123,7 @@ def promote_vec_args(new_args):
         )
         and promote_type
     ):
-        new_args = list(
-            map(
-                functools.partial(
-                    promote_vec_arg,
-                    promote_type=promote_type,
-                ),
-                new_args,
-            )
-        )
+        new_args = list(map(promote_fn, new_args))
     return new_args
 
 
