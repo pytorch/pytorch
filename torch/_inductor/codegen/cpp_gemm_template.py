@@ -283,7 +283,6 @@ class CppPackedGemmTemplate(CppTemplate):
         Mc_blocks, Nc_blocks, Kc_blocks = get_cache_blocking(
             register_blocking, thread_blocking
         )
-        print("Mc, Kc", Mc_blocks, Kc_blocks)
         return GemmBlocking(Mc_blocks, Nc_blocks, Kc_blocks)
 
     @staticmethod
