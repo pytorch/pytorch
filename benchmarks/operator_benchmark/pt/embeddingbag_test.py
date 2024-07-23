@@ -1,8 +1,10 @@
 import numpy
-import torch
 from pt import configs
 
 import operator_benchmark as op_bench
+
+import torch
+
 
 """Embedding and EmbeddingBag Operator Benchmark"""
 

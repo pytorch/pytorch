@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 
 import torch
@@ -11,6 +12,7 @@ from ..select_algorithm import (
 from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
 from .mm_common import mm_args, mm_grid, mm_options
+
 
 aten = torch.ops.aten
 

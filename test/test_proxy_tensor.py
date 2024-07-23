@@ -1108,6 +1108,37 @@ def forward(self, y_1, x_1):
     index_select = torch.ops.aten.index_select.default(y_1, 1, repeat_interleave);  y_1 = repeat_interleave = None
     return index_select""")
 
+    def test_mod_gcd_unbacked(self):
+        def f(_a, _b, _stride):
+            a = _a.item()
+            b = _b.item()
+            stride = _stride.item()
+            torch._check_is_size(a)
+            torch._check_is_size(b)
+            torch._check_is_size(stride)
+            ta = torch.randn(a * stride)
+            tb = torch.randn(b * stride)
+            r = torch.cat([ta, tb])
+            return r.view(a + b, stride)
+
+        _a = torch.tensor(30)
+        _b = torch.tensor(20)
+        _stride = torch.tensor(10)
+        r = str(make_fx(f, tracing_mode="symbolic")(_a, _b, _stride).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, _a_1, _b_1, _stride_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(_a_1);  _a_1 = None
+    _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(_b_1);  _b_1 = None
+    _local_scalar_dense_2 = torch.ops.aten._local_scalar_dense.default(_stride_1);  _stride_1 = None
+    mul = _local_scalar_dense * _local_scalar_dense_2
+    randn = torch.ops.aten.randn.default([mul], device = device(type='cpu'), pin_memory = False);  mul = None
+    mul_1 = _local_scalar_dense_1 * _local_scalar_dense_2
+    randn_1 = torch.ops.aten.randn.default([mul_1], device = device(type='cpu'), pin_memory = False);  mul_1 = None
+    cat = torch.ops.aten.cat.default([randn, randn_1]);  randn = randn_1 = None
+    add = _local_scalar_dense + _local_scalar_dense_1;  _local_scalar_dense = _local_scalar_dense_1 = None
+    view = torch.ops.aten.view.default(cat, [add, _local_scalar_dense_2]);  cat = add = _local_scalar_dense_2 = None
+    return view""")
+
     def test_cumsum_unbacked(self):
         def f(x):
             y = x.item()
@@ -1170,7 +1201,9 @@ def forward(self, x_1):
         batch_size = 4
         src_tokens = torch.randint(1, vocab_size, (batch_size, prompt_size))
         gm = make_fx(f, tracing_mode="symbolic")(src_tokens)
-        self.assertEqual(len(gm.shape_env.guards), 0)
+        # Guards to rule out batch_size == sys.maxsize (wobbling between 2 and
+        # 1 ok)
+        self.assertEqual(len(gm.shape_env.guards), 1)
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_cpu_scalar_cuda(self):
@@ -1587,7 +1620,8 @@ def forward(self, lengths_1, values_1):
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
-    pow_1 = sym_size_int ** 0.5;  sym_size_int = None
+    sym_float = torch.sym_float(sym_size_int);  sym_size_int = None
+    pow_1 = sym_float ** 0.5;  sym_float = None
     div = torch.ops.aten.div.Tensor(a_1, pow_1);  a_1 = pow_1 = None
     return div""")
 
@@ -1965,14 +1999,12 @@ symbolic_tensor_failures = {
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
-    xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
-    xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
 
@@ -2003,8 +2035,6 @@ symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 inplace_symbolic_tensor_failures = {
     # bugs
     xfail('float_power', ''),  # base given to float_power_ has dtype Float but the operation's result requires dtype Double
-    # decomp not implemented
-    xfail('unique', ''),
 }
 
 out_symbolic_tensor_failures = {
@@ -2033,7 +2063,6 @@ out_symbolic_tensor_failures = {
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
     xfail('triangular_solve', ''),
-    xfail('view_copy', ''),
 
     # SymIntArrayRef expected to contain only concrete
     xfail('ones', ''),

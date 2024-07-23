@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""This package adds support for device memory management implemented in CUDA."""
 
 import collections
@@ -9,6 +10,7 @@ import warnings
 from inspect import signature
 
 from typing import Any, Dict, Optional, Tuple, Union
+from typing_extensions import deprecated
 
 import torch
 from torch import _C
@@ -446,21 +448,21 @@ def max_memory_reserved(device: Union[Device, int] = None) -> int:
     return memory_stats(device=device).get("reserved_bytes.all.peak", 0)
 
 
+@deprecated(
+    "`torch.cuda.memory_cached` has been renamed to `torch.cuda.memory_reserved`",
+    category=FutureWarning,
+)
 def memory_cached(device: Union[Device, int] = None) -> int:
     r"""Deprecated; see :func:`~torch.cuda.memory_reserved`."""
-    warnings.warn(
-        "torch.cuda.memory_cached has been renamed to torch.cuda.memory_reserved",
-        FutureWarning,
-    )
     return memory_reserved(device=device)
 
 
+@deprecated(
+    "`torch.cuda.max_memory_cached` has been renamed to `torch.cuda.max_memory_reserved`",
+    category=FutureWarning,
+)
 def max_memory_cached(device: Union[Device, int] = None) -> int:
     r"""Deprecated; see :func:`~torch.cuda.max_memory_reserved`."""
-    warnings.warn(
-        "torch.cuda.max_memory_cached has been renamed to torch.cuda.max_memory_reserved",
-        FutureWarning,
-    )
     return max_memory_reserved(device=device)
 
 
@@ -641,8 +643,12 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
             return "amdsmi driver can't be loaded, is ROCm installed?"
 
         device = _get_amdsmi_device_index(device)
-        handle = amdsmi.amdsmi_get_processor_handles()[device]  # type: ignore[attr-defined]
-        procs = amdsmi.amdsmi_get_gpu_process_list(handle)  # type: ignore[attr-defined]
+
+        try:
+            handle = amdsmi.amdsmi_get_processor_handles()[device]  # type: ignore[attr-defined]
+            procs = amdsmi.amdsmi_get_gpu_process_list(handle)  # type: ignore[attr-defined]
+        except amdsmi.AmdSmiException:  # type: ignore[attr-defined]
+            return "amdsmi cannot list processes from other users"
 
     lines = []
     lines.append(f"GPU:{device}")
@@ -653,7 +659,12 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
             mem = p.usedGpuMemory / (1024 * 1024)
             pid = p.pid
         else:
-            proc_info = amdsmi.amdsmi_get_gpu_process_info(handle, p)  # type: ignore[possibly-undefined]
+            try:
+                proc_info = amdsmi.amdsmi_get_gpu_process_info(handle, p)  # type: ignore[possibly-undefined]
+            except AttributeError:
+                # https://github.com/ROCm/amdsmi/commit/c551c3caedbd903ba828e7fdffa5b56d475a15e7
+                # is a BC-breaking change that removes amdsmi_get_gpu_process_info API from amdsmi
+                proc_info = p
             mem = proc_info["memory_usage"]["vram_mem"] / (1024 * 1024)
             pid = proc_info["pid"]
         lines.append(f"process {pid:>10d} uses {mem:>12.3f} MB GPU memory")

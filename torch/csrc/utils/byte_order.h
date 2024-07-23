@@ -62,8 +62,7 @@
 #error Unexpected or undefined __BYTE_ORDER__
 #endif
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 enum THPByteOrder { THP_LITTLE_ENDIAN = 0, THP_BIG_ENDIAN = 1 };
 
@@ -99,11 +98,7 @@ TORCH_API void THP_decodeDoubleBuffer(
     const uint8_t* src,
     bool do_byte_swap,
     size_t len);
-TORCH_API void THP_decodeBoolBuffer(
-    bool* dst,
-    const uint8_t* src,
-    bool do_byte_swap,
-    size_t len);
+TORCH_API void THP_decodeBoolBuffer(bool* dst, const uint8_t* src, size_t len);
 TORCH_API void THP_decodeBFloat16Buffer(
     at::BFloat16* dst,
     const uint8_t* src,
@@ -147,11 +142,6 @@ TORCH_API void THP_decodeFloatBuffer(
     size_t len);
 TORCH_API void THP_decodeDoubleBuffer(
     double* dst,
-    const uint8_t* src,
-    THPByteOrder order,
-    size_t len);
-TORCH_API void THP_decodeBoolBuffer(
-    bool* dst,
     const uint8_t* src,
     THPByteOrder order,
     size_t len);
@@ -223,5 +213,4 @@ TORCH_API void THP_encodeComplexDoubleBuffer(
     THPByteOrder order,
     size_t len);
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

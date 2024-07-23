@@ -29,6 +29,7 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
   return c10::GetCPUAllocator();
 }
 
+#ifndef C10_MOBILE
 constexpr uint64_t storage_max() {
   // int64_t and size_t are used somewhat inconsistently throughout ATen.
   // To be safe, storage size calculations must fit in both types.
@@ -38,6 +39,7 @@ constexpr uint64_t storage_max() {
       std::numeric_limits<size_t>::max());
   return std::min(int64_max, size_max);
 }
+#endif
 
 inline void raise_warning_for_complex_half(ScalarType dtype) {
   if (dtype == kComplexHalf) {
@@ -328,7 +330,7 @@ struct MetaAllocator final : public at::Allocator {
   static void deleter(void* const pointer) {
     TORCH_INTERNAL_ASSERT(!pointer);
   }
-  DataPtr allocate(const size_t nbytes) override {
+  DataPtr allocate(const size_t nbytes [[maybe_unused]]) override {
     return {nullptr, nullptr, &deleter, at::Device(DeviceType::Meta)};
   }
   DeleterFnPtr raw_deleter() const override {

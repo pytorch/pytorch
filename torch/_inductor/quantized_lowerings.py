@@ -1,5 +1,8 @@
+# mypy: allow-untyped-defs
 import torch
+
 from . import lowering
+
 
 quantized = torch.ops.quantized
 _quantized = torch.ops._quantized

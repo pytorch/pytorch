@@ -170,8 +170,9 @@ struct TraceEntry {
     SEGMENT_UNMAP, // unmap part of a segment (used with expandable segments)
     SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
               // events
-    OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free
-        // bytes reported by cuda)
+    OOM, // the allocator threw an OutOfMemoryError (addr_ is the amount of free
+         // bytes reported by cuda)
+    USER_DEFINED // a call made from user defined API such as record_function
   };
   TraceEntry(
       Action action,
@@ -241,6 +242,11 @@ using OutOfMemoryObserver = std::function<void(
 
 using AllocatorTraceTracker = std::function<void(const TraceEntry&)>;
 
+struct ShareableHandle {
+  ptrdiff_t offset;
+  std::string handle;
+};
+
 class CUDAAllocator : public Allocator {
  public:
   virtual void* raw_alloc(size_t nbytes) = 0;
@@ -276,6 +282,7 @@ class CUDAAllocator : public Allocator {
         " does not yet support checkPoolLiveAllocations. "
         "If you need it, please file an issue describing your use case.");
   }
+  virtual ShareableHandle shareIpcHandle(void* ptr) = 0;
   virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) = 0;
   virtual bool isHistoryEnabled() {
     TORCH_CHECK(
@@ -289,6 +296,7 @@ class CUDAAllocator : public Allocator {
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
       RecordContext when) = 0;
+  virtual void recordAnnotation(const std::shared_ptr<GatheredContext>& name){};
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
   // Attached AllocatorTraceTracker callbacks will be called while the
@@ -428,6 +436,10 @@ inline void recordHistory(
       enabled, context_recorder, alloc_trace_max_entries, when);
 }
 
+inline void recordAnnotation(const std::shared_ptr<GatheredContext>& name) {
+  return get()->recordAnnotation(name);
+}
+
 inline bool isHistoryEnabled() {
   return get()->isHistoryEnabled();
 }
@@ -454,6 +466,10 @@ inline void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
 inline std::shared_ptr<void> getIpcDevPtr(std::string handle) {
   return get()->getIpcDevPtr(std::move(handle));
+}
+
+inline ShareableHandle shareIpcHandle(void* ptr) {
+  return get()->shareIpcHandle(ptr);
 }
 
 inline std::string name() {

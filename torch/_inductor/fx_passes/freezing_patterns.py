@@ -1,9 +1,10 @@
+# mypy: allow-untyped-defs
 import functools
 
 import torch
 from torch._inductor.compile_fx import fake_tensor_prop
-from ..._dynamo.utils import counters
 
+from ..._dynamo.utils import counters
 from .. import config
 from ..pattern_matcher import (
     _return_true,
@@ -18,6 +19,7 @@ from ..pattern_matcher import (
     register_replacement,
     stable_topological_sort,
 )
+
 
 aten = torch.ops.aten
 
