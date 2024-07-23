@@ -19,7 +19,6 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import torch
 
 from .coordinate_descent_tuner import CoordescTuner
-
 from .hints import (
     _NUM_THREADS_PER_WARP,
     AutotuneHint,
@@ -42,6 +41,7 @@ from .runtime_utils import (
     next_power_of_2,
     triton_config_to_hashable,
 )
+
 
 try:
     import triton
@@ -255,10 +255,10 @@ class CachingAutotuner(KernelInterface):
                 self.inductor_meta.get("dynamic_scale_rblock", True)
                 and self.heuristic_type == HeuristicType.REDUCTION
                 and self.size_hints is not None
-                # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
-                and device_prop.type in ["cuda", "hip"]
+                # Disable for AMDGPU/Intel as Triton is not ready to return n_regs for a compiled_binary.
+                and device_prop.type == "cuda"
                 and device_prop.major
-                and (device_prop.major >= 8 or torch.version.hip)
+                and device_prop.major >= 8
             ):
                 assert device_prop.regs_per_multiprocessor
                 assert device_prop.max_threads_per_multi_processor
@@ -295,7 +295,7 @@ class CachingAutotuner(KernelInterface):
                     ):
                         continue
 
-                    nreg_per_warp = nreg * device_prop.warp_size
+                    nreg_per_warp = nreg * 32
                     nreg_per_block = nreg_per_warp * triton_config.num_warps
 
                     # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
@@ -723,7 +723,7 @@ class CachingAutotuner(KernelInterface):
         if self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config, time_taken_ns)
 
-    def save_cuda_kernel(self, grid, stream, launcher):
+    def save_gpu_kernel(self, grid, stream, launcher):
         if callable(grid):
             grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
         else:
@@ -753,12 +753,9 @@ class CachingAutotuner(KernelInterface):
         }
         from torch._inductor.codecache import CudaKernelParamCache
 
-        binary = (
-            launcher.bin.asm["cubin"]
-            if self.device_props.type != "hip"
-            else launcher.bin.asm["hsaco"]
-        )
-        CudaKernelParamCache.set(key, params, binary)
+        bin_type = {"hip": "hsaco", "xpu": "spv"}.get(self.device_props.type, "cubin")
+        binary = launcher.bin.asm[bin_type]
+        CudaKernelParamCache.set(key, params, binary, bin_type)
 
         self.cuda_kernel_saved = True
 
@@ -831,7 +828,7 @@ class CachingAutotuner(KernelInterface):
 
         (launcher,) = self.launchers
         if launcher.store_cubin:
-            self.save_cuda_kernel(grid, stream, launcher)
+            self.save_gpu_kernel(grid, stream, launcher)
 
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
