@@ -702,7 +702,9 @@ class GraphLowering(torch.fx.Interpreter):
     def fake_mode(self) -> torch._subclasses.fake_tensor.FakeTensorMode:
         return V.fake_mode
 
-    def get_buffer(self, buffer_name: str) -> Union[ir.TensorBox, ir.Buffer]:
+    def try_get_buffer(
+        self, buffer_name: str
+    ) -> Optional[Union[ir.TensorBox, ir.Buffer]]:
         if buffer_name in self.name_to_buffer:
             return self.name_to_buffer[buffer_name]
         if buffer_name in self.graph_inputs:
@@ -715,6 +717,13 @@ class GraphLowering(torch.fx.Interpreter):
                     data.device, data.dtype, *V.graph.static_sizes_strides(data)
                 ),
             )
+
+        return None
+
+    def get_buffer(self, buffer_name: str) -> Union[ir.TensorBox, ir.Buffer]:
+        buf = self.try_get_buffer(buffer_name)
+        if buf is not None:
+            return buf
         raise RuntimeError(f"Failed to find buffer matching name {buffer_name}")
 
     def get_dtype(self, buffer_name: str) -> torch.dtype:
