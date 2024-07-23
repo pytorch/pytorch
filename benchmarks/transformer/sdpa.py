@@ -7,6 +7,7 @@ from typing import Callable, List, Tuple
 
 from tabulate import tabulate
 from tqdm import tqdm
+from triton.testing import do_bench
 
 import torch
 import torch.utils.benchmark as benchmark
@@ -28,6 +29,13 @@ def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) ->
         globals={"args": args, "kwargs": kwargs, "func": func},
     )
     return t0.adaptive_autorange(min_run_time=0.1).median * 1e6
+
+
+def benchmark_torch_function_in_microseconds_(func: Callable, *args, **kwargs) -> float:
+    # warmup
+    for _ in range(5):
+        func(*args, **kwargs)
+    return do_bench(lambda: func(*args, **kwargs)) * 1e3
 
 
 @dataclass(frozen=True)
@@ -111,7 +119,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
         k = k.repeat_interleave(config.q_num_heads // config.kv_num_heads, dim=1)
         v = v.repeat_interleave(config.q_num_heads // config.kv_num_heads, dim=1)
     with context:
-        forward_time = benchmark_torch_function_in_microseconds(
+        forward_time = benchmark_torch_function_in_microseconds_(
             scaled_dot_product_attention,
             q,
             k,
@@ -124,7 +132,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
             q, k, v, is_causal=is_causal, attn_mask=None, enable_gqa=enable_gqa
         )
         dOut = torch.randn_like(out_torch)
-        backward_time = benchmark_torch_function_in_microseconds(
+        backward_time = benchmark_torch_function_in_microseconds_(
             out_torch.backward, dOut, retain_graph=True
         )
     return ExperimentResults(
@@ -181,33 +189,34 @@ def generate_experiment_configs(experiment: ExperimentName) -> List[ExperimentCo
 
     elif experiment == ExperimentName.GQA:
         # Added GQA test-cases
-        gqa_num_heads = [(8, 1)]
-        gqa_backends = [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION]
+        gqa_batch_sizes = [1, 8, 16, 32]
+        gqa_num_heads = [(32, 8), (64, 4), (128, 16), (256, 32), (512, 64), (1024, 128)]
+        gqa_backends = [SDPBackend.FLASH_ATTENTION]
         gqa_q_kv_seq_lens = [(2048, 2048)]
         for (
+            bsz,
             (q_heads, kv_heads),
             (q_seq_len, kv_seq_len),
             embed_dim,
-            causal,
             dtype,
             backend,
         ) in itertools.product(
+            gqa_batch_sizes,
             gqa_num_heads,
             gqa_q_kv_seq_lens,
             embed_dims,
-            is_causal,
             dtypes,
             gqa_backends,
         ):
             all_configs.append(
                 ExperimentConfig(
-                    batch_size=8,
+                    batch_size=bsz,
                     q_num_heads=q_heads,
                     kv_num_heads=kv_heads,
                     q_seq_len=q_seq_len,
                     kv_seq_len=kv_seq_len,
                     embed_dim=embed_dim,
-                    is_causal=causal,
+                    is_causal=True,
                     dtype=dtype,
                     backend=backend,
                     enable_gqa=True,
@@ -215,13 +224,13 @@ def generate_experiment_configs(experiment: ExperimentName) -> List[ExperimentCo
             )
             all_configs.append(
                 ExperimentConfig(
-                    batch_size=8,
+                    batch_size=bsz,
                     q_num_heads=q_heads,
                     kv_num_heads=kv_heads,
                     q_seq_len=q_seq_len,
                     kv_seq_len=kv_seq_len,
                     embed_dim=embed_dim,
-                    is_causal=causal,
+                    is_causal=True,
                     dtype=dtype,
                     backend=backend,
                     enable_gqa=False,
@@ -246,10 +255,10 @@ def main():
     seed = 123
     torch.manual_seed(seed)
     print("Experiment 1: SDPA experiments")
-    results_exp1 = []
-    for config in tqdm(generate_experiment_configs(ExperimentName.SDPA)):
-        results_exp1.append(Experiment(config, run_single_experiment(config)))
-    print_results(results_exp1)
+    # results_exp1 = []
+    # for config in tqdm(generate_experiment_configs(ExperimentName.SDPA)):
+    #     results_exp1.append(Experiment(config, run_single_experiment(config)))
+    # print_results(results_exp1)
     print("Experiment 2: GQA experiments")
     results_exp2 = []
     for config in tqdm(generate_experiment_configs(ExperimentName.GQA)):
