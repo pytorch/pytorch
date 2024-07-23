@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import os  # noqa: C101
 import sys
 from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING, Union
@@ -6,11 +5,11 @@ from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING, Unio
 import torch
 
 
-def is_fbcode():
+def is_fbcode() -> bool:
     return not hasattr(torch.version, "git_version")
 
 
-def fx_graph_remote_cache_default():
+def fx_graph_remote_cache_default() -> Optional[bool]:
     if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1":
         return True
     if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "0":
