@@ -1835,7 +1835,7 @@ def are_strides_like_channels_last(
     for d in dim_order:
         if guard_size_oblivious(shape[d] == 0):
             return False
-        if strides[d] < min:
+        if guard_size_oblivious(strides[d] < min):
             return False
         if d == 0 and min == strides[1]:
             return False
