@@ -70,7 +70,16 @@ class _ToTorchTensor(torch.autograd.Function):
     ):
         ctx.dtensor_spec = input._spec
         ctx.grad_placements = grad_placements
-        local_tensor = input._local_tensor
+
+        cur_unpadded_shard_size = ctx.dtensor_spec.unpadded_local_shard_size
+        if cur_unpadded_shard_size is None:
+            local_tensor = input._local_tensor
+        else:
+            slices = [
+                slice(0, unpadded_dim_size)
+                for unpadded_dim_size in cur_unpadded_shard_size
+            ]
+            local_tensor = input._local_tensor[slices]
 
         # We need to return a fresh Tensor object there as autograd metadata
         # will be inplaced into it. So we don't want to pollute the Tensor
@@ -252,6 +261,41 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             requires_grad=requires_grad,
         )
 
+
+        def maybe_pad_local_tensor(local_tensor, spec):
+            from torch.distributed._tensor._utils import compute_padded_and_unpadded_local_shape, compute_padding_size
+            from torch.distributed._tensor._collective_utils import get_padded_tensor, get_unpadded_tensor
+
+            global_shape = spec.shape
+            mesh = spec.mesh
+            placements = spec.placements
+
+            full_shard_size, cur_unpadded_shard_size = compute_padded_and_unpadded_local_shape(global_shape, mesh, placements)
+
+            # short-circuit return if no padding is needed for the given shard.
+            if full_shard_size == cur_unpadded_shard_size:
+                # make `unpadded_local_shard_size` a cached property in DTensorSpec
+                # so we don't need to re-calculate this during backward of _ToTorchTensor.
+                spec.unpadded_local_shard_size = None
+                return local_tensor, spec
+            
+            # add a check to see whether the given local tensor is legit.
+            if tuple(local_tensor.shape) != cur_unpadded_shard_size:
+                raise RuntimeError(
+                    f"The given local tensor shape {local_tensor.shape} does not"
+                    f"match the expected local tesnsor shape {cur_unpadded_shard_size}!"
+                )
+            
+            spec.unpadded_local_shard_size = cur_unpadded_shard_size
+
+            # create a padded tensor.
+            padding_size = compute_padding_size(full_shard_size, cur_unpadded_shard_size)
+            padded_tensor = get_padded_tensor(local_tensor, padding_size)
+            
+            return padded_tensor, spec
+        
+        local_tensor, spec = maybe_pad_local_tensor(local_tensor, spec)
+
         r._spec = spec
         r._local_tensor = local_tensor
         return r
@@ -429,7 +473,15 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             will depend on if the `DTensor` requires_grad or not.
         """
         if not torch.is_grad_enabled():
-            return self._local_tensor
+            cur_unpadded_shard_size = self._spec.unpadded_local_shard_size
+            if cur_unpadded_shard_size is None:
+                return self._local_tensor
+            else:
+                slices = [
+                    slice(0, unpadded_dim_size)
+                    for unpadded_dim_size in cur_unpadded_shard_size
+                ]
+                return self._local_tensor[slices]
 
         if grad_placements is not None and not isinstance(grad_placements, tuple):
             grad_placements = tuple(grad_placements)

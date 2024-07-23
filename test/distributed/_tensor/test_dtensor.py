@@ -962,5 +962,70 @@ dtensor.max()
         self.assertIn("redistribute=False", stderr.decode("utf-8"))
 
 
+class DTensorStaticPadding(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 6
+
+    @with_comms
+    def test_dtensor_uneven_with_static_padding_with_grad(self):
+        self._test_dtensor_uneven_with_static_padding()
+
+    @with_comms
+    @torch.no_grad()
+    def test_dtensor_uneven_with_static_padding_no_grad(self):
+        self._test_dtensor_uneven_with_static_padding()
+
+    def _test_dtensor_uneven_with_static_padding(self):
+        from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
+
+        tensor = torch.tensor([0, 1, 2, 3, 4, 5, 6])
+        tensor_list = torch.chunk(tensor, self.world_size, dim=0)
+        if self.rank <= 3:
+            local_tensor = tensor_list[self.rank]
+        else:
+            local_tensor = torch.tensor([])
+
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        sharding_spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            tensor_meta=TensorMeta(
+                shape=(7,),
+                stride=local_tensor.stride(),
+                dtype=local_tensor.dtype,
+            ),
+        )
+
+        dtensor = DTensor(
+            local_tensor,
+            sharding_spec,
+            requires_grad=False,
+        )
+
+        """
+        self.rank=0, dtensor._local_tensor=tensor([0, 1]), dtensor.to_local()=tensor([0, 1])
+        self.rank=1, dtensor._local_tensor=tensor([2, 3]), dtensor.to_local()=tensor([2, 3])
+        self.rank=2, dtensor._local_tensor=tensor([4, 5]), dtensor.to_local()=tensor([4, 5])
+        self.rank=3, dtensor._local_tensor=tensor([6, 0]), dtensor.to_local()=tensor([6])
+        self.rank=4, dtensor._local_tensor=tensor([0., 0.]), dtensor.to_local()=tensor([])
+        self.rank=5, dtensor._local_tensor=tensor([0., 0.]), dtensor.to_local()=tensor([])
+        """
+
+        # check whether .local_tensor includes padding
+        cur_unpadded_shard_size = dtensor._spec.unpadded_local_shard_size
+        if cur_unpadded_shard_size:
+            slices = [
+                slice(0, unpadded_dim_size)
+                for unpadded_dim_size in cur_unpadded_shard_size
+            ]
+            self.assertEqual(dtensor.to_local(), dtensor._local_tensor[slices])
+            self.assertEqual(dtensor.to_local(), local_tensor)
+        else:
+            self.assertEqual(dtensor.to_local(), dtensor._local_tensor)
+            self.assertEqual(dtensor.to_local(), local_tensor)
+
+
 if __name__ == "__main__":
     run_tests()
