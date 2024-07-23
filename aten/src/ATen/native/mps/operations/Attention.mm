@@ -16,7 +16,8 @@
 #include <ATen/ops/empty_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& query,
                                                                   const Tensor& key,
@@ -26,6 +27,13 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
                                                                   bool is_causal,
                                                                   const std::optional<Tensor>& dropout_mask,
                                                                   std::optional<double> scale) {
+  if (is_causal) {
+    TORCH_CHECK(!attn_mask.has_value(),
+            "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
+    TORCH_CHECK(!query.is_nested() && !key.is_nested(),
+            "_scaled_dot_product_attention: Nested tensors for query / key are not supported when is_causal=True");
+  }
+
   using namespace mps;
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -43,7 +51,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   int64_t maxSeqLength = key.size(2);
   auto out = at::empty({batchSize, num_head, qSize, headSize}, query.options());
   auto attn = at::empty({batchSize, num_head, qSize, maxSeqLength}, query.options());
-  auto scale_factor = sdp::calculate_scale(query, scale).sqrt().as_float_unchecked();
+  auto scale_factor = sdp::calculate_scale(query, scale).as_float_unchecked();
   @autoreleasepool {
     auto mkey = __func__ + getTensorsStringKey({query, key, value}) + ":" + std::to_string(is_causal) + ":" + std::to_string(attn_mask.has_value());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(mkey, [&](auto mpsGraph, auto graph) {
@@ -53,31 +61,24 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
       auto kT = [mpsGraph transposeTensor:kTensor dimension:2 withDimension:3 name:nil];
       auto scaleTensor = [mpsGraph constantWithScalar:scale_factor shape:getMPSShape({1}) dataType:MPSDataTypeFloat32];
 
-      // sqTensor = qTensor * scale_factor
-      auto castedQ = qTensor;
-      if ([qTensor dataType] != MPSDataTypeFloat32) {
-        castedQ = [mpsGraph castTensor:qTensor toType:MPSDataTypeFloat32 name:nil];
+      auto maskedMM = [mpsGraph matrixMultiplicationWithPrimaryTensor:qTensor secondaryTensor:kT name:nil];
+
+      if ([maskedMM dataType] != MPSDataTypeFloat32) {
+        maskedMM = [mpsGraph castTensor:maskedMM toType:MPSDataTypeFloat32 name:nil];
       }
-      auto sqTensor = [mpsGraph multiplicationWithPrimaryTensor:castedQ secondaryTensor:scaleTensor name:nil];
-      if ([sqTensor dataType] != qTensor.dataType) {
-        sqTensor = [mpsGraph castTensor:sqTensor toType:qTensor.dataType name:nil];
+      maskedMM = [mpsGraph multiplicationWithPrimaryTensor:maskedMM secondaryTensor:scaleTensor name:nil];
+      if ([maskedMM dataType] != qTensor.dataType) {
+        maskedMM = [mpsGraph castTensor:maskedMM toType:qTensor.dataType name:nil];
       }
 
-      // skT = kT * scale_factor
-      auto castedKT = kT;
-      if ([kT dataType] != MPSDataTypeFloat32) {
-        castedKT = [mpsGraph castTensor:kT toType:MPSDataTypeFloat32 name:nil];
-      }
-      auto skT = [mpsGraph multiplicationWithPrimaryTensor:castedKT secondaryTensor:scaleTensor name:nil];
-      if ([skT dataType] != kT.dataType) {
-        skT = [mpsGraph castTensor:skT toType:kT.dataType name:nil];
-      }
-
-      auto maskedMM = [mpsGraph matrixMultiplicationWithPrimaryTensor:sqTensor secondaryTensor:skT name:nil];
       if (is_causal) {
-        auto minusInf = [mpsGraph constantWithScalar:std::numeric_limits<double>::infinity() shape:maskedMM.shape dataType:maskedMM.dataType];
-        auto causalMask = [mpsGraph bandPartWithTensor:minusInf numLower:-1 numUpper:0 name:nil];
-        maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM secondaryTensor:causalMask name:nil];
+        auto causalMask = [mpsGraph constantWithScalar:1.0f shape:getMPSShape({qSize, maxSeqLength}) dataType:MPSDataTypeBool];
+        causalMask = [mpsGraph bandPartWithTensor:causalMask numLower:-1 numUpper:0 name:nil];
+        auto minusInf = [mpsGraph constantWithScalar:-1e20 shape:maskedMM.shape dataType:maskedMM.dataType];
+        maskedMM = [mpsGraph selectWithPredicateTensor:causalMask
+                                   truePredicateTensor:maskedMM
+                                  falsePredicateTensor:minusInf
+                                                  name:nil];
       } else if (attn_mask) {
         graph->maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, *attn_mask);
         maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM secondaryTensor:graph->maskTensor name:nil];
@@ -108,4 +109,5 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   return {out, attn};
 }
 
-} // namespace at::native
+} // namespace at
+} // namespace native

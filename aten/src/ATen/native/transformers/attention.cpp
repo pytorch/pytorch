@@ -73,7 +73,8 @@
 #endif
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
-namespace at::native {
+namespace at {
+namespace native {
 
 DEFINE_DISPATCH(_fused_sdp_choice_stub);
 
@@ -996,4 +997,5 @@ Tensor triton_multi_head_attention(
   return proj;
 }
 
-} // namespace at::native
+} // namespace at
+} // namespace native
