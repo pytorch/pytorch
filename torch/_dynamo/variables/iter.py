@@ -8,7 +8,7 @@ import operator
 from typing import Dict, List, Optional
 
 from .. import polyfill, variables
-from ..exc import unimplemented
+from ..exc import ObservedUserStopIteration, unimplemented
 
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
@@ -255,7 +255,7 @@ class CycleIteratorVariable(IteratorVariable):
                 if self.item is None:
                     return self.next_variable(tx)
                 return self.item
-            except StopIteration:
+            except ObservedUserStopIteration:
                 self.iterator = None
                 return self.next_variable(tx)
         elif len(self.saved) > 0:
@@ -263,4 +263,10 @@ class CycleIteratorVariable(IteratorVariable):
             self.saved_index = (self.saved_index + 1) % len(self.saved)
             return self.item
         else:
-            raise StopIteration
+            # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
+            # stack and raise the exception.
+            exception_vt = variables.BuiltinVariable(StopIteration).call_function(
+                self, [], {}
+            )
+            tx.exn_vt_stack.append(exception_vt)
+            raise ObservedUserStopIteration
