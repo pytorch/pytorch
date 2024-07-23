@@ -1283,9 +1283,9 @@ def export_to_pretty_string(
     do_constant_folding=True,
     dynamic_axes=None,
 ):
-    r"""
-    Similar to :func:`export`, but returns a text representation of the ONNX
-    model. Only differences in args listed below. All other args are the same
+    """Similar to :func:`export`, but returns a text representation of the ONNX model.
+
+    Only differences in args listed below. All other args are the same
     as :func:`export`.
 
     Args:
