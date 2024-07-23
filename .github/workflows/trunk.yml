@@ -233,6 +233,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
           { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
         ]}
 
   linux-focal-rocm6_1-py3_8-test:
