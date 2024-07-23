@@ -6,6 +6,7 @@ import json
 import os
 import pkgutil
 import subprocess
+import sys
 import unittest
 from typing import Callable
 
@@ -281,9 +282,10 @@ class TestPublicBindings(TestCase):
                     continue
 
                 subprocess.check_output(
-                    ["python", "-c", f"import {modname}"],
+                    [sys.executable, "-c", f"import {modname}"],
                     stderr=subprocess.STDOUT,
                     text=True,
+                    timeout=120.0,
                 )
             except subprocess.CalledProcessError as e:
                 # Some current failures are not ImportError
