@@ -1899,6 +1899,19 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                         not self._partial_overlap(prof_steps[i], step_helper_funcs[j])
                     )
 
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_user_annotation(self):
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        with profile(activities=supported_activities()) as p:
+            with torch.profiler.record_function("test_user_annotation"):
+                self.payload(use_cuda=use_cuda)
+
+        for evt in p.key_averages():
+            if evt.key == "test_user_annotation":
+                self.assertTrue(evt.is_user_annotation)
+            else:
+                self.assertFalse(evt.is_user_annotation)
+
 
 class SimpleNet(nn.Module):
     def __init__(self):
