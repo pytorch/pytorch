@@ -140,7 +140,7 @@ def _schedule_for_comm(
     # We can remove this logic once the fix is landed.
     unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {}
     for snode in snodes:
-        if isinstance(snode.node, ir.MutationOutput):
+        if isinstance(snode.node, ir.MutationOperation):
             src_name = snode.node.node_doing_mutating.get_name()
             src_snode = buf_name_to_snode[src_name]
             assert src_snode in unmet_deps
@@ -229,13 +229,10 @@ def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
     """
     comm_nodes = [n for n in nodes if is_collective(n.node)]
 
-    def item(x: Set[str]) -> str:
-        assert len(x) == 1
-        return next(iter(x))
-
     for i in range(1, len(comm_nodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
-        comm_nodes[i].add_fake_dep(WeakDep(item(comm_nodes[i - 1].get_buffer_names())))
+        for buf in comm_nodes[i - 1].get_buffer_names():
+            comm_nodes[i].add_fake_dep(WeakDep(buf))
 
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
