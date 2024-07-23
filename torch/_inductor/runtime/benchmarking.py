@@ -241,7 +241,6 @@ class Benchmarker:
         warmup_iters: int = 5,
         benchmark_iters: int = 20,
     ) -> float:
-        counters["inductor"]["benchmarking_benchmark_cpu"] += 1
         # duplicate of original implementation from runtime_utils
         timings_ms = []
         for _ in range(warmup_iters):
@@ -259,7 +258,6 @@ class Benchmarker:
         warmup_iters: int = 5,
         benchmark_iters: int = 20,
     ) -> List[float]:
-        counters["inductor"]["benchmarking_benchmark_many_cpu"] += 1
         # implement this to maintain consistency between cpu/gpu benchmarking functionality
         return [
             self.benchmark_cpu(_callable, warmup_iters, benchmark_iters)
@@ -275,7 +273,6 @@ class Benchmarker:
         benchmark_iters: int = 100,
         max_benchmark_duration_ms: int = 25,
     ) -> float:
-        counters["inductor"]["benchmarking_benchmark_gpu"] += 1
         # we don't want any outside errors propagating into benchmarking
         torch.cuda.synchronize()
 
@@ -379,7 +376,6 @@ class Benchmarker:
         pruning_key: Optional[str] = None,
         pruning_factor: float = 1.25,
     ) -> List[float]:
-        counters["inductor"]["benchmarking_benchmark_many_gpu"] += 1
         # we don't want any outside errors propagating into benchmarking
         torch.cuda.synchronize()
 
