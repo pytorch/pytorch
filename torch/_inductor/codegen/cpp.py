@@ -3665,21 +3665,6 @@ class CppKernelProxy(CppKernel):
                 inner_main_loop.set_kernel(tile2d_kernel)
 
                 if could_masked_vec:
-                    inner_tail_loop.steps = (
-                        inner_tail_loop.size - inner_tail_loop.offset
-                    )
-                    masked_tile2d_kernel1 = codegen_kernel(
-                        CppTile2DKernel,
-                        tiling_factors[0],
-                        tiling_indices,
-                        vec_dtype,
-                        inner_tail_loop.steps,
-                    )
-                    inner_tail_loop.set_kernel(masked_tile2d_kernel1)
-
-                    outer_tail_loop.steps = (
-                        outer_tail_loop.size - outer_tail_loop.offset
-                    )
                     (
                         inner_main_loop_of_outer_tail_loop,
                         inner_tail_loop_of_outer_tail_loop,
@@ -3687,29 +3672,35 @@ class CppKernelProxy(CppKernel):
                         tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                     )
 
-                    masked_tile2d_kernel2 = codegen_kernel(
-                        CppTile2DKernel,
-                        tiling_factors[0],
-                        tiling_indices,
-                        vec_dtype,
-                        None,
-                        outer_tail_loop.steps,
-                    )
-                    inner_main_loop_of_outer_tail_loop.set_kernel(masked_tile2d_kernel2)
+                    for tail_loop in (
+                        inner_tail_loop,
+                        outer_tail_loop,
+                        inner_tail_loop_of_outer_tail_loop,
+                    ):
+                        tail_loop.steps = tail_loop.size - tail_loop.offset
 
-                    inner_tail_loop_of_outer_tail_loop.steps = (
-                        inner_tail_loop_of_outer_tail_loop.size
-                        - inner_tail_loop_of_outer_tail_loop.offset
-                    )
-                    masked_tile2d_kernel3 = codegen_kernel(
-                        CppTile2DKernel,
-                        tiling_factors[0],
-                        tiling_indices,
-                        vec_dtype,
-                        inner_tail_loop_of_outer_tail_loop.steps,
-                        outer_tail_loop.steps,
-                    )
-                    inner_tail_loop_of_outer_tail_loop.set_kernel(masked_tile2d_kernel3)
+                    for tail_loop, inner_tail_size, outer_tail_size in (
+                        (inner_tail_loop, inner_tail_loop.steps, None),
+                        (
+                            inner_main_loop_of_outer_tail_loop,
+                            None,
+                            outer_tail_loop.steps,
+                        ),
+                        (
+                            inner_tail_loop_of_outer_tail_loop,
+                            inner_tail_loop_of_outer_tail_loop.steps,
+                            outer_tail_loop.steps,
+                        ),
+                    ):
+                        masked_tile2d_kernel = codegen_kernel(
+                            CppTile2DKernel,
+                            tiling_factors[0],
+                            tiling_indices,
+                            vec_dtype,
+                            inner_tail_size,
+                            outer_tail_size,
+                        )
+                        tail_loop.set_kernel(masked_tile2d_kernel)
                 else:
                     vec_kernel = codegen_kernel(
                         CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
