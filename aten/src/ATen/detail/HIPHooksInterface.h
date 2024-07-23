@@ -24,7 +24,7 @@ namespace at {
 struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
-  virtual ~HIPHooksInterface() = default;
+  virtual ~HIPHooksInterface() override = default;
 
   // Initialize the HIP library state
   virtual void initHIP() const {
