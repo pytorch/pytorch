@@ -303,7 +303,7 @@ jobs:
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "testing", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
+          { config: "testing", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.testing" },
         ]}
 
   linux-focal-rocm6_1-isolated-py3_8-test:
