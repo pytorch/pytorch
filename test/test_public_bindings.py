@@ -287,10 +287,8 @@ class TestPublicBindings(TestCase):
                     text=True,
                     timeout=120.0,
                 )
-            except subprocess.CalledProcessError as e:
-                # Some current failures are not ImportError
-
-                failures.append((modname, e))
+            except subprocess.CalledProcessError as exc:
+                failures.append((modname, exc))
 
         # It is ok to add new entries here but please be careful that these modules
         # do not get imported by public code.
@@ -435,12 +433,13 @@ class TestPublicBindings(TestCase):
         for mod, exc in failures:
             if mod in public_allowlist:
                 # TODO: Ensure this is the right error type
-
                 continue
             if mod in private_allowlist:
                 continue
             errors.append(f"{mod} failed to import with error:\n{exc.output}")
-        self.assertEqual("", "\n".join(errors))
+
+        error_messages = "\n\n".join(errors)
+        self.assertEqual("", error_messages, error_messages)
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
     @unittest.skipIf(IS_WINDOWS or IS_JETSON or IS_MACOS, "Distributed Attribute Error")
