@@ -399,6 +399,7 @@ class Benchmarker:
         interleaved_event_pairs = self.get_interleaved_event_pairs(
             len(callables), estimation_iters
         )
+        torch.cuda._sleep(int(1 / self.gpu_time_ms_per_gpu_clock_cycle))
         start_time_s = time.perf_counter()
         for event_pairs in interleaved_event_pairs:
             for _callable, (start_event, end_event) in zip(callables, event_pairs):
