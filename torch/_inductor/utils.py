@@ -150,7 +150,7 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
         torch.cuda.synchronize()
 
     log.debug("raw events")
-    log.debug(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
+    log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
 
     filtered_events = EventList(
         [
