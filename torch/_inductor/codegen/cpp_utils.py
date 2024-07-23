@@ -2,6 +2,7 @@
 import contextlib
 import copy
 import math
+
 from collections import namedtuple
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import patch
@@ -10,12 +11,11 @@ import sympy
 
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
-
 from .. import ir
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import V
-from .common import CSEVariable, ExprPrinter, Kernel, KernelArgs
 
+from .common import CSEVariable, ExprPrinter, Kernel, KernelArgs
 
 DTYPE_TO_CPP = {
     torch.float32: "float",

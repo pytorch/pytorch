@@ -33,21 +33,15 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
   bool is_float() override {
     return false;
   }
-  int64_t guard_int(
-      const char* file [[maybe_unused]],
-      int64_t line [[maybe_unused]]) override {
+  int64_t guard_int(const char* file, int64_t line) override {
     TORCH_CHECK(is_int(), "not an int");
     return int_();
   }
-  bool guard_bool(
-      const char* file [[maybe_unused]],
-      int64_t line [[maybe_unused]]) override {
+  bool guard_bool(const char* file, int64_t line) override {
     TORCH_CHECK(is_bool(), "not a bool");
     return bool_();
   }
-  double guard_float(
-      const char* file [[maybe_unused]],
-      int64_t line [[maybe_unused]]) override {
+  double guard_float(const char* file, int64_t line) override {
     TORCH_CHECK(false, "not a float");
   }
   int64_t int_() override {

@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
-
 from .. import config as inductor_config
 from ..codegen.common import BackendFeature
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
@@ -39,7 +38,6 @@ from .mm_common import (
     mm_options,
     triton_config,
 )
-
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
