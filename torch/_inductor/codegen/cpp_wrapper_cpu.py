@@ -10,19 +10,17 @@ import sympy
 from sympy import Expr
 
 import torch
-
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
-from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey
+from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
+
 from .. import config, ir
-from ..codecache import CudaKernelParamCache
 from ..utils import _align, ALIGN_BYTES, cache_on_self, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
 from .cpp_utils import (
     cexpr,
-    CppPrinter,
     DEVICE_TO_ATEN,
     DTYPE_TO_ATEN,
     DTYPE_TO_CPP,
@@ -70,20 +68,6 @@ class CppWrapperCpu(WrapperCodeGen):
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
         self.expr_printer = cexpr
-
-        # CppPrinter sometimes calls at::native functions which causes problems in
-        # the ABI-compatible mode. Currently we are hitting this problem when codegen
-        # Grid computation expressions, but we my need to fix other size computation
-        # as well.
-        class GridExprCppPrinter(CppPrinter):
-            def _print_FloorDiv(self, expr):
-                x, div = expr.args
-                x = self.paren(self.doprint(x))
-                div = self.paren(self.doprint(div))
-                assert expr.is_integer, "Expect integers in GridExprPrinter"
-                return f"({x}/{div})"
-
-        self.grid_expr_printer = GridExprCppPrinter().doprint
 
     def generate_kernel_call(
         self,
@@ -255,7 +239,7 @@ class CppWrapperCpu(WrapperCodeGen):
         # mark output type to unwrap tensor back to python scalar
         from ..ir import ShapeAsConstantBuffer
 
-        output_is_tensor = dict()
+        output_is_tensor = {}
         for idx, x in enumerate(V.graph.graph_outputs):
             if isinstance(x, ShapeAsConstantBuffer):
                 output_is_tensor[idx] = False
@@ -329,12 +313,9 @@ class CppWrapperCpu(WrapperCodeGen):
                         """
                     )
                 else:
-                    assert isinstance(
-                        d, sympy.Symbol
-                    ), f"dimention at {dim_idx=} for tensor {name=} must be a sympy.Symbol"
-                    sym_range = V.graph.sizevars.shape_env.var_to_range.get(d, None)
-                    if sym_range is None:
-                        continue
+                    from torch.utils._sympy.value_ranges import bound_sympy
+
+                    sym_range = bound_sympy(d, V.graph.sizevars.shape_env.var_to_range)
                     if not math.isinf(sym_range.lower):
                         self.prefix.splice(
                             f"""
@@ -398,7 +379,6 @@ class CppWrapperCpu(WrapperCodeGen):
                     f"{CppWrapperCpu.get_input_cpp_type(x)}"
                     for x in V.graph.graph_inputs.values()
                 )
-
                 output_arrayref_types = ", ".join(
                     f"ArrayRefTensor<{DTYPE_TO_CPP[x.get_dtype()]}>"
                     for x in V.graph.graph_outputs
@@ -944,6 +924,10 @@ class CppWrapperCpu(WrapperCodeGen):
         dtype_str = str(dtype).split(".")[-1]
         writer = indented_buffer or self
         writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
+
+        # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
+        tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+
         writer.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
         )
@@ -1299,36 +1283,6 @@ class CppWrapperCpu(WrapperCodeGen):
             self.generate_c_shim_extern_kernel_call(kernel, args)
         else:
             self.writeline(self.wrap_kernel_call(kernel, args))
-
-    def generate_user_defined_triton_kernel(
-        self, kernel_name, grid, configs, args, triton_meta, raw_args
-    ):
-        assert len(grid) != 0
-        if len(grid) == 1:
-            grid_decision = grid[0]
-        else:
-            meta = CudaKernelParamCache.get(kernel_name)
-            assert meta is not None
-            grid_decision = None
-            for i, c in enumerate(configs):
-                if all(arg == meta["meta"][key] for key, arg in c.kwargs.items()):
-                    grid_decision = grid[i]
-                    break
-            assert grid_decision is not None
-
-        arg_types = [
-            arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
-            for arg in raw_args
-        ]
-        self.generate_kernel_call(
-            kernel_name,
-            args,
-            arg_types=arg_types,
-            grid=grid_decision,
-            cuda=True,
-            triton=True,
-            triton_meta=triton_meta,
-        )
 
     def generate_scatter_fallback(
         self,
@@ -2359,6 +2313,10 @@ if (py_{buf_name}.get() == NULL) {{
         elif isinstance(val, (list, tuple)):
             # FIXME: This happens because type_ is not always properly set to torch.ListType
             return f"{{{', '.join(self.val_to_arg_str(x, None) for x in val)}}}"
+        elif isinstance(val, SymTypes):
+            return self.expr_printer(val.node.expr)
+        elif isinstance(val, sympy.Expr):
+            return self.expr_printer(val)
         else:
             return repr(val)
 
