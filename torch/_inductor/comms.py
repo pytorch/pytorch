@@ -222,7 +222,7 @@ def _schedule_for_comm(
 
 
 def decide_global_ordering_of_comms(
-    nodes: List[BaseSchedulerNode], name_to_fused_node
+    nodes: List[BaseSchedulerNode], name_to_buf, name_to_fused_node
 ) -> List[BaseSchedulerNode]:
     """
     Decide global ordering of comms, by just enforcing the ordering that's in the input graph
@@ -240,7 +240,7 @@ def decide_global_ordering_of_comms(
         )
         for x in nodes
     ):
-        nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_fused_node)
+        nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_buf, name_to_fused_node)
     
     comm_nodes = [n for n in nodes if is_collective(n.node)]
 
@@ -462,15 +462,19 @@ def is_fallback_op(node, op):
     return isinstance(node, ir.FallbackKernel) and node.op_overload in op
 
 
-def get_buf_idx(snode):
-    return int(snode.get_name().split("_")[0][3:])
+def get_op_idx(snode):
+    return int(snode.get_name().split("_")[0][2:])
 
 
 def enforce_comm_ordering_for_fsdp(
     snodes: List[torch._inductor.scheduler.BaseSchedulerNode],
+    name_to_buf: Dict[str, torch._inductor.scheduler.SchedulerBuffer],
     name_to_fused_node: Dict[str, BaseSchedulerNode],
 ) -> List[torch._inductor.scheduler.BaseSchedulerNode]:
     from . import scheduler
+
+    def buf_name_to_fused_op(buf_name):
+        return name_to_fused_node[name_to_buf[buf_name].defining_op.get_name()]
 
     def _find_all_recursive_deps_of_node_up_to_criteria(
         snode, collected_node_set, criteria_cb=None
@@ -479,7 +483,7 @@ def enforce_comm_ordering_for_fsdp(
             return
         collected_node_set.add(snode)
         for dep in snode.unmet_dependencies:
-            dep_node = name_to_fused_node[dep.name]
+            dep_node = buf_name_to_fused_op(dep.name)
             if dep_node in collected_node_set:
                 continue
             _find_all_recursive_deps_of_node_up_to_criteria(
@@ -492,18 +496,19 @@ def enforce_comm_ordering_for_fsdp(
         if criteria_cb and criteria_cb(snode):
             return
         collected_node_set.add(snode)
-        for user in snode.users:
-            assert user.node is not None
-            if user.node.get_name() == "OUTPUT":
-                continue
-            if user.node.get_name() not in name_to_fused_node:
-                continue
-            user_node = name_to_fused_node[user.node.get_name()]
-            if user_node in collected_node_set:
-                continue
-            _find_all_recursive_users_of_node_down_to_criteria(
-                user_node, collected_node_set, criteria_cb
-            )
+        for o in snode.get_outputs():
+            for user in o.users:
+                assert user.node is not None
+                if user.node.get_name() == "OUTPUT":
+                    continue
+                if user.node.get_name() not in name_to_fused_node:
+                    continue
+                user_node = name_to_fused_node[user.node.get_name()]
+                if user_node in collected_node_set:
+                    continue
+                _find_all_recursive_users_of_node_down_to_criteria(
+                    user_node, collected_node_set, criteria_cb
+                )
 
     new_order: list[BaseSchedulerNode] = []
     scheduled = set()
@@ -559,7 +564,7 @@ def enforce_comm_ordering_for_fsdp(
 
             # sort nodes by original operation order
             ag_related_snodes = sorted(
-                ag_related_snode_set, key=lambda x: get_buf_idx(x)
+                ag_related_snode_set, key=lambda x: get_op_idx(x)
             )
 
             end_idx_of_current_ag_block = len(ag_related_snodes)
@@ -570,7 +575,7 @@ def enforce_comm_ordering_for_fsdp(
                 # we assume that the two nodes are not part of the same all-gather code block
                 # The reason we need this, is that ops like `.set_` in the 2nd all-gather code block could also
                 # depend on `split_with_sizes_copy` in the 1st all-gather code block, and we don't want to group them together.
-                if get_buf_idx(cur_snode) - get_buf_idx(prev_snode) > 5:
+                if get_op_idx(cur_snode) - get_op_idx(prev_snode) > 5:
                     end_idx_of_current_ag_block = i
                     break
 
@@ -601,7 +606,7 @@ def enforce_comm_ordering_for_fsdp(
 
             # sort nodes by original operation order
             rs_related_snodes = sorted(
-                rs_related_snode_set, key=lambda x: get_buf_idx(x)
+                rs_related_snode_set, key=lambda x: get_op_idx(x)
             )
 
             # Group "reduce_scatter copy-in + reduce_scatter comm" into one GroupedSchedulerNode
@@ -631,7 +636,8 @@ def enforce_comm_ordering_for_fsdp(
     prev_ag_wait = None
     for ag_group_node, wait_group_node in ag_grouped_node_to_wait_grouped_node.items():
         if prev_ag_wait is not None:
-            ag_group_node.add_fake_dep(WeakDep(prev_ag_wait.get_name()))
+            for o in prev_ag_wait.get_outputs():
+                wait_group_node.add_fake_dep(WeakDep(o.get_name()))
         prev_ag_wait = wait_group_node
 
     # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
@@ -639,7 +645,8 @@ def enforce_comm_ordering_for_fsdp(
     prev_rs_wait = None
     for rs_group_node, wait_group_node in rs_grouped_node_to_wait_grouped_node.items():
         if prev_rs_wait is not None:
-            rs_group_node.add_fake_dep(WeakDep(prev_rs_wait.get_name()))
+            for o in prev_rs_wait.get_outputs():
+                wait_group_node.add_fake_dep(WeakDep(o.get_name()))
         prev_rs_wait = wait_group_node
 
     return new_order  # type: ignore[return-value]

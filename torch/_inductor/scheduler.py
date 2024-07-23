@@ -955,7 +955,7 @@ def init_group_snode(
     scheduler: Scheduler,
     snodes: List[BaseSchedulerNode],
 ) -> None:
-    assert isinstance(snode, (FusedSchedulerNode, GroupedSchedulerNode))
+    assert isinstance(group_snode, (FusedSchedulerNode, GroupedSchedulerNode))
     group_snode.snodes = snodes  # type: ignore[attr-defined]
     group_snode.scheduler = scheduler
     group_snode.node = None
@@ -1427,7 +1427,6 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         return self.snodes[0].get_name()
 
     @cache_on_self
-<<<<<<< HEAD
     def get_buffer_names(self) -> Set[str]:
         return set.union(*[x.get_buffer_names() for x in self.snodes])
 
@@ -1436,10 +1435,6 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         for node in self.snodes:
             result.extend(node.get_outputs())
         return result
-=======
-    def get_names(self) -> Set[str]:
-        return set.union(*[x.get_names() for x in self.snodes])
->>>>>>> 29781d35e2c ([Traceable FSDP2][Inductor] Create grouped nodes for FSDP2 all-gather)
 
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
@@ -1585,7 +1580,7 @@ class Scheduler:
         self.compute_ancestors()
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.decide_global_ordering_of_comms(
-                self.nodes, self.name_to_fused_node
+                self.nodes, self.name_to_buf, self.name_to_fused_node,
             )
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
