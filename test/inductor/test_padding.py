@@ -13,7 +13,7 @@ from torch._inductor import config, ir, metrics
 from torch._inductor.fx_passes import pad_mm as pad_mm_pass
 from torch._inductor.runtime.runtime_utils import do_bench
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import serialTest
+from torch.testing._internal.common_utils import requires_cuda, serialTest
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -85,6 +85,7 @@ def forward_and_backward_pass(m, inputs):
         "triton.cudagraphs": USE_CUDA_GRAPHS,
     }
 )
+@requires_cuda
 class TestCaseBase(TestCase):
     def check_close(self, ref, act, tol=1e-3):
         if type(ref).__name__ == "LongformerMaskedLMOutput":
@@ -449,10 +450,8 @@ class PaddingTest(TestCaseBase):
             forward_and_backward_pass, m_bad_shape_opt, inputs_bad_shape
         )
         forward_and_backward_pass(m_bad_shape, inputs_bad_shape)
-        self.assertTrue(
-            torch.allclose(
-                m_bad_shape.linear.weight.grad, m_bad_shape_opt.linear.weight.grad
-            )
+        self.assertEqual(
+            m_bad_shape.linear.weight.grad, m_bad_shape_opt.linear.weight.grad
         )
         self.assertTrue(len(wrapper_codes) == 2)  # one for forward and oen for backward
         forward_wrapper = wrapper_codes[0]
@@ -635,8 +634,10 @@ class PaddingTest(TestCaseBase):
         self.assertTrue(in_strides == out_strides)
 
 
+if HAS_CUDA:
+    torch.set_float32_matmul_precision("high")
+    torch.set_default_device("cuda")
+
 if __name__ == "__main__":
     if HAS_CUDA:
-        torch.set_float32_matmul_precision("high")
-        torch.set_default_device("cuda")
         run_tests()
