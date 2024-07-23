@@ -1357,7 +1357,7 @@ class KernelArgs:
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(outer)
-            arg_types.append(type(outer))
+            arg_types.append(type(outer))  # type: ignore[arg-type]
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
