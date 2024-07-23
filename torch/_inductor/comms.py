@@ -140,7 +140,7 @@ def _schedule_for_comm(
     # We can remove this logic once the fix is landed.
     unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {}
     for snode in snodes:
-        if isinstance(snode.node, ir.MutationOutput):
+        if isinstance(snode.node, ir.MutationOperation):
             src_name = snode.node.node_doing_mutating.get_name()
             src_snode = buf_name_to_snode[src_name]
             assert src_snode in unmet_deps
