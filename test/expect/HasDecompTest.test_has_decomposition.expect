@@ -1295,8 +1295,6 @@ aten::squeeze_copy.dims_out
 aten::squeeze_copy.out
 aten::sspaddmm.out
 aten::t_
-aten::t_copy
-aten::t_copy.out
 aten::to_mkldnn
 aten::to_mkldnn.out
 aten::to_padded_tensor
