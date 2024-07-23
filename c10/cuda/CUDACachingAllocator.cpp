@@ -3574,10 +3574,10 @@ class NativeCachingAllocator : public CUDAAllocator {
   // process. There can be multiple types of storage in the same IPC mem block,
   // so we must cache the device ptr to construct typed storage as it comes.
 
-  // When using cuMemCreate, via expandable segments, we use cuMemExportToShareableHandle
-  // to create a file descriptor that can be sent to the other process to
-  // sort the object. Then we recreate part of the exandable segment necessary to
-  // load the allocation.
+  // When using cuMemCreate, via expandable segments, we use
+  // cuMemExportToShareableHandle to create a file descriptor that can be sent
+  // to the other process to sort the object. Then we recreate part of the
+  // exandable segment necessary to load the allocation.
 
   // ipcMemHandle_to_devptr caches the mapping from shareable handle to
   // this process' memory mapping information for that share to ensure we do not
