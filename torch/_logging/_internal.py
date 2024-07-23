@@ -8,6 +8,7 @@ import os
 import os.path
 import re
 import tempfile
+import time
 from dataclasses import dataclass, field
 from importlib import __import__
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
@@ -1084,6 +1085,7 @@ def trace_structured(
     # trace_log never propagates and is ALWAYS DEBUG, so also check that there
     # are handlers instead of checking the log level
     if trace_log.handlers:
+        t0 = time.time()
         record: Dict[str, object] = {}
         record[name] = metadata_fn()
         if not suppress_context:
@@ -1116,6 +1118,8 @@ def trace_structured(
             h = hashlib.md5()
             h.update(payload.encode("utf-8"))
             record["has_payload"] = h.hexdigest()
+        t1 = time.time()
+        record["log_overhead_s"] = t1 - t0
         trace_log.debug(
             "", extra={"metadata": record, "payload": payload}, stacklevel=2
         )
