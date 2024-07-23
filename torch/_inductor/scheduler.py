@@ -1002,6 +1002,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def __init__(self, scheduler: Scheduler, snodes: List[BaseSchedulerNode]) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
         init_group_node(self, scheduler, snodes)
+        self.users: List[NodeUser] = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
 
     @cache_on_self
