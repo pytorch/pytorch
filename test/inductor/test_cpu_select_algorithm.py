@@ -252,7 +252,15 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 )
                 and epilogue != "mul"
                 and epilogue != "div"
-                or (dtype == torch.half and epilogue == "add" and not bias)
+                or (
+                    dtype == torch.half
+                    or (
+                        dtype == torch.bfloat16
+                        and not torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                    )
+                    and epilogue == "add"
+                    and not bias
+                )
             ):
                 # Several scenarios where epilogue fusion is not counted in:
                 # 1. For bfloat16, the epilogue fusion is part of the template,
