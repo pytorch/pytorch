@@ -128,9 +128,6 @@ class TORCH_API Tensor: public TensorBase {
     if (!this->is_complex()) {
       return *this;
     }
-    if (this->unsafeGetTensorImpl()->is_wrapped_number()) {
-        return this->conj_physical_scalar();
-    }
 
     switch (this->layout()) {
       case at::kSparse:
