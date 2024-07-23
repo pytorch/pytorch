@@ -97,6 +97,27 @@ def dropwhile(predicate, iterable):
     yield from iterable
 
 
+def zip_longest(*iterables, fillvalue=None):
+    # Get the iterators for each iterable
+    iterators = [iter(it) for it in iterables]
+
+    while True:
+        result = []
+        active = False
+        for it in iterators:
+            try:
+                value = next(it)
+            except StopIteration:
+                result.append(fillvalue)
+
+            result.append(value)
+            active = True
+
+        if not active:
+            break
+        yield tuple(result)
+
+
 def getattr_and_trace(*args, **kwargs):
     wrapper_obj = args[0]
     attr_name = args[1]
