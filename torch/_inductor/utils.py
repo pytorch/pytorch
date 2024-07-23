@@ -9,7 +9,6 @@ import functools
 import inspect
 import io
 import itertools
-import json
 import logging
 import math
 import operator
@@ -23,7 +22,6 @@ import time
 import unittest
 from datetime import datetime
 from io import StringIO
-from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -35,7 +33,6 @@ from typing import (
     Optional,
     Protocol,
     Set,
-    Tuple,
     TypeVar,
     Union,
     ValuesView,
@@ -46,7 +43,6 @@ from unittest import mock
 import sympy
 
 import torch
-import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
@@ -62,8 +58,10 @@ from torch.utils._sympy.functions import (
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+
 from . import config
-from .runtime.runtime_utils import cache_dir, ceildiv as runtime_ceildiv
+from .runtime.runtime_utils import ceildiv as runtime_ceildiv
+
 
 log = logging.getLogger(__name__)
 
@@ -281,9 +279,7 @@ def convert_shape_to_inductor(
     trivial. But for symbolic tensors, we need to map from SymIntNode into
     sympy.Expr.
     """
-    return [
-        i.node.expr if isinstance(i, torch.SymInt) else sympy.Integer(i) for i in lst
-    ]
+    return [sympy.sympify(i) for i in lst]
 
 
 def convert_shape_to_symint(
@@ -313,7 +309,15 @@ def is_view(op: torch._ops.OpOverload):
     return any(a.alias_info is not None for a in op._schema.arguments)
 
 
-def is_pointwise_use(use):
+def is_pointwise_use(
+    use, is_pointwise_fn: Optional[Callable[[torch._ops.OpOverload], bool]] = None
+):
+    """
+    Do all uses of this op have torch.Tag.pointwise or return True for optional `is_pointwise_fn`
+
+    Uses in views ops will follow the views uses
+    """
+
     if not use.op == "call_function":
         return False
 
@@ -323,9 +327,11 @@ def is_pointwise_use(use):
         return False
 
     if use.target is operator.getitem or is_view(use.target):
-        return all(is_pointwise_use(u) for u in use.users)
+        return all(is_pointwise_use(u, is_pointwise_fn) for u in use.users)
 
-    return torch.Tag.pointwise in use.target.tags
+    return torch.Tag.pointwise in use.target.tags or (
+        is_pointwise_fn is not None and is_pointwise_fn(use.target)
+    )
 
 
 def gen_gm_and_inputs(target, args, kwargs):
@@ -1177,11 +1183,9 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
     )
-    # TODO(jgong5): support n % n_block_size != 0
     return (
         layout.dtype in layout_dtypes
         and micro_gemm is not None
-        and n % micro_gemm.register_blocking[1] == 0
         and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and mat2.is_module_buffer()
@@ -1540,6 +1544,15 @@ def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int)
     num_rng_seed_offset_inputs = (
         2 if torch._functorch.config.functionalize_rng_ops else 0
     )
+    # AOT won't lift any parameters if we're inlining NN Modules
+    # however desugaring subclasses will still add arguments
+    # resulted in extra fixed inputs https://github.com/pytorch/pytorch/issues/130502
+    if (
+        torch._dynamo.config.inline_inbuilt_nn_modules
+        and not torch._dynamo.utils.is_parameter_freezing()
+    ):
+        return 0
+
     return aot_fw_gm_num_inputs - dynamo_gm_num_inputs - num_rng_seed_offset_inputs
 
 
@@ -1722,168 +1735,6 @@ def maybe_get_suppress_shape_guards_ctx():
         return contextlib.nullcontext()
 
     return shape_env.suppress_guards()
-
-
-def aoti_eager_cache_dir(namespace: str, device: str):
-    return Path(cache_dir()) / "aoti_eager" / namespace / device
-
-
-def aoti_eager_op_conf_lock(op_func_name_with_overload: str):
-    from filelock import FileLock
-
-    # Avoid circular import
-    from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT
-
-    op_conf_lock_file = f"{op_func_name_with_overload}.lock"
-    lock_dir = get_lock_dir()
-    return FileLock(os.path.join(lock_dir, op_conf_lock_file), timeout=LOCK_TIMEOUT)
-
-
-def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type: str):
-    device_kernel_cache = aoti_eager_cache_dir(ns, device_type)
-    op_conf = device_kernel_cache / f"{op_func_name_with_overload}.json"
-    if not op_conf.exists():
-        return []
-
-    with aoti_eager_op_conf_lock(op_func_name_with_overload):
-        with open(op_conf) as f:
-            json_data = json.load(f)
-            for item in json_data:
-                # Get absolution path for kernel library
-                kernel_lib_abs_path = device_kernel_cache / item["kernel_path"]
-                item["kernel_path"] = kernel_lib_abs_path.as_posix()
-
-                # Check if the kernel library exists
-                if not kernel_lib_abs_path.exists():
-                    return []
-
-                for metadata in item["meta_info"]:
-                    assert not metadata[
-                        "is_dynamic"
-                    ], "Only support static shape for now"
-                    if metadata["device_type"] == "cpu":
-                        metadata["device_index"] = -1
-                    metadata["dtype"] = getattr(torch, metadata["dtype"].split(".")[-1])
-
-            return json_data
-
-
-def aoti_compile_with_persistent_cache(
-    ns: str,
-    op_func_name_with_overload: str,
-    device_type: str,
-    dynamic: bool,
-    f: Callable[..., Any],
-    args: Tuple[Any],
-    kwargs: Dict[str, Any],
-    *,
-    dynamic_shapes: Optional[Dict[str, Any]] = None,
-    options: Optional[Dict[str, Any]] = None,
-    remove_runtime_assertions: bool = False,
-    disable_constraint_solver: bool = False,
-):
-    """
-    Compile the given function with persistent cache for AOTI eager mode.
-    """
-    assert not dynamic, "Only support static shape for now"
-    from torch._export import aot_compile
-
-    type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
-    supported_scalar_types = tuple(type_to_torch_dtype.keys())
-    flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
-    if not all(
-        isinstance(input, (supported_scalar_types, torch.Tensor))
-        for input in flattened_inputs
-    ):
-        raise NotImplementedError("Only support tensor, int, float, bool for now")
-
-    persistent_cache = aoti_eager_cache_dir(ns, device_type)
-    if not persistent_cache.exists():
-        persistent_cache.mkdir(parents=True)
-
-    persistent_cache_lib = persistent_cache / "lib"
-    if not persistent_cache_lib.exists():
-        persistent_cache_lib.mkdir()
-
-    with mock.patch.dict(
-        os.environ,
-        {"TORCHINDUCTOR_CACHE_DIR": persistent_cache_lib.absolute().as_posix()},
-    ):
-        try:
-            kernel_lib_path = aot_compile(
-                f,
-                args,
-                kwargs,
-                dynamic_shapes=dynamic_shapes,
-                options=options,
-                remove_runtime_assertions=remove_runtime_assertions,
-                disable_constraint_solver=disable_constraint_solver,
-                # Some operations may have non-Tensor parameters like int, float, bool. These
-                # non-Tensor parameters will not be the input of the graph. Therefore, we do
-                # need to keep the same signature.
-                same_signature=False,
-            )
-
-            kernel_metadata_items = []
-            for input in flattened_inputs:
-                # TODO(Eikan): To add dynamic support
-                metadata: Dict[str, Any] = {}
-                metadata["is_dynamic"] = dynamic
-
-                if isinstance(input, torch.Tensor):
-                    metadata["device_type"] = f"{input.device.type}"
-                    if is_cpu_device([input]):
-                        metadata["device_index"] = -1
-                    else:
-                        metadata["device_index"] = input.device.index
-                    metadata["dtype"] = f"{input.dtype}"
-                    metadata["sizes"] = list(input.size())
-                    metadata["strides"] = list(input.stride())
-                else:
-                    assert isinstance(input, supported_scalar_types)
-                    # Scalar tensor
-                    metadata["device_type"] = device_type
-                    metadata["device_index"] = -1 if device_type == "cpu" else 0
-                    metadata["dtype"] = f"{type_to_torch_dtype[type(input)]}"
-                    metadata["sizes"] = []
-                    metadata["strides"] = []
-                    metadata["scalar_value"] = input
-
-                kernel_metadata_items.append(metadata)
-
-            kernel_meta_info: Dict[str, Any] = {}
-            kernel_meta_info["meta_info"] = kernel_metadata_items
-            kernel_meta_info["kernel_path"] = (
-                Path(kernel_lib_path).relative_to(persistent_cache).as_posix()
-            )
-
-            json_data = []
-            update_json = True
-            op_conf = persistent_cache / f"{op_func_name_with_overload}.json"
-            mode = "r" if op_conf.exists() else "w"
-            with aoti_eager_op_conf_lock(op_func_name_with_overload):
-                with open(op_conf, mode) as op_conf_file:
-                    try:
-                        json_data = json.load(op_conf_file)
-                    except Exception as e:
-                        json_data = []
-
-                    assert isinstance(json_data, list)
-                    for item in json_data:
-                        assert isinstance(item, dict)
-                        # Same kernel meta info already exists in the json file
-                        if item["meta_info"] == kernel_metadata_items:
-                            update_json = False
-                            break
-
-                if update_json:
-                    json_data.append(kernel_meta_info)
-                    with open(op_conf, "w") as op_conf_file:
-                        json.dump(json_data, op_conf_file, indent=4)
-
-            return kernel_lib_path
-        except Exception as e:
-            return ""
 
 
 def run_and_get_cpp_code(fn, *args, **kwargs):

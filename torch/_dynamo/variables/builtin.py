@@ -1470,9 +1470,10 @@ class BuiltinVariable(VariableTracker):
                 return variables.ConstantVariable(hasattr(obj.fn, name))
             return obj.call_hasattr(tx, name)
 
-    def call_map(self, tx, fn, seq):
-        if seq.has_unpack_var_sequence(tx):
-            items = [fn.call_function(tx, [x], {}) for x in seq.unpack_var_sequence(tx)]
+    def call_map(self, tx, fn, *seqs):
+        if all(seq.has_unpack_var_sequence(tx) for seq in seqs):
+            unpacked = [seq.unpack_var_sequence(tx) for seq in seqs]
+            items = [fn.call_function(tx, list(args), {}) for args in zip(*unpacked)]
             return variables.TupleVariable(items)
 
     def call_sum(self, tx, seq, start=_SENTINEL):

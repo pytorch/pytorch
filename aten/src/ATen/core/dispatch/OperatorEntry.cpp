@@ -97,7 +97,7 @@ void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug,
 
 void OperatorEntry::deregisterSchema() {
   TORCH_INTERNAL_ASSERT(schema_.has_value());
-  schema_ = c10::nullopt;
+  schema_ = std::nullopt;
   dispatchKeyExtractor_.deregisterSchema();
 }
 
