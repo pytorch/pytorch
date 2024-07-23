@@ -1079,6 +1079,7 @@ class FxGraphCache:
     def post_compile(
         compiled_graph: CompiledFxGraph,
         example_inputs: List[torch.Tensor],
+        cudagraphs: BoxedBool,
     ):
         """
         Run a set of post processing steps after loading from the cache. These involve:
@@ -1090,7 +1091,12 @@ class FxGraphCache:
         The results of this function are *not* saved in the cache itself.
         """
         set_tracing_context_output_strides(example_inputs, compiled_graph)
-        cudagraphs = compiled_graph.fx_kwargs["cudagraphs"]
+        # `cudagraphs` is part of the cache key, so the cached value of
+        # cudagraphs is always equal to the one passed into this function.
+        # We use the one passed in so that, on a cache hit, we still update the
+        # current BoxedBool and disable backwards cudagraphs regardless of caching.
+        saved_cudagraphs = compiled_graph.fx_kwargs["cudagraphs"]
+        assert saved_cudagraphs.value == cudagraphs.value
         if cudagraphs:
             cudagraph_post_compile(
                 example_inputs,
@@ -1290,8 +1296,10 @@ class FxGraphCache:
                 {"key": key, "cache_state": cache_state, "components": debug_lines}
             ),
         )
-
-        FxGraphCache.post_compile(compiled_graph, example_inputs)
+        # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
+        FxGraphCache.post_compile(
+            compiled_graph, example_inputs, fx_kwargs["cudagraphs"]
+        )
         return compiled_graph
 
     @staticmethod
