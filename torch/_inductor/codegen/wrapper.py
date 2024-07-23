@@ -155,7 +155,7 @@ TritonGrid = Union[
 
 def user_defined_kernel_grid_fn_code(
     name: str,
-    configs: List[triton.Config],
+    configs: List[triton.Config],  # type: ignore[name-defined]
     grids: List[TritonGrid],
     wrapper: Optional[WrapperCodeGen] = None,
 ) -> Tuple[str, str]:
@@ -1342,8 +1342,8 @@ class WrapperCodeGen(CodeGen):
         compile_wrapper.splice(kernel.src, strip=True)
 
         # Also include any possible kernel being called indirectly
-        from triton import JITFunction
-        from triton.language import constexpr
+        from triton import JITFunction  # type: ignore[name-defined, attr-defined]
+        from triton.language import constexpr  # type: ignore[name-defined]
 
         # global constexpr vars handled above
         symbols_included = {original_name}
@@ -1522,7 +1522,7 @@ class WrapperCodeGen(CodeGen):
 
     def generate_example_arg_value(self, arg, arg_type=None, raw_arg=None, index=None):
         if isinstance(arg_type, torch_dtype):
-            if V.graph.get_buffer(arg) is not None:
+            if V.graph.try_get_buffer(arg) is not None:
                 buf_name = arg
                 buf = V.graph.get_buffer(arg)
             else:
