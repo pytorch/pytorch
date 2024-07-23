@@ -66,10 +66,9 @@ from .cpp_utils import (
     cexpr_index,
     CppCSEVariable,
     DTYPE_TO_CPP,
-    get_promote_dtype,
     INDEX_TYPE,
     LocalBufferContext,
-    promote_vec_args,
+    promote_args,
     unify_mask_base_type,
     value_to_cpp,
 )
@@ -937,15 +936,7 @@ class CppVecOverrides(CppOverrides):
                 ]
                 new_args = list(args)
                 if scalars and vectors:
-                    # broadcast scalar args to vector if needed
                     new_args = []
-                    # Fix a data type mismatch in test_torchinductor.py::test_max_pool2d5_cpu.
-                    # In which, a floordiv node has vec arg of int8 and scalar node of int32.
-                    # In data type propagation, we set the output arg as int32.
-                    # However, in previous implementation, we cast scalar to vec data type int8
-                    # for calculation which causes following node data type mis match.
-                    # We should cast vec/scalar arg to promote data type instead.
-                    promote_type = get_promote_dtype(args)
                     for arg in args:
                         if isinstance(arg, (int, sympy.Expr)):
                             if isinstance(arg, sympy.Expr) and not arg.is_number:
@@ -953,30 +944,9 @@ class CppVecOverrides(CppOverrides):
                             else:
                                 arg = ops.constant(arg, torch.int64)
                             arg = arg.value if isinstance(arg, OpsValue) else arg
-                        if (
-                            isinstance(arg, CppCSEVariable)
-                            and func is not CppVecOverrides.randn
-                        ):
-                            assert isinstance(V.kernel, CppVecKernel)
-                            # align scalar data type to the vector for binary ops
-                            if (
-                                len(args) == 2
-                                and promote_type
-                                and arg.dtype != promote_type
-                            ):
-                                arg = ops.to_dtype(arg, promote_type)
-                                arg = arg.value if isinstance(arg, OpsValue) else arg
-                                # See NOTE [dtype of CppCSEVariable]: we have to fix arg.dtype since
-                                # the dtype from optimization context could be wrong.
-                                assert isinstance(arg, CppCSEVariable)
-                                arg.dtype = promote_type
-                            if not arg.is_vec:
-                                new_arg = V.kernel.broadcast(arg)
-                            else:
-                                new_arg = arg
-                            new_args.append(new_arg)
-                        else:
-                            new_args.append(arg)
+                        new_args.append(arg)
+
+                # DType Promotion
                 if vectors:
                     # We have saw several data type mismatch issues related with index_expr in
                     # the lowering phase of torch.int8. torch.int32, torch.int64.
@@ -984,9 +954,25 @@ class CppVecOverrides(CppOverrides):
                     # 2. int8 and int32 in test_torchinductor.py::test_max_pool2d5_cpu
                     # 3. int32 and fp32 in test_torchinductor_dynamic_shapes.py::test_avg_pool2d8_dynamic_shapes_cpu
                     if len(new_args) == 2:
-                        new_args = promote_vec_args(new_args)
+                        new_args = promote_args(new_args)
                     elif func == CppVecOverrides.where:
-                        new_args[1:] = promote_vec_args(new_args[1:])
+                        new_args[1:] = promote_args(new_args[1:])
+
+                # Broadcast scalar args to vector
+                if scalars and vectors:
+                    assert isinstance(V.kernel, CppVecKernel)
+                    new_args = [
+                        V.kernel.broadcast(new_arg)
+                        if (
+                            isinstance(new_arg, CppCSEVariable)
+                            and not new_arg.is_vec
+                            and func is not CppVecOverrides.randn
+                        )
+                        else new_arg
+                        for new_arg in new_args
+                    ]
+
+                if vectors:
                     return func(*new_args, **kwargs)
                 else:
                     # fallback to scalar ops
