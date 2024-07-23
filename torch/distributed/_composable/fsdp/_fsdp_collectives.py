@@ -3,7 +3,6 @@ from typing import List, NamedTuple, Optional, Tuple, Union
 import torch
 import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
-from torch.distributed import _make_nccl_premul_sum
 from torch.distributed._tensor import DTensor
 from torch.distributed.distributed_c10d import ReduceOp
 
@@ -274,11 +273,10 @@ def foreach_reduce(
     reduce_scatter_stream.wait_stream(current_stream)
     with torch.cuda.stream(reduce_scatter_stream):
         reduce_output = reduce_scatter_input.new_empty((reduce_scatter_output_numel,))
+        _div_if_needed(reduce_scatter_input, predivide_factor)
         if reduce_scatter_reduce_op is None:
             if predivide_factor is None:
                 reduce_scatter_reduce_op = ReduceOp.AVG
-            elif predivide_factor > 1:
-                reduce_scatter_reduce_op = _make_nccl_premul_sum(1.0 / predivide_factor)
             else:
                 reduce_scatter_reduce_op = ReduceOp.SUM
         dist.reduce_scatter_tensor(
