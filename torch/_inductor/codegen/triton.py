@@ -2740,6 +2740,14 @@ class TritonKernel(SIMDKernel):
         grid: List[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
         current_device = V.graph.scheduler.get_current_device_or_throw()
+        for call_arg in call_args:
+            if call_arg in V.graph.name_to_buffer:
+                buffer = V.graph.name_to_buffer[call_arg]
+                if (
+                    buffer.layout.device.type != current_device.type
+                    and buffer.layout.device.index != current_device.index
+                ):
+                    wrapper.writeline(f'{call_arg} = {call_arg}.to("{current_device}")')
 
         if self.args.workspace_arg is not None:
             ws = self.args.workspace_arg
