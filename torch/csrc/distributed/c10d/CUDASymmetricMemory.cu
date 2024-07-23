@@ -9,8 +9,6 @@
 #include <c10/cuda/driver_api.h>
 #endif
 
-#include <filesystem>
-
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/un.h>
@@ -114,9 +112,15 @@ class IpcChannel {
 
  private:
   static std::string get_socket_name(int pid) {
+    const char* tmp_dir = "/tmp";
+    for (const char* env_var : {"TMPDIR", "TMP", "TEMP", "TEMPDIR"}) {
+      if (const char* path = getenv(env_var)) {
+        tmp_dir = path;
+        break;
+      }
+    }
     std::ostringstream oss;
-    oss << std::filesystem::temp_directory_path().string() << "/symm_mem-"
-        << pid;
+    oss << tmp_dir << "/symm_mem-" << pid;
     return oss.str();
   }
 
