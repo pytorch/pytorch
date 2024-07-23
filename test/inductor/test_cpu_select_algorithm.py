@@ -241,7 +241,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
             if (
                 (
-                    dtype == torch.bfloat16
+                    (
+                        dtype == torch.bfloat16
+                        and torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                    )
                     or (
                         dtype == torch.float16
                         and torch.ops.mkldnn._is_mkldnn_fp16_supported()
