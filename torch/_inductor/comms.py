@@ -221,12 +221,27 @@ def _schedule_for_comm(
     return scheduled
 
 
-def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
+def decide_global_ordering_of_comms(
+    nodes: List[BaseSchedulerNode], name_to_fused_node
+) -> List[BaseSchedulerNode]:
     """
     Decide global ordering of comms, by just enforcing the ordering that's in the input graph
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
+    # If FSDP2 is used, we apply FSDP-specific passes.
+    if any(
+        is_fallback_op(
+            x.node,
+            {
+                torch.ops.fsdp.all_gather_copy_in.default,
+                torch.ops.fsdp.chunk_cat.default,
+            },
+        )
+        for x in nodes
+    ):
+        nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_fused_node)
+    
     comm_nodes = [n for n in nodes if is_collective(n.node)]
 
     def item(x: Set[str]) -> str:
@@ -236,6 +251,8 @@ def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
     for i in range(1, len(comm_nodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
         comm_nodes[i].add_fake_dep(WeakDep(item(comm_nodes[i - 1].get_buffer_names())))
+
+    return nodes
 
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
@@ -437,3 +454,192 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
 
     remove_unused_getitem(graph)
     graph_pass.apply(graph)  # type: ignore[arg-type]
+
+
+def is_fallback_op(node, op):
+    if isinstance(op, torch._ops.OpOverload):
+        op = {op}
+    return isinstance(node, ir.FallbackKernel) and node.op_overload in op
+
+
+def get_buf_idx(snode):
+    return int(snode.get_name().split("_")[0][3:])
+
+
+def enforce_comm_ordering_for_fsdp(
+    snodes: List[torch._inductor.scheduler.BaseSchedulerNode],
+    name_to_fused_node: Dict[str, BaseSchedulerNode],
+) -> List[torch._inductor.scheduler.BaseSchedulerNode]:
+    from . import scheduler
+
+    def _find_all_recursive_deps_of_node_up_to_criteria(
+        snode, collected_node_set, criteria_cb=None
+    ):
+        if criteria_cb and criteria_cb(snode):
+            return
+        collected_node_set.add(snode)
+        for dep in snode.unmet_dependencies:
+            dep_node = name_to_fused_node[dep.name]
+            if dep_node in collected_node_set:
+                continue
+            _find_all_recursive_deps_of_node_up_to_criteria(
+                dep_node, collected_node_set, criteria_cb
+            )
+
+    def _find_all_recursive_users_of_node_down_to_criteria(
+        snode, collected_node_set, criteria_cb=None
+    ):
+        if criteria_cb and criteria_cb(snode):
+            return
+        collected_node_set.add(snode)
+        for user in snode.users:
+            assert user.node is not None
+            if user.node.get_name() == "OUTPUT":
+                continue
+            if user.node.get_name() not in name_to_fused_node:
+                continue
+            user_node = name_to_fused_node[user.node.get_name()]
+            if user_node in collected_node_set:
+                continue
+            _find_all_recursive_users_of_node_down_to_criteria(
+                user_node, collected_node_set, criteria_cb
+            )
+
+    new_order: list[BaseSchedulerNode] = []
+    scheduled = set()
+    ag_grouped_node_to_wait_grouped_node = {}
+    rs_grouped_node_to_wait_grouped_node = {}
+    snode_name_to_final_snode = {}
+
+    def _create_group_node(snodes_to_group):
+        group_node = scheduler.GroupedSchedulerNode.create(snodes_to_group)
+        for snode in snodes_to_group:
+            snode_name_to_final_snode[snode.get_name()] = group_node
+        snode_name_to_final_snode[group_node.get_name()] = group_node
+        return group_node
+
+    # Create grouped nodes for specific ops
+    for snode in snodes:
+        # Case 1: Handle AllGather
+        if is_collective(
+            snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor_out.default
+        ) and any(
+            is_fallback_op(
+                name_to_fused_node[x].node, torch.ops.fsdp.all_gather_copy_in.default
+            )
+            for x in snode.ancestors
+        ):
+            ag_snode = snode
+            ag_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
+
+            # Find the "cast + copy_in + getitem + all_gather" code block
+            _find_all_recursive_deps_of_node_up_to_criteria(
+                ag_snode,
+                ag_related_snode_set,
+            )
+
+            # Find the "all_gather + all_gather_wait_tensor + copy_out + set_" code block
+            allowed_ops = {
+                torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                torch.ops._c10d_functional.wait_tensor.default,
+                torch.ops.fsdp.split_with_sizes_copy.default,
+                torch.ops.aten.set_.source_Tensor,
+            }
+            _find_all_recursive_users_of_node_down_to_criteria(
+                ag_snode,
+                ag_related_snode_set,
+                criteria_cb=lambda x: not (
+                    isinstance(x, scheduler.NopKernelSchedulerNode)
+                    or (
+                        isinstance(x, scheduler.ExternKernelSchedulerNode)
+                        and x.node.op_overload in allowed_ops  # type: ignore[union-attr]
+                    )
+                ),
+            )
+
+            # sort nodes by original operation order
+            ag_related_snodes = sorted(
+                ag_related_snode_set, key=lambda x: get_buf_idx(x)
+            )
+
+            end_idx_of_current_ag_block = len(ag_related_snodes)
+            for i in range(1, len(ag_related_snodes)):
+                prev_snode = ag_related_snodes[i - 1]
+                cur_snode = ag_related_snodes[i]
+                # Heuristic: if the distance between two nodes is too large (>5),
+                # we assume that the two nodes are not part of the same all-gather code block
+                # The reason we need this, is that ops like `.set_` in the 2nd all-gather code block could also
+                # depend on `split_with_sizes_copy` in the 1st all-gather code block, and we don't want to group them together.
+                if get_buf_idx(cur_snode) - get_buf_idx(prev_snode) > 5:
+                    end_idx_of_current_ag_block = i
+                    break
+
+            ag_related_snodes = ag_related_snodes[:end_idx_of_current_ag_block]
+
+            # Group "cast + copy_in + getitem + all_gather" into one GroupedSchedulerNode
+            wait_node_idx = None
+            for i in range(len(ag_related_snodes) - 1):
+                if isinstance(ag_related_snodes[i + 1].node, ir._WaitKernel):
+                    wait_node_idx = i + 1
+                    break
+            assert wait_node_idx is not None
+            ag_group_node = _create_group_node(ag_related_snodes[:wait_node_idx])
+
+            # Group "all_gather_wait_tensor + copy_out + set_" into one GroupedSchedulerNode
+            ag_wait_group_node = _create_group_node(ag_related_snodes[wait_node_idx:])
+
+            ag_grouped_node_to_wait_grouped_node[ag_group_node] = ag_wait_group_node
+
+        # Case 2: Handle ReduceScatter
+        elif is_fallback_op(snode.node, torch.ops.fsdp.chunk_cat.default):
+            # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" code block
+            rs_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
+            _find_all_recursive_users_of_node_down_to_criteria(
+                snode,
+                rs_related_snode_set,
+            )
+
+            # sort nodes by original operation order
+            rs_related_snodes = sorted(
+                rs_related_snode_set, key=lambda x: get_buf_idx(x)
+            )
+
+            # Group "reduce_scatter copy-in + reduce_scatter comm" into one GroupedSchedulerNode
+            wait_node_idx = None
+            for i in range(len(rs_related_snodes) - 1):
+                if isinstance(rs_related_snodes[i + 1].node, ir._WaitKernel):
+                    wait_node_idx = i + 1
+                    break
+            assert wait_node_idx is not None
+            rs_group_node = _create_group_node(rs_related_snodes[:wait_node_idx])
+
+            # Group "reduce_scatter wait + related output nodes" into one GroupedSchedulerNode
+            rs_wait_group_node = _create_group_node(rs_related_snodes[wait_node_idx:])
+
+            rs_grouped_node_to_wait_grouped_node[rs_group_node] = rs_wait_group_node
+
+    for snode in snodes:
+        if snode.get_name() in snode_name_to_final_snode:
+            snode = snode_name_to_final_snode[snode.get_name()]
+        if snode in scheduled:
+            continue
+        new_order.append(snode)
+        scheduled.add(snode)
+
+    # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
+    # before next AllGather's "copy_in then AG" group node
+    prev_ag_wait = None
+    for ag_group_node, wait_group_node in ag_grouped_node_to_wait_grouped_node.items():
+        if prev_ag_wait is not None:
+            ag_group_node.add_fake_dep(WeakDep(prev_ag_wait.get_name()))
+        prev_ag_wait = wait_group_node
+
+    # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
+    # before next ReduceScatter's "copy_in then RS" group node
+    prev_rs_wait = None
+    for rs_group_node, wait_group_node in rs_grouped_node_to_wait_grouped_node.items():
+        if prev_rs_wait is not None:
+            rs_group_node.add_fake_dep(WeakDep(prev_rs_wait.get_name()))
+        prev_rs_wait = wait_group_node
+
+    return new_order  # type: ignore[return-value]

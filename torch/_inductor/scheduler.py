@@ -950,13 +950,13 @@ class SchedulerNode(BaseSchedulerNode):
         return buffers_store_as_atomic_add
 
 
-def init_group_node(
+def init_group_snode(
     group_snode: BaseSchedulerNode,
     scheduler: Scheduler,
     snodes: List[BaseSchedulerNode],
 ) -> None:
-    assert isinstance(group_snode, (FusedSchedulerNode, GroupedSchedulerNode))
-    group_snode.snodes = snodes
+    assert isinstance(snode, (FusedSchedulerNode, GroupedSchedulerNode))
+    group_snode.snodes = snodes  # type: ignore[attr-defined]
     group_snode.scheduler = scheduler
     group_snode.node = None
     group_snode.ancestors = set.union(
@@ -978,6 +978,7 @@ def init_group_node(
     group_snode.outputs_by_name = {
         buf.get_name(): buf for buf in group_snode.get_outputs()
     }
+    group_snode.users = []
 
 
 class FusedSchedulerNode(BaseSchedulerNode):
@@ -1001,8 +1002,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     def __init__(self, scheduler: Scheduler, snodes: List[BaseSchedulerNode]) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
-        init_group_node(self, scheduler, snodes)
-        self.users: List[NodeUser] = []
+        init_group_snode(self, scheduler, snodes)
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
 
     @cache_on_self
@@ -1402,7 +1402,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 
     def __init__(self, scheduler: Scheduler, snodes: List[BaseSchedulerNode]) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
-        init_group_node(self, scheduler, snodes)
+        init_group_snode(self, scheduler, snodes)
 
     def unpack(self) -> List[BaseSchedulerNode]:
         """
@@ -1414,6 +1414,11 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         del self.scheduler.name_to_fused_node[self.get_name()]
         return self.scheduler.fuse_nodes(self.snodes)
 
+    def add_fake_dep(self, fake_dep: Dep) -> None:
+        assert self.get_name() != fake_dep.name
+        self.set_read_writes(self.read_writes.with_read(fake_dep))
+        self.unmet_dependencies.add(fake_dep)
+
     @cache_on_self
     def get_name(self) -> str:
         return "_".join([x.get_name() for x in self.snodes])
@@ -1422,6 +1427,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         return self.snodes[0].get_name()
 
     @cache_on_self
+<<<<<<< HEAD
     def get_buffer_names(self) -> Set[str]:
         return set.union(*[x.get_buffer_names() for x in self.snodes])
 
@@ -1430,6 +1436,10 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         for node in self.snodes:
             result.extend(node.get_outputs())
         return result
+=======
+    def get_names(self) -> Set[str]:
+        return set.union(*[x.get_names() for x in self.snodes])
+>>>>>>> 29781d35e2c ([Traceable FSDP2][Inductor] Create grouped nodes for FSDP2 all-gather)
 
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
@@ -1571,14 +1581,16 @@ class Scheduler:
         self.compute_dependencies()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.dead_node_elimination()
-        if config.reorder_for_compute_comm_overlap:
-            comms.decide_global_ordering_of_comms(self.nodes)
+        self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.compute_ancestors()
+        if config.reorder_for_compute_comm_overlap:
+            self.nodes = comms.decide_global_ordering_of_comms(
+                self.nodes, self.name_to_fused_node
+            )
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
-        self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.logged_slow_fusion: Set[Tuple[str, str]] = set()
