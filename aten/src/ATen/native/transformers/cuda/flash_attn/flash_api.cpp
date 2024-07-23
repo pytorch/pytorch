@@ -446,7 +446,8 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
     auto opts = q.options();
 
-    auto softmax_lse = at::empty({batch_size, num_heads, seqlen_q_rounded }, opts.dtype(at::kFloat));
+    auto softmax_lse = at::empty({batch_size, num_heads, seqlen_q }, opts.dtype(at::kFloat));
+
     at::Tensor p;
     // Only return softmax if there's dropout to reduce compilation time
     if (return_softmax) {
@@ -530,7 +531,6 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
-    softmax_lse = softmax_lse.slice(2, 0, seqlen_q);
     return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, p};
 }
 

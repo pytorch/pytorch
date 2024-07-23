@@ -705,9 +705,6 @@ def meta__scaled_dot_product_flash(fake_mode, func, *args, **kwargs):
     def convert_tensor(t, device):
         return FakeTensor(fake_mode, t, device)
 
-    def round_multiple(x: int, m: int) -> int:
-        return ((x + m - 1) // m) * m
-
     batch_size = query.size(0)
     num_heads = query.size(1)
     max_seqlen_batch_q = query.size(2)
@@ -717,10 +714,9 @@ def meta__scaled_dot_product_flash(fake_mode, func, *args, **kwargs):
     query_t = query.transpose(1, 2)
     # empty_like already returns a fake tensor so we don't need to convert it
     attention = torch.empty_like(query_t).transpose(1, 2)
-    max_seq_len_batch_q_rounded = round_multiple(max_seqlen_batch_q, 128)
     logsumexp = convert_tensor(
         torch.empty(
-            (batch_size, num_heads, max_seq_len_batch_q_rounded),
+            (batch_size, num_heads, max_seqlen_batch_q),
             dtype=torch.float,
             device="meta",
         ),
@@ -753,7 +749,6 @@ def meta__scaled_dot_product_flash(fake_mode, func, *args, **kwargs):
     # are going to use cudagraphs or not, so we return meta tensors here
     # it's possible we'll need to have some special handling in inductor for sdpa
 
-    logsumexp = logsumexp[..., :max_seqlen_batch_q]
     return (
         attention,
         logsumexp,
