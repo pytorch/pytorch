@@ -1327,6 +1327,36 @@ class TestConverter(TestCase):
         inp = (torch.randn(2, 3),)
         self._check_equal_ts_ep_converter(M1(), inp, ["script"])
 
+    def test_ts2ep_with_loop(self):
+        def func1(x):
+            a, b = x, x
+            for i in range(0, 4, 2):
+                a = a + a + i
+                b = b * b + i
+            return a, b
+
+        def func2(x):
+            for i in range(x.size(0)):
+                x = x * x * i
+            return x
+
+        def func3(x):
+            while x.sum() < 10:
+                x += x.sin()
+            return x
+
+        inp = (torch.ones([2, 2]) * 2,)
+        # Trace unrolls the loop.
+        self._check_equal_ts_ep_converter(func1, inp, ["script"])
+
+        # TODO: (2/N)
+        # Trace unrolls the loop.
+        # self._check_equal_ts_ep_converter(func2, inp, ["script"])
+
+        # TODO: (3/N)
+        # Trace unrolls the loop.
+        # self._check_equal_ts_ep_converter(func3, inp, ["script"])
+
 
 if __name__ == "__main__":
     run_tests()

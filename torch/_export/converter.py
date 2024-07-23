@@ -425,6 +425,27 @@ class TS2FXGraphConverter:
             )
         )
 
+    def _convert_block_to_subgraph(self, node: torch._C.Node, arguments: List[str]):
+        subgraph_nodes = []
+        for block in node.blocks():
+            subgraph_converter = TS2FXGraphConverter(
+                block, {}, {}, self.blocks_to_lifted_attrs, {}
+            )
+            subgraph_converter.constant_map = self.constant_map
+            subgraph_converter.name_to_attribute_fqn = self.name_to_attribute_fqn
+
+            for block_arg in arguments:
+                normalized_block_arg_name = normalize_name(block_arg)
+                placeholder_node = subgraph_converter.fx_graph.placeholder(
+                    normalized_block_arg_name
+                )
+                subgraph_converter.name_to_node[block_arg] = placeholder_node
+
+            subgraph = subgraph_converter.convert()
+            subgraph_name = self.add_subgraph(subgraph)
+            subgraph_nodes.append(self.fx_graph.get_attr(subgraph_name))
+        return subgraph_nodes
+
     def is_top_level_graph(self):
         return isinstance(self.ts_graph, torch._C.Graph)
 
@@ -438,13 +459,13 @@ class TS2FXGraphConverter:
         kwargs = {}
         for input, schema_arg in zip(node.inputs(), schema.arguments):
             if schema_arg.kwarg_only:
-                kwargs[schema_arg.name] = self.get_fx_value(input)
+                kwargs[schema_arg.name] = self.get_fx_value_by_ir_value(input)
             else:
-                args.append(self.get_fx_value(input))
+                args.append(self.get_fx_value_by_ir_value(input))
 
         return tuple(args), kwargs
 
-    def get_fx_value(self, value: torch._C.Value):
+    def get_fx_value_by_ir_value(self, value: torch._C.Value):
         value_name = value.debugName()
 
         if value_name in self.name_to_node:
@@ -456,6 +477,17 @@ class TS2FXGraphConverter:
             return self.name_to_constant[value_name]
         else:
             raise ValueError(f"Input {value_name} not found")
+
+    def get_fx_value_by_fqn(self, name):
+        if name in self.name_to_node:
+            fx_node = self.name_to_node[name]
+        elif name in self.name_to_non_tensor_attribute_node:
+            fx_node = self.name_to_non_tensor_attribute_node[name]
+        elif name in self.name_to_non_tensor_attribute:
+            fx_node = self.name_to_non_tensor_attribute[name]
+        else:
+            raise ValueError(f"Attribute {name} not found")
+        return fx_node
 
     def convert(self) -> torch.fx.GraphModule:
         self.convert_graph_inputs()
@@ -707,7 +739,7 @@ class TS2FXGraphConverter:
     def _convert_prim_iterator(self, node: torch._C.Node):
         output_list = []
         for inp in node.inputs():
-            output_list.append(self.get_fx_value(inp))
+            output_list.append(self.get_fx_value_by_ir_value(inp))
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_list
@@ -719,9 +751,9 @@ class TS2FXGraphConverter:
             # We assume key value are stored in pair in the DictConstruct.
             # The first element is the key and the following is the value.
             if i % 2 == 0:
-                k = self.get_fx_value(inp)
+                k = self.get_fx_value_by_ir_value(inp)
             else:
-                v = self.get_fx_value(inp)
+                v = self.get_fx_value_by_ir_value(inp)
                 assert (
                     k is not None and v is not None
                 ), "DictConstruct has an empty key value pair."
@@ -745,14 +777,14 @@ class TS2FXGraphConverter:
         # Single input and multiple outputs for unpacking.
         for i, outp in enumerate(node.outputs()):
             outp_name = outp.debugName()
-            inp = self.get_fx_value(node.input())
+            inp = self.get_fx_value_by_ir_value(node.input())
             fx_node = self.fx_graph.call_function(operator.getitem, (inp, i))
             self.name_to_node[outp_name] = fx_node
 
     def convert_aten_Int(self, node: torch._C.Node):
         # converts aten::Int as aten._to_copy + aten::_local_scalar_dense
         target = torch.ops.aten._to_copy.default
-        args = tuple(self.get_fx_value(input) for input in node.inputs())
+        args = tuple(self.get_fx_value_by_ir_value(input) for input in node.inputs())
         to_copy_node = self.fx_graph.call_function(target, args, {"dtype": torch.int32})
 
         fx_node = self.fx_graph.call_function(
@@ -773,7 +805,7 @@ class TS2FXGraphConverter:
         # For both of those APIs, torch.jit.trace implicitly sets the output tensor type
         # to be LongTensor.
         target = torch.ops.aten.scalar_tensor
-        args = tuple(self.get_fx_value(input) for input in node.inputs())
+        args = tuple(self.get_fx_value_by_ir_value(input) for input in node.inputs())
 
         fx_node = self.fx_graph.call_function(target, args, {"dtype": torch.long})
         output_name = node.output().debugName()
@@ -829,7 +861,7 @@ class TS2FXGraphConverter:
 
     def convert_aten___getitem__(self, node: torch._C.Node):
         input_container, index = tuple(
-            self.get_fx_value(input) for input in node.inputs()
+            self.get_fx_value_by_ir_value(input) for input in node.inputs()
         )
         fx_node = self.fx_graph.call_function(
             operator.getitem, (input_container, index)
@@ -895,6 +927,70 @@ class TS2FXGraphConverter:
         else:
             self.convert_call_function_op(node)
 
+    def _check_prim_loop_support(self, node):
+        inputs = list(node.inputs())
+
+        # TODO: (1/N) stage.
+        if inputs[0].debugName() not in self.constant_map:
+            raise RuntimeError(
+                "prim::Loop currently cannot run with dynamic value of number of iterations."
+            )
+
+        # Make sure the condition is not updated in the subblock.
+        subblock = next(node.blocks())
+        condition_output_name = next(subblock.outputs()).debugName()
+        for node in subblock.nodes():
+            if (
+                node.outputsSize() == 1
+                and node.output().debugName() == condition_output_name
+            ):
+                raise RuntimeError(
+                    "prim::Loop currently cannot run with dynamic value of condition."
+                )
+            if node.outputsSize() >= 2:
+                for outp in node.outputs():
+                    if outp.debugName() == condition_output_name:
+                        raise RuntimeError(
+                            "prim::Loop currently cannot run with dynamic value of condition."
+                        )
+
+    def convert_prim_Loop(self, node: torch._C.Node):
+        inputs = list(node.inputs())
+        self._check_prim_loop_support(node)
+
+        num_iterations = self.get_fx_value_by_ir_value(inputs[0])
+
+        # Find inputs.
+        arguments = [inp.debugName() for inp in inputs[2:]]
+
+        subgraph_nodes = self._convert_block_to_subgraph(node, [])
+
+        assert len(subgraph_nodes) == 1
+
+        def execute_node(*args, **kwargs):
+            node_func = args[0]
+            iter_idx = args[1]
+            return node_func(torch.tensor(iter_idx), *args[2:], **kwargs)
+
+        fx_block_args = [self.get_fx_value_by_fqn(name) for name in arguments]
+        for iter_idx in range(num_iterations):
+            loop_node = self.fx_graph.call_function(
+                execute_node,
+                tuple([subgraph_nodes[0], iter_idx] + fx_block_args),
+                {},
+            )
+            if node.outputsSize() >= 1:
+                for i, outp in enumerate(node.outputs()):
+                    output_name = outp.debugName()
+                    self.name_to_node[output_name] = self.fx_graph.call_function(
+                        operator.getitem,
+                        (
+                            loop_node,
+                            i + 1,
+                        ),  # + 1 because the 0th element is the condition.
+                    )
+                    fx_block_args[i] = self.name_to_node[output_name]
+
     def _check_set_attr_in_if_block(self, if_node: torch._C.Node):
         for block in if_node.blocks():
             for node in block.nodes():
@@ -910,7 +1006,7 @@ class TS2FXGraphConverter:
 
         inputs = list(node.inputs())
         assert len(inputs) == 1
-        predicate = self.get_fx_value(inputs[0])
+        predicate = self.get_fx_value_by_ir_value(inputs[0])
 
         def _identify_inputs_as_arguments(entry):
             """
@@ -946,46 +1042,11 @@ class TS2FXGraphConverter:
             arguments = arguments.union(self.blocks_to_lifted_attrs[block])
 
         arguments = list(arguments)
-
-        # Convert blocks to subgraphs
-        subgraph_nodes = []
-        for block in node.blocks():
-            subgraph_converter = TS2FXGraphConverter(
-                block,
-                self.name_to_param,
-                self.name_to_buffer,
-                self.blocks_to_lifted_attrs,
-                {},
-                self.name_to_constant,
-            )
-            subgraph_converter.name_to_attribute_fqn = self.name_to_attribute_fqn
-
-            for block_arg in arguments:
-                normalized_block_arg_name = normalize_name(block_arg)
-                placeholder_node = subgraph_converter.fx_graph.placeholder(
-                    normalized_block_arg_name
-                )
-                subgraph_converter.name_to_node[block_arg] = placeholder_node
-
-            subgraph = subgraph_converter.convert()
-            subgraph_name = self.add_subgraph(subgraph)
-            subgraph_nodes.append(self.fx_graph.get_attr(subgraph_name))
+        subgraph_nodes = self._convert_block_to_subgraph(node, arguments)
 
         assert len(subgraph_nodes) == 2
 
-        fx_block_args = []
-        for arg_name in arguments:
-            if arg_name in self.name_to_node:
-                arg_node = self.name_to_node[arg_name]
-                fx_block_args.append(arg_node)
-            elif arg_name in self.name_to_non_tensor_attribute_node:
-                arg_node = self.name_to_non_tensor_attribute_node[arg_name]
-                fx_block_args.append(arg_node)
-            elif arg_name in self.name_to_non_tensor_attribute:
-                arg_value = self.name_to_non_tensor_attribute[arg_name]
-                fx_block_args.append(arg_value)
-            else:
-                raise ValueError(f"Attribute {arg_name} not found")
+        fx_block_args = [self.get_fx_value_by_fqn(name) for name in arguments]
 
         args = (
             predicate,
@@ -1036,14 +1097,14 @@ class TS2FXGraphConverter:
         # currently, _record_function_enter_new and _record_function_exit are
         # discarded during `retrace_as_exported_program`.
         target = torch.ops.profiler._record_function_exit
-        args = tuple(self.get_fx_value(input) for input in node.inputs())
+        args = tuple(self.get_fx_value_by_ir_value(input) for input in node.inputs())
         self.fx_graph.call_function(target, args)
 
     def convert_prim_tolist(self, node: torch._C.Node):
         # prim::tolist cannot be supported by `_convert_standard_operators`
         # since it requires call_method instead of call_function.
         target = "tolist"
-        args = (self.get_fx_value(next(node.inputs())),)
+        args = (self.get_fx_value_by_ir_value(next(node.inputs())),)
         fx_node = self.fx_graph.call_method(target, args)
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
@@ -1058,7 +1119,7 @@ class TS2FXGraphConverter:
 
     def _convert_standard_operators(self, node: torch._C.Node):
         target = kind_to_standard_operators[node.kind()]
-        args = tuple(self.get_fx_value(input) for input in node.inputs())
+        args = tuple(self.get_fx_value_by_ir_value(input) for input in node.inputs())
         fx_node = self.fx_graph.call_function(target, args)
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
@@ -1118,7 +1179,10 @@ class TS2FXGraphConverter:
             else:
                 raise ValueError(f"Output {output_name} not found")
 
-        if len(args) == 1:
+        if len(args) == 0:
+            # Sub-block of prim::If can have zero output.
+            self.fx_graph.output([])
+        elif len(args) == 1:
             self.fx_graph.output(
                 args[0]
             )  # Get rid of an extra list wrapped around final output.
@@ -1127,8 +1191,8 @@ class TS2FXGraphConverter:
                 args
             )  # For prim::Loop and prim::If with multiple outputs.
         else:
-            # Sub-block of prim::If can have zero output.
-            self.fx_graph.output([])
+            # Sub-block of prim::Loop can have multiple outputs.
+            self.fx_graph.output(args)
 
 
 class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
