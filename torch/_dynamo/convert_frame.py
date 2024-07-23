@@ -488,7 +488,7 @@ class ConvertFrameAssert:
             {
                 "co_name": code.co_name,
                 "frame_id": frame_id,
-                "compile_id": compile_id,
+                "compile_id": str(compile_id),
                 "co_filename": code.co_filename,
                 "co_firstlineno": code.co_firstlineno,
                 "cache_size": cache_size.num_cache_entries_with_same_id_matched_objs,
