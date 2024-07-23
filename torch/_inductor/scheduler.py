@@ -170,12 +170,9 @@ class BaseSchedulerNode:
     def has_aliasing_or_mutation(self) -> bool:
         return bool(self.get_aliases() or self.get_mutations())
 
-    def compute_unmet_dependencies(self) -> None:
-        self.unmet_dependencies = self.read_writes.reads
-
     def set_read_writes(self, rw: dependencies.ReadWrites) -> None:
         self.read_writes = rw
-        self.compute_unmet_dependencies()
+        self.unmet_dependencies = self.read_writes.reads
         self.prune_deps()
 
     def op_counts(self) -> Counter[str]:
@@ -906,17 +903,6 @@ def is_group_snode(snode: BaseSchedulerNode) -> bool:
     return isinstance(snode, (FusedSchedulerNode, GroupedSchedulerNode))
 
 
-def compute_unmet_deps_for_group_snode(
-    group_snode: Union[FusedSchedulerNode, GroupedSchedulerNode]
-) -> None:
-    unmet_deps = (
-        set.union(*[x.unmet_dependencies for x in group_snode.snodes])
-        | group_snode.read_writes.reads
-    ) - group_snode.read_writes.writes
-    unmet_deps = {dep for dep in unmet_deps if dep.name not in group_snode.get_names()}
-    group_snode.unmet_dependencies = unmet_deps
-
-
 def init_group_snode(
     group_snode: BaseSchedulerNode,
     scheduler: Scheduler,
@@ -1055,9 +1041,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
     # abstraction for scheduling purposes
     def update_mutated_names(self, renames: Dict[str, str]) -> None:
         raise NotImplementedError
-
-    def compute_unmet_dependencies(self) -> None:
-        return compute_unmet_deps_for_group_snode(self)
 
     def add_fake_dep(self, name: Dep) -> None:
         raise NotImplementedError
@@ -1352,11 +1335,10 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         del self.scheduler.name_to_fused_node[self.get_name()]
         return self.scheduler.fuse_nodes(self.snodes)
 
-    def compute_unmet_dependencies(self) -> None:
-        return compute_unmet_deps_for_group_snode(self)
-
     def add_fake_dep(self, fake_dep: Dep) -> None:
+        assert self.get_name() != fake_dep.name
         self.set_read_writes(self.read_writes.with_read(fake_dep))
+        self.unmet_dependencies.add(fake_dep.name)
 
     @cache_on_self
     def get_name(self) -> str:
@@ -1508,7 +1490,6 @@ class Scheduler:
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.dead_node_elimination()
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
-        self.compute_order()
         self.compute_ancestors()
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.decide_global_ordering_of_comms(
@@ -1876,14 +1857,6 @@ class Scheduler:
             visit(node)
         return result
 
-    def compute_order(self) -> None:
-        """
-        Populate each node.min_order and node.max_order
-        """
-        for order, node in enumerate(self.nodes):
-            node.min_order = order
-            node.max_order = order
-
     def compute_ancestors(self) -> None:
         """
         Populate each node.ancestors
@@ -1894,13 +1867,13 @@ class Scheduler:
             ancestors = set()
             for dep in node.unmet_dependencies:
                 ancestors.add(dep.name)
-                ancestors |= name_to_ancestors[
-                    self.name_to_fused_node[dep.name].get_name()
-                ]
-            name_to_ancestors[
-                self.name_to_fused_node[node.get_name()].get_name()
-            ] = ancestors
+                ancestors |= name_to_ancestors[dep.name]
+            name_to_ancestors[node.get_name()] = ancestors
             node.ancestors = ancestors
+
+        for order, node in enumerate(self.nodes):
+            node.min_order = order
+            node.max_order = order
 
     def fuse_nodes(self, nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
         """
