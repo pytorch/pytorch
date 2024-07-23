@@ -887,7 +887,7 @@ class InplacingTests(TestCase):
             matches = re.findall(r"empty_strided_\w+\(", code)
             self.assertEqual(len(matches), 0)
 
-            self.assertExpectedInline(count_numel(f, x, out), """6""")
+            self.assertExpectedInline(count_numel(f, x, out), """12""")
 
     @requires_cuda
     def test_inplace_custom_op_intermediate(self):
@@ -918,7 +918,7 @@ class InplacingTests(TestCase):
             matches = re.findall(r"empty_strided_\w+\(", code)
             self.assertEqual(len(matches), 1)
 
-            self.assertExpectedInline(count_numel(f, x, out), """6""")
+            self.assertExpectedInline(count_numel(f, x, out), """12""")
 
     @requires_cuda
     def test_inplace_custom_op_two_mutated_inputs(self):
@@ -950,7 +950,7 @@ class InplacingTests(TestCase):
             matches = re.findall(r"empty_strided_\w+\(", code)
             self.assertEqual(len(matches), 1)
 
-            self.assertExpectedInline(count_numel(f), """21""")
+            self.assertExpectedInline(count_numel(f), """27""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v1(self):

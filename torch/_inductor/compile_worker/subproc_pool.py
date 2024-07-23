@@ -18,7 +18,6 @@ from typing import Any, Callable, Dict
 from torch._inductor import config
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 
-
 log = logging.getLogger(__name__)
 
 

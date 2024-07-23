@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import heapq
 import operator
+
 import sys
 from collections import defaultdict
 from typing import Dict, List, Set, TYPE_CHECKING
@@ -13,7 +14,6 @@ import torch
 from . import config, ir
 from .dependencies import WeakDep
 from .utils import is_collective, is_wait
-
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
