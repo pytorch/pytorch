@@ -405,7 +405,7 @@ if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--dynamic-shapes --dynamic-batch-only)
 fi
 
-if [[ "${TEST_CONFIG}" == *cpu* ]]; then
+if [[ "${TEST_CONFIG}" == *cpu_inductor* || "${TEST_CONFIG}" == *cpu_aot_inductor* || "${TEST_CONFIG}" == *perf_cpu* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--device cpu)
 else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
@@ -431,7 +431,7 @@ test_perf_for_dashboard() {
 
   local device=cuda
   local taskset=""
-  if [[ "${TEST_CONFIG}" == *cpu-x86* ]]; then
+  if [[ "${TEST_CONFIG}" == *perf_cpu-x86* ]]; then
     device=cpu-x86
     end_core=$(test_inductor_set_cpu_affinity)
     taskset="taskset -c 0-$end_core"
@@ -582,7 +582,7 @@ test_dynamo_benchmark() {
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
   else
-    if [[ "${TEST_CONFIG}" == *cpu* ]]; then
+    if [[ "${TEST_CONFIG}" == *cpu_inductor* || "${TEST_CONFIG}" == *cpu_aot_inductor* ]]; then
       local dt="float32"
       if [[ "${TEST_CONFIG}" == *amp* ]]; then
         dt="amp"
@@ -1279,7 +1279,7 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
-  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
+  if [[ "${TEST_CONFIG}" == *cpu_inductor* || "${TEST_CONFIG}" == *cpu_aot_inductor* ]]; then
     install_torchaudio cpu
   else
     install_torchaudio cuda
@@ -1305,7 +1305,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     checkout_install_torchbench
     # Do this after checkout_install_torchbench to ensure we clobber any
     # nightlies that torchbench may pull in
-    if [[ "${TEST_CONFIG}" != *cpu* ]]; then
+    if [[ "${TEST_CONFIG}" != *cpu_inductor* && "${TEST_CONFIG}" != *cpu_aot_inductor* ]]; then
       install_torchrec_and_fbgemm
     fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
