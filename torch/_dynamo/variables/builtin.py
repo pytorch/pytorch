@@ -1310,8 +1310,7 @@ class BuiltinVariable(VariableTracker):
                 )
                 if isinstance(out, ConstDictVariable):
                     return out
-                elif isinstance(out, (TupleVariable, ListVariable)):
-                    return BuiltinVariable(user_cls).call_custom_dict(tx, user_cls, out)
+                return BuiltinVariable(user_cls).call_custom_dict(tx, user_cls, out)
         elif not args and kwargs:
             items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
             return variables.ConstDictVariable(
