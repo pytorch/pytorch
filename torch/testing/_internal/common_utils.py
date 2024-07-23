@@ -1408,7 +1408,7 @@ TestEnvironment.def_flag("TEST_WITH_TORCHDYNAMO", env_var="PYTORCH_TEST_WITH_DYN
 if TEST_WITH_TORCHDYNAMO:  # noqa: F821
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
-    torch._dynamo.config.accumulated_cache_size_limit = 8
+    torch._dynamo.config.accumulated_cache_size_limit = 64
     # Do not log compilation metrics from unit tests
     torch._dynamo.config.log_compilation_metrics = False
     if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
