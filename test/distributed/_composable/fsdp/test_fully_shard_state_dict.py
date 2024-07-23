@@ -111,10 +111,47 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         for name, dtensor in state_dict.items():
             self.assertEqual(dtensor.device.type, "cpu")
 
-    # Temporarily disable 2D state dict test, while strided sharding is being devleoped.
-    # TODO: re-enable this test once 2d state_dict is ready.
+    def test_2d_state_dict_correctness(self):
+        dp_size = 2
+        global_mesh = init_device_mesh(
+            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+        )
+        dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+        torch.manual_seed(42)
+        mlp_dim = 4
+
+        # model init
+        model = nn.Sequential(*[MLP(mlp_dim) for _ in range(3)])
+        model_2d = copy.deepcopy(model)
+
+        # FSDP + TP
+        model_2d = parallelize_module(
+            model_2d,
+            device_mesh=tp_mesh,
+            parallelize_plan={
+                "0.in_proj": ColwiseParallel(),
+                "0.out_proj": RowwiseParallel(),
+                "1.in_proj": ColwiseParallel(),
+                "1.out_proj": RowwiseParallel(),
+                "2.in_proj": ColwiseParallel(),
+                "2.out_proj": RowwiseParallel(),
+            },
+        )
+        for mlp in model_2d:
+            fully_shard(mlp, mesh=dp_mesh)
+        fully_shard(model_2d, mesh=dp_mesh)
+
+        # state_dict parity check
+        model_state_dict = model.state_dict()
+        model_2d_state_dict = model_2d.state_dict()
+        for tensor, dtensor in zip(
+            model_state_dict.values(), model_2d_state_dict.values()
+        ):
+            self.assertTrue(isinstance(dtensor, DTensor))
+            self.assertEqual(tensor, dtensor.full_tensor())
+
     @skip_if_lt_x_gpu(2)
-    def _temp_disable_test_dp_tp_state_dict_save_load(self):
+    def test_dp_tp_state_dict_save_load(self):
         dp_size = 2
         global_mesh = init_device_mesh(
             "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
