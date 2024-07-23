@@ -263,7 +263,7 @@ class TestBenchmarking(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(elapsed_time_ms > 1)
     
-    @requires_gpu
+    @requires_gpu()
     @patches
     def test_cpu_launch_overhead_ms_per_event_record(self):
         benchmarker = Benchmarker()
@@ -275,7 +275,7 @@ class TestBenchmarking(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(self.diff(benchmarker.cpu_launch_overhead_ms_per_event_record, elapsed_time_ms / 1000) < 0.25, True)
     
-    @requires_gpu
+    @requires_gpu()
     @patches
     def test_cpu_launch_overhead_ms_per_gpu_cache_clear(self):
         benchmarker = Benchmarker()
@@ -288,7 +288,7 @@ class TestBenchmarking(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(self.diff(benchmarker.cpu_launch_overhead_ms_per_gpu_cache_clear, elapsed_time_ms / 100) < 0.25, True)
     
-    @requires_gpu
+    @requires_gpu()
     @patches
     def test_gpu_time_ms_per_gpu_cache_clear(self):
         benchmarker = Benchmarker()
@@ -304,7 +304,7 @@ class TestBenchmarking(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(self.diff(benchmarker.gpu_time_ms_per_gpu_cache_clear, start_event.elapsed_time(end_event) / 100) < 0.25, True)
     
-    @requires_gpu
+    @requires_gpu()
     @patches
     def test_gpu_time_ms_per_gpu_clock_cycle(self):
         benchmarker = Benchmarker()
