@@ -920,6 +920,12 @@ def init_group_snode(
         dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
     )
 
+    group_snode.unmet_dependencies = {
+        dep
+        for dep in set.union(*[x.unmet_dependencies for x in snodes])
+        if dep.name not in group_snode.get_names()
+    } - group_snode.read_writes.writes
+
     group_snode.min_order = min(x.min_order for x in group_snode.snodes)  # type: ignore[attr-defined]
     group_snode.max_order = max(x.max_order for x in group_snode.snodes)  # type: ignore[attr-defined]
     group_snode.users = []
