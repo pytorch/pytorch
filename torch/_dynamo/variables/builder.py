@@ -2632,14 +2632,7 @@ class SourcelessBuilder:
             return DeviceMeshVariable(value)
         elif isinstance(value, re.Pattern):
             return RegexPatternVariable(value)
-        elif not is_wrapper_or_member_descriptor(value):
-            log.debug(
-                "%s",
-                (
-                    f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}. "
-                    "Converting to a catch all variable tracker - UserDefinedObjectVariable"
-                ),
-            )
+        elif inspect.isclass(type(value)):
             return UserDefinedObjectVariable(value)
         unimplemented(
             f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
