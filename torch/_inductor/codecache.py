@@ -51,7 +51,7 @@ from typing import (
 from typing_extensions import TypeAlias
 
 import torch
-from torch import Tensor, SymInt
+from torch import SymInt, Tensor
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -386,7 +386,9 @@ def get_path(
     return basename, subdir, path
 
 
-def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code") -> str:
+def get_hash(
+    content: Union[str, bytes], extra: str = "", hash_type: str = "code"
+) -> str:
     if hash_type == "code":
         return code_hash(content, extra)
     if hash_type in ["cubin", "hsaco", "spv"]:
@@ -451,7 +453,9 @@ def _ident(x: T) -> T:
     return x
 
 
-def extract_tensor_metadata_for_cache_key(device_map: Dict[torch.device, torch.device], t: Tensor) -> TensorMetadata:
+def extract_tensor_metadata_for_cache_key(
+    device_map: Dict[torch.device, torch.device], t: Tensor
+) -> TensorMetadata:
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
     that are not needed for caching
@@ -474,7 +478,9 @@ def extract_tensor_metadata_for_cache_key(device_map: Dict[torch.device, torch.d
     return meta
 
 
-def _reduce_fake_tensor(device_map: Dict[torch.device, torch.device], t: Tensor) -> Tuple[Callable[[T], T], Tuple[TensorMetadata]]:
+def _reduce_fake_tensor(
+    device_map: Dict[torch.device, torch.device], t: Tensor
+) -> Tuple[Callable[[T], T], Tuple[TensorMetadata]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
@@ -482,8 +488,9 @@ def _reduce_fake_tensor(device_map: Dict[torch.device, torch.device], t: Tensor)
     return (_ident, (metadata,))
 
 
-def _reduce_tensor(device_map: Dict[torch.device, torch.device],
-                   t: Tensor) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
+def _reduce_tensor(
+    device_map: Dict[torch.device, torch.device], t: Tensor
+) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     If we see tensors, we know they're constants stored as attributes on
@@ -614,7 +621,9 @@ class FxGraphCachePickler(pickle.Pickler):
         return lines
 
 
-def build_code_hash(roots: List[str] | None, prefix: str, hasher: hashlib._Hash) -> None:
+def build_code_hash(
+    roots: List[str] | None, prefix: str, hasher: hashlib._Hash
+) -> None:
     for lib in sorted(pkgutil.iter_modules(roots, prefix), key=lambda x: x.name):
         spec = lib.module_finder.find_spec(lib.name, None)
         assert spec is not None
