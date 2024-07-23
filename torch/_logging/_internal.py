@@ -143,12 +143,14 @@ class LogState:
     artifact_names: Set[str] = field(default_factory=set)
 
     def enable_artifact(self, artifact_name):
+        return
         self.artifact_names.add(artifact_name)
 
     def is_artifact_enabled(self, name):
         return name in self.artifact_names
 
     def enable_log(self, log_qnames, log_level):
+        return
         if isinstance(log_qnames, str):
             log_qnames = [log_qnames]
         for log_qname in log_qnames:
@@ -1074,6 +1076,7 @@ def trace_structured(
     payload is an arbitrary string, which can be arbitrarily long (but expected to have
     newlines so no lines are too long)
     """
+    return
     assert "name" not in ["rank", "frame_id", "frame_compile_id", "attempt"]
     assert callable(
         metadata_fn
