@@ -51,8 +51,8 @@ time python test/run_test.py --verbose -i distributed/tensor/parallel/test_tp_ra
 time python test/run_test.py --verbose -i distributed/_composable/fsdp/test_fully_shard_training -- -k test_2d_mlp_with_nd_mesh
 
 # ND composability tests
-time python test/run_test.py --verbose -i distributed/_composable/test_composability/test_2d_composability
 time python test/run_test.py --verbose -i distributed/_composable/test_composability/test_pp_composability
+time python test/run_test.py --verbose -i distributed/_composable/test_composability/test_2d_composability
 
 # Other tests
 time python test/run_test.py --verbose -i test_cuda_primary_ctx
