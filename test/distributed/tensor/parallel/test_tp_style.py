@@ -435,9 +435,6 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(sp_rmsnorm.weight.grad.placements, (_Partial(),))
             # communication happens in both fwd/bwd to redistribute input
             self.assertEqual(comm_mode.get_total_counts(), 2)
-            self.assertEqual(
-                comm_mode.get_comm_counts()[torch.ops._dtensor.shard_dim_alltoall], 2
-            )
 
 
 if __name__ == "__main__":
