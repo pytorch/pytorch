@@ -253,10 +253,12 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 and epilogue != "mul"
                 and epilogue != "div"
                 or (
-                    dtype == torch.half
-                    or (
-                        dtype == torch.bfloat16
-                        and not torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                    (
+                        dtype == torch.half
+                        or (
+                            dtype == torch.bfloat16
+                            and not torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                        )
                     )
                     and epilogue == "add"
                     and not bias
