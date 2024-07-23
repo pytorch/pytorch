@@ -10660,6 +10660,84 @@ class CommonTemplate:
         x = torch.rand([4, 4, 3], dtype=torch.float64)
         self.common(fn, (x,))
 
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    # We only support dtypeview for abi_conpatible aoti
+    @torch._inductor.config.patch(abi_compatible=True)
+    def test_dtypeview(self):
+        if TEST_WITH_ASAN:
+            return
+
+        # https://github.com/pytorch/pytorch/issues/126338
+        def fn(x, y, x_dtype, x2):
+            x = x.view(x_dtype)
+            y = y.view(x_dtype) + 1
+            x2 = x2.view(x_dtype) + 1
+            return x @ y, x2 @ x
+
+        test_dtypes = [
+            torch.float32,
+            torch.float64,
+            torch.float16,
+            torch.bfloat16,
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        ]
+        for test_dtype_x in test_dtypes:
+            for test_dtype_y in test_dtypes:
+                # @ operation needs arguments to be the same dtype
+                for view_dtype in test_dtypes:
+                    try:
+                        # print(f"({test_dtype_x}, {test_dtype_y}, {view_dtype})")
+                        x = rand_strided(
+                            (2, 2), (2, 1), device=self.device, dtype=test_dtype_x
+                        )
+                        y = rand_strided(
+                            (2, 2), (2, 1), device=self.device, dtype=test_dtype_y
+                        )
+                        x2 = x.clone()
+                        fn(x, y, view_dtype, x2)
+                    except Exception as e:
+                        continue
+                    self.common(
+                        fn,
+                        (x, y, view_dtype, x2),
+                        reference_in_float=False,
+                        check_lowp=False,
+                    )
+
+    @torch._inductor.config.patch(abi_compatible=True)
+    def test_dtypeview_fusion(self):
+        @torch.compile
+        def fn(x):
+            x = x + 1
+            x = torch.ops.aten.view.dtype(x, torch.int16)
+            x = x * 2
+            return x
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        x = torch.randn([1024], dtype=torch.float16, device=self.device)
+        self.common(fn, (x,), reference_in_float=False)
+        assertGeneratedKernelCountEqual(self, 1)
+
+    @expectedFailureCodegenDynamic
+    def test_reinterpret_dtypeview(self):
+        @torch.compile
+        def fn(x, x2):
+            return x.view([10, 10]).view(torch.int32), x2.view(torch.int32).view(
+                [10, 10]
+            )
+
+        x = torch.randn([100, 1], device=self.device)
+        x2 = x.clone()
+        self.common(fn, (x, x2), reference_in_float=False, check_lowp=False)
+        x = torch.randn([100, 1], device=self.device)
+        x2 = x.clone()
+        _, code = run_and_get_code(fn, x, x2)
+        FileCheck().check("aten.view.dtype(reinterpret_tensor").run(code[0])
+
     def test_float16_to_int16(self):
         def fn(x):
             x_view = x.view(dtype=torch.int16)
