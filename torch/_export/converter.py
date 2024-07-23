@@ -446,6 +446,32 @@ class TS2FXGraphConverter:
             subgraph_nodes.append(self.fx_graph.get_attr(subgraph_name))
         return subgraph_nodes
 
+    def _identify_inputs_as_arguments(self, entry):
+        """
+        Identify inputs from the innermost sub-block. This is needed
+        for nested sub-blocks when the input is hidden in the nested sub-block.
+        E.g., example IR of input is hidden in the nested sub-block.
+        Graph[x.1]
+        %1 = ...
+            Block[]
+                Block[x.1]
+                    %2 = x.1 ...
+        """
+        arguments: Set[str] = set()
+        for block in entry.blocks():
+            for block_node in block.nodes():
+                for block_node_in in block_node.inputs():
+                    if (
+                        block_node_in.debugName() in self.name_to_node
+                        and block_node_in.debugName()
+                        not in self.name_to_attribute_fqn
+                    ):
+                        arguments.add(block_node_in.debugName())
+                arguments = arguments.union(
+                    self._identify_inputs_as_arguments(block_node)
+                )
+        return arguments
+
     def is_top_level_graph(self):
         return isinstance(self.ts_graph, torch._C.Graph)
 
@@ -961,18 +987,28 @@ class TS2FXGraphConverter:
         num_iterations = self.get_fx_value_by_ir_value(inputs[0])
 
         # Find inputs.
-        arguments = [inp.debugName() for inp in inputs[2:]]
+        loop_local_arguments = [inp.debugName() for inp in inputs[2:]]
 
-        subgraph_nodes = self._convert_block_to_subgraph(node, [])
+        global_arguments = self._identify_inputs_as_arguments(node)
+
+        # Lift parameters as inputs.
+        for block in node.blocks():
+            global_arguments = global_arguments.union(self.blocks_to_lifted_attrs[block])
+
+        global_arguments = list(global_arguments)
+
+        subgraph_nodes = self._convert_block_to_subgraph(node, global_arguments)
 
         assert len(subgraph_nodes) == 1
 
         def execute_node(*args, **kwargs):
             node_func = args[0]
             iter_idx = args[1]
-            return node_func(torch.tensor(iter_idx), *args[2:], **kwargs)
+            loop_local_args = args[2:2+len(loop_local_arguments)]
+            global_args = args[2+len(loop_local_arguments):]
+            return node_func(*global_args, torch.tensor(iter_idx), *loop_local_args, **kwargs)
 
-        fx_block_args = [self.get_fx_value_by_fqn(name) for name in arguments]
+        fx_block_args = [self.get_fx_value_by_fqn(name) for name in loop_local_arguments + global_arguments]
         for iter_idx in range(num_iterations):
             loop_node = self.fx_graph.call_function(
                 execute_node,
@@ -1008,34 +1044,8 @@ class TS2FXGraphConverter:
         assert len(inputs) == 1
         predicate = self.get_fx_value_by_ir_value(inputs[0])
 
-        def _identify_inputs_as_arguments(entry):
-            """
-            Identify inputs from the innermost sub-block. This is needed
-            for nested sub-blocks when the input is hidden in the nested sub-block.
-            E.g., example IR of input is hidden in the nested sub-block.
-            Graph[x.1]
-            %1 = ...
-                Block[]
-                    Block[x.1]
-                        %2 = x.1 ...
-            """
-            arguments: Set[str] = set()
-            for block in entry.blocks():
-                for block_node in block.nodes():
-                    for block_node_in in block_node.inputs():
-                        if (
-                            block_node_in.debugName() in self.name_to_node
-                            and block_node_in.debugName()
-                            not in self.name_to_attribute_fqn
-                        ):
-                            arguments.add(block_node_in.debugName())
-                    arguments = arguments.union(
-                        _identify_inputs_as_arguments(block_node)
-                    )
-            return arguments
-
         # Find inputs.
-        arguments = _identify_inputs_as_arguments(node)
+        arguments = self._identify_inputs_as_arguments(node)
 
         # Lift parameters as inputs.
         for block in node.blocks():
