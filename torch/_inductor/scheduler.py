@@ -978,7 +978,6 @@ def init_group_snode(
     group_snode.outputs_by_name = {
         buf.get_name(): buf for buf in group_snode.get_outputs()
     }
-    group_snode.users = []
 
 
 class FusedSchedulerNode(BaseSchedulerNode):
@@ -1415,7 +1414,6 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         return self.scheduler.fuse_nodes(self.snodes)
 
     def add_fake_dep(self, fake_dep: Dep) -> None:
-        assert self.get_name() != fake_dep.name
         self.set_read_writes(self.read_writes.with_read(fake_dep))
         self.unmet_dependencies.add(fake_dep)
 
@@ -1580,7 +1578,9 @@ class Scheduler:
         self.compute_ancestors()
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.decide_global_ordering_of_comms(
-                self.nodes, self.name_to_buf, self.name_to_fused_node,
+                self.nodes,
+                self.name_to_buf,
+                self.name_to_fused_node,
             )
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)

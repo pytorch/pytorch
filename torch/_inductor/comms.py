@@ -241,7 +241,7 @@ def decide_global_ordering_of_comms(
         for x in nodes
     ):
         nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_buf, name_to_fused_node)
-    
+
     comm_nodes = [n for n in nodes if is_collective(n.node)]
 
     def item(x: Set[str]) -> str:

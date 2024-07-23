@@ -168,7 +168,6 @@ class TestFullyShardCompile(FSDPTest):
     @torch._inductor.config.patch(
         reorder_for_compute_comm_overlap=True,
         reorder_for_compute_comm_overlap_passes=[],
-        reorder_for_locality=False,
     )
     def _test_traceable_fsdp(
         self, model_init_fn, input_creation_fn, backend, fullgraph
