@@ -263,7 +263,7 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
         )
         onnx_program_from_old_exporter = torch.onnx.export(
             SampleModelTwoInputs(),
-            (torch.randn(1, 1, 2), {"b": torch.randn(1, 1, 2)}, {}),
+            (torch.randn(1, 1, 2), {"b": torch.randn(1, 1, 2)}),
             dynamo=True,
         )
         self.assertEqual(
@@ -298,7 +298,7 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
         )
         onnx_program_from_old_exporter = torch.onnx.export(
             SampleModelForDynamicShapes(),
-            (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}, {}),
+            (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}),
             dynamic_axes={
                 "x": {0: "customx_dim_0", 1: "customx_dim_1", 2: "customx_dim_2"},
                 "b": {0: "customb_dim_0", 1: "customb_dim_1", 2: "customb_dim_2"},
@@ -337,7 +337,7 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
         )
         onnx_program_from_old_exporter = torch.onnx.export(
             SampleModelForDynamicShapes(),
-            (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}, {}),
+            (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}),
             dynamic_axes={
                 "x": [0, 1, 2],
                 "b": [0, 1, 2],
@@ -372,7 +372,7 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
         )
         onnx_program_from_old_exporter = torch.onnx.export(
             SampleModelForDynamicShapes(),
-            (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}, {}),
+            (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}),
             dynamic_axes={
                 "b": [0, 1, 2],
             },

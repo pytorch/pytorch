@@ -275,6 +275,7 @@ def export(
                     )
 
         f: Path to the output ONNX model file. E.g. "model.onnx".
+        kwargs: Named arguments to the model.
         export_params: If True, all parameters will
             be exported. Set this to False if you want to export an untrained model.
             In this case, the exported model will first take all of its parameters
@@ -513,6 +514,8 @@ def export(
             category=FutureWarning,
         )
 
+    args = (args,) if isinstance(args, torch.Tensor) else args
+
     if dynamo:
         if isinstance(model, (torch.jit.ScriptModule, torch.jit.ScriptFunction)):
             raise TypeError(
@@ -524,7 +527,6 @@ def export(
             "do_constant_folding, keep_initializers_as_inputs, custom_opsets, export_modules_as_functions, and "
             "autograd_inlining are not supported for dynamo export at the moment."
         )
-        args = (args,) if isinstance(args, torch.Tensor) else args
         if isinstance(model, torch.export.ExportedProgram):
             # We the model is already exported program, so the args, kwargs, and dynamic_shapes
             # are not used
@@ -549,31 +551,33 @@ def export(
             onnx_program.save(f)
         return onnx_program
 
-    if f is None:
-        raise ValueError(
-            "Export destination must be specified for torchscript-onnx export."
+    else:
+        # Torch Script export path
+        if f is None:
+            raise ValueError("Export destination must be specified when dynamo=False.")
+        if kwargs is not None:
+            args = args + (kwargs,)
+
+        _export(
+            model,
+            args,
+            f,
+            export_params,
+            verbose,
+            training,
+            input_names,
+            output_names,
+            operator_export_type=operator_export_type,
+            opset_version=opset_version,
+            do_constant_folding=do_constant_folding,
+            dynamic_axes=dynamic_axes,
+            keep_initializers_as_inputs=keep_initializers_as_inputs,
+            custom_opsets=custom_opsets,
+            export_modules_as_functions=export_modules_as_functions,
+            autograd_inlining=autograd_inlining,
         )
 
-    _export(
-        model,
-        args,
-        f,
-        export_params,
-        verbose,
-        training,
-        input_names,
-        output_names,
-        operator_export_type=operator_export_type,
-        opset_version=opset_version,
-        do_constant_folding=do_constant_folding,
-        dynamic_axes=dynamic_axes,
-        keep_initializers_as_inputs=keep_initializers_as_inputs,
-        custom_opsets=custom_opsets,
-        export_modules_as_functions=export_modules_as_functions,
-        autograd_inlining=autograd_inlining,
-    )
-
-    return None
+        return None
 
 
 def _is_constant_tensor_list(node):
