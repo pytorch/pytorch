@@ -1,3 +1,4 @@
+# pyre-ignore-all-errors[404]
 import operator_benchmark as op_bench
 
 import torch
