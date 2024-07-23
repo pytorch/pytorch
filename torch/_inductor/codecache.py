@@ -45,6 +45,7 @@ from typing import (
     Set,
     Tuple,
     TYPE_CHECKING,
+    TypeVar,
     Union,
 )
 from typing_extensions import TypeAlias
@@ -59,6 +60,7 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compiler,
 )
 
+T = TypeVar("T")
 
 """
 codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
@@ -445,12 +447,11 @@ class TensorMetadataAndValues:
     values: List[Any]
 
 
-def _ident(x: Any) -> Any:
+def _ident(x: T) -> T:
     return x
 
 
-def extract_tensor_metadata_for_cache_key(device_map: Dict[torch.device, torch.device],
-                                          t: Union[Tensor, FakeTensor]) -> TensorMetadata:
+def extract_tensor_metadata_for_cache_key(device_map: Dict[torch.device, torch.device], t: Tensor) -> TensorMetadata:
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
     that are not needed for caching
@@ -473,8 +474,7 @@ def extract_tensor_metadata_for_cache_key(device_map: Dict[torch.device, torch.d
     return meta
 
 
-def _reduce_fake_tensor(device_map: Dict[torch.device, torch.device],
-                        t: FakeTensor) -> Tuple[Callable[..., Any], Tuple[TensorMetadata]]:
+def _reduce_fake_tensor(device_map: Dict[torch.device, torch.device], t: Tensor) -> Tuple[Callable[[T], T], Tuple[TensorMetadata]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
@@ -483,7 +483,7 @@ def _reduce_fake_tensor(device_map: Dict[torch.device, torch.device],
 
 
 def _reduce_tensor(device_map: Dict[torch.device, torch.device],
-                   t: Tensor) -> Tuple[Callable[..., Any], Tuple[TensorMetadataAndValues]]:
+                   t: Tensor) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     If we see tensors, we know they're constants stored as attributes on
@@ -514,7 +514,7 @@ def _reduce_tensor(device_map: Dict[torch.device, torch.device],
     return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
-def _reduce_symint(s: SymInt) -> Tuple[Callable[..., Any], Tuple[str]]:
+def _reduce_symint(s: SymInt) -> Tuple[Callable[[T], T], Tuple[str]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle SymInts.
     """
