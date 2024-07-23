@@ -665,23 +665,24 @@ test_inductor_torchbench_cpu_smoketest_perf(){
   grep -v '^ *#' < "$MODELS_SPEEDUP_TARGET" | while IFS=',' read -r -a model_cfg
   do
     local model_name=${model_cfg[0]}
-    local data_type=${model_cfg[1]}
-    local speedup_target=${model_cfg[4]}
-    if [[ ${model_cfg[3]} == "cpp" ]]; then
+    local data_type=${model_cfg[2]}
+    local speedup_target=${model_cfg[5]}
+    local backend=${model_cfg[1]}
+    if [[ ${model_cfg[4]} == "cpp" ]]; then
       export TORCHINDUCTOR_CPP_WRAPPER=1
     else
       unset TORCHINDUCTOR_CPP_WRAPPER
     fi
     local output_name="$TEST_REPORTS_DIR/inductor_inference_${model_cfg[0]}_${model_cfg[1]}_${model_cfg[2]}_${model_cfg[3]}_cpu_smoketest.csv"
 
-    if [[ ${model_cfg[2]} == "dynamic" ]]; then
+    if [[ ${model_cfg[3]} == "dynamic" ]]; then
       taskset -c 0-"$end_core" python benchmarks/dynamo/torchbench.py \
         --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" --dynamic-shapes \
-        --dynamic-batch-only --freezing --timeout 9000 --backend=inductor --output "$output_name"
+        --dynamic-batch-only --freezing --timeout 9000 --"$backend" --output "$output_name"
     else
       taskset -c 0-"$end_core" python benchmarks/dynamo/torchbench.py \
         --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" \
-        --freezing --timeout 9000 --backend=inductor --output "$output_name"
+        --freezing --timeout 9000 --"$backend" --output "$output_name"
     fi
     cat "$output_name"
     # The threshold value needs to be actively maintained to make this check useful.
@@ -1284,7 +1285,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_smoketest_perf* ]]; then
     checkout_install_torchbench timm_vision_transformer phlippe_densenet basic_gnn_gcn \
       llama_v2_7b_16h resnet50 timm_efficientnet mobilenet_v3_large timm_resnest \
-      shufflenet_v2_x1_0 hf_GPT2
+      shufflenet_v2_x1_0 hf_GPT2 yolov3 mobilenet_v2 resnext50_32x4d hf_T5_base
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_cpu_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *torchbench_gcp_smoketest* ]]; then
     checkout_install_torchbench
