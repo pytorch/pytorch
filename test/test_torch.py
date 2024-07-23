@@ -140,13 +140,6 @@ class TestTorchDeviceType(TestCase):
             shape.append(random.randint(min_size, max_size))
         return tuple(shape)
 
-    def setUp(self):
-        TestCase.setUp(self)
-        # reset dynamo cache to avoid issues like
-        # https://github.com/pytorch/pytorch/issues/125967#issuecomment-2118483919
-        # which depends on test order.
-        torch._dynamo.reset()
-
     # Validates that mathematical constants are defined properly, as required by
     # the Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html)
     @onlyCPU
@@ -6435,13 +6428,6 @@ else:
 class TestDevicePrecision(TestCase):
     exact_dtype = True
 
-    def setUp(self):
-        TestCase.setUp(self)
-        # reset dynamo cache to avoid issues like
-        # https://github.com/pytorch/pytorch/issues/125967#issuecomment-2118483919
-        # which depends on test order.
-        torch._dynamo.reset()
-
     # FIXME: move to indexing test suite
     @onlyCUDA
     def test_index_add_bfloat16(self, device):
@@ -6675,14 +6661,6 @@ def disable_gc():
 
 class TestTorch(TestCase):
     exact_dtype = True
-
-
-    def setUp(self):
-        TestCase.setUp(self)
-        # reset dynamo cache to avoid issues like
-        # https://github.com/pytorch/pytorch/issues/125967#issuecomment-2118483919
-        # which depends on test order.
-        torch._dynamo.reset()
 
     def test_dir(self):
         dir(torch)
