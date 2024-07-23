@@ -113,6 +113,7 @@ def build_subgraph_buffer(
     raise ValueError("FlexAttention was passed a subgraph with no output node!")
 
 
+# Inner Triton functions shared by flex_attention & split-k decoding kernels.
 compute_next_offset_func = r"""
 @triton.jit
 def get_offset_for_next_block(loop_iter, col_indices, total_blocks, SPARSE_BLOCK, SPARSE_BLOCK_MULTIPLE, BLOCK):
@@ -124,6 +125,109 @@ def get_offset_for_next_block(loop_iter, col_indices, total_blocks, SPARSE_BLOCK
 
     offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK
     return offset
+"""
+
+compute_forward_block = r"""
+@triton.jit
+def forward_inner(
+    q, K_block_ptr, V_block_ptr,
+    # accumulated values
+    acc, l_i, m_i,
+    # Offsets
+    off_z, off_h, offs_m, offs_n,
+    # blocksparse data
+    kv_indices, kv_num_blocks,
+    # start kv and end kv block
+    block_n_start, block_n_end,
+    MATMUL_PRECISION,
+    {{gen_argdefs()}},
+    IS_FULL_BLOCKS,
+):
+    # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
+    {{gen_defines() | indent_except_first(1)}}
+
+    SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
+
+    # initialize offsets
+
+    RCP_LN2: tl.constexpr = 1.44269504
+
+    if PRESCALE_QK:
+        q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
+
+    # loop over k, v and update accumulator
+    for start_n in range(block_n_start, block_n_end):
+        # -- load k --
+        k = tl.load(K_block_ptr)
+        # -- compute qk ---
+        qk = tl.dot(q, k) # TODO: use cuda matmul when q_len <= 2.
+        if not PRESCALE_QK:
+            qk *= SM_SCALE
+        # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+        m = offs_m[:, None]
+        n = offs_n[None, :]
+        # TODO: Add load mask in modification when M/N Boundary is not safe
+        {{ modification(
+            subgraph_number=0,
+            output_name="post_mod_scores",
+            score="qk",
+            b="off_z",
+            h="off_h",
+            m="m",
+            n="n",
+            out="qk"
+        ) | indent_except_first(2) }}
+
+        if not IS_FULL_BLOCKS:
+            {{ modification(
+                subgraph_number=1,
+                output_name="mask_mod_output",
+                score="qk",
+                b="off_z",
+                h="off_h",
+                m="m",
+                n="n",
+            ) | indent_except_first(3) }}
+        # apply mask for partially unmasked blocks
+        post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
+
+        # TODO: In the case that score_mod is linear, this can be LICMed
+        if not PRESCALE_QK:
+            post_mod_scores *= RCP_LN2
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+        # -- compute scaling constant ---
+        m_ij = tl.maximum(m_i, tl.max(post_mod_scores, 1))
+
+        alpha = tl.math.exp2(m_i - m_ij)
+        p = tl.math.exp2(post_mod_scores - m_ij[:, None])
+        if not ROWS_GUARANTEED_SAFE:
+            masked_out_rows = (m_ij == float("-inf"))
+            alpha = tl.where(masked_out_rows, 0, alpha)
+            p = tl.where(masked_out_rows[:, None], 0, p)
+
+        # NB: l_i update is pulled up here since it's a bit faster
+        # NB: For headdim=256, it's faster to move it back down to after m_i =
+        # m_ij
+        l_i = l_i * alpha + tl.sum(p, 1)
+        # # -- scale and update acc --
+        acc = acc * alpha[:, None]
+        v = tl.load(V_block_ptr)
+        acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
+
+        # -- update m_i
+        m_i = m_ij
+
+        # update pointers
+        offset = get_offset_for_next_block(start_n, kv_indices, kv_num_blocks, SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N)
+
+        V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
+        K_block_ptr = tl.advance(K_block_ptr, (0, offset))
+
+        offs_n = offs_n + offset
+
+    return acc, l_i, m_i
+
 """
 
 flex_attention_template = TritonTemplate(
@@ -248,6 +352,7 @@ flex_attention_template = TritonTemplate(
         acc, l_i, m_i,
         off_z, off_h, offs_m, offs_n,
         kv_indices, kv_num_blocks,
+        0, kv_num_blocks * SPARSE_KV_MULTIPLE,
         MATMUL_PRECISION,
         {{gen_argdefs()}},
         IS_FULL_BLOCKS=False
@@ -285,6 +390,7 @@ flex_attention_template = TritonTemplate(
             acc, l_i, m_i,
             off_z, off_h, offs_m, offs_n,
             kv_indices, kv_num_blocks,
+            0, kv_num_blocks * SPARSE_KV_MULTIPLE,
             MATMUL_PRECISION,
             {{gen_argdefs()}},
             IS_FULL_BLOCKS=True
@@ -310,115 +416,15 @@ flex_attention_template = TritonTemplate(
         l_ptrs = LSE + off_hz * Q_LEN + offs_m
         lse = m_i + tl.math.log2(l_i)
         tl.store(l_ptrs, lse)
-
-
-@triton.jit
-def forward_inner(
-    q, K_block_ptr, V_block_ptr,
-    # accumulated values
-    acc, l_i, m_i,
-    # Offsets
-    off_z, off_h, offs_m, offs_n,
-    # blocksparse data
-    kv_indices, kv_num_blocks,
-    MATMUL_PRECISION,
-    {{gen_argdefs()}},
-    IS_FULL_BLOCKS,
-):
-    # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
-    {{gen_defines() | indent_except_first(1)}}
-
-    SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
-
-    # initialize offsets
-
-    RCP_LN2: tl.constexpr = 1.44269504
-
-    if PRESCALE_QK:
-        q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
-
-    # loop over k, v and update accumulator
-    lo = 0
-    hi = kv_num_blocks * SPARSE_KV_MULTIPLE
-
-    for start_n in range(0, hi):
-        # -- load k --
-        k = tl.load(K_block_ptr)
-        # -- compute qk ---
-        qk = tl.dot(q, k)
-        if not PRESCALE_QK:
-            qk *= SM_SCALE
-        # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-        m = offs_m[:, None]
-        n = offs_n[None, :]
-        {{ modification(
-            subgraph_number=0,
-            output_name="post_mod_scores",
-            score="qk",
-            b="off_z",
-            h="off_h",
-            m="m",
-            n="n",
-            out="qk"
-        ) | indent_except_first(2) }}
-
-        if not IS_FULL_BLOCKS:
-            {{ modification(
-                subgraph_number=1,
-                output_name="mask_mod_output",
-                score="qk",
-                b="off_z",
-                h="off_h",
-                m="m",
-                n="n",
-            ) | indent_except_first(3) }}
-            # apply mask for partially unmasked blocks
-            post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
-
-        # TODO: In the case that score_mod is linear, this can be LICMed
-        if not PRESCALE_QK:
-            post_mod_scores *= RCP_LN2
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-        # -- compute scaling constant ---
-        m_ij = tl.maximum(m_i, tl.max(post_mod_scores, 1))
-
-        alpha = tl.math.exp2(m_i - m_ij)
-        p = tl.math.exp2(post_mod_scores - m_ij[:, None])
-        if not ROWS_GUARANTEED_SAFE:
-            masked_out_rows = (m_ij == float("-inf"))
-            alpha = tl.where(masked_out_rows, 0, alpha)
-            p = tl.where(masked_out_rows[:, None], 0, p)
-
-        # NB: l_i update is pulled up here since it's a bit faster
-        # NB: For headdim=256, it's faster to move it back down to after m_i =
-        # m_ij
-        l_i = l_i * alpha + tl.sum(p, 1)
-        # # -- scale and update acc --
-        acc = acc * alpha[:, None]
-        v = tl.load(V_block_ptr)
-        acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
-
-        # -- update m_i
-        m_i = m_ij
-
-        # update pointers
-        offset = get_offset_for_next_block(start_n, kv_indices, kv_num_blocks, SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N)
-
-        V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
-        K_block_ptr = tl.advance(K_block_ptr, (0, offset))
-
-        offs_n = offs_n + offset
-
-    return acc, l_i, m_i
  """
+    + compute_forward_block
     + compute_next_offset_func,
 )
 
 
 def _use_flex_decoding(query):
     # Decide which kernel to use, return true if use flex decoding kernel.
-    return V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 128))
+    return V.graph.sizevars.evaluate_expr(sympy.Le(query.get_size()[-2], 128))
 
 
 _h100_default_config = {
@@ -568,17 +574,6 @@ def flex_attention(
     subgraph_buffer = build_subgraph_buffer(
         placeholder_inps + list(score_mod_other_buffers), subgraph
     )
-    if _use_flex_decoding(query):
-        return create_flex_decoding_kernel(
-            subgraph_buffer,
-            query,
-            key,
-            value,
-            subgraph,
-            block_mask,
-            scale,
-            *score_mod_other_buffers,
-        )
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -591,6 +586,18 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
+    if _use_flex_decoding(query):
+        return create_flex_decoding_kernel(
+            query,
+            key,
+            value,
+            block_mask,
+            scale,
+            subgraph_buffer,
+            mask_graph_buffer,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
     for buf in [
         query,
         key,

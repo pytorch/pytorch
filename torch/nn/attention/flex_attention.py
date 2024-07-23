@@ -452,9 +452,6 @@ def _convert_mask_to_block_mask(
     assert mask.dtype == torch.bool
     mask = _broadcast_to_dim(mask, 4)
     B, H, Q, KV = mask.shape
-    is_decoding = Q < 128
-    if is_decoding:
-        Q_BLOCK_SIZE = Q
     assert Q % Q_BLOCK_SIZE == 0
     assert KV % KV_BLOCK_SIZE == 0
     mask = mask.view(
