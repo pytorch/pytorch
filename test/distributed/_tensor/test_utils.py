@@ -162,12 +162,13 @@ class UtilTest(DTensorTestBase):
         ) = compute_padded_and_unpadded_local_shape(
             global_tensor.shape, device_mesh, (Shard(0), Shard(0))
         )
+        print(f"{self.rank=}, {local_padded_shape=}, {local_unpadded_shape=}")
         if self.rank < 6:
             self.assertEqual(local_padded_shape, local_unpadded_shape)
             self.assertEqual(local_padded_shape, list(tensor_list[self.rank].shape))
         else:
             self.assertEqual(local_padded_shape, list(tensor_list[0].shape))
-            self.assertEqual(local_unpadded_shape, [0])
+            self.assertEqual(local_unpadded_shape, [0, 8])
 
         global_tensor = torch.randn(13, 8)
         tensor_list = torch.chunk(global_tensor, 8, dim=0)
@@ -182,10 +183,10 @@ class UtilTest(DTensorTestBase):
             self.assertEqual(local_padded_shape, list(tensor_list[self.rank].shape))
         elif self.rank == 6:
             self.assertEqual(local_padded_shape, list(tensor_list[0].shape))
-            self.assertEqual(local_unpadded_shape, [1])
+            self.assertEqual(local_unpadded_shape, [1, 8])
         else:
             self.assertEqual(local_padded_shape, list(tensor_list[0].shape))
-            self.assertEqual(local_unpadded_shape, [0])
+            self.assertEqual(local_unpadded_shape, [0, 8])
 
     def test_padding_and_unpadding(self):
         tensor = torch.randn(7, 13)
