@@ -337,7 +337,7 @@ class SIMDKernel(Kernel):
             else self.should_use_persistent_reduction()
         )
         self.no_x_dim = self.want_no_x_dim()
-        self.code_hash = None
+        self.code_hash: Union[str, None] = None
 
         # define this in a closure to make cache local to object
         @functools.lru_cache(None)
