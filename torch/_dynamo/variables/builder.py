@@ -977,7 +977,11 @@ class VariableBuilder:
             # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
-            if value in (torch.utils.hooks.BackwardHook, torch.nn.Parameter):
+            if value in (
+                torch.utils.hooks.BackwardHook,
+                torch.nn.Parameter,
+                torch.nn.Buffer,
+            ):
                 # TODO(jansel): combine this case with the one above
                 return trace_rules.lookup(value).create_with_source(
                     value, source=self.source
