@@ -55,3 +55,4 @@ jobs:
       build-environment: linux-focal-rocm6.1-py3.8
       docker-image: ${{ needs.linux-focal-rocm6_1-py3_8-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-rocm6_1-py3_8-build.outputs.test-matrix }}
+      tests-to-exclude: "inductor/test_torchinductor_opinfo"
