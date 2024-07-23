@@ -29,7 +29,7 @@ python test/run_test.py --cpp --verbose -i \
 
 run_if_exists() {
   local test_name="$1"
-  if [[ -f "${CPP_TESTS_DIR}/${test_name}" ]]; then
+  if [[ -x "${CPP_TESTS_DIR}/${test_name}" ]]; then
     python test/run_test.py --cpp --verbose -i "cpp/${test_name}"
   else
     echo "Warning: $test_name does not exist."
