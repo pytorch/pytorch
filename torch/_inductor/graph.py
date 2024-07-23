@@ -93,11 +93,13 @@ from .utils import (
 )
 from .virtualized import NullHandler, V
 
+
 if TYPE_CHECKING:
     from torch._higher_order_ops.effects import _EffectType
     from .codegen.wrapper import WrapperCodeGen
 
 from torch._inductor.codecache import output_code_log
+
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -410,6 +412,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
         self.aligned_inputs: Set[str] = set()
+        self.no_fuse_buffer_names: Set[str] = set()
 
     def has_feature(self, device, feature):
         assert isinstance(feature, BackendFeature), feature
@@ -1000,6 +1003,7 @@ class GraphLowering(torch.fx.Interpreter):
             if value.shape == ():
                 return Constant(value.item(), value.dtype, value.device)
             if self.can_inline_constant(value):
+                log.debug("Inlining constant: %s ", str(target))
                 # tensor lowering has constant inlining logic
                 from .lowering import tensor
 
@@ -1616,6 +1620,7 @@ class GraphLowering(torch.fx.Interpreter):
             # second pass
             self.cpp_wrapper = True
             self.removed_buffers.clear()
+            self.removed_operations.clear()
             self.inplaced_to_remove.clear()
             V.graph.sizevars.precomputed_replacements.clear()
             V.graph.sizevars.inv_precomputed_replacements.clear()
