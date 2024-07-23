@@ -446,7 +446,7 @@ def forward(self, pred_1, x_1, y_1, z_1):
     false_graph_1 = self.false_graph_1
     cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, z_1, y_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = z_1 = y_1 = None
     getitem_1 = cond_1[0]
-    getitem_2 = cond_1[1];  cond_1 = None
+    getitem_2 = cond_1[1];  cond_1 = getitem_2 = None
     return (getitem_1,)""",  # noqa: B950
         )
 
@@ -621,7 +621,7 @@ def forward(self, pred_1, a_1, b_1, c_1):
     cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, a_1, b_1, c_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = a_1 = b_1 = c_1 = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1]
-    getitem_3 = cond_1[2];  cond_1 = None
+    getitem_3 = cond_1[2];  cond_1 = getitem_3 = None
     return (getitem_1, getitem_2)""",  # noqa: B950
         )
         # Forward
@@ -637,7 +637,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             gm.true_graph_1.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    add = torch.ops.aten.add.Tensor(arg1_1, arg2_1);  arg1_1 = arg2_1 = None
+    add = torch.ops.aten.add.Tensor(arg1_1, arg2_1);  arg1_1 = arg2_1 = add = None
     clone = torch.ops.aten.clone.default(arg0_1)
     clone_1 = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
     return [clone, clone_1, None]""",
@@ -695,7 +695,7 @@ def forward(self, pred_1):
     cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, _tensor_constant0_1, _tensor_constant1_1, _tensor_constant2_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = _tensor_constant0_1 = _tensor_constant1_1 = _tensor_constant2_1 = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1]
-    getitem_3 = cond_1[2];  cond_1 = None
+    getitem_3 = cond_1[2];  cond_1 = getitem_3 = None
     return (getitem_1, getitem_2)""",  # noqa: B950
         )
 
@@ -823,12 +823,12 @@ def forward(self, pred_1, x_1):
     _param_constant5_1 = self._param_constant5
     cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, _param_constant0_1, _param_constant1_1, _param_constant2_1, _param_constant3_1, _param_constant4_1, _param_constant5_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = _param_constant0_1 = _param_constant1_1 = _param_constant2_1 = _param_constant3_1 = _param_constant4_1 = _param_constant5_1 = None
     getitem_1 = cond_1[0]
-    getitem_2 = cond_1[1]
-    getitem_3 = cond_1[2]
-    getitem_4 = cond_1[3]
-    getitem_5 = cond_1[4]
-    getitem_6 = cond_1[5]
-    getitem_7 = cond_1[6];  cond_1 = None
+    getitem_2 = cond_1[1];  getitem_2 = None
+    getitem_3 = cond_1[2];  getitem_3 = None
+    getitem_4 = cond_1[3];  getitem_4 = None
+    getitem_5 = cond_1[4];  getitem_5 = None
+    getitem_6 = cond_1[5];  getitem_6 = None
+    getitem_7 = cond_1[6];  cond_1 = getitem_7 = None
     return (getitem_1,)""",  # noqa: B950
         )
 
