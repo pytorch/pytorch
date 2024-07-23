@@ -983,6 +983,20 @@ _EXPORT_FLAGS: Optional[Set[str]] = None
 _EXPORT_MODULE_HIERARCHY: Optional[Dict[str, str]] = None
 
 
+_ALLOW_LIST = {
+    torch._dynamo.exc.Unsupported,
+    torch._dynamo.exc.UserError,
+    torch._dynamo.exc.TorchRuntimeError,
+}
+
+
+def _get_class_if_classified_error(e):
+    case_name = getattr(e, "case_name", None)
+    if type(e) in _ALLOW_LIST and case_name is not None:
+        return case_name
+    return None
+
+
 def _log_export_wrapper(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
@@ -1000,12 +1014,23 @@ def _log_export_wrapper(fn):
         except Exception as e:
             t = type(e)
             error_type = t.__module__ + "." + t.__qualname__
-            log_export_usage(
-                event="export.error",
-                type=error_type,
-                message=str(e),
-                flags=_EXPORT_FLAGS,
-            )
+            case_name = _get_class_if_classified_error(e)
+            if case_name is not None:
+                # TODO (shangdiy): detect whether case_name is really registered in exportdb after we set up exportdb registration.
+                log.error("See %s in exportdb for unsupported case.", case_name)
+                log_export_usage(
+                    event="export.error.classified",
+                    type=error_type,
+                    message=str(e),
+                    flags=_EXPORT_FLAGS,
+                )
+            else:
+                log_export_usage(
+                    event="export.error.unclassified",
+                    type=error_type,
+                    message=str(e),
+                    flags=_EXPORT_FLAGS,
+                )
             raise e
         finally:
             _EXPORT_FLAGS = None
