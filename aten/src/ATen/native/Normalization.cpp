@@ -485,11 +485,23 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
 }
 
 BatchNormBackend _select_batch_norm_backend(
-    const Tensor& input, const Tensor& weight, const Tensor& bias, const Tensor& running_mean,
-    const Tensor& running_var, bool training, double eps) {
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
+    bool training,
+    double eps) {
 
   auto& ctx = at::globalContext();
   bool cudnn_enabled = ctx.userEnabledCuDNN();
+
+  const bool has_running_mean = running_mean_opt.has_value() && running_mean_opt->defined();
+  const bool has_running_var = running_var_opt.has_value() && running_var_opt->defined();
+  const bool has_valid_running_stats = (
+    (has_running_mean && has_running_var) ||
+    (!has_running_mean && !has_running_var && training)
+  );
 
   if (
       input.is_cuda()
@@ -497,8 +509,7 @@ BatchNormBackend _select_batch_norm_backend(
       && (input.scalar_type() != at::kHalf
         || weight.scalar_type() == at::kFloat)
       && weight.defined() && bias.defined()
-      && ((running_mean.defined() && running_var.defined())
-        || (!running_mean.defined() && !running_var.defined() && training))
+      && has_valid_running_stats
       && (input.dim() >= 3)
       && ((input.sym_size(0) <= 880801 && training) // spatial, training
           ||(input.sym_size(0) <= 65535 && !training)) //spatial, eval
@@ -517,8 +528,7 @@ BatchNormBackend _select_batch_norm_backend(
       && input.scalar_type() != at::kBFloat16
       && (weight.scalar_type() != at::kHalf)
       && weight.defined() && bias.defined()
-      && ((running_mean.defined() && running_var.defined())
-        || (!running_mean.defined() && !running_var.defined() && training))
+      && has_valid_running_stats
       && (input.dim() >= 3)
       && detail::getCUDAHooks().compiledWithMIOpen()
       && cudnn_enabled
@@ -878,7 +888,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update_cpu(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     double momentum, double eps) {
-  // Passing in undefined Tensors to `batch_norm_cpu` in eval mode leads to seg fault
+  // Users may disable updating running stats during training by passing in None for
+  // these stats. In such cases, we go through `_batch_norm_no_update` instead of
+  // `_batch_norm_with_update` because the latter's schema expects defined running
+  // stats. Therefore, here we support both eval and training paths, using the eval
+  // path only if both running stats are defined. Otherwise, passing in undefined
+  // Tensors to `batch_norm_cpu` in eval mode would lead to seg fault.
   const bool has_running_mean = running_mean_opt.has_value() && running_mean_opt->defined();
   const bool has_running_var = running_var_opt.has_value() && running_var_opt->defined();
   const bool update = !has_running_mean || !has_running_var;

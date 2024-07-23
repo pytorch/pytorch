@@ -2026,8 +2026,8 @@ def _get_batch_norm_reserve_tensor(
     input: Tensor,
     weight: Optional[Tensor],
     bias: Optional[Tensor],
-    running_mean: Tensor,
-    running_var: Tensor,
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
     eps: float,
     training: bool,
 ) -> Tensor:
@@ -2108,18 +2108,27 @@ def _batch_norm_no_update(
     input: Tensor,
     weight: Optional[Tensor],
     bias: Optional[Tensor],
-    running_mean: Tensor,
-    running_var: Tensor,
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
     momentum: float,
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    # Users may disable updating running stats during training
+    # by passing in None for these stats. In such cases, we go
+    # through `_batch_norm_no_update` instead of `_batch_norm_with_update`
+    # because the latter's schema expects defined running stats.
+    # Therefore, here we support both eval and training paths,
+    # using the eval path only if both running stats are defined.
+    assert running_mean is None == running_var is None  # noqa: E711
+    training = running_mean is None or running_var is None
+
     output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
         input,
         weight,
         bias,
         running_mean,
         running_var,
-        False,  # training
+        training,
         momentum,
         eps,
         False,  # functional
