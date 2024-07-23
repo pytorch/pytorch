@@ -210,7 +210,7 @@ jobs:
     with:
       build-environment: linux-jammy-py3.12-gcc11
       docker-image: ${{ needs.linux-jammy-cpu-py3_12-inductor-halide-build.outputs.docker-image }}
-      test-matrix:  test-matrix: |
+      test-matrix: |
         { include: [
           { config: "laith_test", shard: 1, num_shards: 1, runner: "linux.24xl.spr-metal" },
         ]}

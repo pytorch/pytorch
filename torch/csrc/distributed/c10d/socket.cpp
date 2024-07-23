@@ -32,6 +32,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <fmt/chrono.h>
 C10_DIAGNOSTIC_POP()
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <torch/csrc/distributed/c10d/error.h>
 #include <torch/csrc/distributed/c10d/exception.h>

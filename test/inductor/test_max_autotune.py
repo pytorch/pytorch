@@ -2,7 +2,6 @@
 import json
 import os
 import unittest
-
 from typing import Callable, List, Optional
 
 import torch
@@ -24,7 +23,6 @@ from torch._inductor.select_algorithm import (
     TritonTemplateCaller,
 )
 from torch._inductor.test_case import run_tests, TestCase
-
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -34,8 +32,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
 )
-
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
@@ -267,7 +265,7 @@ class TestMaxAutotune(TestCase):
                 num_put += 1
 
         cache_module = (
-            "triton.fb.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend"
+            "torch._inductor.fb.remote_cache.FbRemoteAutotuneCacheBackend"
             if config.is_fbcode()
             else "torch._inductor.remote_cache.RedisRemoteCacheBackend"
         )
@@ -322,7 +320,7 @@ class TestMaxAutotune(TestCase):
                 return None
 
         fake_choices = [FakeChoiceCaller() for i in range(10)]
-        fake_lookup_result = {choice: 0.123 for choice in fake_choices}
+        fake_lookup_result = dict.fromkeys(fake_choices, 0.123)
 
         def no_lookup(
             choices: List[ChoiceCaller],
