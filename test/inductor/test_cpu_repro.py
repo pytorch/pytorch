@@ -403,6 +403,17 @@ class CPUReproTests(TestCase):
                     (v,),
                 )
 
+    @torch._dynamo.config.patch(
+        {"dynamic_shapes": True, "assume_static_by_default": False}
+    )
+    def test_full_boolean_dynamic_shape(self):
+        def fn(n):
+            x = torch.full((1024,), n >= 1024)
+            return x, x + 1
+
+        self.common(fn, (1024,))
+        self.common(fn, (1023,))
+
     @config.patch(freezing=True)
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
     @torch._dynamo.config.patch(dynamic_shapes=True)
