@@ -594,8 +594,7 @@ class TestPublicBindings(TestCase):
                         )
 
         for mod in pkgutil.walk_packages(torch.__path__, "torch."):
-            # TODO: Change this back after verifying the check catched the bug in CI
-            mod = mod.name
+            modname = mod.name
             test_module(modname)
         test_module("torch")
 
