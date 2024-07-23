@@ -145,9 +145,6 @@ class TestSparseProp(TestCase):
     @parametrize("itype", ITYPES)
     @all_sparse_layouts("layout")
     def test_sumnet(self, dtype, itype, layout):
-        if layout is not torch.sparse_coo:
-            self.skipTest("TODO: support non-coo sparsity!")
-
         net = SumNet()
         for sparse_input in self.generate_simple_inputs(
             layout,
@@ -175,9 +172,6 @@ class TestSparseProp(TestCase):
     @parametrize("itype", ITYPES)
     @all_sparse_layouts("layout")
     def test_eltwisenet(self, dtype, itype, layout):
-        if layout is not torch.sparse_coo:
-            self.skipTest("TODO: support non-coo sparsity!")
-
         net = EltwiseNet()
         for sparse_input in self.generate_simple_inputs(
             layout,
