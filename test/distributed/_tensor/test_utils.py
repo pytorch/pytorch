@@ -197,22 +197,19 @@ class TestStridedSharding(DTensorTestBase):
         # shard on mesh dim-0
         shard_placement = _StridedShard(0, split_factor=split_factor)
         tensor_list, _ = shard_placement._split_tensor(x, mesh_dim0_size)
-        expected_shard = (
-            x.view(mesh_dim0_size, -1)
-            .swapdims(0, 1)
-            .reshape(mesh_dim0_size, -1)[mesh_dim0_local_rank]
-            .view(mesh_dim0_size, -1)
-            .swapdims(0, 1)
-            .reshape(-1)
-        )
         shard_x = tensor_list[mesh_dim0_local_rank]
+        expected_shard = (
+            torch.tensor([0, 1, 4, 5], device=self.device_type)
+            if mesh_dim0_local_rank == 0
+            else torch.tensor([2, 3, 6, 7], device=self.device_type)
+        )
         self.assertEqual(shard_x, expected_shard)
 
         # shard on mesh dim-1
         shard_placement = _StridedShard(0, split_factor=1)  # same as Shard(0)
         tensor_list, _ = shard_placement._split_tensor(shard_x, mesh_dim1_size)
-        expected_shard = shard_x.view(mesh_dim1_size, -1)[mesh_dim1_local_rank]
         shard_x = tensor_list[mesh_dim1_local_rank]
+        expected_shard = expected_shard.view(mesh_dim1_size, -1)[mesh_dim1_local_rank]
         self.assertEqual(shard_x, expected_shard)
 
 
