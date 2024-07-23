@@ -18,8 +18,8 @@ from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import ops, OpsValue, V
 
 from .common import (
-    _deduce_output_dtype_by_name,
     CSEVariable,
+    deduce_output_dtype_by_name,
     ExprPrinter,
     Kernel,
     KernelArgs,
@@ -138,7 +138,7 @@ def get_current_node_opt_ctx() -> OptimizationContext:
 
 def deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs):
     if (
-        output_dtype := _deduce_output_dtype_by_name(
+        output_dtype := deduce_output_dtype_by_name(
             name,
             *args,
             **kwargs,
