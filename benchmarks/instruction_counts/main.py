@@ -14,7 +14,7 @@ from core.expand import materialize
 from definitions.standard import BENCHMARKS
 from execution.runner import Runner
 from execution.work import WorkOrder
-
+import torch
 
 def main(argv: List[str]) -> None:
     work_orders = tuple(
