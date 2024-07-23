@@ -87,6 +87,23 @@ def forward_and_backward_pass(m, inputs):
 )
 @requires_cuda
 class TestCaseBase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if HAS_CUDA:
+            cls.prior_float32_matmul_precision = torch.get_float32_matmul_precision()
+            cls.prior_default_device = torch.get_default_device()
+            torch.set_float32_matmul_precision("high")
+            torch.set_default_device("cuda")
+
+    @classmethod
+    def tearDownClass(cls):
+        if HAS_CUDA:
+            torch.set_float32_matmul_precision(cls.prior_float32_matmul_precision)
+            torch.set_default_device(cls.prior_default_device)
+
+            cls.prior_float32_matmul_precision = None
+            cls.prior_default_device = None
+
     def check_close(self, ref, act, tol=1e-3):
         if type(ref).__name__ == "LongformerMaskedLMOutput":
             ref = ref.loss
@@ -633,10 +650,6 @@ class PaddingTest(TestCaseBase):
         out_strides = ir.Layout._pad_strides(in_strides, t.shape, torch.float32)
         self.assertTrue(in_strides == out_strides)
 
-
-if HAS_CUDA:
-    torch.set_float32_matmul_precision("high")
-    torch.set_default_device("cuda")
 
 if __name__ == "__main__":
     if HAS_CUDA:
