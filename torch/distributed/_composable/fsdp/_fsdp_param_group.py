@@ -175,7 +175,7 @@ class FSDPParamGroup:
         modules_with_2d_params: Set[nn.Module] = set()
         for fsdp_param in self.fsdp_params:
             module = fsdp_param._module_info.module
-            if len(fsdp_param._spmd_placements) > 1:
+            if len(fsdp_param._spmd_placements) > 1 and hasattr(fsdp_param, "_tp_spec"):
                 modules_with_2d_params.add(module)
         for module in modules_with_2d_params:
             module.register_state_dict_pre_hook(_raise_not_implemented_if_2d)

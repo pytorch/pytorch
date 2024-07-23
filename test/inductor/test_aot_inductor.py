@@ -389,7 +389,7 @@ class AOTInductorTestsTemplate:
     )
     def test_deconv_freezing(self):
         dtypes = [torch.float]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch._C._has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported():
             dtypes.append(torch.bfloat16)
         for dtype, groups in itertools.product(dtypes, [2, 1]):
             iC = 4
@@ -3195,6 +3195,8 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_outer_code": fail_stack_allocation(is_skip=True),
     # TODO: error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
     "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
+    # TODO: use of undeclared identifier 'float8_e4m3fn' and 'half'
+    "test_fp8": fail_minimal_arrayref_interface(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
