@@ -1,15 +1,21 @@
 # mypy: allow-untyped-defs
+import copy
+import json
 import re
+
 from collections import defaultdict
 from typing import Any, Dict
 
 import torch
+
+import torch.nn
 
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed._tensor.api import DTensor
 from torch.nn.modules.module import (
     register_module_forward_hook,
     register_module_forward_pre_hook,
+    register_module_full_backward_pre_hook,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
@@ -53,6 +59,15 @@ c10d_collective_ops = {
     c10d_ops.reduce_scatter_tensor_coalesced_,
 }
 
+trivial_ops = {
+    "aten.detach.default",
+    "aten.t.default",
+    "aten.view.default",
+    "aten._to_copy.default",
+    "aten.as_strided.default",
+    "aten.transpose.int",
+}
+
 
 class CommModeModuleTracker(ModuleTracker):
     """
@@ -62,10 +77,26 @@ class CommModeModuleTracker(ModuleTracker):
 
     def __init__(self):
         super().__init__()
-        self.module_depth_dict = {}
+        self.module_helper_dict = {}
         self.module_parameters_dict = {}
+        self.module_parents_dict = {}
+        self.register_forward_hook_handles = {}
+        self.parent_dict = {}
+        self.parent_list = []
         self.sharding_dict = {}
         self.name = ""
+
+    def _fw_set_module_hook(self, mod, input, output):
+        """
+        Updates the current module after module finishes running and
+        all other hooks are resolved
+        """
+
+        # module is no longer parent of next modules
+        self.parent_list.pop()
+
+        # set current module to previous parent module
+        self.name = self.parent_list[-1]
 
     def _fw_pre_hook(self, mod, input):
         """
@@ -75,8 +106,6 @@ class CommModeModuleTracker(ModuleTracker):
         """
         self.name = super()._get_mod_name(mod)
 
-        # contains information about module ordering and depth in the module tree
-        self.module_depth_dict[self.name] = len(self.parents)
         # adds current sub-module to module tracker parent class
         super()._get_append_fn(self.name, False)()
 
@@ -84,6 +113,15 @@ class CommModeModuleTracker(ModuleTracker):
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
         if tensors:
             register_multi_grad_hook(tensors, super()._get_pop_fn(self.name, True))
+
+        # contains information about module ordering and depth in the module tree
+        if self.name not in self.module_helper_dict:
+            self.module_helper_dict[self.name] = {}
+
+        self.module_helper_dict[self.name]["module_type"] = (
+            str(type(mod)).replace("<", "").replace(">", "")
+        )
+        self.module_helper_dict[self.name]["depth"] = len(self.parents) - 1
 
         for param_name, param in mod.named_parameters(recurse=False):
             if self.name not in self.module_parameters_dict:
@@ -95,16 +133,64 @@ class CommModeModuleTracker(ModuleTracker):
                 key_name = self.name + "." + param_name
                 self.sharding_dict[key_name] = param.data.placements
 
+                if "parameters" not in self.module_helper_dict[self.name]:
+                    self.module_helper_dict[self.name]["parameters"] = {}
+
+                self.module_helper_dict[self.name]["parameters"][param_name] = str(
+                    param.data.placements
+                )
+
+        # used to store module's parents to ensure correctness in backward pass/checkpointing
+        if self.name not in self.module_parents_dict:
+            self.module_parents_dict[self.name] = copy.deepcopy(self.parents)
+
+        # used to create parent-child module associations for json dumps
+        parent = self.parent_list[-1]
+        if parent not in self.parent_dict:
+            self.parent_dict[parent] = []
+
+        self.parent_dict[parent].append(self.name)
+        self.parent_list.append(self.name)
+
+        self.register_forward_hook_handles[self.name] = mod.register_forward_hook(
+            self._fw_set_module_hook
+        )
+
+    def _fw_post_hook(self, mod, input, output):
+        """
+        This function is called when the forward pass of a module is called.
+        It updates the module tracker and removes the module from parent data
+        """
+        super()._fw_post_hook(mod, input, output)
+
+    def _bw_hook(self, mod, output):
+        """
+        This function is called when the backward pass of a module is called. It
+        updates the current module for backward passes
+        """
+        self.name = super()._get_mod_name(mod)
+
     def __enter__(self):
         self.module_parameters_dict.clear()
         self.sharding_dict.clear()
-        self.module_depth_dict.clear()
-        self.module_depth_dict["Global"] = 0
+        self.parent_dict.clear()
+        self.parent_list = ["Global"]
+        self.module_helper_dict.clear()
+        self.module_helper_dict["Global"] = {"depth": 0}
+        self.module_parents_dict.clear()
+        self.module_parents_dict["Global"] = set()
         self._fw_pre_handle = register_module_forward_pre_hook(self._fw_pre_hook)
-        self._fw_post_handle = register_module_forward_hook(super()._fw_post_hook)
+        self._fw_post_handle = register_module_forward_hook(self._fw_post_hook)
+        self.register_forward_hook_handles.clear()
+        self._bw_handle = register_module_full_backward_pre_hook(self._bw_hook)
+        self.name = "Global"
 
     def __exit__(self, *args):
         super().__exit__(*args)
+        self._bw_handle.remove()
+
+        for handle in self.register_forward_hook_handles.values():
+            handle.remove()
 
     def print_paramater_info(self):
         print(self.module_parameters_dict)
@@ -146,53 +232,180 @@ class CommDebugMode(TorchDispatchMode):
         self.comm_registry.add(torch.ops._dtensor.shard_dim_alltoall)
         self.advanced_module_tracker = CommModeModuleTracker()
 
-    def generate_module_tracing_table(self):
+    def generate_json_dump(self, file_name="comm_mode_log.json", noise_level=3):
         """
-        Inspired by flop counter, generates a detailed table displaying collective tracing
-        information on a module level
+        Creates json file used to build browser visual
         """
 
-        table = ""
-        for fqn in self.advanced_module_tracker.module_depth_dict:
-            indent = "    " * (self.advanced_module_tracker.module_depth_dict[fqn])
-            table += f"{indent}{fqn}\n"
-            indent += "  "
-            collective_indent = indent
-            collective_indent += "  "
-            # prints out all collectives in the respective sub-module
+        include_ops = False
+        include_trivial_ops = False
+
+        if noise_level > 1:
+            include_ops = True
+
+        if noise_level > 2:
+            include_trivial_ops = True
+
+        # recursively builds json data
+        def add_json_information(json_dict, fqn):
+            json_dict["fqn"] = fqn
+            json_dict["module_type"] = ""
+            json_dict["parameters"] = []
+            json_dict["children"] = []
+            json_dict["collectives_forward"] = []
+            json_dict["collectives_backward"] = []
+            json_dict["operations_forward"] = []
+            json_dict["operations_backward"] = []
+
+            if (
+                "module_type" in self.advanced_module_tracker.module_helper_dict[fqn]
+                and include_ops
+            ):
+                json_dict[
+                    "module_type"
+                ] = self.advanced_module_tracker.module_helper_dict[fqn]["module_type"]
+
+                if "parameters" in self.advanced_module_tracker.module_helper_dict[fqn]:
+                    for (
+                        param_name,
+                        placement,
+                    ) in self.advanced_module_tracker.module_helper_dict[fqn][
+                        "parameters"
+                    ].items():
+                        json_dict["parameters"].append((param_name, placement))
+
+            # adds module collective information
             if fqn in self.comm_module_counts:
-                if len(self.comm_module_counts[fqn]["forward"]):
-                    table += f"{indent}FORWARD PASS\n"
-                    for collective, count in self.comm_module_counts[fqn][
-                        "forward"
-                    ].items():
-                        table += f"\033[1;33m{collective_indent}*{collective}: {count}\033[0m\n"
+                for collective, count in self.comm_module_counts[fqn][
+                    "forward"
+                ].items():
+                    json_dict["collectives_forward"].append((str(collective), count))
 
-                if len(self.comm_module_counts[fqn]["backward"]):
-                    table += f"{indent}BACKWARD PASS\n"
-                    for collective, count in self.comm_module_counts[fqn][
-                        "backward"
-                    ].items():
-                        table += f"\033[1;33m{collective_indent}*{collective}: {count}\033[0m\n"
-        return table
+                for collective, count in self.comm_module_counts[fqn][
+                    "backward"
+                ].items():
+                    json_dict["collectives_backward"].append((str(collective), count))
 
-    def generate_operation_tracing_table(self):
+            # adds module operation information
+            forward_operations = []
+            backward_operations = []
+            if include_ops:
+                if fqn in self.comm_module_operation_counts:
+                    forward_operations = [
+                        op
+                        for op in self.comm_module_operation_counts[fqn][
+                            "operations_list"
+                        ]
+                        if not op["is_bw"]
+                    ]
+                    backward_operations = [
+                        op
+                        for op in self.comm_module_operation_counts[fqn][
+                            "operations_list"
+                        ]
+                        if op["is_bw"]
+                    ]
+
+            if not include_trivial_ops:
+                forward_operations = [
+                    op
+                    for op in forward_operations
+                    if str(op["name"]) not in trivial_ops
+                ]
+                backward_operations = [
+                    op
+                    for op in backward_operations
+                    if str(op["name"]) not in trivial_ops
+                ]
+
+            # converts operation information into string format for json.dumps()
+            forward_operations = copy.deepcopy(forward_operations)
+            for op in forward_operations:
+                op["name"] = str(op["name"])
+
+                for i in range(len(op["input_sharding"])):
+                    op["input_sharding"][i] = str(op["input_sharding"][i])
+                    op["input_shape"][i] = str(op["input_shape"][i])
+
+            backward_operations = copy.deepcopy(backward_operations)
+            for op in backward_operations:
+                op["name"] = str(op["name"])
+
+                for i in range(len(op["input_sharding"])):
+                    op["input_sharding"][i] = str(op["input_sharding"][i])
+                    op["input_shape"][i] = str(op["input_shape"][i])
+
+            json_dict["operations_forward"] = forward_operations
+            json_dict["operations_backward"] = backward_operations
+
+            if fqn not in self.advanced_module_tracker.parent_dict:
+                return json_dict
+
+            # recursively adds module's children
+            for ele in self.advanced_module_tracker.parent_dict[fqn]:
+                json_dict["children"].append(add_json_information({}, ele))
+
+            return json_dict
+
+        json_dict: Dict[str, Any] = {}
+        add_json_information(json_dict, "Global")
+
+        # converts dictonary into json file
+        with open(file_name, "w") as json_file:
+            json.dump(json_dict, json_file, indent=4)
+
+    def generate_comm_debug_tracing_table(self, noise_level=3):
         """
         Generates detailed table displaying operations and collective tracing information
-        on a module level
+        on a module level. Amount of information is dependent on noise_level
+
+        1. prints module-level collective counts
+        2. prints operations not included in trivial operations
+        3. prints all operations
         """
+        include_ops = False
+        include_trivial_ops = False
+
+        if noise_level > 1:
+            include_ops = True
+
+        if noise_level > 2:
+            include_trivial_ops = True
 
         table = ""
-        for fqn in self.advanced_module_tracker.module_depth_dict:
+        for fqn in self.advanced_module_tracker.module_helper_dict:
             # setting up indentations for table formatting
-            indent = "  " * (2 * self.advanced_module_tracker.module_depth_dict[fqn])
+            indent = "  " * (
+                2 * self.advanced_module_tracker.module_helper_dict[fqn]["depth"]
+            )
             table += f"{indent}{fqn}\n"
+
+            if include_ops:
+                if (
+                    "module_type"
+                    in self.advanced_module_tracker.module_helper_dict[fqn]
+                ):
+                    module_type = self.advanced_module_tracker.module_helper_dict[fqn][
+                        "module_type"
+                    ]
+                    table += f"{indent}*module type: {module_type}\n"
+
+                if "parameters" in self.advanced_module_tracker.module_helper_dict[fqn]:
+                    table += f"{indent}*Parameter List\n"
+                    for (
+                        param_name,
+                        placement,
+                    ) in self.advanced_module_tracker.module_helper_dict[fqn][
+                        "parameters"
+                    ].items():
+                        table += f"{indent} *{param_name}: {placement}\n"
+
             indent += "  "
             collective_indent = "  " * (
-                2 * self.advanced_module_tracker.module_depth_dict[fqn] + 2
+                2 * self.advanced_module_tracker.module_helper_dict[fqn]["depth"] + 2
             )
             operation_indent = "  " * (
-                2 * self.advanced_module_tracker.module_depth_dict[fqn] + 3
+                2 * self.advanced_module_tracker.module_helper_dict[fqn]["depth"] + 3
             )
 
             # separate the module's collective and operations by forward and backward
@@ -204,17 +417,22 @@ class CommDebugMode(TorchDispatchMode):
 
             forward_operations = []
             backward_operations = []
-            if fqn in self.comm_module_operation_counts:
-                forward_operations = [
-                    op
-                    for op in self.comm_module_operation_counts[fqn]["operations_list"]
-                    if not op["is_bw"]
-                ]
-                backward_operations = [
-                    op
-                    for op in self.comm_module_operation_counts[fqn]["operations_list"]
-                    if op["is_bw"]
-                ]
+            if include_ops:
+                if fqn in self.comm_module_operation_counts:
+                    forward_operations = [
+                        op
+                        for op in self.comm_module_operation_counts[fqn][
+                            "operations_list"
+                        ]
+                        if not op["is_bw"]
+                    ]
+                    backward_operations = [
+                        op
+                        for op in self.comm_module_operation_counts[fqn][
+                            "operations_list"
+                        ]
+                        if op["is_bw"]
+                    ]
 
             # adds tracing information for module's forward or backward
             def add_tracing_information(table, collectives_dict, operation_list):
@@ -224,15 +442,21 @@ class CommDebugMode(TorchDispatchMode):
                     )
 
                 for operation in operation_list:
-                    operation_name = operation["name"]
-                    table += f"\033[1;33m{collective_indent}**{operation_name}\033[0m\n"
+                    operation_name = str(operation["name"])
 
-                    if len(operation["input_shape"]):
-                        operation_shape = operation["input_shape"]
-                        operation_sharding = operation["input_sharding"]
-                        table += f"\033[1;31m{operation_indent}shape: {operation_shape}\033[0m\n"
+                    if operation_name not in trivial_ops or include_trivial_ops:
+                        table += (
+                            f"\033[1;33m{collective_indent}**{operation_name}\033[0m\n"
+                        )
 
-                        table += f"\033[1;31m{operation_indent}sharding: {operation_sharding}\033[0m\n"
+                        if len(operation["input_shape"]):
+                            operation_shape = operation["input_shape"]
+                            operation_sharding = operation["input_sharding"]
+                            operation_device_mesh = operation["device_mesh"]
+
+                            table += f"\033[1;31m{operation_indent}shape: {operation_shape}\033[0m\n"
+                            table += f"\033[1;31m{operation_indent}sharding: {operation_sharding}\033[0m\n"
+                            table += f"\033[1;31m{operation_indent}device mesh: {operation_device_mesh}\033[0m\n"
 
                 return table
 
@@ -276,6 +500,10 @@ class CommDebugMode(TorchDispatchMode):
     def __enter__(self):
         self.comm_counts.clear()
         self.comm_module_counts.clear()
+        self.comm_module_counts["Global"] = {}
+        self.comm_module_counts["Global"]["forward"] = defaultdict(int)
+        self.comm_module_counts["Global"]["backward"] = defaultdict(int)
+
         self.comm_module_operation_counts.clear()
 
         super().__enter__()
@@ -286,19 +514,16 @@ class CommDebugMode(TorchDispatchMode):
         self.advanced_module_tracker.__exit__()
         super().__exit__(*args)
 
-    def log_module_tracing_table_to_file(self):
-        # ansi_escape is used to remove ANSI escape sequences in table used to make terminal output more readable
+    def log_comm_debug_tracing_table_to_file(
+        self, file_name="comm_mode_log.txt", noise_level=3
+    ):
+        """
+        Alternative to console CommDebugMode output, writes to file specified by the user
+        """
         ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
-        table = ansi_escape.sub("", self.generate_module_tracing_table())
+        table = ansi_escape.sub("", self.generate_comm_debug_tracing_table(noise_level))
 
-        with open("output.txt", "w") as log_file:
-            log_file.write(table)
-
-    def log_operation_tracing_table_to_file(self):
-        ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
-        table = ansi_escape.sub("", self.generate_operation_tracing_table())
-
-        with open("output.txt", "w") as log_file:
+        with open(file_name, "w") as log_file:
             log_file.write(table)
 
     def print_paramater_info(self):
@@ -324,6 +549,7 @@ class CommDebugMode(TorchDispatchMode):
 
         operation_dict["input_shape"] = []
         operation_dict["input_sharding"] = []
+        operation_dict["device_mesh"] = ""
 
         # tracks if the operation is part of the backward pass
         operation_dict["is_bw"] = self.advanced_module_tracker.is_bw
@@ -334,6 +560,7 @@ class CommDebugMode(TorchDispatchMode):
                     # saves shapes and placements of all DTensor args
                     operation_dict["input_shape"].append(ele.shape)
                     operation_dict["input_sharding"].append(ele.placements)
+                    operation_dict["device_mesh"] = str(ele.device_mesh)
 
             self.comm_module_operation_counts[self.advanced_module_tracker.name][
                 "operations_list"
@@ -376,7 +603,9 @@ class CommDebugMode(TorchDispatchMode):
             ] += 1
 
             # adds collective count to parent modules
-            for par in self.advanced_module_tracker.parents:
+            for par in self.advanced_module_tracker.module_parents_dict[
+                self.advanced_module_tracker.name
+            ]:
                 # makes sure we aren't double counting when current sub-module hasn't been removed from parents
                 if par != self.advanced_module_tracker.name:
                     if par not in self.comm_module_counts:

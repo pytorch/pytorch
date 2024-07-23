@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 
 import functools
-import operator
 from collections import defaultdict
 from typing import Dict, List, Optional
 
@@ -42,8 +41,9 @@ def find_input_mutations(g):
                 inputs[StorageWeakRef(meta_fk(n.meta)._typed_storage())].add(input_idx)
             input_idx += 1
         elif n.op == "call_function":
-            if n.target is operator.getitem:
+            if not hasattr(n.target, "_schema"):
                 continue
+
             schema = n.target._schema
             for i, arg in enumerate(schema.arguments):
                 if i < len(n.args):

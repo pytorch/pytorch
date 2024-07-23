@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
+
 from .. import config as inductor_config
 from ..codegen.common import BackendFeature
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
@@ -38,6 +39,7 @@ from .mm_common import (
     mm_options,
     triton_config,
 )
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -474,7 +476,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
 
     if not skip_triton:
         b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
-        if inductor_config.mixed_mm_choice == "heuristic":
+        if static_shape and inductor_config.mixed_mm_choice == "heuristic":
             choices = []
             config = try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout)
             if config is not None:
