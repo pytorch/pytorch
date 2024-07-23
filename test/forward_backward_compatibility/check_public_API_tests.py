@@ -37,11 +37,19 @@ with tempfile.NamedTemporaryFile(dir="torch", suffix=".py") as f:
 
     # Fail the check if the public API test succeeded after introducing a bad file.
     print("Running public API test 'test_correct_module_names'...")
-    if res.returncode == 0 or breaking_name not in res.stderr:
+    if res.returncode == 0:
         print(
             "Expected the public API test 'test_correct_module_names' to fail after introducing "
             "a bad file, but it succeeded! Check test/test_public_bindings.py for any changes "
             "that may have broken the test."
+        )
+        sys.exit(1)
+
+    if breaking_name not in res.stderr:
+        print(
+            "Expected the public API test 'test_correct_module_names' to identify an invalid "
+            "public API, but it didn't! It's possible the test may not have run. Check "
+            "test/test_public_bindings.py for any changes that may have broken the test."
         )
         sys.exit(1)
 

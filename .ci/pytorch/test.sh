@@ -1004,6 +1004,10 @@ test_xla() {
 # the torch built on its base commit.
 test_forward_backward_compatibility() {
   set -x
+
+  # first, validate public API tests in the torch built from branch
+  python test/forward_backward_compatibility/check_public_API_tests.py
+
   REPO_DIR=$(pwd)
   if [[ "${BASE_SHA}" == "${SHA1}" ]]; then
     echo "On trunk, we should compare schemas with torch built from the parent commit"
