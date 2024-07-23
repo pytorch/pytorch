@@ -28,13 +28,12 @@ import sympy
 
 import torch
 import torch._logging
-
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
+
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash
-
 from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
 from ..ir import TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
@@ -861,7 +860,7 @@ class SIMDKernel(Kernel):
         argdefs, call_args, signature, _ = self.args.python_argdefs()
         uniform_stride_order = None
         for arg_name in call_args:
-            buf = V.graph.get_buffer(arg_name)
+            buf = V.graph.try_get_buffer(arg_name)
             if buf and len(buf.layout.size) == 4:
                 # ignore the tensor if only 1 dimension is non-zero
                 if len([x for x in buf.layout.size if x == 1]) == 3:
@@ -878,13 +877,13 @@ class SIMDKernel(Kernel):
 
                     stride_order_list = [
                         ir.get_stride_order(V.graph.get_buffer(name).layout.stride)
-                        if V.graph.get_buffer(name)
+                        if V.graph.try_get_buffer(name)
                         else None
                         for name in call_args
                     ]
                     size_list = [
                         V.graph.get_buffer(name).layout.size
-                        if V.graph.get_buffer(name)
+                        if V.graph.try_get_buffer(name)
                         else None
                         for name in call_args
                     ]
