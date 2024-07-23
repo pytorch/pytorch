@@ -2480,13 +2480,8 @@ class CppVecKernel(CppKernel):
                 # we are using at::vec::VecMask<float, N> for bool
                 vec_dtype = "float" if is_any else DTYPE_TO_CPP[dtype]
                 vec = f"at::vec::Vectorized<{vec_dtype}>"
-                reduce_all_func_template = (
-                    f"{vec_dtype}, {self._get_num_vectors(torch.float)}"
-                    if is_any
-                    else f"{vec_dtype}"
-                )
                 vec_reduce_all_func = (
-                    f"at::vec::vec_reduce_all<{reduce_all_func_template}>"
+                    f"at::vec::vec_reduce_all<{vec_dtype}>"
                 )
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
 
