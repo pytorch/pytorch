@@ -5010,6 +5010,7 @@ class MutationOperation(InputsKernel):
         super().__init__(None, layout, inputs=[node_doing_mutating])
         self.device = node_doing_mutating.get_device()
         self.outputs: List[Buffer] = [MutationOutput(layout, mutated_node, self)]
+        self.node_doing_mutating = node_doing_mutating
         V.graph.register_operation(self)
 
     def get_device(self):
