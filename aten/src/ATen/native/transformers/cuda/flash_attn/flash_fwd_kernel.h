@@ -1155,15 +1155,16 @@ inline __device__ void combine_attn_seqk_parallel(const Params &params) {
     // For the case where all local lse == -INFINITY, we want to set lse_logsum to INFINITY. Otherwise
     // lse_logsum is log(0.0) = -INFINITY and we get NaN when we do lse_accum(l) - lse_logsum.
     ElementAccum lse_logsum = (lse_sum == 0.f || lse_sum != lse_sum) ? INFINITY : logf(lse_sum) + lse_max;
-    // Calculate the actual number of valid rows for this block
-    // This tid contains the final reduction of different K splits.
-    const bool group_leader = tidx % kRowsPerLoadTranspose == 0;
+    // Calculate valid rows for this block
     const int total_rows = params.b * params.h * params.seqlen_q;
-    const int rows_per_block = kBlockM;
-    const int global_row = bidx * rows_per_block + (tidx / kRowsPerLoadTranspose);
-    const bool valid_row = global_row < total_rows;
-    if (group_leader && valid_row) {
-      gLSE(tidx / kRowsPerLoadTranspose) = lse_logsum;
+    const int local_row = tidx / kRowsPerLoadTranspose;
+    const int global_row = blockIdx.x * kBlockM + local_row;
+
+    const bool is_reduction_writer = tidx % kRowsPerLoadTranspose == 0;
+    const bool is_valid_row = (local_row < kBlockM) && (global_row < total_rows);
+
+    if (is_reduction_writer && is_valid_row) {
+        gLSE(local_row) = lse_logsum;
     }
     // Store the scales exp(lse - lse_logsum) in shared memory.
     #pragma unroll
