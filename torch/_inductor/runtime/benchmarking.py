@@ -577,7 +577,7 @@ class Benchmarker:
                 "Lazy benchmarking is disabled. Immediately proceeding to GPU benchmarking."
             )
             return self.benchmark_gpu(_callable, **kwargs)
-        
+
         counters["inductor"]["benchmarking_lazy_benchmark_gpu"] += 1
 
         # we should try the callable before queueing it for benchmarking, in
