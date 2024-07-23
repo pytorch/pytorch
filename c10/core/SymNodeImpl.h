@@ -3,11 +3,13 @@
 #include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <cstdint>
+#include <optional>
 #include <ostream>
 #include <string>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
 namespace c10 {
 
@@ -206,20 +208,23 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
+  virtual std::string _graph_repr() {
+    return str();
+  };
   virtual std::optional<int64_t> nested_int() {
-    return c10::nullopt;
+    return std::nullopt;
   }
   virtual std::optional<int64_t> nested_int_coeff() {
-    return c10::nullopt;
+    return std::nullopt;
   }
   virtual std::optional<int64_t> constant_int() {
-    return c10::nullopt;
+    return std::nullopt;
   }
   virtual std::optional<bool> constant_bool() {
-    return c10::nullopt;
+    return std::nullopt;
   }
   virtual std::optional<int64_t> maybe_as_int() {
-    return c10::nullopt;
+    return std::nullopt;
   }
   virtual bool is_constant() {
     return false;
@@ -234,3 +239,5 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
 };
 
 } // namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()

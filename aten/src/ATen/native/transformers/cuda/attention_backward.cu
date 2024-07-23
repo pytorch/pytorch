@@ -85,15 +85,15 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
   const int non_null_window_right = window_size_right.has_value() ? window_size_right.value() : -1;
 
-  std::optional<at::Tensor> dq{c10::nullopt};
-  std::optional<at::Tensor> dk{c10::nullopt};
-  std::optional<at::Tensor> dv{c10::nullopt};
+  std::optional<at::Tensor> dq{std::nullopt};
+  std::optional<at::Tensor> dk{std::nullopt};
+  std::optional<at::Tensor> dv{std::nullopt};
 
   //  The kernel computes irregardless we will drop for this functions return
   Tensor grad_softmax;
 
   // Currently unused args:
-  std::optional<at::Tensor> alibi_slopes{c10::nullopt};
+  std::optional<at::Tensor> alibi_slopes{std::nullopt};
 
   bool determinisitic{false};
   auto& ctx = at::globalContext();
@@ -180,7 +180,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
     const int64_t max_k,
     double dropout_p,
     bool is_causal,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
 
     auto& ctx = at::globalContext();
     if (ctx.deterministicAlgorithms()) {
@@ -259,9 +259,9 @@ _efficient_attention_backward(
   // This is needed because SaveVariable automatically converts
   // std::optional to undefined tensor
   std::optional<Tensor> bias, cu_seqlens_q, cu_seqlens_k;
-  bias = kernel_bias.has_value() && !kernel_bias->defined() ? c10::nullopt : kernel_bias;
-  cu_seqlens_q = cu_seqlens_q_dummy.has_value() && !cu_seqlens_q_dummy->defined() ? c10::nullopt : cu_seqlens_q_dummy;
-  cu_seqlens_k = cu_seqlens_k_dummy.has_value() && !cu_seqlens_k_dummy->defined() ? c10::nullopt : cu_seqlens_k_dummy;
+  bias = kernel_bias.has_value() && !kernel_bias->defined() ? std::nullopt : kernel_bias;
+  cu_seqlens_q = cu_seqlens_q_dummy.has_value() && !cu_seqlens_q_dummy->defined() ? std::nullopt : cu_seqlens_q_dummy;
+  cu_seqlens_k = cu_seqlens_k_dummy.has_value() && !cu_seqlens_k_dummy->defined() ? std::nullopt : cu_seqlens_k_dummy;
 
     // ndim
   TORCH_CHECK(query.dim() == grad_out_.dim());
@@ -780,8 +780,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   auto k_t = key.transpose(1, 2);
   auto v_t = value.transpose(1, 2);
 
-  Tensor grad_q, grad_k, grad_v, grad_bias;
-
   // This is needed because SaveVariable automatically converts
   // std::optional to undefined tensor
   std::optional<Tensor> kernel_bias;
@@ -797,7 +795,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   sdp::CustomMaskType custom_mask_type = causal
     ? sdp::CustomMaskType::CausalFromTopLeft
     : sdp::CustomMaskType::NoCustomMask;
-  std::tie(grad_q, grad_k, grad_v, grad_bias) =
+  auto [grad_q, grad_k, grad_v, grad_bias] =
       at::_efficient_attention_backward(
           grad_out,
           q_t,
@@ -805,8 +803,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
           v_t,
           kernel_bias,
           out_t,
-          c10::nullopt,
-          c10::nullopt,
+          std::nullopt,
+          std::nullopt,
           max_seqlen_q,
           max_seqlen_k,
           logsumexp,
@@ -816,7 +814,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
           static_cast<int64_t>(custom_mask_type),
           grad_input_mask[3],
           scale,
-          c10::nullopt);  // num_split_keys
+          std::nullopt);  // num_split_keys
   return std::make_tuple(
       grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2), grad_bias);
 }

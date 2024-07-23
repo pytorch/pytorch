@@ -12,7 +12,7 @@
 namespace at::functorch {
 // Flattens out all dims except the batch dim, and also moves batch dim
 // (if it exists) to front.
-static at::Tensor flatten_logical(const Tensor& tensor, optional<int64_t> bdim) {
+static at::Tensor flatten_logical(const Tensor& tensor, std::optional<int64_t> bdim) {
   if (bdim.has_value()) {
     auto result = moveBatchDimToFront(tensor, bdim);
     if (result.dim() > 1) {
@@ -28,8 +28,8 @@ static at::Tensor flatten_logical(const Tensor& tensor, optional<int64_t> bdim) 
 // Useful for many loss functions
 template <typename Func>
 static std::tuple<at::Tensor,optional<int64_t>>
-loss_batch_rule_helper(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
-          optional<int64_t> target_bdim, int64_t reduction,
+loss_batch_rule_helper(const at::Tensor& self, std::optional<int64_t> self_bdim, const at::Tensor& target,
+          std::optional<int64_t> target_bdim, int64_t reduction,
           Func loss_fn) {
   auto self_ = flatten_logical(self, self_bdim);
   auto target_ = flatten_logical(target, target_bdim);
@@ -50,8 +50,8 @@ loss_batch_rule_helper(const at::Tensor& self, optional<int64_t> self_bdim, cons
 };
 
 static std::tuple<at::Tensor,optional<int64_t>>
-mse_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
-          optional<int64_t> target_bdim, int64_t reduction) {
+mse_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, const at::Tensor& target,
+          std::optional<int64_t> target_bdim, int64_t reduction) {
   return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
                                 reduction, [](const at::Tensor& self, const at::Tensor& target, int64_t reduction) {
                                   return at::mse_loss(self, target, reduction);
@@ -59,8 +59,8 @@ mse_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const a
 };
 
 static std::tuple<at::Tensor,optional<int64_t>>
-huber_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
-          optional<int64_t> target_bdim, int64_t reduction, double delta) {
+huber_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, const at::Tensor& target,
+          std::optional<int64_t> target_bdim, int64_t reduction, double delta) {
   return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
                                 reduction, [delta](const at::Tensor& self, const at::Tensor& target, int64_t reduction) {
                                   return at::huber_loss(self, target, reduction, delta);
@@ -68,8 +68,8 @@ huber_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const
 };
 
 static std::tuple<at::Tensor,optional<int64_t>>
-smooth_l1_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
-          optional<int64_t> target_bdim, int64_t reduction, double beta) {
+smooth_l1_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, const at::Tensor& target,
+          std::optional<int64_t> target_bdim, int64_t reduction, double beta) {
   return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
                                 reduction, [beta](const at::Tensor& self, const at::Tensor& target, int64_t reduction) {
                                   return at::smooth_l1_loss(self, target, reduction, beta);
@@ -87,7 +87,7 @@ static Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reductio
 
 static Tensor binary_cross_entropy_plumbing(
     const Tensor& self, const Tensor& target,
-    const optional<Tensor>& weight, int64_t reduction) {
+    const std::optional<Tensor>& weight, int64_t reduction) {
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "binary_cross_entropy_plumbing");
   int64_t cur_level = maybe_layer->layerId();

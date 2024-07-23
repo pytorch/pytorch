@@ -123,14 +123,14 @@ struct OptionalStreamGuard {
 
   /// Returns the stream that was set at the time the guard was most recently
   /// initialized, or nullopt if the guard is uninitialized.
-  optional<Stream> original_stream() const {
+  std::optional<Stream> original_stream() const {
     return guard_.original_stream();
   }
 
   /// Returns the most recent  stream that was set using this stream guard,
   /// either from construction, or via reset_stream, if the guard is
   /// initialized, or nullopt if the guard is uninitialized.
-  optional<Stream> current_stream() const {
+  std::optional<Stream> current_stream() const {
     return guard_.current_stream();
   }
 
