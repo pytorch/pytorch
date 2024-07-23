@@ -192,16 +192,6 @@ class TestFullyShardCompile(FSDPTest):
             torch.ops.fsdp.chunk_cat.default,
             torch.ops._c10d_functional.reduce_scatter_tensor.default,
         }
-        if not expect:
-            for snode in snodes:
-                if (
-                    isinstance(snode.node, torch._inductor.ir.FallbackKernel)
-                    and snode.node.op_overload
-                    is torch.ops.fsdp.split_with_sizes_copy.default
-                ):
-                    print(
-                        f"snode: {snode}, snode.node: {snode.node}, snode.debug_str(): {snode.debug_str()}"
-                    )
         for op in common_ops:
             assert_method(
                 _is_fallback_op_in_snodes(

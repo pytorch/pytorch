@@ -950,13 +950,13 @@ class SchedulerNode(BaseSchedulerNode):
         return buffers_store_as_atomic_add
 
 
-def init_group_snode(
+def init_group_node(
     group_snode: BaseSchedulerNode,
     scheduler: Scheduler,
     snodes: List[BaseSchedulerNode],
 ) -> None:
     assert isinstance(group_snode, (FusedSchedulerNode, GroupedSchedulerNode))
-    group_snode.snodes = snodes  # type: ignore[attr-defined]
+    group_snode.snodes = snodes
     group_snode.scheduler = scheduler
     group_snode.node = None
     group_snode.ancestors = set.union(
@@ -1001,7 +1001,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     def __init__(self, scheduler: Scheduler, snodes: List[BaseSchedulerNode]) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
-        init_group_snode(self, scheduler, snodes)
+        init_group_node(self, scheduler, snodes)
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
 
     @cache_on_self
@@ -1401,7 +1401,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 
     def __init__(self, scheduler: Scheduler, snodes: List[BaseSchedulerNode]) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
-        init_group_snode(self, scheduler, snodes)
+        init_group_node(self, scheduler, snodes)
 
     def unpack(self) -> List[BaseSchedulerNode]:
         """

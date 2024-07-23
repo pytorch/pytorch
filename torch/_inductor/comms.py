@@ -463,7 +463,14 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
 
 
 def get_op_idx(snode):
-    return int(snode.get_name().split("_")[0][2:])
+    assert not isinstance(
+        snode,
+        (
+            torch._inductor.scheduler.FusedSchedulerNode,
+            torch._inductor.scheduler.GroupedSchedulerNode,
+        ),
+    )
+    return int(snode.get_name()[2:])
 
 
 def enforce_comm_ordering_for_fsdp(
