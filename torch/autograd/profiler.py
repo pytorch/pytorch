@@ -531,6 +531,7 @@ class profile:
                 fwd_thread=kineto_event.fwd_thread_id(),
                 input_shapes=kineto_event.shapes(),
                 concrete_inputs=kineto_event.concrete_inputs(),
+                kwinputs=kineto_event.kwinputs(),
                 stack=[
                     entry
                     for entry in kineto_event.stack()
@@ -546,6 +547,7 @@ class profile:
                 device_index=kineto_event.device_index(),
                 device_resource_id=kineto_event.device_resource_id(),
                 flops=kineto_event.flops(),
+                is_user_annotation=kineto_event.is_user_annotation(),
             )
             max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:

@@ -628,6 +628,17 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(f(input, True), input + 1)
             self.assertEqual(f(input, input), input + 1)
 
+    def test_callable_list(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, arg):
+            if callable(arg):
+                return x
+            return x + 1
+
+        input = torch.randn(4)
+        self.assertEqual(fn(input, [1, 2, 3]), input + 1)
+        self.assertEqual(fn(input, (1, 2, 3)), input + 1)
+
     @make_test
     def test_len_constant_misc_iterables(x):
         a = len((1, 2, 3))
@@ -970,6 +981,48 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         test = make_test(fn)
         test(self)
 
+    def test_dict_mutable_map(self):
+        from collections.abc import MutableMapping
+
+        class TensorDict(MutableMapping):
+            def __init__(self):
+                self._dict = {}
+
+            def add(self, key, value):
+                self._dict[key] = value
+
+            def items(self):
+                return self._dict.items()
+
+            def __delitem__(self, key):
+                del self._dict[key]
+
+            def __getitem__(self, key):
+                return self._dict[key]
+
+            def __iter__(self):
+                return iter(self._dict)
+
+            def __len__(self):
+                return len(self._dict)
+
+            def __setitem__(self, key, value):
+                self._dict[key] = value
+
+        tensor_dict = TensorDict()
+        tensor_dict.add("a", torch.ones(4) * 2)
+
+        def fn(x):
+            copy_tensordict = dict(tensor_dict)
+            return x * copy_tensordict["a"]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def _test_default_dict_helper(self, factory):
         dd = collections.defaultdict(factory)
         param = torch.nn.Parameter(torch.ones([2, 2]))
@@ -990,8 +1043,17 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref[1]["c"], res[1]["c"]))
         self.assertTrue(same(ref[1][param], res[1][param]))
 
-    def test_default_dict(self):
+    def test_default_dict_dict(self):
         self._test_default_dict_helper(dict)
+
+    def test_default_dict_list(self):
+        self._test_default_dict_helper(list)
+
+    def test_default_dict_tuple(self):
+        self._test_default_dict_helper(tuple)
+
+    def test_default_dict_set(self):
+        self._test_default_dict_helper(set)
 
     def test_default_dict_lambda(self):
         self._test_default_dict_helper(lambda: dict())  # noqa: C408
@@ -1001,6 +1063,25 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return dict()  # noqa: C408
 
         self._test_default_dict_helper(factory)
+
+    def test_class_dict(self):
+        class A:
+            x = 4
+            y = 5
+
+            def __init__(self):
+                self.a = 6
+
+        a = A()
+
+        def fn(x):
+            if "x" in type(a).__dict__:
+                return x + 1
+            return x + 2
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_default_dict_constr(self):
         param = torch.nn.Parameter(torch.ones([2, 2]))
@@ -1251,6 +1332,83 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         test = make_test(fn)
         test(self)
+
+    @make_test
+    def test_set_intersection(a, b):
+        set1 = {"apple", "banana", "cherry"}
+        set2 = {"google", "microsoft", "apple"}
+        intersection_set = set1.intersection(set2)
+        if "apple" in intersection_set:
+            x = a + b
+        else:
+            x = a - b
+        if "banana" in intersection_set:
+            y = a + b
+        else:
+            y = a - b
+        return x, y
+
+    @make_test
+    def test_set_union(a, b):
+        set1 = {"apple", "banana", "cherry"}
+        set2 = {"google", "microsoft", "apple"}
+        union_set = set1.union(set2)
+        if "apple" in union_set:
+            x = a + b
+        else:
+            x = a - b
+        if "banana" in union_set:
+            y = a + b
+        else:
+            y = a - b
+        return x, y
+
+    @make_test
+    def test_set_difference(a, b):
+        set1 = {"apple", "banana", "cherry"}
+        set2 = {"google", "microsoft", "apple"}
+        difference_set = set1.difference(set2)
+        if "apple" in difference_set:
+            x = a + b
+        else:
+            x = a - b
+        if "banana" in difference_set:
+            y = a + b
+        else:
+            y = a - b
+        return x, y
+
+    def test_set_keys_view(self):
+        from collections.abc import KeysView
+
+        class StringKeys(KeysView):
+            def __init__(self, keys):
+                self.keys = keys
+
+            def __getitem__(self, key):
+                return self.keys.__getitem__(key)
+
+            def __iter__(self):
+                yield from self.keys
+
+            def __repr__(self):
+                return f"{type(self).__name__}({self.keys})"
+
+            def __len__(self):
+                return len(self.keys)
+
+            def __contains__(self, item):
+                return self.keys.__contains__(item)
+
+        a = StringKeys([1, 2, 3, 3])
+
+        def fn(x):
+            set_a = set(a)
+            return len(set_a) * x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.rand(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
     @make_test
     def test_tuple_iadd(a, b):
