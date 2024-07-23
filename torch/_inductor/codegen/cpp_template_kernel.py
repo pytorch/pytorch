@@ -7,8 +7,8 @@ from sympy.parsing.sympy_parser import parse_expr
 
 import torch
 from torch.utils._sympy.symbol import SymT
-from .. import config, cpp_builder, ir, lowering as L
 
+from .. import config, cpp_builder, ir, lowering as L
 from ..autotune_process import CppBenchmarkRequest
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
@@ -284,7 +284,7 @@ class CppTemplateKernel(CppKernel):
                     scope.add_local_buffer(src)
                     return self.store_pointwise_nodes(dst, [copy])
             else:
-                assert dst.layout == src.layout
+                assert dst.layout == src.layout, f"{dst=}, {src=}"
                 return ""
 
 
