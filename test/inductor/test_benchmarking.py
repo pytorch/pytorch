@@ -233,7 +233,7 @@ class TestBenchmarking(TestCase):
         roofline_timing_ms = start_event.elapsed_time(end_event) / 10
         self.assertEqual(timing_ms <= roofline_timing_ms, True)
 
-    def diff(baseline, experimental):
+    def diff(self, baseline, experimental):
         return abs(experimental - baseline) / baseline
 
     def gpu_properties_are_not_initialized(self):
