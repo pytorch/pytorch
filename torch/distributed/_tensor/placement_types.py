@@ -346,17 +346,17 @@ kw_only_dataclass = dict(kw_only=True) if "kw_only" in dataclass.__kwdefaults__ 
 
 @dataclass(frozen=True, **kw_only_dataclass)
 class _StridedShard(Shard):
-    # TODO: change description
     """
-    StridedShard allows a more flexible Shard placement on device compared to the default
-    behavior where tensor is sharded on the leftmost (i.e. outermost) mesh dimension
-    first.
-
-    For instance, when sharding a 2D tensor along dimension 0 over a 2D mesh, the tensor
-    would be divided into four shards placed correspondingly on ranks [0, 1, 2, 3]:
+    _StridedShard is only introduced to support 2D FSDP2 + TP sharding where the tensor
+    is sharded on the TP mesh dimension first, then sharded on the FSDP mesh dimension.
+    We call this right-to-left sharding which is the opposite of the default
+    left-to-right sharding. See the example below:
         tensor shape: [8, 8]
-        mesh: [[0, 1], [2, 3]]
+        mesh: [[0, 1], [2, 3]], names=("dp", "tp")
         placements: [Shard(0), Shard(0)]
+
+    The default sharding behavior shards the tensor on "dp" mesh dimension first then
+    "tp" dimension. The sharding result will be:
         Rank    |   Mesh Coordinate |   Shard Index
         ------------------------------------------------
         0       |   (0, 0)          |   0 (row 0-1)
@@ -364,45 +364,43 @@ class _StridedShard(Shard):
         2       |   (1, 0)          |   2 (row 4-5)
         3       |   (1, 1)          |   3 (row 6-7)
 
-    With StridedShard, users can choose the mesh dimension to shard first, unlike Shard
-    which always starts with the leftmost dimension. To determine each shard's placement
-    (i.e. on which rank it's placed) we here introduce the concept ``Shard Coordinate``
-    to represent where a shard should appear in the original tensor (e.g. if the Shard
-    Coordinate of a tensor shard is 0 on dimension 1, then it means the data in shard
-    appears first on dimension 1). To find out the mapping from rank to Shard Coordinate,
-    we borrow the concept of stride in tensor: the dot result of a rank's mesh coordinate
-    and the stride for a specified tensor dimension is the Shard Coordinate value on that
-    dimension. For the above case, the shard stride for tensor dim 0 is (2, 1) since we
-    shard on mesh dim 0 first:
-        Rank    |   Mesh Coordinate |   Shard Coordinate
+    While the FSDP2 + TP sharding behavior does the opposite: it shards the tensor on
+    "tp" mesh dim first then "dp" dim. This right-to-left sharding will produce the
+    result:
+        Rank    |   Mesh Coordinate |   Shard Index
         ------------------------------------------------
-        0       |   (0, 0)          |   (0, -1) --> for Replicate dim we use -1
-        1       |   (0, 1)          |   (1, -1)
-        2       |   (1, 0)          |   (2, -1)
-        3       |   (1, 1)          |   (3, -1)
+        0       |   (0, 0)          |   0 (row 0-1)
+        1       |   (0, 1)          |   2 (row 4-5)
+        2       |   (1, 0)          |   1 (row 2-3)
+        3       |   (1, 1)          |   3 (row 6-7)
 
-    Now think about sharding this tensor on mesh dim 1 first:
-        mesh: [[0, 1], [2, 3]]
-        placements: [StridedShard(0, _shard_stride=1), Shard(0, _shard_stride=2)]
-        Rank    |   Mesh Coordinate |   Shard Coordinate
+    The consequence is, any attempt to redistribute this DTensor to a full replica will
+    produce a wrong result because the shard-to-replicate redistribution always happens
+    right-to-left, regardless it's left-to-right sharding or right-to-left. To address
+    this, we use _StridedShard placement to make this right-to-left sharding compatible
+    with our left-to-right convention on both tensor distribution and redistribution.
+
+    Now with _StridedShard, the right-to-left sharding above can be represented as:
+        tensor shape: [8, 8]
+        mesh: [[0, 1], [2, 3]], names=("dp", "tp")
+        placements: [_StridedShard(0, split_factor=2), Shard(0)]
+
+    And a left-to-right processing of `placements` will produce the same result, which is
+    different from using the `Shard` placement:
+        Rank    |   Mesh Coordinate |   Shard Index
         ------------------------------------------------
-        0       |   (0, 0)          |   (0, -1) (tensor[:2, :])
-        1       |   (0, 1)          |   (2, -1) (tensor[2:4, :])
-        2       |   (1, 0)          |   (1, -1) (tensor[4:6, :])
-        3       |   (1, 1)          |   (3, -1) (tensor[6:, :])
+        0       |   (0, 0)          |   0 (row 0-1)
+        1       |   (0, 1)          |   2 (row 4-5)
+        2       |   (1, 0)          |   1 (row 2-3)
+        3       |   (1, 1)          |   3 (row 6-7)
 
-    The rule to determine the shard stride is similar to tensor stride:
-        for any mesh dim i, say it shards tensor dim j, the stride is
-        prod(
-            [
-                mesh.size(mesh_dim=k)
-                for all mesh dim k that comes after i in sharding order
-            ],
-            start_value=1,
-        )
+    The argument `split_factor` is the number of existing shards over the tensor sharding
+    dimension before processing the _StridedShard placement, as if the sharding happened
+    right-to-left. In the example above, the tensor should first be sharded on the "tp"
+    dimension into 2 shards before being sharded on the "dp" dimension. Therefore, the
+    `split_factor` of the _StridedShard placement on "dp" dim is 2.
     """
 
-    # TODO: add comment for `split_factor`
     split_factor: int
 
     def __eq__(self, other: object) -> bool:
@@ -432,7 +430,7 @@ class _StridedShard(Shard):
         contiguous: bool = True,
     ) -> Tuple[List[torch.Tensor], List[int]]:
         """
-        Note: currently _StridedShard does not support padding
+        TODO: currently _StridedShard does not support padding
         """
         assert (
             self.dim <= tensor.ndim

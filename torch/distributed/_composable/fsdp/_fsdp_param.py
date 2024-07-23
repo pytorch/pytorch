@@ -284,7 +284,11 @@ class FSDPParam:
             # TODO: Hard code FSDP + TP; need to support HSDP + TP
             split_factor = self._tp_spec.num_shards_map[0]
             self._spmd_placements: Tuple[Placement, ...] = (
-                _StridedShard(0, split_factor=split_factor),
+                (
+                    _StridedShard(0, split_factor=split_factor)
+                    if split_factor > 1
+                    else Shard(0)
+                ),
                 self._tp_spec.placements[0],
             )
             self._sharding_spec = DTensorSpec(
