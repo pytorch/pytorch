@@ -1,11 +1,13 @@
 # Owner(s): ["module: inductor"]
 
 import functools
+import itertools
 import logging
 import time
 
 import torch
 from torch._dynamo.utils import counters
+from torch._inductor import config
 from torch._inductor.runtime.benchmarking import Benchmarker, LazyBenchmark
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, requires_gpu
@@ -364,6 +366,121 @@ class TestBenchmarking(TestCase):
         timings_ms = benchmarker.benchmark_many_gpu(callables)
         for _callable, timing_ms in zip(callables, timings_ms):
             self.sanity_check_gpu_benchmark(_callable, timing_ms)
+    
+    @requires_gpu()
+    @patches
+    def test_lazy_benchmark_gpu_validity(self):
+        benchmarker = Benchmarker()
+        _, _, _, _callable = self.get_fn_args_kwargs_callable(device="cuda")
+        timing_ms = float(benchmarker.lazy_benchmark_gpu(_callable))
+        self.sanity_check_gpu_benchmark(_callable, timing_ms)
+
+    @requires_gpu()
+    @patches
+    def test_benchmark_many_gpu_single_callable(self):
+        benchmarker = Benchmarker()
+        _, _, _, _callable = self.get_fn_args_kwargs_callable(device="cuda")
+        timing_ms = benchmarker.benchmark_many_gpu([_callable])[0]
+        self.sanity_check_gpu_benchmark(_callable, timing_ms)
+    
+    @requires_gpu()
+    @patches
+    def test_benchmark_many_gpu_callables_not_mangled(self):
+        benchmarker = Benchmarker()
+        fast_fn, fast_args, fast_kwargs = torch.sum, [torch.randn(1000, device="cuda")], {}
+        fast_callable = lambda: fast_fn(*fast_args, **fast_kwargs)
+        slow_fn, slow_args, slow_kwargs = torch.mm, [torch.randn(4096, 4096, device="cuda"), torch.randn(4096, 4096, device="cuda")], {}
+        slow_callable = lambda: slow_fn(*slow_args, **slow_kwargs)
+        callables = [fast_callable, fast_callable, slow_callable, slow_callable, fast_callable, slow_callable]
+        timings_ms = benchmarker.benchmark_many_gpu(callables)
+        for _callable, timing_ms in zip(callables, timings_ms):
+            self.sanity_check_gpu_benchmark(_callable, timing_ms)
+    
+    @requires_gpu()
+    @patches
+    @config.patch({"benchmarking.enable_early_ranking": True})
+    def test_benchmark_many_gpu_early_ranking(self):
+        benchmarker = Benchmarker()
+        _, _, _, _callable = self.get_fn_args_kwargs_callable(device="cuda")
+        callables = [_callable for _ in range(10)]
+        timings_ms = benchmarker.benchmark_many_gpu(callables, ranking_key="test")
+        self.assertEqual(counters["inductor"]["benchmarking_early_ranking"], 1)
+        self.assertEqual(max([self.diff(*paired_timings_ms) for paired_timings_ms in itertools.product(timings_ms)]) < 0.25)
+
+    @requires_gpu()
+    @patches
+    @config.patch({"benchmarking.enable_early_ranking": False})
+    def test_benchmark_many_gpu_early_ranking_disabled(self):
+        benchmarker = Benchmarker()
+        _, _, _, _callable = self.get_fn_args_kwargs_callable(device="cuda")
+        callables = [_callable for _ in range(10)]
+        _ = benchmarker.benchmark_many_gpu(callables, ranking_key="test")
+        self.assertEqual(counters["inductor"]["benchmarking_early_ranking"], 0)
+    
+    @requires_gpu()
+    @patches
+    @config.patch({"benchmarking.enable_early_pruning": True})
+    def test_benchmark_many_gpu_early_pruning(self):
+        benchmarker = Benchmarker()
+        _, _, _, _callable = self.get_fn_args_kwargs_callable(device="cuda")
+        callables = [_callable for _ in range(10)]
+        timings_ms = benchmarker.benchmark_many_gpu(callables, pruning_key="test")
+        self.assertEqual(counters["inductor"]["benchmarking_early_pruning"], 1)
+        for _callable, timing_ms in zip(callables, timings_ms):
+            self.sanity_check_gpu_benchmark(_callable, timing_ms)
+
+    @requires_gpu()
+    @patches
+    @config.patch({"benchmarking.enable_early_pruning": False})
+    def test_benchmark_many_gpu_early_pruning_disabled(self):
+        benchmarker = Benchmarker()
+        _, _, _, _callable = self.get_fn_args_kwargs_callable(device="cuda")
+        callables = [_callable for _ in range(10)]
+        _ = benchmarker.benchmark_many_gpu(callables, pruning_key="test")
+        self.assertEqual(counters["inductor"]["benchmarking_early_pruning"], 0)
+    
+    @requires_gpu()
+    @patches
+    @config.patch({"benchmarking.enable_lazy_benchmarking": True})
+    def test_lazy_benchmark_gpu(self):
+        benchmarker = Benchmarker()
+        _, _, _, _callable = self.get_fn_args_kwargs_callable(device="cuda")
+        lazy_benchmark = benchmarker.lazy_benchmark_gpu(_callable)
+        self.assertEqual(counters["inductor"]["benchmarking_lazy_benchmark"], 1)
+        self.assertEqual(counters["inductor"]["benchmarking_finalize_lazy_benchmark"], 0)
+        _ = float(lazy_benchmark)
+        self.assertEqual(counters["inductor"]["benchmarking_finalize_lazy_benchmark"], 1)
+    
+    @requires_gpu()
+    @patches
+    @config.patch({"benchmarking.enable_lazy_benchmarking": False})
+    def test_lazy_benchmark_gpu_disabled(self):
+        benchmarker = Benchmarker()
+        _, _, _, _callable = self.get_fn_args_kwargs_callable(device="cuda")
+        _ = benchmarker.lazy_benchmark_gpu(_callable)
+        self.assertEqual(counters["inductor"]["benchmarking_lazy_benchmark"], 0)
+    
+    @requires_gpu()
+    @patches
+    @config.patch({"benchmarking.enable_lazy_benchmarking": True})
+    def test_lazy_benchmark_gpu_same_callable_no_memory_leak(self):
+        benchmarker = Benchmarker()
+        _, _, _, _callable = self.get_fn_args_kwargs_callable(device="cuda")
+        lazy_benchmark = benchmarker.lazy_benchmark_gpu(_callable)
+        _ = benchmarker.lazy_benchmark_gpu(_callable)
+        _ = float(lazy_benchmark)
+        self.assertEqual(benchmarker.kwargs_hash_to_futures_gpu, {})
+    
+    @requires_gpu()
+    @patches
+    @config.patch({"benchmarking.enable_lazy_benchmarking": True})
+    def test_lazy_benchmark_gpu_group_by_kwargs(self):
+        benchmarker = Benchmarker()
+        _, _, _, _callable = self.get_fn_args_kwargs_callable(device="cuda")
+        lazy_benchmark = benchmarker.lazy_benchmark_gpu(_callable)
+        _ = benchmarker.lazy_benchmark_gpu(_callable, estimation_iters=100)
+        _ = float(lazy_benchmark)
+        self.assertEqual(len(benchmarker.memory_cache), 1)
 
 
 if __name__ == "__main__":
