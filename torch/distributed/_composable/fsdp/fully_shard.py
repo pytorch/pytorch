@@ -4,7 +4,6 @@ from typing import Any, cast, Iterable, List, NoReturn, Optional, Union
 
 import torch
 import torch.nn as nn
-from torch.distributed import _make_nccl_premul_sum
 from torch.distributed._composable import contract
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed.utils import _get_root_modules
@@ -349,7 +348,7 @@ class FSDPModule:
         state = self._get_fsdp_state()
         if (fsdp_param_group := state._fsdp_param_group) is not None:
             mul_factor = 1.0 / float(factor)
-            reduce_op = _make_nccl_premul_sum(mul_factor)
+            reduce_op = torch.distributed._make_nccl_premul_sum(mul_factor)
             fsdp_param_group.reduce_scatter_reduce_op = reduce_op
 
     def _get_fsdp_state(self) -> FSDPState:
