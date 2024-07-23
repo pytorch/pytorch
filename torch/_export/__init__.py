@@ -108,7 +108,7 @@ def capture_pre_autograd_graph(
         An nn.Module containing the traced method.
 
     """
-    from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG, _ignore_backend_decomps
+    from torch.export._trace import _extract_fake_inputs, DEFAULT_EXPORT_DYNAMO_CONFIG, _ignore_backend_decomps
     from torch._utils_internal import export_api_rollout_check
     from torch._export.non_strict_utils import make_constraints
     from torch._subclasses.functional_tensor import FunctionalTensor
@@ -154,7 +154,7 @@ def capture_pre_autograd_graph(
                 **kwargs,
             )[0]
 
-            _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
+            _, _, fake_mode = _extract_fake_inputs(m, args, kwargs)
 
             m.meta["inline_constraints"] = {
                 k: v
