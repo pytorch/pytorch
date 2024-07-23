@@ -95,7 +95,6 @@ from .source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
     TypeSource,
-    UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     WeakRefCallSource,
 )
@@ -866,7 +865,6 @@ class GuardBuilder(GuardBuilderBase):
                 NNModuleSource,
                 UnspecializedNNModuleSource,
                 FSDPNNModuleSource,
-                UnspecializedBuiltinNNModuleSource,
             ),
         ):
             assert base_guard_manager  # to make mypy happy
