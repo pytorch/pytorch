@@ -50,6 +50,7 @@ from typing import (
 from typing_extensions import TypeAlias
 
 import torch
+from torch import Tensor, SymInt
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -167,7 +168,7 @@ def get_cpp_wrapper_cubin_path_name() -> str:
 class CacheBase:
     @staticmethod
     @functools.lru_cache(None)
-    def get_system() -> Dict[str, Union[Dict[str, str], str]]:
+    def get_system() -> Dict[str, Any]:
         try:
             from triton.compiler.compiler import triton_key
 
@@ -448,7 +449,8 @@ def _ident(x: Any) -> Any:
     return x
 
 
-def extract_tensor_metadata_for_cache_key(device_map: Union[Dict[torch.device, torch.device], Dict[Any]], t: Union[Tensor, FakeTensor]) -> TensorMetadata:
+def extract_tensor_metadata_for_cache_key(device_map: Dict[torch.device, torch.device],
+                                          t: Union[Tensor, FakeTensor]) -> TensorMetadata:
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
     that are not needed for caching
@@ -471,7 +473,8 @@ def extract_tensor_metadata_for_cache_key(device_map: Union[Dict[torch.device, t
     return meta
 
 
-def _reduce_fake_tensor(device_map: Union[Dict[torch.device, torch.device], Dict[Any]], t: FakeTensor) -> Tuple[Callable, Tuple[TensorMetadata]]:
+def _reduce_fake_tensor(device_map: Dict[torch.device, torch.device],
+                        t: FakeTensor) -> Tuple[Callable[..., Any], Tuple[TensorMetadata]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
@@ -479,7 +482,8 @@ def _reduce_fake_tensor(device_map: Union[Dict[torch.device, torch.device], Dict
     return (_ident, (metadata,))
 
 
-def _reduce_tensor(device_map: Union[Dict[torch.device, torch.device], Dict[Any]], t: Tensor) -> Tuple[Callable, Tuple[TensorMetadataAndValues]]:
+def _reduce_tensor(device_map: Dict[torch.device, torch.device],
+                   t: Tensor) -> Tuple[Callable[..., Any], Tuple[TensorMetadataAndValues]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     If we see tensors, we know they're constants stored as attributes on
@@ -510,7 +514,7 @@ def _reduce_tensor(device_map: Union[Dict[torch.device, torch.device], Dict[Any]
     return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
-def _reduce_symint(s: SymInt) -> Tuple[Callable, Tuple[str]]:
+def _reduce_symint(s: SymInt) -> Tuple[Callable[..., Any], Tuple[str]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle SymInts.
     """
@@ -610,7 +614,7 @@ class FxGraphCachePickler(pickle.Pickler):
         return lines
 
 
-def build_code_hash(roots: List[str], prefix: str, hasher: HASH) -> None:
+def build_code_hash(roots: List[str] | None, prefix: str, hasher: hashlib._Hash) -> None:
     for lib in sorted(pkgutil.iter_modules(roots, prefix), key=lambda x: x.name):
         spec = lib.module_finder.find_spec(lib.name, None)
         assert spec is not None
@@ -3469,8 +3473,8 @@ class TritonFuture(CodeCacheFuture):
 
 
 class LambdaFuture(CodeCacheFuture):
-    def __init__(self, result_fn: Callable) -> None:
+    def __init__(self, result_fn):
         self.result_fn = result_fn
 
-    def result(self) -> builtin_function_or_method:
+    def result(self):
         return self.result_fn()
