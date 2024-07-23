@@ -1649,53 +1649,105 @@ class CppWrapperCpu(WrapperCodeGen):
         )
 
     def codegen_reinterpret_view(
-        self, data, size_list, stride_list, offset, writer
+        self, data, size_list, stride_list, offset, writer, dtype=None
     ) -> str:
         dim = str(len(size_list))
+        original_offset = offset
         size = self.codegen_shape_tuple(size_list)
         stride = self.codegen_shape_tuple(stride_list)
         offset = self.codegen_sizevar(offset)
-
+        call_strs = []
         if config.abi_compatible:
-            tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
+            final_tmp_name = None
+            final_tmp_name_is_RAIIAtenTensorHandle = False
+
+            def create_reinterpret_call():
+                tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
+                args = [
+                    f"{data.get_name()}",
+                    dim,
+                    self.codegen_int_array_var(
+                        size,
+                        writer,
+                        known_statically=self.is_statically_known_list_of_ints(
+                            size_list
+                        ),
+                        graph=self.get_codegened_graph(),
+                    ),
+                    self.codegen_int_array_var(
+                        stride,
+                        writer,
+                        known_statically=self.is_statically_known_list_of_ints(
+                            stride_list
+                        ),
+                        graph=self.get_codegened_graph(),
+                    ),
+                    offset,
+                ]
+                call_str = (
+                    f"auto {tmp_name} = reinterpret_tensor_wrapper({', '.join(args)});"
+                )
+                return tmp_name, call_str
+
+            def create_dtypeview_call(reinterpret_call):
+                tmp_AtenTensorHandle = (
+                    f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
+                )
+                call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
+                dtype_name = str(dtype).split(".")[-1]
+                device_name = "cuda" if data.layout.device.type == "cuda" else "cpu"
+                get_dtype_function = f"aoti_torch_dtype_{dtype_name}"
+                dtypeview_function = f"aoti_torch_{device_name}_view_dtype"
+                call_strs.append(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK({dtypeview_function}"
+                    f"({reinterpret_call}, {get_dtype_function}(), &{tmp_AtenTensorHandle}));"
+                )
+                tmp_RAIIAtenTensorHandle = (
+                    f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}_handle"
+                )
+                call_strs.append(
+                    f"RAIIAtenTensorHandle {tmp_RAIIAtenTensorHandle}({tmp_AtenTensorHandle});"
+                )
+                return tmp_RAIIAtenTensorHandle, call_strs
+
+            if (
+                size_list == data.layout.size
+                and stride_list == data.layout.stride
+                and original_offset == data.layout.offset
+            ):
+                # pure dtypeview
+                if dtype is not None and dtype != data.dtype:
+                    tmp_output_name, tmp_call_strs = create_dtypeview_call(
+                        data.get_name()
+                    )
+                    call_strs.extend(tmp_call_strs)
+                    final_tmp_name = tmp_output_name
+                    final_tmp_name_is_RAIIAtenTensorHandle = True
+                else:
+                    return f"{data.get_name()}"
+            else:
+                # firstly create reinterpretview
+                final_tmp_name, reinterpret_call = create_reinterpret_call()
+                call_strs.append(reinterpret_call)
+
+                if dtype is not None and dtype != data.dtype:
+                    # wrap it with dtypeview
+                    final_tmp_name, tmp_call_strs = create_dtypeview_call(
+                        reinterpret_call
+                    )
+                    call_strs.extend(tmp_call_strs)
             # Because the memory planning is done in two passes (see the implementation
             # of self.generate), the writeline behavior is different in the two passes.
             if writer is None:
                 writer = self
-
-            args = [
-                f"{data.get_name()}",
-                dim,
-                self.codegen_int_array_var(
-                    size,
-                    writer,
-                    known_statically=self.is_statically_known_list_of_ints(size_list),
-                    graph=self.get_codegened_graph(),
-                ),
-                self.codegen_int_array_var(
-                    stride,
-                    writer,
-                    known_statically=self.is_statically_known_list_of_ints(stride_list),
-                    graph=self.get_codegened_graph(),
-                ),
-                offset,
-            ]
-
-            def gen_reinterpret_call(writer, args):
-                writer.writeline(
-                    f"auto {tmp_name} = reinterpret_tensor_wrapper({', '.join(args)});"
-                )
-
+            writer.writelines(call_strs)
             if (
                 self.can_stack_allocate_buffer(data)
                 and self.is_statically_known_list_of_ints(size_list)
                 and self.is_statically_known_list_of_ints(stride_list)
                 and ir.is_contiguous_strides_for_shape(stride_list, size_list)
             ):
-                gen_reinterpret_call(writer, args)
-                return tmp_name
-
-            gen_reinterpret_call(writer, args)
+                return final_tmp_name
 
             # NB, the return handle here represents a temporary tensor, which will be automatically
             # released.
@@ -1726,7 +1778,10 @@ class CppWrapperCpu(WrapperCodeGen):
             #     }.data()
             # );
             # ```
-            return f"wrap_with_raii_handle_if_needed({tmp_name})"
+            if not final_tmp_name_is_RAIIAtenTensorHandle:
+                return f"wrap_with_raii_handle_if_needed({final_tmp_name})"
+            else:
+                return final_tmp_name
         else:
             args = [data.get_name(), size, stride, offset]
             return f"reinterpret_tensor({', '.join(args)})"
