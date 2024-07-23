@@ -16,7 +16,7 @@ GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
 TypeGuardAccessor = guards.TypeGuardAccessor
 TENSOR_ALIASING = guards.TENSOR_ALIASING
-install_tensor_aliasing_guard = guards.install_tensor_aliasing_guard
+install_object_aliasing_guard = guards.install_object_aliasing_guard
 NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
 install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
 
@@ -242,7 +242,7 @@ num_guards_executed=0)
 
         x_guard_mgr = guard_manager.getattr_manager("x", "", a, default_mgr_enum)
         y_guard_mgr = guard_manager.getattr_manager("y", "", a, default_mgr_enum)
-        install_tensor_aliasing_guard(x_guard_mgr, y_guard_mgr, ["x is y"])
+        install_object_aliasing_guard(x_guard_mgr, y_guard_mgr, ["x is y"])
 
         # Check structure
         x_guards = x_guard_mgr.get_leaf_guards()
