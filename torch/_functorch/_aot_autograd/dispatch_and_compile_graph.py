@@ -91,7 +91,7 @@ def aot_dispatch_base_graph(
     fn_to_trace, updated_flat_args_subclasses_desugared = create_functionalized_fn(
         fn_to_trace,
         updated_flat_args,
-        meta=fw_metadata,
+        meta=maybe_subclass_meta.fw_metadata if maybe_subclass_meta else fw_metadata,
         aot_config=aot_config,
         trace_joint=False,
     )

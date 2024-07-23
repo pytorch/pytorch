@@ -220,7 +220,9 @@ def aot_dispatch_base(
     ).post_compile(
         compiled_fw,
         aot_config,
-        runtime_metadata=fw_metadata,
+        runtime_metadata=fw_metadata
+        if maybe_subclass_meta is None
+        else maybe_subclass_meta.fw_metadata,
     )
 
     # Why do we need to pass in num_fw_outs_saved_for_bw?
