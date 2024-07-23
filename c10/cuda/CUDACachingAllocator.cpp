@@ -3598,10 +3598,10 @@ class NativeCachingAllocator : public CUDAAllocator {
       std::istringstream ss(handle);
       auto type = ss.get();
       if (type == SHAREABLE_CUDA_MALLOC) {
-        cudaIpcMemHandle_t handle;
-        ss.read((char*)&handle, CUDA_IPC_HANDLE_SIZE);
+        cudaIpcMemHandle_t cuda_handle;
+        ss.read((char*)&cuda_handle, CUDA_IPC_HANDLE_SIZE);
         C10_CUDA_CHECK(cudaIpcOpenMemHandle(
-            &cuda_ipc_ptr_, handle, cudaIpcMemLazyEnablePeerAccess));
+            &cuda_ipc_ptr_, cuda_handle, cudaIpcMemLazyEnablePeerAccess));
       } else if (type == SHAREABLE_CUDA_EXPANDABLE_SEGMENT) {
         expandable_segment_ =
             ExpandableSegment::fromShared(device, allocator.peers(), ss);
