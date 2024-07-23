@@ -352,8 +352,6 @@ class CppPackedGemmTemplate(CppTemplate):
             Nc_blocks = 1
             Kc_blocks = thread_blocking.block_k
 
-            # return Mc_blocks, Nc_blocks, Kc_blocks
-
             # TODO: tune the factor here
             L1_limit_factor = 1
             L2_limit_factor = 0.5
