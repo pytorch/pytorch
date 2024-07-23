@@ -16,7 +16,7 @@ TEST(JitTypeTest, IsComplete) {
       std::vector<c10::Stride>(
           {c10::Stride{2, true, 1},
            c10::Stride{1, true, 1},
-           c10::Stride{0, true, c10::nullopt}}),
+           c10::Stride{0, true, std::nullopt}}),
       false);
   TORCH_INTERNAL_ASSERT(!tt->isComplete());
   TORCH_INTERNAL_ASSERT(!tt->strides().isComplete());

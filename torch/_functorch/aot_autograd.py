@@ -20,6 +20,7 @@ from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 from . import config
 from ._aot_autograd.autograd_cache import (  # noqa: F401
     AOTAutogradCache,
@@ -507,7 +508,9 @@ def create_aot_dispatcher_function(
                             shape_env.create_symbol(x, source), hint=x, source=source
                         )
                 if isinstance(x, torch.ScriptObject):
-                    return torch._library.fake_class_registry.to_fake_obj(fake_mode, x)
+                    return torch._library.fake_class_registry.maybe_to_fake_obj(
+                        fake_mode, x
+                    )
                 if not isinstance(x, torch.Tensor):
                     return x
                 if isinstance(x, FakeTensor):
@@ -551,14 +554,17 @@ def create_aot_dispatcher_function(
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
-        from torch._library.fake_class_registry import FakeScriptObject, to_fake_obj
+        from torch._library.fake_class_registry import (
+            FakeScriptObject,
+            maybe_to_fake_obj,
+        )
 
         # Tracing may mutate the states the fake script object,
         # so we need to duplicate the fake script objects so that subsequent tracing
         # won't be affected.
         def _dup_fake_script_obj(fake_flat_args):
             return [
-                to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
+                maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
                 if isinstance(arg, FakeScriptObject)
                 else arg
                 for arg in fake_flat_args
@@ -566,8 +572,9 @@ def create_aot_dispatcher_function(
 
         fake_flat_args = process_inputs(flat_args)
 
-        needs_autograd = any(
-            x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)
+        needs_autograd = (
+            any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
+            and torch.is_grad_enabled()
         )
 
         with enable_python_dispatcher():
@@ -582,6 +589,7 @@ def create_aot_dispatcher_function(
                 with ctx:
                     fw_metadata = run_functionalized_fw_and_collect_metadata(
                         flat_fn,
+                        static_input_indices=aot_config.static_input_indices,
                         keep_input_mutations=aot_config.keep_inference_input_mutations,
                         is_train=needs_autograd,
                         pre_dispatch=aot_config.pre_dispatch,
@@ -592,17 +600,7 @@ def create_aot_dispatcher_function(
                 )
 
                 output_and_mutation_safe = not any(
-                    x.requires_grad
-                    # view-type operations preserve requires_grad even in no_grad.
-                    # Do not count aliases of inputs with requires_grad as reason to make a training graph,
-                    # as AOTAutograd will perform view-replay to regenerate the view outputs at runtime,
-                    # setting their grad_fn properly.
-                    and not (
-                        x.output_type
-                        in (OutputType.alias_of_input, OutputType.is_input)
-                        and fw_metadata.input_info[x.base_idx].requires_grad
-                    )
-                    for x in fw_metadata.output_info
+                    x.requires_grad for x in fw_metadata.output_info
                 ) and not any(
                     x.requires_grad
                     and x.mutates_data
@@ -627,6 +625,7 @@ def create_aot_dispatcher_function(
                             keep_input_mutations=aot_config.keep_inference_input_mutations,
                             is_train=False,
                             pre_dispatch=aot_config.pre_dispatch,
+                            static_input_indices=aot_config.static_input_indices,
                         )(*fake_flat_args)
                     else:
                         fw_metadata = ViewAndMutationMeta(
@@ -640,7 +639,7 @@ def create_aot_dispatcher_function(
                             subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
                             is_train=False,
                             tokens=fw_metadata.tokens,
-                            static_parameter_indices=fw_metadata.static_parameter_indices,
+                            static_input_indices=fw_metadata.static_input_indices,
                         )
 
         if fw_metadata.num_intermediate_bases > 0:
@@ -945,9 +944,10 @@ def aot_module_simplified(
     # Next, the input args
     full_args.extend(args)
 
+    static_input_indices = []
     if hasattr(mod, "graph"):
         # Non dynamo entrypoints can get to here...
-        for node in mod.graph.find_nodes(op="placeholder"):
+        for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
             if hasattr(node, "_dynamo_source"):
                 # ... but not here!
                 if aot_autograd_arg_pos_to_source is None:
@@ -956,6 +956,11 @@ def aot_module_simplified(
                 assert source not in seen_sources, source
                 seen_sources.add(source)
                 aot_autograd_arg_pos_to_source.append(source)
+
+                if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
+                    "_dynamo_static_input_type", None
+                ):
+                    static_input_indices.append(pos)
 
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
@@ -977,6 +982,7 @@ def aot_module_simplified(
         keep_inference_input_mutations=keep_inference_input_mutations,
         dynamic_shapes=dynamic_shapes,
         aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source,
+        static_input_indices=static_input_indices,
         is_export=False,
         no_tangents=False,
         cache_key=None,

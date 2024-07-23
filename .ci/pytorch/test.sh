@@ -324,6 +324,7 @@ test_inductor_distributed() {
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_hsdp --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_transformer_checkpoint_resume --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_gradient_accumulation --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_state_dict.py -k test_dp_state_dict_save_load --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_frozen.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_compute_dtype --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_reduce_dtype --verbose

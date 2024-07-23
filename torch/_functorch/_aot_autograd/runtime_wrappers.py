@@ -12,7 +12,7 @@ import pprint
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils.dlpack
@@ -304,13 +304,7 @@ def _create_runtime_wrapper(
             for idx in indices_of_inps_to_detach:
                 if isinstance(args_[idx], torch.Tensor):
                     args_[idx] = args_[idx].detach()
-
-            # It's possible to have trace_joint inside user specified with no_grad() region,
-            # if there is a nested with enable_grad(), that forces some outputs to require gradients.
-            # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
-            with torch.autograd._force_original_view_tracking(
-                True
-            ), torch.enable_grad():
+            with torch.autograd._force_original_view_tracking(True):
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )
@@ -911,6 +905,7 @@ class AOTDedupeWrapper(CompilerWrapper):
         if config.debug_assert:
             ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
                 wrapped_flat_fn,
+                static_input_indices=aot_config.static_input_indices,
                 keep_input_mutations=fw_metadata.keep_input_mutations,
                 is_train=fw_metadata.is_train,
             )(*deduped_flat_args)
@@ -1100,6 +1095,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         if config.debug_assert:
             ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
                 wrapped_flat_fn,
+                static_input_indices=aot_config.static_input_indices,
                 keep_input_mutations=fw_metadata.keep_input_mutations,
                 is_train=fw_metadata.is_train,
             )(*flat_args_with_synthetic_bases)
@@ -1456,7 +1452,7 @@ Expected metadata: {str(expected_tangent_metadata)}
 
 Runtime metadata: {str(runtime_tangent_metadata)}
 
-shape: {str(x.shape)}
+shape: {str(cast(torch.Tensor, x).shape)}
 To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
 """
             )
@@ -1836,14 +1832,16 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
                     assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
-                        AOTDispatchAutograd.coerce_runtime_tangent(
-                            t,
-                            CompiledFunction.metadata.traced_tangent_metas[
-                                i - tangents_start_idx
-                            ],
+                        (
+                            AOTDispatchAutograd.coerce_runtime_tangent(
+                                t,
+                                CompiledFunction.metadata.traced_tangent_metas[
+                                    i - tangents_start_idx
+                                ],
+                            )
+                            if tangents_start_idx <= i < tangents_end_idx
+                            else t
                         )
-                        if tangents_start_idx <= i < tangents_end_idx
-                        else t
                         for i, t in enumerate(all_args)
                     ]
                     all_args = unwrap_tensor_subclasses(
@@ -1855,9 +1853,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # Make the tangents contiguous. Note that we must do this after subclass desugaring
                 # because inputs to inductor have to be contiguous
                 all_args = [
-                    AOTDispatchAutograd._force_contiguous(t)
-                    if (tangents_start_idx <= i < tangents_end_idx)
-                    else t
+                    (
+                        AOTDispatchAutograd._force_contiguous(t)
+                        if (tangents_start_idx <= i < tangents_end_idx)
+                        else t
+                    )
                     for i, t in enumerate(all_args)
                 ]
 

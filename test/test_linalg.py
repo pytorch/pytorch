@@ -425,6 +425,12 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, r'input.size\(-2\) should match other.size\(-2\)'):
             torch.linalg.lstsq(a, b.unsqueeze(-1))
 
+        a = torch.randn(1, 1, 1, dtype=dtype, device=device)
+        b = torch.randn(3, 1, dtype=dtype, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, r'input.size\(-2\) should match other.size\(-2\)'):
+            torch.linalg.lstsq(a, b)
+
         def complement_device(device):
             if device == 'cpu' and torch.cuda.is_available():
                 return 'cuda'
@@ -3690,7 +3696,6 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     "The derivative of linalg.qr depends on Q"):
             b.backward()
-        #
         inp = torch.randn((7, 5), device=device, dtype=dtype, requires_grad=True)
         q, r = torch.linalg.qr(inp, mode='complete')
         b = torch.sum(r)
@@ -4577,6 +4582,20 @@ class TestLinalg(TestCase):
         i2 = torch.randn((M, B, K), device=device, dtype=dtype)
         i2 = torch.permute(i2, (1, 2, 0))
         out = torch.bmm(i1, i2)
+        # case 4
+        input_tensor = torch.rand((1920, 1, 100), device=device, dtype=dtype)
+        input_tensor = torch.as_strided(
+            input_tensor, size=(1920, 1, 100), stride=(100, 100, 1)
+        )
+        batch1_tensor = torch.rand((1920, 256, 512), device=device, dtype=dtype)
+        batch1_tensor = torch.as_strided(
+            batch1_tensor, size=(1920, 256, 512), stride=(512, 983040, 1)
+        )
+        batch2_tensor = torch.rand((1920, 512, 100), device=device, dtype=dtype)
+        batch2_tensor = torch.as_strided(
+            batch2_tensor, size=(1920, 512, 100), stride=(51200, 100, 1)
+        )
+        out = torch.baddbmm(input_tensor, batch1_tensor, batch2_tensor)
         # clean up, remove any file that was generated
         try:
             import os
@@ -6138,11 +6157,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         b_bf16 = torch.rand((k, n), dtype=torch.bfloat16, device=device)
 
         def convert_weight_to_int4pack(b):
-            b_int32, b_scales_and_zeros = _group_quantize_tensor(
+            b_uint8, b_scales_and_zeros = _group_quantize_tensor(
                 b, n_bit=4, q_group_size=q_group
             )
             b_int4pack = torch._convert_weight_to_int4pack(
-                b_int32, inner_k_tiles
+                b_uint8, inner_k_tiles
             )
 
             return b_int4pack, b_scales_and_zeros
