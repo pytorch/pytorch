@@ -1654,7 +1654,7 @@ def _warn_complex_not_supported():
 
 # There are some types (CPU) which we accept as input but not as
 # output.
-def unsupported_input_tensor(t: torch._subclasses.FakeTensor, parent=None):
+def unsupported_input_tensor(t: torch.Tensor, parent=None):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         # Complex views are supported with IR ComplexView
@@ -1668,7 +1668,7 @@ def unsupported_input_tensor(t: torch._subclasses.FakeTensor, parent=None):
     return False
 
 
-def unsupported_output_tensor(t: torch._subclasses.FakeTensor, parent=None):
+def unsupported_output_tensor(t: torch.Tensor, parent=None):
     "Do not support writing tensor but can read from it"
     if unsupported_input_tensor(t, parent):
         return True
