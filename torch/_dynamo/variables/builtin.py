@@ -1365,12 +1365,14 @@ class BuiltinVariable(VariableTracker):
         elif isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
             arg.value, KeysView
         ):
-            out = tx.inline_user_function_return(
-                arg.var_getattr(tx, "__iter__"), args, kwargs
-            )
-            if isinstance(out, SetVariable):
-                return out
-            return BuiltinVariable(set).call_set(tx, out)
+            iter_fn = arg.var_getattr(tx, "__iter__")
+            if isinstance(iter_fn, variables.UserMethodVariable):
+                out = tx.inline_user_function_return(iter_fn, args, kwargs)
+                if isinstance(out, SetVariable):
+                    return out
+                return BuiltinVariable(set).call_set(tx, out)
+            else:
+                unimplemented(f"set(): {args} {kwargs}")
         else:
             unimplemented(f"set(): {args} {kwargs}")
 
