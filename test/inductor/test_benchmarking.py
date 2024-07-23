@@ -219,8 +219,8 @@ class TestBenchmarking(TestCase):
         start_time_s = time.perf_counter()
         for _ in range(10):
             _callable()
-        roofline_timing_ms = ((time.perf_counter() - start_time_s) * 1000) / 10
-        self.assertEqual(timing_ms <= roofline_timing_ms, True)
+        baseline_timing_ms = ((time.perf_counter() - start_time_s) * 1000) / 10
+        self.assertEqual(self.diff(baseline_timing_ms, timing_ms) < 0.25, True)
 
     def sanity_check_gpu_benchmark(self, _callable, timing_ms):
         start_event = torch.cuda.Event(enable_timing=True)
@@ -231,7 +231,7 @@ class TestBenchmarking(TestCase):
         end_event.record()
         torch.cuda.synchronize()
         roofline_timing_ms = start_event.elapsed_time(end_event) / 10
-        self.assertEqual(timing_ms <= (roofline_timing_ms * 1.25), True)
+        self.assertEqual(timing_ms <= roofline_timing_ms, True)
 
     def diff(baseline, experimental):
         return abs(experimental - baseline) / baseline

@@ -135,7 +135,7 @@ class Benchmarker:
         # we really shouldn't see any significant slowdowns
         torch.cuda._sleep(
             int(
-                (self.cpu_launch_overhead_ms_per_event_record() * 2500)
+                (self.cpu_launch_overhead_ms_per_event_record * 2500)
                 / self.gpu_time_ms_per_gpu_clock_cycle
             )
         )
