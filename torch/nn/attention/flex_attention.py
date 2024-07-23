@@ -452,6 +452,9 @@ def _convert_mask_to_block_mask(
     assert mask.dtype == torch.bool
     mask = _broadcast_to_dim(mask, 4)
     B, H, Q, KV = mask.shape
+    is_decoding = Q < 128
+    if is_decoding:
+        Q_BLOCK_SIZE = Q
     assert Q % Q_BLOCK_SIZE == 0
     assert KV % KV_BLOCK_SIZE == 0
     mask = mask.view(
@@ -463,7 +466,7 @@ def _convert_mask_to_block_mask(
     mask_block_sum = mask.sum(
         dim=[-2, -1]
     )  # [B, H, Q//Q_BLOCK_SIZE, KV//KV_BLOCK_SIZE]
-    if separate_full_blocks:
+    if separate_full_blocks and not is_decoding:
         full_block_sum = Q_BLOCK_SIZE * KV_BLOCK_SIZE
         full_blocks = mask_block_sum == full_block_sum
         partial_blocks = (mask_block_sum > 0) & (mask_block_sum < full_block_sum)
@@ -605,7 +608,11 @@ def create_block_mask(
     r"""This function creates a block mask tuple from a mask_mod function.
 
     Args:
-        mask_mod (Callable): mask_mod function.
+        mask_mod (Callable): mask_mod function. This is a callable that defines the
+            masking pattern for the attention mechanism. It takes four arguments:
+            b (batch size), h (number of heads), q_idx (query index), and kv_idx (key/value index).
+            It should return a boolean tensor indicating which attention connections are allowed (True)
+            or masked out (False).
         B (int): Batch size.
         H (int): Number of heads.
         Q_LEN (int): Sequence length of query.
@@ -618,6 +625,20 @@ def create_block_mask(
     Returns:
         block_mask (tuple): A tuple of (kv_num_blocks, kv_indices, q_num_blocks, q_indices,
                             KV_BLOCK_SIZE, Q_BLOCK_SIZE) which represents the block mask.
+
+    Example Usage:
+    .. code-block:: python
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(causal_mask, 1, 1, 8192, 8192, device="cuda")
+
+        query = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+        key = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+        value = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+
+        output = flex_attention(query, key, value, block_mask=block_mask)
     """
     mod_type = _get_mod_type(mask_mod)
     assert (

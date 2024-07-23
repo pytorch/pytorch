@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_CI,
     IS_FBCODE,
+    IS_MACOS,
     IS_WINDOWS,
     skipIfRocm,
     TEST_WITH_ROCM,
@@ -388,7 +389,7 @@ class AOTInductorTestsTemplate:
     )
     def test_deconv_freezing(self):
         dtypes = [torch.float]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch._C._has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported():
             dtypes.append(torch.bfloat16)
         for dtype, groups in itertools.product(dtypes, [2, 1]):
             iC = 4
@@ -3006,7 +3007,11 @@ class AOTInductorTestsTemplate:
             model, example_inputs_list, dynamic_shapes=dynamic_shapes
         )
 
-    def test_misc_1(self):
+    @common_utils.parametrize("max_autotune", [False, True])
+    def test_misc_1(self, max_autotune):
+        if self.device == "cpu" and IS_MACOS and max_autotune:
+            raise unittest.SkipTest("max_autotune not supported on macos")
+
         class Model(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3027,7 +3032,9 @@ class AOTInductorTestsTemplate:
             torch.randn(16, 128, device=self.device),
             torch.randint(0, 128, (16, 10), device=self.device),
         )
-        self.check_model(Model(), example_inputs)
+        self.check_model(
+            Model(), example_inputs, options=dict(max_autotune=max_autotune)
+        )
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
@@ -3137,6 +3144,8 @@ CPU_TEST_FAILURES = {
     "test_reuse_kernel_dynamic": fail_minimal_arrayref_interface(is_skip=True),
     # the test segfaults
     "test_repeat_output": fail_stack_allocation(is_skip=True),
+    # TODO: failed internally
+    "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
     # segfault
     "test_buffer_mutation_1": fail_stack_allocation(is_skip=True),
     # segfault
@@ -3188,6 +3197,8 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_outer_code": fail_stack_allocation(is_skip=True),
     # TODO: error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
     "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
+    # TODO: use of undeclared identifier 'float8_e4m3fn' and 'half'
+    "test_fp8": fail_minimal_arrayref_interface(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
