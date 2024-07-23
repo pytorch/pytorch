@@ -306,7 +306,7 @@ DTYPE_TO_COMPUTATION_DTYPE = {
 }
 
 
-def _deduce_output_dtype_by_name(
+def deduce_output_dtype_by_name(
     op_name: str,
     *args,
     **kwargs,
@@ -400,7 +400,7 @@ class DataTypePropagation:
             return self.deduce_node_dtype_by_subgraph(node)
 
         if (
-            output_dtype := _deduce_output_dtype_by_name(
+            output_dtype := deduce_output_dtype_by_name(
                 node.target,
                 *node.args,
                 **node.kwargs,
