@@ -305,7 +305,6 @@ jobs:
         { include: [
           { config: "testing", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
         ]}
-      tests-to-include: "inductor/test_torchinductor_opinfo"
 
   linux-focal-rocm6_1-isolated-py3_8-test:
     permissions:
@@ -319,7 +318,9 @@ jobs:
     with:
       build-environment: linux-focal-rocm6.1-py3.8
       docker-image: ${{ needs.linux-focal-rocm6_1-isolated-py3_8-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm6_1-isolated-py3_8-build.outputs.test-matrix }}
+      test-matrix: ${{ needs.linux-focal-rocm6_1-isolated-py3_8-build.outputs.test-matrix }}      
+      tests-to-include: "inductor/test_torchinductor_opinfo"
+
 
   linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build:
     name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
