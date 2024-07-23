@@ -131,25 +131,25 @@ static Tensor _lazy_clone_impl(Tensor const& self,
   // } else if (device.value().is_cpu()) {
   //   std::cout << "Device is CPU" << std::endl;
   // }
-  if (c10::impl::cow::get_future_lazy_clone()) {  // TODO(Frank): This is assuming future.
+  if (c10::impl::cow::get_future_lazy_clone()) {
+    // TODO(Frank): Unclear if this is the right approach.
     if (device == std::nullopt) {
       device = c10::Device("cpu");
     }
-    // TODO(Frank): Set MPS if guard?
     at::Allocator* allocator = nullptr;
-    if (device.value().is_cpu()) {
-      allocator = c10::GetDefaultCPUAllocator();
-    } else if (device.value().is_mps()) {
-      allocator = at::mps::GetMPSAllocator();
-    } else {
-      std::cout << "AutograComposite" << std::endl;
-      assert(false);
-    }
-    if (storage->allocator() == at::mps::GetMPSAllocator()) {
-      std::cout << "Changing from MPS Allocator to CPU Allocator" << std::endl;
-    } else {
-      std::cout << "Changing from CPU Allocator to MPS Allocator" << std::endl;
-    }
+    // if (device.value().is_cpu()) {
+    //   allocator = c10::GetDefaultCPUAllocator();
+    // } else if (device.value().is_mps()) {
+    //   allocator = at::mps::GetMPSAllocator();
+    // } else {
+    //   std::cout << "AutograComposite" << std::endl;
+    //   assert(false);
+    // }
+    // if (storage->allocator() == at::mps::GetMPSAllocator()) {
+    //   std::cout << "Changing from MPS Allocator to CPU Allocator" << std::endl;
+    // } else {
+    //   std::cout << "Changing from CPU Allocator to MPS Allocator" << std::endl;
+    // }
 
     allocator = c10::GetAllocator(device.value().type());
     if (allocator == nullptr) {

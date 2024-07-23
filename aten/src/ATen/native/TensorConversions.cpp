@@ -431,6 +431,7 @@ bool to_will_cow(
   auto is_shared_memory = ((self.device().is_cpu() && device->is_mps()) ||
   (self.device().is_mps() && (device == std::nullopt || device->is_cpu())));
 
+  // Debug message.
   std::cout << "ToWillCOW" << std::endl;
   if (self.device().is_mps()) {
     std::cout << "\tCurrent Device is MPS" << std::endl;
@@ -446,9 +447,9 @@ bool to_will_cow(
   }
   std::cout << "IsSharedMemory:" << is_shared_memory << std::endl;
 
-
   return is_null_or_equal_to(dtype, self.dtype().toScalarType()) &&
     is_null_or_equal_to(layout, self.layout()) &&
+    is_shared_memory &&
     !copy &&
     (memory_format == MemoryFormat::Preserve ||
      self.suggest_memory_format() == memory_format);
@@ -474,13 +475,16 @@ static inline Tensor to_impl(
   // create a copy-on-write context
   if (c10::impl::cow::get_future_lazy_clone() && to_will_cow_result) {
 
+    // Debug
     std::cout << "IsFutureLazyClone: " << c10::impl::cow::get_future_lazy_clone() << std::endl;
     std::cout << "self, is_cow_data_ptr: " << c10::impl::cow::is_cow_data_ptr(
       self.storage().data_ptr()
     ) << std::endl;
 
+    // Only line matters
     auto lazy_clone = self._lazy_clone(device);
 
+    // Debug
     std::cout << "self._lazy_clone(), is_cow_data_ptr: " << c10::impl::cow::is_cow_data_ptr(
       lazy_clone.storage().data_ptr()
     ) << std::endl;
