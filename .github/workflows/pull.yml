@@ -45,7 +45,7 @@ jobs:
 
   linux-jammy-py3_8-gcc11-build:
     name: linux-jammy-py3.8-gcc11
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -85,7 +85,7 @@ jobs:
 
   linux-jammy-py3_8-gcc11-no-ops:
     name: linux-jammy-py3.8-gcc11-no-ops
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -98,7 +98,7 @@ jobs:
 
   linux-jammy-py3_8-gcc11-pch:
     name: linux-jammy-py3.8-gcc11-pch
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -112,7 +112,7 @@ jobs:
 
   linux-jammy-py3_10-clang15-asan-build:
     name: linux-jammy-py3.10-clang15-asan
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -144,7 +144,7 @@ jobs:
 
   linux-focal-py3_8-clang10-onnx-build:
     name: linux-focal-py3.8-clang10-onnx
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -169,7 +169,7 @@ jobs:
 
   linux-focal-py3_8-clang10-build:
     name: linux-focal-py3.8-clang10
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -200,7 +200,7 @@ jobs:
 
   linux-focal-py3_11-clang10-build:
     name: linux-focal-py3.11-clang10
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -232,7 +232,7 @@ jobs:
 
   linux-focal-py3_12-clang10-build:
     name: linux-focal-py3.12-clang10
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -261,7 +261,7 @@ jobs:
 
   linux-focal-cuda11_8-py3_10-gcc9-build:
     name: linux-focal-cuda11.8-py3.10-gcc9
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -288,7 +288,7 @@ jobs:
 
   linux-focal-cuda12_1-py3_10-gcc9-build:
     name: linux-focal-cuda12.1-py3.10-gcc9
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -317,7 +317,7 @@ jobs:
 
   linux-jammy-py3-clang12-mobile-build:
     name: linux-jammy-py3-clang12-mobile-build
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -331,7 +331,7 @@ jobs:
 
   linux-jammy-cuda-11_8-cudnn9-py3_8-clang12-build:
     name: linux-jammy-cuda11.8-cudnn9-py3.8-clang12
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -344,7 +344,7 @@ jobs:
 
   linux-focal-py3-clang9-mobile-custom-build-static:
     name: linux-focal-py3-clang9-mobile-custom-build-static
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -358,7 +358,7 @@ jobs:
 
   linux-focal-py3_8-clang9-xla-build:
     name: linux-focal-py3_8-clang9-xla
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -462,7 +462,7 @@ jobs:
 
   linux-jammy-py3_8-gcc11-mobile-lightweight-dispatch-build:
     name: linux-jammy-py3.8-gcc11-mobile-lightweight-dispatch-build
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -478,7 +478,7 @@ jobs:
     # don't run build twice on main
     if: github.event_name == 'pull_request'
     name: linux-focal-rocm6.1-py3.8
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -494,7 +494,7 @@ jobs:
 
   linux-focal-cuda12_1-py3_10-gcc9-sm86-build:
     name: linux-focal-cuda12.1-py3.10-gcc9-sm86
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -523,7 +523,7 @@ jobs:
 
   linux-jammy-py3-clang12-executorch-build:
     name: linux-jammy-py3-clang12-executorch
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -545,7 +545,7 @@ jobs:
 
   linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build:
     name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -575,7 +575,7 @@ jobs:
 
   linux-focal-py3_12-clang10-experimental-split-build:
     name: linux-focal-py3.12-clang10-experimental-split-build
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     with:
       use_split_build: True
       build-environment: linux-focal-py3.12-clang10

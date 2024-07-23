@@ -8,15 +8,12 @@ import sys
 import time
 import warnings
 from itertools import count
-
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from unittest import mock
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
-
 import torch.fx
 import torch.utils._pytree as pytree
-
 from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo import (
     compiled_autograd,
@@ -76,6 +73,7 @@ from .utils import (
     output_node,
 )
 from .virtualized import V
+
 
 if config.is_fbcode():
     from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
@@ -410,7 +408,7 @@ def should_use_remote_fx_graph_cache():
     if not config.is_fbcode():
         return False
     try:
-        from triton.fb.fb_memcache import MEMCACHE_VERSION
+        from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
     except ModuleNotFoundError:
         return False
 
@@ -418,7 +416,7 @@ def should_use_remote_fx_graph_cache():
     if torch.version.hip is not None:
         jk_name = "pytorch/remote_cache:fx_graph_memcache_version_amd"
 
-    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)
+    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)
 
 
 # pass config dict back to user
@@ -1051,7 +1049,8 @@ def remove_unaligned_input_idxs(
     that aren't.
     """
     aligned_static_input_idxs = []
-    for idx, input in zip(static_input_idxs, inputs):
+    for idx in static_input_idxs:
+        input = inputs[idx]
         if isinstance(input, torch.Tensor) and (input.data_ptr() % ALIGNMENT) == 0:
             aligned_static_input_idxs.append(idx)
     if len(aligned_static_input_idxs) != len(static_input_idxs):

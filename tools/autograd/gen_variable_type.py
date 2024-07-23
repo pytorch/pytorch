@@ -177,10 +177,12 @@ DONT_REQUIRE_DERIVATIVE = {
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "fill",
     "t",
+    "t_copy",
     "view",
     "reshape",
     "reshape_as",
     "view_as",
+    "view_copy",
     "roll",
     "clone",
     "block_diag",

@@ -25,6 +25,7 @@ from .utils import (
 )
 from .virtualized import OpsHandler, ReductionType, V
 
+
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
 
@@ -554,7 +555,7 @@ def extract_input_node_reduction_ranges(
             if read.name in seen:
                 continue
             seen.add(read.name)
-            buffer = V.graph.get_buffer(read.name)
+            buffer = V.graph.try_get_buffer(read.name)
             if buffer is None:
                 continue
             op = buffer.get_defining_op()
