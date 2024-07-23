@@ -2,6 +2,7 @@
 
 #include <c10/macros/Export.h>
 #include <c10/util/python_stub.h>
+#include <c10/core/impl/SavedVariableHookTLS.h>
 #include <optional>
 #include <stack>
 #include <string>
@@ -9,34 +10,14 @@
 #include <utility>
 
 namespace at {
-
-namespace impl {
-
-struct TORCH_API SavedTensorDefaultHooksTLS {
-  // PyObject is defined in c10/util/python_stub.h
-  std::stack<std::pair<PyObject*, PyObject*>> stack;
-
-  // See NOTE: [Disabling SavedTensorDefaultHooks] for context
-  // NOTE: [disabled_error_message invariant]
-  // disabled_error_message is nullopt IFF Saved Tensor hooks is enabled
-  // We did this for efficiency (so we didn't have to keep a separate bool
-  // around)
-  std::optional<std::string> disabled_error_message;
-
-  // See NOTE: [Deferring tensor pack/unpack hooks until runtime]
-  bool is_tracing = false;
-};
-
-} // namespace impl
-
 struct TORCH_API SavedTensorDefaultHooks {
   static void push_hooks(PyObject* pack_hook, PyObject* unpack_hook);
   static std::pair<PyObject*, PyObject*> pop_hooks();
   static std::pair<PyObject*, PyObject*> get_hooks();
   static void lazy_initialize();
 
-  static const impl::SavedTensorDefaultHooksTLS& get_tls_state();
-  static void set_tls_state(const impl::SavedTensorDefaultHooksTLS& tls);
+  static const c10::impl::SavedTensorDefaultHooksTLS& get_tls_state();
+  static void set_tls_state(const c10::impl::SavedTensorDefaultHooksTLS& tls);
 
   // NOTE: [Disabling SavedTensorDefaultHooks]
   // A developer of a PyTorch feature may choose to disable SavedTensorDefault

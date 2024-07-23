@@ -4,7 +4,10 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/python_arg_parser.h>
+#include <c10/core/impl/SavedVariableHookTLS.h>
 #include <torch/csrc/utils/python_dispatch.h>
+#include <torch/csrc/autograd/python_saved_variable_hooks.h>
+
 
 #include <string>
 
@@ -140,6 +143,9 @@ struct ConcretePyInterpreterVTable final
   }
 
   void reset_backward_hooks(const c10::TensorImpl* self) const override;
+
+  void set_default_saved_variable_hooks_tls(const c10::impl::SavedTensorDefaultHooksTLS& tls) const override;
+
 
   static ConcretePyInterpreterVTable* instance() {
     static ConcretePyInterpreterVTable s;
@@ -954,6 +960,10 @@ void ConcretePyInterpreterVTable::reset_backward_hooks(
       py::reinterpret_steal<py::object>(THPVariable_Wrap(std::move(self_t)));
   PyObject_SetAttrString(self_p.ptr(), "_backward_hooks", Py_None);
   END_HANDLE_TH_ERRORS_PYBIND
+}
+
+void ConcretePyInterpreterVTable::set_default_saved_variable_hooks_tls(const c10::impl::SavedTensorDefaultHooksTLS& tls) const {
+  torch::autograd::PyDefaultSavedVariableHooks::set_tls_state(tls);
 }
 
 PyInterpreterHolder self_interpreter;

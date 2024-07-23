@@ -7,6 +7,9 @@
 #include <ATen/record_function.h>
 #include <ATen/SavedTensorHooks.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <c10/core/impl/SavedVariableHookTLS.h>
+#include <c10/core/impl/GPUTrace.h>
+
 
 namespace at {
 
@@ -41,7 +44,11 @@ void ThreadLocalState::setThreadLocalState(
 
   at::set_record_function_tls_(state.rf_tls_);
 
-  at::SavedTensorDefaultHooks::set_tls_state(state.saved_tensors_default_hooks_state_);
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    (*interp)->set_default_saved_variable_hooks_tls(state.saved_tensors_default_hooks_state_);
+  }
+  // at::SavedTensorDefaultHooks::set_tls_state(state.saved_tensors_default_hooks_state_);
 
   c10::impl::PythonDispatcherTLS::set_state(state.python_dispatcher_state_);
 

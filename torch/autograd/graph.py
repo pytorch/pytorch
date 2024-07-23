@@ -293,6 +293,7 @@ class saved_tensors_hooks:
     ) -> None:
         self.pack_hook = pack_hook
         self.unpack_hook = unpack_hook
+        torch._C._activate_gpu_trace()
 
     def __enter__(self) -> None:
         torch._C._autograd._push_saved_tensors_default_hooks(

@@ -12,6 +12,8 @@
 #include <ATen/record_function.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <c10/core/impl/SavedVariableHookTLS.h>
+
 
 namespace at {
 
@@ -71,7 +73,7 @@ class TORCH_API ThreadLocalState {
   at::impl::PythonTorchFunctionTLS python_torch_function_state_;
 
   // TLS for saved tensors default hooks
-  at::impl::SavedTensorDefaultHooksTLS saved_tensors_default_hooks_state_;
+  c10::impl::SavedTensorDefaultHooksTLS saved_tensors_default_hooks_state_;
 
   bool functionalization_reapply_views_state_;
 

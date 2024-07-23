@@ -4,6 +4,7 @@
 
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
+#include <ATen/SavedTensorHooks.h>
 
 bool THPEngine_initModule(PyObject* module);
 

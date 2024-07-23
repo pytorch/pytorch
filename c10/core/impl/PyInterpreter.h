@@ -9,8 +9,10 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
+#include <c10/core/impl/SavedVariableHookTLS.h>
 #include <string>
 #include <vector>
+#include <stack>
 
 // Forward declarations
 
@@ -212,6 +214,9 @@ struct C10_API PyInterpreterVTable {
       uintptr_t event) const = 0;
 
   virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
+
+  virtual void set_default_saved_variable_hooks_tls(const SavedTensorDefaultHooksTLS& tls) const = 0;
+
 };
 
 struct C10_API PyInterpreter {

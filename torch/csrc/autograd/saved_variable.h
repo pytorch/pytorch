@@ -51,6 +51,8 @@ class TORCH_API SavedVariable {
     return (bool)hooks_;
   }
 
+  static std::unique_ptr<SavedVariableHooks> get_default_hooks();
+
  private:
   // This field contains either:
   // 1. the variable to save
@@ -112,7 +114,6 @@ class TORCH_API SavedVariable {
   bool requires_grad_ = false;
 
   void save_metadata(const Variable& data);
-  static std::unique_ptr<SavedVariableHooks> get_default_hooks();
   void set_hooks_and_pack_data(
       std::unique_ptr<SavedVariableHooks>&& hooks,
       const Variable& data);

@@ -14,6 +14,7 @@ namespace torch::autograd {
 
 struct PySavedVariableHooks : public SavedVariableHooks {
   PySavedVariableHooks(py::function& pack_hook, py::function& unpack_hook);
+  PySavedVariableHooks(const PySavedVariableHooks& other);
   void call_pack_hook(const at::Tensor& tensor) override;
   at::Tensor call_unpack_hook() override;
   ~PySavedVariableHooks() override;
@@ -28,6 +29,7 @@ struct PyDefaultSavedVariableHooks {
   static void push_hooks(py::function& pack_hook, py::function& unpack_hook);
   static void pop_hooks();
   static std::unique_ptr<SavedVariableHooks> get_hooks();
+  static void set_tls_state(const c10::impl::SavedTensorDefaultHooksTLS& tls);
 };
 
 } // namespace torch::autograd

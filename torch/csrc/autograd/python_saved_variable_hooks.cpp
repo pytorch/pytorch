@@ -84,4 +84,30 @@ std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
   return std::make_unique<PySavedVariableHooks>(pack_hook_, unpack_hook_);
 }
 
+void PyDefaultSavedVariableHooks::set_tls_state(
+    const c10::impl::SavedTensorDefaultHooksTLS& tls) {
+  if (Py_IsInitialized()) {
+    py::gil_scoped_acquire gil;
+    const c10::impl::SavedTensorDefaultHooksTLS& prev_tls =
+        at::SavedTensorDefaultHooks::get_tls_state();
+    for (const auto& [pack_hook, unpack_hook] : tls.stack) {
+      if (pack_hook != nullptr) {
+        Py_XINCREF(pack_hook);
+      }
+      if (unpack_hook != nullptr) {
+        Py_XINCREF(unpack_hook);
+      }
+    }
+    for (const auto& [pack_hook, unpack_hook] : prev_tls.stack) {
+      if (pack_hook != nullptr) {
+        Py_XDECREF(pack_hook);
+      }
+      if (unpack_hook != nullptr) {
+        Py_XDECREF(unpack_hook);
+      }
+    }
+  }
+  at::SavedTensorDefaultHooks::set_tls_state(tls);
+}
+
 } // namespace torch::autograd
