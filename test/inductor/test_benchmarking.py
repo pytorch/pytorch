@@ -222,6 +222,9 @@ class TestBenchmarking(TestCase):
         roofline_timing_ms = start_event.elapsed_time(end_event) / 10
         self.assertEqual(timing_ms <= (roofline_timing_ms * 1.25), True)
     
+    def diff(baseline, experimental):
+        return abs(experimental - baseline) / baseline
+    
     def gpu_properties_are_not_initialized(self):
         self.assertEqual(counters["inductor"]["benchmarking_L2_cache_size"], 0)
         self.assertEqual(counters["inductor"]["benchmarking_gpu_queue_limit"], 0)
@@ -248,7 +251,7 @@ class TestBenchmarking(TestCase):
         benchmarker = Benchmarker()
         gpu_queue_limit = benchmarker.gpu_queue_limit
         torch.cuda.synchronize()
-        torch.cuda._sleep(100000000)
+        torch.cuda._sleep(int((benchmarker.cpu_launch_overhead_ms_per_event_record * gpu_queue_limit) / benchmarker.gpu_time_ms_per_gpu_clock_cycle))
         for _ in range(gpu_queue_limit - 1):
             start_time_s = time.perf_counter()
             torch.cuda.Event(enable_timing=True).record()
@@ -264,14 +267,56 @@ class TestBenchmarking(TestCase):
     @patches
     def test_cpu_launch_overhead_ms_per_event_record(self):
         benchmarker = Benchmarker()
-        cpu_launch_overhead_ms_per_event_record = benchmarker.cpu_launch_overhead_ms_per_event_record
         torch.cuda.synchronize()
         start_time_s = time.perf_counter()
         for _ in range(1000):
             torch.cuda.Event(enable_timing=True).record()
         elapsed_time_ms = (time.perf_counter() - start_time_s) * 1000
         torch.cuda.synchronize()
-        self.assertEqual((elapsed_time_ms / 1000) <= (cpu_launch_overhead_ms_per_event_record * 1.5), True)
+        self.assertEqual(self.diff(benchmarker.cpu_launch_overhead_ms_per_event_record, elapsed_time_ms / 1000) < 0.25, True)
+    
+    @requires_gpu
+    @patches
+    def test_cpu_launch_overhead_ms_per_gpu_cache_clear(self):
+        benchmarker = Benchmarker()
+        buffer = torch.empty(int(self.L2_cache_size // 4), dtype=torch.int, device="cuda")
+        torch.cuda.synchronize()
+        start_time_s = time.perf_counter()
+        for _ in range(100):
+            buffer.zero_()
+        elapsed_time_ms = (time.perf_counter() - start_time_s) * 1000
+        torch.cuda.synchronize()
+        self.assertEqual(self.diff(benchmarker.cpu_launch_overhead_ms_per_gpu_cache_clear, elapsed_time_ms / 100) < 0.25, True)
+    
+    @requires_gpu
+    @patches
+    def test_gpu_time_ms_per_gpu_cache_clear(self):
+        benchmarker = Benchmarker()
+        buffer = torch.empty(int(self.L2_cache_size // 4), dtype=torch.int, device="cuda")
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        torch.cuda.synchronize()
+        torch.cuda._sleep(int((benchmarker.cpu_launch_overhead_ms_per_gpu_cache_clear * 100) / benchmarker.gpu_time_ms_per_gpu_clock_cycle))
+        start_event.record()
+        for _ in range(100):
+            buffer.zero_()
+        end_event.record()
+        torch.cuda.synchronize()
+        self.assertEqual(self.diff(benchmarker.gpu_time_ms_per_gpu_cache_clear, start_event.elapsed_time(end_event) / 100) < 0.25, True)
+    
+    @requires_gpu
+    @patches
+    def test_gpu_time_ms_per_gpu_clock_cycle(self):
+        benchmarker = Benchmarker()
+        gpu_clock_cycles_to_sleep = int(100 / benchmarker.gpu_time_ms_per_gpu_clock_cycle)
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        torch.cuda.synchronize()
+        start_event.record()
+        torch.cuda._sleep(gpu_clock_cycles_to_sleep)
+        end_event.record()
+        torch.cuda.synchronize()
+        self.assertEqual(self.diff(benchmarker.gpu_time_ms_per_gpu_clock_cycle, start_event.elapsed_time(end_event) / gpu_clock_cycles_to_sleep) < 0.25, True)
     
     @requires_gpu()
     @patches
