@@ -2842,6 +2842,7 @@ class TestCase(expecttest.TestCase):
         compiled = TEST_WITH_TORCHDYNAMO or TEST_WITH_AOT_EAGER or TEST_WITH_TORCHINDUCTOR  # noqa: F821
         # Is the class strict and compiling?
         strict_default = False
+        should_reset_dynamo = False
         if compiled:
             try:
                 path = inspect.getfile(type(test_cls))
@@ -2852,6 +2853,9 @@ class TestCase(expecttest.TestCase):
                     if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
                         from .dynamo_test_failures import FIXME_inductor_non_strict
                         strict_default = filename not in FIXME_inductor_non_strict
+
+                        from .dynamo_test_failures import FIXME_inductor_dont_reset_dynamo
+                        should_reset_dynamo = filename not in FIXME_inductor_dont_reset_dynamo
                     else:
                         strict_default = True
             # inspect.getfile can fail with these
@@ -2872,7 +2876,7 @@ class TestCase(expecttest.TestCase):
                 strict_mode = strict_default
         nopython = getattr(test_cls, "dynamo_strict_nopython", False) and compiled
 
-        if strict_mode:
+        if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
 
         # TODO: Remove this; this is grandfathered in because we suppressed errors
@@ -2929,7 +2933,7 @@ class TestCase(expecttest.TestCase):
 
             super_run(result=result)
 
-        if strict_mode:
+        if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
 
         # Early terminate test if necessary.  If using pytest, use the -x flag instead
