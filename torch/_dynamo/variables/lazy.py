@@ -10,7 +10,8 @@ class LazyCache:
     """Container to cache the real VariableTracker"""
 
     def __init__(self, value, source):
-        assert source
+        if not isinstance(value, LazySymNodeString):
+            assert source
         self.value = value
         self.source = source
         self.vt: Optional[VariableTracker] = None
@@ -18,10 +19,13 @@ class LazyCache:
     def realize(self):
         assert self.vt is None
         from ..symbolic_convert import InstructionTranslator
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         tx = InstructionTranslator.current_tx()
-        self.vt = VariableBuilder(tx, self.source)(self.value)
+        if isinstance(self.value, LazySymNodeString):
+            self.vt = SourcelessBuilder.create(tx, self.value)
+        else:
+            self.vt = VariableBuilder(tx, self.source)(self.value)
 
         del self.value
         del self.source
@@ -124,6 +128,14 @@ class LazyVariableTracker(VariableTracker):
         # save `value` to keep it alive and ensure id() isn't reused
         cache[idx] = (result, value)
         return result
+
+
+class LazySymNodeString:
+    def __init__(self, sym_node_variable: VariableTracker):
+        self.sym_node_var = sym_node_variable
+
+    def __str__(self):
+        return self.sym_node_var.evaluate_expr()
 
 
 def _create_realize_and_forward(name):

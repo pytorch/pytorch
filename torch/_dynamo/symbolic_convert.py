@@ -1928,7 +1928,14 @@ class InstructionTranslatorBase(
 
         value = self.pop()
         if isinstance(value, SymNodeVariable):
-            value = ConstantVariable.create(str(value.evaluate_expr()))
+            from torch._dynamo.variables.lazy import (
+                LazySymNodeString,
+                LazyVariableTracker,
+            )
+
+            value = LazyVariableTracker.create(
+                LazySymNodeString(value), source=value.source
+            )
         if (flags & 0x03) == 0x01:
             value = BuiltinVariable(str).call_function(self, [value], {})
         elif (flags & 0x03) == 0x02:

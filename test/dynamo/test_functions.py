@@ -1588,6 +1588,24 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + 1
 
     @make_test
+    def test_fstrings4(x):
+        tmp = f"{x.shape[0]} bar"
+        if "10" in tmp:
+            return x + 1
+
+    @make_test
+    def test_fstrings5(x):
+        tmp = f"{x.shape[0]} bar"
+        if "10" in (tmp + "haha"):
+            return x + 1
+
+    @make_test
+    def test_fstrings6(x):
+        tmp = f"{x.shape[0] + x.shape[1]}"
+        if "20" in tmp:
+            return x + 1
+
+    @make_test
     def test_tensor_new_with_size(x):
         y = torch.rand(5, 8)
         z = x.new(y.size())
