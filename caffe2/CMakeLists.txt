@@ -1530,9 +1530,20 @@ if(USE_XPU)
   target_link_libraries(
       torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
 
-  target_link_libraries(
-      torch_xpu
-      PRIVATE "-Wl,--no-as-needed,\"$<TARGET_FILE:torch_cpu>\" -Wl,--as-needed")
+  include(CheckLinkerFlag)
+
+  # Check whether the compiler supports '--no-as-needed' and '--as-needed'
+  check_linker_flag(CXX "-Wl,--no-as-needed,-Wl,--as-needed" HAVE_AS_NEEDED)
+
+  # Ensure that torch_cpu is ready before being linked by torch_xpu.
+  add_dependencies(torch_xpu torch_cpu)
+
+  if(HAVE_AS_NEEDED)
+    target_link_libraries(torch_xpu PRIVATE
+        "-Wl,--no-as-needed,\"$<TARGET_FILE:torch_cpu>\" -Wl,--as-needed")
+  else()
+    target_link_libraries(torch_xpu PRIVATE "$<TARGET_FILE:torch_cpu>")
+  endif()
 endif()
 
 # ---[ Metal(OSX) modification
