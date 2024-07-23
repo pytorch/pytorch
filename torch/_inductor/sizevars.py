@@ -32,6 +32,7 @@ from .utils import (
 )
 from .virtualized import V
 
+
 log = logging.getLogger(__name__)
 
 
@@ -310,11 +311,9 @@ class SizeVarAllocator:
         """
         Returns a bool indicating if it is sound to optimize as if left and right lists are equal.
         """
-        if len(left) != len(right):
-            return False
-        if all(self.statically_known_equals(l, r) for l, r in zip(left, right)):
-            return True
-        return False
+        return len(left) == len(right) and all(
+            self.statically_known_equals(l, r) for l, r in zip(left, right)
+        )
 
     # See Note - [On Statically Known]
     def statically_known_leq(self, left: Expr, right: Union[Expr, int]) -> bool:
