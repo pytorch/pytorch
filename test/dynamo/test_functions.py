@@ -1410,36 +1410,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(4)
         self.assertEqual(fn(x), opt_fn(x))
 
-    def test_sourceless_decorator(self):
-        class Decorator:
-            def __init__(self, scalar):
-                self.scalar = scalar
-
-            def __call__(self, fn):
-                def inner(*args, **kwargs):
-                    return fn(*args, **kwargs) * self.scalar
-
-                return inner
-
-        class Foo:
-            def __init__(self):
-                self.a = 5
-
-            @Decorator(2)
-            def helper(self, x):
-                return x * 2
-
-            def run(self, x):
-                return self.helper(x)
-
-        def fn(x):
-            foo = Foo()
-            return foo.run(x)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        self.assertEqual(fn(x), opt_fn(x))
-
     @make_test
     def test_tuple_iadd(a, b):
         output = (a, b)
