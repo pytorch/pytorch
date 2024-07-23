@@ -1226,6 +1226,21 @@ class TestConverter(TestCase):
         inp = (torch.randn([4, 4]), torch.randn([1, 1, 10, 10]))
         self._check_equal_ts_ep_converter(M(), inp)
 
+    def test_ts2ep_append(self):
+        class M(torch.nn.Module):
+            def forward(self, x: List[torch.Tensor]):
+                res1 = x[0] + x[1]
+                x.append(res1)
+                res2 = x[0] - x[1]
+                x.append(res2)
+                res3 = x[0] * x[1]
+                x.append(res3)
+                return x
+
+        inp = ([torch.tensor(2), torch.tensor(3)],)
+        # Trace already unrolls the list.
+        self._check_equal_ts_ep_converter(M(), inp, ["script"])
+
 
 if __name__ == "__main__":
     run_tests()
