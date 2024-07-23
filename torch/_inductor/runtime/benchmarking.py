@@ -165,14 +165,10 @@ class Benchmarker:
 
     @cached_property
     def cpu_launch_overhead_ms_per_gpu_cache_clear(self) -> float:
-        counters["inductor"][
-            "benchmarking_cpu_launch_overhead_ms_per_gpu_cache_clear"
-        ] += 1
         return self.get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear()[0]
 
     @cached_property
     def gpu_time_ms_per_gpu_cache_clear(self) -> float:
-        counters["inductor"]["benchmarking_gpu_time_ms_per_gpu_cache_clear"] += 1
         return self.get_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear()[1]
 
     @functools.lru_cache(None)  # noqa: B019
@@ -230,7 +226,6 @@ class Benchmarker:
         fn_kwargs: Dict[str, Any],
         **kwargs: Any,
     ) -> float:
-        counters["inductor"]["benchmarking_benchmark"] += 1
         _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
         fn_args_and_kwargs = list(fn_args) + list(fn_kwargs.values())
         # should we be checking if all args and kwargs are on the same device?
