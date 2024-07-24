@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from typing import List, Optional, Tuple, Union
 
@@ -26,6 +27,8 @@ class Adafactor(Optimizer):
         *,
         maximize: bool = False,
     ):
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Learning rate should be >= 0 but is: {lr}")
         if not 0.0 >= beta2_decay:
@@ -215,7 +218,7 @@ Adafactor.__doc__ = (
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float, optional): unlike other optimizers, Adafactor does not require a
+        lr (float, Tensor, optional): unlike other optimizers, Adafactor does not require a
             learning rate, and Shazeer, Noam, and Mitchell Stern do not use lr at all.
             Deviating from the paper, this implementation uses lr for applying weight
             decay and as the maximum value for relative step size rho_t. Note that in
