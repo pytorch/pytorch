@@ -3485,10 +3485,7 @@ class TestNestedTensorSubclass(TestCase):
         return out
 
     def _get_example_tensor_lists(
-        self,
-        include_list_of_lists=True,
-        include_requires_grad=True,
-        include_inner_dim_size_1=False,
+        self, include_list_of_lists=True, include_requires_grad=True
     ):
         def _make_tensor(
             *shape, include_requires_grad=include_requires_grad, requires_grad=True
@@ -3535,24 +3532,6 @@ class TestNestedTensorSubclass(TestCase):
                     _make_tensor(3, 5).tolist(),
                     _make_tensor(4, 5).tolist(),
                 ]
-            )
-
-        if include_inner_dim_size_1:
-            example_lists.append(
-                [
-                    _make_tensor(2, 1),
-                    _make_tensor(3, 1, requires_grad=False),
-                    _make_tensor(4, 1, requires_grad=False),
-                    _make_tensor(6, 1),
-                ]  # (B, *, 1)
-            )
-            example_lists.append(
-                [
-                    _make_tensor(2, 5, 1),
-                    _make_tensor(3, 5, 1, requires_grad=False),
-                    _make_tensor(4, 5, 1, requires_grad=False),
-                    _make_tensor(6, 5, 1),
-                ]  # (B, *, 5, 1)
             )
 
         return example_lists
@@ -4146,9 +4125,7 @@ class TestNestedTensorSubclass(TestCase):
         op_name = get_op_name(func)
 
         tensor_lists = self._get_example_tensor_lists(
-            include_list_of_lists=False,
-            include_requires_grad=components_require_grad,
-            include_inner_dim_size_1=True,  # (B, *, 1)
+            include_list_of_lists=False, include_requires_grad=components_require_grad
         )
         reduce_dim = (1,)  # ragged
 

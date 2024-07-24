@@ -283,10 +283,10 @@ class OpsWrapper:
         return OpsValue(x)
 
     @staticmethod
-    def indirect_indexing(index, size, check=True, wrap_neg=True):
+    def indirect_indexing(index, size, check=True):
         # Returns a sympy value, not IR value
         index = OpsWrapper._unwrap(index)
-        return _ops.indirect_indexing(index, size, check, wrap_neg)
+        return _ops.indirect_indexing(index, size, check)
 
 
 ops = OpsWrapper()

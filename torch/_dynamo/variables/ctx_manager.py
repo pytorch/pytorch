@@ -3,12 +3,9 @@ import dataclasses
 import inspect
 import sys
 import warnings
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Callable, Dict, List, Optional
 
 import torch._C
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._guards import Guard
 
 from .. import variables
@@ -72,7 +69,7 @@ class ContextWrappingVariable(VariableTracker):
         self.set_cleanup_hook(tx)
         return variables.ConstantVariable.create(None)
 
-    def set_cleanup_hook(self, tx: "InstructionTranslator", fn=None):
+    def set_cleanup_hook(self, tx, fn=None):
         if fn is None:
 
             def fn():
@@ -81,7 +78,7 @@ class ContextWrappingVariable(VariableTracker):
         self.state.cleanup_fn = fn
         tx.output.add_cleanup_hook(self.state.cleanup)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(self, tx, *args):
         self.state.cleanup_assert()
         return variables.ConstantVariable.create(None)
 
@@ -105,10 +102,7 @@ class ContextWrappingVariable(VariableTracker):
         raise NotImplementedError("fn_name called on base")
 
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         assert len(args) == 1
         if isinstance(args[0], NestedUserFunctionVariable):
@@ -144,7 +138,7 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
                 from_exc=e,
             )
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(self, tx, *args):
         source = None if self.source is None else AttrSource(self.source, "__exit__")
         try:
             x = variables.UserMethodVariable(
@@ -199,7 +193,7 @@ class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(None)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(self, tx, *args):
         self.state.cleanup()
         tx.output.create_node(
             "call_function",
@@ -243,7 +237,7 @@ class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(jvp_level)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(self, tx, *args):
         self.state.cleanup()
         tx.output.create_node(
             "call_function", torch._C._functorch._jvp_decrement_nesting, (), {}
@@ -278,7 +272,7 @@ class SetFwdGradEnabledContextManager(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(None)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(self, tx, *args):
         self.state.cleanup()
         tx.output.create_node(
             "call_function",
@@ -316,7 +310,7 @@ class DualLevelContextManager(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(self.new_level)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(self, tx, *args):
         self.state.cleanup()
         tx.output.create_node(
             "call_function",
@@ -358,7 +352,7 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(grad_level)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(self, tx, *args):
         self.state.cleanup()
         tx.output.create_node(
             "call_function", torch._C._functorch._grad_decrement_nesting, (), {}
@@ -429,7 +423,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(vmap_level)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(self, tx, *args):
         self.state.cleanup()
         tx.output.create_node(
             "call_function", torch._C._functorch._vmap_decrement_nesting, (), {}
@@ -463,20 +457,17 @@ class GradModeVariable(ContextWrappingVariable):
         self._call_func(tx, self.target_values)
         return variables.ConstantVariable.create(None)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(self, tx, *args):
         self._call_func(tx, self.initial_values)
         return variables.ConstantVariable.create(None)
 
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ):
         self._call_func(tx, self.initial_values)  # undo eager initialization
         return super().call_function(tx, args, kwargs)
 
-    def _call_func(self, tx: "InstructionTranslator", values):
+    def _call_func(self, tx, values):
         assert len(values) == 1
         value = values[0]
         # Coalesce grad mode mutations
@@ -515,7 +506,7 @@ class InferenceModeVariable(ContextWrappingVariable):
         )
         self.target_values = target_values
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(self, tx, *args):
         self.state.cleanup_assert()
         tx.output.create_node(
             "call_function",
@@ -569,7 +560,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
     def enter(self, tx):
         return variables.ConstantVariable.create(None)
 
-    def _call_func(self, tx: "InstructionTranslator", values):
+    def _call_func(self, tx, values):
         assert len(values) == 1
         tx.output.set_torch_function_state(values[0])
 
@@ -601,7 +592,7 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     def enter(self, tx):
         return variables.ConstantVariable.create(None)
 
-    def _call_func(self, tx: "InstructionTranslator", values):
+    def _call_func(self, tx, values):
         assert len(values) == 1
         value = values[0]
         tx.output.create_node(
@@ -640,7 +631,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
     def enter(self, tx):
         return variables.ConstantVariable.create(None)
 
-    def _call_func(self, tx: "InstructionTranslator", values):
+    def _call_func(self, tx, values):
         assert len(values) == 1
         value = values[0]
         if value is not None:
@@ -707,7 +698,7 @@ class AutocastModeVariable(ContextWrappingVariable):
         )
         self.target_values = target_values
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(self, tx, *args):
         self.state.cleanup_assert()
         tx.output.create_node(
             "call_function", torch.amp._exit_autocast, (self.state.proxy,), {}
@@ -740,7 +731,7 @@ class NullContextVariable(ContextWrappingVariable):
     def enter(self, tx):
         return variables.ConstantVariable.create(None)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(self, tx, *args):
         return variables.ConstantVariable.create(None)
 
     def module_name(self):
@@ -804,7 +795,7 @@ class StreamContextVariable(ContextWrappingVariable):
         self.set_stream(self.target_values[0].value)
         self.set_cleanup_hook(tx, lambda: self.set_stream(self.initial_values[0].value))
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(self, tx, *args):
         tx.output.create_proxy(
             "call_function",
             self.set_stream,
@@ -837,7 +828,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     def enter(self, tx):
         pass
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(self, tx, *args):
         from ..tensor_version_op import _unsafe_set_version_counter
 
         return variables.TorchInGraphFunctionVariable(
@@ -874,20 +865,17 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
         self._call_func(tx, self.target_values)
         return variables.ConstantVariable.create(None)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(self, tx, *args):
         self._call_func(tx, self.initial_values)
         return variables.ConstantVariable.create(None)
 
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ):
         self._call_func(tx, self.initial_values)  # undo eager initialization
         return super().call_function(tx, args, kwargs)
 
-    def _call_func(self, tx: "InstructionTranslator", values):
+    def _call_func(self, tx, values):
         assert len(values) == 1
         value = values[0]
         if self.param_group_var.value._training_state != value:
@@ -1033,10 +1021,7 @@ class WithExitFunctionVariable(VariableTracker):
         self.target = target
 
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         assert not kwargs
         return self.ctx.exit(tx, *args)
