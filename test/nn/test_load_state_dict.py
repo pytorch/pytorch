@@ -201,7 +201,7 @@ class TestLoadStateDict(NNTestCase):
             module_state_dict = module.state_dict()
             self.assertEqual(len(module_state_dict.keys()), len(state_dict.keys()))
 
-        model[0][0]._register_load_state_dict_pre_hook(hook_fn, with_module=True)
+        model[0][0].register_load_state_dict_pre_hook(hook_fn)
         model.load_state_dict(model.state_dict(), strict=True)
 
     # fails swapping as LSTM installs weak references on the parameters
