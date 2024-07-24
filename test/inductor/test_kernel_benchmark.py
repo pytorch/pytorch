@@ -410,7 +410,6 @@ class TestKernelBenchmark(TestCase):
         self.check_bandwidth(compiled_module, "0.200")
 
     def test_split_scan(self):
-
         @torch.compile
         def f(a):
             return a.cumsum(-1)
