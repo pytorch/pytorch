@@ -1,16 +1,12 @@
 # mypy: allow-untyped-defs
 import functools
-
 from typing import Optional, Set
 
 import torch._inductor.runtime.hints
 from torch._inductor import config
 from torch._inductor.codegen.simd import IterationRangesRoot
-
 from torch._inductor.codegen.triton import triton_compute_type, TritonKernel
-
 from torch._prims_common import prod
-
 from torch.utils._sympy.functions import CeilDiv
 
 
