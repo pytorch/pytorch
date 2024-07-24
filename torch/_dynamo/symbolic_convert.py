@@ -193,6 +193,20 @@ class SpeculationLog:
         return entry
 
 
+@dataclasses.dataclass
+class LocalState:
+    input_sizes: Dict[str, List[int]] = dataclasses.field(default_factory=dict)
+    input_strides: Dict[str, List[int]] = dataclasses.field(default_factory=dict)
+
+
+# Mutable box that is shared across restarts
+@dataclasses.dataclass
+class DistributedState:
+    compile_pg: Any
+    local_state: LocalState
+    all_states: Optional[List[LocalState]] = None
+
+
 @functools.lru_cache(None)
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
@@ -2405,9 +2419,11 @@ class InstructionTranslatorBase(
         export: bool,
         inline_depth: int,
         speculation_log: SpeculationLog,
+        distributed_state: Optional[DistributedState],
     ):
         super().__init__()
         self.speculation_log = speculation_log
+        self.distributed_state = distributed_state
 
         # Mutable state checkpointed by copy_graphstate()
         self.output = output
@@ -2509,6 +2525,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         mutated_closure_cell_contents: Set[str],
         frame_state,
         speculation_log: SpeculationLog,
+        distributed_state: Optional[DistributedState],
     ):
         _step_logger()(
             logging.INFO,
@@ -2538,6 +2555,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             export=export,
             inline_depth=0,
             speculation_log=speculation_log,
+            distributed_state=distributed_state,
         )
 
         self._throw_if_in_functorch()
@@ -3002,6 +3020,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             export=parent.export,
             inline_depth=parent.inline_depth + 1,
             speculation_log=parent.speculation_log,
+            distributed_state=parent.distributed_state,
         )
         self.parent = parent
         self.symbolic_result = None
