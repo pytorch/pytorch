@@ -1929,12 +1929,12 @@ class InstructionTranslatorBase(
         value = self.pop()
         if isinstance(value, SymNodeVariable):
             from torch._dynamo.variables.lazy import (
-                LazySymNodeString,
+                LazySymNodeFormatString,
                 LazyVariableTracker,
             )
 
             value = LazyVariableTracker.create(
-                LazySymNodeString(value, fmt_spec), source=value.source
+                LazySymNodeFormatString(value, fmt_spec), source=value.source
             )
             self.push(value)
             return

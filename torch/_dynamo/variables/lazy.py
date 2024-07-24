@@ -10,7 +10,7 @@ class LazyCache:
     """Container to cache the real VariableTracker"""
 
     def __init__(self, value, source):
-        if not isinstance(value, LazySymNodeString):
+        if not isinstance(value, LazySymNodeFormatString):
             assert source
         self.value = value
         self.source = source
@@ -22,7 +22,7 @@ class LazyCache:
         from .builder import SourcelessBuilder, VariableBuilder
 
         tx = InstructionTranslator.current_tx()
-        if isinstance(self.value, LazySymNodeString):
+        if isinstance(self.value, LazySymNodeFormatString):
             self.vt = SourcelessBuilder.create(tx, self.value)
         else:
             self.vt = VariableBuilder(tx, self.source)(self.value)
@@ -130,7 +130,7 @@ class LazyVariableTracker(VariableTracker):
         return result
 
 
-class LazySymNodeString:
+class LazySymNodeFormatString:
     def __init__(
         self, sym_node_variable: VariableTracker, fmt_spec_var: VariableTracker
     ):
