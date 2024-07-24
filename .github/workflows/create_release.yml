@@ -1,0 +1,100 @@
+name: Create Release
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      # Final Release tags look like: v1.11.0
+      - v[0-9]+.[0-9]+.[0-9]+
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+  release:
+    types: [published]
+  pull_request:
+    paths: [.github/workflows/create_release.yml]
+
+jobs:
+  release:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    name: Create Release
+    runs-on: ubuntu-latest
+    # https://github.com/softprops/action-gh-release?tab=readme-ov-file#permissions
+    permissions:
+      contents: write
+    outputs:
+      pt_release_name: ${{ steps.release_name.outputs.pt_release_name }}
+    steps:
+      - uses: malfet/checkout@silent-checkout
+        with:
+          submodules: 'recursive'
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Fake name for PRs
+        if: ${{ github.event_name == 'pull_request' }}
+        run: echo "PT_GITHUB_REF=refs/tags/pr-tag" >> "$GITHUB_ENV"
+      - name: Real name for non-PRs
+        if: ${{ github.event_name != 'pull_request' }}
+        run: echo "PT_GITHUB_REF=$GITHUB_REF" >> "$GITHUB_ENV"
+      - name: Set filenames
+        run: |
+          tag_or_branch="${PT_GITHUB_REF#refs/tags/}"
+          tag_or_branch="${tag_or_branch#refs/heads/}"
+          # replace directory separators with _ in branch name
+          tag_or_branch="${tag_or_branch//\//_}"
+          echo "PT_RELEASE_NAME=pytorch-$tag_or_branch" >> "$GITHUB_ENV"
+          echo "PT_RELEASE_FILE=pytorch-$tag_or_branch.tar.gz" >> "$GITHUB_ENV"
+      - name: Create source distribution
+        run: |
+            # Create new folder with specified name so extracting the archive yields that
+            rm -rf "/tmp/$PT_RELEASE_NAME"
+            cp -r "$PWD" "/tmp/$PT_RELEASE_NAME"
+            mv "/tmp/$PT_RELEASE_NAME" .
+            # Cleanup
+            rm -rf "$PT_RELEASE_NAME"/{.circleci,.ci}
+            find "$PT_RELEASE_NAME" -name '.git*' -exec rm -rv {} \; || true
+            # Create archive
+            tar -czf "$PT_RELEASE_FILE" "$PT_RELEASE_NAME"
+            echo "Created source archive $PT_RELEASE_FILE with content: $(ls -a "$PT_RELEASE_NAME")"
+      - name: Upload source distribution for release
+        if: ${{ github.event_name == 'release' }}
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{env.PT_RELEASE_FILE}}
+      - name: Upload source distribution to GHA artifacts for release tags
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ env.PT_RELEASE_FILE }}
+          path: ${{ env.PT_RELEASE_FILE }}
+      - name: Set output
+        id: release_name
+        run: echo "::set-output name=pt_release_name::${{ env.PT_RELEASE_NAME }}.tar.gz"
+
+  upload_source_code_to_s3:
+    if: ${{ github.repository == 'pytorch/pytorch' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
+    runs-on: linux.2xlarge
+    environment: sourcecode-upload
+    name: Upload source code to S3 for release tags
+    permissions:
+      id-token: write
+    needs: release
+    steps:
+      - uses: actions/download-artifact@v2
+        with:
+          name: ${{ needs.release.outputs.pt_release_name }}
+      - name: Configure AWS credentials(PyTorch account)
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::749337293305:role/gha_pytorch_source_code_upload_role
+          aws-region: us-east-1
+      - uses: seemethere/upload-artifact-s3@v5
+        with:
+          s3-bucket: pytorch
+          s3-prefix: source_code/test
+          if-no-files-found: warn
+          path: ${{ needs.release.outputs.pt_release_name }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
+  cancel-in-progress: true
