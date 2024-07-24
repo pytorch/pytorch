@@ -3368,7 +3368,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         ndim = len(shape)
         indirect_idx = list(idx)
         indirect_idx[dim] = ops.indirect_indexing(
-            index_loader(idx), 1 if ndim == 0 else shape[dim]
+            index_loader(idx), 1 if ndim == 0 else shape[dim], wrap_neg=False
         )
         return indirect_idx
 

@@ -888,9 +888,6 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
             # If the original dictionary has the key, return its value.
             # Otherwise, return the mock value.
             if not super().__contains__(key):
-                warnings.warn(
-                    f"{key} is not found in <class 'dict'>. Mock is instead used."
-                )
                 return self.mock_value
             return super().__getitem__(key)
 
@@ -1024,7 +1021,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
 
         return ep
 
-    def explain(self):
+    def explain(self, print_output=True):
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
 
         graph_converter = ExplainTS2FXGraphConverter(
@@ -1040,9 +1037,11 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
             for i, n in enumerate(graph_converter.unsupported_node_list):
                 node_str = "".join(str(n).split("\n")[:1])
                 explain_str += f"\n\n    {i}. {n.kind()} [{node_str}]"
-            print(explain_str)
         else:
-            print("Success!")
+            explain_str = "Success!"
+        if print_output:
+            print(explain_str)
+        return explain_str
 
     def retrace_as_exported_program(
         self, gm: torch.fx.GraphModule, tensor_constants: Dict[str, torch.Tensor]
@@ -1111,9 +1110,6 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
                     if isinstance(value, torch.Tensor):
                         if attr_fqn not in self.name_to_buffer:
                             # Lift tensor constants to be a buffer
-                            warnings.warn(
-                                f"ts converter lifted tensor constant {attr_fqn} to be a buffer"
-                            )
                             self.name_to_buffer[attr_fqn] = value
                     else:
                         self.name_to_non_tensor_attributes[attr_fqn] = value
