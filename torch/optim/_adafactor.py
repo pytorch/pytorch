@@ -198,7 +198,7 @@ Adafactor.__doc__ = (
                 \frac{R_t \cdot C_t}{max(1^\top_n \cdot R_t, \epsilon_1)}                        \\
             &\hspace{5mm}\textbf{else}                                                           \\
             &\hspace{10mm}\widehat{V}_t \leftarrow \widehat{\beta}_{2_t}\widehat{V}_{t-1}+
-                (1-\widehat{\beta}_{2_t}) \cdot (G_t \odot G_t + \epsilon_1 1_n)                 \\
+                (1-\widehat{\beta}_{2_t}) \cdot (G_t \odot G_t)                                  \\
             &\hspace{5mm}U_t            \leftarrow
                 \frac{G_t}{max(\sqrt{\widehat{V}_t}, \epsilon_1)}                                \\
             &\hspace{5mm}\widehat{U}_t  \leftarrow \frac{U_t}{max(1, \frac{\text{RMS}(U_t)}{d})} \\
@@ -237,13 +237,13 @@ Adafactor.__doc__ = (
     .. Note::
         The implementation of Adafactor subtly differs from Shazeer, Noam, and Mitchell Stern
         and implementations in some other frameworks with its use of learning rate and
-        :math:`epsilon_1`.
+        :math:`\epsilon_1`.
 
         Regarding the learning rate hyperparameter: Shazeer, Noam, and Mitchell Stern do not
-        use lr at all, as the stated algorithm uses :math:`rho_t` and update clipping to
+        use lr at all, as the stated algorithm uses :math:`\rho_t` and update clipping to
         affect the step size.
 
-        This implementation allows `lr` to influence the maximum value for :math:`rho_t`:
+        This implementation allows `lr` to influence the maximum value for :math:`\rho_t`:
 
         .. math::
             \begin{aligned}
@@ -251,7 +251,7 @@ Adafactor.__doc__ = (
             \end{aligned}
 
         This differs from Shazeer, Noam, and Mitchell Stern, who use a constant of 0.01 as
-        the maximum value of :math:`rho_t`
+        the maximum value of :math:`\rho_t`
 
         .. math::
             \begin{aligned}
@@ -262,8 +262,8 @@ Adafactor.__doc__ = (
         be computed, and so we use the learning rate as a coefficient for decoupled weight
         decay, similar to what is suggested in `Decoupled Weight Decay Regularization`_.
 
-        Regarding the use of :math:`epsilon_1`: The implementation attempts to replicate the
-        presumed intention of Shazeer, Noam, and Mitchell Stern to use :math:`epsilon_1` as
+        Regarding the use of :math:`\epsilon_1`: The implementation attempts to replicate the
+        presumed intention of Shazeer, Noam, and Mitchell Stern to use :math:`\epsilon_1` as
         a stabilizing term when the squared gradient becomes small.
 
         This stabilization can be written as
@@ -280,11 +280,11 @@ Adafactor.__doc__ = (
             \end{aligned}
 
         where the row and column factors of gradient squared :math:`R_t` and :math:`C_t`
-        are left alone, and we apply :math:`epsilon_1` at the final calculation of
+        are left alone, and we apply :math:`\epsilon_1` at the final calculation of
         the variance estimate :math:`\widehat{V}_t` and for the update :math:`U_t`.
 
         This is in contrast to Shazeer, Noam, and Mitchell Stern and other frameworks which
-        apply :math:`epsilon_1` to both row and column factors of the squared gradient, but
+        apply :math:`\epsilon_1` to both row and column factors of the squared gradient, but
         not in the calculations after:
 
         .. math::
@@ -363,7 +363,7 @@ def _single_tensor_adafactor(
         if grad.dim() > 1:
             assert (
                 row_var is not None and col_var is not None
-            ), "row_var and col_var should be defined"
+            ), "row_var and col_var should be defined when grad is multidimensional"
             # same as (g * g).mean(dim=-1) w/o materializing an intermediate size g
             row_mean = (
                 torch.norm(grad, dim=-1, keepdim=True).square_().div_(grad.size(-1))
@@ -377,13 +377,16 @@ def _single_tensor_adafactor(
             var_estimate = row_var @ col_var
             var_estimate.div_(row_var.mean(dim=-2, keepdim=True).clamp_(min=eps1))
         else:
-            assert variance is not None, "variance should be defined"
+            assert (
+                variance is not None
+            ), "variance should be defined when grad is a vector"
             grad_squared = grad * grad
             variance.lerp_(grad_squared, 1 - beta2_t)
             # avoid writing into variance during update
             var_estimate = variance.clone()
 
-        update = var_estimate.sqrt_().clamp_(min=eps1).reciprocal_()
+        # square the eps1 as we sqrt after to keep eps1's magnitude
+        update = var_estimate.clamp_(min=eps1 * eps1).rsqrt_()
         update.mul_(grad)
         denom = max(1.0, update.norm(2).item() / ((update.numel() ** 0.5) * d))
         param.add_(update, alpha=-alpha / denom)
