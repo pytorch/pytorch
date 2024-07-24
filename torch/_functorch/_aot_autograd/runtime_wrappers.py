@@ -269,17 +269,16 @@ def _create_runtime_wrapper(
     #       and doing so requires us accessing the corresponding input after the compiled artifact has run.
     epilogue_args_idx = []
     epilogue_args_idx.extend(runtime_metadata.mutated_inp_runtime_indices)
-    num_tokens = len(runtime_metadata.tokens)
     for info in runtime_metadata.output_info:
         if (
             info.output_type == OutputType.alias_of_input
             or info.output_type == OutputType.is_input
         ):
             assert isinstance(info.base_idx, int)
-            epilogue_args_idx.append(info.base_idx + num_tokens)
+            epilogue_args_idx.append(info.base_idx)
 
     if config.unlift_effect_tokens:
-        assert num_tokens == 0
+        assert len(runtime_metadata.tokens) == 0
 
     replay_views = config.view_replay_for_aliased_outputs
     if runtime_metadata.num_outputs_aliased > 0:
@@ -289,12 +288,6 @@ def _create_runtime_wrapper(
         )
 
     def runtime_wrapper(args: List[Any]):
-        if num_tokens > 0:
-            # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-            old_args = args
-            args = [[None] * num_tokens, *args]
-            old_args.clear()
-
         # stash a ref to each input tensor we plan to use after the compiled function
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
 
@@ -342,11 +335,7 @@ def _create_runtime_wrapper(
             == num_mutated_runtime_inps
             + runtime_metadata.num_outputs
             + num_intermediate_bases
-            + num_tokens
         )
-
-        # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-        all_outs = all_outs[num_tokens:]
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs
         num_mutations_to_apply = runtime_metadata.num_mutated_inp_runtime_indices
@@ -651,6 +640,34 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 is_runtime=True,
             )
             return wrapped_outs
+
+        # box it
+        inner_fn._boxed_call = True  # type: ignore[attr-defined]
+        return inner_fn
+
+
+@dataclass
+class EffectTokensWrapper(CompilerWrapper):
+
+    def post_compile(
+        self,
+        compiled_fn,
+        *,
+        runtime_metadata: ViewAndMutationMeta,
+    ):
+        num_tokens = len(runtime_metadata.tokens)
+
+        @wraps(compiled_fn)
+        def inner_fn(args: List[Any]):
+            if num_tokens > 0:
+                # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
+                old_args = args
+                args = [[None] * num_tokens, *args]
+                old_args.clear()
+
+            outs = compiled_fn(args)
+            # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
+            return outs[num_tokens:]
 
         # box it
         inner_fn._boxed_call = True  # type: ignore[attr-defined]

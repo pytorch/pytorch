@@ -31,6 +31,7 @@ from .traced_function_transforms import (
     create_joint,
     fn_input_mutations_to_outputs,
     fn_prepped_for_autograd,
+    handle_effect_tokens_fn,
 )
 from .utils import root_module_when_exporting_non_strict, unlift_tokens
 
@@ -95,6 +96,14 @@ def aot_dispatch_base_graph(
         meta=fw_metadata,
         fw_only=flat_fn,
     )
+
+    (fn_to_trace, updated_flat_args_subclasses_desugared) = handle_effect_tokens_fn(
+        fn_to_trace,
+        updated_flat_args_subclasses_desugared,
+        meta=fw_metadata,
+        trace_joint=False,
+    )
+
     aot_graphs_log.debug(
         "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
         str(aot_config.aot_id),
