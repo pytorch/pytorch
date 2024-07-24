@@ -4575,8 +4575,8 @@ class TestLinalg(TestCase):
         torch.cuda.tunable.enable()
         # record GEMM
         torch.cuda.tunable.tuning_enable(False)
-        assert torch.cuda.tunable.record_untuned_is_enabled() is False, "Record untuned should be off by default"
         torch.cuda.tunable.record_untuned_enable(True)
+        assert torch.cuda.tunable.record_untuned_is_enabled()
 
         make_arg = partial(make_tensor, device=device, dtype=dtype)
         for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
@@ -4615,6 +4615,7 @@ class TestLinalg(TestCase):
 
         # disables TunableOp, no file will be written, restore to default values
         torch.cuda.tunable.enable(False)
+        torch.cuda.tunable.record_untuned_enable(False)
         torch.cuda.tunable.set_max_tuning_duration(30)
         torch.cuda.tunable.set_max_tuning_iterations(100)
         assert torch.cuda.tunable.is_enabled() is False, "TunableOp should be off after resetting"
