@@ -2797,7 +2797,12 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
         # TODO: fix this to work with meta tensors
         try:
-            requires_grad = builtins.any(x.requires_grad for x in tensors)
+            # BUG? This looks like it wants to call builtins.any() but is
+            # actually calling .any() (in this file). Changing to builtins.any()
+            # causes tests to fail:
+            # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 python test/test_ops.py -k \
+            #   TestFakeTensorCUDA.test_fake_crossref_backward_amp_cat_cuda_float32
+            requires_grad = bool(any(x.requires_grad for x in tensors))  # type: ignore[arg-type]
         except Exception:
             requires_grad = False  # type: ignore[assignment]
 
