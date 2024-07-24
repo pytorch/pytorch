@@ -9,7 +9,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
@@ -418,6 +418,11 @@ class TestConverter(TestCase):
         inp = ((torch.zeros(1, 4), torch.ones(1, 4)),)
         self._check_equal_ts_ep_converter(MUnpackTuple(), inp)
 
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "torch.cond doesn't go through torch.compile on windows"
+        "causing output not normalized as list",
+    )
     def test_convert_retrace_nested_scripted_modules(self):
         class Wrapper(torch.nn.Module):
             def __init__(self, mod) -> None:
@@ -586,6 +591,11 @@ class TestConverter(TestCase):
                 orig_m(*inp),
             )
 
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "torch.cond doesn't go through torch.compile on windows"
+        "causing output not normalized as list",
+    )
     def test_convert_nn_module_with_nested_if_and_param(self):
         class M(torch.nn.Module):
             def __init__(self, dim: int) -> None:
