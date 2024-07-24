@@ -69,10 +69,11 @@ def is_forbidden_context_manager(ctx):
     f_ctxs = []
 
     try:
-        import _pytest
+        from _pytest.python_api import RaisesContext
+        from _pytest.recwarn import WarningsChecker
 
-        f_ctxs.append(_pytest.python_api.RaisesContext)
-        f_ctxs.append(_pytest.recwarn.WarningsChecker)
+        f_ctxs.append(RaisesContext)
+        f_ctxs.append(WarningsChecker)
     except ImportError:
         pass
 
