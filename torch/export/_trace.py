@@ -2026,4 +2026,23 @@ def _export(
         constants=export_artifact.aten.constants,
     )
 
+    if _ALLOW_WRITE_TO_COPY:
+        log.warning(
+            "_ALLOW_WRITE_TO_COPY is set to True, this may or may not cause soundness issue with torch.export."
+        )
+
     return exported_program
+
+
+_ALLOW_WRITE_TO_COPY: bool = False
+
+
+@contextmanager
+def _allow_write_to_copy():
+    global _ALLOW_WRITE_TO_COPY
+    assert not _ALLOW_WRITE_TO_COPY
+    _ALLOW_WRITE_TO_COPY = True
+    try:
+        yield
+    finally:
+        _ALLOW_WRITE_TO_COPY = False

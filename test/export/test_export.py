@@ -3067,6 +3067,22 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             )
         )
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T193701564
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # T193701564
+    def test_dtype_to_mutation_knob(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                y = y.to(dtype=torch.float)
+                y.add_(1)
+                return y, x
+
+        mod = Module()
+        with torch.export._trace._allow_write_to_copy():
+            ep = export(mod, (torch.tensor(1, dtype=torch.float),))
+
+        self.assertEqual(ep.module()(torch.tensor(2)), mod(torch.tensor(2)))
+
     def test_args_type_checked(self):
         class M(torch.nn.Module):
             def forward(self, x):
