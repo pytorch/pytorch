@@ -98,24 +98,25 @@ def dropwhile(predicate, iterable):
 
 
 def zip_longest(*iterables, fillvalue=None):
-    # Get the iterators for each iterable
+    # Create a list of iterators from the input iterables
     iterators = [iter(it) for it in iterables]
-
+    result = []
     while True:
-        result = []
+        row = []
         active = False
         for it in iterators:
             try:
+                # Try to get the next item from the iterator
                 value = next(it)
+                row.append(value)
+                active = True
             except StopIteration:
-                result.append(fillvalue)
-
-            result.append(value)
-            active = True
-
+                # If the iterator is exhausted, use the fillvalue
+                row.append(fillvalue)
         if not active:
             break
-        yield tuple(result)
+        result.append(tuple(row))
+    return result
 
 
 def getattr_and_trace(*args, **kwargs):
