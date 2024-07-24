@@ -146,5 +146,5 @@ Tensor transformer_encoder_layer_forward(
   return x;
 }
 
-} // namespace at
 } // namespace native
+} // namespace at

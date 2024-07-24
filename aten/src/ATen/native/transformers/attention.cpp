@@ -693,7 +693,9 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::math:
-      if (query_.device().type() == DeviceType::MPS && dropout_p == 0.0 && query_.is_contiguous() && key.is_contiguous() && value.is_contiguous()) {
+      if (query_.device().type() == DeviceType::MPS && dropout_p == 0.0
+          && query_.is_contiguous() && key.is_contiguous() && value.is_contiguous()
+          && !query_.is_nested() && !key.is_nested() && !value.is_nested()) {
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
             query_,
             key,
@@ -997,5 +999,5 @@ Tensor triton_multi_head_attention(
   return proj;
 }
 
-} // namespace at
 } // namespace native
+} // namespace at

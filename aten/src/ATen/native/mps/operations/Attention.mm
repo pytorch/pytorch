@@ -29,14 +29,14 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
                                                                   std::optional<double> scale) {
   if (is_causal) {
     TORCH_CHECK(!attn_mask.has_value(),
-            "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
-    TORCH_CHECK(!query.is_nested() && !key.is_nested(),
-            "_scaled_dot_product_attention: Nested tensors for query / key are not supported when is_causal=True");
+                "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
   }
 
   TORCH_CHECK(dropout_p == 0.0, "_scaled_dot_product_attention_math_for_mps: dropout_p != 0.0 is not supported");
   TORCH_CHECK(query.is_contiguous() && key.is_contiguous() && value.is_contiguous(),
               "_scaled_dot_product_attention_math_for_mps: query, key, and value must be contiguous");
+  TORCH_CHECK(!query.is_nested() && !key.is_nested() && !value.is_nested(),
+              "_scaled_dot_product_attention_math_for_mps: query, key, and value must not be nested");
 
   using namespace mps;
   struct CachedGraph : public MPSCachedGraph {
@@ -57,7 +57,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   auto attn = at::empty({batchSize, num_head, qSize, maxSeqLength}, query.options());
   auto scale_factor = sdp::calculate_scale(query, scale).as_float_unchecked();
   @autoreleasepool {
-    auto mkey = __func__ + getTensorsStringKey({query, key, value}) + ":" + std::to_string(is_causal) + ":" + std::to_string(attn_mask.has_value());
+    auto mkey = __func__ + getTensorsStringKey({query, key, value}) + ":" + std::to_string(is_causal) + ":" +
+        std::to_string(attn_mask.has_value());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(mkey, [&](auto mpsGraph, auto graph) {
       auto qTensor = mpsGraphRankedPlaceHolder(mpsGraph, query);
       auto kTensor = mpsGraphRankedPlaceHolder(mpsGraph, key);
@@ -77,7 +78,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
       }
 
       if (is_causal) {
-        auto causalMask = [mpsGraph constantWithScalar:1.0f shape:getMPSShape({qSize, maxSeqLength}) dataType:MPSDataTypeBool];
+        auto causalMask = [mpsGraph constantWithScalar:1.0f
+                                                 shape:getMPSShape({qSize, maxSeqLength})
+                                              dataType:MPSDataTypeBool];
         causalMask = [mpsGraph bandPartWithTensor:causalMask numLower:-1 numUpper:0 name:nil];
         auto minusInf = [mpsGraph constantWithScalar:-1e20 shape:maskedMM.shape dataType:maskedMM.dataType];
         maskedMM = [mpsGraph selectWithPredicateTensor:causalMask
@@ -101,18 +104,18 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
     auto vPlaceholder = Placeholder(cachedGraph->vTensor, value);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor, out);
     auto attnPlaceholder = Placeholder(cachedGraph->attnTensor, attn);
-    NSDictionary *feeds = nil;
+    NSDictionary* feeds = nil;
     if (!attn_mask) {
       feeds = dictionaryFromPlaceholders(qPlaceholder, kPlaceholder, vPlaceholder);
     } else {
       auto mPlaceholder = Placeholder(cachedGraph->maskTensor, *attn_mask);
       feeds = dictionaryFromPlaceholders(qPlaceholder, kPlaceholder, vPlaceholder, mPlaceholder);
     }
-    NSDictionary *outs = dictionaryFromPlaceholders(outputPlaceholder, attnPlaceholder);
+    NSDictionary* outs = dictionaryFromPlaceholders(outputPlaceholder, attnPlaceholder);
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outs);
   }
   return {out, attn};
 }
 
-} // namespace at
 } // namespace native
+} // namespace at

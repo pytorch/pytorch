@@ -9256,13 +9256,13 @@ class TestSDPA(TestCaseMPS):
         err = ((y - ref).abs() / denom).mean().item()
         self.assertLess(err, 0.01)
 
-    def _test_sdpa_no_mask(self, is_causal: bool, dtype: torch.dtype, L: int = 1, S: int = 72):
+    def _test_sdpa_no_mask(self, is_causal: bool, dtype: torch.dtype, L: int = 1, S: int = 72, NH: int = 32, HS: int = 128):
         torch.manual_seed(1729)
         with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
-            q = torch.randn([1, 32, L, 128], dtype=dtype, device="mps")
-            k = torch.randn([1, 32, S, 128], dtype=q.dtype, device="mps")
-            v = torch.randn([1, 32, S, 128], dtype=q.dtype, device="mps")
-                       
+            q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps")
+            k = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
+            v = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
+
             y = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=is_causal)
             y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), dropout_p=0.0, is_causal=is_causal)
 
@@ -9286,16 +9286,19 @@ class TestSDPA(TestCaseMPS):
     def test_sdpa_no_mask_causal_fp16_L7_S17(self):
         self._test_sdpa_no_mask(True, torch.float16, 7, 17)
 
-    def _test_sdpa_mask(self, dtype: torch.dtype, L: int = 1, S: int = 72):
+    def test_sdpa_no_mask_causal_fp16_L7_S17_NH23_HS121(self):
+        self._test_sdpa_no_mask(True, torch.float16, 7, 17, 23, 121)
+
+    def _test_sdpa_mask(self, dtype: torch.dtype, L: int = 1, S: int = 72, NH: int = 32, HS: int = 128):
         torch.manual_seed(1729)
         causal_mask = torch.tril(torch.ones(S, S, dtype=torch.bool, device='mps'))
         with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
             i = 42
 
-            q = torch.randn([1, 32, L, 128], dtype=dtype, device="mps")
-            k = torch.randn([1, 32, S, 128], dtype=q.dtype, device="mps")
-            v = torch.randn([1, 32, S, 128], dtype=q.dtype, device="mps")
-            
+            q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps")
+            k = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
+            v = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
+
             input_pos = torch.tensor([i], dtype=torch.int32, device='mps')
             mask = causal_mask[None, None, input_pos]
 
@@ -9312,6 +9315,9 @@ class TestSDPA(TestCaseMPS):
 
     def test_sdpa_mask_fp16_L6(self):
         self._test_sdpa_mask(torch.float16, 6)
+
+    def test_sdpa_mask_fp16_L6_S17_NH23_HS121(self):
+        self._test_sdpa_no_mask(True, torch.float16, 7, 17, 23, 121)
 
 
 class TestGatherScatter(TestCaseMPS):
