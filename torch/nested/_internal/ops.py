@@ -894,38 +894,35 @@ def sum_dim_IntList(func, *args, **kwargs):
                     "sum(): not supported along a ragged and non-batch dimension for NestedTensor"
                 )
             # reduction cases: (ragged)
-            # shift reduction dimension of values backward to outer dimension
-            values_transposed_backward = inp._values.permute(
-                inp._ragged_idx - 1,
+            values_ragged_dim_outer = inp._values.permute(
+                inp._ragged_idx - 1,  # outer dimension
                 *range(0, inp._ragged_idx - 1),
                 *range(inp._ragged_idx, inp.dim() - 1),
-            )
+            )  # shift reduction dimension of values backward to outer dimension
 
             padded = torch.ops.aten._jagged_to_padded_dense_forward(
-                values_transposed_backward.reshape(
-                    values_transposed_backward.shape[0], -1
-                ),  # _jagged_to_padded_dense_forward requires values to be a 2D tensor
+                values_ragged_dim_outer.reshape(
+                    values_ragged_dim_outer.shape[0], -1
+                ),  # _jagged_to_padded_dense_forward requires values to be a 2D tensor with the ragged dimension as the 0th dimension
                 [inp._offsets],
                 max_lengths=[inp._max_seqlen],
             )
 
-            # expand non-batch dimensions of padded tensor
-            padded_transposed_forward = padded.view(
+            padded_ragged_dim_original = padded.view(
                 padded.shape[0],
                 inp._max_seqlen,
-                *values_transposed_backward.shape[1:],
-            )
-
-            # shift reduction dimension of padded tensor forward to original ragged dimension
-            padded_transposed_forward = padded_transposed_forward.permute(
+                *values_ragged_dim_outer.shape[
+                    1:
+                ],  # expand non-batch dimensions of padded tensor
+            ).permute(
                 0,
                 *range(2, inp._ragged_idx + 1),
                 1,
                 *range(inp._ragged_idx + 1, inp.dim()),
-            )
+            )  # shift reduction dimension of padded tensor forward to original ragged dimension
 
             out = torch.sum(
-                padded_transposed_forward,
+                padded_ragged_dim_original,
                 dim=inp._ragged_idx,
             )  # need to read offsets --> pad jagged dimension and apply sum
 
