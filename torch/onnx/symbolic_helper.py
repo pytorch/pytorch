@@ -10,13 +10,12 @@ import warnings
 from typing import (
     Any,
     Callable,
-    Concatenate,
     Literal,
     NoReturn,
-    ParamSpec,
     Sequence,
     TypeVar,
 )
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._C._onnx as _C_onnx
