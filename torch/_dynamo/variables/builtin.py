@@ -1549,9 +1549,6 @@ class BuiltinVariable(VariableTracker):
                 {},
             )
 
-    def call_StopIteration(self, tx: "InstructionTranslator", *args):
-        return variables.StopIterationVariable([*args])
-
     def call_reduce(
         self, tx: "InstructionTranslator", function, iterable, initial=_SENTINEL
     ):
