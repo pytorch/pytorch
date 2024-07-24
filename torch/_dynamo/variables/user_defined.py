@@ -12,7 +12,10 @@ import threading
 import types
 import warnings
 
-from typing import Dict, Generic, List
+from typing import Dict, Generic, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 from ..bytecode_transformation import create_call_function
 
@@ -109,14 +112,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def can_constant_fold_through(self):
         return self.value in self._constant_fold_classes()
 
-    def has_key_in_generic_dict(self, tx, key):
+    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
             return not isinstance(mutated_attr, variables.DeletedVariable)
 
         return key in self.value.__dict__
 
-    def var_getattr(self, tx, name: str) -> "VariableTracker":
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         from . import ConstantVariable, EnumVariable
         from .builder import SourcelessBuilder, VariableBuilder
 
@@ -171,7 +174,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return super().var_getattr(tx, name)
 
-    def _call_cross_entropy_loss(self, tx, args, kwargs):
+    def _call_cross_entropy_loss(self, tx: "InstructionTranslator", args, kwargs):
         """
         functional: input, target, weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
         label_smoothing=0.0
@@ -274,7 +277,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
         from .builder import SourcelessBuilder, wrap_fx_proxy
@@ -454,14 +460,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             new_fn = new_fn.__func__
         return new_fn in (object.__new__, Generic.__new__)
 
-    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.source:
             source = AttrSource(self.source, name)
             install_guard(source.make_guard(GuardBuilder.HASATTR))
             return variables.ConstantVariable(hasattr(self.value, name))
         return super().call_hasattr(tx, name)
 
-    def const_getattr(self, tx, name):
+    def const_getattr(self, tx: "InstructionTranslator", name):
         if name == "__name__":
             return self.value.__name__
         return super().const_getattr(tx, name)
@@ -515,7 +521,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return build_torch_function_fn(tx, self.value, self.source)
 
-    def call_torch_function(self, tx, fn, types, args, kwargs):
+    def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
         self.torch_function_check()
 
         from .torch_function import _get_subclass_type_var, call_torch_function
@@ -652,7 +658,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def method_setattr_standard(self, tx, name, value):
+    def method_setattr_standard(self, tx: "InstructionTranslator", name, value):
         try:
             name = name.as_python_constant()
         except NotImplementedError:
@@ -696,7 +702,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return False
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .. import trace_rules
         from .builder import VariableBuilder
@@ -821,7 +830,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj = inspect.getattr_static(self.value, name)
         return subobj
 
-    def has_key_in_generic_dict(self, tx, key):
+    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
         self._check_for_getattribute()
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
@@ -834,7 +843,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             torch.nn.Module.parameters,
         )
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         from .. import trace_rules
         from . import ConstantVariable
 
@@ -982,7 +991,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         options = {"source": source}
         return variables.GetAttrVariable(self, name, **options)
 
-    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if tx.output.side_effects.is_attribute_mutation(self):
             try:
                 result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
@@ -1025,7 +1034,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             else:
                 unimplemented("UserDefined with non-function __getattr__")
 
-    def odict_getitem(self, tx, key):
+    def odict_getitem(self, tx: "InstructionTranslator", key):
         from .builder import VariableBuilder
         from .dicts import is_hashable
 
@@ -1074,7 +1083,10 @@ class WeakRefVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         call_source = None
         referent = self.value()
@@ -1102,7 +1114,7 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         assert type(value) is KeyedJaggedTensor
         super().__init__(value, **kwargs)
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         if (
             torch._dynamo.config.force_unspec_int_unbacked_size_like_on_torchrec_kjt
             and self.source is not None
@@ -1133,7 +1145,7 @@ class RemovableHandleVariable(VariableTracker):
         self.mutable_local = mutable_local
         self.idx = idx
 
-    def call_method(self, tx, method_name, args, kwargs):
+    def call_method(self, tx: "InstructionTranslator", method_name, args, kwargs):
         if method_name == "remove":
             if self.idx != self.REMOVED:
                 tx.output.side_effects.remove_hook(self.idx)
