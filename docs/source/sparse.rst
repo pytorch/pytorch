@@ -68,7 +68,7 @@ indices of non-zero elements are stored in this case.
 PyTorch currently supports :ref:`COO<sparse-coo-docs>`, :ref:`CSR<sparse-csr-docs>`,
 :ref:`CSC<sparse-csc-docs>`, :ref:`BSR<sparse-bsr-docs>`, and :ref:`BSC<sparse-bsc-docs>`.
 
-We also have a prototype implementation to support :ref: `semi-structured sparsity<sparse-semi-structured-docs>`.
+We also have a beta implementation to support :ref: `semi-structured sparsity<sparse-semi-structured-docs>`.
 Please see the references for more details.
 
 Note that we provide slight generalizations of these formats.
@@ -176,19 +176,47 @@ Sparse Semi-Structured Tensors
 
 .. warning::
 
-   Sparse semi-structured tensors are currently a prototype feature and subject to change. Please feel free to open an issue to report a bug or if you have feedback to share.
+   Sparse semi-structured tensors are currently a beta feature and subject to change. Please feel free to open an issue to report a bug or if you have feedback to share.
 
 Semi-Structured sparsity is a sparse data layout that was first introduced in NVIDIA's Ampere architecture. It is also referred to as **fine-grained structured sparsity** or **2:4 structured sparsity**.
 
 This sparse layout stores `n` elements out of every `2n` elements, with `n` being determined by the width of the Tensor's data type (dtype). The most frequently used dtype is float16, where `n=2`, thus the term "2:4 structured sparsity."
+In addition to the specified elements, we also store a compressed form of the mask as metadata.
 
 Semi-structured sparsity is explained in greater detail in `this NVIDIA blog post <https://developer.nvidia.com/blog/exploiting-ampere-structured-sparsity-with-cusparselt>`_.
 
-In PyTorch, semi-structured sparsity is implemented via a Tensor subclass.
-By subclassing, we can override ``__torch_dispatch__`` , allowing us to use faster sparse kernels when performing matrix multiplication.
-We can also store the tensor in it's compressed form inside the subclass to reduce memory overhead.
+In PyTorch, semi-structured sparsity is implemented via a Tensor subclass, which allows us to dispatch to fast sparse kernels to speedup matmuls.
+We offer support for acceleration on NVIDIA Ampere GPUs using either our CUTLASS kernels (PyTorch 2.1+) or cuSPARSELt integration (PyTorch 2.2+). Below are the following shape constraints for the CUTLASS and cuSPARSELt backend respectively
 
-In this compressed form, the sparse tensor is stored by retaining only the *specified* elements and some metadata, which encodes the mask.
+cuSPARSELt acceleration is supported for Ampere (SM 8.0) and Ada Lovelace (SM 8.9) GPUs.
+
+CUTLASS
+-------
+
+.. csv-table::
+   :header: "PyTorch dtype", "Sparse Shape Constraints", "Dense Shape Constraints" "Compression Factor", "Sparsity Pattern"
+   :widths: 15, 45, 10, 10
+   :delim: ;
+
+   ``torch.float32``; Tensor must be 2D and (r, c) must both be a positive multiple of (32, 32); (4, 4); 9/16;1:2
+   ``torch.float16``; Tensor must be 2D and (r, c) must both be a positive multiple of (32, 64); (8, 8); 9/16;2:4
+   ``torch.bfloat16``; Tensor must be 2D and (r, c) must both be a positive multiple of (32, 64); (8, 8); 9/16;2:4
+   ``torch.int8``; Tensor must be 2D and (r, c) must be a positive multiple of (16, 128); (16, 16); 10/16;2:4
+
+cuSPARSELt
+----------
+
+.. csv-table::
+   :header: "PyTorch dtype", "Sparse Shape Constraints", "Dense Shape Constraints" "Compression Factor", "Sparsity Pattern"
+   :widths: 15, 45, 10, 10
+   :delim: ;
+
+   ``torch.float32``; Tensor must be 2D and (r, c) must both be a positive multiple of (8, 8); (4, 4); 9/16;1:2
+   ``torch.float16``; Tensor must be 2D and (r, c) must both be a positive multiple of (16, 16); (8, 8); 9/16;2:4
+   ``torch.bfloat16``; Tensor must be 2D and (r, c) must both be a positive multiple of (16, 16); (8, 8); 9/16;2:4
+   ``torch.int8``; Tensor must be 2D and (r, c) must be a positive multiple of (8, 8); (4, 4); 10/16;2:4
+
+
 
 .. note::
     The specified elements and metadata mask of a semi-structured sparse tensor are stored together in a single
@@ -234,21 +262,6 @@ Constructing Sparse Semi-Structured Tensors
 -------------------------------------------
 
 You can transform a dense tensor into a sparse semi-structured tensor by simply using the ``torch.to_sparse_semi_structured`` function.
-
-Please also note that we only support CUDA tensors since hardware compatibility for semi-structured sparsity is limited to NVIDIA GPUs.
-
-
-The following datatypes are supported for semi-structured sparsity. Note that each datatype has its own shape constraints and compression factor.
-
-.. csv-table::
-   :header: "PyTorch dtype", "Shape Constraints", "Compression Factor", "Sparsity Pattern"
-   :widths: 15, 45, 10, 10
-   :delim: ;
-
-   ``torch.float16``; Tensor must be 2D and (r, c) must both be a positive multiple of 64;9/16;2:4
-   ``torch.bfloat16``; Tensor must be 2D and (r, c) must both be a positive multiple of 64;9/16;2:4
-   ``torch.int8``; Tensor must be 2D and (r, c) must both be a positive multiple of 128;10/16;2:4
-
 
 To construct a semi-structured sparse tensor, start by creating a regular dense tensor that adheres to a 2:4 (or semi-structured) sparse format.
 To do this we  tile a small 1x4 strip to create a 16x16 dense float16 tensor.
@@ -302,13 +315,14 @@ To use these ops, simply pass the output of ``to_sparse_semi_structured(tensor)`
 
 Accelerating nn.Linear with semi-structured sparsity
 ----------------------------------------------------
-You can accelerate the linear layers in your model if the weights are already semi-structured sparse with just a few lines of code:
+You can accelerate the linear layers in your model for inference if the weights are already semi-structured sparse with just a few lines of code:
 
     >>> input = torch.rand(64, 64).half().cuda()
     >>> mask = torch.Tensor([0, 0, 1, 1]).tile((64, 16)).cuda().bool()
     >>> linear = nn.Linear(64, 64).half().cuda()
     >>> linear.weight = nn.Parameter(to_sparse_semi_structured(linear.weight.masked_fill(~mask, 0)))
 
+Semi-structured sparsity can also be used to accelerate training with `torchao <https://github.com/pytorch/ao/tree/main/torchao/sparsity/training>`_.
 
 .. _sparse-coo-docs:
 
