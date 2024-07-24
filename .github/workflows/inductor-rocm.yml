@@ -1,4 +1,4 @@
-name: inductor_rocm
+name: inductor-rocm
 
 on:
   schedule:
@@ -14,7 +14,7 @@ on:
 #     - main
       - release/*
     tags:
-      - ciflow/inductor_rocm/*
+      - ciflow/inductor-rocm/*
   workflow_dispatch:
 
 concurrency:
@@ -47,4 +47,3 @@ jobs:
       build-environment: linux-focal-rocm6.1-py3.8
       docker-image: ${{ needs.linux-focal-rocm6_1-py3_8-inductor-build.outputs.docker-image }}
       test-matrix:  ${{ needs.linux-focal-rocm6_1-py3_8-inductor-build.outputs.test-matrix }}
-
