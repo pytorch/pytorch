@@ -169,7 +169,7 @@ def record_untuned_enable(val: bool = True) -> None:
     torch._C._cuda_record_untuned_enable(val)  # type: ignore[attr-defined]
 
 def record_untuned_is_enabled() -> bool:
-    r"""Returns whether TunableOp implementations can be recorded."""
+    r"""Returns whether TunableOp operations are recorded for offline tuning."""
     return torch._C._cuda_record_untuned_is_enabled()  # type: ignore[attr-defined]
 
 def set_max_tuning_duration(duration: int) -> None:
