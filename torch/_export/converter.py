@@ -637,8 +637,10 @@ class TS2FXGraphConverter:
             return (
                 fqn in self.name_to_buffer
                 or fqn in self.name_to_param
-                or (fqn in self.name_to_constant
-                and isinstance(self.name_to_constant[fqn], torch.ScriptObject))
+                or (
+                    fqn in self.name_to_constant
+                    and isinstance(self.name_to_constant[fqn], torch.ScriptObject)
+                )
             )
 
         if self.is_top_level_graph():
@@ -1332,6 +1334,8 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         ep._constants = {**name_to_tensor_constants, **name_to_constant}
         for k in name_to_tensor_constants:
             ep.state_dict.pop(k, None)
+        for k in name_to_constant:
+            ep.state_dict.pop(k, None)
         for spec in ep.graph_signature.input_specs:
             # Mark as constant tensors for erroneously traced buffers.
             if (
@@ -1346,7 +1350,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
     def lift_get_attr(self):
         # This function lifts multiple data types.
 
-        #     1. Tensor constants attributes (e.g., self.data = torch.tensor([2,3])) 
+        #     1. Tensor constants attributes (e.g., self.data = torch.tensor([2,3]))
         #     to buffers. Currently, when there are tensor constants, export
         #     would error and ask users to register tensor constants as buffers.
         #     Since it is hard to manually do so for TorchScript models
@@ -1355,7 +1359,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
 
         #     2. ScriptObbject to constant. It will then be converted to getattr in
         #     in the fx graph.
-        # 
+        #
         # This function should happen in TS2EPConverter instead of
         # TS2FXGraphConverter since it gets attributes from self.ts_model
         # which is not accessable in TS2FXGraphConverter. It is similar to where
