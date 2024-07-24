@@ -5,7 +5,7 @@
 #pragma once
 
 #include <ATen/cuda/PhiloxUtils.cuh>
-#include <cute/algorithm/copy.hpp>
+#include <cute/tensor.hpp>
 
 #include <cutlass/cutlass.h>
 #include <cutlass/array.h>
