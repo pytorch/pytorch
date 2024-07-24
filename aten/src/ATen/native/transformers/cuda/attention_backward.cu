@@ -94,6 +94,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
 
   // Currently unused args:
   std::optional<at::Tensor> alibi_slopes{std::nullopt};
+  const float softcap = 0.0;
 
   bool determinisitic{false};
   auto& ctx = at::globalContext();
@@ -132,6 +133,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         is_causal,
         non_null_window_left,
         non_null_window_right,
+        softcap,
         determinisitic,
         philox_seed,
         philox_offset);
@@ -154,6 +156,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         is_causal,
         non_null_window_left,
         non_null_window_right,
+        softcap,
         determinisitic,
         philox_seed,
         philox_offset);

@@ -8,5 +8,5 @@
 namespace pytorch_flash{
 
 
-template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 32>(Flash_fwd_params &params, cudaStream_t stream);
+template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 32, false>(Flash_fwd_params &params, cudaStream_t stream);
 } // namespace pytorch_flash

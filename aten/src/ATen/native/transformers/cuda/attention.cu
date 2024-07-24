@@ -906,6 +906,7 @@ _flash_attention_forward(
   std::optional<Tensor> seqused_k = _seqused_k;
   c10::optional<at::Tensor> block_table = std::nullopt;  // we are not using the block table yet
   std::optional<Tensor> alibi_slopes = _alibi_slopes;
+  const float softcap = 0.0;
 
   const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
   const int non_null_window_right = window_size_right.has_value() ? window_size_right.value() : -1;
@@ -947,6 +948,7 @@ _flash_attention_forward(
             is_causal,
             non_null_window_left,
             non_null_window_right,
+            softcap,
             return_debug_mask,
             std::nullopt /*gen_*/);
   } else {
@@ -970,6 +972,7 @@ _flash_attention_forward(
             is_causal,
             non_null_window_left,
             non_null_window_right,
+            softcap,
             return_debug_mask, /*return_softmax (this is used for testing)*/
             std::nullopt);
   }

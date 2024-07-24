@@ -56,6 +56,16 @@
   #define EVENK_SWITCH BOOL_SWITCH
 #endif
 
+#ifdef FLASHATTENTION_DISABLE_SOFTCAP
+  #define SOFTCAP_SWITCH(COND, CONST_NAME, ...)   \
+  [&] {                                         \
+    constexpr static bool CONST_NAME = false;    \
+    return __VA_ARGS__();                       \
+  }()
+#else
+  #define SOFTCAP_SWITCH BOOL_SWITCH
+#endif
+
 #ifdef FLASHATTENTION_DISABLE_LOCAL
   #define LOCAL_SWITCH(COND, CONST_NAME, ...)   \
   [&] {                                         \

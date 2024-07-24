@@ -13,7 +13,7 @@ using namespace cute;
 template <typename Engine, typename Layout>
 __forceinline__ __device__ void apply_mask(Tensor<Engine, Layout> &tensor, const int max_seqlen_k,
                                   const int col_idx_offset_ = 0) {
-    // tensor has shape (ncol=(2, MMA_M), nrow=(2, MMA_N))
+    // tensor has shape (nrow=(2, MMA_M), ncol=(2, MMA_N))
     static_assert(Layout::rank == 2, "Only support 2D Tensor");
     const int lane_id = threadIdx.x % 32;
     const int col_idx_offset = col_idx_offset_ + (lane_id % 4) * 2;
@@ -39,7 +39,7 @@ __forceinline__ __device__ void apply_mask_local(Tensor<Engine, Layout> &tensor,
                                         const int max_seqlen_k, const int row_idx_offset,
                                         const int max_seqlen_q, const int warp_row_stride,
                                         const int window_size_left, const int window_size_right) {
-    // tensor has shape (ncol=(2, MMA_M), nrow=(2, MMA_N))
+    // tensor has shape (nrow=(2, MMA_M), ncol=(2, MMA_N))
     static_assert(Layout::rank == 2, "Only support 2D Tensor");
     const int lane_id = threadIdx.x % 32;
     const int col_idx_offset = col_idx_offset_ + (lane_id % 4) * 2;
@@ -85,7 +85,7 @@ __forceinline__ __device__ void apply_mask_causal_w_idx(
     Tensor<Engine0, Layout0> &tensor, Tensor<Engine1, Layout1> const &idx_rowcol,
     const int col_idx_offset_, const int max_seqlen_k, const int row_idx_offset)
 {
-    // tensor has shape (ncol=(2, MMA_M), nrow=(2, MMA_N))
+    // tensor has shape (nrow=(2, MMA_M), ncol=(2, MMA_N))
     static_assert(Layout0::rank == 2, "Only support 2D Tensor");
     static_assert(Layout1::rank == 2, "Only support 2D Tensor");
     CUTE_STATIC_ASSERT_V(size<0>(tensor) == size<0>(idx_rowcol));

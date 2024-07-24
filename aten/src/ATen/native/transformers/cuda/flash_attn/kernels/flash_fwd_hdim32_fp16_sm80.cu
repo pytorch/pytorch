@@ -8,7 +8,7 @@
 namespace pytorch_flash{
 
 template<>
-void run_mha_fwd_<cutlass::half_t, 32>(Flash_fwd_params &params, cudaStream_t stream) {
-    run_mha_fwd_hdim32<cutlass::half_t>(params, stream);
+void run_mha_fwd_<cutlass::half_t, 32, false>(Flash_fwd_params &params, cudaStream_t stream) {
+    run_mha_fwd_hdim32<cutlass::half_t, false>(params, stream);
 }
 } // namespace pytorch_flash
