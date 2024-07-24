@@ -224,6 +224,18 @@ class RepeatIteratorVariable(IteratorVariable):
     def next_variable(self, tx):
         return self.item
 
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(itertools),
+                    codegen.create_load_attr("count"),
+                ]
+            )
+        )
+        codegen(self.item)
+        codegen.extend_output(create_call_function(1, False))
+
 
 class CountIteratorVariable(IteratorVariable):
     def __init__(self, item: int = 0, step: int = 1, **kwargs):
@@ -241,6 +253,19 @@ class CountIteratorVariable(IteratorVariable):
         next_item = self.item.call_method(tx, "__add__", [self.step], {})
         self.item = next_item
         return self.item
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(itertools),
+                    codegen.create_load_attr("count"),
+                ]
+            )
+        )
+        codegen(self.item)
+        codegen(self.step)
+        codegen.extend_output(create_call_function(2, False))
 
 
 class CycleIteratorVariable(IteratorVariable):
