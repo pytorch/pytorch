@@ -3574,17 +3574,13 @@ class NativeCachingAllocator : public CUDAAllocator {
   // process. There can be multiple types of storage in the same IPC mem block,
   // so we must cache the device ptr to construct typed storage as it comes.
 
-  // When using cuMemCreate, via expandable segments, we use c
-  // MemExportToShareableHandle
-  // create a file descriptor that can be sent t
-  //  the other process to
-  // ort the object. Then we recreate part of the ex
-  // andable segment necessary to
-  // the allocation.
+  // When using cuMemCreate, via expandable segments, we use
+  // cuMemExportToShareableHandle to create a file descriptor that can be sent
+  // to the other process to sort the object. Then we recreate part of the
+  // exandable segment necessary to load the allocation.
 
   // ipcMemHandle_to_devptr caches the mapping from shareable handle to
-
-  // This process' memory mapping information for that share to ensure we do not
+  // this process' memory mapping information for that share to ensure we do not
   // create it twice. When the shared_ptr is no longer in use we clean up the
   // cache.
 
@@ -3598,10 +3594,10 @@ class NativeCachingAllocator : public CUDAAllocator {
       std::istringstream ss(handle);
       auto type = ss.get();
       if (type == SHAREABLE_CUDA_MALLOC) {
-        cudaIpcMemHandle_t handle;
-        ss.read((char*)&handle, CUDA_IPC_HANDLE_SIZE);
+        cudaIpcMemHandle_t cuda_handle;
+        ss.read((char*)&cuda_handle, CUDA_IPC_HANDLE_SIZE);
         C10_CUDA_CHECK(cudaIpcOpenMemHandle(
-            &cuda_ipc_ptr_, handle, cudaIpcMemLazyEnablePeerAccess));
+            &cuda_ipc_ptr_, cuda_handle, cudaIpcMemLazyEnablePeerAccess));
       } else if (type == SHAREABLE_CUDA_EXPANDABLE_SEGMENT) {
         expandable_segment_ =
             ExpandableSegment::fromShared(device, allocator.peers(), ss);
