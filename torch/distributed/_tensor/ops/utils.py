@@ -9,12 +9,12 @@ from typing import (
     Iterable,
     List,
     Optional,
-    ParamSpec,
     Sequence,
     Tuple,
     TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 
 import torch
 from torch.distributed._tensor._collective_utils import redistribute_cost
