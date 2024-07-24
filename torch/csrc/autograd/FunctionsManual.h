@@ -1102,4 +1102,29 @@ mkldnn_rnn_layer_differentiable_backward(
 
 Tensor values_backward(const Tensor& grad, const Tensor& self);
 
+Tensor _batch_norm_no_update_jvp_manual(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& weight_p,
+    const Tensor& weight_t,
+    const Tensor& bias_p,
+    const Tensor& bias_t,
+    const std::optional<Tensor>& running_mean,
+    const std::optional<Tensor>& running_var,
+    const Tensor& saved_mean,
+    const Tensor& saved_invstd,
+    double eps);
+
+std::tuple<Tensor, Tensor, Tensor> _batch_norm_no_update_backward_manual(
+    const Tensor& grad_output,
+    const Tensor& input,
+    const std::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
+    const std::optional<Tensor>& save_mean_opt,
+    const std::optional<Tensor>& save_var_opt,
+    double eps,
+    std::array<bool,3> grad_input_mask,
+    const Tensor& reserve);
+
 } // namespace torch::autograd::generated::details
