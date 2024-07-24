@@ -45,3 +45,13 @@ def get_mm_tensors(
     else:
         b = torch.randn(k, n, dtype=dtype_right)
     return (a, b)
+
+
+def set_precision(dtype: Any, p_float32_prec_highest: float = 0.8) -> None:
+    if dtype == torch.float32:
+        precisions = ["high", "highest"]
+        weights = [1 - p_float32_prec_highest, p_float32_prec_highest]
+        precision = random.choices(precisions, weights)[0]
+    else:
+        precision = "high"
+    torch.set_float32_matmul_precision(precision)
