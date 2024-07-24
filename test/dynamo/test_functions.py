@@ -573,6 +573,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         d[4] = x + 2
         return len(values)
 
+    def test_dict_id_guard(self):
+        d1 = collections.OrderedDict({"a": 2})
+        d2 = d1
+
+        def fn(x):
+            # Iteration forces DictGuardManager
+            for k in d1:
+                x = x * d1[k] * d2[k]
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     @make_test
     def test_callable_lambda(x):
         if callable(lambda x: True):

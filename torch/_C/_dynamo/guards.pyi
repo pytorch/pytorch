@@ -91,7 +91,7 @@ class DictGuardManager(GuardManager):
         guard_manager_enum,
     ) -> GuardManager: ...
 
-def install_tensor_aliasing_guard(
+def install_object_aliasing_guard(
     guard_managers: list[GuardManager],
     tensor_names: list[str],
     verbose_code_parts: list[str],
