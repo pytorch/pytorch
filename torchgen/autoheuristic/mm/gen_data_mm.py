@@ -74,18 +74,9 @@ class BenchmarkRunnerMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimporte
         random_multiple = random.randint(start, end)
         return random_multiple * 128
 
-    def get_random_pow2(self):
-        small_nums = [2**i for i in range(0, 6)]
-        medium_nums = [2**i for i in range(6, 10)]
-        large_nums = [2**i for i in range(10, 17)]
-        choices = [small_nums, medium_nums, large_nums]
-        weights = [0.05, 0.1, 0.85]
-        nums = random.choices(choices, weights)[0]
-        return random.choice(nums)
-
     def get_distr_type(self) -> str:
         # 85%: choose a random multiple of 128 between 2^10 and 2^17
-        # 10%: choose a random power of 2 between 2^0 and 2^17 favoring larger values
+        # 10%: choose a random power of 2 between 2^0 and 2^17
         #  4%: choose a random number between 1 and 131072
         #  1%: choose a random number between 2^i and 2^(i+1) with i in [1, 16]
         return random.choices(
@@ -98,7 +89,7 @@ class BenchmarkRunnerMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimporte
         if distr_type == "mult_128":
             return self.random_multiple_of_128(min_num=10, max_num=17)
         if distr_type == "pow2":
-            return self.get_random_pow2()
+            return 2 ** random.randint(0, 17)
         elif distr_type == "uniform-between-pow2":
             return self.get_random_between_pow2(min_power2=1, max_power2=17)
         elif distr_type == "uniform":
