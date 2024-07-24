@@ -27,6 +27,7 @@ from ..pattern_matcher import (
 )
 from .replace_random import replace_random_passes
 
+
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
 aten = torch.ops.aten
@@ -265,6 +266,10 @@ class UniformValueConstantFolder(ConstantFolder):
             out = super(ConstantFolder, self).run_node(node)
             if isinstance(out, torch.Tensor) and out.numel() == 1:
                 return out
+
+        # handle device_put op
+        if node.target == prims.device_put.default:
+            return super(ConstantFolder, self).run_node(node)
 
         # constructors ops
         if (

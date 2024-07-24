@@ -324,11 +324,24 @@ coordinate_descent_search_radius = int(
 )
 
 # AutoHeuristic is a framework that allows one to collect data from autotuning, use the data to learn a heuristic, and
-# generate the learned heursitic to code which is shipped with the compiler. For now, this is only enabled for pad_mm.
-# If set to "OFF", this will not run AutoHeuristic.
-# If set to "COLLECT_DATA", this will store data about the inputs and autotuning results.
-# If set to "USE_HEURISTIC", this will use the learned heuristic to make a choice in pad_mm.
-autoheuristic_mode = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_MODE", "OFF")
+# generate the learned heursitic to code which is shipped with the compiler
+# Specify a list of comma separated optimizations to collect data for
+autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
+# Specify a list of comma separated optimizations to use learned heuristics for
+autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "")
+
+
+def run_autoheuristic(name):
+    return collect_autoheuristic(name) or use_autoheuristic(name)
+
+
+def collect_autoheuristic(name):
+    return name in torch._inductor.config.autoheuristic_collect.split(",")
+
+
+def use_autoheuristic(name):
+    return name in torch._inductor.config.autoheuristic_use.split(",")
+
 
 # If set to "DEFAULT", this will use the default log path specified in autoheuristic.py.
 # If set to another path, autoheuristic will instead log results to the given path.
@@ -419,6 +432,12 @@ assert_indirect_indexing = True
 
 # compute CSE bounds on variables that do not appear in the FX graph
 compute_all_bounds = False
+
+# benchmark combo kernels and only allow ones with perf gains
+benchmark_combo_kernel = False
+# combo_kernel autotuning options: 0 - disable, 1 - enable except for foreach,
+# 2 - enable for all
+combo_kernels_autotune = 1
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -831,6 +850,8 @@ class aot_inductor:
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
 
+    package: bool = False
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
@@ -1042,6 +1063,11 @@ class trace:
 _save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
+    "post_grad_custom_post_pass",
+    "post_grad_custom_pre_pass",
+    "joint_custom_pre_pass",
+    "joint_custom_post_pass",
+    "pre_grad_custom_pass",
 ]
 
 _cache_config_ignore_prefix = [
@@ -1057,6 +1083,7 @@ if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
+
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])

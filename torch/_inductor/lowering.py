@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 import itertools
@@ -42,11 +43,12 @@ from torch.utils._sympy.functions import (
     IntTrueDiv,
     ModularIndexing,
 )
-from .._dynamo.utils import import_submodule
 
+from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
 from .ir import (
+    DtypeView,
     ExpandView,
     IndexingConstant,
     is_triton,
@@ -71,6 +73,7 @@ from .utils import (
     use_scatter_fallback,
 )
 from .virtualized import ops, V
+
 
 log = logging.getLogger(__name__)
 lowerings: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
@@ -207,6 +210,14 @@ def get_overloads(aten_fn):
     return aten_fn
 
 
+def in_namespace(op, namespace):
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        return namespace in op._qualified_op_name
+    elif isinstance(op, torch._ops.OpOverload):
+        return namespace in op.name()
+    return False
+
+
 def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
     indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
     if (type_promotion_kind or convert_input_to_bool) and indices:
@@ -293,7 +304,9 @@ def _register_lowering(
             args = args[0]
 
         # kwargs tensors not supported yet unless it's a fallback op
-        if not all(fn in fallbacks for fn in aten_fn):
+        if not all(
+            (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
+        ):
             assert not any(isinstance(x, TensorBox) for x in kwargs.values())
             # explicitly assert for "out=" ops for better error messages
             assert not any(
@@ -514,7 +527,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
         outputs = [None] * len(a_list_input)
         for (device, use_foreach), group in groups.items():
-            buffer_list = []
+            operation_list: List[str] = []
             for (
                 output_ind,
                 args,
@@ -531,10 +544,11 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                     and use_foreach
                     and realize_outputs
                 ):
-                    buffer_list.append(output.realize())
+                    output.realize()
+                    operation_list.append(output.get_operation_name())
 
-            if buffer_list:
-                V.graph.register_list(buffer_list)
+            if operation_list:
+                V.graph.register_operation_list(operation_list)
 
         assert all(x is not None for x in outputs)
         return outputs
@@ -585,16 +599,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     if src_bits != dst_bits:
         # fallback to aten eager implementation for differing bitwidths
         return fallback_handler(aten.view.dtype)(x, dtype)
-
-    def _to_dtype_bitcast(x):
-        # Because we may promote tensor type from float16 or bfloat16
-        # to float, we will need to pass the original src dtype (i.e. x_dtype),
-        # which is used for correctly constructing type conversion before bitcast,
-        # which requires the bitwidth of the input tensor type is the same as the
-        # target type.
-        return ops.to_dtype_bitcast(x, dtype, x_dtype)
-
-    return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
+    else:
+        return TensorBox(DtypeView.create(x, dtype))
 
 
 @register_lowering(aten.view.dtype, type_promotion_kind=None)
@@ -603,7 +609,7 @@ def _view_dtype(x: TensorBox, dtype: torch.dtype):
         return TensorBox.create(
             ir.ComplexView.create(torch.ops.aten.view.dtype, x, dtype)
         )
-    return to_dtype_bitcast(x, dtype, copy=True)
+    return to_dtype_bitcast(x, dtype)
 
 
 def to_device(x: TensorBox, device: torch.device, *, copy=False):
@@ -1419,11 +1425,17 @@ def cat(inputs, dim=0):
     MAX_COMPLEX_POINTWISE_CAT = 8
     MAX_SIMPLE_OP_COUNT = 2
 
+    def additional_pointwise_ops(op: torch._ops.OpOverload):
+        return op in (aten.cat.default, aten.constant_pad_nd.default)
+
     if len(inputs) <= MAX_COMPLEX_POINTWISE_CAT or (
         (len(inputs) <= config.max_pointwise_cat_inputs)
         and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
     ):
-        pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
+        pointwise_uses = all(
+            is_pointwise_use(use, additional_pointwise_ops)
+            for use in V.current_node.users
+        )
         # fuse in case we will be used in a pointwise node, and there are any inputs we
         # we can prevent materialization of.
         fuse_pointwise_use = (
@@ -1617,8 +1629,11 @@ def fallback_handler(kernel, add_to_fallback_set=True):
         fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
+        def wrap_tensors(x):
+            return TensorBox.create(x) if isinstance(x, ir.IRNode) else x
+
         return pytree.tree_map(
-            TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
+            wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
         )
 
     return handler
@@ -1633,7 +1648,7 @@ def _warn_complex_not_supported():
 
 # There are some types (CPU) which we accept as input but not as
 # output.
-def unsupported_input_tensor(t: torch._subclasses.FakeTensor, parent=None):
+def unsupported_input_tensor(t: torch.Tensor, parent=None):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         # Complex views are supported with IR ComplexView
@@ -1647,7 +1662,7 @@ def unsupported_input_tensor(t: torch._subclasses.FakeTensor, parent=None):
     return False
 
 
-def unsupported_output_tensor(t: torch._subclasses.FakeTensor, parent=None):
+def unsupported_output_tensor(t: torch.Tensor, parent=None):
     "Do not support writing tensor but can read from it"
     if unsupported_input_tensor(t, parent):
         return True
@@ -2589,6 +2604,7 @@ def _local_scalar_dense(data):
     binding_sym, keypath = next(iter(unbacked_bindings.items()))
     buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
     # NB: the replaced expr is OK to use directly downstream, we want
     # simplifications in this case!
     val = V.graph.current_node.meta["val"]
@@ -3166,6 +3182,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
 
     if x_ndim == 0:
         self = view(self, [])
@@ -3386,6 +3403,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             zero_out,
         )
         buffer.name = V.graph.register_buffer(buffer)
+        V.graph.register_operation(buffer)
 
     # self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
     # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
@@ -3404,6 +3422,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
 
     if ndim == 0:
         self = view(self, [])
@@ -3507,105 +3526,6 @@ def _upsample_nearest_exact3d(
 
 def _create_constants(*args, dtype):
     return tuple(ops.constant(a, dtype) for a in args)
-
-
-@register_lowering(aten.reflection_pad1d_backward)
-@register_lowering(aten.reflection_pad2d_backward)
-@register_lowering(aten.reflection_pad3d_backward)
-def _reflection_padnd_backward(grad_output, x, padding):
-    dim = len(padding) // 2
-
-    dhw = [h - 1 for h in x.get_size()[-dim:]]
-    grad_loader = grad_output.make_loader()
-
-    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
-    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
-
-    def fn(idx):
-        b = idx[:-dim]
-        xyz = idx[-dim:]
-
-        def load_from_output(x):
-            return grad_loader([*b, *x])
-
-        def index_range_condition(index_range):
-            i, lb, ub = index_range
-            i = ops.index_expr(i, torch.int32)
-            lb = ops.index_expr(lb, torch.int64)
-            ub = ops.index_expr(ub, torch.int64)
-            return ops.and_(ops.ge(i, lb), ops.le(i, ub))
-
-        # Areas after reflection:
-        #
-        #   top-left    |   top     |   top-right
-        # -----------------------------------------
-        #   left        |   center  |   right
-        # -----------------------------------------
-        #   bottom-left |   bottom  |   bottom-right
-        #
-        # The center area is the original matrix. Other areas are reflections.
-
-        center = [xyz[i] + padding_left[i] for i in range(dim)]
-        left_reflect = [padding_left[i] - xyz[i] for i in range(dim)]
-        right_reflect = [2 * dhw[i] + padding_left[i] - xyz[i] for i in range(dim)]
-
-        # Accumulate gradients from different areas
-        # If some of the padding is negative, center load is not always valid
-        range_c = [
-            (center[i], 0, dhw[i] + padding_left[i] + padding_right[i])
-            for i in range(dim)
-        ]
-        cond = functools.reduce(
-            ops.and_, [index_range_condition(range_c[i]) for i in range(dim)]
-        )
-        grad = ops.masked(cond, lambda: load_from_output(center), 0.0)
-
-        def accumulate(grad, out, index_ranges):
-            # If the upper bound is less than the lower bound, we can get rid of one accumulation.
-            # This happens when the padding size is zero.
-            for i in range(dim):
-                upper_less_than_lower = index_ranges[i][2] < index_ranges[i][1]
-                if isinstance(upper_less_than_lower, bool) and upper_less_than_lower:
-                    return grad
-            cond = functools.reduce(
-                ops.and_,
-                [index_range_condition(index_range) for index_range in index_ranges],
-            )
-            g = ops.masked(cond, lambda: load_from_output(out), 0.0)
-            return ops.add(grad, g)
-
-        for area in itertools.product(*[[-1, 0, 1] for _ in range(dim)]):
-            if area == tuple([0] * dim):
-                # center, this is already done.
-                continue
-
-            outs = []
-            index_ranges = []
-
-            for i in range(dim):
-                if area[i] == 0:
-                    out = center[i]
-                    index_range = range_c[i]
-                elif area[i] == -1:
-                    out = left_reflect[i]
-                    index_range = (xyz[i], 1, padding_left[i])
-                elif area[i] == 1:
-                    out = right_reflect[i]
-                    index_range = (xyz[i], dhw[i] - padding_right[i], dhw[i] - 1)
-
-                outs.append(out)  # type: ignore[possibly-undefined]
-                index_ranges.append(index_range)  # type: ignore[possibly-undefined]
-
-            grad = accumulate(grad, outs, index_ranges)
-
-        return grad
-
-    return Pointwise.create(
-        device=grad_output.get_device(),
-        dtype=grad_output.get_dtype(),
-        inner_fn=fn,
-        ranges=list(x.get_size()),
-    )
 
 
 @register_lowering(prims.rev.default)
@@ -5398,6 +5318,9 @@ def fill_(x, fill_value):
 
 @register_lowering(aten.copy_, type_promotion_kind=None)
 def copy_(dst, src, non_blocking=False):
+    if dst is src:
+        # dst.copy_(dst) can happen from the reinplacing pass
+        return dst
     src = to_device(src, dst.get_device())
     src = to_dtype(src, dst.get_dtype())
     src = expand(src, dst.get_size())
@@ -6104,6 +6027,15 @@ def set__source_tensor(self, source_tensor):
     return TensorBox.create(ir.SetSourceTensorKernel(self, source_tensor))
 
 
+if hasattr(torch.ops.fsdp, "set_"):
+
+    @register_lowering(torch.ops.fsdp.set_.default)
+    def fsdp_set_(self, source_tensor):
+        self.realize()
+        source_tensor.realize()
+        ir.SetSourceTensorKernel(self, source_tensor)
+
+
 @register_lowering(torch.ops.aten.resize)
 def resize(x, size, *, memory_format=None):
     assert isinstance(x, TensorBox)
@@ -6170,6 +6102,7 @@ def resize(x, size, *, memory_format=None):
 
 
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
+
 
 make_fallback(auto_functionalized)
 
@@ -6263,7 +6196,11 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
     kwargs = _make_scan_inner(input[0], axis=dim, dtype=None)
     kwargs["dtypes"] = tuple(x.get_dtype() for x in input)
     kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
-    result = ir.Scan.create(**kwargs, combine_fn=wrapped_combine_fn)
+    result = ir.Scan.create(
+        combine_fn=wrapped_combine_fn,
+        can_fallback_to_aten=False,
+        **kwargs,
+    )
     if result[0] is None:
         raise RuntimeError("Unable to generate code for associative_scan op")
     return result
@@ -6366,6 +6303,17 @@ try:
             ),
         )
 
+    @register_lowering(_c10d_functional.all_gather_into_tensor_out)
+    def _all_gather_into_tensor_out(inp, group_size, group_name, *, out):
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.all_gather_into_tensor_out.default,
+            inp,
+            group_size,
+            group_name,
+            out=out,
+        )
+        return out
+
     @register_lowering(_c10d_functional.reduce_scatter_tensor)
     def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name):
         return ir.TensorBox.create(
@@ -6443,17 +6391,21 @@ except (AttributeError, ImportError):
 # populate lowerings defined in kernel/*
 from . import kernel
 
+
 import_submodule(kernel)
 
 from . import quantized_lowerings
+
 
 quantized_lowerings.register_quantized_ops()
 quantized_lowerings.register_woq_mm_ops()
 
 from . import mkldnn_lowerings
 
+
 mkldnn_lowerings.register_onednn_fusion_ops()
 
 from . import jagged_lowerings
+
 
 jagged_lowerings.register_jagged_ops()
