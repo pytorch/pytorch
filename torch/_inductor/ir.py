@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import collections
 import contextlib
 import dataclasses
 import functools
@@ -15,6 +16,7 @@ from typing import (
     Any,
     Callable,
     ClassVar,
+    ContextManager,
     Dict,
     Iterable,
     List,
@@ -2566,7 +2568,11 @@ class ReinterpretView(BaseView):
     def make_loader(self):
         def loader(index):
             indexer = self.layout.make_indexer()
-            return ops.load(self.get_name(), indexer(index))
+            tmp_loader = ops.load(self.get_name(), indexer(index))
+            if self.layout.dtype != self.data.dtype:
+                return ops.to_dtype_bitcast(tmp_loader, self.dtype, self.data.dtype)
+            else:
+                return tmp_loader
 
         return loader
 
@@ -2596,7 +2602,49 @@ class ReinterpretView(BaseView):
             self.layout.stride,
             self.layout.offset,
             writer,
+            dtype=self.layout.dtype,
         )
+
+
+@dataclasses.dataclass
+class DtypeView(BaseView):
+    """Pretend our storage has a different type"""
+
+    target_dtype: torch.dtype
+
+    @classmethod
+    def create(cls, x, new_dtype):
+        if is_storage_and_layout(x):
+            storage, old_layout = as_storage_and_layout(x)
+            new_layout = FixedLayout(
+                old_layout.device,
+                new_dtype,
+                old_layout.size,
+                old_layout.stride,
+                old_layout.offset,
+            )
+            return ReinterpretView(storage, new_layout)
+        return DtypeView(x, new_dtype)
+
+    def __str__(self):
+        return self.str_helper([self.data, self.target_dtype])
+
+    __repr__ = __str__
+
+    @property
+    def dtype(self):
+        return self.target_dtype
+
+    def get_size(self):
+        return self.data.get_size()
+
+    def make_loader(self):
+        inner = self.data.make_loader()
+
+        def loader(idx):
+            return ops.to_dtype_bitcast(inner(idx), self.target_dtype, self.data.dtype)
+
+        return loader
 
 
 class SliceView(View):
@@ -3802,7 +3850,6 @@ class TritonTemplateBuffer(TemplateBuffer):
         super().__init__(layout, inputs, make_kernel_render)
         self.debug_extra = debug_extra
         self.mutated_inputs = mutated_inputs
-        self.outputs: List[Buffer] = [self]
         if mutated_inputs is not None:
             # Ensure that the mutated inputs are only allowed for certain nodes
             allowed_set = {
@@ -3813,13 +3860,7 @@ class TritonTemplateBuffer(TemplateBuffer):
             assert (
                 current_node in allowed_set
             ), f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
-            device = self.inputs[0].get_device()
-            self.outputs += [
-                MutationOutput(NoneLayout(device), buf, self) for buf in mutated_inputs
-            ]
-
-    def get_outputs(self) -> List[Buffer]:
-        return self.outputs
+            mark_node_as_mutating(self, *mutated_inputs)
 
     def __str__(self):
         out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
@@ -3948,23 +3989,24 @@ class CppTemplateBuffer(TemplateBuffer):
 class InputsKernel(OperationBuffer):
     inputs: List[Buffer]
 
+    def get_read_writes_input(self, x):
+        return dependencies.StarDep(x.get_name())
+
     def get_read_writes(self):
-        reads: Set[dependencies.Dep] = set()
-        StarDep = dependencies.StarDep
+        star_dep = []
         for input in self.inputs:
             if isinstance(input, list):
-                reads.update(StarDep(x.get_name()) for x in input)
+                star_dep.extend([self.get_read_writes_input(x) for x in input])
             else:
-                reads.add(StarDep(input.get_name()))
-
-        writes: Set[dependencies.Dep] = {
-            StarDep(buf.get_name()) for buf in self.get_outputs()
-        }
+                star_dep.append(self.get_read_writes_input(input))
 
         return dependencies.ReadWrites(
-            reads=reads,
-            writes=writes,
-            index_exprs=set(),
+            set(star_dep),
+            {dependencies.StarDep(self.get_name())},
+            set(),
+            [],
+            None,
+            op_counts=collections.Counter(),
         )
 
     @classmethod
@@ -4184,7 +4226,6 @@ class ExternKernel(InputsKernel):
     unbacked_bindings: Dict[sympy.Symbol, pytree.KeyPath] = dataclasses.field(
         default_factory=dict
     )
-    mutation_outputs: List[MutationOutput] = dataclasses.field(default_factory=list)
 
     def __init__(
         self,
@@ -4214,11 +4255,7 @@ class ExternKernel(InputsKernel):
         self.op_overload = op_overload
         self.collect_arg_kwarg_properties()
         self.unbacked_bindings = {}
-        self.mutation_outputs = []
         self.fx_node = V.graph.current_node
-
-    def get_outputs(self) -> List[Buffer]:
-        return [self, *self.mutation_outputs]
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
@@ -4439,9 +4476,9 @@ class ExternKernel(InputsKernel):
         # NOTE: Don't use extract_read_writes here as it fails when
         # make_loader() inlines the computation
         x_unwrap_view = x.unwrap_view()
-        x_unwrap_view_fx_node = V.graph.get_buffer(
-            x_unwrap_view.get_name()
-        ).get_origin_node()
+        buf = V.graph.get_buffer(x_unwrap_view.get_name())
+        assert buf is not None
+        x_unwrap_view_fx_node = buf.get_origin_node()
         # Prefer channels last format according to how the format is set from eager.
         if (
             x_unwrap_view_fx_node is not None
@@ -4880,29 +4917,6 @@ class ExternKernelAlloc(ExternKernel):
         raise NotImplementedError
 
 
-class MutationOutput(Buffer):
-    """
-    An output buffer that represents the mutation of a pre-existing buffer
-    """
-
-    def __init__(self, layout, mutated_node, mutating_node: Operation):
-        super().__init__(name=None, layout=layout)
-        mutated_node_name = mutated_node.get_name()
-        V.graph.mark_buffer_mutated(mutated_node_name)
-        self.mutation_names = [mutated_node_name]
-        self.mutating_node: Operation = mutating_node
-        self.name = V.graph.register_buffer(self)
-
-    def get_defining_op(self) -> Operation:
-        return self.mutating_node
-
-    def get_mutation_names(self):
-        return self.mutation_names
-
-    def should_allocate(self):
-        return False
-
-
 class UserDefinedTritonKernel(ExternKernel):
     def get_kernel_and_configs(self):
         from triton.runtime.autotuner import Autotuner
@@ -4932,6 +4946,14 @@ class UserDefinedTritonKernel(ExternKernel):
             new_name, raw_args, self.grid, configs, triton_meta, kernel.constexprs
         )
 
+    def should_allocate(self):
+        return False
+
+    def has_side_effects(self):
+        # UserDefinedTritonKernel does not return anything, but rather
+        # modifies input in place, do not let it get DCEd
+        return True
+
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         # add unbacked symbols used in the grid to the ones used
         # in the kwargs (the latter is generated by ExternKernel)
@@ -4939,6 +4961,12 @@ class UserDefinedTritonKernel(ExternKernel):
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
+
+    def get_mutation_names(self):
+        # NB: Inductor only allows a node to mutate 0 or 1 buffers.
+        # To get around that, we create MutationOutputs which marks their
+        # assigned input as mutable, thus, adhering to Inductor's constraint.
+        return []
 
     def __init__(self, *, kernel_idx, grid, kernel_args):
         inputs = []
@@ -4954,15 +4982,17 @@ class UserDefinedTritonKernel(ExternKernel):
                 kwargs[k] = v
 
         assert len(inputs) != 0
-        self.device = inputs[0].get_device()
+        device = inputs[0].get_device()
 
         super().__init__(
             None,
-            NoneLayout(self.device),  # type: ignore[arg-type]
+            NoneLayout(device),  # type: ignore[arg-type]
             inputs,
             tuple(constant_args),
             kwargs,
         )
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
         self.kernel_idx = kernel_idx
         self.grid = grid
 
@@ -4981,18 +5011,49 @@ class UserDefinedTritonKernel(ExternKernel):
                 kernel, {**kernel_args, **autotuned_kwargs}
             )
         ]
+        mark_node_as_mutating(self, *self.mutable_args)
 
-        self.mutation_outputs = [
-            MutationOutput(NoneLayout(self.device), buf, self)
-            for buf in self.mutable_args
-        ]
+    def get_inputs_that_alias_output(self):
+        return [i.get_name() for i in self.mutable_args]
+
+
+def mark_node_as_mutating(cur_buffer, *mutated_nodes: IRNode):
+    """
+    Allows ops in mutated_nodes to be marked as being mutated as well as
+    indicates to the scheduler that these ops depend on cur_buffer.
+
+    NB: Use this instead of directly constructing MutationOutput
+    """
+    for node in mutated_nodes:
+        assert isinstance(
+            node, IRNode
+        ), f"{node} node is type {type(node)} and is not an IRNode"
+        V.graph.mark_buffer_mutated(node.get_name())
+        MutationOutput(node.get_layout(), node, cur_buffer)
+
+
+class MutationOutput(ExternKernel):
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
+    def __init__(self, layout, mutated_node, node_doing_mutating):
+        # NB: Do not directly construct this - use `mark_node_as_mutating`
+        super().__init__(None, layout, [mutated_node, node_doing_mutating], ())
+        self.node_doing_mutating = node_doing_mutating
+        self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
-    def get_outputs(self) -> List[Buffer]:
-        return list(self.mutation_outputs)
+    def should_allocate(self):
+        return False
 
-    def get_device(self) -> torch.device:
-        return self.device
+    def is_no_op(self):
+        return True
+
+    def has_side_effects(self):
+        return True
+
+    def get_inputs_that_alias_output(self):
+        return [self.inputs[0].get_name()]
 
 
 class InplaceBernoulliFallback(ExternKernel):
@@ -5031,13 +5092,13 @@ class InplaceBernoulliFallback(ExternKernel):
             constant_args,
             op_overload=op_overload,
         )
-        V.graph.mark_buffer_mutated(x.get_name())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
         self.python_kernel_name = "aten.bernoulli_"
         if not config.abi_compatible:
             # TODO: this should be simplified once we switch to ABI-compatible only
             self.cpp_kernel_name = "at::native::bernoulli_"
+        mark_node_as_mutating(self, x)
 
 
 # Used to deal with torch.complex types
@@ -5077,7 +5138,6 @@ class InplaceCopyFallback(ExternKernel):
                 "aoti_torch_copy_" if config.abi_compatible else "at::_ops::copy_::call"
             ),
         )
-        V.graph.mark_buffer_mutated(inputs[0].get_name())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
@@ -5090,6 +5150,7 @@ class InplaceCopyFallback(ExternKernel):
             inputs,
             constant_args,
         )
+        mark_node_as_mutating(result, dst)
         return result
 
 
@@ -5135,6 +5196,7 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
         self.python_kernel_name = "inductor_ops.resize_storage_bytes_"
         self.cpp_kernel_name = "torch::inductor::resize_storage_bytes_"
         V.graph.never_reuse_buffers.add(variable.data.get_name())
+        mark_node_as_mutating(self, variable)
 
 
 class SetSourceTensorKernel(ExternKernelAlloc):
@@ -5148,14 +5210,16 @@ class SetSourceTensorKernel(ExternKernelAlloc):
         V.graph.never_reuse_buffers.add(self_tensor.data.get_name())
         V.graph.never_reuse_buffers.add(storage_tensor.get_name())
         V.graph.never_reuse_buffers.add(self.get_name())
-        device = storage_tensor.get_device()
-        self.mutation_outputs = [
-            MutationOutput(NoneLayout(device), self_tensor, self),
-            MutationOutput(NoneLayout(device), storage_tensor, self),
-        ]
+        mark_node_as_mutating(self, self_tensor, storage_tensor)
 
     def get_inputs_that_alias_output(self):
         return [self.inputs[0].get_name(), self.inputs[1].get_name()]
+
+    def get_mutation_names(self):
+        return [self.inputs[1].get_name()]
+
+    def has_side_effects(self):
+        return True
 
 
 class ScatterFallback(ExternKernel):
@@ -5229,9 +5293,9 @@ class ScatterFallback(ExternKernel):
             op_overload=op_overload,
         )
         self.cpp_kernel_name = get_aten_cpp_kernel_name(op_overload)
-        V.graph.mark_buffer_mutated(x.get_name())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
+        mark_node_as_mutating(self, x)
 
 
 class IndexPutFallback(ExternKernel):
@@ -5278,9 +5342,9 @@ class IndexPutFallback(ExternKernel):
             cpp_kernel_name=cpp_kernel_name,
             op_overload=op_overload,
         )
-        V.graph.mark_buffer_mutated(self.inputs[0].get_name())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
+        mark_node_as_mutating(self, x)
 
 
 class DeviceCopy(ExternKernelOut):
@@ -5457,7 +5521,7 @@ class FallbackKernel(ExternKernelAlloc):
         self.op_overload = kernel
         self.unflatten_args = unflatten_args
         self.kwargs = {} if kwargs is None else kwargs
-        V.graph.warn_fallback(self.python_kernel_name)
+        V.graph.warn_fallback(self.python_kernel_name)  # type: ignore[arg-type]
 
         # args that are aliased
         self.alias_names: List[str] = []
@@ -5522,20 +5586,15 @@ class FallbackKernel(ExternKernelAlloc):
                 return
             if info.alias_info is None:
                 return
-
-            def add_alias(t):
-                self.alias_names.append(t.get_name())
-                if info.alias_info.is_write:
-                    self.mutation_outputs.append(
-                        MutationOutput(NoneLayout(t.get_device()), t, self)
-                    )
-
             if is_list_tensor:
                 for tensor_arg in arg:
-                    add_alias(tensor_arg)
+                    self.alias_names.append(tensor_arg.get_name())
+                    mark_node_as_mutating(self, tensor_arg)
             else:
                 assert isinstance(info.type, torch.TensorType) or is_optional_tensor
-                add_alias(arg)
+                self.alias_names.append(arg.get_name())
+                if info.alias_info.is_write:
+                    mark_node_as_mutating(self, arg)
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
@@ -5836,8 +5895,8 @@ class FallbackKernel(ExternKernelAlloc):
     @classmethod
     def create(cls, kernel, *args, **kwargs):
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
-        context = (
-            V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
+        context: ContextManager[None] = (
+            V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()  # type: ignore[assignment]
         )
         with context:
             (
@@ -6858,9 +6917,8 @@ class _CollectiveKernel(FallbackKernel):
         for tensor_arg in tensor_args:
             tensor_arg.realize()
 
-        device = tensor_args[0].get_device()
         packed = cls(
-            NoneLayout(device),
+            NoneLayout(tensor_args[0].get_device()),
             kernel,
             tensor_args,
             non_tensor_args,
@@ -6870,16 +6928,11 @@ class _CollectiveKernel(FallbackKernel):
         packed.python_kernel_name = python_kernel_name
 
         inps = pytree.tree_leaves(inputs)
-        packed.mutation_outputs.extend(
-            [MutationOutput(NoneLayout(device), buf, packed) for buf in inps]
-        )
-
+        mark_node_as_mutating(packed, *inps)
         # For inplace collective ops, the input is guaranteed to be alias of the returned value of op.
         packed.alias_names.extend([inp.get_name() for inp in inps])
         if "out" in kwargs:
-            packed.mutation_outputs.append(
-                MutationOutput(NoneLayout(device), kwargs["out"], packed)
-            )
+            mark_node_as_mutating(packed, kwargs["out"])
             # For out-variant collective ops, the `out=` arg is guaranteed to be alias of the returned value of op.
             packed.alias_names.append(kwargs["out"].get_name())
 
@@ -6997,9 +7050,8 @@ class _WaitKernel(_CollectiveKernel):
             non_tensor_args,
             unflatten_args,
         )
-        packed.mutation_outputs.append(
-            MutationOutput(NoneLayout(inp.get_device()), inp, packed)
-        )
+
+        mark_node_as_mutating(packed, inp)
 
     def get_read_writes(self):
         read_writes = super().get_read_writes()
