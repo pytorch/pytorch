@@ -921,7 +921,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
             self.name_to_node,
             # Dummy node.
             torch.fx.Node(
-                None,
+                None,  # type: ignore[arg-type]
                 "mock",
                 "call_function",
                 lambda: None,

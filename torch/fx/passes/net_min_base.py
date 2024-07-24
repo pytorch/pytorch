@@ -302,7 +302,7 @@ class _MinimizerBase:
 
         # Find submodule containing colored nodes
         submodule_name: str = ""
-        for child_name, _ in split_module.named_children():
+        for child_name, _ in split_module.named_children():  # type: ignore[union-attr]
             # Skip submodules we're not interested in at the moment
             if "minimize" not in child_name:
                 continue
@@ -319,7 +319,7 @@ class _MinimizerBase:
                 f"Minimize submodule was not found with nodes {nodes}"
             )
 
-        return split_module, submodule_name
+        return split_module, submodule_name  # type: ignore[return-value]
 
     def _run_and_compare(
         self,
@@ -391,10 +391,10 @@ class _MinimizerBase:
             report.append(f"Result mismatch for {result_key}")
             if self.module_exporter:
                 self.module_exporter(
-                    a_input, submodule, str(result_key[0]) + "_cpu",
+                    a_input, submodule, str(result_key[0]) + "_cpu",  # type: ignore[index]
                 )
                 self.module_exporter(
-                    b_input, submodule, str(result_key[0]) + "_acc",
+                    b_input, submodule, str(result_key[0]) + "_acc",  # type: ignore[index]
                 )
             raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")
 

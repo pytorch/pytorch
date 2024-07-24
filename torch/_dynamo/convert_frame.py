@@ -1058,7 +1058,7 @@ def replay(filename: str) -> None:
     record.globals = dict(itertools.chain(record.globals.items(), globals().items()))
 
     try:
-        _compile(
+        _compile(  # type: ignore[call-arg]
             record.code,
             record.globals,
             record.locals,

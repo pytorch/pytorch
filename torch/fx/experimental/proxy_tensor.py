@@ -372,7 +372,7 @@ def track_tensor(tensor: Tensor, proxy: Proxy, *, constant: Optional[Tensor], tr
     )
     try_set_proxy_slot(
         tensor.storage_offset(),
-        lambda x: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_storage_offset.default, (proxy,)), x)
+        lambda x: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_storage_offset.default, (proxy,)), x)  # type: ignore[call-arg]
     )
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
@@ -767,7 +767,7 @@ class PythonKeyTracer(Tracer):
     torch_fn_counts: Dict[OpOverload, int]
 
     def __init__(self) -> None:
-        super().__init__(autowrap_modules=())
+        super().__init__(autowrap_modules=())  # type: ignore[arg-type]
         self.tensor_tracker = WeakTensorKeyDictionary()
         self.symnode_tracker = _SymNodeDict()
         self.script_object_tracker = WeakIdKeyDictionary(dict=None, ref_type=_WeakHashRef)
@@ -803,7 +803,7 @@ class PythonKeyTracer(Tracer):
         elif isinstance(a, py_sym_types):
             assert a.node.constant is not None
             return a.node.constant
-        return super().create_arg(a)
+        return super().create_arg(a)  # type: ignore[return-value]
 
     @overload
     def unwrap_proxy(self, e: Tensor) -> Union[Proxy, Tensor]:
@@ -867,7 +867,7 @@ def dispatch_trace(
         tracer: Tracer,
         concrete_args: Optional[Tuple[Any, ...]] = None,
 ) -> GraphModule:
-    graph = tracer.trace(root, concrete_args)
+    graph = tracer.trace(root, concrete_args)  # type: ignore[arg-type]
     from torch._inductor.fx_passes.dedupe_symint_uses import dedupe_symints
     dedupe_symints(graph)
     name = root.__class__.__name__ if isinstance(root, Module) else root.__name__
@@ -966,7 +966,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             # It's for passing the export verifier which needs to verify the meta['val']
             # TODO(tmanlaibaatar): we should systematically couple it with expoert verifier,
             # instead of hardcoding it here.
-            node = self.tracer.create_node("call_function", func, args, {})
+            node = self.tracer.create_node("call_function", func, args, {})  # type: ignore[arg-type]
             if func is torch._C._set_grad_enabled:
                 node.meta['val'] = None
             return node
@@ -1090,7 +1090,7 @@ class ProxySymDispatchMode(SymDispatchMode):
 
         # func doesn't have a __torch_function__ that Proxy can interpose, so
         # we gotta do it manually
-        n_out = self.tracer.create_node("call_function", func, n_args, {})
+        n_out = self.tracer.create_node("call_function", func, n_args, {})  # type: ignore[arg-type]
         p_out = fx.Proxy(n_out, self.tracer)
         set_meta(p_out, out)
         return p_out
@@ -1149,7 +1149,7 @@ class DecompositionInterpreter(fx.Interpreter):
             decomposition_table: Optional[Mapping[OpOverload, Callable]] = None,
             **kwargs: object
     ) -> None:
-        super().__init__(module, **kwargs)
+        super().__init__(module, **kwargs)  # type: ignore[arg-type]
         self.new_graph = new_graph
         self.tracer = _GraphAppendingTracerEx(self.new_graph)
         # Blegh
@@ -1164,23 +1164,23 @@ class DecompositionInterpreter(fx.Interpreter):
         # distinguish between different calls to the same torch function.
         self.tracer.torch_fn_counts = {}
 
-    def placeholder(self, target: str, args: Tuple[object, ...], kwargs: Dict[str, object]) -> object:
-        out = super().placeholder(target, args, kwargs)
+    def placeholder(self, target: str, args: Tuple[object, ...], kwargs: Dict[str, object]) -> object:  # type: ignore[override]
+        out = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         proxy = fx.Proxy(self.new_graph.placeholder(target), self.tracer)
         track_tensor_tree(out, proxy, constant=None, tracer=self.tracer)
         # TODO handle case where the first character of target is '*'
         return out
 
-    def get_attr(self, target: str, args: Tuple[object, ...], kwargs: Dict[str, object]) -> object:
-        out = super().get_attr(target, args, kwargs)
+    def get_attr(self, target: str, args: Tuple[object, ...], kwargs: Dict[str, object]) -> object:  # type: ignore[override]
+        out = super().get_attr(target, args, kwargs)  # type: ignore[arg-type]
         proxy = fx.Proxy(self.new_graph.get_attr(target), self.tracer)
         track_tensor_tree(out, proxy, constant=None, tracer=self.tracer)
         return out
 
     # call_function, call_method, call_module get traced automatically by the outer mode.
 
-    def output(self, target: str, args: Tuple[object, ...], kwargs: Dict[str, object]) -> object:
-        out = super().output(target, args, kwargs)
+    def output(self, target: str, args: Tuple[object, ...], kwargs: Dict[str, object]) -> object:  # type: ignore[override]
+        out = super().output(target, args, kwargs)  # type: ignore[arg-type]
 
         def get_proxy_node(x: _ProxyTensor) -> fx.node.Node:
             return x.proxy.node
@@ -1194,7 +1194,7 @@ class DecompositionInterpreter(fx.Interpreter):
         # Should enter the mode at least once for being able to restore it later
         # See: https://github.com/pytorch/pytorch/pull/82549#discussion_r934782025
         with decompose(self.decomposition_table), self.mode:
-            return super().run(*args, **kwargs)
+            return super().run(*args, **kwargs)  # type: ignore[arg-type]
 
 
 def wrapper_and_args_for_make_fx(
@@ -1348,7 +1348,7 @@ class _ModuleStackTracer(PythonKeyTracer):
             self.attr_proxy_map[attr_val].reset_proxy_mapping(attr_val, attr)
         return self.attr_proxy_map[attr_val]
 
-    def trace(
+    def trace(  # type: ignore[override]
             self,
             root: Union[Module, Callable],
             concrete_args: Optional[Dict[str, object]]
@@ -1438,7 +1438,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         Add torch_fn by looking at torch_fn_metadata and torch_fn_counts.
         Add stack_trace by filtering out forward() stack frames.
         '''
-        node = super().create_node(*args, **kwargs)
+        node = super().create_node(*args, **kwargs)  # type: ignore[arg-type]
 
         # nn_module_stack
         if node.op not in ["placeholder", "output"]:
