@@ -142,7 +142,6 @@ class LazySymNodeString:
         )
 
     def __str__(self):
-        breakpoint()
         return str.format(
             self.fmt_var.as_python_constant(),
             str(self.sym_node_var.evaluate_expr()),
