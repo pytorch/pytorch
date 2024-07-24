@@ -4,6 +4,7 @@ import gzip
 import io
 import json
 import os
+import time
 import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -153,6 +154,9 @@ def upload_to_dynamodb(
         for doc in docs:
             if generate_partition_key:
                 doc["dynamoKey"] = generate_partition_key(repo, doc)
+            # This is to move away the _event_time field from Rockset, which we cannot use when
+            # reimport the data
+            doc["timestamp"] = int(round(time.time() * 1000))
             batch.put_item(Item=doc)
 
 

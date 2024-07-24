@@ -1912,13 +1912,10 @@ def forward(self, l_x_):
             ):
                 # True branch and false branch return tensors of different shape
                 torch._dynamo.export(mod)(torch.randn(3, 2))
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile",
-            ):
-                # True branch and false branch return tensors of different shape
-                test_x = torch.randn(3, 2)
-                mod(test_x)
+
+            # We specialize into one of the branches since predicate is a python boolean.
+            test_x = torch.randn(3, 2)
+            mod(test_x)
 
     def test_export_with_map_cond(self):
         from functorch.experimental.control_flow import cond, map
@@ -2931,7 +2928,7 @@ def forward(self, x):
         dynamic_shapes = {"x": (dim0,)}
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "must be specialized.*guards generated.*too complex",
+            r"Constraints violated \(dim0\)",
         ):
             torch.export.export(foo, (x,), dynamic_shapes=dynamic_shapes)
 
@@ -2939,7 +2936,7 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Not all values.*satisfy the generated guard",
+            r"Constraints violated \(dim0\)",
         ):
             torch.export.export(qux, (x,), dynamic_shapes=dynamic_shapes)
 
@@ -3428,8 +3425,7 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
+            RuntimeError, "Unmatched number of outputs from cond"
         ):
             torch._dynamo.export(
                 f_mismatch_return_length,

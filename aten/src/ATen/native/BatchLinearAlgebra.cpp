@@ -3524,10 +3524,22 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   TORCH_CHECK(
       0 <= dim_diff && dim_diff <= 1,
       "torch.linalg.lstsq: input.dim() must be greater or equal to other.dim() and (input.dim() - other.dim()) <= 1");
-  Tensor other_2d = dim_diff ? other.unsqueeze(-1) : other;
+
+  // now check whether the provided output tensors can be used directly
+
+  // Two types of 'other' tensors are supported:
+  // - 1-dimensional (1D) tensor or batch of 1D tensors (vector case)
+  // - 2-dimensional (2D) tensor or batch of 2D tensors (matrix case)
+  // original torch.lstsq supported only the matrix case, while NumPy works for both cases
+  // for the batched input we need to be able to distinguish them
+  // auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim() - 1); // input.shape[:-1]
+  // bool vector_case = other.dim() == 1 || (input.dim() - 1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
+
+  bool vector_case = linalg_solve_is_vector_rhs(input, other);
+  Tensor other_2d = vector_case ? other.unsqueeze(-1) : other;
   TORCH_CHECK(
       input.size(-2) == other_2d.size(-2),
-      dim_diff ? "torch.linalg.lstsq: input.size(-2) should match other.size(-1)"
+      vector_case ? "torch.linalg.lstsq: input.size(-2) should match other.size(-1)"
                : "torch.linalg.lstsq: input.size(-2) should match other.size(-2)");
 
   checkSameDevice("torch.linalg.lstsq", other, input, "other");
@@ -3560,17 +3572,6 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
     : _get_epsilon(c10::toRealValueType(input.scalar_type())) * std::max<int64_t>(input.size(-2), input.size(-1));
 
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
-
-  // now check whether the provided output tensors can be used directly
-
-  // Two types of 'other' tensors are supported:
-  // - 1-dimensional (1D) tensor or batch of 1D tensors (vector case)
-  // - 2-dimensional (2D) tensor or batch of 2D tensors (matrix case)
-  // original torch.lstsq supported only the matrix case, while NumPy works for both cases
-  // for the batched input we need to be able to distinguish them
-  // auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim() - 1); // input.shape[:-1]
-  // bool vector_case = other.dim() == 1 || (input.dim() - 1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
-  bool vector_case = linalg_solve_is_vector_rhs(input, other);
 
   // provided output tensor can be used directly if:
   // 1. the shape matches the expected shape

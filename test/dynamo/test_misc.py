@@ -584,6 +584,22 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
             f(x, out)
 
+    def test_auto_functionalize_self_as_mutate_arg(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("foo(Tensor(a!) self) -> None")
+
+            def foo_impl(self: torch.Tensor) -> None:
+                self.sin_()
+
+            x = torch.randn(3)
+            lib.impl("foo", foo_impl, "CompositeExplicitAutograd")
+
+            @torch.compile(backend="inductor", fullgraph=True)
+            def f(x):
+                torch.ops.mylib.foo(x)
+
+            f(x)
+
     def test_user_defined_setattr1(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(obj):
@@ -1348,6 +1364,20 @@ utils_device.CURRENT_DEVICE == None""".split(
         r2 = opt_fn(i)
         self.assertEqual(r1, r2)
 
+    def test_tensor_hasattr(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            if hasattr(x, "test"):
+                return x + 2
+            else:
+                return x + 1
+
+        self.assertEqual(torch.ones(2, 2) + 1, fn(torch.ones(2, 2)))
+
+        inp = torch.ones(2, 2)
+        inp.test = None
+        self.assertEqual(torch.ones(2, 2) + 2, fn(inp))
+
     def test_shape_unpack(self):
         def fn(x):
             a, b = x.size()
@@ -1391,7 +1421,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         r1 = fn(i, [])
         opt_fn = torch._dynamo.optimize("eager")(fn)
         r2 = opt_fn(i, [])
-        r3 = opt_fn(i, tuple())
+        r3 = opt_fn(i, ())
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
@@ -4296,7 +4326,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         subs_of_foo_reg = Foo.__subclasses__()
         sub_of_foo_subclass_var_reg = subs_of_foo_reg[0].__subclasses__()
 
-        sub_of_foo_subclass_var_optim = list()
+        sub_of_foo_subclass_var_optim = []
         counter = CompileCounter()
 
         @torch._dynamo.optimize_assert(counter)
@@ -7065,7 +7095,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         od = collections.OrderedDict
 
         def fn():
-            d1 = dict()
+            d1 = dict()  # noqa: C408
             d1["a"] = 1
             d2 = od(d1)
             d2["b"] = 2
@@ -9521,8 +9551,8 @@ def ___make_guard_fn():
 ShapeEnv not equal: field values don't match:
 
 ==> settings: values don't match.
-  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, _allow_complex_guards_as_runtime_asserts=False)
-  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, _allow_complex_guards_as_runtime_asserts=False)
+  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False)
+  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False)
 """,
         )
         self._replay_and_check(main)
@@ -9826,7 +9856,7 @@ ShapeEnv not equal: field values don't match:
             if not forward_deterministic and backward_deterministic:
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "^This compiled backward function is being run with torch\.use_deterministic_algorithms",
+                    r"^This compiled backward function is being run with torch\.use_deterministic_algorithms",
                 ):
                     res.backward(grad)
 
@@ -10638,6 +10668,18 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_iter_type(self):
+        @torch.compile(fullgraph=True)
+        def fn(y):
+            x = iter([])
+            if isinstance(x, list):
+                return y + 1
+            else:
+                return y + 2
+
+        res = fn(torch.ones(2))
+        self.assertEqual(torch.ones(2) + 2, res)
 
     def test_descriptor(self):
         class lazy_property:
