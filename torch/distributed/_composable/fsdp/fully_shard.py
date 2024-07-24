@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 from typing import Any, cast, Iterable, List, NoReturn, Optional, Union
