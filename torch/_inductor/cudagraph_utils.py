@@ -12,6 +12,7 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 InputType = List[Union[torch.Tensor, int]]
 OutputType = List[Optional[Union[int, torch.Tensor]]]
+ModelType = Callable[[InputType], OutputType]
 
 
 @dataclasses.dataclass(frozen=True)

@@ -53,6 +53,7 @@ from typing import (
     Any,
     Callable,
     cast,
+    ContextManager,
     Dict,
     Generator,
     Iterator,
@@ -88,6 +89,7 @@ from torch._inductor.cudagraph_utils import (
     log_cudagraph_skip_and_bump_counter,
     log_data_ptr_mismatch,
     maybe_get_static_data_ptr,
+    ModelType,
     OutputType,
     WrappedFunction,
 )
@@ -181,9 +183,7 @@ def enable_history_recording() -> Generator[None, None, None]:
             torch.cuda.memory._record_memory_history(None)
 
 
-def get_history_recording() -> (
-    Union[contextlib.nullcontext[None], contextlib._GeneratorContextManager[None]]
-):
+def get_history_recording() -> ContextManager[None]:
     # TODO - remove, prevents cleanup
     if not config.triton.cudagraph_trees_history_recording:
         return contextlib.nullcontext()
@@ -328,7 +328,7 @@ def reset_cudagraph_trees() -> None:
     MarkStepBox.mark_step_counter = 0
 
 
-def get_obj(local, attr_name):  # type: ignore[no-untyped-def]
+def get_obj(local: Any, attr_name: str) -> Any:
     if hasattr(local, attr_name):
         return getattr(local, attr_name)
     else:
@@ -356,17 +356,12 @@ def get_manager(
 
 
 def cudagraphify_impl(
-    model: Callable[
-        [
-            InputType,
-        ],
-        OutputType,
-    ],
+    model: ModelType,
     inputs: InputType,
     static_input_idxs: Sequence[int],
     *args: Any,
     **kwargs: Any,
-) -> Callable[[InputType], OutputType]:
+) -> ModelType:
     fn_cache: Dict[Tuple[int, ...], Callable[..., Any]] = {}
 
     # Detect int inputs: we need to index on these
@@ -402,10 +397,7 @@ def cudagraphify_impl(
 
 
 def cudagraphify(
-    model: Callable[
-        [InputType],
-        OutputType,
-    ],
+    model: ModelType,
     inputs: InputType,
     static_input_idxs: Sequence[int] = (),
     *,
@@ -416,7 +408,7 @@ def cudagraphify(
     constants: Tuple[torch.Tensor, ...] = (),
     placeholders: Tuple[torch.fx.Node, ...] = (),
     mutated_input_idxs: Tuple[int, ...] = (),
-) -> Tuple[Callable[[InputType], OutputType], OutputType]:
+) -> Tuple[ModelType, OutputType]:
     manager = get_container(device_index).get_tree_manager()
     assert not (is_backward and is_inference)
     mode = (
@@ -1023,7 +1015,7 @@ class CUDAGraphNode:
         assert len(new_inputs) == 0
         outputs = self.recording_outputs
         self.recording_outputs = None
-        assert outputs
+        assert outputs is not None
         return outputs
 
     def run(self, new_inputs: InputType) -> OutputType:
@@ -1151,9 +1143,7 @@ class CUDAGraphNode:
                 return False
         return True
 
-    def _record(
-        self, model: Callable[[InputType], OutputType], inputs: InputType
-    ) -> OutputType:
+    def _record(self, model: ModelType, inputs: InputType) -> OutputType:
         "Record the model"
 
         def static_input_iter() -> Generator[torch.Tensor, None, None]:
@@ -2172,12 +2162,7 @@ class CUDAGraphTreeManager:
 
     def add_function(
         self,
-        model: Callable[
-            [
-                InputType,
-            ],
-            OutputType,
-        ],
+        model: ModelType,
         inputs: InputType,
         static_input_idxs: Sequence[int],
         stack_traces: Optional[StackTraces],
@@ -2185,7 +2170,7 @@ class CUDAGraphTreeManager:
         constants: Tuple[torch.Tensor, ...],
         placeholders: Tuple[torch.fx.Node, ...],
         mutated_input_idxs: Tuple[int, ...],
-    ) -> Tuple[Callable[[InputType], OutputType], OutputType,]:
+    ) -> Tuple[ModelType, OutputType,]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
         self.ids_to_funcs[id] = WrappedFunction(
@@ -2298,7 +2283,7 @@ class CUDAGraphTreeManager:
             self.current_node = None
             return
 
-        assert self.current_node
+        assert self.current_node is not None
         if self.current_node.all_outputs_are_dead():
             self.current_node = None
             return
@@ -2313,7 +2298,7 @@ class CUDAGraphTreeManager:
         ):
             return
 
-        assert self.current_node
+        assert self.current_node is not None
         existing_nodes = [
             node
             for node in self.current_node._path_from_root
@@ -2340,11 +2325,11 @@ class CUDAGraphTreeManager:
         )
 
     def dealloc_current_path_weakrefs(self) -> None:
-        assert self.current_node
+        assert self.current_node is not None
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
         for node in self.current_node._path_from_root:
-            assert node.stack_traces
+            assert node.stack_traces is not None
             assert len(node.tensor_weakrefs) == len(node.stack_traces)
             for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
                 ten = None if t is None else t()
@@ -2418,7 +2403,7 @@ class CUDAGraphTreeManager:
             )
             for wrapper in live_storages_wrappers:
                 storage_ptr = wrapper()
-                assert storage_ptr
+                assert storage_ptr is not None
                 assert torch._C._has_Standard_Deleter(storage_ptr)
                 assert wrapper.data_ptr() not in ptrs_to_deallocate
 
