@@ -155,7 +155,7 @@ class ProfileEvent:
     count: float
 
 
-def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns):
+def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns, device_name):
     def get_self_device_time(ev):
         """
         ev.self_device_time_total is in microsecond. Convert to millisecond.
@@ -209,7 +209,7 @@ def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns):
         )
         print(
             tabulate(
-                rows, headers=["Kernel", "Self Device TIME (ms)", "Count", "Percent"]
+                rows, headers=["Kernel", f"Self {device_name.upper()} TIME (ms)", "Count", "Percent"]
             )
         )
         return total_time
@@ -234,21 +234,21 @@ def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns):
                 per_category_wall_time[category] = _time
                 total_device_ms += _time
 
-        gpu_busy_percent = f"{total_device_ms / wall_time_ms * 100:.2f}%"
-        print(f"\nPercent of time when GPU is busy: {gpu_busy_percent}")
+        device_busy_percent = f"{total_device_ms / wall_time_ms * 100:.2f}%"
+        print(f"\nPercent of time when {device_name.upper()} is busy: {device_busy_percent}")
         print(f"Total wall time {wall_time_ms:.3f} ms")
 
         # output such a line so we can gather such line from all compiled modules from all
         # benchmarks and tabulate it!
         # Columns: benchmark_name, pointwise_percent, reduction_percent, persistent_reduction_percent,
-        #   unknown_category_percent, GPU_busy_percent, wall_time_ms
+        #   unknown_category_percent, device_busy_percent, wall_time_ms
         tabulate_line = f"Output for tabulate: {benchmark_name}"
         for category in category_list:
             percent = (
                 f"{per_category_wall_time.get(category, 0.0) / wall_time_ms * 100:.2f}%"
             )
             tabulate_line += f", {percent}"
-        tabulate_line += f", {gpu_busy_percent}, {wall_time_ms:.3f}ms"
+        tabulate_line += f", {device_busy_percent}, {wall_time_ms:.3f}ms"
 
         print(tabulate_line)
 
@@ -302,5 +302,5 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
         event_list = p.key_averages(group_by_input_shape=True)
         print(event_list.table(sort_by="self_device_time_total", row_limit=10))
         parse_profile_event_list(
-            benchmark_name, event_list, wall_time_ms, times * repeat
+            benchmark_name, event_list, wall_time_ms, times * repeat, p.use_device
         )
