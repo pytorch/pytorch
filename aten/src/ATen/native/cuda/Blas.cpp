@@ -656,11 +656,14 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
 
 } // anonymous namespace
 
-Tensor dot_cuda(const Tensor& self, const Tensor& other) {
+TORCH_IMPL_FUNC(dot_out_cuda)(const Tensor& self, const Tensor& other, const Tensor& result) {
   if (self.is_complex()) {
     if (self.is_conj()) {
       if (other.is_conj()) {
-        return (dot_cuda(self.conj(), other.conj())).conj();
+        auto temp_result = at::empty({}, self.options());
+        at::dot_out(temp_result, self.conj(), other.conj());
+        result.fill_(temp_result.conj());
+        return;
        } else {
          return vdot_cuda(self.conj(), other);
        }
@@ -670,7 +673,12 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
   }
 
   at::NoNamesGuard guard;
-  dot_check(self, other);
+  // Most checks are performed in the META_FUNC
+  TORCH_CHECK(
+    (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
+        (other.stride(0) <= INT_MAX),
+    "dot only supports n, incx, incy with the bound [val] <= %d",
+    INT_MAX);
 
   const int n = static_cast<int>(self.numel());
   int incx = static_cast<int>(self.stride(0));
@@ -680,16 +688,15 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     incy = 1;
   }
 
-if (self._is_zerotensor() || other._is_zerotensor()) {
-  return at::_efficientzerotensor({}, self.options());
-}
+  if (self._is_zerotensor() || other._is_zerotensor()) {
+    result.fill_(0);
+    return;
+  }
 
-return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "dot",
       [&] {
-        Tensor result = at::empty({}, self.options());
-
         auto handle = at::cuda::getCurrentCUDABlasHandle();
         at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
         at::cuda::blas::dot<scalar_t>(
@@ -700,8 +707,6 @@ return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
             other.const_data_ptr<scalar_t>(),
             incy,
             result.mutable_data_ptr<scalar_t>());
-
-        return result;
       });
 }
 

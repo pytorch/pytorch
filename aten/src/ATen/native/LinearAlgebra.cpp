@@ -279,6 +279,36 @@ TORCH_META_FUNC(_linalg_slogdet)(const Tensor& A) {
   set_output_contiguous(3, shape.slice(0, ndim - 1), A.options().dtype(kInt));
 }
 
+TORCH_META_FUNC(dot)(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(
+      self.dim() == 1 && other.dim() == 1,
+      "1D tensors expected, but got ",
+      self.dim(),
+      "D and ",
+      other.dim(),
+      "D tensors");
+  TORCH_CHECK(
+      self.scalar_type() == other.scalar_type(),
+      "dot : expected both vectors to have same dtype, but found ",
+      self.scalar_type(),
+      " and ",
+      other.scalar_type());
+  TORCH_CHECK(
+      self.numel() == other.numel(),
+      "inconsistent tensor size, expected tensor [",
+      self.numel(),
+      "] and src [",
+      other.numel(),
+      "] to have the same number of elements, but got ",
+      self.numel(),
+      " and ",
+      other.numel(),
+      " elements respectively");
+
+  // Set output tensor to be a scalar
+  set_output_raw_strided(0, {}, {}, self.options());
+}
+
 template <typename Meta>
 void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const std::optional<Tensor>& self_baddbmm = std::nullopt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
@@ -1899,20 +1929,17 @@ TORCH_IMPL_FUNC(bmm_out_cpu)
     }
 }
 
-Tensor& dot_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto output_device = result.device();
-  auto input1_device = self.device();
-  auto input2_device = other.device();
-  // check if the input & output tensors are on the same device.
-  TORCH_CHECK(
-    (output_device == input1_device) && (input1_device == input2_device),
-    "dot: Expected the output and input tensors to be on the "
-    "same device, but got the output tensor on ", output_device,
-    ", the 'input' tensor on ", input1_device, ", and the 'other' tensor on ", input2_device);
+TORCH_IMPL_FUNC(dot_out_cpu)(const Tensor& self, const Tensor& other, const Tensor& result) {
+  // Ensure the result is a scalar
   at::native::resize_output(result, {});
-  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-           "result dtype ", result.scalar_type(), " does not match input dtype ", self.scalar_type());
-  return result.fill_(self.dot(other));
+
+  // Perform the matrix multiplication
+  auto self_reshaped = self.view({1, -1});  // Reshape self to be a 1xN matrix
+  auto other_reshaped = other.view({-1, 1});  // Reshape other to be a Nx1 matrix
+  auto matmul_result = at::matmul(self_reshaped, other_reshaped);
+
+  // The result of the matrix multiplication is a 1x1 matrix, extract the scalar value
+  result.fill_(matmul_result.item());
 }
 
 Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
