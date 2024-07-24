@@ -244,7 +244,7 @@ class Buffer(torch.Tensor, metaclass=_BufferMeta):
 
         # Path for custom tensors: set a flag on the instance to indicate buffer-ness.
         t = data.detach().requires_grad_(requires_grad)
-        if type(t) is not type(data) and not isinstance(data, Parameter):
+        if type(t) is not type(data) and not isinstance(data, Buffer):
             raise RuntimeError(
                 f"Creating a Buffer from an instance of type {type(data).__name__} "
                 "requires that detach() returns an instance of the same type, but return "

@@ -44,7 +44,7 @@ class TestDataParallel(TestCase):
         class TestModule(nn.Module):
             def __init__(self, t):
                 super().__init__()
-                self.t_rg = nn.Buffer(t, t.requires_grad)
+                self.t_rg = nn.Buffer(t, requires_grad=t.requires_grad)
                 self.t_not_rg = nn.Buffer(t.clone().detach())
 
             def forward(self, x):
