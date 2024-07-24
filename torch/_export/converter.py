@@ -466,8 +466,7 @@ class TS2FXGraphConverter:
                 for block_node_in in block_node.inputs():
                     if (
                         block_node_in.debugName() in self.name_to_node
-                        and block_node_in.debugName()
-                        not in self.name_to_attribute_fqn
+                        and block_node_in.debugName() not in self.name_to_attribute_fqn
                     ):
                         arguments.add(block_node_in.debugName())
                 arguments = arguments.union(
@@ -665,7 +664,6 @@ class TS2FXGraphConverter:
         self.name_to_node[inp_list[0].debugName()] = fx_node
 
         if not self.is_top_level_graph() and inp_value_list[0].op == "placeholder":
-            self.fx_graph.output(fx_node)
             self.name_update_from_subblock_to_parent.append(inp_list[0].debugName())
 
     def convert_prim_Constant(self, node: torch._C.Node):
@@ -1011,11 +1009,15 @@ class TS2FXGraphConverter:
 
         # Lift parameters as inputs.
         for block in node.blocks():
-            global_arguments = global_arguments.union(self.blocks_to_lifted_attrs[block])
+            global_arguments = global_arguments.union(
+                self.blocks_to_lifted_attrs[block]
+            )
 
         global_arguments = list(global_arguments)
 
-        subgraph_nodes, subgraph_converters = self._convert_block_to_subgraph(node, global_arguments)
+        subgraph_nodes, subgraph_converters = self._convert_block_to_subgraph(
+            node, global_arguments
+        )
 
         assert len(subgraph_nodes) == 1
         subgraph_converter = subgraph_converters[0]
@@ -1023,11 +1025,16 @@ class TS2FXGraphConverter:
         def execute_node(*args, **kwargs):
             node_func = args[0]
             iter_idx = args[1]
-            loop_local_args = args[2:2+len(loop_local_arguments)]
-            global_args = args[2+len(loop_local_arguments):]
-            return node_func(*global_args, torch.tensor(iter_idx), *loop_local_args, **kwargs)
+            loop_local_args = args[2 : 2 + len(loop_local_arguments)]
+            global_args = args[2 + len(loop_local_arguments) :]
+            return node_func(
+                *global_args, torch.tensor(iter_idx), *loop_local_args, **kwargs
+            )
 
-        fx_block_args = [self.get_fx_value_by_fqn(name) for name in loop_local_arguments + global_arguments]
+        fx_block_args = [
+            self.get_fx_value_by_fqn(name)
+            for name in loop_local_arguments + global_arguments
+        ]
         for iter_idx in range(num_iterations):
             loop_node = self.fx_graph.call_function(
                 execute_node,
@@ -1045,15 +1052,17 @@ class TS2FXGraphConverter:
                         ),  # + 1 because the 0th element is the condition.
                     )
                     fx_block_args[i] = self.name_to_node[output_name]
-            for i, name in enumerate(subgraph_converter.name_update_from_subblock_to_parent):
+            for i, name in enumerate(
+                subgraph_converter.name_update_from_subblock_to_parent
+            ):
                 self.name_to_node[name] = self.fx_graph.call_function(
-                        operator.getitem,
-                        (
-                            loop_node,
-                            i + node.outputsSize() + 1,
-                        ),  # + 1 because the 0th element is the condition.
-                    )
-                fx_block_args[i + node.outputsSize() + 1] = self.name_to_node[name]
+                    operator.getitem,
+                    (
+                        loop_node,
+                        i + node.outputsSize() + 1,
+                    ),  # + 1 because the 0th element is the condition.
+                )
+                fx_block_args[i + node.outputsSize()] = self.name_to_node[name]
 
     def _check_set_attr_in_if_block(self, if_node: torch._C.Node):
         for block in if_node.blocks():
@@ -1080,7 +1089,7 @@ class TS2FXGraphConverter:
             arguments = arguments.union(self.blocks_to_lifted_attrs[block])
 
         arguments = list(arguments)
-        subgraph_nodes , _ = self._convert_block_to_subgraph(node, arguments)
+        subgraph_nodes, _ = self._convert_block_to_subgraph(node, arguments)
 
         assert len(subgraph_nodes) == 2
 
@@ -1183,8 +1192,10 @@ class TS2FXGraphConverter:
 
     def convert_graph_outputs(self):
         args = []
-        for graph_output in self.ts_graph.outputs():
-            output_name = graph_output.debugName()
+        outp_name_list = [
+            outp.debugName() for outp in self.ts_graph.outputs()
+        ] + self.name_update_from_subblock_to_parent
+        for output_name in outp_name_list:
             if output_name in self.name_to_node:
                 fx_node = self.name_to_node[output_name]
                 # TODO: Revisit this later after HigherOrderOp design changes.
