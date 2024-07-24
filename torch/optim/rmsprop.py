@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Implementation for the RMSprop algorithm."""
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import torch
 from torch import Tensor
@@ -26,7 +26,7 @@ class RMSprop(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
-        lr: float = 1e-2,
+        lr: Union[float, Tensor] = 1e-2,
         alpha: float = 0.99,
         eps: float = 1e-8,
         weight_decay: float = 0,
@@ -37,6 +37,8 @@ class RMSprop(Optimizer):  # noqa: D101
         maximize: bool = False,
         differentiable: bool = False,
     ):  # noqa: D107
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -238,7 +240,7 @@ RMSprop.__doc__ = (
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float, optional): learning rate (default: 1e-2)
+        lr (float, Tensor, optional): learning rate (default: 1e-2)
         momentum (float, optional): momentum factor (default: 0)
         alpha (float, optional): smoothing constant (default: 0.99)
         eps (float, optional): term added to the denominator to improve
