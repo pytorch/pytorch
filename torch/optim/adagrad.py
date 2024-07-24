@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import torch
 from torch import Tensor
@@ -24,7 +24,7 @@ class Adagrad(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: float = 1e-2,
+        lr: Union[float, Tensor] = 1e-2,
         lr_decay: float = 0,
         weight_decay: float = 0,
         initial_accumulator_value: float = 0,
@@ -35,6 +35,8 @@ class Adagrad(Optimizer):
         differentiable: bool = False,
         fused: Optional[bool] = None,
     ):
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= lr_decay:
@@ -219,7 +221,7 @@ Adagrad.__doc__ = (
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float, optional): learning rate (default: 1e-2)
+        lr (float, Tensor, optional): learning rate (default: 1e-2)
         lr_decay (float, optional): learning rate decay (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         initial_accumulator_value (float, optional): initial value of the

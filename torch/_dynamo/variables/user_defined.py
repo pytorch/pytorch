@@ -109,17 +109,27 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def can_constant_fold_through(self):
         return self.value in self._constant_fold_classes()
 
+    def has_key_in_generic_dict(self, tx, key):
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
+            mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
+            return not isinstance(mutated_attr, variables.DeletedVariable)
+
+        return key in self.value.__dict__
+
     def var_getattr(self, tx, name: str) -> "VariableTracker":
-        from .. import trace_rules
         from . import ConstantVariable, EnumVariable
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
+
+        source = AttrSource(self.source, name) if self.source is not None else None
 
         if name == "__name__":
             return ConstantVariable.create(self.value.__name__)
         elif name == "__qualname__":
             return ConstantVariable.create(self.value.__qualname__)
+        elif name == "__dict__":
+            options = {"source": source}
+            return variables.GetAttrVariable(self, name, **options)
 
-        source = AttrSource(self.source, name) if self.source is not None else None
         try:
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
@@ -128,9 +138,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if isinstance(obj, staticmethod):
             func = obj.__get__(self.value)
             if source is not None:
-                return trace_rules.lookup(func).create_with_source(func, source=source)
+                return VariableBuilder(tx, source)(func)
             else:
-                return trace_rules.lookup(func)(func)
+                return SourcelessBuilder(tx)(func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source:
@@ -239,7 +249,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and "__subclasses__" not in self.value.__dict__
         ):
             options = {"mutable_local": MutableLocal()}
-            subs_as_vars: List[VariableTracker] = list()
+            subs_as_vars: List[VariableTracker] = []
             for sub in self.value.__subclasses__():
                 source = AttrSource(tx.import_source(sub.__module__), sub.__name__)
                 subs_as_vars.append(

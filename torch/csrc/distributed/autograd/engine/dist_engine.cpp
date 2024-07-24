@@ -4,6 +4,7 @@
 #include <c10/core/Event.h>
 #include <c10/util/DeadlockDetection.h>
 #include <c10/util/irange.h>
+#include <c10/util/thread_name.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
@@ -76,6 +77,7 @@ class DistAccumulateGradCaptureHook
 
 void DistEngine::globalCpuThread(
     const std::shared_ptr<ReadyQueue>& ready_queue) {
+  c10::setThreadName("pt_dist_engine");
   while (true) {
     NodeTask task = ready_queue->pop();
     if (task.isShutdownTask_) {

@@ -5,6 +5,7 @@ from typing import (
     Any,
     cast,
     Dict,
+    Generic,
     Iterable,
     Iterator,
     List,
@@ -20,7 +21,8 @@ T_co = TypeVar("T_co", covariant=True)
 __all__ = ["OrderedSet"]
 
 
-class OrderedSet(MutableSet[T]):
+# Using Generic[T] bc py38 does not support type parameterized MutableSet
+class OrderedSet(Generic[T], MutableSet):
     """
     Insertion ordered set, similar to OrderedDict.
     """
@@ -31,7 +33,7 @@ class OrderedSet(MutableSet[T]):
         self._dict = dict.fromkeys(iterable, None) if iterable is not None else {}
 
     @staticmethod
-    def from_dict(dict_inp: Dict[T, None]) -> OrderedSet[T]:
+    def _from_dict(dict_inp: Dict[T, None]) -> OrderedSet[T]:
         s: OrderedSet[T] = OrderedSet()
         s._dict = dict_inp
         return s
@@ -80,7 +82,7 @@ class OrderedSet(MutableSet[T]):
         return self._dict.popitem()[0]
 
     def copy(self) -> OrderedSet[T]:
-        return OrderedSet.from_dict(self._dict.copy())
+        return OrderedSet._from_dict(self._dict.copy())
 
     def difference(self, *others: Iterable[T]) -> OrderedSet[T]:
         res = self.copy()

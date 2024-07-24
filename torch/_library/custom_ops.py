@@ -1,6 +1,9 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
+import logging
 import weakref
+from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
@@ -10,6 +13,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Union,
 )
@@ -21,6 +25,7 @@ from . import utils
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
+log = logging.getLogger(__name__)
 
 
 @exposed_in("torch.library")
@@ -175,9 +180,12 @@ class CustomOpDef:
         self._abstract_fn: Optional[Callable] = None
         self._setup_context_fn: Optional[Callable] = None
         self._backward_fn: Optional[Callable] = None
+        self._torch_dispatch_fns: Dict[type, Callable] = {}
+        self._vmap_fn: Optional[Callable] = None
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher()
+        self._disabled_kernel: Set = set()
         OPDEFS[self._qualname] = self
 
     @property
@@ -186,6 +194,76 @@ class CustomOpDef:
 
     def __repr__(self) -> str:
         return f"<CustomOpDef({self._qualname})>"
+
+    @contextmanager
+    def set_kernel_enabled(self, device_type: str, enabled: bool = True):
+        """
+        Disable or re-enable an already registered kernel for this custom operator.
+
+        If the kernel is already disabled/enabled, this is a no-op.
+
+        Note:
+            If a kernel is first disabled and then registered, it is disabled until enabled again.
+
+        Args:
+            device_type (str): The device type to disable/enable the kernel for.
+            disable (bool): Whether to disable or enable the kernel.
+
+        Example:
+            >>> inp = torch.randn(1)
+            >>>
+            >>> # define custom op `f`.
+            >>> @custom_op("mylib::f", mutates_args=())
+            >>> def f(x: Tensor) -> Tensor:
+            >>>     return torch.zeros(1)
+            >>>
+            >>> print(f(inp))  # tensor([0.]), default kernel
+            >>>
+            >>> @f.register_kernel("cpu")
+            >>> def _(x):
+            >>>     return torch.ones(1)
+            >>>
+            >>> print(f(inp))  # tensor([1.]), CPU kernel
+            >>>
+            >>> # temporarily disable the CPU kernel
+            >>> with f.set_kernel_enabled("cpu", enabled = False):
+            >>>     print(f(inp))  # tensor([0.]) with CPU kernel disabled
+
+        """
+        action = "enable" if enabled else "disable"
+        originally_disabled = device_type in self._disabled_kernel
+        if device_type not in self._backend_fns:
+            log.warning(
+                "Attempted to %s kernel for %s but no kernel was registered for this device type.",
+                action,
+                device_type,
+            )
+
+        if not enabled:
+            if originally_disabled:
+                log.warning(
+                    "Attempted to disable kernel for %s but it was already disabled.",
+                    device_type,
+                )
+            else:
+                self._disabled_kernel.add(device_type)
+        else:  # enable the kernel
+            if not originally_disabled:
+                log.warning(
+                    "Attempted to enable kernel for  %s but it was already enabled.",
+                    device_type,
+                )
+            else:
+                self._disabled_kernel.remove(device_type)
+
+        try:
+            yield
+        finally:
+            # restore original state
+            if originally_disabled:
+                self._disabled_kernel.add(device_type)
+            else:
+                self._disabled_kernel.discard(device_type)
 
     def register_kernel(
         self, device_types: device_types_t, fn: Optional[Callable] = None, /
@@ -275,7 +353,16 @@ class CustomOpDef:
                             backend_impl,
                             _C._dispatch_key_for_device(device_type),
                         )
-                self._backend_fns[device_type] = fn
+
+                # Wrap function to choose between the default implementation or the device-specific
+                # implementation depending on if the kernel is disabled.
+                def wrapped_fn(*args, **kwargs):
+                    if device_type in self._disabled_kernel:
+                        return self._init_fn(*args, **kwargs)
+                    else:
+                        return fn(*args, **kwargs)
+
+                self._backend_fns[device_type] = wrapped_fn
             return fn
 
         from torch._library.utils import get_device_arg_index, has_tensor_arg
@@ -366,6 +453,37 @@ class CustomOpDef:
         """
         self._abstract_fn = fn
         return fn
+
+    def register_torch_dispatch(
+        self, torch_dispatch_class: Any, fn: Optional[Callable] = None, /
+    ) -> Callable:
+        r"""Registers a torch_dispatch rule for the given operator and ``torch_dispatch_class``.
+
+        This allows for open registration to specify the behavior between the operator
+        and the ``torch_dispatch_class`` without needing to modify the ``torch_dispatch_class``
+        or the operator directly.
+
+        Please see :func:`torch.library.register_torch_dispatch` for examples and more details.
+        """
+
+        def register(fn):
+            if torch_dispatch_class not in self._torch_dispatch_fns:
+
+                def inner(*args, **kwargs):
+                    return self._torch_dispatch_fns[torch_dispatch_class](
+                        *args, **kwargs
+                    )
+
+                self._lib._register_torch_dispatch_rule(
+                    self._name, torch_dispatch_class, inner
+                )
+            self._torch_dispatch_fns[torch_dispatch_class] = fn
+            return fn
+
+        if fn is None:
+            return register
+        else:
+            return register(fn)
 
     def register_autograd(
         self,
@@ -545,6 +663,103 @@ class CustomOpDef:
 
     def __call__(self, *args, **kwargs):
         return self._opoverload(*args, **kwargs)
+
+    def register_vmap(
+        self,
+        func: Optional[Callable] = None,
+    ):
+        r"""Register a vmap implementation to support :func:`torch.vmap` for this custom op.
+
+        This API may be used as a decorator.
+
+        In order for an operator to work with :func:`torch.vmap`, you may need to register a
+        vmap implementation in the following signature:
+
+            ``vmap_func(info, in_dims: Tuple[Optional[int]], *args, **kwargs)``,
+
+        where ``*args`` and ``**kwargs`` are the arguments and kwargs for ``op``.
+
+        It specifies how do we compute the batched version of ``op`` given inputs with an additional
+        dimension (specified by ``in_dims``).
+
+        For each arg in ``args``, ``in_dims`` has a corresponding ``Optional[int]``. It is ``None``
+        if the arg is not a Tensor or if the arg is not being vmapped over, otherwise, it is an integer
+        specifying what dimension of the Tensor is being vmapped over.
+
+        ``info`` is a collection of additional metadata that may be helpful:
+        ``info.batch_size`` specifies the size of the dimension being vmapped over, while
+        ``info.randomness`` is the ``randomness`` option that was passed to :func:`torch.vmap`.
+
+        The return of the function ``func`` is a tuple of ``(output, out_dims)``. Similar to ``in_dims``,
+        ``out_dims`` should be of the same structure as ``output`` and contain one ``out_dim``
+        per output that specifies if the output has the vmapped dimension and what index it is in.
+
+        Examples:
+            >>> import torch
+            >>> import numpy as np
+            >>> from torch import Tensor
+            >>> from typing import Tuple
+            >>>
+            >>> def to_numpy(tensor):
+            >>>     return tensor.cpu().numpy()
+            >>>
+            >>> lib = torch.library.Library("mylib", "FRAGMENT")
+            >>> @torch.library.custom_op("mylib::numpy_cube", mutates_args=())
+            >>> def numpy_cube(x: Tensor) -> Tuple[Tensor, Tensor]:
+            >>>     x_np = to_numpy(x)
+            >>>     dx = torch.tensor(3 * x_np ** 2, device=x.device)
+            >>>     return torch.tensor(x_np ** 3, device=x.device), dx
+            >>>
+            >>> def numpy_cube_vmap(info, in_dims, x):
+            >>>     result = numpy_cube(x)
+            >>>     return result, (in_dims[0], in_dims[0])
+            >>>
+            >>> numpy_cube.register_vmap(numpy_cube_vmap)
+            >>>
+            >>> x = torch.randn(3)
+            >>> torch.vmap(numpy_cube)(x)
+            >>>
+            >>> @torch.library.custom_op("mylib::numpy_mul", mutates_args=())
+            >>> def numpy_mul(x: Tensor, y: Tensor) -> Tensor:
+            >>>     return torch.tensor(to_numpy(x) * to_numpy(y), device=x.device)
+            >>>
+            >>> @numpy_mul.register_vmap
+            >>> def numpy_mul_vmap(info, in_dims, x, y):
+            >>>     x_bdim, y_bdim = in_dims
+            >>>     x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+            >>>     y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+            >>>     result = x * y
+            >>>     result = result.movedim(-1, 0)
+            >>>     return result, 0
+            >>>
+            >>>
+            >>> x = torch.randn(3)
+            >>> y = torch.randn(3)
+            >>> torch.vmap(numpy_mul)(x, y)
+        """
+        from torch._functorch.autograd_function import custom_function_call_vmap_helper
+        from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
+
+        def register(func):
+            need_register = self._vmap_fn is None
+            self._vmap_fn = func
+
+            if need_register:
+
+                def wrapped_func(keyset, *args, **kwargs):
+                    interpreter = retrieve_current_functorch_interpreter()
+                    return custom_function_call_vmap_helper(
+                        interpreter, self._vmap_fn, self._opoverload, *args, **kwargs
+                    )
+
+                self._lib.impl(
+                    self._name, wrapped_func, "FuncTorchBatched", with_keyset=True
+                )
+
+        if func is None:
+            return register
+        else:
+            return register(func)
 
 
 # NOTE: [Supporting decorator and non-decorator usage]
