@@ -213,6 +213,7 @@ def aot_dispatch_base(
 
     compiled_fw = EffectTokensWrapper().post_compile(
         compiled_fw,
+        aot_config,
         runtime_metadata=fw_metadata,
     )
 
@@ -499,6 +500,12 @@ def aot_dispatch_autograd(
 
             if fakified_out_wrapper.needs_post_compile:
                 fakified_out_wrapper.set_fwd_output_strides(fwd_output_strides)
+
+            compiled_fw_func = EffectTokensWrapper().post_compile(
+                compiled_fw_func,
+                aot_config,
+                runtime_metadata=fw_metadata,
+            )
 
             compiled_fw_func = AOTDispatchSubclassWrapper(
                 fw_only=None,

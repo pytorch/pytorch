@@ -648,10 +648,10 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
 
 @dataclass
 class EffectTokensWrapper(CompilerWrapper):
-
     def post_compile(
         self,
         compiled_fn,
+        _aot_config,
         *,
         runtime_metadata: ViewAndMutationMeta,
     ):
@@ -1653,12 +1653,10 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 num_mutated_runtime_inps = (
                     CompiledFunction.metadata.num_mutated_inp_runtime_indices
                 )
-                num_tokens = len(CompiledFunction.metadata.tokens)
                 expected_grad_outs = (
                     CompiledFunction.metadata.num_outputs
                     + num_mutated_runtime_inps
                     + num_intermediate_bases
-                    + num_tokens
                 )
                 deterministic = CompiledFunction.metadata.deterministic
                 global_deterministic = torch.are_deterministic_algorithms_enabled()
@@ -1679,16 +1677,13 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 out_info = CompiledFunction.metadata.output_info
 
                 inp_tangents, out_tangents, intermediate_base_tangents = (
-                    flat_args[num_tokens:num_mutated_runtime_inps],
+                    flat_args[:num_mutated_runtime_inps],
                     flat_args[
-                        num_tokens
-                        + num_mutated_runtime_inps : num_tokens
-                        + num_mutated_runtime_inps
+                        num_mutated_runtime_inps : num_mutated_runtime_inps
                         + CompiledFunction.metadata.num_outputs
                     ],
                     flat_args[
-                        num_tokens
-                        + num_mutated_runtime_inps
+                        num_mutated_runtime_inps
                         + CompiledFunction.metadata.num_outputs :
                     ],
                 )
@@ -2002,8 +1997,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         out,
                         subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,
                     )
-                    return (*[None] * num_tokens, *outs_wrapped)
-                return (*[None] * num_tokens, *out)
+                    return outs_wrapped
+                return out
 
         compiled_function = RuntimeWrapper(
             indices_of_inps_to_detach=indices_of_inps_to_detach,

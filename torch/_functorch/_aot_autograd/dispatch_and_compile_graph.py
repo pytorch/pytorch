@@ -264,6 +264,14 @@ def aot_dispatch_autograd_graph(
 
     joint_fn_to_trace = subclass_tracing_info.plain_tensor_trace_fn
     updated_joint_inputs = subclass_tracing_info.plain_tensor_args
+
+    (joint_fn_to_trace, updated_joint_inputs) = handle_effect_tokens_fn(
+        joint_fn_to_trace,
+        updated_joint_inputs,
+        meta=fw_metadata,
+        trace_joint=True,
+    )
+
     # When we call _create_graph, this may mutate the metadata of joint
     # inputs.  But callers are expecting to get the original joint inputs.  So
     # we make aliases of all the inputs to make sure we have a copy that
