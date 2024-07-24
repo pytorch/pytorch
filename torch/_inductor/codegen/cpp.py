@@ -64,6 +64,7 @@ from .common import (
 from .cpp_utils import (
     cexpr,
     cexpr_index,
+    codegen_rand,
     CppCSEVariable,
     DTYPE_TO_CPP,
     INDEX_TYPE,
@@ -971,7 +972,12 @@ class CppVecOverrides(CppOverrides):
                         if (
                             isinstance(new_arg, CppCSEVariable)
                             and not new_arg.is_vec
-                            and func is not CppVecOverrides.randn
+                            and func
+                            not in [
+                                CppVecOverrides.rand,
+                                CppVecOverrides.randn,
+                                CppVecOverrides.randint64,
+                            ]
                         )
                         else new_arg
                         for new_arg in new_args
@@ -1189,28 +1195,27 @@ class CppVecOverrides(CppOverrides):
         return f"{V.kernel.load(name, offset)}"
 
     @staticmethod
+    def rand(seed, offset):
+        assert isinstance(V.kernel, CppVecKernel)
+        code = BracesBuffer()
+        rand_function = (
+            f"result[offset_idx] = normalized_rand_cpu({seed}, offset[offset_idx]);"
+        )
+        return codegen_rand(offset, code, rand_function)
+
+    @staticmethod
     def randn(seed, offset):
         assert isinstance(V.kernel, CppVecKernel)
         code = BracesBuffer()
-        code.writeline("[&]()")
-        with code.indent():
-            code.writeline(
-                f"{DTYPE_TO_CPP[offset.dtype]} offset[{V.kernel.tiling_factor}];"
-            )
-            code.writeline(
-                f"{DTYPE_TO_CPP[torch.float32]} result[{V.kernel.tiling_factor}];"
-            )
-            code.writeline(f"{offset}.store(offset);")
-            code.writeline(
-                f"for( {DTYPE_TO_CPP[offset.dtype]} offset_idx = 0; offset_idx < {V.kernel.tiling_factor}; offset_idx++ )"
-            )
-            with code.indent():
-                code.writeline(
-                    f"result[offset_idx] = randn_cpu({seed}, offset[offset_idx]);"
-                )
-            code.writeline("return at::vec::Vectorized<float>::loadu(result);")
-        code.writeline("()")
-        return code
+        rand_function = f"result[offset_idx] = randn_cpu({seed}, offset[offset_idx]);"
+        return codegen_rand(offset, code, rand_function)
+
+    @staticmethod
+    def randint64(seed, offset, low, high):
+        assert isinstance(V.kernel, CppVecKernel)
+        code = BracesBuffer()
+        rand_function = f"result[offset_idx] = randint64_cpu({seed}, offset[offset_idx], {low}, {high});"
+        return codegen_rand(offset, code, rand_function, torch.int64)
 
     @staticmethod
     def tan(a):
