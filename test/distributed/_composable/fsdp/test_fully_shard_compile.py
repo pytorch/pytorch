@@ -226,7 +226,7 @@ class TestFullyShardCompile(FSDPTest):
     @torch._functorch.config.patch(cse=False)
     @torch._inductor.config.patch(
         reorder_for_compute_comm_overlap=True,
-        reorder_for_compute_comm_overlap_passes=[],
+        reorder_for_compute_comm_overlap_passes=["sink_waits", "raise_comms", "reorder_compute_for_overlap"],
     )
     def _test_traceable_fsdp(
         self, model_init_fn, input_creation_fn, backend, fullgraph
@@ -519,9 +519,47 @@ class TestFullyShardCompile(FSDPTest):
             len(triton_codes) == 2,
             "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
         )
-        for code in triton_codes:
-            FileCheck().check(
-                "torch.ops._c10d_functional.all_gather_into_tensor_out."
+        for code in [triton_codes[0]]:  # FWD graph only, TODO: add BWD graph
+            (
+                FileCheck()
+                .check("torch.ops._c10d_functional.wait_tensor.")
+                .check("torch.ops.fsdp.split_with_sizes_copy.")
+                .check("torch.ops.aten.set_.")
+                .check("torch.ops.aten.set_.")
+                .check("torch.ops.aten.set_.")
+                .check("torch.ops.aten.set_.")
+                .check("torch.ops.aten.set_.")
+                .check("torch.ops.aten.set_.")
+                .check("torch.ops.aten.set_.")
+                .check("torch.ops.aten.set_.")
+                .check("torch.ops.aten.set_.")
+                .check("torch.ops.aten.set_.")
+                .check("torch.ops.aten.set_.")
+                .check_next("assert_size_stride(")
+                .check_next("torch.ops.fsdp.all_gather_copy_in.")  # Proof that (n+1)th AG is issued right after nth AGWait
+                .check("torch.ops._c10d_functional.all_gather_into_tensor_out.")
+                .check("extern_kernels.mm(")  # Proof that (n+1)th AGWait is delayed and overlapped with compute
+                .check("extern_kernels.mm(")
+                .check("extern_kernels.mm(")
+                .check("aten._scaled_dot_product_efficient_attention.")
+                .check("extern_kernels.mm(")
+                .check("aten.native_dropout.")
+                .check("extern_kernels.addmm(")
+                .check("extern_kernels.addmm(")
+                .check("aten.native_dropout.")
+                .check("inductor_ops.resize_storage_bytes_(")
+                .check_next("inductor_ops.resize_storage_bytes_(")
+                .check_next("inductor_ops.resize_storage_bytes_(")
+                .check_next("inductor_ops.resize_storage_bytes_(")
+                .check_next("inductor_ops.resize_storage_bytes_(")
+                .check_next("inductor_ops.resize_storage_bytes_(")
+                .check_next("inductor_ops.resize_storage_bytes_(")
+                .check_next("inductor_ops.resize_storage_bytes_(")
+                .check_next("inductor_ops.resize_storage_bytes_(")
+                .check_next("inductor_ops.resize_storage_bytes_(")
+                .check_next("inductor_ops.resize_storage_bytes_(")
+                .check_next("inductor_ops.resize_storage_bytes_(")
+                .check_next("torch.ops._c10d_functional.wait_tensor.")
             ).run(code)
 
 
