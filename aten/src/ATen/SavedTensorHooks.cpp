@@ -59,16 +59,14 @@ void SavedTensorDefaultHooks::lazy_initialize() {
 }
 
 void SavedTensorDefaultHooks::push_hooks(SafePyObject pack_hook, SafePyObject unpack_hook) {
-  // Reference counting is handled by the caller of `push_hooks`
   TORCH_INTERNAL_ASSERT(is_initialized);
   assertSavedTensorHooksNotDisabled();
-  tls.stack.emplace(pack_hook, unpack_hook);
+  tls.stack.emplace(std::move(pack_hook), std::move(unpack_hook));
 }
 
 std::pair<SafePyObject, SafePyObject> SavedTensorDefaultHooks::pop_hooks() {
-  // Reference counting is handled by the caller of `pop_hooks`
   TORCH_INTERNAL_ASSERT(is_initialized && !tls.stack.empty());
-  std::pair<SafePyObject, SafePyObject> hooks = tls.stack.top();
+  std::pair<SafePyObject, SafePyObject> hooks = std::move(tls.stack.top());
   tls.stack.pop();
   return hooks;
 }
