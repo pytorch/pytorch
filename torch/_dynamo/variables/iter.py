@@ -4,12 +4,13 @@ MAX_CYCLE = 3000
 
 import itertools
 import operator
+import sys
 
 from typing import Dict, List, Optional, Union
 
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import unimplemented
+from ..exc import unimplemented, UserError
 
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
@@ -208,6 +209,11 @@ class IteratorVariable(VariableTracker):
                 break
         return result
 
+    # don't call force_unpack_var_sequence since it can mutate
+    # IteratorVariable state!
+    def has_force_unpack_var_sequence(self, tx) -> bool:
+        return True
+
 
 class RepeatIteratorVariable(IteratorVariable):
     def __init__(self, item: VariableTracker, **kwargs):
@@ -313,17 +319,22 @@ class ZipVariable(IteratorVariable):
 
     _nonvar_fields = {
         "index",
+        "strict",
         *VariableTracker._nonvar_fields,
     }
 
     def __init__(
-        self, iterables: List[Union[List[VariableTracker], VariableTracker]], **kwargs
+        self,
+        iterables: List[Union[List[VariableTracker], VariableTracker]],
+        strict: bool = False,
+        **kwargs,
     ):
         super().__init__(**kwargs)
         assert isinstance(iterables, list)
         # can be list[Variable] or VariableTracker (with next_variable implemented)
         self.iterables = iterables
         self.index = 0
+        self.strict = strict
 
     def python_type(self):
         return zip
@@ -342,19 +353,46 @@ class ZipVariable(IteratorVariable):
                 iterables.append(it[self.index :])
             else:
                 iterables.append(it.unpack_var_sequence(tx))
-        return list(zip(*iterables))
+        kwargs = {"strict": self.strict} if self.strict else {}
+        zipped = zip(*iterables, **kwargs)
+        return [TupleVariable(list(var)) for var in zipped]
 
     def next_variable(self, tx):
         assert self.mutable_local
         old_index = self.index
         args = []
-        for it in self.iterables:
+
+        def get_item(it):
             if isinstance(it, list):
                 if old_index >= len(it):
                     raise StopIteration
-                args.append(it[old_index])
+                return it[old_index]
             else:
-                args.append(it.next_variable(tx))
+                return it.next_variable(tx)
+
+        try:
+            for idx, it in enumerate(self.iterables):
+                args.append(get_item(it))
+        except StopIteration:
+            if self.strict:
+                if idx == 0:
+                    # all other iterables should be exhausted
+                    for it in self.iterables:
+                        try:
+                            get_item(it)
+                        except StopIteration:
+                            continue
+                        # no StopIteration - fall through to UserError
+                        break
+                    else:
+                        # all iterables exhausted, raise original error
+                        raise
+                raise UserError(
+                    ValueError,
+                    "zip() has one argument of len differing from others",
+                ) from None
+            raise
+
         tx.output.side_effects.mutation(self)
         self.index += 1
         return TupleVariable(args)
@@ -373,12 +411,20 @@ class ZipVariable(IteratorVariable):
     def reconstruct(self, codegen):
         codegen.add_push_null(lambda: codegen.load_import_from("builtins", "zip"))
         self.reconstruct_items(codegen)
-        codegen.extend_output(
-            [
-                create_instruction("BUILD_TUPLE", arg=len(self.iterables)),
-                create_instruction("CALL_FUNCTION_EX", arg=0),
-            ]
+        codegen.append_output(
+            create_instruction("BUILD_TUPLE", arg=len(self.iterables))
         )
+        if sys.version_info >= (3, 10):
+            codegen.extend_output(
+                [
+                    codegen.create_load_const("strict"),
+                    codegen.create_load_const(self.strict),
+                    create_instruction("BUILD_MAP", arg=1),
+                    create_instruction("CALL_FUNCTION_EX", arg=1),
+                ]
+            )
+        else:
+            codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=0))
 
 
 class MapVariable(ZipVariable):

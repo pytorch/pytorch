@@ -1358,15 +1358,12 @@ class BuiltinVariable(VariableTracker):
     def call_zip(self, tx, *args, **kwargs):
         if kwargs:
             assert len(kwargs) == 1 and "strict" in kwargs
-        if kwargs.pop("strict", False) and len(args) > 0:
-            if not all(len(u) == len(args[0]) for u in args):
-                raise UserError(
-                    ValueError,
-                    "zip() has one argument of len differing from others",
-                )
+        strict = kwargs.pop("strict", False)
         if all(x.has_unpack_var_sequence(tx) for x in args):
             args = [arg.unpack_var_sequence(tx) for arg in args]
-        return variables.ZipVariable(list(args), mutable_local=MutableLocal())
+        return variables.ZipVariable(
+            list(args), strict=strict, mutable_local=MutableLocal()
+        )
 
     def call_enumerate(self, tx, *args):
         if len(args) == 1:

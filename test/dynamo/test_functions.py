@@ -3175,9 +3175,15 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
             nopython_fn(x, ys[:1], zs)
 
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+            nopython_fn(x, ys, zs[:1])
+
         # Should cause fallback if allow graph break
         with self.assertRaisesRegex(ValueError, "zip()"):
             opt_fn(x, ys[:1], zs)
+
+        with self.assertRaisesRegex(ValueError, "zip()"):
+            opt_fn(x, ys, zs[:1])
 
 
 instantiate_parametrized_tests(FunctionTests)
