@@ -2016,6 +2016,7 @@ def wrap_fx_proxy_cls(
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
+        is_buffer = isinstance(example_value, torch.nn.Buffer)
 
         # NB: In most (all?) cases, this does not actually do a clone.
         # (WARNING: this means that if we mutate metadata on the fake
@@ -2030,7 +2031,11 @@ def wrap_fx_proxy_cls(
         ):
             tensor_type = subclass_type if subclass_type else torch.Tensor
             specialized_props["class_type"] = (
-                torch.nn.Parameter if is_parameter else tensor_type
+                torch.nn.Parameter
+                if is_parameter
+                else torch.nn.Buffer
+                if is_buffer
+                else tensor_type
             )
 
         options.update(specialized_props)
