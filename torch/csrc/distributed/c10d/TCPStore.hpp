@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <future>
 #include <memory>
 
 #include <torch/csrc/distributed/c10d/Store.hpp>
@@ -143,6 +144,8 @@ class TORCH_API TCPStore : public Store {
  private:
   int64_t incrementValueBy(const std::string& key, int64_t delta);
 
+  void connect(const TCPStoreOptions& opts);
+  void waitConnected();
   void ping();
   void validate();
 
@@ -152,6 +155,7 @@ class TORCH_API TCPStore : public Store {
       c10::ArrayRef<std::string> keys,
       std::chrono::milliseconds timeout);
 
+ private:
   detail::SocketAddress addr_;
   std::shared_ptr<detail::TCPServer> server_;
   std::unique_ptr<detail::TCPClient> client_;
@@ -162,6 +166,9 @@ class TORCH_API TCPStore : public Store {
   std::mutex activeOpLock_;
   std::unordered_map<std::string, detail::Counter> clientCounters_;
   bool usingLibUv_ = true;
+
+  std::mutex connectLock_;
+  std::future<void> connectFuture_;
 };
 
 } // namespace c10d
