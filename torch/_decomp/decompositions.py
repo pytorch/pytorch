@@ -2119,7 +2119,6 @@ def _batch_norm_no_update(
     # because the latter's schema expects defined running stats.
     # Therefore, here we support both eval and training paths,
     # using the eval path only if both running stats are defined.
-    assert running_mean is None == running_var is None  # noqa: E711
     training = running_mean is None or running_var is None
 
     output, save_mean, save_rstd, _, _ = native_batch_norm_helper(

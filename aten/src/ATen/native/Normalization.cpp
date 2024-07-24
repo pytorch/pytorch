@@ -687,6 +687,14 @@ Tensor batch_norm(
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
   const bool running_stats_defined = running_mean.defined() && running_var.defined();
 
+  if (input.sym_numel() == 0) {
+    // don't return view of input, don't return empty tensor because it will break gradient chain
+    auto out = input.clone();
+    if (weight.defined()) out = out * weight[0];
+    if (bias.defined()) out = out + bias[0];
+    return out;
+  }
+
   if (!training && !running_stats_defined) {
     AT_ERROR("running_mean and running_var must be defined in evaluation mode");
   }
