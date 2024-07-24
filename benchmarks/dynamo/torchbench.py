@@ -29,8 +29,8 @@ from torch._dynamo.utils import clone_inputs
 torch.backends.cuda.matmul.allow_tf32 = True
 
 # Enable FX graph caching
-if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
-    torch._inductor.config.fx_graph_cache = True
+#if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
+#    torch._inductor.config.fx_graph_cache = True
 
 
 def _reassign_parameters(model):
