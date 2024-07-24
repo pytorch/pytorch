@@ -179,16 +179,20 @@ class CacheBase:
 
         try:
             system: Dict[str, Any] = {
-                "device": {
-                    "name": torch.cuda.get_device_properties(
-                        torch.cuda.current_device()
-                    ).name,
-                },
+                "device": {"name": None},
                 "version": {
-                    "cuda": torch.version.cuda,
                     "triton": triton_version,
                 },
             }
+            device_properties = torch.cuda.get_device_properties(
+                torch.cuda.current_device()
+            )
+            if torch.version.cuda is not None:
+                system["device"]["name"] = device_properties.name
+                system["version"]["cuda"] = torch.version.cuda
+            else:
+                system["device"]["name"] = device_properties.gcnArchName
+                system["version"]["hip"] = torch.version.hip
         except (AssertionError, RuntimeError):
             # If cuda is not installed, none of the above config is relevant.
             system = {}
@@ -1080,11 +1084,11 @@ class FxGraphCache:
                 cache_id = "fx-graph-v1"
                 try:
                     if config.is_fbcode():
-                        from triton.fb.fb_memcache import (
-                            FbMemcacheRemoteFxGraphCacheBackend,
+                        from torch._inductor.fb.remote_cache import (
+                            FbRemoteFxGraphCacheBackend,
                         )
 
-                        remote_cache = FbMemcacheRemoteFxGraphCacheBackend(cache_id)
+                        remote_cache = FbRemoteFxGraphCacheBackend(cache_id)
                     else:
                         from torch._inductor.remote_cache import RedisRemoteCacheBackend
 

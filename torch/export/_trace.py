@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import dataclasses
 import functools
@@ -21,7 +22,6 @@ from torch._export.non_strict_utils import (
     _gather_constant_attrs,
     make_constraints,
     make_fake_inputs,
-    make_fake_params_buffers,
     produce_guards_and_solve_constraints,
 )
 from torch._export.passes._node_metadata_hook import (
@@ -182,8 +182,13 @@ def _rewrite_node(gm):
                     gm.graph.erase_node(node)
 
 
-def _convert_input_to_fake(gm, args, kwargs):
-    params_buffers = _get_params_buffers(gm)
+def _extract_fake_inputs(gm, args, kwargs):
+    """
+    Given a graph module, extract fakified input tensors from the metadata of
+    its placeholders, and map them to the structure of given args and kwargs.
+    Also return the fake mode used to fakify those inputs.
+    """
+
     fake_inps: List[torch.Tensor] = []
     fake_vals: List[torch.Tensor] = []
     for node in gm.graph.nodes:
@@ -191,7 +196,7 @@ def _convert_input_to_fake(gm, args, kwargs):
             fake_val = node.meta["val"]
             if fake_val is not None and isinstance(fake_val, torch.Tensor):
                 fake_inps.append(fake_val)
-        elif len(fake_inps) == 0 and "example_value" in node.meta:
+        elif "example_value" in node.meta:
             fake_val = node.meta["example_value"]
             if fake_val is not None and isinstance(fake_val, torch.Tensor):
                 fake_vals.append(fake_val)
@@ -201,26 +206,18 @@ def _convert_input_to_fake(gm, args, kwargs):
     else:
         fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
 
-    if len(args) == 0 and len(kwargs) == 0:
-        return (), {}, params_buffers, fake_mode
-
     count = 0
 
-    def convert_to_fake(x):
+    def lookup_fake(x):
         nonlocal count
         val = fake_inps[count]
         count += 1
         return val
 
-    fake_args = pytree.tree_map_only(torch.Tensor, convert_to_fake, args)
-    # TODO properly use the cached fake tensor
-    fake_kwargs = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, kwargs)
-    fake_params_buffers = pytree.tree_map_only(
-        torch.Tensor,
-        functools.partial(fake_mode.from_tensor, static_shapes=True),
-        params_buffers,
-    )
-    return fake_args, fake_kwargs, fake_params_buffers, fake_mode
+    fake_args = pytree.tree_map_only(torch.Tensor, lookup_fake, args)
+    fake_kwargs = pytree.tree_map_only(torch.Tensor, lookup_fake, kwargs)
+
+    return fake_args, fake_kwargs, fake_mode
 
 
 def _replace_param_buffer_names(param_buffer_table, sig):
@@ -790,14 +787,25 @@ def _export_to_aten_ir(
     )
 
 
-def _get_params_buffers(mod: torch.nn.Module) -> Dict[str, torch.Tensor]:
-    params_buffers: Dict[str, torch.Tensor] = {}
-    for name, param in mod.named_parameters(remove_duplicate=False):
-        params_buffers[name] = param
+def _fakify_params_buffers(
+    fake_mode: FakeTensorMode,
+    mod: torch.nn.Module,
+) -> Dict[str, Union[torch.Tensor, torch.nn.Parameter]]:
+    params_buffers = {
+        **dict(mod.named_parameters(remove_duplicate=False)),
+        **dict(mod.named_buffers(remove_duplicate=False)),
+    }
 
-    for name, buffer in mod.named_buffers(remove_duplicate=False):
-        params_buffers[name] = buffer
-    return params_buffers
+    faked_params_buffers = {}
+    memo: Dict[int, FakeTensor] = {}
+    for key, value in params_buffers.items():
+        if id(value) in memo:
+            fake_tensor = memo[id(value)]
+        else:
+            fake_tensor = fake_mode.from_tensor(value, static_shapes=True)
+            memo[id(value)] = fake_tensor
+        faked_params_buffers[key] = fake_tensor
+    return faked_params_buffers  # type: ignore[return-value]
 
 
 def _get_forward_arg_names(
@@ -983,6 +991,20 @@ _EXPORT_FLAGS: Optional[Set[str]] = None
 _EXPORT_MODULE_HIERARCHY: Optional[Dict[str, str]] = None
 
 
+_ALLOW_LIST = {
+    torch._dynamo.exc.Unsupported,
+    torch._dynamo.exc.UserError,
+    torch._dynamo.exc.TorchRuntimeError,
+}
+
+
+def _get_class_if_classified_error(e):
+    case_name = getattr(e, "case_name", None)
+    if type(e) in _ALLOW_LIST and case_name is not None:
+        return case_name
+    return None
+
+
 def _log_export_wrapper(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
@@ -1000,12 +1022,23 @@ def _log_export_wrapper(fn):
         except Exception as e:
             t = type(e)
             error_type = t.__module__ + "." + t.__qualname__
-            log_export_usage(
-                event="export.error",
-                type=error_type,
-                message=str(e),
-                flags=_EXPORT_FLAGS,
-            )
+            case_name = _get_class_if_classified_error(e)
+            if case_name is not None:
+                # TODO (shangdiy): detect whether case_name is really registered in exportdb after we set up exportdb registration.
+                log.error("See %s in exportdb for unsupported case.", case_name)
+                log_export_usage(
+                    event="export.error.classified",
+                    type=error_type,
+                    message=str(e),
+                    flags=_EXPORT_FLAGS,
+                )
+            else:
+                log_export_usage(
+                    event="export.error.unclassified",
+                    type=error_type,
+                    message=str(e),
+                    flags=_EXPORT_FLAGS,
+                )
             raise e
         finally:
             _EXPORT_FLAGS = None
@@ -1164,9 +1197,10 @@ def _strict_export_lower_to_aten_ir(
     (
         fake_args,
         fake_kwargs,
-        fake_params_buffers,
         dynamo_fake_mode,
-    ) = _convert_input_to_fake(gm_torch_level, args, kwargs)
+    ) = _extract_fake_inputs(gm_torch_level, args, kwargs)
+
+    fake_params_buffers = _fakify_params_buffers(dynamo_fake_mode, gm_torch_level)
 
     # First, we want to pass through the graph to try populating
     # val field for getattr if there is anything missing.
@@ -1333,14 +1367,9 @@ def _export_to_aten_ir_make_fx(
     def _make_fx_helper(mod, args, kwargs, **flags):
         kwargs = kwargs or {}
 
-        named_parameters = dict(mod.named_parameters(remove_duplicate=False))
-        param_len = len(named_parameters)
-        named_buffers = dict(mod.named_buffers(remove_duplicate=False))
-        buffer_len = len(named_buffers)
-
         params_and_buffers = {
-            **dict(named_parameters),
-            **dict(named_buffers),
+            **dict(mod.named_parameters(remove_duplicate=False)),
+            **dict(mod.named_buffers(remove_duplicate=False)),
         }
         params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
         params_and_buffers_flat = tuple(params_and_buffers_flat)
@@ -1388,10 +1417,7 @@ def _export_to_aten_ir_make_fx(
         named_buffers = dict(mod.named_buffers(remove_duplicate=False))
         buffer_len = len(named_buffers)
 
-        params_and_buffers = {
-            **dict(named_parameters),
-            **dict(named_buffers),
-        }
+        params_and_buffers = {**named_parameters, **named_buffers}
         params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
         params_and_buffers_flat = tuple(params_and_buffers_flat)
         params_len = len(params_and_buffers)
@@ -1643,7 +1669,7 @@ def _non_strict_export(
         allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,  # for shape env initialization
     )
 
-    fake_params_buffers = make_fake_params_buffers(fake_mode, _get_params_buffers(mod))
+    fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
 
     def _produce_guards_callback(gm):
         return produce_guards_and_solve_constraints(
