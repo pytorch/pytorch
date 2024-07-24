@@ -3,18 +3,16 @@ import io
 import os
 
 import onnx
-from beartype import roar
 
 import torch
 from torch.onnx import dynamo_export, ExportOptions, ONNXProgram
-from torch.onnx._internal import exporter, io_adapter
+from torch.onnx._internal import exporter
 from torch.onnx._internal.exporter import (
     LargeProtobufONNXProgramSerializer,
     ONNXProgramSerializer,
     ProtobufONNXProgramSerializer,
     ResolvedExportOptions,
 )
-from torch.onnx._internal.fx import diagnostics
 
 from torch.testing._internal import common_utils
 
@@ -49,15 +47,6 @@ class _LargeModel(torch.nn.Module):
 
 
 class TestExportOptionsAPI(common_utils.TestCase):
-    def test_raise_on_invalid_argument_type(self):
-        expected_exception_type = roar.BeartypeException
-        with self.assertRaises(expected_exception_type):
-            ExportOptions(dynamic_shapes=2)  # type: ignore[arg-type]
-        with self.assertRaises(expected_exception_type):
-            ExportOptions(diagnostic_options="DEBUG")  # type: ignore[arg-type]
-        with self.assertRaises(expected_exception_type):
-            ResolvedExportOptions(options=12)  # type: ignore[arg-type]
-
     def test_dynamic_shapes_default(self):
         options = ResolvedExportOptions(ExportOptions())
         self.assertFalse(options.dynamic_shapes)
@@ -120,7 +109,6 @@ class TestDynamoExportAPI(common_utils.TestCase):
 
         # NOTE: Inheritance from `ONNXProgramSerializer` is not required.
         # Because `ONNXProgramSerializer` is a Protocol class.
-        # `beartype` will not complain.
         class CustomSerializer:
             def serialize(
                 self, onnx_program: ONNXProgram, destination: io.BufferedIOBase
@@ -196,27 +184,8 @@ class TestDynamoExportAPI(common_utils.TestCase):
                 ),
             )
 
-    def test_raise_on_invalid_save_argument_type(self):
-        with self.assertRaises(roar.BeartypeException):
-            ONNXProgram(torch.nn.Linear(2, 3))  # type: ignore[arg-type]
-        onnx_program = ONNXProgram(
-            onnx.ModelProto(),
-            io_adapter.InputAdapter(),
-            io_adapter.OutputAdapter(),
-            diagnostics.DiagnosticContext("test", "1.0"),
-            fake_context=None,
-        )
-        with self.assertRaises(roar.BeartypeException):
-            onnx_program.save(None)  # type: ignore[arg-type]
-        onnx_program.model_proto
-
 
 class TestProtobufONNXProgramSerializerAPI(common_utils.TestCase):
-    def test_raise_on_invalid_argument_type(self):
-        with self.assertRaises(roar.BeartypeException):
-            serializer = ProtobufONNXProgramSerializer()
-            serializer.serialize(None, None)  # type: ignore[arg-type]
-
     def test_serialize_raises_when_model_greater_than_2gb(self):
         onnx_program = torch.onnx.dynamo_export(_LargeModel(), torch.randn(1))
         serializer = ProtobufONNXProgramSerializer()

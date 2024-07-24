@@ -5,6 +5,7 @@ from typing import (
     Any,
     cast,
     Dict,
+    Generic,
     Iterable,
     Iterator,
     List,
@@ -20,7 +21,8 @@ T_co = TypeVar("T_co", covariant=True)
 __all__ = ["OrderedSet"]
 
 
-class OrderedSet(MutableSet[T]):
+# Using Generic[T] bc py38 does not support type parameterized MutableSet
+class OrderedSet(Generic[T], MutableSet):
     """
     Insertion ordered set, similar to OrderedDict.
     """
@@ -28,12 +30,10 @@ class OrderedSet(MutableSet[T]):
     __slots__ = ("_dict",)
 
     def __init__(self, iterable: Optional[Iterable[T]] = None):
-        self._dict: dict[T, None] = {}
-        if iterable is not None:
-            self._dict = dict.fromkeys(iterable, None)
+        self._dict = dict.fromkeys(iterable, None) if iterable is not None else {}
 
     @staticmethod
-    def from_dict(dict_inp: Dict[T, None]) -> OrderedSet[T]:
+    def _from_dict(dict_inp: Dict[T, None]) -> OrderedSet[T]:
         s: OrderedSet[T] = OrderedSet()
         s._dict = dict_inp
         return s
@@ -45,7 +45,7 @@ class OrderedSet(MutableSet[T]):
         return elem in self._dict
 
     def __iter__(self) -> Iterator[T]:
-        yield from self._dict.keys()
+        return iter(self._dict)
 
     def __len__(self) -> int:
         return len(self._dict)
@@ -82,7 +82,7 @@ class OrderedSet(MutableSet[T]):
         return self._dict.popitem()[0]
 
     def copy(self) -> OrderedSet[T]:
-        return OrderedSet.from_dict(self._dict.copy())
+        return OrderedSet._from_dict(self._dict.copy())
 
     def difference(self, *others: Iterable[T]) -> OrderedSet[T]:
         res = self.copy()
@@ -131,6 +131,11 @@ class OrderedSet(MutableSet[T]):
     # Specify here for correct type inference, otherwise would
     # return AbstractSet[T]
     def __sub__(self, other: AbstractSet[T_co]) -> OrderedSet[T]:
+        # following cpython set impl optimization
+        if isinstance(other, OrderedSet) and (len(self) * 4) > len(other):
+            out = self.copy()
+            out -= other
+            return out
         return cast(OrderedSet[T], super().__sub__(other))
 
     def __ior__(self, other: Iterable[T]) -> OrderedSet[T]:  # type: ignore[misc, override]   # noqa: PYI034

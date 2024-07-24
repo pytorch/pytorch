@@ -19,7 +19,6 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import torch
 
 from .coordinate_descent_tuner import CoordescTuner
-
 from .hints import (
     _NUM_THREADS_PER_WARP,
     AutotuneHint,
@@ -42,6 +41,7 @@ from .runtime_utils import (
     next_power_of_2,
     triton_config_to_hashable,
 )
+
 
 try:
     import triton
@@ -342,7 +342,7 @@ class CachingAutotuner(KernelInterface):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
         for k, v in cfg.kwargs.items():
-            if self.device_props.type != "hip":
+            if self.device_props.type == "hip":
                 if k == "matrix_instr_nonkdim":
                     compile_meta["matrix_instr_nonkdim"] = v
                     continue
@@ -723,7 +723,7 @@ class CachingAutotuner(KernelInterface):
         if self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config, time_taken_ns)
 
-    def save_cuda_kernel(self, grid, stream, launcher):
+    def save_gpu_kernel(self, grid, stream, launcher):
         if callable(grid):
             grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
         else:
@@ -753,12 +753,9 @@ class CachingAutotuner(KernelInterface):
         }
         from torch._inductor.codecache import CudaKernelParamCache
 
-        binary = (
-            launcher.bin.asm["cubin"]
-            if self.device_props.type != "hip"
-            else launcher.bin.asm["hsaco"]
-        )
-        CudaKernelParamCache.set(key, params, binary)
+        bin_type = {"hip": "hsaco", "xpu": "spv"}.get(self.device_props.type, "cubin")
+        binary = launcher.bin.asm[bin_type]
+        CudaKernelParamCache.set(key, params, binary, bin_type)
 
         self.cuda_kernel_saved = True
 
@@ -831,7 +828,7 @@ class CachingAutotuner(KernelInterface):
 
         (launcher,) = self.launchers
         if launcher.store_cubin:
-            self.save_cuda_kernel(grid, stream, launcher)
+            self.save_gpu_kernel(grid, stream, launcher)
 
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
@@ -1032,9 +1029,12 @@ def should_use_remote_autotune_cache(inductor_meta):
     if inductor_meta.get("is_hip"):
         return False
 
-    from triton.fb.fb_memcache import MEMCACHE_VERSION
+    try:
+        from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
+    except ModuleNotFoundError:
+        return False
 
-    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
         "pytorch/remote_cache:autotune_memcache_version"
     )
 
@@ -1076,13 +1076,11 @@ def cached_autotune(
 
                 try:
                     if inductor_meta.get("is_fbcode"):
-                        import triton.fb.fb_memcache
-
-                        remote_cache = (
-                            triton.fb.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend(
-                                key
-                            )
+                        from torch._inductor.fb.remote_cache import (
+                            FbRemoteAutotuneCacheBackend,
                         )
+
+                        remote_cache = FbRemoteAutotuneCacheBackend(key)
                     else:
                         from torch._inductor.remote_cache import RedisRemoteCacheBackend
 
@@ -1773,3 +1771,42 @@ def split_scan_grid(xnumel, rnumel):
     setattr(grid_fn, "grid_fn_str", grid_fn_str)  # noqa: B010
 
     return grid_fn
+
+
+def grid_combo_kernels(*numels, num_kernels, min_blocks, is_sequential):
+    """min_blocks is the minimal size of the grid x dimension"""
+    if not is_sequential:
+        # round robin dispatch
+        kernel_grid_fn = grid(*numels)
+    else:
+        # sequential dispatch
+        seq_numels = list(numels)
+        # x numels are not used here, just a place holder
+        seq_numels[-1] = 1024
+        kernel_grid_fn = grid(*seq_numels)
+
+    def get_grid_dim(numel, block):
+        if numel is None:
+            return 1
+        if block is None:
+            return numel
+        return ceildiv(numel, block)
+
+    def grid_fn(meta):
+        cuda_grid = list(kernel_grid_fn(meta))
+        cuda_grid[0] = max(num_kernels * cuda_grid[0], min_blocks)
+        return tuple(cuda_grid)
+
+    def seq_grid_fn(meta):
+        cuda_grid = list(kernel_grid_fn(meta))
+        # x <= 0 means this kernel's x grid is not tunable (x_no_dim is true)
+        x_grid = sum(
+            [
+                -x if x <= 0 else get_grid_dim(x, meta.get("XBLOCK", 1))
+                for x in numels[-1]
+            ]
+        )
+        cuda_grid[0] = x_grid
+        return tuple(cuda_grid)
+
+    return grid_fn if not is_sequential else seq_grid_fn

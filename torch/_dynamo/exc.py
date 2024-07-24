@@ -3,13 +3,16 @@ import os
 import textwrap
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import Any, cast, NoReturn, Optional
+from typing import Any, cast, NoReturn, Optional, Tuple, TYPE_CHECKING
 
 import torch._guards
 
 from . import config
 
 from .utils import counters
+
+if TYPE_CHECKING:
+    from torch._guards import CompileId
 
 
 def exportdb_error_message(case_name):
@@ -86,12 +89,13 @@ class BackendCompilerFailed(TorchDynamoException):
 
 
 class Unsupported(TorchDynamoException):
-    def __init__(self, msg):
+    def __init__(self, msg, *, case_name=None):
         super().__init__(msg)
         self.real_stack = torch._guards.TracingContext.extract_stack()
         self.msg = msg
         self.category: Optional[str] = None
         self.add_to_stats()
+        self.case_name: Optional[str] = case_name
 
     def remove_from_stats(self):
         assert self.category is not None
@@ -214,11 +218,13 @@ def unimplemented_with_warning(e: Exception, code, msg: str) -> NoReturn:
 _NOTHING = object()
 
 
-def unimplemented(msg: str, *, from_exc: Any = _NOTHING) -> NoReturn:
+def unimplemented(
+    msg: str, *, from_exc: Any = _NOTHING, case_name: Optional[str] = None
+) -> NoReturn:
     assert msg != os.environ.get("BREAK", False)
     if from_exc is not _NOTHING:
-        raise Unsupported(msg) from from_exc
-    raise Unsupported(msg)
+        raise Unsupported(msg, case_name=case_name) from from_exc
+    raise Unsupported(msg, case_name=case_name)
 
 
 def warning(msg: str) -> None:
@@ -286,6 +292,18 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
     else:
         new_msg = old_msg + msg
         exc.args = (new_msg,) + exc.args[1:]
+
+
+def get_exc_message(
+    e: Exception, compile_id: "CompileId"
+) -> Tuple[Optional[str], Optional[int]]:
+    filename = None
+    lineno = None
+    if e.innermost_user_frame_summary is not None:  # type: ignore[attr-defined]
+        filename = e.innermost_user_frame_summary.filename  # type: ignore[attr-defined]
+        lineno = e.innermost_user_frame_summary.lineno  # type: ignore[attr-defined]
+    e.compile_id = compile_id  # type: ignore[attr-defined]
+    return filename, lineno
 
 
 def get_real_stack(exc: Exception, frame=None) -> Optional[StackSummary]:

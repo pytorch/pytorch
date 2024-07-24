@@ -25,8 +25,8 @@ void _fused_adamw_kernel_mps_(at::TensorList params,
                               const double eps,
                               const bool amsgrad,
                               const bool maximize,
-                              const c10::optional<at::Tensor>& grad_scale,
-                              const c10::optional<at::Tensor>& found_inf) {
+                              const std::optional<at::Tensor>& grad_scale,
+                              const std::optional<at::Tensor>& found_inf) {
   if (amsgrad) {
     TORCH_CHECK(at::native::check_fast_path_restrictions({params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs}),
                 "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout");
@@ -76,8 +76,8 @@ void _fused_adamw_kernel_mps_(at::TensorList params,
                               const double eps,
                               const bool amsgrad,
                               const bool maximize,
-                              const c10::optional<at::Tensor>& grad_scale,
-                              const c10::optional<at::Tensor>& found_inf) {
+                              const std::optional<at::Tensor>& grad_scale,
+                              const std::optional<at::Tensor>& found_inf) {
   if (lr.is_cpu()) {
     return _fused_adamw_kernel_mps_(params,
                                     grads,
@@ -137,4 +137,5 @@ void _fused_adamw_kernel_mps_(at::TensorList params,
                                 found_inf);
   }
 }
+
 } // namespace at::native

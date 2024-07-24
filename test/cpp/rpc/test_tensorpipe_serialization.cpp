@@ -24,9 +24,7 @@ TEST(TensorpipeSerialize, Base) {
       c10::make_intrusive<torch::distributed::rpc::Message>(
           std::move(payload), std::move(tensors), mtype);
   sendingRpcMessage->setId(mId);
-  tensorpipe::Message sendingTpMessage;
-  torch::distributed::rpc::TensorpipeWriteBuffers sendingTpBuffers;
-  std::tie(sendingTpMessage, sendingTpBuffers) =
+  auto [sendingTpMessage, sendingTpBuffers] =
       torch::distributed::rpc::tensorpipeSerialize(
           std::move(sendingRpcMessage), {}, {});
 
@@ -58,9 +56,7 @@ TEST(TensorpipeSerialize, Base) {
   // Mimic readDescriptor() callback:
   // - Allocate buffers
   // - Fill pointers in tensorpipe message
-  tensorpipe::Allocation recvingTpAllocation;
-  torch::distributed::rpc::TensorpipeReadBuffers recvingTpBuffers;
-  std::tie(recvingTpAllocation, recvingTpBuffers) =
+  auto [recvingTpAllocation, recvingTpBuffers] =
       torch::distributed::rpc::tensorpipeAllocate(recvingTpDescriptor, {});
 
   // Mimic tensorpipe data transfer
@@ -117,9 +113,7 @@ TEST(TensorpipeSerialize, RecopySparseTensors) {
       c10::make_intrusive<torch::distributed::rpc::Message>(
           std::move(payload), std::move(tensors), mtype);
 
-  tensorpipe::Message sendingTpMessage;
-  torch::distributed::rpc::TensorpipeWriteBuffers tpBuffers;
-  std::tie(sendingTpMessage, tpBuffers) =
+  auto [sendingTpMessage, tpBuffers] =
       torch::distributed::rpc::tensorpipeSerialize(
           std::move(sendingRpcMessage), {}, {});
 
@@ -150,9 +144,7 @@ TEST(TensorpipeSerialize, NoDeleterTensors) {
       c10::make_intrusive<torch::distributed::rpc::Message>(
           std::move(payload), std::move(tensors), mtype);
 
-  tensorpipe::Message sendingTpMessage;
-  torch::distributed::rpc::TensorpipeWriteBuffers tpBuffers;
-  std::tie(sendingTpMessage, tpBuffers) =
+  auto [sendingTpMessage, tpBuffers] =
       torch::distributed::rpc::tensorpipeSerialize(
           std::move(sendingRpcMessage), {}, {});
 

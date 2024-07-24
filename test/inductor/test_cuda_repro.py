@@ -29,8 +29,8 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ASAN,
 )
-
 from torch.testing._internal.inductor_utils import skipCUDAIf
+
 
 try:
     try:
@@ -1190,6 +1190,21 @@ class CudaReproTests(TestCase):
         out, code = run_and_get_code(outer_reduce, a)
         self.assertEqual(outer_reduce(a), out)
         self.assertTrue("for roffset" not in code)
+
+    def test_non_contiguous_unaligned_input_indices(self):
+        from torch._inductor.compile_fx import remove_unaligned_input_idxs
+
+        inputs = [torch.ones(2, 2, device="cuda"), torch.ones(2, 2, device="cuda")[1:]]
+        idxs = remove_unaligned_input_idxs(inputs, [1])
+        self.assertEqual(idxs, [])
+
+        inputs = [
+            torch.ones(2, 2, device="cuda"),
+            torch.ones(2, 2, device="cuda"),
+            torch.ones(2, 2, device="cuda")[1:],
+        ]
+        idxs = remove_unaligned_input_idxs(inputs, [0, 2])
+        self.assertEqual(idxs, [0])
 
     def test_epilogue_fusion_with_view(self):
         class ToyModel(torch.nn.Module):

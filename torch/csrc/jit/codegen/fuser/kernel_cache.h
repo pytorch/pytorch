@@ -1,12 +1,12 @@
 #pragma once
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_spec.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 
 namespace torch {
 namespace jit {

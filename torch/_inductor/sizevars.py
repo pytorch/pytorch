@@ -32,6 +32,7 @@ from .utils import (
 )
 from .virtualized import V
 
+
 log = logging.getLogger(__name__)
 
 
@@ -56,8 +57,8 @@ class SizeVarAllocator:
         # which potentially could have already had a precomputed replacement
         # on it, we are obligated to invert the precomputed replacements
         # (inv_precomputed_replacements).
-        self.precomputed_replacements: Dict[Expr, sympy.Symbol] = dict()
-        self.inv_precomputed_replacements: Dict[sympy.Symbol, Expr] = dict()
+        self.precomputed_replacements: Dict[Expr, sympy.Symbol] = {}
+        self.inv_precomputed_replacements: Dict[sympy.Symbol, Expr] = {}
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
@@ -69,7 +70,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict[Tuple[Any, ...], Expr] = dict()
+        cache: Dict[Tuple[Any, ...], Expr] = {}
         replacement_count = len(self.replacements)
 
         def simplify_with_ranges(expr: Expr, var_ranges: VarRanges) -> Expr:
@@ -91,7 +92,7 @@ class SizeVarAllocator:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
-        cache: Dict[Tuple[Any, ...], Any] = dict()
+        cache: Dict[Tuple[Any, ...], Any] = {}
         replacement_count = len(self.replacements)
 
         def simplify_loops(index_vars, sizes, index_formulas):
@@ -299,7 +300,9 @@ class SizeVarAllocator:
 
         return False
 
-    def statically_known_equals(self, left: Expr, right: Union[Expr, int]) -> bool:
+    def statically_known_equals(
+        self, left: Union[Expr, int], right: Union[Expr, int]
+    ) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
@@ -310,11 +313,9 @@ class SizeVarAllocator:
         """
         Returns a bool indicating if it is sound to optimize as if left and right lists are equal.
         """
-        if len(left) != len(right):
-            return False
-        if all(self.statically_known_equals(l, r) for l, r in zip(left, right)):
-            return True
-        return False
+        return len(left) == len(right) and all(
+            self.statically_known_equals(l, r) for l, r in zip(left, right)
+        )
 
     # See Note - [On Statically Known]
     def statically_known_leq(self, left: Expr, right: Union[Expr, int]) -> bool:
