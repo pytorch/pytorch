@@ -51,8 +51,8 @@
 #endif // _WIN32
 #endif // __GNUC__
 
-#include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -143,6 +143,8 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_int64(AtenTensorHandle tensor, int64_t* ret_value);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_bool(AtenTensorHandle tensor, bool* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_bfloat16(AtenTensorHandle tensor, c10::BFloat16* ret_value);
 
 // Functions for wrapping a scalar value to a single-element tensor
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_float32(

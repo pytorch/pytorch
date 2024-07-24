@@ -43,7 +43,6 @@
 
 #endif
 
-
 using namespace torch::aot_inductor;
 
 namespace {
@@ -122,6 +121,7 @@ AOTI_TORCH_ITEM_IMPL(int16, int16_t)
 AOTI_TORCH_ITEM_IMPL(int32, int32_t)
 AOTI_TORCH_ITEM_IMPL(int64, int64_t)
 AOTI_TORCH_ITEM_IMPL(bool, bool)
+AOTI_TORCH_ITEM_IMPL(bfloat16, c10::BFloat16)
 #undef AOTI_TORCH_ITEM_IMPL
 
 #define AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(dtype, ctype, ttype)                  \

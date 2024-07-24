@@ -934,9 +934,7 @@ class CppWrapperCpu(WrapperCodeGen):
             writer.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar_tmp}));"
             )
-            writer.writeline(
-                f"float {scalar} = float({scalar_tmp});"
-            )
+            writer.writeline(f"float {scalar} = float({scalar_tmp});")
         else:
             writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
 
