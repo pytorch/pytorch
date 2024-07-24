@@ -33,6 +33,7 @@ from typing_extensions import deprecated
 import optree
 from optree import PyTreeSpec  # direct import for type annotations
 
+import torch.utils._pytree as _pytree
 from torch.utils._pytree import (
     GetAttrKey,
     key_get,
@@ -1032,3 +1033,10 @@ def tree_map_with_path(
         none_is_leaf=True,
         namespace="torch",
     )
+
+
+with _pytree._NODE_REGISTRY_LOCK:
+    _pytree._cxx_pytree_imported = True
+    for args, kwargs in _pytree._cxx_pytree_pending_imports:
+        _private_register_pytree_node(*args, **kwargs)
+    _pytree._cxx_pytree_pending_imports.clear()

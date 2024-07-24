@@ -1617,6 +1617,28 @@ class TestAutogradFunctionVmapAPI(TestCase):
         with self.assertRaisesRegex(RuntimeError, "returned an incompatible"):
             result = vmap(Zeros.apply)(x)
 
+    def test_kwarg_only_tensors(self, device):
+        with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
+
+            class MyClass(torch.autograd.Function):
+                @staticmethod
+                def forward(x, *, y):
+                    return x + y
+
+                @staticmethod
+                def setup_context(ctx, inputs, output):
+                    pass
+
+                @staticmethod
+                def vmap(info, in_dims, x, *, y):
+                    assert in_dims == (0,)
+                    return x + y, 0
+
+            x = torch.randn(3)
+            y = torch.randn(3)
+
+            vmap(MyClass.apply)(x, y=y)
+
 
 @markDynamoStrictTest
 class TestVmapOfGrad(TestCase):
@@ -3529,13 +3551,10 @@ class TestComposability(TestCase):
     @parametrize(
         "transform",
         [
-            "vmap",
             "grad",
             "jacrev",
-            "jacfwd",
             "grad_and_value",
             "hessian",
-            "functionalize",
         ],
     )
     def test_transforms_dont_support_saved_tensor_hooks(self, device, transform):
@@ -3575,7 +3594,7 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
             vjp(g, x)
 
-    def test_jvp_doesnt_support_saved_tensor_hooks(self, device):
+    def test_jvp_supports_saved_tensor_hooks(self, device):
         def f(x):
             return torch.sin(x).sum()
 
@@ -3586,12 +3605,12 @@ class TestComposability(TestCase):
         x = torch.randn(3, device=device)
         t = torch.randn(3, device=device)
 
-        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
-            with torch.autograd.graph.save_on_cpu():
-                jvp(f, (x,), (t,))
+        # smoke tests
+        with torch.autograd.graph.save_on_cpu():
+            jvp(f, (x,), (t,))
 
-        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
-            jvp(g, (x,), (t,))
+        # smoke tests
+        jvp(g, (x,), (t,))
 
     def test_can_use_functionalize_when_key_is_excluded(self, device):
         def f(x):
@@ -4737,8 +4756,8 @@ def forward(self, x_1) -> torch.Tensor:
     view_copy = torch.ops.aten.view_copy.default(x_1, [4, 2])
     add = torch.ops.aten.add.Tensor(view_copy, ones);  view_copy = ones = None
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4, 2]);  add = None
-    view_copy_2 = torch.ops.aten.view_copy.default(view_copy_1, [4, 2])
-    copy_ = torch.ops.aten.copy_.default(x_1, view_copy_1);  x_1 = None
+    view_copy_2 = torch.ops.aten.view_copy.default(view_copy_1, [4, 2]);  view_copy_2 = None
+    copy_ = torch.ops.aten.copy_.default(x_1, view_copy_1);  x_1 = copy_ = None
     return view_copy_1
     """,
         )
@@ -4780,13 +4799,13 @@ def forward(self, x_1) -> torch.Tensor:
 
 
 def forward(self, inpt_1) -> torch.Tensor:
-    empty = torch.ops.aten.empty.memory_format([], dtype = torch.float32, device = 'cpu', pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([], dtype = torch.float32, device = 'cpu', pin_memory = False);  empty = None
     add = torch.ops.aten.add.Tensor(inpt_1, inpt_1);  inpt_1 = None
-    view_copy = torch.ops.aten.view_copy.default(add, [4])
+    view_copy = torch.ops.aten.view_copy.default(add, [4]);  view_copy = None
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4]);  add = None
     add_1 = torch.ops.aten.add.Tensor(view_copy_1, 1);  view_copy_1 = None
     view_copy_2 = torch.ops.aten.view_copy.default(add_1, [4]);  add_1 = None
-    view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [4])
+    view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [4]);  view_copy_3 = None
     return view_copy_2
     """,
         )
@@ -4810,15 +4829,15 @@ def forward(self, inpt_1) -> torch.Tensor:
 
 
 def forward(self, inpt_1) -> torch.Tensor:
-    empty = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = 'cpu', pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = 'cpu', pin_memory = False);  empty = None
     empty_1 = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = 'cpu', pin_memory = False)
-    view_copy = torch.ops.aten.view_copy.default(empty_1, [4]);  empty_1 = None
+    view_copy = torch.ops.aten.view_copy.default(empty_1, [4]);  empty_1 = view_copy = None
     view_copy_1 = torch.ops.aten.view_copy.default(inpt_1, [2, 4]);  inpt_1 = None
     aminmax = torch.ops.aten.aminmax.default(view_copy_1, dim = 0);  view_copy_1 = None
     getitem = aminmax[0]
     getitem_1 = aminmax[1];  aminmax = None
     view_copy_2 = torch.ops.aten.view_copy.default(getitem_1, [2, 2]);  getitem_1 = None
-    view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [4])
+    view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [4]);  view_copy_3 = None
     return (view_copy_2, getitem)
     """,
         )
@@ -4843,8 +4862,8 @@ def forward(self, x_1) -> torch.Tensor:
     view = torch.ops.aten.view.default(x_1, [4, 2])
     add = torch.ops.aten.add.Tensor(view, ones);  view = ones = None
     view_1 = torch.ops.aten.view.default(add, [4, 2]);  add = None
-    view_2 = torch.ops.aten.view.default(view_1, [4, 2])
-    copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = None
+    view_2 = torch.ops.aten.view.default(view_1, [4, 2]);  view_2 = None
+    copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = copy_ = None
     return view_1
     """,
         )
@@ -4933,7 +4952,7 @@ def forward(self, x_1):
     resize = torch.ops.aten.resize.default(x_1, [10])
     fill = torch.ops.aten.fill.Scalar(resize, 2);  resize = None
     resize_ = torch.ops.aten.resize_.default(x_1, [10]);  x_1 = None
-    copy_ = torch.ops.aten.copy_.default(resize_, fill);  resize_ = fill = None
+    copy_ = torch.ops.aten.copy_.default(resize_, fill);  resize_ = fill = copy_ = None
     return None
     """,
         )
