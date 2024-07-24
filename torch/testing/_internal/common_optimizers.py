@@ -121,6 +121,9 @@ class OptimizerInfo:
         # A subset of the global-cliquey flags (fused, foreach, differentiable) the optimizer
         # supports. See NOTE: [optimizer kwarg categories] for what global-cliquey means.
         supported_impls: Tuple[str, ...] = ("foreach", "differentiable"),
+        # A subset of all flags, signifying which ones were only supported after the
+        # original optimizer had already been released. aka impls where we need to check BC.
+        not_og_supported_flags: Tuple[str, ...] = ("foreach", "differentiable", "maximize", "capturable"),
         # the optim supports passing in sparse gradients as well as dense grads
         supports_sparse: bool = False,
         # the optim only supports one config: sparse grads w/ dense params, see SparseAdam
@@ -146,6 +149,7 @@ class OptimizerInfo:
         self.optim_inputs_func = optim_inputs_func
         self.scheduler_inputs = scheduler_inputs
         self.supported_impls = supported_impls
+        self.not_og_supported_flags = not_og_supported_flags
         self.supports_sparse = supports_sparse
         self.metadata_for_sparse = metadata_for_sparse
         self.only_supports_sparse_grads = only_supports_sparse_grads
@@ -1234,6 +1238,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adafactor,
         optim_error_inputs_func=optim_error_inputs_func_adafactor,
         supported_impls=(),
+        not_og_supported_flags=(),
         supports_complex=False,
         skips=(),
     ),
@@ -1242,6 +1247,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adagrad,
         optim_error_inputs_func=optim_error_inputs_func_adagrad,
         supported_impls=("foreach", "differentiable", "fused"),
+        not_og_supported_flags=("foreach", "differentiable", "fused", "maximize", "capturable"),
         supports_fused_on=("cpu",),
         supports_sparse=True,
         metadata_for_sparse=(
@@ -1325,6 +1331,7 @@ optim_db: List[OptimizerInfo] = [
         ),
         optim_error_inputs_func=optim_error_inputs_func_adam,
         supported_impls=("foreach", "differentiable", "fused"),
+        not_og_supported_flags=("foreach", "differentiable", "fused", "maximize", "capturable"),
         supports_fused_on=("cpu", "cuda", "mps"),
         decorators=(
             # Expected floating point error between fused and compiled forloop
@@ -1447,6 +1454,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamw,
         optim_error_inputs_func=optim_error_inputs_func_adamw,
         supported_impls=("foreach", "differentiable", "fused"),
+        not_og_supported_flags=("foreach", "differentiable", "fused", "maximize", "capturable"),
         supports_fused_on=("cpu", "cuda", "mps"),
         decorators=(
             # Expected error between compiled forloop and fused optimizers
@@ -1838,6 +1846,7 @@ optim_db: List[OptimizerInfo] = [
         ),
         optim_error_inputs_func=optim_error_inputs_func_sgd,
         supported_impls=("foreach", "differentiable", "fused"),
+        not_og_supported_flags=("foreach", "differentiable", "fused", "maximize", "capturable"),
         supports_sparse=True,
         metadata_for_sparse=(
             {
