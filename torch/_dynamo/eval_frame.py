@@ -162,6 +162,7 @@ class OptimizedModule(torch.nn.Module):
         self._orig_mod = mod
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
+        self.training = self._orig_mod.training
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
@@ -197,10 +198,18 @@ class OptimizedModule(torch.nn.Module):
         self.__dict__ = state
         self._initialize()
 
-    def __getattribute__(self, name):
-        if name == "training":
-            return getattr(self._orig_mod, name)
-        return super().__getattribute__(name)
+    @property
+    def training(self):
+        return self._orig_mod.training
+
+    @training.setter
+    def training(self, value):
+        try:
+            super().__getattr__("_orig_mod")
+            self._orig_mod.training = value
+        except AttributeError:
+            # still initializing
+            pass
 
     def __getattr__(self, name):
         if name == "_orig_mod":
