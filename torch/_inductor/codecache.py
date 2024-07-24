@@ -1968,6 +1968,7 @@ class AotCodeCompiler:
 
             if use_mmap_weights:
                 import resource
+
                 page_size_ = resource.getpagesize()
                 page_size = max(16384, page_size_)
                 with open(output_so, "a+b") as f_so:
