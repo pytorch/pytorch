@@ -460,6 +460,13 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle self,
     AtenTensorHandle mat2);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__mm_plus_mm_out(
+    AtenTensorHandle out,
+    AtenTensorHandle a,
+    AtenTensorHandle b,
+    AtenTensorHandle c,
+    AtenTensorHandle d);
+
 // This will soon be deprecated after ao_quantization is complete.
 // Please refrain from using this or increasing callsites.
 AOTI_TORCH_EXPORT AOTITorchError
