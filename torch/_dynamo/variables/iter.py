@@ -5,10 +5,7 @@ MAX_CYCLE = 3000
 import itertools
 import operator
 
-from typing import Dict, List, Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+from typing import Dict, List, Optional
 
 from .. import polyfill, variables
 from ..exc import ObservedUserStopIteration, unimplemented
@@ -32,10 +29,7 @@ class ItertoolsVariable(VariableTracker):
         return self.value
 
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if (
             self.value is itertools.product

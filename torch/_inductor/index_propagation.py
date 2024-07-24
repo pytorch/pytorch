@@ -329,11 +329,7 @@ class IndexPropagation:
         return bool(evaluated)
 
     def indirect_indexing(
-        self,
-        index: Union[Any, IndexPropVar],
-        size: Any,
-        check: bool = True,
-        wrap_neg=True,
+        self, index: Union[Any, IndexPropVar], size: Any, check: bool = True
     ) -> Any:
         if isinstance(index, IndexPropVar) and index.is_symbolic:
             # If we find something we can convert into a direct indexing we do so
@@ -358,8 +354,7 @@ class IndexPropagation:
                 -size <= expr
             )
             can_prove_upper = self.statically_true(expr < size)
-            if wrap_neg:
-                expr = wrap_expr(expr)
+            expr = wrap_expr(expr)
             if generate_assert(check):
                 self.fallback(
                     "check_bounds",
@@ -369,6 +364,6 @@ class IndexPropagation:
             return expr
 
         indirect_var = self.fallback(
-            "indirect_indexing", (index, size, check, wrap_neg), {}
+            "indirect_indexing", (index, size, check), {}
         ).value
         return indirect_var

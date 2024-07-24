@@ -13,9 +13,6 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.base import VariableTracker
@@ -34,6 +31,9 @@ from ..utils import proxy_args_kwargs
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 log = logging.getLogger(__name__)
@@ -599,10 +599,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
@@ -612,10 +609,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         reason="Cond doesn't work unless it is captured completely with torch.compile."
     )
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import ListVariable, TensorVariable
 
@@ -814,10 +808,7 @@ class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self.method_name = method_name
 
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
@@ -843,10 +834,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         reason="while_loop doesn't work unless it is captured completely with torch.compile."
     )
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         from . import TensorVariable
 
@@ -1000,10 +988,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         reason="associative_scan must be captured completely with torch.compile."
     )
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         from .builder import SourcelessBuilder, wrap_fx_proxy
 
@@ -1106,10 +1091,7 @@ def non_single_tensor_return_unsupported(api, ret):
 
 class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         from . import TensorVariable
         from .builder import wrap_fx_proxy_cls
@@ -1196,10 +1178,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
@@ -1247,10 +1226,7 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
 
 class FunctorchHigherOrderVariable(UserFunctionVariable):
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if not torch._dynamo.config.capture_func_transforms:
             name = self.get_name()
@@ -1274,9 +1250,7 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def create_wrapped_node(
-        self, tx: "InstructionTranslator", args, kwargs, description
-    ):
+    def create_wrapped_node(self, tx, args, kwargs, description):
         # See NOTE [HigherOrderOperator tracing design] for more details
 
         (
@@ -1316,10 +1290,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         return proxy_args, {}, example_value, body_r, treespec, body_gmod
 
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         # This flattens the kwargs into lifted args
         p_args, p_kwargs, example_value, body_r, treespec, _ = self.create_wrapped_node(
@@ -1342,10 +1313,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
@@ -1380,10 +1348,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         reason="strict_mode HOO doesn't work unless it is captured completely with torch.compile."
     )
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         callable = args[0]
 
@@ -1444,10 +1409,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         from torch._higher_order_ops.wrap import TagActivationCheckpoint
         from torch.utils.checkpoint import noop_context_fn
@@ -1510,10 +1472,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
 class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
@@ -1533,10 +1492,7 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
@@ -1563,10 +1519,7 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
     """
 
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         kwargs = dict(kwargs)
         fn = kwargs.pop("fn")
@@ -1586,11 +1539,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         return all_args
 
     def create_wrapped_node(
-        self,
-        tx: "InstructionTranslator",
-        query: "VariableTracker",
-        fn: "VariableTracker",
-        fn_name: str,
+        self, tx, query: "VariableTracker", fn: "VariableTracker", fn_name: str
     ):
         from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
         from .builder import SourcelessBuilder
@@ -1655,10 +1604,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         return proxy_args
 
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
@@ -1736,10 +1682,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.parent_source = parent_source
 
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import (
             AutogradFunctionContextVariable,

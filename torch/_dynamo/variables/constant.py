@@ -1,13 +1,10 @@
 # mypy: ignore-errors
 
 import operator
-from typing import Dict, List, TYPE_CHECKING
+from typing import Dict, List
 
 import torch
 from torch._dynamo.source import GetItemSource
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
@@ -119,7 +116,7 @@ class ConstantVariable(VariableTracker):
         except TypeError as e:
             raise NotImplementedError from e
 
-    def const_getattr(self, tx: "InstructionTranslator", name):
+    def const_getattr(self, tx, name):
         if isinstance(self.value, type):
             raise UserError(
                 UserErrorType.ANTI_PATTERN,
@@ -192,7 +189,7 @@ class ConstantVariable(VariableTracker):
 
         unimplemented(f"const method call {typestr(self.value)}.{name}")
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
@@ -222,7 +219,7 @@ class EnumVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def const_getattr(self, tx: "InstructionTranslator", name):
+    def const_getattr(self, tx, name):
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError

@@ -2,10 +2,7 @@
 
 import collections
 from enum import Enum
-from typing import Any, Callable, Dict, List, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+from typing import Any, Callable, Dict, List
 
 from .. import variables
 from ..current_scope_id import current_scope_id
@@ -231,11 +228,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.source.make_guard(fn)
         raise NotImplementedError
 
-    def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
+    def const_getattr(self, tx, name: str) -> Any:
         """getattr(self, name) returning a python constant"""
         raise NotImplementedError
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def var_getattr(self, tx, name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
@@ -295,14 +292,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def inspect_parameter_names(self) -> List[str]:
         unimplemented(f"inspect_parameter_names: {self}")
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
         unimplemented(f"hasattr {self.__class__.__name__} {name}")
 
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         unimplemented(f"call_function {self} {args} {kwargs}")
 
