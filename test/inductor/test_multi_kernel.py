@@ -110,19 +110,21 @@ class MultiKernelTest(TestCase):
         def f(x):
             return torch.softmax(x, -1) + force_kernel
 
-        orig_run = MultiKernelCall.run_with_argless_kernels
+        orig_run = MultiKernelCall.run
         picked_kernel = None
 
-        def mock_run(self, kernel_calls):
-            out = orig_run(self, kernel_calls)
+        def mock_run(self, *args, **kwargs):
+            out = orig_run(self, *args, **kwargs)
             nonlocal picked_kernel
             picked_kernel = self.picked_kernel
             return out
 
         with unittest.mock.patch.object(
-            MultiKernelCall, "run_with_argless_kernels", mock_run
+            MultiKernelCall, "run", mock_run
         ), unittest.mock.patch.object(
-            MultiKernelCall, "benchmark_sub_kernels", lambda *args: mock_latency
+            MultiKernelCall,
+            "benchmark_sub_kernels",
+            lambda *args, **kwargs: mock_latency,
         ):
             torch.compile(f)(x)
         self.assertEqual(picked_kernel, force_kernel)
@@ -267,6 +269,21 @@ class MultiKernelTest(TestCase):
             return torch.cumsum(x, 0)
 
         x = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float32, device="cuda")
+        expect = f(x)
+        with config.patch("triton.multi_kernel", force_multi_kernel):
+            actual = torch.compile(f)(x)
+        self.assertEqual(expect, actual)
+
+    def test_sort_disables_multi_kernel(self, force_multi_kernel=1):
+        """
+        Sort currently requires a persistent kernel, so multi-kernel is not
+        possible. Make sure this falls back gracefully.
+        """
+
+        def f(x):
+            return x.sort(-1).values
+
+        x = torch.rand(32, 32, device="cuda")
         expect = f(x)
         with config.patch("triton.multi_kernel", force_multi_kernel):
             actual = torch.compile(f)(x)
