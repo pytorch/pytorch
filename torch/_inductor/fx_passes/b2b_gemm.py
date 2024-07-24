@@ -9,7 +9,6 @@ from typing import (
 )
 
 import torch
-
 from ..._dynamo.utils import counters
 from ..ir import (
     ComputedBuffer,
@@ -62,15 +61,97 @@ def b2b_gemm_grid(M, P, meta):
     return (ceildiv(M, meta["BLOCK_SIZE_M"]) * ceildiv(P, meta["BLOCK_SIZE_P"]), 1, 1)
 
 
-b2b_gemm_template = TritonTemplate(
-    name="b2b_gemm",
+b2b_gemm_left_template = TritonTemplate(
+    name="b2b_gemm_left",
     grid=b2b_gemm_grid,
     debug=False,
     source=r"""
 {{def_kernel("A", "B", "C")}}
 
 
-    # B2B_GEMM_TRITON_ENTRANCE
+    # B2B_GEMM_LEFT_TRITON_ENTRANCE
+
+    # dynamic shapes
+    M = {{size("A", 0)}}
+    N = {{size("A", 1)}}
+    O = {{size("C", 0)}}
+    P = {{size("C", 1)}}
+
+    # dynamic strides
+    stride_am = {{stride("A", 0)}}
+    stride_an = {{stride("A", 1)}}
+    stride_bn = {{stride("B", 0)}}
+    stride_bo = {{stride("B", 1)}}
+    stride_co = {{stride("C", 0)}}
+    stride_cp = {{stride("C", 1)}}
+
+    # output block counts
+    num_m_block = tl.cdiv(M, BLOCK_SIZE_M)
+    num_p_block = tl.cdiv(P, BLOCK_SIZE_P)
+
+    # internal block counts
+    num_n_block = tl.cdiv(N, BLOCK_SIZE_N)
+    num_o_block = tl.cdiv(O, BLOCK_SIZE_O)
+
+    # output block ids
+    pid = tl.program_id(axis=0)
+    m_block_id = pid // num_p_block
+    p_block_id = pid % num_p_block
+
+    # accumulator
+    acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_P), dtype=tl.float32)
+
+    # main loop
+    offs_m = (m_block_id * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))
+    offs_p = (p_block_id * BLOCK_SIZE_P + tl.arange(0, BLOCK_SIZE_P))
+    # (subgraph(A @ B) @ C)
+    offs_o = tl.arange(0, BLOCK_SIZE_O)
+    for _ in range(num_o_block):
+        c_mask = (offs_o[:, None] < O) & (offs_p[None, :] < P)
+        c_ptrs = C + (offs_o[:, None] * stride_co + offs_p[None, :] * stride_cp)
+        c = tl.load(c_ptrs, mask=c_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_O * BLOCK_SIZE_P
+        acc_ab = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_O), dtype=tl.float32)
+        offs_n = tl.arange(0, BLOCK_SIZE_N)
+        for __ in range(num_n_block):
+            a_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
+            a_ptrs = A + (offs_m[:, None] * stride_am + offs_n[None, :] * stride_an)
+            a = tl.load(a_ptrs, mask=a_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_M * BLOCK_SIZE_N
+            b_mask = (offs_n[:, None] < N) & (offs_o[None, :] < O)
+            b_ptrs = B + (offs_n[:, None] * stride_bn + offs_o[None, :] * stride_bo)
+            b = tl.load(b_ptrs, mask=b_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_N * BLOCK_SIZE_O
+            acc_ab += tl.dot(a, b, out_dtype=tl.float32)
+            offs_n += BLOCK_SIZE_N
+        # apply the subgraph
+        {{ modification(
+            subgraph_number=0,
+            output_name="post_subgraph_acc_ab",
+            inner_mm="acc_ab"
+        ) | indent_except_first(2) }}
+        acc += tl.dot(post_subgraph_acc_ab, c, out_dtype=tl.float32)
+        offs_o += BLOCK_SIZE_O
+
+    # type conversion
+    acc = acc.to(tl.float16)
+
+    # store preparation
+    idx_m = offs_m[:, None]
+    idx_p = offs_p[None, :]
+    out_mask = (idx_m < M) & (idx_p < P)
+
+    {{store_output(("idx_m", "idx_p"), "acc", "out_mask")}}
+""",
+)
+
+
+b2b_gemm_right_template = TritonTemplate(
+    name="b2b_gemm_right",
+    grid=b2b_gemm_grid,
+    debug=False,
+    source=r"""
+{{def_kernel("A", "B", "C")}}
+
+
+    # B2B_GEMM_RIGHT_TRITON_ENTRANCE
 
     # dynamic shapes
     M = {{size("A", 0)}}
@@ -105,56 +186,31 @@ b2b_gemm_template = TritonTemplate(
     # main loop (two cases)
     offs_m = (m_block_id * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))
     offs_p = (p_block_id * BLOCK_SIZE_P + tl.arange(0, BLOCK_SIZE_P))
-    if IS_LEFT_ASSOC:  # (subgraph(A @ B) @ C)
+    # (A @ subgraph(B @ C))
+    offs_n = tl.arange(0, BLOCK_SIZE_N)
+    for _ in range(num_n_block):
+        a_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
+        a_ptrs = A + (offs_m[:, None] * stride_am + offs_n[None, :] * stride_an)
+        a = tl.load(a_ptrs, mask=a_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_M * BLOCK_SIZE_N
+        acc_bc = tl.zeros((BLOCK_SIZE_N, BLOCK_SIZE_P), dtype=tl.float32)
         offs_o = tl.arange(0, BLOCK_SIZE_O)
-        for _ in range(num_o_block):
+        for __ in range(num_o_block):
+            b_mask = (offs_n[:, None] < N) & (offs_o[None, :] < O)
+            b_ptrs = B + (offs_n[:, None] * stride_bn + offs_o[None, :] * stride_bo)
+            b = tl.load(b_ptrs, mask=b_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_N * BLOCK_SIZE_O
             c_mask = (offs_o[:, None] < O) & (offs_p[None, :] < P)
             c_ptrs = C + (offs_o[:, None] * stride_co + offs_p[None, :] * stride_cp)
             c = tl.load(c_ptrs, mask=c_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_O * BLOCK_SIZE_P
-            acc_ab = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_O), dtype=tl.float32)
-            offs_n = tl.arange(0, BLOCK_SIZE_N)
-            for __ in range(num_n_block):
-                a_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
-                a_ptrs = A + (offs_m[:, None] * stride_am + offs_n[None, :] * stride_an)
-                a = tl.load(a_ptrs, mask=a_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_M * BLOCK_SIZE_N
-                b_mask = (offs_n[:, None] < N) & (offs_o[None, :] < O)
-                b_ptrs = B + (offs_n[:, None] * stride_bn + offs_o[None, :] * stride_bo)
-                b = tl.load(b_ptrs, mask=b_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_N * BLOCK_SIZE_O
-                acc_ab += tl.dot(a, b, out_dtype=tl.float32)
-                offs_n += BLOCK_SIZE_N
-            # apply the subgraph
-            {{ modification(
-                subgraph_number=0,
-                output_name="post_subgraph_acc_ab",
-                inner_mm="acc_ab"
-            ) | indent_except_first(3) }}
-            acc += tl.dot(post_subgraph_acc_ab, c, out_dtype=tl.float32)
+            acc_bc += tl.dot(b, c, out_dtype=tl.float32)
             offs_o += BLOCK_SIZE_O
-    else:  # (A @ subgraph(B @ C))
-        offs_n = tl.arange(0, BLOCK_SIZE_N)
-        for _ in range(num_n_block):
-            a_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
-            a_ptrs = A + (offs_m[:, None] * stride_am + offs_n[None, :] * stride_an)
-            a = tl.load(a_ptrs, mask=a_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_M * BLOCK_SIZE_N
-            acc_bc = tl.zeros((BLOCK_SIZE_N, BLOCK_SIZE_P), dtype=tl.float32)
-            offs_o = tl.arange(0, BLOCK_SIZE_O)
-            for __ in range(num_o_block):
-                b_mask = (offs_n[:, None] < N) & (offs_o[None, :] < O)
-                b_ptrs = B + (offs_n[:, None] * stride_bn + offs_o[None, :] * stride_bo)
-                b = tl.load(b_ptrs, mask=b_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_N * BLOCK_SIZE_O
-                c_mask = (offs_o[:, None] < O) & (offs_p[None, :] < P)
-                c_ptrs = C + (offs_o[:, None] * stride_co + offs_p[None, :] * stride_cp)
-                c = tl.load(c_ptrs, mask=c_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_O * BLOCK_SIZE_P
-                acc_bc += tl.dot(b, c, out_dtype=tl.float32)
-                offs_o += BLOCK_SIZE_O
-            # apply the subgraph
-            {{ modification(
-                subgraph_number=0,
-                output_name="post_subgraph_acc_bc",
-                inner_mm="acc_bc"
-            ) | indent_except_first(3) }}
-            acc += tl.dot(a, post_subgraph_acc_bc, out_dtype=tl.float32)
-            offs_n += BLOCK_SIZE_N
+        # apply the subgraph
+        {{ modification(
+            subgraph_number=0,
+            output_name="post_subgraph_acc_bc",
+            inner_mm="acc_bc"
+        ) | indent_except_first(2) }}
+        acc += tl.dot(a, post_subgraph_acc_bc, out_dtype=tl.float32)
+        offs_n += BLOCK_SIZE_N
 
     # type conversion
     acc = acc.to(tl.float16)
@@ -169,13 +225,17 @@ b2b_gemm_template = TritonTemplate(
 )
 
 
-def load_ratio(M: int, N: int, O: int, P: int, m: int, n: int, o: int, p: int) -> float:
+# Note: load_ratio_left and load_ratio_right are only calculating numbers
+# in the trivial subgraph case; i.e. (A @ (B @ C)) or ((A @ B) @ C)
+
+
+def load_ratio_left(M: int, N: int, O: int, P: int, m: int, n: int, o: int, p: int) -> float:
     """
     compute the ratio of estimated numbers of loads in baseline and b2bgemm
     M, N, O, P are matrix sizes
     m, n, o, p are block sizes
     |       | baseline (lower bound)        | b2bgemm
-    | load  | M * N + N * O + M * O + O * P | M / m * P / p * N / n * (m * n + O / o * (n * o + o * p))
+    | load  | M * N + N * O + M * O + O * P | M / m * P / p * O / o * (o * p + N / n * (m * n + n * o))
     | store | M * O + M * P                 | M * P
     b2bgemm is always better on stores, but for loads we need to find out beneficial cases using this function
     """
@@ -184,6 +244,25 @@ def load_ratio(M: int, N: int, O: int, P: int, m: int, n: int, o: int, p: int) -
         return x // y + (1 if x % y != 0 else 0)
 
     base = M * N + N * O + M * O + O * P
+    gemm = cdiv(M, m) * cdiv(P, p) * cdiv(O, o) * (o * p + cdiv(N, n) * (m * n + n * o))
+    return base / gemm
+
+
+def load_ratio_right(M: int, N: int, O: int, P: int, m: int, n: int, o: int, p: int) -> float:
+    """
+    compute the ratio of estimated numbers of loads in baseline and b2bgemm
+    M, N, O, P are matrix sizes
+    m, n, o, p are block sizes
+    |       | baseline (lower bound)        | b2bgemm
+    | load  | N * O + O * P + M * N + N * P | M / m * P / p * N / n * (m * n + O / o * (n * o + o * p))
+    | store | N * P + M * P                 | M * P
+    b2bgemm is always better on stores, but for loads we need to find out beneficial cases using this function
+    """
+
+    def cdiv(x: int, y: int):
+        return x // y + (1 if x % y != 0 else 0)
+
+    base = N * O + O * P + M * N + N * P
     gemm = cdiv(M, m) * cdiv(P, p) * cdiv(N, n) * (m * n + cdiv(O, o) * (n * o + o * p))
     return base / gemm
 
@@ -195,8 +274,8 @@ b2b_gemm_configs = [
         "BLOCK_SIZE_N": 32,
         "BLOCK_SIZE_O": 64,
         "BLOCK_SIZE_P": 32,
-        "num_stages": 2,
-        "num_warps": 4,
+        "num_stages": 4,
+        "num_warps": 8,
     },
     {
         "BLOCK_SIZE_M": 64,
@@ -219,29 +298,38 @@ b2b_gemm_configs = [
         "BLOCK_SIZE_N": 64,
         "BLOCK_SIZE_O": 128,
         "BLOCK_SIZE_P": 64,
-        "num_stages": 4,
-        "num_warps": 8,
-    },
-    {
-        "BLOCK_SIZE_M": 256,
-        "BLOCK_SIZE_N": 32,
-        "BLOCK_SIZE_O": 256,
-        "BLOCK_SIZE_P": 32,
         "num_stages": 2,
         "num_warps": 4,
     },
     {
-        "BLOCK_SIZE_M": 256,
+        "BLOCK_SIZE_M": 32,
         "BLOCK_SIZE_N": 64,
-        "BLOCK_SIZE_O": 256,
+        "BLOCK_SIZE_O": 32,
         "BLOCK_SIZE_P": 64,
-        "num_stages": 3,
+        "num_stages": 4,
+        "num_warps": 8,
+    },
+    {
+        "BLOCK_SIZE_M": 32,
+        "BLOCK_SIZE_N": 128,
+        "BLOCK_SIZE_O": 32,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 128,
+        "BLOCK_SIZE_O": 64,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 2,
         "num_warps": 4,
     },
 ]
 
 
 def is_b2b_gemm_good_on(
+    is_left_assoc: bool,
     A_node: torch.fx.Node,
     B_node: torch.fx.Node,
     C_node: torch.fx.Node,
@@ -263,22 +351,37 @@ def is_b2b_gemm_good_on(
     M, N = A.shape
     O, P = C.shape
     ratios = []
-    for config in b2b_gemm_configs:
-        ratio = load_ratio(
-            M,
-            N,
-            O,
-            P,
-            config["BLOCK_SIZE_M"],
-            config["BLOCK_SIZE_N"],
-            config["BLOCK_SIZE_O"],
-            config["BLOCK_SIZE_P"],
-        )
-        ratios.append(ratio)
+    if is_left_assoc:
+        for config in b2b_gemm_configs:
+            ratio = load_ratio_left(
+                M,
+                N,
+                O,
+                P,
+                config["BLOCK_SIZE_M"],
+                config["BLOCK_SIZE_N"],
+                config["BLOCK_SIZE_O"],
+                config["BLOCK_SIZE_P"],
+            )
+            ratios.append(ratio)
+    else:
+        for config in b2b_gemm_configs:
+            ratio = load_ratio_right(
+                M,
+                N,
+                O,
+                P,
+                config["BLOCK_SIZE_M"],
+                config["BLOCK_SIZE_N"],
+                config["BLOCK_SIZE_O"],
+                config["BLOCK_SIZE_P"],
+            )
+            ratios.append(ratio)
+    ratios.sort(reverse=True)
     average_ratio = 1.0
-    for r in ratios:
+    for r in ratios[:3]:  # top 3 choices
         average_ratio *= r
-    average_ratio = average_ratio ** (1 / len(ratios))
+    average_ratio = average_ratio ** (1 / 3)
     return average_ratio > 1
 
 
@@ -323,14 +426,22 @@ def tuned_b2b_gemm(
     )
     choices: list[TritonTemplateCaller] = []
     for config in b2b_gemm_configs:
-        b2b_gemm_template.maybe_append_choice(
-            choices,
-            input_nodes=(A, B, C),
-            layout=layout,
-            subgraphs=[subgraph_buffer],
-            **config,
-            IS_LEFT_ASSOC=is_left_assoc,
-        )
+        if is_left_assoc:
+            b2b_gemm_left_template.maybe_append_choice(
+                choices,
+                input_nodes=(A, B, C),
+                layout=layout,
+                subgraphs=[subgraph_buffer],
+                **config,
+            )
+        else:
+            b2b_gemm_right_template.maybe_append_choice(
+                choices,
+                input_nodes=(A, B, C),
+                layout=layout,
+                subgraphs=[subgraph_buffer],
+                **config,
+            )
     # add the unoptimized choice to mitigate performance degradation
     choices.append(
         unoptimized_choice.bind((A, B, C), layout, is_left_assoc=is_left_assoc, subgraph=subgraph)
@@ -501,7 +612,7 @@ def b2b_gemm(
         A = outer_mm.args[0]
         B = inner_mm.args[0]
         C = inner_mm.args[1]
-    if not is_b2b_gemm_good_on(A, B, C):
+    if not is_b2b_gemm_good_on(is_left_assoc, A, B, C):
         return
 
     # finally update the original graph
