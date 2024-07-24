@@ -3124,7 +3124,8 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad, **kwargs):
                           weight=weight_tensor, density=density)
 
         bins_tensor = make_arg((bin_ct + 1,))
-        yield SampleInput(input_tensor, bins_tensor,
+        sorted_bins, bins_indices = torch.sort(bins_tensor)
+        yield SampleInput(input_tensor, sorted_bins,
                           weight=weight_tensor, density=density)
 
 def sample_inputs_histogramdd(op_info, device, dtype, requires_grad, **kwargs):
