@@ -589,9 +589,8 @@ class BaseSchedulerNode:
                     )
                 else:
                     buf_elems = try_size_hint(sympy_product(buf.get_size()))
-                    return (
-                        get_dtype_size(buf.get_dtype()) *
-                        min(buf_accessed_elems, buf_elems)
+                    return get_dtype_size(buf.get_dtype()) * min(
+                        buf_accessed_elems, buf_elems
                     )
 
             node_bytes += get_buf_bytes(buf)
