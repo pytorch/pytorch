@@ -391,6 +391,9 @@ test_inductor_cpp_wrapper_abi_compatible() {
 # .github/workflows/inductor-perf-test-nightly.yml
 DYNAMO_BENCHMARK_FLAGS=()
 
+test_laith() {
+  echo "just doing echo for now"
+}
 
 if [[ "${TEST_CONFIG}" == *test_laith* ]]; then
   test_laith
@@ -654,10 +657,6 @@ test_inductor_torchbench_smoketest_perf() {
       --actual "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv" \
       --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_huggingface_training.csv"
   done
-}
-
-test_laith() {
-  echo "just doing echo for now"
 }
 
 test_inductor_set_cpu_affinity(){
