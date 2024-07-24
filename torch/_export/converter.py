@@ -415,6 +415,8 @@ class TS2FXGraphConverter:
                 lambda node: self._convert_standard_operators(node),
             )
 
+        self.name_update_from_subblock_to_parent = []
+
     def _is_get_attr_node(self, fqn):
         return (
             fqn in self.name_to_buffer
@@ -426,7 +428,7 @@ class TS2FXGraphConverter:
         )
 
     def _convert_block_to_subgraph(self, node: torch._C.Node, arguments: List[str]):
-        subgraph_nodes = []
+        subgraph_nodes, subgraph_converters = [], []
         for block in node.blocks():
             subgraph_converter = TS2FXGraphConverter(
                 block, {}, {}, self.blocks_to_lifted_attrs, {}
@@ -444,7 +446,8 @@ class TS2FXGraphConverter:
             subgraph = subgraph_converter.convert()
             subgraph_name = self.add_subgraph(subgraph)
             subgraph_nodes.append(self.fx_graph.get_attr(subgraph_name))
-        return subgraph_nodes
+            subgraph_converters.append(subgraph_converter)
+        return subgraph_nodes, subgraph_converters
 
     def _identify_inputs_as_arguments(self, entry):
         """
@@ -507,6 +510,8 @@ class TS2FXGraphConverter:
     def get_fx_value_by_fqn(self, name):
         if name in self.name_to_node:
             fx_node = self.name_to_node[name]
+        elif name in self.constant_map:
+            fx_node = self.constant_map[name]
         elif name in self.name_to_non_tensor_attribute_node:
             fx_node = self.name_to_non_tensor_attribute_node[name]
         elif name in self.name_to_non_tensor_attribute:
@@ -649,6 +654,19 @@ class TS2FXGraphConverter:
 
         # inplace mutate arg[0], which is the python list
         self.name_to_node[node.inputsAt(0).debugName()] = fx_node
+
+    def convert_aten_append(self, node: torch._C.Node):
+        inp_list = list(node.inputs())
+        inp_value_list = [self.get_fx_value_by_ir_value(inp) for inp in inp_list]
+        fx_node = self.fx_graph.call_function(
+            append_to_immutable_list, tuple(inp_value_list)
+        )
+        self.name_to_node[node.output().debugName()] = fx_node
+        self.name_to_node[inp_list[0].debugName()] = fx_node
+
+        if not self.is_top_level_graph() and inp_value_list[0].op == "placeholder":
+            self.fx_graph.output(fx_node)
+            self.name_update_from_subblock_to_parent.append(inp_list[0].debugName())
 
     def convert_prim_Constant(self, node: torch._C.Node):
         name = node.output().debugName()
@@ -997,9 +1015,10 @@ class TS2FXGraphConverter:
 
         global_arguments = list(global_arguments)
 
-        subgraph_nodes = self._convert_block_to_subgraph(node, global_arguments)
+        subgraph_nodes, subgraph_converters = self._convert_block_to_subgraph(node, global_arguments)
 
         assert len(subgraph_nodes) == 1
+        subgraph_converter = subgraph_converters[0]
 
         def execute_node(*args, **kwargs):
             node_func = args[0]
@@ -1026,6 +1045,15 @@ class TS2FXGraphConverter:
                         ),  # + 1 because the 0th element is the condition.
                     )
                     fx_block_args[i] = self.name_to_node[output_name]
+            for i, name in enumerate(subgraph_converter.name_update_from_subblock_to_parent):
+                self.name_to_node[name] = self.fx_graph.call_function(
+                        operator.getitem,
+                        (
+                            loop_node,
+                            i + node.outputsSize() + 1,
+                        ),  # + 1 because the 0th element is the condition.
+                    )
+                fx_block_args[i + node.outputsSize() + 1] = self.name_to_node[name]
 
     def _check_set_attr_in_if_block(self, if_node: torch._C.Node):
         for block in if_node.blocks():
@@ -1052,7 +1080,7 @@ class TS2FXGraphConverter:
             arguments = arguments.union(self.blocks_to_lifted_attrs[block])
 
         arguments = list(arguments)
-        subgraph_nodes = self._convert_block_to_subgraph(node, arguments)
+        subgraph_nodes , _ = self._convert_block_to_subgraph(node, arguments)
 
         assert len(subgraph_nodes) == 2
 

@@ -1328,10 +1328,13 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(M1(), inp, ["script"])
 
     def test_ts2ep_with_loop(self):
-        def func1(x: List[torch.Tensor]):
-            for i in range(4):
-                x.append(x[i] + x[i + 1])
-            return x
+        def func1(x, y):
+            y = y / 1
+            a, b = x, x
+            for i in range(0, 4, 2):
+                a = a + a + i + y
+                b = b * b + i - y
+            return a, b
 
         def func2(x):
             for i in range(x.size(0)):
