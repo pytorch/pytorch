@@ -1328,9 +1328,16 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(M1(), inp, ["script"])
 
     def test_ts2ep_with_loop(self):
-        def func1(x: List[torch.Tensor]):
+        def func1(x, x_list: List[torch.Tensor]):
+            a, b, c = x, x, x
             for i in range(5):
-                x.append(x[i] + x[i + 1])
+                a = a + a + i
+                b = b + b - i
+                x_list.append(x_list[i] + x_list[i + 1])
+            for i in range(5):
+                b = b + b - i
+                c = c + c * i
+                x_list.append(x_list[i] + x_list[i + 1] - x_list[i + 2])
             return x
 
         def func2(x):
@@ -1343,7 +1350,7 @@ class TestConverter(TestCase):
                 x += x.sin()
             return x
 
-        inp = ([torch.ones([2, 2]), torch.ones([2, 2]) * 2],)
+        inp = (torch.tensor(1), [torch.ones([2, 2]), torch.ones([2, 2]) * 2],)
         # Trace unrolls the loop.
         self._check_equal_ts_ep_converter(func1, inp, ["script"])
 

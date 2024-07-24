@@ -1028,7 +1028,7 @@ class TS2FXGraphConverter:
             loop_local_args = args[2 : 2 + len(loop_local_arguments)]
             global_args = args[2 + len(loop_local_arguments) :]
             return node_func(
-                *global_args, torch.tensor(iter_idx), *loop_local_args, **kwargs
+                *global_args, iter_idx, *loop_local_args, **kwargs
             )
 
         fx_block_args = [
@@ -1062,7 +1062,8 @@ class TS2FXGraphConverter:
                         i + node.outputsSize() + 1,
                     ),  # + 1 because the 0th element is the condition.
                 )
-                fx_block_args[i + node.outputsSize()] = self.name_to_node[name]
+                global_argument_index = global_arguments.index(name)
+                fx_block_args[i + node.outputsSize() + global_argument_index] = self.name_to_node[name]
 
     def _check_set_attr_in_if_block(self, if_node: torch._C.Node):
         for block in if_node.blocks():
