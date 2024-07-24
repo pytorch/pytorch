@@ -1350,7 +1350,10 @@ class TestConverter(TestCase):
                 x += x.sin()
             return x
 
-        inp = (torch.tensor(1), [torch.ones([2, 2]), torch.ones([2, 2]) * 2],)
+        inp = (
+            torch.tensor(1),
+            [torch.ones([2, 2]), torch.ones([2, 2]) * 2],
+        )
         # Trace unrolls the loop.
         self._check_equal_ts_ep_converter(func1, inp, ["script"])
 
