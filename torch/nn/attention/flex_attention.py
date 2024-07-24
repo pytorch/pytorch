@@ -88,6 +88,7 @@ def _vmap_for_bhqkv(
         callable: The vmapped function.
     """
     # We vamp a function 4 times, broadcasting the [b, h, q_idx, kv_idx] dimensions
+    dimensions: List[Tuple[None | int, None | int, None | int, None | int]] = []
     dimensions = [
         (None, None, None, 0),
         (None, None, 0, None),
