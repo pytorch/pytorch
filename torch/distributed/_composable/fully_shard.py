@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 from typing import Callable, Iterable, Optional, Union
 from typing_extensions import deprecated
 
