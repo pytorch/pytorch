@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 from __future__ import annotations
 
 import atexit

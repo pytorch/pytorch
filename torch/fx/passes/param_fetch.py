@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 from torch.fx.graph_module import GraphModule
 from typing import Any, Callable, Dict, List, Tuple, Type
 import torch
