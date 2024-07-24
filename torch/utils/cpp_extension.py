@@ -77,7 +77,7 @@ CUDA_CLANG_VERSIONS: VersionMap = {
 __all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
            "CppExtension", "CUDAExtension", "include_paths", "library_paths", "load", "load_inline", "is_ninja_available",
            "verify_ninja_availability", "remove_extension_h_precompiler_headers", "get_cxx_compiler", "check_compiler_is_gcc",
-           "get_dpcpp_complier", "DPCPPExtension", "IntelDpcppBuildExtension"]
+           "get_sycl_complier", "XPUExtension", "IntelDpcppBuildExtension"]
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
 def _nt_quote_args(args: Optional[List[str]]) -> List[str]:
@@ -2756,7 +2756,7 @@ def _get_one_api_help():
     oneAPI = _one_api_help()
     return oneAPI
 
-def DPCPPExtension(name, sources, *args, **kwargs):
+def XPUExtension(name, sources, *args, **kwargs):
     r"""
     Creates a :class:`setuptools.Extension` for DPCPP/C++.
     Convenience method that creates a :class:`setuptools.Extension` with the
@@ -2765,11 +2765,11 @@ def DPCPPExtension(name, sources, *args, **kwargs):
     All arguments are forwarded to the :class:`setuptools.Extension`
     constructor.
     Example:
-        >>> from intel_extension_for_pytorch.xpu.utils import DpcppBuildExtension, DPCPPExtension
+        >>> from torch.utils import DpcppBuildExtension, XPUExtension
         >>> setup(
                 name='dpcpp_extension',
                 ext_modules=[
-                    DPCPPExtension(
+                    XPUExtension(
                             name='dpcpp_extension',
                             sources=['extension.cpp', 'extension_kernel.cpp'],
                             extra_compile_args={'cxx': ['-g', '-std=c++20', '-fPIC']})
@@ -2884,8 +2884,8 @@ class IntelDpcppBuildExtension(build_ext):
             # Ensure at least an empty list of flags for 'cxx' when
             # extra_compile_args is a dict. Otherwise, default torch
             # flags do not get passed. Necessary when only one of 'cxx' is
-            # passed to extra_compile_args in DPCPPExtension, i.e.
-            #   DPCPPExtension(..., extra_compile_args={'cxx': [...]})
+            # passed to extra_compile_args in XPUExtension, i.e.
+            #   XPUExtension(..., extra_compile_args={'cxx': [...]})
             if isinstance(extension.extra_compile_args, dict):
                 for ext in ["cxx"]:
                     if ext not in extension.extra_compile_args:
