@@ -591,14 +591,6 @@ We only support storage resizing on graph inputs as long as the input either sta
         # Setup the wrapper for functionalization of rng ops
         helper, args = create_functionalized_rng_ops_wrapper(helper, args, trace_joint)
 
-    # Additionally pass in tokens as inputs
-    # See Note [Side-Effectful Tokens in AOTAutograd]
-    # additional_token_inputs = [torch.tensor([])] * len(meta.tokens)
-    # if trace_joint:
-    #     args = ([*additional_token_inputs, *args[0]], *args[1:])
-    # else:
-    #     args = [*additional_token_inputs, *args]
-
     return helper, args
 
 
@@ -612,7 +604,7 @@ def handle_effect_tokens_fn(
     num_tokens = len(meta.tokens)
 
     @wraps(fn)
-    def inner_fn(*_args):
+    def inner_fn(*args):
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
@@ -622,18 +614,18 @@ def handle_effect_tokens_fn(
             # See Note [Side-Effectful Tokens in AOTAutograd]
             if trace_joint:
                 assert (
-                    isinstance(_args, tuple)
-                    and len(_args) == 2
-                    and isinstance(_args[0], (list, tuple))
+                    isinstance(args, tuple)
+                    and len(args) == 2
+                    and isinstance(args[0], (list, tuple))
                 )
-                ts = _args[0][:num_tokens]
-                actual_args = _args[0][num_tokens:]
-                args = (actual_args, _args[1])
+                tokens = args[0][:num_tokens]
+                actual_args = args[0][num_tokens:]
+                args = (actual_args, args[1])
             else:
-                ts = _args[:num_tokens]
-                args = _args[num_tokens:]
+                tokens = args[:num_tokens]
+                args = args[num_tokens:]
 
-            assert all(token.numel() == 0 for token in ts)
+            assert all(token.numel() == 0 for token in tokens)
 
             # Populate the current FunctionalTensorMode with the tokens per
             # operator. See Note [FunctionalTensorMode is Stateful]
@@ -641,7 +633,7 @@ def handle_effect_tokens_fn(
                 torch._C._TorchDispatchModeKey.FUNCTIONAL
             )
             assert functional_tensor_mode is not None
-            f_tokens = pytree.tree_map(to_fun, ts)
+            f_tokens = pytree.tree_map(to_fun, tokens)
             for i, k in enumerate(meta.tokens.keys()):
                 functional_tensor_mode._tokens[k] = f_tokens[i]
 

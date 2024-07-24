@@ -373,11 +373,17 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             lib.define("foo(Tensor x) -> Tensor")
 
             def foo_impl(a):
+                torch.ops.aten._print("fwd")
                 return a.clone()
 
-            lib.impl("foo", foo_impl, "CPU")
-            lib.impl("foo", foo_impl, "CUDA")
-            lib.impl("foo", foo_impl, "Meta")
+            def foo_bwd(ctx, grad):
+                torch.ops.aten._print("bwd")
+                return grad.clone()
+
+            for backend in ["CPU", "CUDA", "Meta"]:
+                lib.impl("foo", foo_impl, backend)
+
+            torch.library.register_autograd("_mylib::foo", foo_bwd)
 
             from torch._higher_order_ops.effects import (
                 _EffectType,
@@ -441,13 +447,46 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             def fn(x, y):
                 return torch.ops._mylib.foo(x) + y
 
-            ins = DoubleTensor(torch.tensor([1.0, 2.0, 3.0])), torch.tensor(
-                [4.0, 5.0, 6.0]
-            )
-            ref_out = fn(*ins)
-            compiled_fn = torch.compile(fn, backend="aot_eager")
-            out = compiled_fn(*ins)
-            self.assertEqual(ref_out, out)
+            def ins_sc():
+                return (
+                    DoubleTensor(torch.tensor([1.0, 2.0, 3.0])),
+                    torch.tensor([4.0, 5.0, 6.0]),
+                )
+
+            def ins_dense():
+                return torch.tensor([1.0, 2.0, 3.0]), torch.tensor([4.0, 5.0, 6.0])
+
+            for ins_fn in [ins_sc, ins_dense]:
+                ref_out = fn(*ins_fn())
+                compiled_fn = torch.compile(fn, backend="aot_eager")
+
+                out = compiled_fn(*ins_fn())
+                self.assertEqual(ref_out, out)
+
+            def ins_dense_req_grad():
+                return (
+                    torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+                    torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
+                )
+
+            def ins_sc_req_grad():
+                return (
+                    DoubleTensor(torch.tensor([1.0, 2.0, 3.0], requires_grad=True)),
+                    torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
+                )
+
+            for ins_fn_req_grad in [ins_dense_req_grad]:  # , ins_sc_req_grad]:
+                ref_ins = ins_fn_req_grad()
+                ref_out = fn(*ref_ins)
+                ref_out.sum().backward()
+
+                compiled_fn = torch.compile(fn, backend="aot_eager")
+                ins = ins_fn_req_grad()
+                out = compiled_fn(*ins)
+                self.assertEqual(ref_out, out)
+                out.sum().backward()
+                self.assertEqual(ref_ins[1].grad, ins[1].grad)
+                self.assertEqual(ref_ins[0].grad, ins[0].grad)
 
 
 if __name__ == "__main__":

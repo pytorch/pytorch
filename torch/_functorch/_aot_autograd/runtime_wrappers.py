@@ -666,6 +666,9 @@ class EffectTokensWrapper(CompilerWrapper):
                 old_args.clear()
 
             outs = compiled_fn(args)
+            # TODO: Why? Should be boxed...
+            if outs is None:
+                return None
             # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
             return outs[num_tokens:]
 
