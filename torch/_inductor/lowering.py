@@ -423,12 +423,7 @@ def make_pointwise(
     override_fn_when_cuda_float64=None,
     allow_alpha=False,
     triton_fallback=None,
-    emulate_precision_casts=None,
 ):
-
-    if emulate_precision_casts is None:
-        emulate_precision_casts = torch._inductor.config.emulate_precision_casts
-
     def inner(*inputs: List[TensorBox], alpha=None):
         if triton_fallback is not None and any(map(is_triton, inputs)):
             assert not allow_alpha  # not implemented
@@ -451,6 +446,10 @@ def make_pointwise(
                 other.get_size()
             ), f"ndim mismatch {fn} {ranges} {other.get_size()}"
 
+        emulate_precision_casts = V.graph.current_node.meta.get(
+            "low_precision_pointwise_barrier", False
+        )
+
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
             if dtype == torch.bool and override_fn_when_input_bool is not None:
@@ -460,7 +459,9 @@ def make_pointwise(
             else:
                 out = fn(*[load(index) for load in loaders])
                 if emulate_precision_casts and dtype in (torch.bfloat16, torch.float16):
-                    downcast = ops.to_dtype(out, dtype, src_dtype=torch.float32, use_compute_types=False)
+                    downcast = ops.to_dtype(
+                        out, dtype, src_dtype=torch.float32, use_compute_types=False
+                    )
                     return ops.to_dtype(downcast, torch.float32, src_dtype=dtype)
                 return out
 
@@ -571,7 +572,7 @@ def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
     def _to_dtype(x):
         return ops.to_dtype(x, dtype, src_dtype=src_dtype)
 
-    return make_pointwise(_to_dtype, override_return_dtype=dtype, emulate_precision_casts=False)(x)
+    return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
 @register_lowering(prims.convert_element_type, type_promotion_kind=None)

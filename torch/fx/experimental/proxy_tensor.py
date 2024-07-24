@@ -497,6 +497,25 @@ def fetch_object_proxy(tracer: _ProxyTracer, t: Union[Tensor, _AnyScriptObjectTy
 
 HANDLED_TYPES = (Tensor, torch.nn.Parameter, FakeTensor)
 
+
+def maybe_record_pointwise_barrier(func: object, proxy_mode: ProxyTorchDispatchMode) -> None:
+    """
+    Records pointwise operators in user program (non decomposed) that were output in fp16/bf16
+    """
+    if proxy_mode.decomp_layers or not proxy_mode.emulate_precision_casts:
+        return
+
+    if not isinstance(func, torch._ops.OpOverload) or torch.Tag.pointwise not in func.tags:
+        return
+
+    last_node = next(iter(reversed(proxy_mode.tracer.graph.nodes)))
+    t = last_node.meta.get("val")
+    if not isinstance(t, torch.Tensor) or t.dtype not in (torch.bfloat16, torch.float16):
+        return
+
+    last_node.meta["low_precision_pointwise_barrier"] = True
+
+
 def proxy_call(
         proxy_mode: ProxyTorchDispatchMode,
         func: OpOverload,
@@ -528,6 +547,7 @@ def proxy_call(
 
     r = maybe_handle_decomp(proxy_mode, func, args, kwargs)
     if r is not NotImplemented:
+        maybe_record_pointwise_barrier(func, proxy_mode)
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
@@ -730,6 +750,7 @@ def proxy_call(
         constant = None
 
     track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
+    maybe_record_pointwise_barrier(func, proxy_mode)
     return out
 
 
@@ -1001,6 +1022,9 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # ProxyTorchDispatchMode state was (if there was any).
         # This lets us properly reset the state on exit.
         self.enter_stack: List[Optional[ProxyTorchDispatchMode]] = []
+        self.decomp_layers = 0
+        from torch._inductor import config
+        self.emulate_precision_casts = config.emulate_precision_casts
 
     @count
     def __torch_dispatch__(
@@ -1789,7 +1813,11 @@ def maybe_handle_decomp(
 ) -> object:
     if op in CURRENT_DECOMPOSITION_TABLE:
         with proxy_mode:
-            return CURRENT_DECOMPOSITION_TABLE[op](*args, **kwargs)
+            proxy_mode.decomp_layers += 1
+            out = CURRENT_DECOMPOSITION_TABLE[op](*args, **kwargs)
+            proxy_mode.decomp_layers -= 1
+            return out
+
     return NotImplemented
 
 

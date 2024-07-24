@@ -439,6 +439,11 @@ joint_graph_constant_folding = True
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
 
+# Mode to emulate pytorch eager numerics for lower precision (fp16, bf16)
+# Pytorch eager computes bf16/fp16 by upcasting inputs to fp32 and downcasting after
+# For multiple, fused pointwise nodes, inductor will elide the intermediary upcasts and downcasts
+# Typically this should be closer to fp64 ref numerics. However, it can be useful for debugging
+# to emulate the eager numerics.
 emulate_precision_casts = False
 
 # warnings intended for PyTorch developers, disable for point releases

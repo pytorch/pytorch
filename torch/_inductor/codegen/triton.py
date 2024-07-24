@@ -580,7 +580,12 @@ class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton"""
 
     @staticmethod
-    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None, use_compute_types=True):
+    def to_dtype(
+        x,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types=True,
+    ):
         def _get_min_elements_per_thread(
             src_dtype: torch.dtype, dst_dtype: torch.dtype
         ) -> int:
