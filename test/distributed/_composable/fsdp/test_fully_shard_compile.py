@@ -317,12 +317,14 @@ class TestFullyShardCompile(FSDPTest):
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(),
@@ -397,12 +399,14 @@ class TestFullyShardCompile(FSDPTest):
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_nested_fully_shard_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
             *self._create_nested_fully_shard_factory_fns(),
@@ -475,12 +479,14 @@ class TestFullyShardCompile(FSDPTest):
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_transformer_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_transformer_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_fullgraph_backend_aot_eager_decomp_partition(self):
