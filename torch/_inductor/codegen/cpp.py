@@ -2480,9 +2480,7 @@ class CppVecKernel(CppKernel):
                 # we are using at::vec::VecMask<float, N> for bool
                 vec_dtype = "float" if is_any else DTYPE_TO_CPP[dtype]
                 vec = f"at::vec::Vectorized<{vec_dtype}>"
-                vec_reduce_all_func = (
-                    f"at::vec::vec_reduce_all<{vec_dtype}>"
-                )
+                vec_reduce_all_func = f"at::vec::vec_reduce_all<{vec_dtype}>"
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
 
             self.reduction_suffix.writeline(
@@ -2904,7 +2902,7 @@ class CppVecKernelChecker(CppVecKernel):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         if not (
-            (src_dtype == torch.bool and reduction_type == "any")
+            (dtype == torch.bool and reduction_type == "any")
             or (dtype == torch.float and src_dtype == torch.float)
             or (dtype == torch.int64 and src_dtype == torch.int64)
             and reduction_type in VECTORIZABLE_RTYPES
