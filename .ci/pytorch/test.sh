@@ -1373,6 +1373,7 @@ test_linux_aarch64(){
 test_operator_benchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   TEST_DIR=$(pwd)
+  CORES=$(lscpu | grep Core | awk '{print $4}')
   end_core=$(( CORES-1 ))
   cd benchmarks/operator_benchmark/pt_extension
   python setup.py install
