@@ -33,6 +33,9 @@ class LearnedHeuristic:
     def get_name(self) -> str:
         return ""
 
+    def get_decisions_ranked(self, context: AHContext) -> Optional[List[str]]:
+        return None
+
 
 class LearnedHeuristicRegression(LearnedHeuristic):
     def __init__(self) -> None:
@@ -74,6 +77,16 @@ class LearnedHeuristicDecision(LearnedHeuristic):
         if best_choice_proba <= self.get_confidence_threshold():
             return None
         return self.get_choice(best_choice_idx)
+
+    def get_decisions_ranked(self, context: AHContext) -> Optional[List[str]]:
+        feedback_idx_list = self.get_best_choices(context)
+        if feedback_idx_list is None:
+            return None
+        choices = [
+            self.get_choice(feedback_idx[1]) for feedback_idx in feedback_idx_list
+        ]
+        choices = [choice for choice in choices if choice is not None]
+        return choices
 
     def get_best_choices(self, context: AHContext) -> Optional[List[Tuple[float, int]]]:
         return []
