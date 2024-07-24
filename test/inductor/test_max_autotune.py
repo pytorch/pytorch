@@ -265,7 +265,7 @@ class TestMaxAutotune(TestCase):
                 num_put += 1
 
         cache_module = (
-            "triton.fb.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend"
+            "torch._inductor.fb.remote_cache.FbRemoteAutotuneCacheBackend"
             if config.is_fbcode()
             else "torch._inductor.remote_cache.RedisRemoteCacheBackend"
         )
