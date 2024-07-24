@@ -25,6 +25,7 @@ import sympy
 
 import torch
 import torch._logging
+
 from ..._prims_common import is_integer_dtype
 from ...utils._sympy.functions import FloorDiv, ModularIndexing
 from ...utils._sympy.symbol import symbol_is_type, SymT
@@ -34,7 +35,6 @@ from ..codecache import HalideCodeCache
 from ..ir import get_reduction_combine_fn
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
 from ..ops_handler import AddParenHandler, MockHandler
-
 from ..runtime.hints import HalideInputSpec, HalideMeta, ReductionHint
 from ..utils import (
     get_bounds_index_expr,
@@ -57,6 +57,7 @@ from .common import (
 from .cpp import DTYPE_TO_CPP
 from .cpp_utils import cexpr
 from .simd import constant_repr, SIMDKernel, SIMDScheduling
+
 
 if TYPE_CHECKING:
     from ..ops_handler import ReductionType, StoreMode
@@ -404,19 +405,19 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def rand(seed, offset):
-        raise Unsupported("rand")
+        return f"halide_helpers.rand({seed}, {offset})"
 
     @staticmethod
     def randn(seed, offset):
-        raise Unsupported("rand")
+        return f"halide_helpers.randn({seed}, {offset})"
 
     @staticmethod
     def randint64(seed, offset, low, high):
-        raise Unsupported("rand")
+        return f"halide_helpers.randint64({seed}, {offset}, {low}, {high})"
 
     @staticmethod
     def load_seed(name, offset):
-        raise Unsupported("rand")
+        return f"{ops.load(name, 0)} + {V.kernel.args.seed_offset('load_seed_offset', offset)}"
 
     @staticmethod
     def rsqrt(x):
@@ -517,7 +518,7 @@ class HalideOverrides(OpOverrides):
         return var
 
     @classmethod
-    def indirect_indexing(cls, index_var, size, check=True):
+    def indirect_indexing(cls, index_var, size, check=True, wrap_neg=True):
         # TODO(jansel): Halide only supports 32-bit indexing, we should error on overflow
         index_var = ops.to_dtype(index_var, torch.int32)
         index_var = ops.halide_clamp(index_var, size, check)
@@ -1491,6 +1492,7 @@ class HalideKernel(SIMDKernel):
         code.splice(
             """
             import halide as hl
+            from torch._inductor.runtime import halide_helpers
             from math import inf, nan
 
             @hl.generator(name="kernel")
