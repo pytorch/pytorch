@@ -1,8 +1,25 @@
 # mypy: allow-untyped-defs
+import functools
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+)
+
 import torch
 
 from ..._dynamo.utils import counters
-from ..ir import FixedLayout
+from ..ir import (
+    ComputedBuffer,
+    FixedLayout,
+    Subgraph,
+)
+from ..kernel.flex_attention import (
+    build_subgraph_buffer,
+    create_placeholder,
+)
 from ..pattern_matcher import (
     Arg,
     CallFunction,
@@ -17,6 +34,23 @@ from ..select_algorithm import (
     TritonTemplateCaller,
 )
 from ..utils import ceildiv
+
+
+def graph_to_str(G: torch.fx.Graph) -> str:
+    """
+    for debugging
+    """
+    ret = f"### BEGIN GRAPH (node -> users)\n"
+    GR = {}
+    for node in G.nodes:
+        if node not in GR:
+            GR[node] = []
+        for u, _ in node.users.items():
+            GR[node].append(u)
+    for n, u in GR.items():
+        ret += f"{n}:{n.op}:{n.target} -> {u}\n"
+    ret += f"### END GRAPH"
+    return ret
 
 
 B2B_GEMM_PASS = PatternMatcherPass(
@@ -68,28 +102,59 @@ b2b_gemm_template = TritonTemplate(
     # accumulator
     acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_P), dtype=tl.float32)
 
-    # main loop
+    # main loop (two cases)
     offs_m = (m_block_id * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))
-    offs_n = tl.arange(0, BLOCK_SIZE_N)
     offs_p = (p_block_id * BLOCK_SIZE_P + tl.arange(0, BLOCK_SIZE_P))
-    for _ in range(num_n_block):
-        a_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
-        a_ptrs = A + (offs_m[:, None] * stride_am + offs_n[None, :] * stride_an)
-        a = tl.load(a_ptrs, mask=a_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_M * BLOCK_SIZE_N
+    if IS_LEFT_ASSOC:  # (subgraph(A @ B) @ C)
         offs_o = tl.arange(0, BLOCK_SIZE_O)
-        acc_bc = tl.zeros((BLOCK_SIZE_N, BLOCK_SIZE_P), dtype=tl.float32)
-        for __ in range(num_o_block):
-            b_mask = (offs_n[:, None] < N) & (offs_o[None, :] < O)
-            b_ptrs = B + (offs_n[:, None] * stride_bn + offs_o[None, :] * stride_bo)
-            b = tl.load(b_ptrs, mask=b_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_N * BLOCK_SIZE_O
+        for _ in range(num_o_block):
             c_mask = (offs_o[:, None] < O) & (offs_p[None, :] < P)
             c_ptrs = C + (offs_o[:, None] * stride_co + offs_p[None, :] * stride_cp)
-            # Note: this load is independent of the outer loop; can we somehow move it?
             c = tl.load(c_ptrs, mask=c_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_O * BLOCK_SIZE_P
-            acc_bc += tl.dot(b, c, out_dtype=tl.float32)
+            acc_ab = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_O), dtype=tl.float32)
+            offs_n = tl.arange(0, BLOCK_SIZE_N)
+            for __ in range(num_n_block):
+                a_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
+                a_ptrs = A + (offs_m[:, None] * stride_am + offs_n[None, :] * stride_an)
+                a = tl.load(a_ptrs, mask=a_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_M * BLOCK_SIZE_N
+                b_mask = (offs_n[:, None] < N) & (offs_o[None, :] < O)
+                b_ptrs = B + (offs_n[:, None] * stride_bn + offs_o[None, :] * stride_bo)
+                b = tl.load(b_ptrs, mask=b_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_N * BLOCK_SIZE_O
+                acc_ab += tl.dot(a, b, out_dtype=tl.float32)
+                offs_n += BLOCK_SIZE_N
+            # apply the subgraph
+            {{ modification(
+                subgraph_number=0,
+                output_name="post_subgraph_acc_ab",
+                inner_mm="acc_ab"
+            ) | indent_except_first(3) }}
+            acc += tl.dot(post_subgraph_acc_ab, c, out_dtype=tl.float32)
             offs_o += BLOCK_SIZE_O
-        acc += tl.dot(a, acc_bc, out_dtype=tl.float32)
-        offs_n += BLOCK_SIZE_N
+    else:  # (A @ subgraph(B @ C))
+        offs_n = tl.arange(0, BLOCK_SIZE_N)
+        for _ in range(num_n_block):
+            a_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
+            a_ptrs = A + (offs_m[:, None] * stride_am + offs_n[None, :] * stride_an)
+            a = tl.load(a_ptrs, mask=a_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_M * BLOCK_SIZE_N
+            acc_bc = tl.zeros((BLOCK_SIZE_N, BLOCK_SIZE_P), dtype=tl.float32)
+            offs_o = tl.arange(0, BLOCK_SIZE_O)
+            for __ in range(num_o_block):
+                b_mask = (offs_n[:, None] < N) & (offs_o[None, :] < O)
+                b_ptrs = B + (offs_n[:, None] * stride_bn + offs_o[None, :] * stride_bo)
+                b = tl.load(b_ptrs, mask=b_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_N * BLOCK_SIZE_O
+                c_mask = (offs_o[:, None] < O) & (offs_p[None, :] < P)
+                c_ptrs = C + (offs_o[:, None] * stride_co + offs_p[None, :] * stride_cp)
+                c = tl.load(c_ptrs, mask=c_mask, other=0.0).to(tl.float32)  # BLOCK_SIZE_O * BLOCK_SIZE_P
+                acc_bc += tl.dot(b, c, out_dtype=tl.float32)
+                offs_o += BLOCK_SIZE_O
+            # apply the subgraph
+            {{ modification(
+                subgraph_number=0,
+                output_name="post_subgraph_acc_bc",
+                inner_mm="acc_bc"
+            ) | indent_except_first(3) }}
+            acc += tl.dot(a, post_subgraph_acc_bc, out_dtype=tl.float32)
+            offs_n += BLOCK_SIZE_N
 
     # type conversion
     acc = acc.to(tl.float16)
@@ -97,9 +162,9 @@ b2b_gemm_template = TritonTemplate(
     # store preparation
     idx_m = offs_m[:, None]
     idx_p = offs_p[None, :]
-    d_mask = (idx_m < M) & (idx_p < P)
+    out_mask = (idx_m < M) & (idx_p < P)
 
-    {{store_output(("idx_m", "idx_p"), "acc", "d_mask")}}
+    {{store_output(("idx_m", "idx_p"), "acc", "out_mask")}}
 """,
 )
 
@@ -176,19 +241,27 @@ b2b_gemm_configs = [
 ]
 
 
-def can_apply_b2b_gemm(match: Match) -> bool:
-    if not all("val" in arg.meta for arg in match.args):
+def is_b2b_gemm_good_on(
+    A_node: torch.fx.Node,
+    B_node: torch.fx.Node,
+    C_node: torch.fx.Node,
+) -> bool:
+    """
+    checks whether the sizes are good for b2b_gemm
+    """
+    # basic checks
+    if not all(["val" in A_node.meta, "val" in B_node.meta, "val" in C_node.meta]):
         return False
-    mats = [arg.meta["val"] for arg in match.args]
-    if not all(mat.is_cuda for mat in mats):
+    A, B, C = A_node.meta["val"], B_node.meta["val"], C_node.meta["val"]  # torch._subclasses.fake_tensor.FakeTensor
+    if not all([A.is_cuda, B.is_cuda, C.is_cuda]):
         return False
-    if not all(len(mat.shape) == 2 for mat in mats):
+    if not all([len(A.shape) == 2, len(B.shape) == 2, len(C.shape) == 2]):
         return False
-    mat1, mat2, mat3 = mats
-    if not ((mat1.shape[1] == mat2.shape[0]) and (mat2.shape[1] == mat3.shape[0])):
+    if not ((A.shape[1] == B.shape[0]) and (B.shape[1] == C.shape[0])):
         return False
-    M, N = mat1.shape
-    O, P = mat3.shape
+    # size checks: we only dispatch to B2B-GEMM when the average load ratio is > 1
+    M, N = A.shape
+    O, P = C.shape
     ratios = []
     for config in b2b_gemm_configs:
         ratio = load_ratio(
@@ -202,7 +275,6 @@ def can_apply_b2b_gemm(match: Match) -> bool:
             config["BLOCK_SIZE_P"],
         )
         ratios.append(ratio)
-    # we only dispatch to B2B-GEMM when the average load ratio is > 1
     average_ratio = 1.0
     for r in ratios:
         average_ratio *= r
@@ -210,8 +282,19 @@ def can_apply_b2b_gemm(match: Match) -> bool:
     return average_ratio > 1
 
 
-def unoptimized_b2b_gemm(m1, m2, m3, *, out):
-    torch.mm(torch.mm(m1, m2), m3, out=out)
+def unoptimized_b2b_gemm(
+    is_left_assoc: bool,
+    subgraph: Subgraph,
+    A: torch.Tensor,
+    B: torch.Tensor,
+    C: torch.Tensor,
+    *,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    if is_left_assoc:
+        torch.mm(subgraph.graph_module(torch.mm(A, B)), C, out=out)
+    else:
+        torch.mm(A, subgraph.graph_module(torch.mm(B, C)), out=out)
     return out
 
 
@@ -219,53 +302,224 @@ unoptimized_choice = ExternKernelChoice(unoptimized_b2b_gemm)
 
 
 def tuned_b2b_gemm(
-    mat1: torch._inductor.ir.TensorBox,
-    mat2: torch._inductor.ir.TensorBox,
-    mat3: torch._inductor.ir.TensorBox,
+    is_left_assoc: bool,
+    subgraph: Subgraph,
+    A: torch._inductor.ir.TensorBox,
+    B: torch._inductor.ir.TensorBox,
+    C: torch._inductor.ir.TensorBox,
     *,
     layout=None,
 ) -> torch._inductor.ir.TensorBox:
     # call .realize() to get rid of Pointwise
-    mat1.realize()
-    mat2.realize()
-    mat3.realize()
+    A.realize()
+    B.realize()
+    C.realize()
     layout = FixedLayout(
-        mat1.get_device(), mat1.get_dtype(), [mat1.shape[0], mat3.shape[1]]
+        A.get_device(), A.get_dtype(), [A.shape[0], C.shape[1]]
+    )
+    subgraph_buffer = build_subgraph_buffer(
+        [create_placeholder("inner_mm", A.get_dtype(), A.get_device())],
+        subgraph,
     )
     choices: list[TritonTemplateCaller] = []
     for config in b2b_gemm_configs:
         b2b_gemm_template.maybe_append_choice(
             choices,
-            input_nodes=(mat1, mat2, mat3),
+            input_nodes=(A, B, C),
             layout=layout,
+            subgraphs=[subgraph_buffer],
             **config,
+            IS_LEFT_ASSOC=is_left_assoc,
         )
     # add the unoptimized choice to mitigate performance degradation
-    choices.append(unoptimized_choice.bind((mat1, mat2, mat3), layout))
-    return autotune_select_algorithm("b2b_gemm", choices, [mat1, mat2, mat3], layout)
+    choices.append(
+        unoptimized_choice.bind((A, B, C), layout, is_left_assoc=is_left_assoc, subgraph=subgraph)
+    )
+    # autotune
+    return autotune_select_algorithm("b2b_gemm", choices, [A, B, C], layout)
 
 
-# currently it matches ((A @ B) @ C)
-# TODO: later will change to matching (A @ B) in (epilogue2 ((epilogue1 (A @ B)) @ C)) and inspecting the graph
-# TODO: match more cases such as bmm and addmm, and (A @ (B @ C)), etc.
+# match the inner mm of a potential b2b_gemm
 @register_graph_pattern(
-    CallFunction(
-        torch.ops.aten.mm, CallFunction(torch.ops.aten.mm, Arg(), Arg()), Arg()
-    ),
-    extra_check=can_apply_b2b_gemm,
+    CallFunction(torch.ops.aten.mm, Arg(), Arg()),
     pass_dict=B2B_GEMM_PASS,
 )
 def b2b_gemm(
-    match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node, mat3: torch.fx.Node
+    match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node
 ) -> None:
+    # match.args: list[torch.fx.Node]
+
+    def is_pointwise_node(node: torch.fx.Node) -> bool:
+        return (
+            node.op == "call_function" and
+            isinstance(node.target, torch._ops.OpOverload) and
+            (torch.Tag.pointwise in node.target.tags)
+        )
+    
+    def is_mm(node: torch.fx.Node) -> bool:
+        return (
+            node.op == "call_function" and
+            node.target == torch.ops.aten.mm.default
+        )
+
+    # the inner MM
+    inner_mm = match.nodes[-1]
+
+    # find the (candidate) outer MM
+    # In a real (A @ f(B @ C)), every path starting from (B @ C) must reach (A @ _).
+    outer_mm = None
+    node = inner_mm
+    while len(node.users) > 0:
+        node = next(iter(node.users))
+        if is_mm(node):
+            outer_mm = node
+            break
+        elif is_pointwise_node(node):
+            continue
+        else:
+            break
+    if not outer_mm:
+        return
+
+    # find the unique input node for outer_mm representing f(B @ C) in (A @ f(B @ C))
+    # we call it the "f_node"
+    # when the pattern is simply (A @ (B @ C)), f_node is just inner_mm
+    f_node = inner_mm
+    while not (next(iter(f_node.users)) is outer_mm):
+        f_node = next(iter(f_node.users))
+
+    def all_reach_via(
+        src: torch.fx.Node,
+        dst: torch.fx.Node,
+        check_intermediate: Callable[[torch.fx.Node], bool],
+        get_next: Callable[[torch.fx.Node], Iterable[torch.fx.Node]],
+    ) -> bool:
+        '''
+        checks whether every path from src reaches dst via check_intermediate nodes
+        where the direction is specified by get_next
+        '''
+        visited: Dict[torch.fx.Node, bool] = {}
+        def dfs(node: torch.fx.Node) -> bool:
+            if node in visited:
+                return visited[node]
+            if node is dst:
+                ret = True
+            elif (node is src) or check_intermediate(node):
+                ret = True
+                for next_node in get_next(node):
+                    val = dfs(next_node)
+                    ret = ret and val
+            else:
+                ret = False
+            visited[node] = ret
+            return ret
+        
+        return dfs(src)
+
+    # checker inner_mm and f_node are connected by pointwise nodes with no outside input_nodes / users
+    if not all_reach_via(inner_mm, f_node, is_pointwise_node, lambda node: iter(node.users)):
+        return
+    if not all_reach_via(f_node, inner_mm, is_pointwise_node, lambda node: node.all_input_nodes):
+        return
+    
+    # check inner_mm's inputs and f_node's outputs
+    if not (len(inner_mm.all_input_nodes) == 2 and len(f_node.users) == 1):
+        return
+
+    # at this point, the nodes between inner_mm and f_node (both included)
+    # are all used internally inside (A @ subgraph(B @ C))
+    # i.e. they neither have other users nor have other inputs
+
+    # find nodes in the subgraph (including inner_mm and f_node, excluding outer_mm)
+    subgraph_node_set = set()
+
+    def dfs(node: torch.fx.Node) -> None:
+        if node in subgraph_node_set:
+            return
+        if node is outer_mm:
+            return
+        subgraph_node_set.add(node)
+        for user, _ in node.users.items():
+            dfs(user)
+
+    dfs(inner_mm)
+
+    # original graph and module
+    graph, module = inner_mm.graph, inner_mm.graph.owning_module
+
+    # construct the new (sub)graph
+    subgraph_node_list = []  # ordered list of nodes used for node removal later
+    new_graph = torch.fx.Graph()
+    node_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
+    new_input_anchor = None  # inner_mm, to be changed to an input node
+    new_output_anchor = None  # f_node, to be used to construct an output node
+    for node in graph.nodes:  # preserve the order of nodes
+        if node in subgraph_node_set:
+            subgraph_node_list.append(node)
+            new_node = new_graph.node_copy(node, lambda x: node_remapping[x] if x in node_remapping else x)
+            node_remapping[node] = new_node
+            if node is inner_mm:
+                new_input_anchor = new_node
+            if node is f_node:
+                new_output_anchor = new_node
+    if not (new_input_anchor is new_output_anchor):  # subgraph is non-trivial
+        # update the input node
+        with new_graph.inserting_before(new_input_anchor):
+            new_input_node = new_graph.placeholder(name="subgraph_input")
+            new_input_node.meta.update(new_input_anchor.meta)
+            new_input_anchor.replace_all_uses_with(new_input_node)
+        new_graph.erase_node(new_input_anchor)
+        # add the output node
+        new_output_node = new_graph.output(new_output_anchor)
+        new_output_node.meta.update(new_output_anchor.meta)
+    else:  # subgraph is trivial, e.g. (A @ (B @ C))
+        # update the input node
+        with new_graph.inserting_before(new_input_anchor):
+            new_input_node = new_graph.placeholder(name="subgraph_input")
+            new_input_node.meta.update(new_input_anchor.meta)
+            new_input_anchor.replace_all_uses_with(new_input_node)
+        new_graph.erase_node(new_input_anchor)
+        # update the output node (don't use new_output_anchor since it has been erased)
+        new_output_node = new_graph.output(new_input_node)
+        new_output_node.meta.update(new_input_node.meta)
+    new_graph.lint()
+
+    # construct the subgraph
+    subgraph = Subgraph(name="subgraph", graph_module=torch.fx.GraphModule(module, new_graph))
+
+    # two cases
+    # (1) (subgraph(A @ B) @ C), called "left_assoc"
+    # (2) (A @ subgraph(B @ C)), called "right_assoc"
+    is_left_assoc = (outer_mm.args[0] is f_node)
+
+    # find the nodes A, B, C and check the sizes
+    if is_left_assoc:
+        A = inner_mm.args[0]
+        B = inner_mm.args[1]
+        C = outer_mm.args[1]
+    else:
+        A = outer_mm.args[0]
+        B = inner_mm.args[0]
+        C = inner_mm.args[1]
+    if not is_b2b_gemm_good_on(A, B, C):
+        return
+
+    # finally update the original graph
     counters["inductor"]["b2b_gemm"] += 1
     graph = match.graph
-    root_node = match.nodes[-1]
-    with graph.inserting_before(root_node):
-        tuned_b2b_gemm._inductor_lowering_function = True  # type: ignore[attr-defined]
+    with graph.inserting_before(outer_mm):
+        function = functools.partial(tuned_b2b_gemm, is_left_assoc, subgraph)
+        function.__name__ = tuned_b2b_gemm.__name__
+        function._inductor_lowering_function = True  # type: ignore[attr-defined]
         replacement = graph.call_function(
-            tuned_b2b_gemm, tuple(match.args), match.kwargs
+            function,
+            tuple([A, B, C]),
+            match.kwargs,
         )
-        replacement.meta.update(root_node.meta)
-        root_node.replace_all_uses_with(replacement)
-    match.erase_nodes(graph)
+        replacement.meta.update(outer_mm.meta)
+        outer_mm.replace_all_uses_with(replacement)
+    # erase unnecessary nodes
+    graph.erase_node(outer_mm)
+    for node in reversed(subgraph_node_list):
+        graph.erase_node(node)
+    graph.lint()
