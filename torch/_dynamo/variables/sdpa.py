@@ -2,6 +2,11 @@
 
 from inspect import getattr_static
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
 from ..bytecode_transformation import create_call_function
 from ..exc import Unsupported
 from .base import VariableTracker
@@ -57,7 +62,7 @@ class SDPAParamsVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
-    def var_getattr(self, tx, name: str) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         import torch._C
         from ..source import AttrSource
         from .builder import wrap_fx_proxy
