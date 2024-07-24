@@ -1582,8 +1582,13 @@ def _non_strict_export(
     orig_in_spec: TreeSpec,
     allow_complex_guards_as_runtime_asserts: bool,
     _is_torch_jit_trace: bool,
-    _is_training: bool = False,
+    dispatch_tracing_mode: str = "aot_export",
 ) -> ExportArtifact:
+    """
+    ``dispatch_tracing_mode`` can be either "make_fx” or “aot_export”, corresponding to
+    _export_to_aten_ir_make_fx and _export_to_aten_ir, respectively.
+    """
+    assert dispatch_tracing_mode in ["make_fx", "aot_export"]
     out_spec: Optional[TreeSpec] = None
 
     module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
@@ -1623,7 +1628,7 @@ def _non_strict_export(
 
             if sig is not None:
                 assert (
-                    not _is_training
+                    dispatch_tracing_mode == "aot_export"
                 ), "graph signature should be None for training IR"
                 sig.parameters = pytree.tree_map(_strip_root, sig.parameters)
                 sig.buffers = pytree.tree_map(_strip_root, sig.buffers)
@@ -1638,7 +1643,9 @@ def _non_strict_export(
                 )
             else:
                 # TODO(pianpwk): clean up _make_fx_helper() so we don't have these checks
-                assert _is_training, "graph signature can be None only for training IR"
+                assert (
+                    dispatch_tracing_mode == "make_fx"
+                ), "graph signature can be None only for training IR"
 
             for node in gm.graph.nodes:
                 if "nn_module_stack" in node.meta:
@@ -1691,7 +1698,7 @@ def _non_strict_export(
         ):
             _to_aten_func = (
                 _export_to_aten_ir_make_fx
-                if _is_training
+                if dispatch_tracing_mode == "make_fx"
                 else functools.partial(
                     _export_to_aten_ir,
                     pre_dispatch=pre_dispatch,
@@ -1764,7 +1771,7 @@ def _export_for_training(
         if strict
         else functools.partial(
             _non_strict_export,
-            _is_training=True,
+            dispatch_tracing_mode="make_fx",
         )
     )
     export_artifact = export_func(  # type: ignore[operator]
