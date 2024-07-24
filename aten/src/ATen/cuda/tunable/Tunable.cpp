@@ -618,7 +618,7 @@ TuningResultsManager& TuningContext::GetTuningResultsManager() {
       SetFilename(filename, true);
     }
     auto filename = GetFilename();
-    if (!filename.empty()) {
+    if (!filename.empty() && !IsRecordUntunedEnabled()) {
       ReadFile(filename);
       // attempt immediately to open file for writing to catch errors early
       std::ofstream file(filename, std::ios::out | std::ios::app);

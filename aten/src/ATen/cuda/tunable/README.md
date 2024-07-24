@@ -77,6 +77,31 @@ default, now called through TunableOp. Any call to at::cuda::blas::gemm() or ::b
 when enabled. Calling gemm() for a given set of input arguments (transa, transb, m, n, k) will attempt to use the
 fastest available implementation across both rocblas and hipblaslt.
 
+## Offline Tuning
+
+### Motivation
+Basically it is used for workload with high-memory utilization where one might run out of memory with regular tuning.
+
+### Workflow 
+There are basically two steps: 
+1) Set the environment variables to collect the untuned GEMM and this will generate `tunableop_untuned?.csv` ("?" is placeholder for the GPU ID), like:
+```
+PYTORCH_TUNABLEOP_ENABLED=1
+PYTORCH_TUNABLEOP_TUNING=0
+PYTORCH_TUNABLEOP_RECORD_UNTUNED=1
+...
+```
+2) Run a Python script that reads the `tunableop_untuned?.csv` and generates the `tunableop_results?.csv`, like:
+```
+import torch.cuda.tunable as tunable
+import os
+
+os.putenv('PYTORCH_TUNABLEOP_ENABLED', '1')
+os.putenv('PYTORCH_TUNABLEOP_TUNING', '1')
+os.putenv('PYTORCH_TUNABLEOP_RECORD_UNTUNED', '0')
+tunable.tune_gemm_in_file("tunableop_results?.csv")
+```
+
 ## Tuning Context
 The behavior of TunableOp is currently manipulated through environment variables, the C++ interface of
 at::cuda::tunable::getTuningContext(), or the `torch.cuda.tunable` python interfaces. The environment variables take

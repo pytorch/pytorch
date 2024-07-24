@@ -261,7 +261,7 @@ def tune_gemm_in_file(filename: str) -> None:
 
     with open(filename, 'r') as file:
         for line in file:
-            if line.startswith("Untuned"):
+            if line.startswith("Gemm"):
                 untuned_gemm = line.strip().split(',')[:]
                 [op_sig,data_type, layout] = untuned_gemm[0].split('_')
 
