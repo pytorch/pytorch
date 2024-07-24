@@ -114,11 +114,18 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
     context = (
         sdpa_kernel(config.backend) if config.backend is not None else nullcontext()
     )
-    if config.tensor_repeat_interleave:
-        # Need to compare enable gqa with repeat_interleave case
-        k = k.repeat_interleave(config.q_num_heads // config.kv_num_heads, dim=1)
-        v = v.repeat_interleave(config.q_num_heads // config.kv_num_heads, dim=1)
     with context:
+        # To compare enable gqa with repeat_interleave case
+        kv_repeat_time = 0
+        if config.tensor_repeat_interleave:
+            kv_repeat_time = 2 * benchmark_torch_function_in_microseconds_(
+                torch.repeat_interleave,
+                k,
+                config.q_num_heads // config.kv_num_heads,
+                dim=1
+            )
+            k = k.repeat_interleave(config.q_num_heads // config.kv_num_heads, dim=1)
+            v = v.repeat_interleave(config.q_num_heads // config.kv_num_heads, dim=1)
         forward_time = benchmark_torch_function_in_microseconds_(
             scaled_dot_product_attention,
             q,
@@ -136,7 +143,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
             out_torch.backward, dOut, retain_graph=True
         )
     return ExperimentResults(
-        forward_time=forward_time,
+        forward_time=forward_time+kv_repeat_time,
         backward_time=backward_time,
     )
 
@@ -255,10 +262,10 @@ def main():
     seed = 123
     torch.manual_seed(seed)
     print("Experiment 1: SDPA experiments")
-    # results_exp1 = []
-    # for config in tqdm(generate_experiment_configs(ExperimentName.SDPA)):
-    #     results_exp1.append(Experiment(config, run_single_experiment(config)))
-    # print_results(results_exp1)
+    results_exp1 = []
+    for config in tqdm(generate_experiment_configs(ExperimentName.SDPA)):
+        results_exp1.append(Experiment(config, run_single_experiment(config)))
+    print_results(results_exp1)
     print("Experiment 2: GQA experiments")
     results_exp2 = []
     for config in tqdm(generate_experiment_configs(ExperimentName.GQA)):
