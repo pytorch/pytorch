@@ -13,6 +13,7 @@ warnings.filterwarnings(
 
 import numpy as np
 import pandas as pd  # type: ignore[import-untyped]
+from ah_tree import DecisionTree
 from scipy.stats import gmean
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
@@ -81,8 +82,19 @@ class AHTrainDecisionTree(AHTrain):
         leaf_ids = model.apply(df[feature_columns])
         return predictions, proba, leaf_ids
 
+    def ranking_num_choices(self):
+        # if the heuristic is used for ranking, this function returns the number
+        # of choices that the heuristic will return
+        return 5
+
     def train_and_evaluate_models(
-        self, datasets, max_depths, min_samples_leafs, criterion_list, feature_columns
+        self,
+        datasets,
+        max_depths,
+        min_samples_leafs,
+        criterion_list,
+        feature_columns,
+        ranking=False,
     ):
         results = []
         best_model = None
@@ -104,7 +116,20 @@ class AHTrainDecisionTree(AHTrain):
             )
             df_train = datasets["train"]
             df_val = datasets["val"]
-            model.fit(df_train[feature_columns], df_train["winner"])
+            if ranking:
+                model.fit(
+                    df_train[feature_columns],
+                    df_train["winner"],
+                    sample_weight=df_train["relative_performance"],
+                )
+            else:
+                model.fit(df_train[feature_columns], df_train["winner"])
+
+            model = DecisionTree(model, feature_columns)
+
+            if ranking:
+                model.prune(df_train, "winner", k=self.ranking_num_choices())
+
             unsafe_leaves = self.get_unsafe_leaves(model, df_train, feature_columns)
             predictions, proba, leaf_ids = self.predict(model, df_val, feature_columns)
 
@@ -118,10 +143,17 @@ class AHTrainDecisionTree(AHTrain):
                 wrong_pct=wrong_pct,
                 unsafe_leaves=unsafe_leaves,
                 leaf_ids=leaf_ids,
+                k=self.ranking_num_choices(),
+                ranking=ranking,
             )
             print(f"safe_proba={safe_proba}")
 
             def eval(name, df):
+                if ranking:
+                    # when ranking is enabled, we duplicate each input for each choice that
+                    # is almost as good as the best choice
+                    # we do not want to evaluate the same input multiple times, so we remove duplicates here
+                    df = df[df["winner"] == df["actual_winner"]]
                 predictions, proba, leaf_ids = self.predict(model, df, feature_columns)
                 eval_result = self.get_results(
                     model,
@@ -131,6 +163,8 @@ class AHTrainDecisionTree(AHTrain):
                     threshold=safe_proba,
                     unsafe_leaves=unsafe_leaves,
                     leaf_ids=leaf_ids,
+                    k=self.ranking_num_choices(),
+                    ranking=ranking,
                 )
                 if name == "val":
                     nonlocal best_model_num_correct
@@ -165,6 +199,7 @@ class AHTrainDecisionTree(AHTrain):
                         eval_result["wrong_max_speedup"],
                         eval_result["wrong_gmean_speedup"],
                         eval_result["top_k_correct"],
+                        eval_result["top_k_wrong"],
                         eval_result["wrong_max_speedup_k"],
                         eval_result["wrong_gmean_speedup_k"],
                         eval_result["top_k_unsure"],
@@ -194,6 +229,7 @@ class AHTrainDecisionTree(AHTrain):
                     "wrong_max_spdup",
                     "wrong_gman_spdup",
                     "top_k_correct",
+                    "top_k_wrong",
                     "wrong_max_spdup_k",
                     "wrong_gman_spdup_k",
                     "top_k_unsure",
@@ -212,7 +248,7 @@ class AHTrainDecisionTree(AHTrain):
     def get_test_and_val_size(self):
         return (0.15, 0.15)
 
-    def prepare_datasets(self, df, other_datasets, cat_feature2cats):
+    def prepare_datasets(self, df, other_datasets, cat_feature2cats, ranking=False):
         test_size, val_size = self.get_test_and_val_size()
         # Split into train+val and test
         df_train_val, df_test = train_test_split(
@@ -225,21 +261,13 @@ class AHTrainDecisionTree(AHTrain):
             df_train_val, test_size=val_size / train_val_size, random_state=42
         )
         datasets = {"train": df_train, "val": df_val, "test": df_test}
-        self.add_real_datasets(datasets, other_datasets, cat_feature2cats)
+        self.add_real_datasets(datasets, other_datasets, cat_feature2cats, ranking)
         return datasets
 
     def export_to_dot(self, best_model, df, feature_columns):
-        from sklearn import tree
-
-        tree.export_graphviz(
-            best_model,
-            out_file="best_model.dot",
-            feature_names=df[feature_columns].columns,
-            class_names=[str(c) for c in best_model.classes_],
-            filled=True,
-            rounded=True,
-            special_characters=True,
-        )
+        dot_str = best_model.to_dot()
+        with open("best_model.dot", "w") as f:
+            f.write(dot_str)
 
     def get_feature_columns(self, df):
         exclude_columns = [
@@ -249,17 +277,33 @@ class AHTrainDecisionTree(AHTrain):
             "avail_choices",
             "choice2time",
             "index",
+            "actual_winner",
+            "relative_performance",
         ]
         feature_columns = [col for col in df.columns if col not in exclude_columns]
         return feature_columns
 
-    def main(self, log_path, other_datasets, nrows, heuristic_name, save_dot=False):
+    def add_training_data(self, df_train, datasets):
+        return datasets["train"]
+
+    def main(
+        self,
+        log_path,
+        other_datasets,
+        nrows,
+        heuristic_name,
+        save_dot=False,
+        ranking=False,
+    ):
         # TODO: Enable apply_filters
         (df, choices, cat_feature2cats, dummy_col_2_col_val, metadata) = self.get_df(
-            log_path, nrows=nrows, apply_filters=False
+            log_path, nrows=nrows, apply_filters=False, add_near_best=ranking
         )
         print(df["winner"].value_counts())
-        datasets = self.prepare_datasets(df, other_datasets, cat_feature2cats)
+        datasets = self.prepare_datasets(df, other_datasets, cat_feature2cats, ranking)
+        df_train = self.add_training_data(datasets["train"], datasets)
+        datasets["train"] = df_train
+
         feature_columns = self.get_feature_columns(df)
         grid_search_values = self.get_grid_search_values()
         max_depths = grid_search_values["max_depth"]
@@ -271,28 +315,44 @@ class AHTrainDecisionTree(AHTrain):
             best_model_safe_proba,
             unsafe_leaves,
         ) = self.train_and_evaluate_models(
-            datasets, max_depths, min_samples_leafs, criterion_list, feature_columns
+            datasets,
+            max_depths,
+            min_samples_leafs,
+            criterion_list,
+            feature_columns,
+            ranking=ranking,
         )
 
+        if ranking:
+            columns_to_keep = [
+                "set",
+                "total",
+                "top_k_correct",
+                "top_k_wrong",
+                "top_k_unsure",
+                "wrong_max_spdup_k",
+                "wrong_gman_spdup_k",
+            ]
+            results_df = results_df[columns_to_keep]
         # prints results for all models and datasets
         print(results_df.to_string())
 
-        # prints results grouped by dataset
-        for set_name in results_df["set"].unique():
-            dataset_results = results_df[results_df["set"] == set_name]
-            dataset_results = dataset_results.sort_values(by="correct")
-            print(dataset_results.to_string() + "\n")
+        if not ranking:
+            # prints results grouped by dataset
+            for set_name in results_df["set"].unique():
+                dataset_results = results_df[results_df["set"] == set_name]
+                dataset_results = dataset_results.sort_values(by="correct")
+                print(dataset_results.to_string() + "\n")
 
         if best_model is not None:
             if save_dot:
                 self.export_to_dot(best_model, df, feature_columns)
-            self.dt_to_python(
+            self.codegen(
                 best_model,
                 metadata,
-                feature_columns,
-                dummy_col_2_col_val,
                 heuristic_name,
                 best_model_safe_proba,
+                dummy_col_2_col_val,
                 unsafe_leaves,
             )
         else:
@@ -300,17 +360,29 @@ class AHTrainDecisionTree(AHTrain):
                 "All learned models have too many wrong predictions, so no heuristic was generated"
             )
 
-    def get_df(self, log_path, cat_feature2cats=None, nrows=None, apply_filters=False):
+    def get_df(
+        self,
+        log_path,
+        cat_feature2cats=None,
+        nrows=None,
+        apply_filters=False,
+        add_near_best=False,
+    ):
         (df, metadata, features, categorical_features, choices) = self.parse_log(
             log_path, nrows
         )
 
         def calculate_stats(group):
             count = len(group)
-            mean = group["feedback"].mean()
-            std = group["feedback"].std()
-            relative_std = (std / mean) * 100 if mean != 0 else np.inf
-            median = group["feedback"].median()
+            has_inf = np.isinf(group["feedback"]).any()
+            if has_inf:
+                relative_std = np.inf
+                median = np.inf
+            else:
+                mean = group["feedback"].mean()
+                std = group["feedback"].std()
+                relative_std = (std / mean) * 100 if mean != 0 else np.inf
+                median = group["feedback"].median()
             return pd.Series(
                 {
                     "count": count,
@@ -374,6 +446,28 @@ class AHTrainDecisionTree(AHTrain):
             .reset_index()
         )
 
+        def add_near_best_configs(df):
+            new_rows = []
+
+            for index, row in df.iterrows():
+                dictionary = json.loads(row["choice2time"])
+                min_value = min(dictionary.values())
+
+                for key, value in dictionary.items():
+                    new_row = row.copy()
+                    relative_performance = min_value / value
+                    new_row["relative_performance"] = relative_performance
+                    if relative_performance is None or relative_performance is np.inf:
+                        breakpoint()
+                    new_row["actual_winner"] = row["winner"]
+                    new_row["winner"] = key
+                    if relative_performance >= 0.95:
+                        new_rows.append(new_row)
+
+            return pd.DataFrame(new_rows).reset_index(drop=True)
+
+        if add_near_best:
+            results = add_near_best_configs(results)
         (results, added_categorical_features) = self.add_new_features(results)
         categorical_features += added_categorical_features
 
@@ -395,9 +489,10 @@ class AHTrainDecisionTree(AHTrain):
         return_safe_proba=False,
         wrong_pct=0.01,
         threshold=0.0,
-        k=3,
+        k=10,
         unsafe_leaves=None,
         leaf_ids=None,
+        ranking=False,
     ):
         def compute_speedup_over_default(default_config, pred, df, i, predicted_time):
             nonlocal num_non_default_predictions
@@ -414,7 +509,7 @@ class AHTrainDecisionTree(AHTrain):
                         num_default_better += 1
                     speedups_over_default.append(speedup_over_default)
 
-        y_true = df["winner"]
+        y_true = df["actual_winner"] if ranking else df["winner"]
         num_correct = 0
         num_wrong = 0
         num_unsure = 0
@@ -427,6 +522,7 @@ class AHTrainDecisionTree(AHTrain):
         speedups_over_default = []
         num_non_default_predictions = 0
         num_default_better = 0
+        num_wrong_top_k = 0
         for pred, true, prob, leaf_id in zip(predictions, y_true, probas, leaf_ids):
             avail_choices = df["avail_choices"].iloc[i]
             top_k_choices = self.top_k_classes(
@@ -473,6 +569,7 @@ class AHTrainDecisionTree(AHTrain):
                 if min_time is not None:
                     speedup = min_time / best_time
                     wrong_speedups_top_k.append(speedup)
+                    num_wrong_top_k += 1
                 else:
                     top_k_unsure += 1
             i += 1
@@ -511,6 +608,7 @@ class AHTrainDecisionTree(AHTrain):
             "wrong_max_speedup": max_speedup,
             "wrong_gmean_speedup": gmean_speedup,
             "top_k_correct": num_correct_top_k,
+            "top_k_wrong": num_wrong_top_k,
             "wrong_max_speedup_k": max_speedup_top_k,
             "wrong_gmean_speedup_k": gmean_speedup_top_k,
             "top_k_unsure": top_k_unsure,
@@ -525,35 +623,14 @@ class AHTrainDecisionTree(AHTrain):
         indent = " " * num_spaces
         return "\n".join([f"{indent}self.choices.append('{c}')" for c in classes])
 
-    def best_probas_and_indices(self, class_probas):
-        # we generate a list of tuples (proba, idx) sorted by proba in descending order
-        # idx is the index of a choice
-        # we only generate a tuple if proba > 0
-        probas_indices_sorted = sorted(
-            [(proba, index) for index, proba in enumerate(class_probas) if proba > 0],
-            key=lambda x: x[0],
-            reverse=True,
-        )
-        probas_indices_sorted_str = ", ".join(
-            f"({value:.3f}, {index})" for value, index in probas_indices_sorted
-        )
-        return f"[{probas_indices_sorted_str}]"
-
     def get_default_config(self, row):
         return None
-
-    def handle_leaf(self, tree_, node, indent, unsafe_leaves):
-        if node in unsafe_leaves:
-            return f"{indent}return None"
-        leaf_num_samples = tree_.n_node_samples[node]
-        class_probas = tree_.value[node][0]
-        return f"{indent}return {self.best_probas_and_indices(class_probas)}"
 
     def gen_predict_fn_def(self):
         return "def get_best_choices(self, context: AHContext) -> Optional[List[Tuple[float, int]]]:"
 
     def codegen_boilerplate(
-        self, heuristic_name, opt_name, threshold, shared_memory, device_capa, dt
+        self, heuristic_name, opt_name, threshold, shared_memory, device_capa, classes
     ):
         boiler_plate = f"""# flake8: noqa: B950
 from typing import Any, List, Optional, Tuple
@@ -584,19 +661,52 @@ class {heuristic_name}(LearnedHeuristicDecision):
         return None
 
     def fill_choices(self) -> None:
-{self.gen_classes(dt.classes_, num_spaces=8)}
+{self.gen_classes(classes, num_spaces=8)}
 
     def get_name(self) -> str:
         return '{opt_name}'"""
         return boiler_plate
 
-    def add_real_datasets(self, datasets, other_datasets, cat_feature2cats):
+    def add_real_datasets(
+        self, datasets, other_datasets, cat_feature2cats, ranking=False
+    ):
         if other_datasets:
             for name, path in other_datasets:
                 (df_other, choices, _, _, _) = self.get_df(
-                    path, cat_feature2cats=cat_feature2cats, apply_filters=False
+                    path,
+                    cat_feature2cats=cat_feature2cats,
+                    apply_filters=False,
+                    add_near_best=ranking,
                 )
                 datasets[name] = df_other
+
+    def codegen(
+        self,
+        tree,
+        metadata,
+        heuristic_name,
+        threshold,
+        dummy_col_2_col_val,
+        unsafe_leaves,
+    ):
+        lines = []
+        device_capa = metadata["device_capa"]
+        device_capa_str = f"({device_capa[0]}, {device_capa[1]})"
+        opt_name = metadata["name"]
+        lines.append(
+            self.codegen_boilerplate(
+                heuristic_name,
+                opt_name,
+                threshold,
+                metadata["shared_memory"],
+                device_capa_str,
+                tree.classes_,
+            )
+        )
+        fn_def = f"\n    {self.gen_predict_fn_def()}"
+        lines.append(fn_def)
+        tree.codegen(dummy_col_2_col_val, lines, unsafe_leaves)
+        self.write_heuristic_to_file(lines, heuristic_name)
 
 
 if __name__ == "__main__":
