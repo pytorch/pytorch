@@ -59,7 +59,7 @@ static void mps_error_fallback(const c10::OperatorHandle& op, torch::jit::Stack*
 static Tensor slow_conv2d_forward_mps(const Tensor& self,
                                       const Tensor& weight,
                                       IntArrayRef kernel_size,
-                                      const c10::optional<Tensor>& bias,
+                                      const std::optional<Tensor>& bias,
                                       IntArrayRef stride,
                                       IntArrayRef padding) {
   TORCH_CHECK(self.device() == weight.device(),

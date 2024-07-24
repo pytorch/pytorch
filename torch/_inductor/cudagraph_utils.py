@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
 import dataclasses
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 from torch._dynamo.utils import counters
+
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
@@ -178,3 +180,57 @@ def get_placeholder_stack_trace(placeholder: torch.fx.Node) -> Optional[str]:
             return user.stack_trace
 
     return None
+
+
+class CheckInvariantStatus(Enum):
+    # Check invariant succeeded
+    SUCCESS = 1
+
+    # Previously managed data pointers are not stable
+    CudagraphManagedIdxMismatch = 2
+
+    # Static tensor input addresses are not stable
+    StaticInputIdxMismatch = 3
+
+    # Expected dead indices before graph are live
+    ExpectedDeadIndicesBeforeGraphMismatch = 4
+
+    def __str__(self):
+        if self.name == "CudagraphManagedIdxMismatch":
+            return "cudagraph managed tensor data pointer changed"
+        elif self.name == "StaticInputIdxMismatch":
+            return "static input data pointer changed"
+        elif self.name == "ExpectedDeadIndicesBeforeGraphMismatch":
+            return "expected dead indices before graph are live"
+        else:
+            return f"{self.name}: {self.value}"
+
+
+def log_data_ptr_mismatch(
+    placeholders: List[torch.fx.Node],
+    inputs: List[torch.Tensor],
+    recorded_data_ptr: List[Optional[int]],
+    target_idxs: List[int],
+    mismatch: CheckInvariantStatus,
+) -> str:
+    """
+    Logs the mismatch between input data pointers and recorded data pointers.
+    This checks only idxs in target_idxs.
+    """
+    assert len(inputs) == len(recorded_data_ptr) and len(inputs) == len(
+        placeholders
+    ), "length mismatch between inputs, recorded_data_ptr, and placeholders"
+
+    t_tensors = [inputs[i] for i in target_idxs]
+    t_data_ptrs = [recorded_data_ptr[i] for i in target_idxs]
+    error_msg = f"{mismatch}.\n"
+    for i, (tensor, data_ptr) in enumerate(zip(t_tensors, t_data_ptrs)):
+        index = target_idxs[i]
+        if tensor.data_ptr() != data_ptr:
+            placeholder = placeholders[index]
+            error_msg = (
+                f"{error_msg}input name: {placeholder.name}. "
+                f"data pointer changed from {data_ptr} to {tensor.data_ptr()}. "
+                f"input stack trace: {get_placeholder_stack_trace(placeholder)}\n"
+            )
+    return error_msg

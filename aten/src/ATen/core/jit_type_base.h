@@ -455,7 +455,7 @@ struct TORCH_API Type {
   // this method.
   std::string annotation_str(const TypePrinter& printer) const {
     if (printer) {
-      // the printer can return nullopt to fall through to the default impl
+      // the printer can return std::nullopt to fall through to the default impl
       if (auto renamed = printer(*this)) {
         return *renamed;
       }
