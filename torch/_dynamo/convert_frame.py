@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 from __future__ import annotations
 
 import collections
@@ -35,6 +36,7 @@ except ModuleNotFoundError:
 
 import torch
 import torch._logging
+from torch._dynamo.distributed import get_compile_pg
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
 from torch._utils_internal import compile_time_strobelight_meta, signpost_event
@@ -80,7 +82,12 @@ from .guards import (
 )
 from .hooks import Hooks
 from .replay_record import ExecutionRecord
-from .symbolic_convert import InstructionTranslator, SpeculationLog
+from .symbolic_convert import (
+    DistributedState,
+    InstructionTranslator,
+    LocalState,
+    SpeculationLog,
+)
 from .trace_rules import is_numpy
 from .utils import (
     CleanupManager,
@@ -488,7 +495,7 @@ class ConvertFrameAssert:
             {
                 "co_name": code.co_name,
                 "frame_id": frame_id,
-                "compile_id": compile_id,
+                "compile_id": str(compile_id),
                 "co_filename": code.co_filename,
                 "co_firstlineno": code.co_firstlineno,
                 "cache_size": cache_size.num_cache_entries_with_same_id_matched_objs,
@@ -580,6 +587,10 @@ def _compile(
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
     speculation_log = SpeculationLog()
+    if compile_pg := get_compile_pg():
+        distributed_state = DistributedState(compile_pg, LocalState())
+    else:
+        distributed_state = None
     torch._dynamo.callback_handler.run_start_callbacks()
 
     @preserve_global_state
@@ -603,6 +614,7 @@ def _compile(
             mutated_closure_cell_contents,
             frame_state=frame_state,
             speculation_log=speculation_log,
+            distributed_state=distributed_state,
         )
 
         try:
