@@ -2,13 +2,14 @@ import socket
 import uuid
 
 from contextlib import contextmanager
+from datetime import timedelta
 from functools import partial
 from typing import Callable, Dict, Generator, List, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
-from torch._C._distributed_c10d import _SymmetricMemory
+from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 
 _group_name_to_store: Dict[str, c10d.Store] = {}
 
@@ -262,6 +263,10 @@ lib.define(
 )
 lib.define(
     "fused_matmul_reduce_scatter(Tensor A, Tensor B, str reduce_op, int scatter_dim, str group_name) -> Tensor"
+)
+lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor")
+lib.define(
+    "_low_contention_reduce_scatter(Tensor tensor, str reduce_op, str group_name) -> Tensor"
 )
 
 
@@ -579,3 +584,224 @@ def _fused_all_gather_scaled_matmul(
             group_name,
         )
         return unflatten(ag_out), [unflatten(output) for output in outputs]
+
+
+class Work(_Work):
+    def __init__(self) -> None:
+        super().__init__()
+        self.event = torch.cuda.Event()
+        self.event.record()
+
+    def wait(self, timeout: timedelta = timedelta(seconds=0)) -> bool:
+        self.event.wait()
+        return True
+
+
+"""
+NOTE [low-contention collectives]
+When a collective is overlapped with abundant compute, it makes sense to
+prioritize reducing the contention between the collective and the overlapped
+compute, even at the cost of a slightly slower collective.
+
+Common collective implementations (e.g., NCCL without user buffer
+registration) optimize for throughput with no ambient compute. However, such
+implementations may not be optimal when they are overlapped with compute:
+- These implementations typically fuse the entire collective into a single
+kernel and reserve SM resources based on the most demanding portion of the
+collective, even when a large portion of the collective does not require this
+much resource.
+- These implementations often use SM-based P2P copy as opposed to copy
+engine-based P2P copy. Copy engine-based P2P copy may not have a significant
+advantage when there's no ambient compute. However, it may significantly
+improve overall resource utilization in the presence of ambient compute.
+
+When overlapped with intensive compute (e.g., persistent matmul kernels), the
+SM-usage of a collective can lead to inefficient overlapping.
+
+Low-contention collectives achieve their goals with the following strategies:
+- Use copy engine-based copy whenever possible.
+- Break down portions of a collective with different resource requirements
+into multiple kernels. This improves the overlapping efficiency at the cost
+of additional launching overhead.
+"""
+
+
+@torch.library.impl(lib, "_low_contention_all_gather", "Meta")
+def _low_contention_all_gather_meta(
+    tensor: torch.Tensor,
+    group_name: str,
+) -> torch.Tensor:
+    group_size = c10d._get_group_size_by_name(group_name)
+    return tensor.new_empty(tensor.shape[0] * group_size, *tensor.shape[1:])
+
+
+@torch.library.impl(lib, "_low_contention_all_gather", "CUDA")
+def _low_contention_all_gather(
+    tensor: torch.Tensor,
+    group_name: str,
+) -> torch.Tensor:
+    """
+    Performs all-gather with symmetric memory in a low-contention fashion.
+
+    When `tensor` is already in symmetric memory:
+        - The collective is carried out without using SMs.
+        - No symmetric memory workspace is required.
+
+    When `tensor` is not in symmetric memory:
+        - An extra SM-based copy is performed to copy the input data into the
+          symmetric memory workspace.
+        - Symmetric memory workspace size requirement: the size of `tensor`.
+    """
+    symm_mem = _SymmetricMemory.rendezvous(tensor)
+    if symm_mem is not None:
+        input_is_symm_mem = True
+    else:
+        symm_mem = get_symm_mem_workspace(
+            group_name, tensor.numel() * tensor.element_size()
+        )
+        input_is_symm_mem = False
+
+    rank = symm_mem.rank
+    world_size = symm_mem.world_size
+
+    output = tensor.new_empty(tensor.shape[0] * world_size, *tensor.shape[1:])
+    chunks = output.chunk(world_size)
+
+    _get_backend_stream().wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(_get_backend_stream()):
+        if not input_is_symm_mem:
+            local_buf = symm_mem.get_buffer(rank, tensor.shape, tensor.dtype)
+            local_buf.copy_(tensor)
+        # pull
+        symm_mem.barrier()
+        for step in range(0, world_size):
+            remote_rank = (rank - step) % world_size
+            src_buf = symm_mem.get_buffer(remote_rank, tensor.shape, tensor.dtype)
+            chunks[remote_rank].copy_(src_buf)
+        symm_mem.barrier()
+        torch._C._distributed_c10d._register_work(output, Work())
+        return output
+
+
+@torch.library.impl(lib, "_low_contention_reduce_scatter", "Meta")
+def _low_contention_reduce_scatter_meta(
+    tensor: torch.Tensor,
+    reduce_op: str,
+    group_name: str,
+) -> torch.Tensor:
+    group_size = c10d._get_group_size_by_name(group_name)
+    return tensor.unflatten(0, (group_size, -1)).mean(dim=0)
+
+
+def _low_contention_reduce_scatter_with_symm_mem_input(
+    tensor: torch.Tensor,
+    reduce_op: str,
+    symm_mem: _SymmetricMemory,
+) -> torch.Tensor:
+    rank = symm_mem.rank
+    world_size = symm_mem.world_size
+
+    assert tensor.shape[0] % world_size == 0
+    a2a_res = torch.empty_like(tensor)
+    chunks = a2a_res.chunk(world_size)
+
+    _get_backend_stream().wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(_get_backend_stream()):
+        # pull + offline reduction
+        symm_mem.barrier()
+        for step in range(0, world_size):
+            remote_rank = (rank - step) % world_size
+            src_buf = symm_mem.get_buffer(
+                remote_rank,
+                chunks[0].shape,
+                chunks[0].dtype,
+                chunks[0].numel() * rank,
+            )
+            chunks[remote_rank].copy_(src_buf)
+        symm_mem.barrier()
+
+        ret = a2a_res.unflatten(0, (world_size, -1))
+        if reduce_op == "sum":
+            ret = ret.sum(dim=0)
+        elif reduce_op == "avg":
+            ret = ret.mean(dim=0)
+        else:
+            raise ValueError(f"reduce_op ({reduce_op}) is not supported")
+        torch._C._distributed_c10d._register_work(ret, Work())
+        return ret
+
+
+def _low_contention_reduce_scatter_with_workspace(
+    tensor: torch.Tensor,
+    reduce_op: str,
+    workspace: _SymmetricMemory,
+) -> torch.Tensor:
+    rank = workspace.rank
+    world_size = workspace.world_size
+
+    assert tensor.shape[0] % world_size == 0
+    chunks = tensor.chunk(world_size)
+
+    _get_backend_stream().wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(_get_backend_stream()):
+        # push + offline reduction
+        workspace.barrier()
+        for step in range(0, world_size):
+            remote_rank = (rank - step) % world_size
+            dst_buf = workspace.get_buffer(
+                remote_rank, chunks[0].shape, chunks[0].dtype, chunks[0].numel() * rank
+            )
+            dst_buf.copy_(chunks[remote_rank])
+        workspace.barrier()
+
+        buf = workspace.get_buffer(rank, tensor.shape, tensor.dtype)
+        ret = buf.unflatten(0, (world_size, -1))
+        if reduce_op == "sum":
+            ret = ret.sum(dim=0)
+        elif reduce_op == "avg":
+            ret = ret.mean(dim=0)
+        else:
+            raise ValueError(f"reduce_op ({reduce_op}) is not supported")
+        torch._C._distributed_c10d._register_work(ret, Work())
+        return ret
+
+
+@torch.library.impl(lib, "_low_contention_reduce_scatter", "CUDA")
+def _low_contention_reduce_scatter(
+    tensor: torch.Tensor,
+    reduce_op: str,
+    group_name: str,
+) -> torch.Tensor:
+    """
+    Performs reduce-scatter with symmetric memory in a low-contention fashion.
+
+    This implementation performs a P2P-based all-to-all followed by an offline
+    reduction.
+
+    When `tensor` is already in symmetric memory:
+        - Pull-based all-to-all is used.
+        - No symmetric memory workspace is required.
+
+    When `tensor` is not in symmetric memory:
+        - Push-based all-to-all is used.
+        - Symmetric memory workspace size requirement: the size of `tensor`.
+
+    SM-usage:
+        - SM-based copy of the rank's own chunk for the all-to-all.
+        - Reduction on the all-to-all result.
+
+    TODO(yifu): the SM-based copy can be avoided with a list-based reduction
+    kernel.
+    """
+    symm_mem = _SymmetricMemory.rendezvous(tensor)
+    if symm_mem is not None:
+        return _low_contention_reduce_scatter_with_symm_mem_input(
+            tensor, reduce_op, symm_mem
+        )
+    else:
+        workspace = get_symm_mem_workspace(
+            group_name, tensor.numel() * tensor.element_size()
+        )
+        return _low_contention_reduce_scatter_with_workspace(
+            tensor, reduce_op, workspace
+        )
