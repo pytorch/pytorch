@@ -162,9 +162,9 @@ def tuning_is_enabled() -> bool:
     return torch._C._cuda_tunableop_tuning_is_enabled()  # type: ignore[attr-defined]
 
 def record_untuned_enable(val: bool = True) -> None:
-    r"""Enable record untuned of TunableOp implementations.
+    r"""Enable recording untuned of TunableOp perations for offline tuning.
 
-    When enabled, if a tuned entry isn't found, record the GEMM into file.
+    When enabled, if a tuned entry isn't found, write it to the untuned file.
     """
     torch._C._cuda_record_untuned_enable(val)  # type: ignore[attr-defined]
 
@@ -262,7 +262,7 @@ def tune_gemm_in_file(filename: str) -> None:
     with open(filename, 'r') as file:
         for line in file:
             if line.startswith("Untuned"):
-                untuned_gemm = line.strip().split(',')[1:]
+                untuned_gemm = line.strip().split(',')[:]
                 [op_sig,data_type, layout] = untuned_gemm[0].split('_')
 
                 transA = True if layout[0] == 'T'  else False
