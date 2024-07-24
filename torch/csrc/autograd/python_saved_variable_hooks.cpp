@@ -1,6 +1,7 @@
 #include <ATen/SavedTensorHooks.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 
+#include <c10/core/SafePyObject.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
 
@@ -73,11 +74,11 @@ void PyDefaultSavedVariableHooks::pop_hooks() {
 }
 
 std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
-  auto [pack_hook, unpack_hook] = at::SavedTensorDefaultHooks::get_hooks();
-  if (!pack_hook.ptr(getPyInterpreter()) ||
-      !unpack_hook.ptr(getPyInterpreter())) {
+  auto out = at::SavedTensorDefaultHooks::get_hooks();
+  if (!out.has_value()) {
     return nullptr;
   }
+  auto [pack_hook, unpack_hook] = *out;
   py::gil_scoped_acquire gil;
   py::function pack_hook_ =
       py::reinterpret_steal<py::function>(pack_hook.release());

@@ -71,10 +71,10 @@ std::pair<SafePyObject, SafePyObject> SavedTensorDefaultHooks::pop_hooks() {
   return hooks;
 }
 
-std::pair<SafePyObject, SafePyObject> SavedTensorDefaultHooks::get_hooks() {
+c10::optional<std::pair<SafePyObject, SafePyObject>> SavedTensorDefaultHooks::get_hooks() {
   // For tls.is_tracing, see NOTE: [Deferring tensor pack/unpack hooks until runtime]
   if (!is_initialized || tls.stack.empty() || tls.is_tracing) {
-    return std::make_pair(c10::SafePyObject(nullptr, nullptr), c10::SafePyObject(nullptr, nullptr));
+    return c10::nullopt;
   }
   return tls.stack.top();
 }

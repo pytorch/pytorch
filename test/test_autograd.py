@@ -556,6 +556,40 @@ class TestAutograd(TestCase):
                 # if forward AD ends up being implemented for torch.igamma, choose a different op
                 torch.igamma(dual_x, dual_x)
 
+    def test_saved_tensor_hooks_extra_exit_during_bw_no_crash(self):
+        # This usage of saved tensor is not supported, but should not crash
+        def unpack(x):
+            ctx_1.__exit__()
+            return x
+
+        ctx_1 = torch.autograd.graph.saved_tensors_hooks(lambda x: x, unpack)
+        ctx_2 = torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x)
+
+        for i in range(10):
+            with ctx_2:
+                ctx_1.__enter__()
+                x = torch.randn(3, 3, requires_grad=True)
+                x.sin().sum().backward()
+
+    def test_saved_tensor_hooks_extra_enter_during_bw_no_leak(self):
+        # This usage of saved tensor is not supported, but should not leak
+        def scope():
+            def unpack(x):
+                weak_ctx_1().__enter__()
+                return x
+
+            ctx_1 = torch.autograd.graph.saved_tensors_hooks(lambda x: x, unpack)
+            weak_ctx_1 = weakref.ref(ctx_1)
+
+            x = torch.randn(3, 3, requires_grad=True)
+            with ctx_1:
+                x.sin().sum().backward()
+            return weakref.ref(unpack)
+
+        with disable_gc():
+            unpack_hook_ref = scope()
+            self.assertIsNone(unpack_hook_ref())
+
     def test_will_engine_execute_node(self):
         counter = [0]
 
