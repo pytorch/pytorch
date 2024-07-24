@@ -11,12 +11,12 @@ from typing import (
     Dict,
     List,
     Optional,
-    ParamSpec,
     Set,
     TYPE_CHECKING,
     TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 
 import torch
 import torch._inductor as inductor
@@ -58,7 +58,7 @@ from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
-from .micro_pipeline_tp import patterns as micro_pipeline_tp_patterns
+from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
@@ -128,7 +128,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
     if config._micro_pipeline_tp:
-        micro_pipeline_tp_patterns.apply(gm)
+        micro_pipeline_tp_pass(gm.graph)
 
     if config._fuse_ddp_communication:
         fuse_ddp_communication(
