@@ -255,7 +255,7 @@ def dynamo_timed(
     original_function: Optional[Callable[_P, T]] = None,
     phase_name: Optional[str] = None,
     fwd_only: bool = True,
-):
+) -> Union[Callable[_P, T], Callable[[Callable[_P, T]], Callable[_P, T]]]:
     def dynamo_timed_inner(func: Callable[_P, T]) -> Callable[_P, T]:
         @wraps(func)
         def time_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> T:
