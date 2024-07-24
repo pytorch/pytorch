@@ -55,6 +55,10 @@
 #include <cuda_fp16.h>
 #endif
 
+#ifdef USE_ROCM
+#include <hip/hip_fp16.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -120,9 +124,9 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_layout_strided();
 AOTI_TORCH_EXPORT int32_t aoti_torch_layout__mkldnn();
 
 // Functions for converting a single-element tensor to a scalar value
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_ROCM)  
 AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_item_float16(AtenTensorHandle tensor, half* ret_value);
+aoti_torch_item_float16(AtenTensorHandle tensor, __half* ret_value);
 #endif
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_float32(AtenTensorHandle tensor, float* ret_value);
