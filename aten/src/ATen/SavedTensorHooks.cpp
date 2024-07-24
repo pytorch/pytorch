@@ -2,6 +2,7 @@
 #include <c10/util/Exception.h>
 #include <stack>
 #include <utility>
+#include <c10/core/SafePyObject.h>
 
 namespace at {
 
@@ -57,26 +58,25 @@ void SavedTensorDefaultHooks::lazy_initialize() {
   is_initialized = true;
 }
 
-void SavedTensorDefaultHooks::push_hooks(PyObject* pack_hook, PyObject* unpack_hook) {
+void SavedTensorDefaultHooks::push_hooks(SafePyObject pack_hook, SafePyObject unpack_hook) {
   // Reference counting is handled by the caller of `push_hooks`
   TORCH_INTERNAL_ASSERT(is_initialized);
-  TORCH_INTERNAL_ASSERT(pack_hook != nullptr && unpack_hook != nullptr);
   assertSavedTensorHooksNotDisabled();
   tls.stack.emplace(pack_hook, unpack_hook);
 }
 
-std::pair<PyObject*, PyObject*> SavedTensorDefaultHooks::pop_hooks() {
+std::pair<SafePyObject, SafePyObject> SavedTensorDefaultHooks::pop_hooks() {
   // Reference counting is handled by the caller of `pop_hooks`
   TORCH_INTERNAL_ASSERT(is_initialized && !tls.stack.empty());
-  std::pair<PyObject*, PyObject*> hooks = tls.stack.top();
+  std::pair<SafePyObject, SafePyObject> hooks = tls.stack.top();
   tls.stack.pop();
   return hooks;
 }
 
-std::pair<PyObject*, PyObject*> SavedTensorDefaultHooks::get_hooks() {
+std::pair<SafePyObject, SafePyObject> SavedTensorDefaultHooks::get_hooks() {
   // For tls.is_tracing, see NOTE: [Deferring tensor pack/unpack hooks until runtime]
   if (!is_initialized || tls.stack.empty() || tls.is_tracing) {
-    return std::make_pair(nullptr, nullptr);
+    return std::make_pair(c10::SafePyObject(nullptr, nullptr), c10::SafePyObject(nullptr, nullptr));
   }
   return tls.stack.top();
 }
