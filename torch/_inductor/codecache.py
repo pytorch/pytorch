@@ -1618,6 +1618,9 @@ class AotCodeCompiler:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> str:
+        if sys.platform == "win32":
+            raise RuntimeError("AotCodeCompiler not yet supported for inductor")
+
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
         picked_vec_isa = pick_vec_isa()
