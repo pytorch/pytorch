@@ -1,6 +1,5 @@
 # mypy: ignore-errors
 
-import contextlib
 import functools
 import inspect
 import logging
@@ -8,7 +7,7 @@ import operator
 import textwrap
 import types
 import unittest
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
 import sympy
 
@@ -16,6 +15,9 @@ import torch._numpy as tnp
 import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -45,7 +47,6 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .constant import ConstantVariable
-from .ctx_manager import PreserveVersionContextVariable
 from .lists import SizeVariable
 
 try:
@@ -81,31 +82,6 @@ supported_tensor_comparison_op_values = dict.fromkeys(
 supported_const_comparison_op_values = dict.fromkeys(
     supported_const_comparison_ops.values()
 )
-
-
-@contextlib.contextmanager
-def maybe_proxy_hide_mutations_from_autograd(self, tx, method_name):
-    # Subclass VT that represents the result of calling tensor.data.
-    # any mutations done to .data are hidden from autograd.
-    # so we subclass TensorVariableTracker, and:
-    # (1) attempt to see if we are passing the tensor into a mutable op
-    # (2) If so, insert a `torch._C._autograd._unsafe_set_version_counter` before/after
-    #     to emulate .data mutation and avoid bumping the version counter.
-    # Note: this isn't fully robust (the mutable op detection is a heuristic).
-    # we could just emit the above calls before/after every op,
-    # but I don't want to risk making the graphs huge, and also
-    # this case does not come up very much.
-    if not self.is_data_attr:
-        yield
-        return
-    # basic check for tensor method mutation ops that catches most cases.
-    if not method_name.endswith("_"):
-        yield
-        return
-    out = PreserveVersionContextVariable.constructor(tx).call_function(tx, [self], {})
-    out.enter(tx)
-    yield
-    out.exit(tx)
 
 
 class TensorVariable(VariableTracker):
@@ -155,7 +131,6 @@ class TensorVariable(VariableTracker):
         stride=None,
         is_contiguous=None,
         _is_name_set=None,
-        is_data_attr=False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -176,7 +151,6 @@ class TensorVariable(VariableTracker):
             # no need to rename inputs
             _is_name_set = self.proxy.node.op == "placeholder"
         self._is_name_set: bool = _is_name_set
-        self.is_data_attr = is_data_attr
 
     def debug_repr(self):
         # TODO: strip off fake tensor from repr here
@@ -238,7 +212,7 @@ class TensorVariable(VariableTracker):
                 )
         return props
 
-    def dynamic_getattr(self, tx, name):
+    def dynamic_getattr(self, tx: "InstructionTranslator", name):
         fake_val = self.proxy.node.meta["example_value"]
         # For getattrs on tensors without sources,
         # we can do better than the default (creating a GetAttrVariable)
@@ -347,10 +321,9 @@ class TensorVariable(VariableTracker):
             return ConstantVariable.create(self.is_sparse)
 
     def method_attr_data(self, tx):
-        out = self.call_method(tx, "detach", [], {})
-        assert isinstance(out, TensorVariable)
-        out.is_data_attr = True
-        return out
+        return variables.TorchInGraphFunctionVariable(
+            torch._C._autograd._get_data_attr
+        ).call_function(tx, [self], {})
 
     def method_attr_grad_fn(self, tx):
         if self.has_grad_fn:
@@ -365,7 +338,7 @@ class TensorVariable(VariableTracker):
             tx, [self], {}
         )
 
-    def call_hasattr(self, tx, name):
+    def call_hasattr(self, tx: "InstructionTranslator", name):
         from . import GetAttrVariable
         from .builtin import BuiltinVariable
 
@@ -386,7 +359,7 @@ class TensorVariable(VariableTracker):
 
         return ConstantVariable(ret_val)
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         from . import UserDefinedClassVariable
 
         if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
@@ -469,7 +442,7 @@ class TensorVariable(VariableTracker):
     def has_unpack_var_sequence(self, tx):
         return self.ndim > 0
 
-    def unpack_var_sequence(self, tx, idxes=None):
+    def unpack_var_sequence(self, tx: "InstructionTranslator", idxes=None):
         from .builder import wrap_fx_proxy_cls
 
         if self.size:
@@ -536,15 +509,14 @@ class TensorVariable(VariableTracker):
 
         from .builder import wrap_fx_proxy
 
-        with maybe_proxy_hide_mutations_from_autograd(self, tx, name):
-            return wrap_fx_proxy(
-                tx,
-                tx.output.create_proxy(
-                    "call_method",
-                    name,
-                    *proxy_args_kwargs([self, *args], kwargs),
-                ),
-            )
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_method",
+                name,
+                *proxy_args_kwargs([self, *args], kwargs),
+            ),
+        )
 
     def method_size(self, *args, **kwargs):
         return self._method_size_stride("size", *args, **kwargs)
@@ -1143,7 +1115,7 @@ class NumpyNdarrayVariable(TensorVariable):
             **options,
         )
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         # NB: This INTENTIONALLY does not call super(), because there is
         # no intrinsic reason ndarray properties are related to Tensor
         # properties.  The inheritance here is for implementation sharing.
@@ -1291,7 +1263,10 @@ class TensorSubclassVariable(VariableTracker):
         super().__init__(*args, **kwargs)
 
     def call_function(
-        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+        self,
+        tx: "InstructionTranslator",
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         if len(args) == 1 and isinstance(args[0], TensorVariable):
             from .builder import VariableBuilder
