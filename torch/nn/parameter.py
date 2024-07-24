@@ -229,14 +229,14 @@ class Buffer(torch.Tensor, metaclass=_BufferMeta):
     Buffers are :class:`~torch.Tensor` subclasses, that have a
     very special property when used with :class:`Module` s - when they're
     assigned as Module attributes they are automatically added to the list of
-    its buffers, and will appear e.g. in :meth:`~Module.buffers` iterator.
+    its buffers, and will appear e.g. in :meth:`~torch.nn.Module.buffers` iterator.
     Assigning a Tensor doesn't have such effect. One can still assign a Tensor as explicitly by using
-    a the modules `~register_buffer` function.
+    a the modules :meth:`~torch.nn.Module.register_buffer` function.
 
     Args:
         data (Tensor): buffer tensor.
         persistent (bool, optional): whether the buffer is part of the module's
-            :attr:`state_dict`. Default: `True`
+            :attr:`state_dict`. Default: ``True``
     """
 
     def __new__(cls, data=None, persistent=True):
