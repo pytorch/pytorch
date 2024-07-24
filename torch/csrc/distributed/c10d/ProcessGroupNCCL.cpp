@@ -19,6 +19,7 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
+#include <c10/util/WaitCounter.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
 #include <torch/csrc/cuda/nccl.h>
@@ -29,7 +30,6 @@
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
-#include <torch/csrc/monitor/instrumentation.h>
 #include <torch/torch.h>
 #include <optional>
 
@@ -538,9 +538,9 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
   std::unique_lock<std::mutex> lock(mutex_);
   exception_ = exception_ptr;
   if (exception_) {
-    LOG(INFO) << logPrefix()
-              << "found async exception when checking for NCCL errors: "
-              << getExceptionMsgFromExceptionPtr(exception_);
+    LOG(ERROR) << logPrefix()
+               << "found async exception when checking for NCCL errors: "
+               << getExceptionMsgFromExceptionPtr(exception_);
   }
 }
 
@@ -575,6 +575,11 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
 
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   // Checking the work's corresponding CUDA event's status
+  // It calls `cudaEventQuery` eventually. Although this seems to be a
+  // non-blocking call, but we did notice hangs in the past. It can
+  // hang if another thread is holding the CUDA global context lock. For
+  // example, when doing a `cudaDeviceSynchronize` or even
+  // `cudaStreamSynchronize`.
   if (!ncclEndEvent_->query()) {
     return false;
   }
@@ -2117,7 +2122,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   gpuGuard.set_index(deviceIndex);
 
 #ifdef NCCL_HAS_COMM_SPLIT
-  options_->config.splitShare = 1;
   if (options_->split_from) {
     TORCH_CHECK(
         options_->split_color != 0,
@@ -2179,8 +2183,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       size_); // worldSize
 
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
-            << ncclComm->ncclComm_
-            << " on CUDA device: " << static_cast<int>(deviceIndex);
+            << ncclComm->ncclComm_ << " on CUDA device: " << deviceIndex;
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file

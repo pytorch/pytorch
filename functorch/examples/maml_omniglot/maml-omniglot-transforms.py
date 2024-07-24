@@ -34,7 +34,6 @@ import time
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-
 import pandas as pd
 from support.omniglot_loaders import OmniglotNShot
 
@@ -43,6 +42,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch import nn
 from torch.func import functional_call, grad, vmap
+
 
 mpl.use("Agg")
 plt.style.use("bmh")

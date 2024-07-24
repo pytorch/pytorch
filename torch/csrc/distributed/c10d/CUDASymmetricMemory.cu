@@ -21,14 +21,16 @@ class IpcChannel {
   IpcChannel() : socket_name_(get_socket_name(getpid())) {
     TORCH_CHECK(
         (socket_ = socket(AF_UNIX, SOCK_DGRAM, 0)) != 0,
-        "Failed to create socket");
+        "Failed to create socket: ",
+        strerror(errno));
 
     struct sockaddr_un addr = {.sun_family = AF_UNIX};
     std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
 
     TORCH_CHECK(
         bind(socket_, (struct sockaddr*)&addr, SUN_LEN(&addr)) == 0,
-        "Failed to bind socket");
+        "Failed to bind socket: ",
+        strerror(errno));
   }
 
   ~IpcChannel() {
@@ -58,7 +60,10 @@ class IpcChannel {
     cmsg->cmsg_type = SCM_RIGHTS;
     memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
 
-    TORCH_CHECK(sendmsg(socket_, &msg, 0) > 0, "Failed to send fd");
+    TORCH_CHECK(
+        sendmsg(socket_, &msg, 0) > 0,
+        "Failed to send fd: ",
+        strerror(errno));
   }
 
   int recv_fd() {
@@ -74,7 +79,10 @@ class IpcChannel {
         .msg_control = cbuf,
         .msg_controllen = sizeof(cbuf)};
 
-    TORCH_CHECK(recvmsg(socket_, &msg, 0) > 0, "Failed to receive fd");
+    TORCH_CHECK(
+        recvmsg(socket_, &msg, 0) > 0,
+        "Failed to receive fd: ",
+        strerror(errno));
 
     auto cmsg = CMSG_FIRSTHDR(&msg);
     TORCH_CHECK(cmsg != NULL);
@@ -104,8 +112,15 @@ class IpcChannel {
 
  private:
   static std::string get_socket_name(int pid) {
+    const char* tmp_dir = "/tmp";
+    for (const char* env_var : {"TMPDIR", "TMP", "TEMP", "TEMPDIR"}) {
+      if (const char* path = getenv(env_var)) {
+        tmp_dir = path;
+        break;
+      }
+    }
     std::ostringstream oss;
-    oss << "symm_mem-" << pid;
+    oss << tmp_dir << "/symm_mem-" << pid;
     return oss.str();
   }
 
@@ -530,10 +545,9 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     void* ptr) {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto block = find_block(ptr);
-  TORCH_CHECK(
-      block != nullptr,
-      "CUDASymmetricMemoryAllocator::rendezvous: input must be allocated ",
-      "via CUDASymmetricMemoryAllocator::alloc");
+  if (block == nullptr) {
+    return nullptr;
+  }
 
   if (block->symm_mem != nullptr) {
     return block->symm_mem;
