@@ -875,6 +875,8 @@ class OpInfo:
     supports_sparse_bsr: bool = None
     # whether the op supports sparse bsc inputs, defaults to False
     supports_sparse_bsc: bool = None
+    # whether the op supports nested jagged inputs, defaults to False
+    supports_njt: bool = None
 
     # whether the op promotes integer inputs to float
     promotes_int_to_float: bool = False
@@ -1050,6 +1052,9 @@ class OpInfo:
             self.supports_sparse_bsc = self.sample_inputs_sparse_bsc_func is not None
         if self.sample_inputs_sparse_bsc_func is None:
             self.sample_inputs_sparse_bsc_func = self._sample_inputs_unspecified
+
+        if self.supports_njt is None:
+            self.supports_njt = False
 
         # We run the sampling functions without tracking the gradiends of the creation of inputs
         self.sample_inputs_func = torch.no_grad()(self.sample_inputs_func)

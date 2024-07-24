@@ -689,6 +689,7 @@ class TensorLikePair(Pair):
     def _check_supported(self, tensor: torch.Tensor, *, id: Tuple[Any, ...]) -> None:
         if tensor.layout not in {
             torch.strided,
+            torch.jagged,
             torch.sparse_coo,
             torch.sparse_csr,
             torch.sparse_csc,
