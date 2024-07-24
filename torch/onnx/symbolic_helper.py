@@ -7,14 +7,7 @@ import math
 import sys
 import typing
 import warnings
-from typing import (
-    Any,
-    Callable,
-    Literal,
-    NoReturn,
-    Sequence,
-    TypeVar,
-)
+from typing import Any, Callable, Literal, NoReturn, Sequence, TypeVar
 from typing_extensions import Concatenate, ParamSpec
 
 import torch
