@@ -2,7 +2,8 @@
 # mypy: allow-untyped-defs
 import math
 from functools import wraps
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, TypeVar, Union
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._prims as prims
@@ -66,6 +67,9 @@ __all__ = [
     "triplet_margin_loss",
 ]
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 Tensor = torch.Tensor
 aten = torch._ops.ops.aten
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -128,22 +132,27 @@ def alpha_dropout(
     return self * dropout_mask + b
 
 
-def _inplace_wrapper(fn):
+def _inplace_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     """
     Given a nn.functional non-linearity, implements its `inplace: bool` argument
     """
 
     # nb. We use the name of the first argument used in the unary references
     @wraps(fn)
-    def _fn(a, *args, inplace=False, **kwargs):
-        if inplace:
+    def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        a = args[0]
+        if "inplace" not in kwargs:
+            kwargs["inplace"] = False
+        if kwargs["inplace"]:
             torch._check(
                 "out" not in kwargs,
                 lambda: "Cannot set inplace=True and pass out= at the same time",
             )
-            return fn(a, *args, inplace=False, out=a, **kwargs)
+            kwargs["inplace"] = False
+            kwargs["out"] = a
+            return fn(*args, **kwargs)
         else:
-            return fn(a, *args, inplace=False, **kwargs)
+            return fn(*args, **kwargs)
 
     return _fn
 
