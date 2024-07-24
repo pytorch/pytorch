@@ -24,9 +24,9 @@ from torch._inductor.comm_analysis import (
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
+    at_least_x_gpu,
     DynamoDistributedMultiProcTestCase,
     requires_nccl,
-    at_least_x_gpu,
 )
 from torch.utils._triton import has_triton
 

@@ -19,7 +19,11 @@ from torch.distributed._composable.fsdp._fsdp_common import TrainingState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import init_device_mesh
 from torch.testing import FileCheck
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu, _dynamo_dist_per_rank_init, at_least_x_gpu
+from torch.testing._internal.common_distributed import (
+    _dynamo_dist_per_rank_init,
+    at_least_x_gpu,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -87,9 +91,11 @@ class TestFullyShardCompileCompute(FSDPTest):
 
 
 class TestFullyShardCompile(FSDPTest):
+    fake_pg = not at_least_x_gpu(2)
+
     @property
     def world_size(self) -> int:
-        return min(2, torch.cuda.device_count())
+        return 2
 
     def test_dynamo_trace_use_training_state(self):
         torch._dynamo.reset()
@@ -276,11 +282,9 @@ class TestFullyShardCompile(FSDPTest):
             res = run_iters(model, optim)
             return res
 
-        with _dynamo_dist_per_rank_init(
-            self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
-        ):
-            losses_compiled = test_compiled()
-            losses_eager = test_eager()
+        losses_compiled = test_compiled()
+        losses_eager = test_eager()
+        if not self.fake_pg:
             for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
                 self.assertTrue(
                     torch.allclose(
