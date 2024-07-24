@@ -2634,7 +2634,7 @@ class SourcelessBuilder:
         elif isinstance(value, re.Pattern):
             return RegexPatternVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeString):
-            return ConstantVariable.create(str(value.sym_node_var.evaluate_expr()))
+            return ConstantVariable.create(str(value))
         unimplemented(
             f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
         )
