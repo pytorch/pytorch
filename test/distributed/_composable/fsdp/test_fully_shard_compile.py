@@ -221,6 +221,48 @@ class TestFullyShardCompile(FSDPTest):
         self._check_fsdp_ops_in_snodes(new_snodes, is_fwd_graph, expect=False)
         return new_snodes
 
+    def inductor_code_check_no_compute_op(self, file_check):
+        return (
+            file_check
+            .check_not(" = aten.")
+            .check_not(" = extern_kernels.")
+            .check_not(" = triton_")
+            .check_not(" = torch.ops.")
+            .check_not(" = inductor_ops.")
+            .check_not("    aten.")
+            .check_not("    extern_kernels.")
+            .check_not("    triton_")
+            .check_not("    torch.ops.")
+            .check_not("    inductor_ops.")
+        )
+
+    def inductor_code_check_fsdp_all_gather(self, file_check, overlapped_compute_op_str, num_set, num_resize, last_all_gather=False):
+        file_check = file_check.check("torch.ops.fsdp.all_gather_copy_in.")
+        file_check = self.inductor_code_check_no_compute_op(file_check)
+        file_check = file_check.check("torch.ops._c10d_functional.all_gather_into_tensor_out.")
+        # Checks that AGWait is delayed, making the AG overlap with some compute op.
+        file_check = file_check.check(f"{overlapped_compute_op_str}")
+        file_check = file_check.check_count("inductor_ops.resize_storage_bytes_(", num_resize, exactly=True)
+        file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
+        file_check = self.inductor_code_check_no_compute_op(file_check)
+        file_check = file_check.check("torch.ops.fsdp.split_with_sizes_copy.")
+        file_check = self.inductor_code_check_no_compute_op(file_check)
+        file_check = file_check.check_count("torch.ops.aten.set_.", num_set, exactly=True)
+        if not last_all_gather:
+            # Checks that there is no compute op between this AGWait and next AG.
+            file_check = self.inductor_code_check_no_compute_op(file_check)
+        return file_check
+
+    def inductor_code_check_fsdp_reduce_scatter(self, file_check, overlapped_compute_op_str, num_set, num_resize):
+        file_check = file_check.check("torch.ops.fsdp.chunk_cat.")
+        file_check = self.inductor_code_check_no_compute_op(file_check)
+        file_check = file_check.check("torch.ops._c10d_functional.reduce_scatter_tensor.")
+        # Checks that RSWait is delayed, making the RS overlap with some compute op.
+        if overlapped_compute_op_str is not None:
+            file_check = file_check.check(f"{overlapped_compute_op_str}")
+        file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
+        return file_check
+
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._functorch.config.patch(recompute_views=True)
     @torch._functorch.config.patch(cse=False)
@@ -317,12 +359,14 @@ class TestFullyShardCompile(FSDPTest):
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(),
@@ -397,12 +441,14 @@ class TestFullyShardCompile(FSDPTest):
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_nested_fully_shard_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
             *self._create_nested_fully_shard_factory_fns(),
@@ -475,12 +521,14 @@ class TestFullyShardCompile(FSDPTest):
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_transformer_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_transformer_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_fullgraph_backend_aot_eager_decomp_partition(self):
@@ -519,49 +567,38 @@ class TestFullyShardCompile(FSDPTest):
             len(triton_codes) == 2,
             "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
         )
-        for code in [triton_codes[0]]:  # FWD graph only, TODO: add BWD graph
-            (
-                FileCheck()
-                .check("torch.ops._c10d_functional.wait_tensor.")
-                .check("torch.ops.fsdp.split_with_sizes_copy.")
-                .check("torch.ops.aten.set_.")
-                .check("torch.ops.aten.set_.")
-                .check("torch.ops.aten.set_.")
-                .check("torch.ops.aten.set_.")
-                .check("torch.ops.aten.set_.")
-                .check("torch.ops.aten.set_.")
-                .check("torch.ops.aten.set_.")
-                .check("torch.ops.aten.set_.")
-                .check("torch.ops.aten.set_.")
-                .check("torch.ops.aten.set_.")
-                .check("torch.ops.aten.set_.")
-                .check_next("assert_size_stride(")
-                .check_next("torch.ops.fsdp.all_gather_copy_in.")  # Proof that (n+1)th AG is issued right after nth AGWait
-                .check("torch.ops._c10d_functional.all_gather_into_tensor_out.")
-                .check("extern_kernels.mm(")  # Proof that (n+1)th AGWait is delayed and overlapped with compute
-                .check("extern_kernels.mm(")
-                .check("extern_kernels.mm(")
-                .check("aten._scaled_dot_product_efficient_attention.")
-                .check("extern_kernels.mm(")
-                .check("aten.native_dropout.")
-                .check("extern_kernels.addmm(")
-                .check("extern_kernels.addmm(")
-                .check("aten.native_dropout.")
-                .check("inductor_ops.resize_storage_bytes_(")
-                .check_next("inductor_ops.resize_storage_bytes_(")
-                .check_next("inductor_ops.resize_storage_bytes_(")
-                .check_next("inductor_ops.resize_storage_bytes_(")
-                .check_next("inductor_ops.resize_storage_bytes_(")
-                .check_next("inductor_ops.resize_storage_bytes_(")
-                .check_next("inductor_ops.resize_storage_bytes_(")
-                .check_next("inductor_ops.resize_storage_bytes_(")
-                .check_next("inductor_ops.resize_storage_bytes_(")
-                .check_next("inductor_ops.resize_storage_bytes_(")
-                .check_next("inductor_ops.resize_storage_bytes_(")
-                .check_next("inductor_ops.resize_storage_bytes_(")
-                .check_next("torch.ops._c10d_functional.wait_tensor.")
-            ).run(code)
+        fwd_code = triton_codes[0]
+        
+        file_check = FileCheck().check("def call(args):")
+        for fwd_ag_block_info in [
+            dict(overlapped_compute_op_str="triton_", num_set=4, num_resize=0),
+            dict(overlapped_compute_op_str="aten.native_dropout.", num_set=12, num_resize=0),
+            dict(overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.", num_set=12, num_resize=12),
+            dict(overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.", num_set=12, num_resize=12, last_all_gather=True),
+        ]:
+            file_check = self.inductor_code_check_fsdp_all_gather(file_check, **fwd_ag_block_info)
+        file_check.run(fwd_code)
 
+        bwd_code = triton_codes[1]
+        # bwd_rs_block_list = [
+
+        # ]
+        file_check = FileCheck().check("def call(args):")
+        for bwd_ag_block_info in [
+            dict(overlapped_compute_op_str="extern_kernels.mm(", num_set=12, num_resize=0),
+            dict(overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.", num_set=12, num_resize=0),
+            dict(overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.", num_set=12, num_resize=0),
+        ]:
+            file_check = self.inductor_code_check_fsdp_all_gather(file_check, **bwd_ag_block_info)
+        for bwd_rs_block_info in [
+            dict(overlapped_compute_op_str="extern_kernels.mm("),
+            dict(overlapped_compute_op_str=None),  # TODO: improve compute/comm overlap
+            dict(overlapped_compute_op_str=None),
+            dict(overlapped_compute_op_str=None),
+        ]:
+            file_check = self.inductor_code_check_fsdp_reduce_scatter(file_check, **bwd_ag_block_info)
+        file_check.run(bwd_code)
+        
 
 if __name__ == "__main__":
     run_tests()
