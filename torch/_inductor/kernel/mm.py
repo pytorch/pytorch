@@ -8,8 +8,10 @@ from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgor
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
     context_add_strides,
+    context_add_using_tf32,
     get_mixedmm_precondition,
     mixed_mm_operations,
+    mm_operations,
 )
 from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
@@ -170,7 +172,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
@@ -183,6 +184,15 @@ def tuned_mm(mat1, mat2, *, layout=None):
             layout,
             [mat1, mat2],
         )
+
+    name = "mm"
+    input_nodes = [mat1, mat2]
+    if torch._inductor.config.run_autoheuristic(name):
+        choice = mm_autoheuristic(
+            mat1, mat2, m, n, k, choices, name, input_nodes, mm_operations(), None
+        )
+        if choice is not None:
+            choices.insert(0, choice)
 
     if (
         len(choices) == 0
@@ -467,7 +477,9 @@ def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
     return None
 
 
-def mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes):
+def mm_autoheuristic(
+    mat1, mat2, m, n, k, choices, name, input_nodes, ops, precondition
+):
     m, n, k = get_size_hints(mat1, mat2, m, n, k)
     if not dims_are_int([m, n, k]):
         return None
@@ -487,6 +499,9 @@ def mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes):
         context.add_feature(
             "mat2_iscontig", mat2.layout.is_contiguous(), is_categorical=True
         )
+        if name == "mm":
+            # for mixed_mm, we only consider fp16
+            context_add_using_tf32(context, mat1.layout.dtype)
         return context
 
     def fallback():
@@ -499,8 +514,8 @@ def mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes):
         input_nodes=input_nodes,
         context=context,
         name=name,
-        augment_context=mixed_mm_operations(),
-        precondition=get_mixedmm_precondition,
+        augment_context=ops,
+        precondition=precondition,
     )
     return autoheuristic.get_choice_caller()
 
@@ -576,7 +591,18 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     name = "mixed_mm"
     input_nodes = [mat1, mat2]
     if torch._inductor.config.run_autoheuristic(name):
-        choice = mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes)
+        choice = mm_autoheuristic(
+            mat1,
+            mat2,
+            m,
+            n,
+            k,
+            choices,
+            name,
+            input_nodes,
+            mixed_mm_operations(),
+            get_mixedmm_precondition,
+        )
         if (
             not skip_triton
             and inductor_config.mixed_mm_choice == "heuristic"

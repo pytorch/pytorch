@@ -17,6 +17,7 @@ from torch._inductor.autoheuristic.autoheuristic import (
 )
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     context_add_strides,
+    context_add_using_tf32,
     pad_mm_operations,
     pad_mm_precondition,
 )
@@ -600,11 +601,7 @@ def get_context(
     context.add_feature("prepadded_mat1", mat1_pre_padded, is_categorical=True)
     context.add_feature("prepadded_mat2", mat2_pre_padded, is_categorical=True)
 
-    using_tf32 = "not_float_32"
-    if mat1.dtype == torch.float32:
-        using_tf32 = torch.backends.cuda.matmul.allow_tf32
-    context.add_feature("using_tf32", using_tf32, is_categorical=True)
-
+    context_add_using_tf32(context, mat1.dtype)
     return context
 
 
