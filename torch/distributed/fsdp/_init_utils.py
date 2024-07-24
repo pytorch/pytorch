@@ -807,7 +807,7 @@ def _get_device_from_device_id(
     device = (
         device_id if isinstance(device_id, torch.device) else torch.device(device_id)
     )
-    if device.type in ["cuda", "hpu"]:
+    if device in [torch.device("cuda"), torch.device("hpu")]:
         backend = getattr(torch, device.type)
         device_idx = backend.current_device()
         warnings.warn(
