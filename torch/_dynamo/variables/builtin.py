@@ -1541,9 +1541,6 @@ class BuiltinVariable(VariableTracker):
                 {},
             )
 
-    def call_StopIteration(self, tx, *args):
-        return variables.StopIterationVariable([*args])
-
     def call_reduce(self, tx, function, iterable, initial=_SENTINEL):
         if iterable.has_unpack_var_sequence(tx):
             items = iterable.unpack_var_sequence(tx)
