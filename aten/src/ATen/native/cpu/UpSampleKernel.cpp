@@ -1546,18 +1546,19 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
   auto input_scalar_type = input.scalar_type();
 
   std::vector<Tensor> indices_weights;
+  unsigned int weights_precision = 0;
 
   if (input_scalar_type == at::kByte) {
     // This is a special branch to provide uint8 dtype support for bilinear and bicubic modes only
     TORCH_INTERNAL_ASSERT(F::interp_size == 2 || F::interp_size == 4);
-    auto [temp_indices_weights, _, weights_precision] =
+    int unused = 0;
+    std::tie(indices_weights, unused, weights_precision) =
       F::compute_index_ranges_int16_weights(
         input.size(interp_dim), oshape[interp_dim],
         input.stride(interp_dim) * input.element_size(),
         input.dim(), interp_dim, align_corners, scales[interp_dim - 2],
         antialias);
     TORCH_INTERNAL_ASSERT(weights_precision > 0);
-    indices_weights = std::move(temp_indices_weights);
   } else {
     indices_weights =
       F::compute_index_ranges_weights(
