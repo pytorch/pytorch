@@ -1184,19 +1184,6 @@ class LoggingLoggerVariable(VariableTracker):
         unimplemented("Logger not supported for non-export cases")
 
 
-class StopIterationVariable(VariableTracker):
-    def __init__(self, args, **kwargs):
-        super().__init__(**kwargs)
-        self.args = args
-
-    def reconstruct(self, codegen):
-        codegen.add_push_null(
-            lambda: codegen.load_import_from("builtins", "StopIteration")
-        )
-        codegen.foreach(self.args)
-        codegen.call_function(len(self.args), False)
-
-
 class ConstantLikeVariable(VariableTracker):
     """self.value is a compile-time constant, but not a literal"""
 
