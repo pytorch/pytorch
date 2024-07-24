@@ -5,9 +5,6 @@ from typing import Dict, List, TYPE_CHECKING
 
 import torch.utils._pytree as pytree
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
 from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -219,7 +216,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         compile_id = tx.output.compile_id
         return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}_c{id}"
 
-    def var_getattr(self, tx: "InstructionTranslator", name):
+    def var_getattr(self, tx, name):
         # [Note: __torch_function__] We currently only support attributes that are defined on
         # base tensors, custom attribute accesses will graph break.
         import torch
@@ -255,7 +252,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         else:
             return super().var_getattr(tx, name)
 
-    def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
+    def call_torch_function(self, tx, fn, types, args, kwargs):
         return call_torch_function(
             tx,
             self.class_type_var(tx),

@@ -1,12 +1,9 @@
 # mypy: ignore-errors
 import functools
 import inspect
-from typing import Dict, List, TYPE_CHECKING
+from typing import Dict, List
 
 import torch
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 from ...fx.experimental._backward_state import BackwardState
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
@@ -91,7 +88,7 @@ class WorldMetaClassVariable(DistributedVariable):
 
         return type(value) is _WorldMeta
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(self, tx, name: str) -> VariableTracker:
         if name == "WORLD":
             source = AttrSource(base=self.source, member="WORLD")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
@@ -114,10 +111,7 @@ class PlacementClassVariable(DistributedVariable):
         return self.value
 
     def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if (
             inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
@@ -148,7 +142,7 @@ class PlacementVariable(DistributedVariable):
     def as_python_constant(self):
         return self.value
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(self, tx, name: str) -> VariableTracker:
         if name == "dim":
             return ConstantVariable.create(self.value.dim)
         return super().var_getattr(tx, name)
@@ -212,7 +206,7 @@ class DeviceMeshVariable(DistributedVariable):
     def as_python_constant(self):
         return self.value
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(self, tx, name: str) -> VariableTracker:
         if name == "ndim":
             return ConstantVariable.create(self.value.ndim)
         if name == "device_type":
@@ -275,7 +269,7 @@ class ProcessGroupVariable(DistributedVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(self, tx: "InstructionTranslator", name):
+    def var_getattr(self, tx, name):
         if name == "group_name":
             return variables.ConstantVariable.create(self.value.group_name)
         if name in ["rank", "size"]:
@@ -381,7 +375,7 @@ class BackwardHookVariable(VariableTracker):
             return self._setup_hook(tx, name, *args, **kwargs)
         return super().call_method(tx, name, args, kwargs)
 
-    def _setup_hook(self, tx: "InstructionTranslator", hook_method_name, args):
+    def _setup_hook(self, tx, hook_method_name, args):
         from .builder import wrap_fx_proxy
 
         return wrap_fx_proxy(
