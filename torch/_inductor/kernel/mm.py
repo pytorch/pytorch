@@ -251,9 +251,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         log.warning("No choices for GEMM, using ATen backend as fallback")
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
-    from ..config import external_matmul
-
-    for k in external_matmul:
+    for k in inductor_config.external_matmul:
         choices.append(lazy_register_extern_choice(k).bind((mat1, mat2), layout))
 
     try:
