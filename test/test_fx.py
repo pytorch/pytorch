@@ -3385,7 +3385,7 @@ class TestFX(JitTestCase):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("my_buff", torch.rand(3, 4))
+                self.my_buff = torch.nn.Buffer(torch.rand(3, 4))
                 self.register_parameter(
                     "my_param", torch.nn.Parameter(torch.rand(3, 4))
                 )
@@ -3834,7 +3834,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
     def test_insert_arg(self):
         m = symbolic_trace(SimpleTest())
-        m.register_buffer("buf", torch.tensor(0))
+        m.buf = torch.nn.Buffer(torch.tensor(0))
         output_node = next(iter(reversed(m.graph.nodes)))
         with m.graph.inserting_before(output_node):
             a = m.graph.get_attr("buf")
@@ -4168,7 +4168,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
     def test_preserve_unused_attr_after_unpickle(self):
         gm = torch.fx.symbolic_trace(Add())
         gm.add_submodule("foo", Add())
-        gm.register_buffer("dummy_buffer", torch.empty(1))
+        gm.dummy_buffer = torch.nn.Buffer(torch.empty(1))
         gm.register_parameter("dummy_parameter", torch.nn.Parameter(torch.empty(1)))
         b = io.BytesIO()
         torch.save(gm, b)

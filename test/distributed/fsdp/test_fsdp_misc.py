@@ -818,7 +818,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
                 super().__init__()
                 self.a = nn.Linear(1, 1)
                 self.b = nn.Linear(1, 1)
-                self.a.register_buffer("buf", torch.ones(1))
+                self.a.buf = torch.nn.Buffer(torch.ones(1))
 
         m = CPUGPUModule()
         m = FSDP(m, device_id=self.rank, ignored_modules=[m.a], use_orig_params=True)

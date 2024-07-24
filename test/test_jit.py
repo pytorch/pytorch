@@ -15833,7 +15833,7 @@ dedent """
 
             def __init__(self):
                 super().__init__()
-                self.register_buffer("foo", torch.ones(1))
+                self.foo = torch.nn.Buffer(torch.ones(1))
                 self.register_parameter("bar", torch.nn.Parameter(torch.ones(1)))
                 self.baz = torch.ones(1)
                 self.my_constant = 1

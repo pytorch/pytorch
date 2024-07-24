@@ -483,7 +483,7 @@ class TestSaveLoad(JitTestCase):
                 self.register_parameter(
                     "parameter_a", torch.nn.Parameter(torch.randn(4))
                 )
-                self.register_buffer("buffer", torch.randn(4))
+                self.buffer = torch.nn.Buffer(torch.randn(4))
                 self.t = torch.rand(4)  # not buffer
 
                 self.parameter_b = torch.nn.Parameter(torch.randn(4))
@@ -1142,7 +1142,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
                 self.register_parameter(
                     "parameter_a", torch.nn.Parameter(torch.randn(4))
                 )
-                self.register_buffer("buffer", torch.randn(4))
+                self.buffer = torch.nn.Buffer(torch.randn(4))
                 self.t = torch.rand(4)  # not buffer
 
                 self.parameter_b = torch.nn.Parameter(torch.randn(4))

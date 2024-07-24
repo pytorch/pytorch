@@ -1766,7 +1766,7 @@ class TestNNParametrization(NNTestCase):
         ):
             model = nn.Linear(2, 2)
             buf = torch.randn(2, 2)
-            model.register_buffer("buf", buf)
+            model.buf = torch.nn.Buffer(buf)
             if (
                 type_before_registration == TwoTensor
                 and type_after_registration == Tensor
