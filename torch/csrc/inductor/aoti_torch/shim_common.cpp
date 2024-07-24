@@ -43,13 +43,6 @@
 
 #endif
 
-// #ifdef USE_CUDA
-#include <cuda_fp16.h>
-// #endif
-
-// #ifdef USE_ROCM
-// #include <hip/hip_fp16.h>
-// #endif
 
 using namespace torch::aot_inductor;
 
@@ -117,17 +110,7 @@ int32_t aoti_torch_layout__mkldnn() {
     });                                                        \
   }
 
-// #if defined(USE_CUDA) || defined(USE_ROCM)  
-// AOTI_TORCH_ITEM_IMPL(float16, at::Half)
-AOTITorchError aoti_torch_item_float16(                      
-    AtenTensorHandle tensor, __half* ret_value) {             
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({               
-    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor); 
-    *ret_value = static_cast<__half>(t->item().to<at::Half>());                      
-  });                                                        
-}
-// #endif
-
+AOTI_TORCH_ITEM_IMPL(float16, c10::Half)
 AOTI_TORCH_ITEM_IMPL(float32, float)
 AOTI_TORCH_ITEM_IMPL(float64, double)
 AOTI_TORCH_ITEM_IMPL(uint8, uint8_t)

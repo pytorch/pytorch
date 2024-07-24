@@ -43,9 +43,6 @@ class CppWrapperCuda(CppWrapperCpu):
         super().write_header()
 
         self.header.splice("#include <filesystem>")
-        # Half.h is a header-only implementation so it's ok to include this c10 header directly.
-        # This is checked in test/cpp/aoti_abi_check.
-        self.header.splice("#include <c10/util/Half.h>")
         if config.abi_compatible:
             self.header.splice(
                 "#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>"

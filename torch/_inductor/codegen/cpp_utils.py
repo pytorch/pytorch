@@ -20,7 +20,7 @@ from .common import CSEVariable, ExprPrinter, Kernel, KernelArgs
 DTYPE_TO_CPP = {
     torch.float32: "float",
     torch.float64: "double",
-    torch.float16: "half",
+    torch.float16: "c10::Half",
     torch.int64: "int64_t",
     torch.int32: "int32_t",
     torch.int16: "int16_t",
