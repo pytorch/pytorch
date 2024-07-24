@@ -1934,8 +1934,10 @@ class InstructionTranslatorBase(
             )
 
             value = LazyVariableTracker.create(
-                LazySymNodeString(value), source=value.source
+                LazySymNodeString(value, fmt_spec), source=value.source
             )
+            self.push(value)
+            return
         if (flags & 0x03) == 0x01:
             value = BuiltinVariable(str).call_function(self, [value], {})
         elif (flags & 0x03) == 0x02:

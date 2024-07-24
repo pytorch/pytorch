@@ -131,11 +131,22 @@ class LazyVariableTracker(VariableTracker):
 
 
 class LazySymNodeString:
-    def __init__(self, sym_node_variable: VariableTracker):
+    def __init__(
+        self, sym_node_variable: VariableTracker, fmt_spec_var: VariableTracker
+    ):
+        from .constant import ConstantVariable
+
         self.sym_node_var = sym_node_variable
+        self.fmt_var = ConstantVariable.create(
+            "{:" + fmt_spec_var.as_python_constant() + "}"
+        )
 
     def __str__(self):
-        return self.sym_node_var.evaluate_expr()
+        breakpoint()
+        return str.format(
+            self.fmt_var.as_python_constant(),
+            str(self.sym_node_var.evaluate_expr()),
+        )
 
 
 def _create_realize_and_forward(name):
