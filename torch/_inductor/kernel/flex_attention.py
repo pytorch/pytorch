@@ -851,9 +851,9 @@ flex_attention_backward_template = TritonTemplate(
         sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + off_pid_mask * stride_kv_idx_m  # noqa: B950
 
         # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads.
-        q_adj2 = (stride_qhq * off_hq2 + stride_qz * off_z).to(tl.int64)
-        do_adj2 = (stride_dohq * off_hq2 + stride_doz * off_z).to(tl.int64)
-        dq_adj2 = (stride_dqhq * off_hq2 + stride_dqz * off_z).to(tl.int64)
+        q_adj2 = (stride_qh * off_hq2 + stride_qz * off_z).to(tl.int64)
+        do_adj2 = (stride_doh * off_hq2 + stride_doz * off_z).to(tl.int64)
+        dq_adj2 = (stride_dqh * off_hq2 + stride_dqz * off_z).to(tl.int64)
         off_chz2 = ((off_z * HQ + off_hq2) * Q_LEN).to(tl.int64)
 
         Q2 = Q + q_adj2
@@ -948,9 +948,9 @@ flex_attention_backward_template = TritonTemplate(
             off_hq1 = off_hkv * GQA_SHARED_HEADS + off_g
 
             # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads.
-            q_adj1 = (stride_qhq * off_hq1 + stride_qz * off_z).to(tl.int64)
-            do_adj1 = (stride_dohq * off_hq1 + stride_doz * off_z).to(tl.int64)
-            dq_adj1 = (stride_dqhq * off_hq1 + stride_dqz * off_z).to(tl.int64)
+            q_adj1 = (stride_qh * off_hq1 + stride_qz * off_z).to(tl.int64)
+            do_adj1 = (stride_doh * off_hq1 + stride_doz * off_z).to(tl.int64)
+            dq_adj1 = (stride_dqh * off_hq1 + stride_dqz * off_z).to(tl.int64)
             off_chz1 = ((off_z * HQ + off_hq1) * Q_LEN).to(tl.int64)
 
             Q1 = Q + q_adj1
