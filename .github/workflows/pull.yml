@@ -576,18 +576,20 @@ jobs:
   linux-focal-py3_12-clang10-experimental-split-build:
     name: linux-focal-py3.12-clang10-experimental-split-build
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
       use_split_build: True
       build-environment: linux-focal-py3.12-clang10
       docker-image-name: pytorch-linux-focal-py3.12-clang10
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 3, runner: "amz2023.linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 3, runner: "amz2023.linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 3, runner: "amz2023.linux.2xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 3, runner: "amz2023.linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 3, runner: "amz2023.linux.2xlarge" },
+          { config: "dynamo", shard: 3, num_shards: 3, runner: "amz2023.linux.2xlarge" },
         ]}
   linux-focal-py3_12-clang10-experimental-split-build-test:
     name: linux-focal-py3.12-clang10-experimental-split-build
