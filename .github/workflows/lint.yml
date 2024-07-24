@@ -83,7 +83,7 @@ jobs:
 
   pr-sanity-checks:
     name: pr-sanity-checks
-    runs-on: amz2023.linux.large
+    runs-on: [safe-hosted, amz2023.linux.large]
     # Only run this on pull requests. This check is simple enough to be done without a Docker image
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks')
     steps:
