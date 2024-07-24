@@ -6,6 +6,7 @@ import functools
 import operator
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 
@@ -17,6 +18,7 @@ from .virtualized import ops, V, WrapperHandler
 
 
 T = TypeVar("T")
+_P = ParamSpec("_P")
 
 
 class PointwiseSubgraphLowering(torch.fx.Interpreter):
@@ -101,7 +103,7 @@ class TracingOpsHandler(WrapperHandler[T]):
 
 def lower_pointwise_subgraph(
     subgraph: ir.Subgraph, inputs: List[InputDescriptor]
-) -> Callable[[Any, Dict[str, Any]], Any]:
+) -> Callable[_P, Any]:
     # Lower subgraph to ir.Pointwise nodes
     def fake_inner_fn(
         loop_idx: int, input_idx: int
@@ -147,7 +149,7 @@ def lower_pointwise_subgraph(
 
     lowered_gm = torch.fx.GraphModule({}, tracer.graph)
 
-    def inner_fn(*args: Any, **kwargs: Dict[str, Any]) -> Any:
+    def inner_fn(*args: _P.args, **kwargs: _P.kwargs) -> Any:
         return lowered_gm(V.get_ops_handler(), *args, **kwargs)
 
     return inner_fn
