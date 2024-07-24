@@ -133,7 +133,7 @@ dict_version = torch._C._dynamo.guards.dict_version
 
 RootGuardManager = torch._C._dynamo.guards.RootGuardManager
 DictGuardManager = torch._C._dynamo.guards.DictGuardManager
-install_tensor_aliasing_guard = torch._C._dynamo.guards.install_tensor_aliasing_guard
+install_object_aliasing_guard = torch._C._dynamo.guards.install_object_aliasing_guard
 install_no_tensor_aliasing_guard = (
     torch._C._dynamo.guards.install_no_tensor_aliasing_guard
 )
@@ -1613,7 +1613,7 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
         if config.enable_cpp_guard_manager:
-            install_tensor_aliasing_guard(
+            install_object_aliasing_guard(
                 self.get_guard_manager(guard),
                 self.get_guard_manager_from_source(source_b),
                 get_verbose_code_parts(code, guard),
@@ -2359,7 +2359,7 @@ class CheckFunctionManager:
                 source_b = guard.input_source_b
                 code_part = f"{source_a.name()} is {source_b.name()}"
                 if config.enable_cpp_guard_manager:
-                    install_tensor_aliasing_guard(
+                    install_object_aliasing_guard(
                         builder.get_guard_manager_from_source(source_a),
                         builder.get_guard_manager_from_source(source_b),
                         [code_part],

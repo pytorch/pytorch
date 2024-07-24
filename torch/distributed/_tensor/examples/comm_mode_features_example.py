@@ -22,6 +22,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
 )
 
+from torch.utils.checkpoint import checkpoint
+
 
 def get_device_type() -> str:
     return (
@@ -630,6 +632,80 @@ class CommDebugModeExample:
 
         comm_mode.generate_json_dump(file_name="transformer_log.json", noise_level=2)
 
+    def example_activation_checkpointing(self) -> None:
+        """
+        Example code showing that CommDebugMode is able to differentiate between backward passes
+        and activation checkpointing. Sends the information to default comm_mode_log.json file.
+        The output for the example output is shown below:
+
+        Global
+          FORWARD PASS
+            **aten.sum.default
+            **aten.ones_like.default
+          BACKWARD PASS
+            **aten.expand.default
+            Foo
+            *module type: class '__main__.CommDebugModeExample.example_activation_checkpointing.locals.Foo'
+              FORWARD PASS
+                **aten.relu.default
+                **aten.empty.memory_format
+                **aten.empty.memory_format
+                **aten.relu.default
+              BACKWARD PASS
+                **aten.threshold_backward.default
+                Foo.linears.0
+                *module type: class 'torch.nn.modules.linear.Linear'
+                  FORWARD PASS
+                    **aten.addmm.default
+                  BACKWARD PASS
+                    **aten.mm.default
+                    **aten.sum.dim_IntList
+                Foo.linears.1
+                *module type: class 'torch.nn.modules.linear.Linear'
+                  FORWARD PASS
+                    **aten.addmm.default
+                  ACTIVATION CHECKPOINTING
+                    **aten.mm.default
+                    **aten.mm.default
+                    **aten.sum.dim_IntList
+                    **aten.threshold_backward.default
+        """
+
+        class Foo(torch.nn.Module):
+            def __init__(self, n_layers: int, dim: int, use_ac: bool = False):
+                super().__init__()
+                self.linears = torch.nn.ModuleList()
+                self.use_ac = use_ac
+                for _ in range(n_layers):
+                    self.linears.append(torch.nn.Linear(dim, dim))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                for i, block in enumerate(self.linears):
+                    if i >= 1 and self.use_ac:
+                        x = checkpoint(
+                            block, x, preserve_rng_state=True, use_reentrant=False
+                        )
+                    else:
+                        x = block(x)
+                    assert x is not None
+                    x = torch.nn.functional.relu(x)
+                return x
+
+        bsz = 2
+        dim = 8
+        n_layers = 2
+
+        model = Foo(n_layers, dim, True)
+        x = torch.randn(bsz, dim)
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            model(x).sum().backward()
+
+        print(comm_mode.generate_comm_debug_tracing_table(noise_level=2))
+        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=2)
+        comm_mode.generate_json_dump(noise_level=2)
+
 
 def run_example(world_size: int, rank: int, example_name: str) -> None:
     # set manual seed
@@ -645,6 +721,7 @@ def run_example(world_size: int, rank: int, example_name: str) -> None:
         "transformer_operation_tracing": instantiated_example.example_transformer_operation_tracing,
         "MLP_json_dump": instantiated_example.example_MLP_json_dump,
         "transformer_json_dump": instantiated_example.example_transformer_json_dump,
+        "activation_checkpointing": instantiated_example.example_activation_checkpointing,
     }
 
     name_to_example_code[example_name]()
