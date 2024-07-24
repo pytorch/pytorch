@@ -7,8 +7,8 @@ future.
 """
 
 from torch.optim import lr_scheduler, swa_utils
-from torch.optim.adadelta import Adadelta
 from torch.optim._adafactor import Adafactor
+from torch.optim.adadelta import Adadelta
 from torch.optim.adagrad import Adagrad
 from torch.optim.adam import Adam
 from torch.optim.adamax import Adamax
