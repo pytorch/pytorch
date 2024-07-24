@@ -1988,6 +1988,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fullgraph=True, backend=counter)(fn)
         self.assertEqual(opt_fn(t), fn(t))
 
+    def test_filter(self):
+        def fn(inputs):
+            out = inputs[0]
+            for inp in filter(lambda x: (x.requires_grad), inputs):
+                out = out * inp
+            return out
+
+        input1 = torch.arange(2, dtype=torch.bfloat16)
+        input2 = torch.arange(2, dtype=torch.bfloat16).requires_grad_(True)
+        inputs = [input1, input2]
+
+        opt_fn = torch.compile(fullgraph=True)(fn)
+        self.assertEqual(opt_fn(inputs), fn(inputs))
+
     def test_pow_int(self):
         def fn(a, b):
             return torch.pow(a, b)
