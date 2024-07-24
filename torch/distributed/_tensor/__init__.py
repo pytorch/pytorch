@@ -43,7 +43,7 @@ if DTensor not in _optim_foreach_supported_types:
     _optim_foreach_supported_types.append(DTensor)
 
 if DTensor not in _util_foreach_supported_types:
-    _util_foreach_supported_types.append(DTensor)
+    _util_foreach_supported_types.append(DTensor)  # type: ignore[arg-type]
 
 
 def _dtensor_init_helper(
