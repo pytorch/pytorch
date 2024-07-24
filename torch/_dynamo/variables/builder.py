@@ -2342,7 +2342,8 @@ def _automatic_dynamic(
         tx.output.frame_state[name] = frame_state_entry
 
     if (st := tx.distributed_state) is None:
-        update_frame_state(e.size(), e.stride())
+        stride = e.stride() if not is_sparse_any(e) else ()
+        update_frame_state(e.size(), stride)
         frame_state_entry = tx.output.frame_state[name]
     elif st.all_states is None:
         # Preflight, always pretend as if it's static
