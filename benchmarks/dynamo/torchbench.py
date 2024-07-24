@@ -79,6 +79,12 @@ def load_yaml_file():
     with open(filepath) as f:
         data = yaml.safe_load(f)
 
+    internal_file_path = os.path.join(os.path.dirname(__file__), "fb", filename)
+    if os.path.exists(internal_file_path):
+        with open(internal_file_path) as f:
+            internal_data = yaml.safe_load(f)
+            data.update(internal_data)
+
     def flatten(lst):
         for item in lst:
             if isinstance(item, list):
