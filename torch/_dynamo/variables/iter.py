@@ -457,7 +457,7 @@ class MapVariable(ZipVariable):
         self.reconstruct_items(codegen)
         codegen.extend_output(
             [
-                create_instruction("BUILD_TUPLE", arg=len(self.iterables)),
+                create_instruction("BUILD_TUPLE", arg=len(self.iterables) + 1),
                 create_instruction("CALL_FUNCTION_EX", arg=0),
             ]
         )

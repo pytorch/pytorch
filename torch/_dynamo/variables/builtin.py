@@ -1331,13 +1331,12 @@ class BuiltinVariable(VariableTracker):
             return DictVariableType(
                 dict.fromkeys(arg, value), user_cls, mutable_local=MutableLocal()
             )
-        elif arg.has_force_unpack_var_sequence(tx) and all(
-            is_hashable(v) for v in arg.force_unpack_var_sequence(tx)
-        ):
+        elif arg.has_force_unpack_var_sequence(tx):
             keys = arg.force_unpack_var_sequence(tx)
-            return DictVariableType(
-                dict.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
-            )
+            if all(is_hashable(v) for v in keys):
+                return DictVariableType(
+                    dict.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
+                )
         unimplemented(f"{user_cls.__name__}.fromkeys(): {args} {kwargs}")
 
     def call_set(self, tx, *args, **kwargs):
@@ -1359,11 +1358,11 @@ class BuiltinVariable(VariableTracker):
         if kwargs:
             assert len(kwargs) == 1 and "strict" in kwargs
         strict = kwargs.pop("strict", False)
-        if all(x.has_unpack_var_sequence(tx) for x in args):
-            args = [arg.unpack_var_sequence(tx) for arg in args]
-        return variables.ZipVariable(
-            list(args), strict=strict, mutable_local=MutableLocal()
-        )
+        args = [
+            arg.unpack_var_sequence(tx) if arg.has_unpack_var_sequence(tx) else arg
+            for arg in args
+        ]
+        return variables.ZipVariable(args, strict=strict, mutable_local=MutableLocal())
 
     def call_enumerate(self, tx, *args):
         if len(args) == 1:
@@ -1481,9 +1480,11 @@ class BuiltinVariable(VariableTracker):
             return obj.call_hasattr(tx, name)
 
     def call_map(self, tx, fn, *seqs):
-        if all(seq.has_unpack_var_sequence(tx) for seq in seqs):
-            seqs = [seq.unpack_var_sequence(tx) for seq in seqs]
-        return variables.MapVariable(fn, list(seqs), mutable_local=MutableLocal())
+        seqs = [
+            seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
+            for seq in seqs
+        ]
+        return variables.MapVariable(fn, seqs, mutable_local=MutableLocal())
 
     def call_sum(self, tx, seq, start=_SENTINEL):
         # Special case for sum on tuple of floats and ints
@@ -1795,11 +1796,12 @@ class BuiltinVariable(VariableTracker):
             return variables.TupleVariable(items)
 
     def call_sorted(self, tx, obj: VariableTracker, **kwargs):
-        if (
-            obj.has_force_unpack_var_sequence(tx)
-            and not isinstance(obj, variables.TensorVariable)
-            and all(x.is_python_constant() for x in obj.force_unpack_var_sequence(tx))
+        if obj.has_force_unpack_var_sequence(tx) and not isinstance(
+            obj, variables.TensorVariable
         ):
+            unpacked = obj.force_unpack_var_sequence(tx)
+            if not all(x.is_python_constant() for x in unpacked):
+                return
             function = kwargs.pop("key", None)
             reverse = kwargs.pop(
                 "reverse", ConstantVariable.create(False)
@@ -1807,7 +1809,7 @@ class BuiltinVariable(VariableTracker):
             assert len(kwargs) == 0
             if function:
                 items = sorted(
-                    obj.force_unpack_var_sequence(tx),
+                    unpacked,
                     key=lambda x: function.call_function(
                         tx, [x], {}
                     ).as_python_constant(),
@@ -1815,7 +1817,7 @@ class BuiltinVariable(VariableTracker):
                 )
             else:
                 items = sorted(
-                    obj.force_unpack_var_sequence(tx),
+                    unpacked,
                     key=lambda x: x.as_python_constant(),
                     reverse=reverse,
                 )

@@ -458,7 +458,12 @@ class DequeVariable(CommonListMethodsVariable):
             )
         )
         codegen.foreach(self.items)
-        codegen.extend_output(create_call_function(len(self.items), False))
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_LIST", arg=len(self.items)),
+                *create_call_function(1, False),
+            ]
+        )
 
     def call_method(
         self,
@@ -481,7 +486,11 @@ class DequeVariable(CommonListMethodsVariable):
             tx.output.side_effects.mutation(self)
             self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
-        elif name == "extendleft" and self.mutable_local:
+        elif (
+            name == "extendleft"
+            and self.mutable_local
+            and args[0].has_force_unpack_var_sequence(tx)
+        ):
             assert not kwargs
 
             (arg,) = args
