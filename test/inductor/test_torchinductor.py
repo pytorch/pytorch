@@ -26,7 +26,6 @@ from unittest.mock import patch
 import numpy as np
 
 import torch
-
 import torch._dynamo.config as dynamo_config
 import torch._inductor.aoti_eager
 import torch.nn as nn
@@ -67,7 +66,6 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDNN,
     with_tf32_off,
 )
-
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
     expectedFailureXPU,
@@ -95,6 +93,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.weak import WeakTensorKeyDictionary
 
+
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 if IS_WINDOWS and IS_CI:
@@ -109,14 +108,12 @@ importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from torch._inductor import config, test_operators
-
 from torch._inductor.compile_fx import (
     compile_fx,
     compile_fx_inner,
     complex_memory_overlap,
 )
 from torch._inductor.utils import has_torchvision_roi_align
-
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -127,6 +124,7 @@ from torch.testing._internal.inductor_utils import (
     skipCPUIf,
     skipCUDAIf,
 )
+
 
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
 
@@ -806,7 +804,48 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
-    def test_eager_aoti_support_out(self):
+    def test_aoti_eager_dtype_device_layout(self):
+        ns = "aten"
+        op_name = "tril_indices"
+        dispatch_key = "CPU"
+        device = "cpu"
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = "cuda"
+
+        with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+            row = 128
+            col = 256
+            offset = 1
+            dtype = torch.int32
+            layout = torch.strided
+            pin_memory = False
+            ref = torch.tril_indices(
+                row=row,
+                col=col,
+                offset=offset,
+                dtype=dtype,
+                layout=layout,
+                pin_memory=pin_memory,
+                device=device,
+            )
+            register_ops_with_aoti_compile(
+                ns, [op_name], dispatch_key, torch_compile_op_lib_impl
+            )
+            res = torch.tril_indices(
+                row=row,
+                col=col,
+                offset=offset,
+                dtype=dtype,
+                layout=layout,
+                pin_memory=pin_memory,
+                device=device,
+            )
+            self.assertEqual(ref, res)
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skip_if_halide  # aoti
+    def test_aoti_eager_support_out(self):
         ns = "aten"
         op_name = "clamp"
         dispatch_key = "CPU"
@@ -859,7 +898,45 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
-    def test_eager_aoti_cache_hit(self):
+    def test_aoti_eager_support_str(self):
+        ns = "aten"
+        op_name = "div"
+        dispatch_key = "CPU"
+        device = "cpu"
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = "cuda"
+
+        a = torch.randn(128, dtype=torch.float, device=device)
+        b = torch.randn(128, dtype=torch.float, device=device)
+        rounding_mode_list = ["trunc", "floor"]
+        with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+            # Get ref result from eager
+            ref_value_list = []
+            for rounding_mode in rounding_mode_list:
+                ref_value = getattr(torch.ops.aten, op_name)(
+                    a, b, rounding_mode=rounding_mode
+                )
+                ref_value_list.append(ref_value)
+
+            register_ops_with_aoti_compile(
+                ns, [op_name], dispatch_key, torch_compile_op_lib_impl
+            )
+
+            # Invoke the pre-compiled kernel and get result.
+            res_value_list = []
+            for rounding_mode in rounding_mode_list:
+                res_value = getattr(torch.ops.aten, op_name)(
+                    a, b, rounding_mode=rounding_mode
+                )
+                res_value_list.append(res_value)
+
+            for ref_value, res_value in zip(ref_value_list, res_value_list):
+                self.assertEqual(ref_value, res_value)
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skip_if_halide  # aoti
+    def test_aoti_eager_cache_hit(self):
         ns = "aten"
         op_name = "abs"
         dispatch_key = "CPU"
@@ -901,7 +978,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
-    def test_eager_aoti_with_persistent_cache(self):
+    def test_aoti_eager_with_persistent_cache(self):
         def fn(a):
             return torch.abs(a)
 
@@ -946,7 +1023,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
-    def test_eager_aoti_with_scalar(self):
+    def test_aoti_eager_with_scalar(self):
         namespace_name = "aten"
         op_name = "add"
         op_overload_name = "Tensor"
@@ -1017,7 +1094,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
-    def test_eager_aoti_override_registration(self):
+    def test_aoti_eager_override_registration(self):
         namespace_name = "aten"
         dispatch_key = "CPU"
         device = torch.device("cpu")
@@ -1910,6 +1987,45 @@ class CommonTemplate:
 
         idx = torch.arange(100, device=self.device).view(100, 1).expand(100, 100)
         actual = associative_scan(argmax_combine, (a, idx), 0)
+        self.assertEqual(expect, actual)
+
+    @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
+    @skip_if_halide  # scan ops
+    def test_custom_scan_would_split(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("associative_scan only supported on GPU")
+
+        def combine_linear_recurrence(left, right):
+            xl, fl = left
+            xr, fr = right
+            x = xl * fr + xr
+            f = fl * fr
+            return x, f
+
+        def eager_scan(x, g):
+            x, g = x.to(torch.float64), g.to(torch.float64)
+            x_out = torch.empty_like(x)
+            g_out = torch.empty_like(g)
+            x_out[:, 0] = x[:, 0]
+            g_out[:, 0] = g[:, 0]
+            for i in range(1, x.shape[1]):
+                x_out[:, i], g_out[:, i] = combine_linear_recurrence(
+                    (x_out[:, i - 1], g_out[:, i - 1]),
+                    (x[:, i], g[:, i]),
+                )
+            return x_out.float(), g_out.float()
+
+        @torch.compile
+        def compiled_scan(x, f):
+            from torch._higher_order_ops.associative_scan import associative_scan
+
+            x, f = associative_scan(combine_linear_recurrence, (x, f), dim=1)
+            return x, f
+
+        x = torch.randn(1, 129, 2, device=self.device)
+        f = torch.randn(1, 129, 2, device=self.device)
+        expect = eager_scan(x, f)
+        actual = compiled_scan(x, f)
         self.assertEqual(expect, actual)
 
     def test_embedding_bag_byte_unpack(self):
@@ -9004,6 +9120,26 @@ class CommonTemplate:
         x = torch.rand(128, 32, 63)
         self.common(fn, (x,))
 
+    def test_vectorized_ops_masked(self):
+        def fn(x):
+            index = torch.arange(64, device=x.device)
+            mask = index.view(1, 1, 64) < 63
+            indices = [None, None, index]
+            return torch.ops.aten._unsafe_masked_index(x, mask, indices, 7)
+
+        x = torch.rand(128, 32, 63)
+        self.common(fn, (x,))
+
+    def test_vectorized_ops_masked_var_novec(self):
+        def fn(x):
+            index = torch.arange(10, device=x.device)
+            mask = (index < 5).view(1, 1, 1, 10)
+            indices = [None, None, None, index]
+            return torch.ops.aten._unsafe_masked_index(x, mask, indices, 7)
+
+        x = torch.rand(1, 1, 8, 8)
+        self.common(fn, (x,))
+
     def test_diagonal_copy(self):
         def fn(x):
             return torch.diagonal_copy(x)
@@ -10565,6 +10701,84 @@ class CommonTemplate:
         x = torch.rand([4, 4, 3], dtype=torch.float64)
         self.common(fn, (x,))
 
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    # We only support dtypeview for abi_conpatible aoti
+    @torch._inductor.config.patch(abi_compatible=True)
+    def test_dtypeview(self):
+        if TEST_WITH_ASAN:
+            return
+
+        # https://github.com/pytorch/pytorch/issues/126338
+        def fn(x, y, x_dtype, x2):
+            x = x.view(x_dtype)
+            y = y.view(x_dtype) + 1
+            x2 = x2.view(x_dtype) + 1
+            return x @ y, x2 @ x
+
+        test_dtypes = [
+            torch.float32,
+            torch.float64,
+            torch.float16,
+            torch.bfloat16,
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        ]
+        for test_dtype_x in test_dtypes:
+            for test_dtype_y in test_dtypes:
+                # @ operation needs arguments to be the same dtype
+                for view_dtype in test_dtypes:
+                    try:
+                        # print(f"({test_dtype_x}, {test_dtype_y}, {view_dtype})")
+                        x = rand_strided(
+                            (2, 2), (2, 1), device=self.device, dtype=test_dtype_x
+                        )
+                        y = rand_strided(
+                            (2, 2), (2, 1), device=self.device, dtype=test_dtype_y
+                        )
+                        x2 = x.clone()
+                        fn(x, y, view_dtype, x2)
+                    except Exception as e:
+                        continue
+                    self.common(
+                        fn,
+                        (x, y, view_dtype, x2),
+                        reference_in_float=False,
+                        check_lowp=False,
+                    )
+
+    @torch._inductor.config.patch(abi_compatible=True)
+    def test_dtypeview_fusion(self):
+        @torch.compile
+        def fn(x):
+            x = x + 1
+            x = torch.ops.aten.view.dtype(x, torch.int16)
+            x = x * 2
+            return x
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        x = torch.randn([1024], dtype=torch.float16, device=self.device)
+        self.common(fn, (x,), reference_in_float=False)
+        assertGeneratedKernelCountEqual(self, 1)
+
+    @expectedFailureCodegenDynamic
+    def test_reinterpret_dtypeview(self):
+        @torch.compile
+        def fn(x, x2):
+            return x.view([10, 10]).view(torch.int32), x2.view(torch.int32).view(
+                [10, 10]
+            )
+
+        x = torch.randn([100, 1], device=self.device)
+        x2 = x.clone()
+        self.common(fn, (x, x2), reference_in_float=False, check_lowp=False)
+        x = torch.randn([100, 1], device=self.device)
+        x2 = x.clone()
+        _, code = run_and_get_code(fn, x, x2)
+        FileCheck().check("aten.view.dtype(reinterpret_tensor").run(code[0])
+
     def test_float16_to_int16(self):
         def fn(x):
             x_view = x.view(dtype=torch.int16)
@@ -11452,10 +11666,10 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 x[:, mask] = -math.inf
                 return x
 
-            x_tmp = torch.randn(512, 19, device="cuda")
+            x_tmp = torch.randn(512, 19, device=GPU_TYPE)
             x = x_tmp.permute(1, 0).view(-1, 128, 4)[:, :, 1:]
 
-            mask_tmp = torch.ones(128, 3, dtype=torch.int32, device="cuda")
+            mask_tmp = torch.ones(128, 3, dtype=torch.int32, device=GPU_TYPE)
             mask = mask_tmp == mask_tmp
             f(x, mask)
             code = run_and_get_triton_code(f, x, mask)

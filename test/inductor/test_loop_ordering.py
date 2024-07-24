@@ -25,6 +25,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.functions import ModularIndexing
 
+
 if HAS_CUDA:
     torch.set_default_device("cuda")
 
