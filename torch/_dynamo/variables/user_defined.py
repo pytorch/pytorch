@@ -117,8 +117,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return key in self.value.__dict__
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
+        from .. import trace_rules
         from . import ConstantVariable, EnumVariable
-        from .builder import SourcelessBuilder, VariableBuilder
+        from .builder import VariableBuilder
 
         source = AttrSource(self.source, name) if self.source is not None else None
 
@@ -138,9 +139,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if isinstance(obj, staticmethod):
             func = obj.__get__(self.value)
             if source is not None:
-                return VariableBuilder(tx, source)(func)
+                return trace_rules.lookup(func).create_with_source(func, source=source)
             else:
-                return SourcelessBuilder(tx)(func)
+                return trace_rules.lookup(func)(func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source:
