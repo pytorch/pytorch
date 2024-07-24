@@ -223,8 +223,7 @@ class TestFullyShardCompile(FSDPTest):
 
     def inductor_code_check_no_compute_op(self, file_check):
         return (
-            file_check
-            .check_not(" = aten.")
+            file_check.check_not(" = aten.")
             .check_not(" = extern_kernels.")
             .check_not(" = triton_")
             .check_not(" = torch.ops.")
@@ -236,28 +235,45 @@ class TestFullyShardCompile(FSDPTest):
             .check_not("    inductor_ops.")
         )
 
-    def inductor_code_check_fsdp_all_gather(self, file_check, overlapped_compute_op_str, num_resize, num_set, last_all_gather=False):
+    def inductor_code_check_fsdp_all_gather(
+        self,
+        file_check,
+        overlapped_compute_op_str,
+        num_resize,
+        num_set,
+        last_all_gather=False,
+    ):
         file_check = file_check.check("torch.ops.fsdp.all_gather_copy_in.")
         file_check = self.inductor_code_check_no_compute_op(file_check)
-        file_check = file_check.check("torch.ops._c10d_functional.all_gather_into_tensor_out.")
+        file_check = file_check.check(
+            "torch.ops._c10d_functional.all_gather_into_tensor_out."
+        )
         # Checks that AGWait is delayed, making the AG overlap with some compute op.
         if overlapped_compute_op_str is not None:
             file_check = file_check.check(f"{overlapped_compute_op_str}")
-        file_check = file_check.check_count("inductor_ops.resize_storage_bytes_(", num_resize, exactly=True)
+        file_check = file_check.check_count(
+            "inductor_ops.resize_storage_bytes_(", num_resize, exactly=True
+        )
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         file_check = self.inductor_code_check_no_compute_op(file_check)
         file_check = file_check.check("torch.ops.fsdp.split_with_sizes_copy.")
         file_check = self.inductor_code_check_no_compute_op(file_check)
-        file_check = file_check.check_count("torch.ops.aten.set_.", num_set, exactly=True)
+        file_check = file_check.check_count(
+            "torch.ops.aten.set_.", num_set, exactly=True
+        )
         if not last_all_gather:
             # Checks that there is no compute op between this AGWait and next AG.
             file_check = self.inductor_code_check_no_compute_op(file_check)
         return file_check
 
-    def inductor_code_check_fsdp_reduce_scatter(self, file_check, overlapped_compute_op_str):
+    def inductor_code_check_fsdp_reduce_scatter(
+        self, file_check, overlapped_compute_op_str
+    ):
         file_check = file_check.check("torch.ops.fsdp.chunk_cat.")
         file_check = self.inductor_code_check_no_compute_op(file_check)
-        file_check = file_check.check("torch.ops._c10d_functional.reduce_scatter_tensor.")
+        file_check = file_check.check(
+            "torch.ops._c10d_functional.reduce_scatter_tensor."
+        )
         # Checks that RSWait is delayed, making the RS overlap with some compute op.
         if overlapped_compute_op_str is not None:
             file_check = file_check.check(f"{overlapped_compute_op_str}")
@@ -269,7 +285,11 @@ class TestFullyShardCompile(FSDPTest):
     @torch._functorch.config.patch(cse=False)
     @torch._inductor.config.patch(
         reorder_for_compute_comm_overlap=True,
-        reorder_for_compute_comm_overlap_passes=["sink_waits", "raise_comms", "reorder_compute_for_overlap"],
+        reorder_for_compute_comm_overlap_passes=[
+            "sink_waits",
+            "raise_comms",
+            "reorder_compute_for_overlap",
+        ],
     )
     def _test_traceable_fsdp(
         self, model_init_fn, input_creation_fn, backend, fullgraph
@@ -490,32 +510,64 @@ class TestFullyShardCompile(FSDPTest):
         file_check = FileCheck().check("def call(args):")
         for fwd_ag_block_info in [
             dict(overlapped_compute_op_str=None, num_resize=0, num_set=2),
-            dict(overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2),
-            dict(overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2),
-            dict(overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2),
-            dict(overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2),
-            dict(overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2),
-            dict(overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2),
-            dict(overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2),
-            dict(overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2, last_all_gather=True),
+            dict(
+                overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2
+            ),
+            dict(
+                overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2
+            ),
+            dict(
+                overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2
+            ),
+            dict(
+                overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2
+            ),
+            dict(
+                overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2
+            ),
+            dict(
+                overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2
+            ),
+            dict(
+                overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2
+            ),
+            dict(
+                overlapped_compute_op_str="extern_kernels.mm(",
+                num_resize=2,
+                num_set=2,
+                last_all_gather=True,
+            ),
         ]:
-            file_check = self.inductor_code_check_fsdp_all_gather(file_check, **fwd_ag_block_info)
+            file_check = self.inductor_code_check_fsdp_all_gather(
+                file_check, **fwd_ag_block_info
+            )
         file_check.run(fwd_code)
 
         bwd_code = triton_codes[1]
         file_check = FileCheck().check("def call(args):")
         for bwd_ag_block_info in [
             dict(overlapped_compute_op_str=None, num_resize=0, num_set=2),
-            dict(overlapped_compute_op_str="extern_kernels.mm(", num_resize=0, num_set=2),
-            dict(overlapped_compute_op_str="extern_kernels.mm(", num_resize=0, num_set=2, last_all_gather=True),
+            dict(
+                overlapped_compute_op_str="extern_kernels.mm(", num_resize=0, num_set=2
+            ),
+            dict(
+                overlapped_compute_op_str="extern_kernels.mm(",
+                num_resize=0,
+                num_set=2,
+                last_all_gather=True,
+            ),
         ]:
-            file_check = self.inductor_code_check_fsdp_all_gather(file_check, **bwd_ag_block_info)
+            file_check = self.inductor_code_check_fsdp_all_gather(
+                file_check, **bwd_ag_block_info
+            )
         for bwd_rs_block_info in [
             dict(overlapped_compute_op_str="extern_kernels.mm("),
             dict(overlapped_compute_op_str=None),  # TODO: improve compute/comm overlap
             dict(overlapped_compute_op_str=None),
         ]:
-            file_check = self.inductor_code_check_fsdp_reduce_scatter(file_check, **bwd_rs_block_info)
+            file_check = self.inductor_code_check_fsdp_reduce_scatter(
+                file_check, **bwd_rs_block_info
+            )
         file_check.run(bwd_code)
 
     def _create_transformer_factory_fns(self):
@@ -600,30 +652,60 @@ class TestFullyShardCompile(FSDPTest):
         file_check = FileCheck().check("def call(args):")
         for fwd_ag_block_info in [
             dict(overlapped_compute_op_str="triton_", num_resize=0, num_set=4),
-            dict(overlapped_compute_op_str="aten.native_dropout.", num_resize=0, num_set=12),
-            dict(overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.", num_resize=12, num_set=12),
-            dict(overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.", num_resize=12, num_set=12, last_all_gather=True),
+            dict(
+                overlapped_compute_op_str="aten.native_dropout.",
+                num_resize=0,
+                num_set=12,
+            ),
+            dict(
+                overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                num_resize=12,
+                num_set=12,
+            ),
+            dict(
+                overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                num_resize=12,
+                num_set=12,
+                last_all_gather=True,
+            ),
         ]:
-            file_check = self.inductor_code_check_fsdp_all_gather(file_check, **fwd_ag_block_info)
+            file_check = self.inductor_code_check_fsdp_all_gather(
+                file_check, **fwd_ag_block_info
+            )
         file_check.run(fwd_code)
 
         bwd_code = triton_codes[1]
         file_check = FileCheck().check("def call(args):")
         for bwd_ag_block_info in [
-            dict(overlapped_compute_op_str="extern_kernels.mm(", num_resize=0, num_set=12),
-            dict(overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.", num_resize=0, num_set=12),
-            dict(overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.", num_resize=0, num_set=12, last_all_gather=True),
+            dict(
+                overlapped_compute_op_str="extern_kernels.mm(", num_resize=0, num_set=12
+            ),
+            dict(
+                overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                num_resize=0,
+                num_set=12,
+            ),
+            dict(
+                overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                num_resize=0,
+                num_set=12,
+                last_all_gather=True,
+            ),
         ]:
-            file_check = self.inductor_code_check_fsdp_all_gather(file_check, **bwd_ag_block_info)
+            file_check = self.inductor_code_check_fsdp_all_gather(
+                file_check, **bwd_ag_block_info
+            )
         for bwd_rs_block_info in [
             dict(overlapped_compute_op_str="extern_kernels.mm("),
             dict(overlapped_compute_op_str=None),  # TODO: improve compute/comm overlap
             dict(overlapped_compute_op_str=None),
             dict(overlapped_compute_op_str=None),
         ]:
-            file_check = self.inductor_code_check_fsdp_reduce_scatter(file_check, **bwd_rs_block_info)
+            file_check = self.inductor_code_check_fsdp_reduce_scatter(
+                file_check, **bwd_rs_block_info
+            )
         file_check.run(bwd_code)
-        
+
 
 if __name__ == "__main__":
     run_tests()
