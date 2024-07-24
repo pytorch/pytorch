@@ -19,11 +19,7 @@ from torch.distributed._composable.fsdp._fsdp_common import TrainingState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import init_device_mesh
 from torch.testing import FileCheck
-from torch.testing._internal.common_distributed import (
-    _dynamo_dist_per_rank_init,
-    at_least_x_gpu,
-    skip_if_lt_x_gpu,
-)
+from torch.testing._internal.common_distributed import at_least_x_gpu, skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (

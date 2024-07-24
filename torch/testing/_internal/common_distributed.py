@@ -589,7 +589,7 @@ class MultiProcessTestCase(TestCase):
                 name="process " + str(rank),
                 args=(rank, self._current_test_name(), self.file_name, child_conn),
                 kwargs={
-                    "fake_pg": self.fake_pg,
+                    "fake_pg": getattr(self, "fake_pg", False),
                 }
             )
             process.start()
