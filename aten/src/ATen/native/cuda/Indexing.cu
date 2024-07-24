@@ -1336,6 +1336,20 @@ tensorInfoLegacyIfScalar(cuda::detail::TensorInfo<T, IndexType> ti) {
 
 }
 
+uint64_t getDefaultMaxThreadsPerBlock() {
+#ifndef USE_ROCM
+  return 128;
+#else
+  hipDeviceProp_t* prop = at::cuda::getCurrentDeviceProperties();
+  // MI300x optimization
+  if (std::string(prop->gcnArchName).find("gfx942") != std::string::npos) {
+    return 1024;
+  }
+  // bigger default
+  return 256;
+#endif
+}
+
 template <typename scalar_t>
 void index_select_out_cuda_impl(
     Tensor& out,
@@ -1400,14 +1414,16 @@ void index_select_out_cuda_impl(
       selfSelectDimSize);                                                      \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (uint64_t)128), (uint64_t) (mpc * 8)));
-  dim3 smallIndexBlock(std::min(sliceSize, (uint64_t)128));
+  uint64_t defaultMaxBlockThreads = getDefaultMaxThreadsPerBlock();
+  dim3 smallIndexGrid(std::min(ceil_div(sliceSize, defaultMaxBlockThreads), (uint64_t) (mpc * 8)));
+  dim3 smallIndexBlock(std::min(sliceSize, defaultMaxBlockThreads));
 
-  dim3 largeIndexGrid(std::min(ceil_div(outTotalSize, (uint64_t)128), (uint64_t) (mpc * 8)));
+  dim3 largeIndexGrid(std::min(ceil_div(outTotalSize, defaultMaxBlockThreads), (uint64_t) (mpc * 8)));
   // for issue https://github.com/pytorch/pytorch/issues/130806 there are two problems
   // 1: ptrdiff_t was used but it is signed int,  outTotalSize of 2147483648 can cause overflow
   // 2: On ROCm, std::min -> ::min did not work as expected on when outTotalSize>=2147483648
-  dim3 largeIndexBlock( (outTotalSize < 128) ? outTotalSize : 128 );
+  dim3 largeIndexBlock( (outTotalSize < defaultMaxBlockThreads) ? outTotalSize : defaultMaxBlockThreads );
+
   if (cuda::detail::canUse32BitIndexMath(out) &&
       cuda::detail::canUse32BitIndexMath(self) &&
       cuda::detail::canUse32BitIndexMath(index)) {
