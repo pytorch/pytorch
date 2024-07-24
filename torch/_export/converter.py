@@ -962,7 +962,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
 
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
-        log.info(f"TorchScript graph\n\n%s\n", self.ts_graph)
+        log.info("TorchScript graph\n\n%s\n", self.ts_graph)
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
