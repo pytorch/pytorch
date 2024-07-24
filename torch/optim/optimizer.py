@@ -150,7 +150,7 @@ def _disable_dynamo_if_unsupported(single_tensor_fn=None):
             if is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
-                and (args[state_steps_ind] and args[state_steps_ind][0].is_cuda)
+                and (args[state_steps_ind] and (args[state_steps_ind][0].is_cuda or args[state_steps_ind][0].is_xpu))
                 or (
                     "state_steps" in kwargs
                     and kwargs["state_steps"]
@@ -218,7 +218,7 @@ def _get_scalar_dtype(is_fused=None):
 
 def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
     r"""Return the device type list that supports capturable optimizer."""
-    capturable_supported_devices = ["cuda"]
+    capturable_supported_devices = ["cuda", "xpu"]
     if not torch.jit.is_scripting():
         capturable_supported_devices.append(torch._C._get_privateuse1_backend_name())
     if supports_xla:
