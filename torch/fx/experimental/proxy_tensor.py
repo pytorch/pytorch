@@ -153,10 +153,10 @@ def set_proxy_slot(
     if isinstance(obj, Tensor):
         # We DO want to clobber proxies whenever we run an inplace operation
         # on a tensor, and it affects the metadata on the proxy.
-        tracer.tensor_tracker[obj] = proxy
+        tracer.tensor_tracker[obj] = proxy  # type: ignore[has-type]
     elif isinstance(obj, (_AnyScriptObject)):
         # We DO want to clobber proxies, with a similar rationale as for tensors.
-        tracer.script_object_tracker[obj] = proxy
+        tracer.script_object_tracker[obj] = proxy  # type: ignore[has-type]
     else:
         # NB: Never clobber pre-existing proxy.  Although the proxies
         # are in principle equivalent, when we do graph partitioning
@@ -165,8 +165,8 @@ def set_proxy_slot(
         # THEN later we allocate tangent inputs.  Make sure if a SymInt
         # is derivable from a primal that we use that.
         assert isinstance(obj, py_sym_types), type(obj)
-        if obj not in tracer.symnode_tracker:
-            tracer.symnode_tracker[obj] = typing.cast(_PySymProxyType, proxy)
+        if obj not in tracer.symnode_tracker:  # type: ignore[has-type]
+            tracer.symnode_tracker[obj] = typing.cast(_PySymProxyType, proxy)  # type: ignore[has-type]
 
 def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
     assert isinstance(obj, (Tensor, SymNode)), type(obj)
@@ -261,12 +261,12 @@ def get_proxy_slot(
 
     tracker: Any
     if isinstance(obj, Tensor):
-        tracker = tracer.tensor_tracker
+        tracker = tracer.tensor_tracker  # type: ignore[has-type]
     elif isinstance(obj, _AnyScriptObject):
-        tracker = tracer.script_object_tracker
+        tracker = tracer.script_object_tracker  # type: ignore[has-type]
     else:
         assert isinstance(obj, py_sym_types), type(obj)
-        tracker = tracer.symnode_tracker
+        tracker = tracer.symnode_tracker  # type: ignore[has-type]
 
     if obj not in tracker:
         if isinstance(default, _NoDefault):
