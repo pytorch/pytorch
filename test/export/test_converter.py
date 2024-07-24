@@ -10,12 +10,56 @@ from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
+from torch.testing._internal.torchbind_impls import (
+    _empty_tensor_queue,
+    init_torchbind_implementations,
+)
 
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 class TestConverter(TestCase):
+    def setUp(self):
+        init_torchbind_implementations()
+
+        @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
+        class FakeTensorQueue:
+            def __init__(self, queue):
+                self.queue = queue
+
+            @classmethod
+            def __obj_unflatten__(cls, flattened_ctx):
+                return cls(**dict(flattened_ctx))
+
+            def push(self, x):
+                self.queue.append(x)
+
+            def pop(self):
+                if self.is_empty():
+                    return torch.empty([])
+                return self.queue.pop(0)
+
+            def size(self):
+                return len(self.queue)
+
+            def is_empty(self):
+                return len(self.queue) == 0
+
+            def float_size(self):
+                return float(len(self.queue))
+
+        self.torch_bind_ops = [
+            torch.ops._TorchScriptTesting.queue_pop,
+            torch.ops._TorchScriptTesting.queue_push,
+            torch.ops._TorchScriptTesting.queue_size,
+        ]
+
+    def tearDown(self):
+        torch._library.fake_class_registry.deregister_fake_class(
+            "_TorchScriptTesting::_TensorQueue"
+        )
+
     def _check_equal_ts_ep_converter(
         self,
         M,
@@ -1267,6 +1311,20 @@ class TestConverter(TestCase):
         inp = ([torch.ones(2, 3), torch.ones(2, 3)],)
         # Trace already unrolls the list.
         self._check_equal_ts_ep_converter(M(), inp, ["script"])
+
+    def test_convert_script_object(self):
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tq = _empty_tensor_queue()
+
+            def forward(self, x: torch.Tensor):
+                self.tq.push(x)
+                torch.ops._TorchScriptTesting.queue_push(self.tq, x.cos())
+                return torch.ops._TorchScriptTesting.queue_pop(self.tq), self.tq.pop()
+
+        inp = (torch.randn(2, 3),)
+        self._check_equal_ts_ep_converter(M1(), inp, ["script"])
 
 
 if __name__ == "__main__":
