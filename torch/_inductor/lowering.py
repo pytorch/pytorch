@@ -7,17 +7,7 @@ import operator
 import os
 import warnings
 from collections import defaultdict
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
