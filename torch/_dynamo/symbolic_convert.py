@@ -193,6 +193,20 @@ class SpeculationLog:
         return entry
 
 
+@dataclasses.dataclass
+class LocalState:
+    input_sizes: Dict[str, List[int]] = dataclasses.field(default_factory=dict)
+    input_strides: Dict[str, List[int]] = dataclasses.field(default_factory=dict)
+
+
+# Mutable box that is shared across restarts
+@dataclasses.dataclass
+class DistributedState:
+    compile_pg: Any
+    local_state: LocalState
+    all_states: Optional[List[LocalState]] = None
+
+
 @functools.lru_cache(None)
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
@@ -230,7 +244,7 @@ def stack_op(fn: typing.Callable[..., object]):
     fn_var = BuiltinVariable(fn)
 
     @functools.wraps(fn)
-    def impl(self: "InstructionTranslatorBase", inst: Instruction):
+    def impl(self: "InstructionTranslator", inst: Instruction):
         self.push(fn_var.call_function(self, self.popn(nargs), {}))
 
     return impl
@@ -427,18 +441,18 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
             try:
-                x = value.var_getattr(self, "__bool__")
+                x = value.var_getattr(self, "__bool__")  # type: ignore[arg-type]
             except exc.ObservedException:
                 # if __bool__ is missing, trying __len__ to infer a truth value.
-                x = value.var_getattr(self, "__len__")
+                x = value.var_getattr(self, "__len__")  # type: ignore[arg-type]
             else:
                 if isinstance(x, GetAttrVariable):
                     # if __bool__ is missing, trying __len__ to infer a truth value.
-                    x = value.var_getattr(self, "__len__")
+                    x = value.var_getattr(self, "__len__")  # type: ignore[arg-type]
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
-                result = x.call_function(self, [], {})
+                result = x.call_function(self, [], {})  # type: ignore[arg-type]
                 if isinstance(result, ConstantVariable) and isinstance(
                     result.value, (bool, int)
                 ):
@@ -757,7 +771,7 @@ class InstructionTranslatorBase(
             inner_fn = fn.fn
         if inner_fn and callable(inner_fn) and is_forbidden(inner_fn):
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
-        self.push(fn.call_function(self, args, kwargs))
+        self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
 
     def inline_user_function_return(self, fn, args, kwargs):
         """
@@ -1296,7 +1310,7 @@ class InstructionTranslatorBase(
             if isinstance(val, variables.BuiltinVariable):
                 # Create the instance of the exception type
                 # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
-                val = val.call_function(self, [], {})
+                val = val.call_function(self, [], {})  # type: ignore[arg-type]
 
             # Save the exception in a global data structure
             self.exn_vt_stack.append(val)
@@ -1615,7 +1629,7 @@ class InstructionTranslatorBase(
     def _load_attr(self, inst):
         obj = self.pop()
         result = BuiltinVariable(getattr).call_function(
-            self, [obj, ConstantVariable.create(inst.argval)], {}
+            self, [obj, ConstantVariable.create(inst.argval)], {}  # type: ignore[arg-type]
         )
         self.push(result)
 
@@ -1641,7 +1655,7 @@ class InstructionTranslatorBase(
 
         try:
             BuiltinVariable(setattr).call_function(
-                self, [obj, ConstantVariable.create(inst.argval), val], {}
+                self, [obj, ConstantVariable.create(inst.argval), val], {}  # type: ignore[arg-type]
             )
             return
         except Unsupported as e:
@@ -1667,7 +1681,7 @@ class InstructionTranslatorBase(
     def DELETE_ATTR(self, inst):
         obj = self.pop()
         BuiltinVariable(delattr).call_function(
-            self, [obj, ConstantVariable.create(inst.argval)], {}
+            self, [obj, ConstantVariable.create(inst.argval)], {}  # type: ignore[arg-type]
         )
 
     def create_call_resume_at(self, offset):
@@ -1734,7 +1748,7 @@ class InstructionTranslatorBase(
     def BUILD_MAP_UNPACK(self, inst):
         items = self.popn(inst.argval)
         # ensure everything is a dict
-        items = [BuiltinVariable(dict).call_function(self, [x], {}) for x in items]
+        items = [BuiltinVariable(dict).call_function(self, [x], {}) for x in items]  # type: ignore[arg-type]
         result = {}
         for x in items:
             assert isinstance(x, ConstDictVariable)
@@ -1839,7 +1853,7 @@ class InstructionTranslatorBase(
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()
         if isinstance(seq, TensorVariable):
-            val = seq.unpack_var_sequence(self, idxes=range(inst.argval))
+            val = seq.unpack_var_sequence(self, idxes=range(inst.argval))  # type: ignore[arg-type]
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
@@ -1926,11 +1940,11 @@ class InstructionTranslatorBase(
         if isinstance(value, SymNodeVariable):
             value = ConstantVariable.create(str(value.sym_num))
         if (flags & 0x03) == 0x01:
-            value = BuiltinVariable(str).call_function(self, [value], {})
+            value = BuiltinVariable(str).call_function(self, [value], {})  # type: ignore[arg-type]
         elif (flags & 0x03) == 0x02:
-            value = BuiltinVariable(repr).call_function(self, [value], {})
+            value = BuiltinVariable(repr).call_function(self, [value], {})  # type: ignore[arg-type]
         elif (flags & 0x03) == 0x03:
-            value = BuiltinVariable(ascii).call_function(self, [value], {})
+            value = BuiltinVariable(ascii).call_function(self, [value], {})  # type: ignore[arg-type]
 
         fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
 
@@ -1986,7 +2000,7 @@ class InstructionTranslatorBase(
         obj.call_method(self, "extend", [v], {})
 
     def LIST_TO_TUPLE(self, inst):
-        self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))
+        self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))  # type: ignore[arg-type]
 
     def DICT_MERGE(self, inst):
         v = self.pop()
@@ -2405,9 +2419,11 @@ class InstructionTranslatorBase(
         export: bool,
         inline_depth: int,
         speculation_log: SpeculationLog,
+        distributed_state: Optional[DistributedState],
     ):
         super().__init__()
         self.speculation_log = speculation_log
+        self.distributed_state = distributed_state
 
         # Mutable state checkpointed by copy_graphstate()
         self.output = output
@@ -2509,6 +2525,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         mutated_closure_cell_contents: Set[str],
         frame_state,
         speculation_log: SpeculationLog,
+        distributed_state: Optional[DistributedState],
     ):
         _step_logger()(
             logging.INFO,
@@ -2538,6 +2555,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             export=export,
             inline_depth=0,
             speculation_log=speculation_log,
+            distributed_state=distributed_state,
         )
 
         self._throw_if_in_functorch()
@@ -3002,6 +3020,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             export=parent.export,
             inline_depth=parent.inline_depth + 1,
             speculation_log=parent.speculation_log,
+            distributed_state=parent.distributed_state,
         )
         self.parent = parent
         self.symbolic_result = None
@@ -3165,7 +3184,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         tos = self.stack[-1]
         if not isinstance(tos, ListIteratorVariable):
             self.pop()
-            res = BuiltinVariable(iter).call_function(self, [tos], {})
+            res = BuiltinVariable(iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
 
     def YIELD_FROM(self, inst):
