@@ -13,13 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import replicate
 from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
-from torch.distributed._tensor import (
-    DTensor,
-    DTensor as DT,
-    init_device_mesh,
-    Replicate,
-    Shard,
-)
+from torch.distributed._tensor import DTensor, init_device_mesh, Replicate, Shard
 from torch.distributed._tensor.debug.comm_mode import CommDebugMode
 from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
@@ -58,34 +52,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
-
-
-def init_model(device_type, model_parallel_size=2):
-    torch.manual_seed(0)
-    model = MLPModule(device_type)
-    torch.manual_seed(0)
-    twod_model = MLPModule(device_type)
-    model = DDP(model)
-
-    # 2-D mesh is [dp, tp]
-    world_size = dist.get_world_size()
-    mesh_2d = init_device_mesh(
-        device_type,
-        (world_size // model_parallel_size, model_parallel_size),
-        mesh_dim_names=("dp", "tp"),
-    )
-
-    dp_pg = mesh_2d.get_group(mesh_dim=0)
-
-    parallelize_plan = {
-        "net1": ColwiseParallel(),
-        "net2": RowwiseParallel(),
-    }
-    twod_model = parallelize_module(twod_model, mesh_2d["tp"], parallelize_plan)
-    _pre_dp_module_transform(twod_model)
-    # TODO: Add tests when using gradient_as_bucket_view and static_graph for DDP.
-    twod_model = DDP(twod_model, process_group=dp_pg)
-    return model, twod_model, dp_pg
 
 
 class SimpleModel(nn.Module):
@@ -377,9 +343,33 @@ class TestFullyShard2DTraining(FSDPTest):
         self.assertEqual(loss_no_cp2, loss_cp2)
 
 
-class Test2dParallelIntegration(DTensorTestBase):
-    global LR
-    LR = 3e-5
+class Test2dFSDP1ParallelIntegration(DTensorTestBase):
+    def init_model(self, device_type, model_parallel_size=2):
+        torch.manual_seed(0)
+        model = MLPModule(device_type)
+        torch.manual_seed(0)
+        twod_model = MLPModule(device_type)
+        model = DDP(model)
+
+        # 2-D mesh is [dp, tp]
+        world_size = dist.get_world_size()
+        mesh_2d = init_device_mesh(
+            device_type,
+            (world_size // model_parallel_size, model_parallel_size),
+            mesh_dim_names=("dp", "tp"),
+        )
+
+        dp_pg = mesh_2d.get_group(mesh_dim=0)
+
+        parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+        }
+        twod_model = parallelize_module(twod_model, mesh_2d["tp"], parallelize_plan)
+        _pre_dp_module_transform(twod_model)
+        # TODO: Add tests when using gradient_as_bucket_view and static_graph for DDP.
+        twod_model = DDP(twod_model, process_group=dp_pg)
+        return model, twod_model, dp_pg
 
     def _check_module(self, m1, m2, check_grad=False):
         named_parameters = dict(m1.named_parameters())
@@ -401,9 +391,9 @@ class Test2dParallelIntegration(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_2d_ddp_integration_functionality(self) -> None:
-        model, twod_model, dp_pg = init_model(self.device_type)
-        optim = torch.optim.Adam(model.parameters(), lr=LR)
-        twod_optim = torch.optim.Adam(twod_model.parameters(), lr=LR)
+        model, twod_model, dp_pg = self.init_model(self.device_type)
+        optim = torch.optim.Adam(model.parameters(), lr=3e-5)
+        twod_optim = torch.optim.Adam(twod_model.parameters(), lr=3e-5)
 
         # Create Input
         input_seed = dist.get_rank(dp_pg)
@@ -446,7 +436,7 @@ class TestNew2dParallelTraining(DTensorTestBase):
                     name = n_p1[0]
                     if name == "net2.bias" and self.rank != 0:
                         continue
-                    if type(p2) is DT:
+                    if type(p2) is DTensor:
                         p2 = p2.redistribute(p2.device_mesh, [Replicate()]).to_local()
                     self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
 
@@ -632,7 +622,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
             self.assertEqual(no_wrap_k, two_d_k)
 
             # check if all value in 2D state_dict are DTensor
-            self.assertTrue(isinstance(two_d_v, DT))
+            self.assertTrue(isinstance(two_d_v, DTensor))
             self.assertEqual(len(two_d_v.placements), 2)
             # the outer dimension is the FSDP dimension and the placement is always Shard(0)
             self.assertEqual(two_d_v.placements[0], Shard(0))
@@ -684,8 +674,8 @@ class TestNew2dParallelStateDict(DTensorTestBase):
             # check whether fqn are the same
             self.assertEqual(k1, k2)
 
-            self.assertEqual(type(v1), DT)
-            self.assertEqual(type(v2), DT)
+            self.assertEqual(type(v1), DTensor)
+            self.assertEqual(type(v2), DTensor)
             # check whether DTensor are the same
             # TODO: 2D DTensor comparison is not supported at the time, so we are comparing the spec and the local tensor for now.
             # TODO: Update it to compare the two DTensors once 2D DTensor comparison is supported.
@@ -743,7 +733,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
                 dist_state = dist_states.get(state_name)
                 # If a state  is DTensor, we all gather it in both DP and TP dimension to
                 # compare with no_wrap state.
-                if isinstance(dist_state, DT):
+                if isinstance(dist_state, DTensor):
                     dist_state = (
                         dist_state.cuda()
                         .redistribute(placements=(Replicate(), Replicate()))
@@ -773,7 +763,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
             for state_name, state in states.items():
                 new_state = new_states.get(state_name)
 
-                if isinstance(new_state, DT):
+                if isinstance(new_state, DTensor):
                     self.assertEqual(new_state.placements, state.placements)
                     self.assertEqual(new_state.device_mesh, state.device_mesh)
                     self.assertTrue(
