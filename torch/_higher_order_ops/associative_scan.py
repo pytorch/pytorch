@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Callable, List
+from typing import Callable, List, Tuple
 
 import torch
 import torch._prims_common as utils
@@ -79,23 +79,6 @@ def check_args(combine_fn, leaves, tree, dim):
             "The pytree of the output of the operator needs to match the input pytree"
         )
 
-    # Check that all leaves are on CUDA
-    if not all([l.device.type == "cuda" for l in leaves]):  # noqa: C419
-        return True
-
-    # Check that the combine_fn is pointwise
-    with disable_proxy_modes_tracing():
-        sample_inputs = [
-            torch.ones_like(x, dtype=x.dtype, device=x.device) for x in leaves
-        ]
-        sample_inputs = pytree.tree_unflatten(sample_inputs, tree)
-        combine_graph = make_fx(combine_fn)(sample_inputs, sample_inputs)
-
-    if not is_pointwise_subgraph(combine_graph.graph):
-        return True
-
-    return False
-
 
 def _interleave(a, b, dim):
     # https://stackoverflow.com/questions/60869537/how-can-i-interleave-5-pytorch-tensors
@@ -139,6 +122,7 @@ def associative_scan(
     dim: int,
     reverse: bool = False,
     generic_scan: bool = False,
+    lifted_args: Tuple = ()
 ) -> torch.Tensor:
     r"""
     Performs an inclusive scan with an associative pointwise combine function.
@@ -177,7 +161,7 @@ def associative_scan(
     """
     leaves, spec = pytree.tree_flatten(input)
 
-    generic_scan_required = check_args(combine_fn, leaves, spec, dim)
+    check_args(combine_fn, leaves, spec, dim)
 
     if reverse:
         leaves = [torch.flip(elem, [dim]) for elem in leaves]
@@ -186,10 +170,10 @@ def associative_scan(
         wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
     )
 
-    if generic_scan | generic_scan_required:
-        result_flat = generic_associative_scan(combine_fn, leaves, dim)
+    if generic_scan:
+        result_flat = generic_associative_scan(combine_fn, leaves, dim, lifted_args)
     else:
-        result_flat = associative_scan_op(combine_fn, leaves, dim)
+        result_flat = associative_scan_op(combine_fn, leaves, dim, lifted_args)
 
     if reverse:
         result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
@@ -197,7 +181,7 @@ def associative_scan(
     return pytree.tree_unflatten(result_flat, spec)
 
 
-def generic_associative_scan(operator, elems_flat, dim=0):
+def generic_associative_scan(operator, elems_flat, dim=0, lifted_args=()):
     # TODO: The recursion involved here "unrolls" the scan
     # function for all inputs. Could there be a more efficient
     # way instead of running over the operation in sequence?
@@ -253,13 +237,16 @@ associative_scan_op = HigherOrderOperator("associative_scan")
 
 
 def trace_associative_scan(
-    proxy_mode, func_overload, combine_fn: Callable, input: List[torch.Tensor], dim: int
+    proxy_mode, func_overload, combine_fn: Callable, input: List[torch.Tensor], dim: int, lifted_args: Tuple
 ):
     from torch.fx.experimental.proxy_tensor import maybe_handle_decomp
 
     with disable_proxy_modes_tracing():
         sample_inputs = [
-            torch.full((), False, dtype=x.dtype, device=x.device)
+            # torch.full((), False, dtype=x.dtype, device=x.device)
+            # torch.empty_like(x, dtype=x.dtype, device=x.device)
+            # torch.empty_like(x[slice_along_axis(0, 1, stride=None, dim=dim)], dtype=x.dtype, device=x.device)
+            torch.empty_like(x[slice_along_axis(0, 1, stride=None, dim=dim)], dtype=x.dtype, device=x.device, requires_grad=x.requires_grad)
             for x in itertools.chain(input, input)
         ]
         combine_graph = reenter_make_fx(combine_fn)(*sample_inputs)
@@ -282,18 +269,15 @@ def trace_associative_scan(
             f"combine_fn output type mismatch, expected {i.dtype} "
             + f"but got {o_meta.dtype}"
         )
-        assert (
-            o_meta.shape == ()
-        ), f"combine_fn must return a scalar tensor but got shape {o_meta.shape}"
-        assert (
-            o_meta.shape == ()
-        ), f"combine_fn must return a scalar tensor but got shape {o_meta.shape}"
+        # assert (
+        #     o_meta.shape == ()
+        # ), f"combine_fn must return a scalar tensor but got shape {o_meta.shape}"
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
-    args = (combine_graph, input, dim)
+    args = (combine_graph, input, dim, lifted_args)
     out = maybe_handle_decomp(proxy_mode, associative_scan_op, args, {})
     if out is not NotImplemented:
         return out
@@ -310,34 +294,42 @@ def trace_associative_scan(
 
 
 @associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def associative_scan_op_dense(combine_fn, input, dim):
-    return generic_associative_scan(combine_fn, input, dim)
+def associative_scan_op_dense(combine_fn, input, dim, lifted_args):
+    return generic_associative_scan(combine_fn, input, dim, lifted_args)
+
+# @associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
+# def associative_scan_op_dense(combine_fn, input, dim):
+#     raise NotImplementedError("associative_scan is not implemented for eager")
 
 
 associative_scan_op.py_impl(DispatchKey.Autograd)(
     autograd_not_implemented(associative_scan_op, deferred_error=True)
 )
 
+# @associative_scan_op.py_impl(DispatchKey.Autograd)
+# def associative_scan_op_autograd(combine_fn, input, dim):
+#     return generic_associative_scan(combine_fn, input, dim)
+
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)
-def associative_scan_proxy_mode(mode, combine_fn, input, dim):
+def associative_scan_proxy_mode(mode, combine_fn, input, dim, lifted_args):
     if mode.enable_tracing:
-        return trace_associative_scan(mode, associative_scan_op, combine_fn, input, dim)
+        return trace_associative_scan(mode, associative_scan_op, combine_fn, input, dim, lifted_args)
     else:
-        return associative_scan_op(mode, associative_scan_op, combine_fn, input, dim)
+        return associative_scan_op(mode, associative_scan_op, combine_fn, input, dim, lifted_args)
 
 
 @associative_scan_op.py_impl(FakeTensorMode)
-def assoiciative_scan_fake_tensor_mode(mode, combine_fn, input, dim):
+def assoiciative_scan_fake_tensor_mode(mode, combine_fn, input, dim, lifted_args):
     with mode:
         return [x.clone() for x in input]
 
 
 @associative_scan_op.py_functionalize_impl
-def associative_scan_functionalize(ctx, combine_fn, input, dim):
+def associative_scan_functionalize(ctx, combine_fn, input, dim, lifted_args):
     unwrapped_input = ctx.unwrap_tensors(input)
     with ctx.redispatch_to_next() as m:
-        ret = associative_scan_op(combine_fn, unwrapped_input, dim)
+        ret = associative_scan_op(combine_fn, unwrapped_input, dim, lifted_args)
     return ctx.wrap_tensors(ret)
 
 
