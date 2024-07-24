@@ -19,6 +19,7 @@
 #endif
 
 namespace at {
+
 namespace native {
 
 namespace {
