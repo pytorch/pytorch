@@ -673,6 +673,29 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_func(t1, t2, output2), torch_add)
 
     @requires_gpu
+    @skipIfRocm  # https://github.com/pytorch/pytorch/actions/runs/10051552819/job/27782048305?pr=131431
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @patch.object(
+        torch._inductor.config, "unsafe_ignore_unsupported_triton_autotune_args", True
+    )
+    def test_triton_kernel_autotune_with_unsupported_args(self, backend):
+        def call_triton(x: torch.Tensor, y: torch.Tensor):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            add_kernel_autotuned_with_unsupported_args[(n_elements,)](
+                x, y, output, n_elements
+            )
+            return output
+
+        t1 = torch.rand(256, device=GPU_TYPE)
+        t2 = torch.rand(256, device=GPU_TYPE)
+
+        torch_add = call_triton(t1, t2)
+        compiled_func = torch.compile(call_triton, backend=backend, fullgraph=True)
+        compiled_add = compiled_func(t1, t2)
+        self.assertEqual(compiled_add, torch_add)
+
+    @requires_gpu
     @common_utils.parametrize("grad", [False, True])
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import logging
 import math
 from typing import Any, Callable, cast, List, Optional, Set, Union
 from unittest.mock import patch
@@ -18,6 +19,7 @@ from .cpp_template import CppTemplate
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import GemmBlocking, get_gemm_template_output_and_compute_dtype
 
+log = logging.getLogger(__name__)
 
 GEMM_TEMPLATE = r"""
 {{template.header().getvalue()}}
@@ -94,7 +96,7 @@ extern "C"
         {{ micro_gemm.codegen_init(kernel) }}
         for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
             const int64_t m_start = mc * M0;
-            const int64_t m_end = std::min((mc + Mc_blocks) * M0, M);
+            const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * M0, M);
             const int64_t m_size = m_end - m_start;
             {%- if use_local_acc %}
             {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "N0"], acc_buf_dtype) }}
@@ -174,10 +176,18 @@ class CppPackedGemmTemplate(CppTemplate):
 
     @cache_on_self
     def thread_blocking(self) -> GemmBlocking:
-        # TODO(jgong5): allow tuning various blocking options
+        """
+        NOTE [Thread blocking in Cpp GEMM]
+        We use simple heuristics to decide the thread blocking:
+        1. Make sure all threads are occupied as much as possible.
+        2. Favor more square-sized thread blocks for better data reuse.
+        TODO(jgong5): we only do blocking on on M and N now, add blocking on K
+                      after supporting k-slicing.
+        TODO(jgong5): allow tuning various blocking options
+        """
+
         def get_factors(number):
             factors = []
-            # priorize more evenly divided factors
             for i in range(int(number**0.5), 0, -1):
                 if number % i == 0:
                     factors.append(number // i)
@@ -199,22 +209,41 @@ class CppPackedGemmTemplate(CppTemplate):
         k_blocks = (self.k + register_blocking.block_k - 1) // register_blocking.block_k
         factors = get_factors(self.num_threads)
         assert len(factors) > 0
+
+        # we favor square-sized thread blocks for good data reuse
+        def get_better_blocking(blocking, best_blocking):
+            if best_blocking is None:
+                best_blocking = blocking
+            else:
+                block_m_size = blocking.block_m * register_blocking.block_m
+                block_n_size = blocking.block_n * register_blocking.block_n
+                best_block_m_size = best_blocking.block_m * register_blocking.block_m
+                best_block_n_size = best_blocking.block_n * register_blocking.block_n
+                if block_m_size + block_n_size < best_block_m_size + best_block_n_size:
+                    best_blocking = blocking
+            return best_blocking
+
+        best_blocking = None
+        # check if we can have a thread-blocking to occupy all threads
         for factor in factors:
-            if n_blocks % factor == 0 and m_blocks % (self.num_threads // factor) == 0:
-                return get_blocking(
-                    self.num_threads, factor, m_blocks, n_blocks, k_blocks
-                )
-        for factor in factors:
-            if n_blocks % factor == 0:
-                return get_blocking(
-                    self.num_threads, factor, m_blocks, n_blocks, k_blocks
-                )
             cofactor = self.num_threads // factor
-            if m_blocks % cofactor == 0:
-                return get_blocking(
+            if n_blocks >= factor and m_blocks >= cofactor:
+                blocking = get_blocking(
                     self.num_threads, factor, m_blocks, n_blocks, k_blocks
                 )
-        raise AssertionError("Should not reach here.")
+                best_blocking = get_better_blocking(blocking, best_blocking)
+
+        if best_blocking is None:
+            for factor in factors:
+                cofactor = self.num_threads // factor
+                if n_blocks >= factor or m_blocks >= cofactor:
+                    blocking = get_blocking(
+                        self.num_threads, factor, m_blocks, n_blocks, k_blocks
+                    )
+                    best_blocking = get_better_blocking(blocking, best_blocking)
+
+        assert best_blocking is not None
+        return best_blocking
 
     @cache_on_self
     def cache_blocking(self) -> GemmBlocking:
@@ -227,10 +256,6 @@ class CppPackedGemmTemplate(CppTemplate):
             # Nc_blocks is always 1
             Nc_blocks = 1
             Kc_blocks = thread_blocking.block_k
-
-            # TODO: support multi-thread
-            if self.num_threads != 1:
-                return Mc_blocks, Nc_blocks, Kc_blocks
 
             # TODO: tune the factor here
             L1_limit_factor = 1
@@ -278,10 +303,29 @@ class CppPackedGemmTemplate(CppTemplate):
         register_blocking = self.register_blocking
         thread_blocking = self.thread_blocking()
 
-        Mc_blocks, Nc_blocks, Kc_blocks = get_cache_blocking(
-            register_blocking, thread_blocking
+        return GemmBlocking(*get_cache_blocking(register_blocking, thread_blocking))
+
+    def log_blockings(self):
+        log.debug(f"Register blocking: {self.register_blocking}")  # noqa: G004
+        if self.is_dynamic_M:
+            # thread and cache blockings are determined at runtime for dynamic shapes
+            return
+        log.debug(f"Cache blocking: {self.cache_blocking()}")  # noqa: G004
+        thread_blocking = self.thread_blocking()
+        log.debug(f"Thread blocking: {thread_blocking}")  # noqa: G004
+
+        def get_occupancy():
+            m_blocks = math.ceil(self.m / self.register_blocking.block_m)
+            n_blocks = math.ceil(self.n / self.register_blocking.block_n)
+            k_blocks = math.ceil(self.k / self.register_blocking.block_k)
+            m = math.ceil(m_blocks / thread_blocking.block_m)
+            n = math.ceil(n_blocks / thread_blocking.block_n)
+            k = math.ceil(k_blocks / thread_blocking.block_k)
+            return (m, n, k)
+
+        log.debug(
+            f"Number of threads: {self.num_threads}, occupancy: {get_occupancy()}"  # noqa: G004
         )
-        return GemmBlocking(Mc_blocks, Nc_blocks, Kc_blocks)
 
     @staticmethod
     def add_choices(
@@ -650,6 +694,7 @@ class CppPackedGemmTemplate(CppTemplate):
         )
         assert micro_gemm is not None
         assert self.register_blocking == micro_gemm.register_blocking
+        self.log_blockings()
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
 
