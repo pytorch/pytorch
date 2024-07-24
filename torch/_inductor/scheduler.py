@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: disallow-untyped-defs
 from __future__ import annotations
 
