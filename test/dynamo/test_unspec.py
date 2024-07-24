@@ -617,6 +617,18 @@ def forward(self):
         self.assertTrue(f(torch.empty(8)).item())
         self.assertFalse(f(torch.empty(13)).item())
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_symint_sum_list(self):
+        @torch.compile()
+        def f(xt):
+            xs = xt.tolist()
+            for x in xs:
+                torch._check_is_size(x)
+            y = sum(xs)
+            return torch.zeros(y, device='cuda')
+
+        f(torch.tensor([5] * 80))
+
     @torch._dynamo.config.patch(error_on_recompile=True)
     def test_mark_unbacked(self):
         class TestModel(torch.nn.Module):
