@@ -1155,13 +1155,12 @@ def CUDAExtension(name, sources, *args, **kwargs):
     return setuptools.Extension(name, sources, *args, **kwargs)
 
 
-def include_paths(cuda: bool = False, xpu: Optional[bool] = None) -> List[str]:
+def include_paths(backend: str="cpu") -> List[str]:
     """
-    Get the include paths required to build a C++ or CUDA extension.
+    Get the include paths required to build a C++, CUDA or XPU extension.
 
     Args:
-        cuda: If `True`, includes CUDA-specific include paths.
-        xpu: If `True`, includes XPU-specific include paths.
+        backend: A string specifying the backend. Options are "cuda", "xpu", or "cpu".
 
     Returns:
         A list of include path strings.
@@ -1176,25 +1175,24 @@ def include_paths(cuda: bool = False, xpu: Optional[bool] = None) -> List[str]:
         os.path.join(lib_include, 'TH'),
         os.path.join(lib_include, 'THC')
     ]
-    if cuda and IS_HIP_EXTENSION:
-        paths.append(os.path.join(lib_include, 'THH'))
-        paths.append(_join_rocm_home('include'))
-    elif cuda:
-        cuda_home_include = _join_cuda_home('include')
-        # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
-        # but gcc doesn't like having /usr/include passed explicitly
-        if cuda_home_include != '/usr/include':
-            paths.append(cuda_home_include)
+    if backend == "cuda":
+        if IS_HIP_EXTENSION:
+            paths.append(os.path.join(lib_include, 'THH'))
+            paths.append(_join_rocm_home('include'))
+        else:
+            cuda_home_include = _join_cuda_home('include')
+            # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
+            # but gcc doesn't like having /usr/include passed explicitly
+            if cuda_home_include != '/usr/include':
+                paths.append(cuda_home_include)
 
-        # Support CUDA_INC_PATH env variable supported by CMake files
-        if (cuda_inc_path := os.environ.get("CUDA_INC_PATH", None)) and \
-                cuda_inc_path != '/usr/include':
-            paths.append(cuda_inc_path)
-        if CUDNN_HOME is not None:
-            paths.append(os.path.join(CUDNN_HOME, 'include'))
-    elif xpu:
-        paths += _get_one_api_help().get_include_dirs()
-    if xpu is None and IS_XPU_EXTENSION:
+            # Support CUDA_INC_PATH env variable supported by CMake files
+            if (cuda_inc_path := os.environ.get("CUDA_INC_PATH", None)) and \
+                    cuda_inc_path != '/usr/include':
+                paths.append(cuda_inc_path)
+            if CUDNN_HOME is not None:
+                paths.append(os.path.join(CUDNN_HOME, 'include'))
+    elif backend == "xpu":
         paths += _get_one_api_help().get_include_dirs()
 
     return paths
@@ -2245,7 +2243,7 @@ def _write_ninja_file_to_build_library(path,
     user_includes = [os.path.abspath(file) for file in extra_include_paths]
 
     # include_paths() gives us the location of torch/extension.h
-    system_includes = include_paths(with_cuda)
+    system_includes = include_paths(backend="cuda" if with_cuda else "cpu")
     # sysconfig.get_path('include') gives us the location of Python.h
     # Explicitly specify 'posix_prefix' scheme on non-Windows platforms to workaround error on some MacOS
     # installations where default `get_path` points to non-existing `/Library/Python/M.m/include` folder
@@ -2793,7 +2791,7 @@ def XPUExtension(name, sources, *args, **kwargs):
     kwargs["libraries"] = libraries
 
     include_dirs = kwargs.get("include_dirs", [])
-    include_dirs += include_paths(cuda=False, xpu=True)
+    include_dirs += include_paths(backend="xpu")
     kwargs["include_dirs"] = include_dirs
 
     kwargs["language"] = "c++"
