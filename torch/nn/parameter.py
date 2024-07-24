@@ -214,9 +214,12 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
 class _BufferMeta(torch._C._TensorMeta):
     # Make `isinstance(t, Buffer)` return True for custom tensor instances that have the _is_buffer flag.
     def __instancecheck__(self, instance):
-        return isinstance(instance, torch.Tensor) and getattr(
-            instance, "_is_buffer", False
-        )
+        if self is Buffer:
+            if isinstance(instance, torch.Tensor) and getattr(
+                instance, "_is_buffer", False
+            ):
+                return True
+        return super().__instancecheck__(instance)
 
 
 class Buffer(torch.Tensor, metaclass=_BufferMeta):
@@ -232,29 +235,17 @@ class Buffer(torch.Tensor, metaclass=_BufferMeta):
 
     Args:
         data (Tensor): buffer tensor.
-        requires_grad (bool, optional): if the buffer requires gradient.
-            Default: `False`
         persistent (bool, optional): whether the buffer is part of the module's
             :attr:`state_dict`. Default: `True`
     """
 
-    def __new__(cls, data=None, requires_grad=False, persistent=True):
+    def __new__(cls, data=None, persistent=True):
         if data is None:
             data = torch.empty(0)
 
-        # Path for custom tensors: set a flag on the instance to indicate buffer-ness.
-        t = data.detach().requires_grad_(requires_grad)
-        if type(t) is not type(data) and not isinstance(data, Buffer):
-            raise RuntimeError(
-                f"Creating a Buffer from an instance of type {type(data).__name__} "
-                "requires that detach() returns an instance of the same type, but return "
-                f"type {type(t).__name__} was found instead. To use the type as a "
-                "Buffer, please correct the detach() semantics defined by "
-                "its __torch_dispatch__() implementation."
-            )
-        t.persistent = persistent
-        t._is_buffer = True
-        return t
+        data.persistent = persistent
+        data._is_buffer = True
+        return data
 
     def __deepcopy__(self, memo):
         if id(self) in memo:

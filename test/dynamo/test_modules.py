@@ -2700,9 +2700,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         class TestModule(torch.nn.Module):
             def __init__(self, buf) -> None:
                 super().__init__()
-                # FIXME: Changing this one to nn.Buffer fails because value in self.tx.output.side_effects
-                # will no longer evaluate to True
-                self.register_buffer("buf", buf)
+                self.buf = torch.nn.Buffer(buf)
 
             def forward(self, x):
                 return self.buf * x
