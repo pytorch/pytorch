@@ -164,7 +164,7 @@ def run_single_experiment(
         query.reshape(batch_size, kv_heads, -1, head_dim),
         key,
         value,
-        score_mod, 
+        score_mod,
         block_mask,
     )
 

@@ -129,8 +129,6 @@ def _math_attention_inner(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     working_precision = torch.float64 if query.dtype == torch.float64 else torch.float32
 
-    
-
     scores = (query @ key.transpose(-2, -1)).to(dtype=working_precision)
 
     b = torch.arange(0, scores.size(0), device=scores.device)
@@ -140,18 +138,19 @@ def _math_attention_inner(
     m = torch.arange(0, scores.size(-2), device=scores.device)
     n = torch.arange(0, scores.size(-1), device=scores.device)
 
-
-    
-
     captured_buffers_in_dim = (None,) * len(score_mod_other_buffers)
     from torch.nn.attention.flex_attention import _vmap_for_bhqkv
 
     # first input is score
-    score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,), suffix=captured_buffers_in_dim)
+    score_mod = _vmap_for_bhqkv(
+        score_mod, prefix=(0,), suffix=captured_buffers_in_dim, group_dim=True
+    )
 
     mask_mod = block_mask[-1]
     mask_mod_in_dim_buffers = (None,) * len(mask_mod_other_buffers)
-    mask_mod = _vmap_for_bhqkv(mask_mod, prefix=(), suffix=mask_mod_in_dim_buffers)
+    mask_mod = _vmap_for_bhqkv(
+        mask_mod, prefix=(), suffix=mask_mod_in_dim_buffers, group_dim=True
+    )
 
     # todo: We wouldn't need these overrides in this file if Dynamo always did the
     # rewriting.
@@ -212,7 +211,7 @@ def math_attention(
 
     post_mod_scores = post_mod_scores.softmax(dim=-1)
 
-    output = scores.to(query.dtype) @ value
+    output = post_mod_scores.to(query.dtype) @ value
 
     output = torch.flatten(output, 1, 2)
     logsumexp = torch.flatten(logsumexp, 1, 2)
@@ -732,6 +731,7 @@ def sdpa_dense_backward(
         prefix=(0,),
         suffix=(0,) + captured_buffers_in_dim,
         out_dims=out_dims,
+        group_dim=True,
     )
     with TransformGetItemToIndex():
         grad_scores, *_ = joint_score_mod(
@@ -741,7 +741,10 @@ def sdpa_dense_backward(
     grad_scores = grad_scores.to(query.dtype)
 
     mask_mod = _vmap_for_bhqkv(
-        mask_graph, prefix=(), suffix=(None,) * len(mask_mod_other_buffers)
+        mask_graph,
+        prefix=(),
+        suffix=(None,) * len(mask_mod_other_buffers),
+        group_dim=True,
     )
     with TransformGetItemToIndex():
         mask_scores = mask_mod(b, h, m, n, *mask_mod_other_buffers)

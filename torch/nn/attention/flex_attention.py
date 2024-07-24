@@ -68,9 +68,10 @@ def _vmap_for_bhqkv(
     prefix: Tuple[Optional[int], ...],
     suffix: Tuple[Optional[int], ...] = (),
     out_dims: Union[int, List[Optional[int]]] = 0,
+    group_dim: bool = False,
 ):
-    """Used to vmap both score_mods and mask_mods over 4-dimensional inputs.
-    Mapping over the [b, h, q_idx, kv_idx] dimensions.
+    """Used to vmap both score_mods and mask_mods over 4-dimensional/5-dimension inputs.
+    Mapping over the [b, hq, q_idx, kv_idx] or [b, hkv, g, q_idx, kv_idx] dimensions.
 
     Args:
         fn (callable): The function to vmap.
@@ -91,6 +92,14 @@ def _vmap_for_bhqkv(
         (None, None, None, 0),
         (None, None, 0, None),
         (None, 0, None, None),
+    ]
+
+    if group_dim:
+        dimensions += [
+            (None, 0, None, None),
+        ]
+
+    dimensions += [
         (0, None, None, None),
     ]
 
