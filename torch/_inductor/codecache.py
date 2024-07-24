@@ -1091,18 +1091,25 @@ class FxGraphCache:
         The results of this function are *not* saved in the cache itself.
         """
         set_tracing_context_output_strides(example_inputs, compiled_graph)
-        # `cudagraphs` is part of the cache key, so the cached value of
-        # cudagraphs is always equal to the one passed into this function.
-        # We use the one passed in so that, on a cache hit, we still update the
-        # current BoxedBool and disable backwards cudagraphs regardless of caching.
-        saved_cudagraphs = compiled_graph.fx_kwargs["cudagraphs"]
-        assert saved_cudagraphs.value == cudagraphs.value
+
         if cudagraphs:
-            cudagraph_post_compile(
-                example_inputs,
-                compiled_graph,
-                cudagraphs,
-            )
+            # It's possible that cudagraphs is enabled, but was disabled
+            # during a previous compilation we're loading from the cache.
+            # If so, we need to disable it on this new process too.
+            if compiled_graph.disabled_cudagraphs_reason:
+                if "cuda" in compiled_graph.device_types:
+                    log_cudagraph_skip_and_bump_counter(
+                        f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
+                    )
+                else:
+                    counters["inductor"]["cudagraph_skips"] += 1
+                BoxedBool.disable(cudagraphs)
+            else:
+                cudagraph_post_compile(
+                    example_inputs,
+                    compiled_graph,
+                    cudagraphs,
+                )
         inputs_to_check = compiled_graph.inputs_to_check
         # cudagraphs could have been disabled from the earlier conditions
         # so we still need to realign inputs if that happens
