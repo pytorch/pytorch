@@ -3275,7 +3275,7 @@ class DLLWrapper:
 
         return _wrapped_func
 
-    def __enter__(self):  # type: ignore[no-untyped-def]
+    def __enter__(self) -> DLLWrapper:  # noqa: PYI034
         return self
 
     def __exit__(self, *args: Any) -> None:
@@ -3481,7 +3481,7 @@ class TritonFuture(CodeCacheFuture):
         self.future = future
 
     # @dynamo_utils.dynamo_timed
-    def result(self):  # type: ignore[no-untyped-def]
+    def result(self) -> ModuleType:  # type: ignore[override]
         if self.future is not None:
             # If the worker failed this will throw an exception.
             result = self.future.result()
@@ -3492,8 +3492,8 @@ class TritonFuture(CodeCacheFuture):
 
 
 class LambdaFuture(CodeCacheFuture):
-    def __init__(self, result_fn):  # type: ignore[no-untyped-def]
+    def __init__(self, result_fn: Callable[..., Any]) -> None:
         self.result_fn = result_fn
 
-    def result(self):  # type: ignore[no-untyped-def]
+    def result(self) -> Callable[..., Any]:  # type: ignore[override]
         return self.result_fn()
