@@ -14,7 +14,7 @@ from ..._guards import Source
 
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import unimplemented
+from ..exc import ObservedUserStopIteration, unimplemented
 from ..source import AttrSource, GetItemSource
 from ..utils import (
     get_fake_value,
@@ -804,7 +804,14 @@ class ListIteratorVariable(VariableTracker):
         assert self.mutable_local
         old_index = self.index
         if old_index >= len(self.items):
-            raise StopIteration
+            # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
+            # stack and raise the exception.
+            exception_vt = variables.BuiltinVariable(StopIteration).call_function(
+                self, [], {}
+            )
+            tx.exn_vt_stack.append(exception_vt)
+            raise ObservedUserStopIteration
+
         tx.output.side_effects.mutation(self)
         self.index += 1
         return self.items[old_index]
