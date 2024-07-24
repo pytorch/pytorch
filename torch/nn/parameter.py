@@ -227,11 +227,11 @@ class Buffer(torch.Tensor, metaclass=_BufferMeta):
     parameter. For example, BatchNorm's ``running_mean`` is not a parameter, but is part of the module's state.
 
     Buffers are :class:`~torch.Tensor` subclasses, that have a
-    very special property when used with :class:`Module` s - when they're
+    very special property when used with :class:`Module` s -- when they're
     assigned as Module attributes they are automatically added to the list of
     its buffers, and will appear e.g. in :meth:`~torch.nn.Module.buffers` iterator.
     Assigning a Tensor doesn't have such effect. One can still assign a Tensor as explicitly by using
-    a the modules :meth:`~torch.nn.Module.register_buffer` function.
+    the :meth:`~torch.nn.Module.register_buffer` function.
 
     Args:
         data (Tensor): buffer tensor.
@@ -239,42 +239,14 @@ class Buffer(torch.Tensor, metaclass=_BufferMeta):
             :attr:`state_dict`. Default: ``True``
     """
 
-    def __new__(cls, data=None, persistent=True):
+    def __new__(cls, data=None, *, persistent=True):
         if data is None:
             data = torch.empty(0)
 
-        data.persistent = persistent
-        data._is_buffer = True
-        return data
-
-    def __deepcopy__(self, memo):
-        if id(self) in memo:
-            return memo[id(self)]
-        else:
-            result = type(self)(
-                self.data.clone(memory_format=torch.preserve_format),
-                self.requires_grad,
-                self.persistent,
-            )
-            memo[id(self)] = result
-            return result
-
-    def __repr__(self):
-        return "Buffer containing:\n" + super().__repr__()
-
-    def __reduce_ex__(self, proto):
-        state = torch._utils._get_obj_state(self)
-
-        if not state:
-            return (
-                torch._utils._rebuild_buffer,
-                (self.data, self.requires_grad, self.persistent),
-            )
-
-        return (
-            torch._utils._rebuild_buffer_with_state,
-            (self.data, self.requires_grad, self.persistent, state),
-        )
+        t = data.detach().requires_grad_(data.requires_grad)
+        t.persistent = persistent
+        t._is_buffer = True
+        return t
 
     __torch_function__ = _disabled_torch_function_impl
 

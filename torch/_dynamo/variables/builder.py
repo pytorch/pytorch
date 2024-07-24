@@ -389,7 +389,6 @@ class VariableBuilder:
             (
                 (
                     torch.Tensor,
-                    torch.nn.Buffer,
                     torch.nn.Parameter,
                     torch._subclasses.FakeTensor,
                     torch._subclasses.functional_tensor.FunctionalTensor,
@@ -1391,7 +1390,6 @@ class VariableBuilder:
         else:
             assert type(value) in (
                 torch.Tensor,
-                torch.nn.Buffer,
                 torch.nn.Parameter,
                 torch._subclasses.fake_tensor.FakeTensor,
                 torch._subclasses.functional_tensor.FunctionalTensor,
@@ -2534,7 +2532,7 @@ def wrap_to_fake_tensor_and_record(
     e, tx, *, source: Optional[Source], is_tensor: bool, parent_context=None
 ):
     if (
-        type(e) in (torch.Tensor, torch.nn.Buffer, torch.nn.Parameter, FakeTensor)
+        type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
         or isinstance(e, torch.Tensor)
         or is_traceable_wrapper_subclass(e)
     ):
