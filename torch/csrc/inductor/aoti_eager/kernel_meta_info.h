@@ -90,6 +90,7 @@ enum ParameterTag {
   TENSOR_LIST_OPTIONAL,
   SCALAR,
   STRING,
+  DEVICE,
   INVALID,
 };
 
@@ -99,7 +100,8 @@ using ParameterMetadataValue = std::variant<
     TensorMetadata,
     std::vector<TensorMetadata>,
     c10::Scalar,
-    std::string>;
+    std::string,
+    c10::Device>;
 
 // ParameterMetadata is to represent the metadata of the input parameters of a
 // aten operation. It includes the tag of the parameter, the value of the
@@ -127,6 +129,7 @@ struct ParameterMetadata {
       uint64_t input_order);
   ParameterMetadata(const c10::Scalar& scalar, uint64_t input_order);
   ParameterMetadata(const std::string& string_value, uint64_t input_order);
+  ParameterMetadata(const c10::Device& device, uint64_t input_order);
 
   bool operator==(const ParameterMetadata& other) const;
 

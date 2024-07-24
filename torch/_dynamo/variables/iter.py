@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Union
 
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import unimplemented, UserError
+from ..exc import ObservedUserStopIteration, unimplemented, UserError
 
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
@@ -205,7 +205,7 @@ class IteratorVariable(VariableTracker):
         while True:
             try:
                 result.append(self.next_variable(tx))
-            except StopIteration:
+            except ObservedUserStopIteration:
                 break
         return result
 
@@ -224,18 +224,6 @@ class RepeatIteratorVariable(IteratorVariable):
     def next_variable(self, tx):
         return self.item
 
-    def reconstruct(self, codegen):
-        codegen.add_push_null(
-            lambda: codegen.extend_output(
-                [
-                    codegen.create_load_python_module(itertools),
-                    codegen.create_load_attr("count"),
-                ]
-            )
-        )
-        codegen(self.item)
-        codegen.extend_output(create_call_function(1, False))
-
 
 class CountIteratorVariable(IteratorVariable):
     def __init__(self, item: int = 0, step: int = 1, **kwargs):
@@ -253,19 +241,6 @@ class CountIteratorVariable(IteratorVariable):
         next_item = self.item.call_method(tx, "__add__", [self.step], {})
         self.item = next_item
         return self.item
-
-    def reconstruct(self, codegen):
-        codegen.add_push_null(
-            lambda: codegen.extend_output(
-                [
-                    codegen.create_load_python_module(itertools),
-                    codegen.create_load_attr("count"),
-                ]
-            )
-        )
-        codegen(self.item)
-        codegen(self.step)
-        codegen.extend_output(create_call_function(2, False))
 
 
 class CycleIteratorVariable(IteratorVariable):
@@ -301,7 +276,7 @@ class CycleIteratorVariable(IteratorVariable):
                 if self.item is None:
                     return self.next_variable(tx)
                 return self.item
-            except StopIteration:
+            except ObservedUserStopIteration:
                 self.iterator = None
                 return self.next_variable(tx)
         elif len(self.saved) > 0:
@@ -309,7 +284,13 @@ class CycleIteratorVariable(IteratorVariable):
             self.saved_index = (self.saved_index + 1) % len(self.saved)
             return self.item
         else:
-            raise StopIteration
+            # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
+            # stack and raise the exception.
+            exception_vt = variables.BuiltinVariable(StopIteration).call_function(
+                self, [], {}
+            )
+            tx.exn_vt_stack.append(exception_vt)
+            raise ObservedUserStopIteration
 
 
 class ZipVariable(IteratorVariable):
@@ -365,7 +346,7 @@ class ZipVariable(IteratorVariable):
         def get_item(it):
             if isinstance(it, list):
                 if old_index >= len(it):
-                    raise StopIteration
+                    raise ObservedUserStopIteration
                 return it[old_index]
             else:
                 return it.next_variable(tx)
@@ -373,16 +354,16 @@ class ZipVariable(IteratorVariable):
         try:
             for idx, it in enumerate(self.iterables):
                 args.append(get_item(it))
-        except StopIteration:
+        except ObservedUserStopIteration:
             if self.strict:
                 if idx == 0:
                     # all other iterables should be exhausted
                     for it in self.iterables:
                         try:
                             get_item(it)
-                        except StopIteration:
+                        except ObservedUserStopIteration:
                             continue
-                        # no StopIteration - fall through to UserError
+                        # no ObservedUserStopIteration - fall through to UserError
                         break
                     else:
                         # all iterables exhausted, raise original error

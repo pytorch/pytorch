@@ -572,7 +572,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.needs_input_grad = needs_input_grad
 
     @staticmethod
-    def create(tx, args=None, kwargs=None):
+    def create(tx: "InstructionTranslator", args=None, kwargs=None):
         needs_input_grad = None
         if args and not kwargs:
             needs_input_grad = tuple(
@@ -758,7 +758,11 @@ class GetAttrVariable(VariableTracker):
             and args[0].is_python_constant()
             and isinstance(
                 self.obj,
-                (variables.UserDefinedObjectVariable, variables.NNModuleVariable),
+                (
+                    variables.UserDefinedObjectVariable,
+                    variables.NNModuleVariable,
+                    variables.UserDefinedClassVariable,
+                ),
             )
         ):
             obj = self.obj
@@ -782,7 +786,11 @@ class GetAttrVariable(VariableTracker):
             and not kwargs
             and isinstance(
                 self.obj,
-                (variables.UserDefinedObjectVariable, variables.NNModuleVariable),
+                (
+                    variables.UserDefinedObjectVariable,
+                    variables.NNModuleVariable,
+                    variables.UserDefinedClassVariable,
+                ),
             )
         ):
             obj = self.obj
@@ -1174,19 +1182,6 @@ class LoggingLoggerVariable(VariableTracker):
             # For export cases, we can just make debugging functions no-ops
             return
         unimplemented("Logger not supported for non-export cases")
-
-
-class StopIterationVariable(VariableTracker):
-    def __init__(self, args, **kwargs):
-        super().__init__(**kwargs)
-        self.args = args
-
-    def reconstruct(self, codegen):
-        codegen.add_push_null(
-            lambda: codegen.load_import_from("builtins", "StopIteration")
-        )
-        codegen.foreach(self.args)
-        codegen.call_function(len(self.args), False)
 
 
 class ConstantLikeVariable(VariableTracker):
