@@ -172,6 +172,10 @@ def import_transformers_or_skip():
     return decorator
 
 
+def at_least_x_gpu(x):
+    return torch.cuda.is_available() and torch.cuda.device_count() >= x
+
+
 def skip_if_lt_x_gpu(x):
     def decorator(func):
         @wraps(func)
@@ -584,6 +588,9 @@ class MultiProcessTestCase(TestCase):
                 target=self.__class__._run,
                 name="process " + str(rank),
                 args=(rank, self._current_test_name(), self.file_name, child_conn),
+                kwargs={
+                    "fake_pg": getattr(self, "fake_pg", False),
+                }
             )
             process.start()
             logger.info("Started process %s with pid %s", rank, process.pid)
@@ -629,7 +636,7 @@ class MultiProcessTestCase(TestCase):
                 return
 
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
@@ -1051,7 +1058,7 @@ class MultiThreadedTestCase(TestCase):
             self.threads.append(t)
 
     @classmethod
-    def _run(cls, test_name, rank, world_size):
+    def _run(cls, test_name, rank, world_size, **kwargs):
         self = cls(test_name)
         self.rank = rank
 
@@ -1306,7 +1313,7 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
         return torch.cuda.device_count()
 
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:
         # The rest is copypasta from MultiProcessTestCase._run
         self = cls(test_name)
         self.rank = rank
