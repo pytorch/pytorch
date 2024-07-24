@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ import threading
 import warnings
 from bisect import bisect_right
 from copy import copy
-from ctypes import c_void_p, cdll, CDLL
+from ctypes import c_void_p, CDLL, cdll
 from functools import partial
 from pathlib import Path
 from time import time, time_ns
@@ -58,6 +59,7 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compiler,
 )
 
+
 """
 codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
 https://github.com/pytorch/pytorch/issues/124245#issuecomment-2197778902
@@ -86,7 +88,6 @@ from torch._inductor.runtime.compile_tasks import (
 )
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import ALIGN_BYTES, clear_on_fresh_inductor_cache, is_linux
-
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -94,6 +95,7 @@ from torch._subclasses.fake_tensor import (
     TensorMetadata,
 )
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
+
 
 if TYPE_CHECKING:
     from concurrent.futures import Future
@@ -385,7 +387,7 @@ def get_path(
 def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
     if hash_type == "code":
         return code_hash(content, extra)
-    if hash_type in ["cubin", "hsaco"]:
+    if hash_type in ["cubin", "hsaco", "spv"]:
         return code_hash(repr(content))
     raise AssertionError(f"Unknown hash type {hash_type}")
 
@@ -1079,11 +1081,11 @@ class FxGraphCache:
                 cache_id = "fx-graph-v1"
                 try:
                     if config.is_fbcode():
-                        from triton.fb.fb_memcache import (
-                            FbMemcacheRemoteFxGraphCacheBackend,
+                        from torch._inductor.fb.remote_cache import (
+                            FbRemoteFxGraphCacheBackend,
                         )
 
-                        remote_cache = FbMemcacheRemoteFxGraphCacheBackend(cache_id)
+                        remote_cache = FbRemoteFxGraphCacheBackend(cache_id)
                     else:
                         from torch._inductor.remote_cache import RedisRemoteCacheBackend
 
@@ -1581,8 +1583,7 @@ class CudaKernelParamCache:
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
-    def set(cls, key: str, params: Dict[str, str], cubin: str) -> None:
-        bin_type = "cubin" if torch.version.hip is None else "hsaco"
+    def set(cls, key: str, params: Dict[str, str], cubin: str, bin_type: str) -> None:
         _, path = write(
             cubin,
             bin_type,
