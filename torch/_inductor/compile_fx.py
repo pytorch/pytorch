@@ -547,7 +547,7 @@ def compile_fx_inner(
         cudagraph_info = None
         if cudagraphs:
             # check cudagraph disabling reasons from inductor lowering
-            if getattr(compiled_graph, "disabled_cudagraphs_reason", None):
+            if compiled_graph.disabled_cudagraphs_reason:
                 if "cuda" in compiled_graph.device_types:
                     log_cudagraph_skip_and_bump_counter(
                         f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
