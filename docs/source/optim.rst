@@ -456,7 +456,6 @@ We train the model for a total of 300 epochs and start to collect EMA averages i
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.optim.adadelta
-.. py:module:: torch.optim.adafactor
 .. py:module:: torch.optim.adagrad
 .. py:module:: torch.optim.adam
 .. py:module:: torch.optim.adamax
