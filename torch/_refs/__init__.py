@@ -1049,7 +1049,7 @@ def _make_elementwise_binary_reference(
             return handle_noncontiguous_outputs([a, b], output)
 
         if has_out:
-            _ref = out_wrapper()(_ref)
+            _ref = out_wrapper()(_ref)  # type: ignore[assignment]
 
         _ref.__name__ = name
         if aten_op is infer_aten_op:
@@ -2805,9 +2805,9 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
         # TODO: fix this to work with meta tensors
         try:
-            requires_grad = any(x.requires_grad for x in tensors)
+            requires_grad = builtins.any(x.requires_grad for x in tensors)
         except Exception:
-            requires_grad = False
+            requires_grad = False  # type: ignore[assignment]
 
         return empty(
             (0,),
@@ -4427,7 +4427,7 @@ def block_diag(*tensors: List[TensorLikeType]) -> TensorLikeType:
     expects arguments splatted, but `aten.block_diag` expects only
     one argument that is a list of Tensors.
     """
-    return _block_diag_iterable(tensors)
+    return _block_diag_iterable(tensors)  # type: ignore[arg-type]
 
 
 # CompositeImplicitAutograd - don't register decomp
