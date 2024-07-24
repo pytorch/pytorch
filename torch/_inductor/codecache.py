@@ -1,4 +1,5 @@
 # mypy: allow-untyped-decorators
+
 from __future__ import annotations
 
 import base64
@@ -62,6 +63,8 @@ from torch._inductor.codegen.rocm.compile_command import (
 )
 
 T = TypeVar("T")
+
+from _collections_abc import dict_keys  # noqa: TCH003
 
 """
 codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
@@ -1065,7 +1068,7 @@ class FxGraphCache:
                 raise BypassFxGraphCache
 
     @staticmethod
-    def load(
+    def load(  # type: ignore[no-untyped-def]
         compile_fx_fn: Callable[..., Any],
         gm: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
@@ -1073,7 +1076,7 @@ class FxGraphCache:
         inputs_to_check: Sequence[int],
         local: bool,
         remote: bool,
-    ) -> Optional[CompiledFxGraph]:
+    ):
         """
         Load a compiled graph from the cache. If a cached entry does not exist,
         compile the graph and save it to the cache.
@@ -1615,7 +1618,7 @@ class CudaKernelParamCache:
         return cls.cache.get(key, None)
 
     @classmethod
-    def get_keys(cls):  # type: ignore
+    def get_keys(cls) -> dict_keys[str, Dict[str, str]]:
         return cls.cache.keys()
 
 
@@ -2994,7 +2997,7 @@ def _worker_task_halide(lockfile: str, jobs: List[partial[Any]]) -> None:
         raise
 
 
-def touch(filename: str):  # type: ignore
+def touch(filename: str):  # type: ignore[no-untyped-def]
     open(filename, "a").close()
 
 
@@ -3274,7 +3277,7 @@ class DLLWrapper:
 
         return _wrapped_func
 
-    def __enter__(self) -> DLLWrapper:
+    def __enter__(self):  # type: ignore[no-untyped-def]
         return self
 
     def __exit__(self, *args: Any) -> None:
@@ -3340,7 +3343,7 @@ class CUDACodeCache:
                     except subprocess.CalledProcessError as error:
                         raise exc.CUDACompileError(cmd_parts, error.output) from error
                     end_time = time()
-                    log_duration_msg = f"CUDA Compilation took {end_time-start_time} seconds. Compile command: {cmd}"
+                    log_duration_msg = f"CUDA Compilation took {end_time - start_time} seconds. Compile command: {cmd}"
                     log.info(log_duration_msg)
                 else:
                     log.debug(
@@ -3434,7 +3437,7 @@ class ROCmCodeCache:
                     except subprocess.CalledProcessError as error:
                         raise exc.CUDACompileError(cmd_parts, error.output) from error
                     end_time = time()
-                    log_duration_msg = f"Compilation took {end_time-start_time} seconds. Compile command: {cmd}"
+                    log_duration_msg = f"Compilation took {end_time - start_time} seconds. Compile command: {cmd}"
                     log.info(log_duration_msg)
                 else:
                     log.debug(
@@ -3480,7 +3483,7 @@ class TritonFuture(CodeCacheFuture):
         self.future = future
 
     # @dynamo_utils.dynamo_timed
-    def result(self):  # type: ignore
+    def result(self):  # type: ignore[no-untyped-def]
         if self.future is not None:
             # If the worker failed this will throw an exception.
             result = self.future.result()
@@ -3491,8 +3494,8 @@ class TritonFuture(CodeCacheFuture):
 
 
 class LambdaFuture(CodeCacheFuture):
-    def __init__(self, result_fn):  # type: ignore
+    def __init__(self, result_fn):  # type: ignore[no-untyped-def]
         self.result_fn = result_fn
 
-    def result(self):  # type: ignore
+    def result(self):  # type: ignore[no-untyped-def]
         return self.result_fn()
