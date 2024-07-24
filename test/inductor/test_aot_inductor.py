@@ -30,9 +30,11 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    find_library_location,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
+    IS_SANDCASTLE,
     IS_WINDOWS,
     skipIfRocm,
     TEST_WITH_ROCM,
@@ -2469,6 +2471,18 @@ class AOTInductorTestsTemplate:
         model.weight += 1
         self.check_model(model, example_inputs)
 
+    def test_custom_op_add(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_custom_ops.custom_add(x, y)
+
+        m = M().to(device=self.device)
+        args = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+        )
+        self.check_model(m, args)
+
     def test_triton_kernel_extern_kernel_arg(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -3040,7 +3054,21 @@ class AOTInductorTestsTemplate:
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
 
-class AOTInductorTestABICompatibleCpu(TestCase):
+class AOTITestCase(TestCase):
+    def setUp(self):
+        if IS_SANDCASTLE or IS_FBCODE:
+            torch.ops.load_library("//caffe2/test/inductor:custom_ops")
+        elif IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        else:
+            lib_file_path = find_library_location("libaoti_custom_ops.so")
+            if IS_WINDOWS:
+                lib_file_path = find_library_location("aoti_custom_ops.dll")
+            torch.ops.load_library(str(lib_file_path))
+        super().setUp()
+
+
+class AOTInductorTestABICompatibleCpu(AOTITestCase):
     device = "cpu"
     abi_compatible = True
     check_model = check_model
@@ -3199,6 +3227,7 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
     # TODO: use of undeclared identifier 'float8_e4m3fn' and 'half'
     "test_fp8": fail_minimal_arrayref_interface(is_skip=True),
+    "test_custom_op_add": fail_minimal_arrayref_interface(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
@@ -3213,6 +3242,7 @@ CUDA_TEST_FAILURES = {
     "test_runtime_checks_shape_failed": fail_non_abi_compatible_cuda(is_skip=True),
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(is_skip=True),
+    "test_custom_op_add": fail_non_abi_compatible_cuda(is_skip=True),
 }
 
 
@@ -3268,7 +3298,7 @@ copy_tests(
 )
 
 
-class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
+class AOTInductorTestABICompatibleCpuWithStackAllocation(AOTITestCase):
     device = "cpu"
     abi_compatible = True
     check_model = check_model
@@ -3306,7 +3336,7 @@ copy_tests(
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
-class AOTInductorTestABICompatibleCuda(TestCase):
+class AOTInductorTestABICompatibleCuda(AOTITestCase):
     device = "cuda"
     abi_compatible = True
     check_model = check_model
@@ -3328,7 +3358,7 @@ copy_tests(
     IS_FBCODE or sys.platform == "darwin",
     "NonABI mode should not be used in fbcode nor on MacOS",
 )
-class AOTInductorTestNonABICompatibleCpu(TestCase):
+class AOTInductorTestNonABICompatibleCpu(AOTITestCase):
     device = "cpu"
     abi_compatible = False
     check_model = check_model
@@ -3355,6 +3385,7 @@ copy_tests(
         "test_runtime_checks_shape_failed": TestFailure(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
+        "test_custom_op_add": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
     },
 )
 
@@ -3363,7 +3394,7 @@ copy_tests(
     IS_FBCODE or sys.platform == "darwin",
     "NonABI mode should not be used in fbcode nor on MacOS",
 )
-class AOTInductorTestNonABICompatibleCuda(TestCase):
+class AOTInductorTestNonABICompatibleCuda(AOTITestCase):
     device = "cuda"
     abi_compatible = False
     check_model = check_model
