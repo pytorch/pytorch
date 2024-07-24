@@ -3,20 +3,14 @@
 import itertools
 
 import torch
-from torch.distributed._tensor import (
-    distribute_tensor,
-    DTensor,
-    Replicate,
-    Shard,
-)
+from torch.distributed._tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed._tensor.experimental import register_sharding
+from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.distributed._tensor._op_schema import RuntimeSchemaInfo
 
 
 aten = torch.ops.aten
@@ -28,7 +22,9 @@ class TestRegisterSharding(DTensorTestBase):
         # After registering the custom softmax sharding strategy,
         # the original entry would have been replaced.
         # The following line is for showcasing purpose only.
-        DTensor._op_dispatcher.sharding_propagator.op_strategy_funcs.pop(aten._softmax.default, None)
+        DTensor._op_dispatcher.sharding_propagator.op_strategy_funcs.pop(
+            aten._softmax.default, None
+        )
 
         @register_sharding(aten._softmax.default)
         def custom_softmax_sharding(
@@ -45,9 +41,12 @@ class TestRegisterSharding(DTensorTestBase):
 
             for sharding_dim in range(x.ndim):
                 if sharding_dim != softmax_dim:
-                    all_sharding = ([Shard(sharding_dim)], [Shard(sharding_dim), None, None])
-                    acceptable_shardings.append(all_sharding)
-            
+                    all_sharded = (
+                        [Shard(sharding_dim)],
+                        [Shard(sharding_dim), None, None],
+                    )
+                    acceptable_shardings.append(all_sharded)
+
             return acceptable_shardings
 
         device_mesh = self.build_device_mesh()

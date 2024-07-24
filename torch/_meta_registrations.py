@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
 from enum import Enum
@@ -6180,22 +6181,6 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     )
     return torch.empty_like(self, dtype=result_dtype)
-
-
-@register_meta(aten.channel_shuffle.default)
-def meta_channel_shuffle(input, groups):
-    # Assume the input shape is (*, C, H, W), where * represents any number of leading dimensions
-    *leading_dims, C, H, W = input.size()
-    # The output shape is the same as the input
-    return torch.empty(
-        *leading_dims,
-        C,
-        H,
-        W,
-        dtype=input.dtype,
-        layout=input.layout,
-        device=input.device,
-    )
 
 
 @register_meta(aten._local_scalar_dense)
