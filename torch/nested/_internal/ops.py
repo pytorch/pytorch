@@ -553,19 +553,15 @@ def _softmax_default(func, *args, **kwargs):
         )
 
     if reduce_on_ragged:
-        padded_softmax_values = torch.softmax(
+        padded_softmax_values = torch.nn.functional.softmax(
             torch.ops.aten._jagged_to_padded_dense_forward(
-                inp._values.view(
-                    *inp._values.shape[: inp._ragged_idx], -1
+                inp._values.flatten(
+                    start_dim=inp._ragged_idx
                 ),  # values are required to be 2D tensors for j2pd
                 [inp._offsets],
                 max_lengths=[inp._max_seqlen],  # max length of ragged dimension
                 padding_value=float("-inf"),  # e^-inf = 0
-            ).view(
-                *inp.shape[: inp._ragged_idx],
-                inp._max_seqlen,
-                *inp.shape[inp._ragged_idx + 1 :],
-            ),  # insert original dimensions of nested tensor back into padded tensor
+            ),
             dim=inp._ragged_idx,
         )
 
@@ -575,7 +571,9 @@ def _softmax_default(func, *args, **kwargs):
             total_L=inp._values.shape[
                 0
             ],  # providing this parameter helps avoid a GPU/CPU sync
-        )
+        ).reshape(
+            -1, *inp._values.shape[1:]
+        )  # expand softmax_values back to original shape (inp._values.shape)
 
         return torch.nested.nested_tensor_from_jagged(
             softmax_values,
@@ -963,38 +961,35 @@ def sum_dim_IntList(func, *args, **kwargs):
                     "sum(): not supported along a ragged and non-batch dimension for NestedTensor"
                 )
             # reduction cases: (ragged)
-            # shift reduction dimension of values backward to outer dimension
-            values_transposed_backward = inp._values.permute(
-                inp._ragged_idx - 1,
+            values_ragged_dim_outer = inp._values.permute(
+                inp._ragged_idx - 1,  # outer dimension
                 *range(0, inp._ragged_idx - 1),
                 *range(inp._ragged_idx, inp.dim() - 1),
-            )
+            )  # shift reduction dimension of values backward to outer dimension
 
             padded = torch.ops.aten._jagged_to_padded_dense_forward(
-                values_transposed_backward.reshape(
-                    values_transposed_backward.shape[0], -1
-                ),  # _jagged_to_padded_dense_forward requires values to be a 2D tensor
+                values_ragged_dim_outer.reshape(
+                    values_ragged_dim_outer.shape[0], -1
+                ),  # _jagged_to_padded_dense_forward requires values to be a 2D tensor with the ragged dimension as the 0th dimension
                 [inp._offsets],
                 max_lengths=[inp._max_seqlen],
             )
 
-            # expand non-batch dimensions of padded tensor
-            padded_transposed_forward = padded.view(
+            padded_ragged_dim_original = padded.view(
                 padded.shape[0],
                 inp._max_seqlen,
-                *values_transposed_backward.shape[1:],
-            )
-
-            # shift reduction dimension of padded tensor forward to original ragged dimension
-            padded_transposed_forward = padded_transposed_forward.permute(
+                *values_ragged_dim_outer.shape[
+                    1:
+                ],  # expand non-batch dimensions of padded tensor
+            ).permute(
                 0,
                 *range(2, inp._ragged_idx + 1),
                 1,
                 *range(inp._ragged_idx + 1, inp.dim()),
-            )
+            )  # shift reduction dimension of padded tensor forward to original ragged dimension
 
             out = torch.sum(
-                padded_transposed_forward,
+                padded_ragged_dim_original,
                 dim=inp._ragged_idx,
             )  # need to read offsets --> pad jagged dimension and apply sum
 
@@ -1120,21 +1115,11 @@ def native_layer_norm_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     normalized_shape = new_kwargs["normalized_shape"]
 
-    # # Ensure we're not trying to normalize over the ragged dim
-    # if inp.dim() < 3 or (inp.dim() - len(normalized_shape)) < 2:
-    #     raise RuntimeError(
-    #         "layer_norm(): normalizing over ragged dim not supported for nested tensors"
-    #     )
-
-    new_kwargs["dim"], reduce_on_batch, reduce_on_ragged, reduce_on_non_batch = (
-        _wrap_jagged_dims(
-            inp.dim(),
-            (new_kwargs["dim"],),
-            "softmax",
-            inp._ragged_idx,
-            allow_batch_dim=True,
+    # Ensure we're not trying to normalize over the ragged dim
+    if inp.dim() < 3 or (inp.dim() - len(normalized_shape)) < 2:
+        raise RuntimeError(
+            "layer_norm(): normalizing over ragged dim not supported for nested tensors"
         )
-    )
 
     output, mean, std = func(inp._values, **new_kwargs)
     return (NestedTensor(output, **extract_kwargs(inp)), mean, std)
