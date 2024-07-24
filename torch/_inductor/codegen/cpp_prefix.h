@@ -167,19 +167,11 @@ inline IndexValue<T>& argmax_combine(IndexValue<T>& a, T next_value, int64_t nex
 }
 template <typename T>
 inline IndexValue<T>& argmin_combine(IndexValue<T>& a, const IndexValue<T>& next){
-  if(!(less_or_nan(a.value, next.value, a.index, next.index))){
-    a.value = next.value;
-    a.index = next.index;
-  }
-  return a;
+  return argmin_combine(a, next.value, next.index);
 }
 template <typename T>
 inline IndexValue<T>& argmax_combine(IndexValue<T>& a, const IndexValue<T>& next){
-  if(!(greater_or_nan(a.value, next.value, a.index, next.index))){
-    a.value = next.value;
-    a.index = next.index;
-  }
-  return a;
+  return argmax_combine(a, next.value, next.index);
 }
 
 #if INDUCTOR_USE_VECTOR_TYPES()
