@@ -309,7 +309,7 @@ class LLVMCodeGenImpl : public IRVisitor {
       std::optional<std::string> triple,
       std::optional<std::string> cpu,
       std::optional<std::string> attrs);
-  ~LLVMCodeGenImpl() = default;
+  ~LLVMCodeGenImpl() override = default;
 
   llvm::JITTargetAddress getKernelAddress() const;
   std::unique_ptr<llvm::orc::PytorchLLVMJIT> releaseJIT();
