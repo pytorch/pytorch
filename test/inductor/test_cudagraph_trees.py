@@ -2023,6 +2023,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.run_static_input_param_test(fn, 6)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
         def test_fallback_to_eager_if_recompiling_too_many_times(self):
@@ -2058,6 +2059,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
         def test_fallback_to_eager_if_recompiling_too_many_times_warn_only_once(self):
@@ -2102,6 +2104,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             )
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 2)
 
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
         def test_fallback_to_eager_if_recompiling_too_many_times_due_to_cudagraph_managed_tensor(
@@ -2146,6 +2149,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             ).run(captured_output[0])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 1)
