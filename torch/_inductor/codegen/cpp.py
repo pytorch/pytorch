@@ -1419,7 +1419,7 @@ class CppVecOverrides(CppOverrides):
         return code
 
     @staticmethod
-    def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
+    def to_dtype(x, dtype, src_dtype=None, use_compute_dtypes=True):
         assert dtype in [
             torch.bool,
             torch.float,
