@@ -9,8 +9,13 @@ import sys
 from typing import Dict, List, Optional, Union
 
 from .. import polyfill, variables
-from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import ObservedUserStopIteration, unimplemented, UserError
+from ..bytecode_transformation import create_instruction
+from ..exc import (
+    ObservedUserStopIteration,
+    raise_observed_user_stop_iteration,
+    unimplemented,
+    UserError,
+)
 
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
@@ -309,13 +314,7 @@ class CycleIteratorVariable(IteratorVariable):
             self.saved_index = (self.saved_index + 1) % len(self.saved)
             return self.item
         else:
-            # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
-            # stack and raise the exception.
-            exception_vt = variables.BuiltinVariable(StopIteration).call_function(
-                self, [], {}
-            )
-            tx.exn_vt_stack.append(exception_vt)
-            raise ObservedUserStopIteration
+            raise_observed_user_stop_iteration(self, tx)
 
 
 class ZipVariable(IteratorVariable):
@@ -371,7 +370,7 @@ class ZipVariable(IteratorVariable):
         def get_item(it):
             if isinstance(it, list):
                 if old_index >= len(it):
-                    raise ObservedUserStopIteration
+                    raise_observed_user_stop_iteration(self, tx)
                 return it[old_index]
             else:
                 return it.next_variable(tx)

@@ -198,6 +198,16 @@ class ObservedUserStopIteration(ObservedException):
             self.value = None
 
 
+def raise_observed_user_stop_iteration(vt, tx):
+    from .variables import BuiltinVariable
+
+    # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
+    # stack and raise the exception.
+    exception_vt = BuiltinVariable(StopIteration).call_function(vt, [], {})
+    tx.exn_vt_stack.append(exception_vt)
+    raise ObservedUserStopIteration
+
+
 # These exceptions are ok to fallback to eager/graph_break.
 exceptions_allowed_to_be_fallback = (
     torch._subclasses.fake_tensor.DataDependentOutputException,
