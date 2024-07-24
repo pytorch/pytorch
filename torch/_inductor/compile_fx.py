@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
 import functools
@@ -40,6 +41,7 @@ from torch._inductor.cudagraph_utils import (
     CudagraphCachedInfo,
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
+    PlaceholderInfo,
 )
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -412,7 +414,7 @@ def should_use_remote_fx_graph_cache():
     if not config.is_fbcode():
         return False
     try:
-        from triton.fb.fb_memcache import MEMCACHE_VERSION
+        from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
     except ModuleNotFoundError:
         return False
 
@@ -420,7 +422,7 @@ def should_use_remote_fx_graph_cache():
     if torch.version.hip is not None:
         jk_name = "pytorch/remote_cache:fx_graph_memcache_version_amd"
 
-    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)
+    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)
 
 
 # pass config dict back to user
@@ -914,7 +916,7 @@ def get_input_idxs_to_check(
 
 @dynamo_utils.dynamo_timed
 def cudagraphify(
-    model: torch.fx.GraphModule,
+    model: Callable[..., Any],
     static_input_idxs: Sequence[int] = (),
     *,
     device_index: int,
@@ -922,7 +924,7 @@ def cudagraphify(
     is_backward: bool,
     is_inference: bool,
     constants: Tuple[torch.Tensor, ...] = (),
-    placeholders: Tuple[torch.fx.Node, ...] = (),
+    placeholders: Sequence[PlaceholderInfo] = (),
     mutated_input_idxs: Tuple[int, ...] = (),
 ) -> Callable[..., Any]:
     from torch._inductor.cudagraph_trees import (
@@ -975,7 +977,7 @@ def index_expanded_dims_and_copy_(
 
 
 def cudagraphify_impl(
-    model: torch.fx.GraphModule,
+    model: Callable[..., Any],
     inputs: List[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
 ):
