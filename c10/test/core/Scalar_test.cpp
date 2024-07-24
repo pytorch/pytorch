@@ -48,8 +48,14 @@ TEST(ScalarTest, Equality) {
   ASSERT_FALSE(Scalar(-1).equal(0xFFFFFFFFFFFFFFFF));
 }
 
+#ifdef WIN32
+#define TYPE_LONG uint32_t
+#else
+#define TYPE_LONG uint64_t
+#endif
+
 TEST(ScalarTest, LongsAndLongLongs) {
-  Scalar longOne = 1L;
+  Scalar longOne = static_cast<TYPE_LONG>(1L);
   Scalar longlongOne = 1LL;
   ASSERT_EQ(longOne.toInt(), longlongOne.toInt());
 }
