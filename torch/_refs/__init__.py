@@ -516,7 +516,7 @@ def _make_inplace(fn):
 
     inplace_name = f"{fn.__name__}_"
     _fn.__name__ = inplace_name
-    _fn = register_decomposition(getattr(aten, inplace_name))(_fn)
+    _fn = register_decomposition(getattr(aten, inplace_name))(_fn)  # type: ignore[assignment]
 
     # We access the __all__ attribute of the module where fn is defined
     # There may be a cleaner way of doing this...
@@ -5208,7 +5208,7 @@ def meshgrid(*tensors: TensorLikeType, indexing: str):
     pass
 
 
-@register_decomposition(aten.meshgrid)
+@register_decomposition(aten.meshgrid)  # type: ignore[misc]
 def meshgrid(
     *tensors: Union[TensorLikeType, List[TensorLikeType], Tuple[TensorLikeType]],
     indexing: str,
