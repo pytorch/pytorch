@@ -2,7 +2,7 @@
 # mypy: disable-error-code="type-arg"
 from datetime import timedelta
 from enum import Enum
-from typing import Any, overload
+from typing import Any, Optional, overload
 
 import torch
 from torch import Tensor
@@ -550,10 +550,6 @@ class ProcessGroupNCCL(Backend):
         min_ctas: int
         max_ctas: int
 
-        def __init__(self) -> None: ...
-        @property
-        def net_name(self) -> str: ...
-
     class Options:
         config: ProcessGroupNCCL.NCCLConfig
         is_high_priority_stream: bool
@@ -561,19 +557,26 @@ class ProcessGroupNCCL(Backend):
         split_color: int
         global_ranks_in_group: list[int]
         group_name: str
+
+        def __init__(self, is_high_priority_stream: bool = False): ...
+
     def __init__(
         self,
         store: Store,
         rank: int,
         size: int,
-        timeout: timedelta,
+        options: Options,
     ) -> None: ...
     def _group_start(self) -> None: ...
     def _group_end(self) -> None: ...
     def _set_default_timeout(self, timeout) -> None: ...
     def _shutdown(self) -> None: ...
+    def perform_nocolor_split(self, device: torch.device) -> None: ...
+    def comm_split_count(self) -> int: ...
     @property
     def uid(self) -> int: ...
+    @property
+    def options(self) -> Options: ...
 
 class ProcessGroupUCC(Backend):
     def __init__(
@@ -653,3 +656,30 @@ class _SymmetricMemory:
     def barrier(self, channel: int = 0) -> None: ...
     def put_signal(self, dst_rank: int, channel: int = 0) -> None: ...
     def wait_signal(self, src_rank: int, channel: int = 0) -> None: ...
+
+class ProcessGroupCudaP2P(Backend):
+    class Options:
+        nccl_options: Optional[ProcessGroupNCCL.Options]
+        buffer_size: Optional[int]
+
+        def __init__(self) -> None: ...
+
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        options: ProcessGroupCudaP2P.Options,
+    ) -> None: ...
+    def is_p2p_available(self) -> bool: ...
+    def get_buffer_size(self) -> int: ...
+    def stream(self) -> torch.cuda.Stream: ...
+    def intra_node_barrier(self) -> Work: ...
+    def get_p2p_buffer(
+        self,
+        rank: int,
+        sizes: torch.Size,
+        dtype: torch.dtype,
+        storage_offset: Optional[int] = 0,
+    ) -> torch.Tensor: ...
+    def _shutdown(self) -> None: ...

@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import pandas
 
+
 df = pandas.read_csv("perf.csv")
 
 ops = pandas.unique(df["operator"])
