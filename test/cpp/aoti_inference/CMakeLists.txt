@@ -7,7 +7,7 @@ set_target_properties(aoti_custom_class PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 if(USE_CUDA)
   target_compile_definitions(aoti_custom_class PRIVATE USE_CUDA)
-elseif (USE_ROCM)
+elseif(USE_ROCM)
     target_compile_definitions(aoti_custom_class PRIVATE USE_ROCM)
 endif()
 # Link against LibTorch
@@ -62,7 +62,7 @@ target_link_libraries(test_aoti_inference PRIVATE
 if(USE_CUDA)
   target_include_directories(test_aoti_inference PRIVATE ${ATen_CUDA_INCLUDE})
   target_compile_definitions(test_aoti_inference PRIVATE USE_CUDA)
-elseif (USE_ROCM)
+elseif(USE_ROCM)
     target_include_directories(test_aoti_inference PRIVATE ${ATen_HIP_INCLUDE})
     target_compile_definitions(test_aoti_inference PRIVATE USE_ROCM)
 endif()
