@@ -1,13 +1,17 @@
 # mypy: allow-untyped-defs
 import dataclasses
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._dynamo.utils import counters
 
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+
+
+InputType = List[Union[torch.Tensor, int]]
+OutputType = List[Optional[Union[int, torch.Tensor]]]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -25,11 +29,11 @@ class WrappedFunction:
     """
 
     model: Callable[..., Any]
-    static_input_idxs: List[int]
+    static_input_idxs: Sequence[int]
     id: FunctionID
     constants: Tuple[torch.Tensor, ...]
-    placeholders: List[torch.fx.Node]
-    mutated_input_idxs: List[int]
+    placeholders: Sequence[torch.fx.Node]
+    mutated_input_idxs: Sequence[int]
 
 
 def get_placeholders(graph: torch.fx.Graph) -> List[torch.fx.Node]:
@@ -54,7 +58,7 @@ def format_default_skip_message(reason: str) -> str:
 
 
 def get_mutation_stack_trace(
-    placeholders: List[torch.fx.Node], mutation_indices: List[int]
+    placeholders: Sequence[torch.fx.Node], mutation_indices: Sequence[int]
 ) -> str:
     stack_trace: Optional[str] = ""
 
@@ -74,18 +78,18 @@ def get_mutation_stack_trace(
 
 def check_for_mutation(
     func: WrappedFunction,
-    inputs: List[torch.Tensor],
+    inputs: InputType,
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
 ) -> Optional[str]:
     # doesnt work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
         # checking if mutation is only on parameters/static inputs
-        mutation_indices = [
+        mutation_indices: Sequence[int] = [
             idx
             for idx in func.mutated_input_idxs
             if not (
                 idx in func.static_input_idxs
-                or is_cuda_graph_recorded_tensor(inputs[idx])
+                or is_cuda_graph_recorded_tensor(inputs[idx])  # type: ignore[arg-type]
             )
         ]
     else:
@@ -207,10 +211,10 @@ class CheckInvariantStatus(Enum):
 
 
 def log_data_ptr_mismatch(
-    placeholders: List[torch.fx.Node],
-    inputs: List[torch.Tensor],
-    recorded_data_ptr: List[Optional[int]],
-    target_idxs: List[int],
+    placeholders: Sequence[torch.fx.Node],
+    inputs: InputType,
+    recorded_data_ptr: Sequence[Optional[int]],
+    target_idxs: Sequence[int],
     mismatch: CheckInvariantStatus,
 ) -> str:
     """
@@ -225,6 +229,7 @@ def log_data_ptr_mismatch(
     t_data_ptrs = [recorded_data_ptr[i] for i in target_idxs]
     error_msg = f"{mismatch}.\n"
     for i, (tensor, data_ptr) in enumerate(zip(t_tensors, t_data_ptrs)):
+        assert isinstance(tensor, torch.Tensor)
         index = target_idxs[i]
         if tensor.data_ptr() != data_ptr:
             placeholder = placeholders[index]
@@ -234,3 +239,12 @@ def log_data_ptr_mismatch(
                 f"input stack trace: {get_placeholder_stack_trace(placeholder)}\n"
             )
     return error_msg
+
+
+def maybe_get_static_data_ptr(
+    idx: int, inputs: List[Union[torch.Tensor, int]], static_input_idxs: List[int]
+) -> Optional[int]:
+    inp = inputs[idx]
+    if isinstance(inp, torch.Tensor) and idx in static_input_idxs:
+        return inp.data_ptr()
+    return None
