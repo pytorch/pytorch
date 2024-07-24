@@ -545,10 +545,9 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     void* ptr) {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto block = find_block(ptr);
-  TORCH_CHECK(
-      block != nullptr,
-      "CUDASymmetricMemoryAllocator::rendezvous: input must be allocated ",
-      "via CUDASymmetricMemoryAllocator::alloc");
+  if (block == nullptr) {
+    return nullptr;
+  }
 
   if (block->symm_mem != nullptr) {
     return block->symm_mem;

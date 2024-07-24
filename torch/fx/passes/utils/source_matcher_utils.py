@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from dataclasses import dataclass, field
 from torch.fx.graph import Graph
