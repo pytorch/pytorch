@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
 from typing import Any, Callable, Dict, List, Optional, Set
