@@ -21,8 +21,8 @@ class Adafactor(Optimizer):
         lr: Union[float, Tensor] = 1e-2,
         beta2_decay: float = -0.8,
         eps: Tuple[Optional[float], float] = (None, 1e-3),
-        d: float = 1,
-        weight_decay: float = 0,
+        d: float = 1.0,
+        weight_decay: float = 0.0,
         *,
         maximize: bool = False,
     ):
@@ -51,7 +51,6 @@ class Adafactor(Optimizer):
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
-            group.setdefault("maximize", False)
             for p in group["params"]:
                 p_state = self.state.get(p, [])
                 if len(p_state) != 0 and not torch.is_tensor(p_state["step"]):
@@ -126,9 +125,9 @@ class Adafactor(Optimizer):
         for group in self.param_groups:
             params_with_grad: List[Tensor] = []
             grads: List[Tensor] = []
-            row_vars: List[Tensor] = []
-            col_vars: List[Tensor] = []
-            variances: List[Tensor] = []
+            row_vars: List[Optional[Tensor]] = []
+            col_vars: List[Optional[Tensor]] = []
+            variances: List[Optional[Tensor]] = []
             state_steps: List[Tensor] = []
             eps1, eps2 = group["eps"]
 
@@ -192,14 +191,14 @@ Adafactor.__doc__ = (
             &\hspace{5mm}\theta_t       \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}    \\
             &\hspace{5mm}\textbf{if} \: \text{dim}(G_t) > 1:                                     \\
             &\hspace{10mm}R_t           \leftarrow \widehat{\beta}_{2_t}R_{t-1}+
-                (1-\widehat{\beta}_{2_t})(G_t \odot G_t + 1_n \cdot 1^\top_m) \cdot 1_m          \\
+                (1-\widehat{\beta}_{2_t})(G_t \odot G_t) \cdot 1_m                               \\
             &\hspace{10mm}C_t           \leftarrow \widehat{\beta}_{2_t}C_{t-1}+
-                (1-\widehat{\beta}_{2_t}) 1^\top_n \cdot (G_t \odot G_t + 1_n \cdot 1^\top_m)    \\
+                (1-\widehat{\beta}_{2_t}) 1^\top_n \cdot (G_t \odot G_t)                         \\
             &\hspace{10mm}\widehat{V}_t \leftarrow
                 \frac{R_t \cdot C_t}{max(1^\top_n \cdot R_t, \epsilon_1)}                        \\
             &\hspace{5mm}\textbf{else}                                                           \\
             &\hspace{10mm}\widehat{V}_t \leftarrow \widehat{\beta}_{2_t}\widehat{V}_{t-1}+
-                (1-\widehat{\beta}_{2_t}) 1^\top_n \cdot (G_t \odot G_t + \epsilon_1 1_n)        \\
+                (1-\widehat{\beta}_{2_t}) \cdot (G_t \odot G_t + \epsilon_1 1_n)                 \\
             &\hspace{5mm}U_t            \leftarrow
                 \frac{G_t}{max(\sqrt{\widehat{V}_t}, \epsilon_1)}                                \\
             &\hspace{5mm}\widehat{U}_t  \leftarrow \frac{U_t}{max(1, \frac{\text{RMS}(U_t)}{d})} \\
@@ -310,9 +309,13 @@ Adafactor.__doc__ = (
 def _single_tensor_adafactor(
     params: List[Tensor],
     grads: List[Tensor],
-    row_vars: List[Tensor],
-    col_vars: List[Tensor],
-    variances: List[Tensor],
+    # If grad is 1-dimensional (aka a vector), there is no factorization necessary
+    # so row_var and col_var will be None while variance will be filled.
+    # Contrarily, for a grad with multiple dimensions, we will factor along the last
+    # 2 dimensions, and so row_var and col_var will be filled and variance will be None.
+    row_vars: List[Optional[Tensor]],
+    col_vars: List[Optional[Tensor]],
+    variances: List[Optional[Tensor]],
     state_steps: List[Tensor],
     grad_scale: Optional[Tensor],
     found_inf: Optional[Tensor],
@@ -326,7 +329,9 @@ def _single_tensor_adafactor(
     maximize: bool,
     has_complex: bool,
 ):
-    assert grad_scale is None and found_inf is None
+    assert (
+        grad_scale is None and found_inf is None
+    ), "Grad scaling should occur outside of optimizer.step()"
 
     if torch.jit.is_scripting():
         # this assert is due to JIT being dumb and not realizing that the ops below
@@ -356,6 +361,9 @@ def _single_tensor_adafactor(
             param.mul_(1 - lr * weight_decay)
 
         if grad.dim() > 1:
+            assert (
+                row_var is not None and col_var is not None
+            ), "row_var and col_var should be defined"
             # same as (g * g).mean(dim=-1) w/o materializing an intermediate size g
             row_mean = (
                 torch.norm(grad, dim=-1, keepdim=True).square_().div_(grad.size(-1))
@@ -367,13 +375,15 @@ def _single_tensor_adafactor(
             )
             col_var.lerp_(col_mean, 1 - beta2_t)
             var_estimate = row_var @ col_var
-            var_estimate.div_(row_var.mean(dim=-1, keepdim=True).clamp_(min=eps1))
-            update = var_estimate.sqrt_().clamp_(min=eps1).reciprocal_()
+            var_estimate.div_(row_var.mean(dim=-2, keepdim=True).clamp_(min=eps1))
         else:
-            grad_squared_eps = grad * grad + eps1
-            variance.lerp_(grad_squared_eps, 1 - beta2_t)
-            update = variance.rsqrt()
+            assert variance is not None, "variance should be defined"
+            grad_squared = grad * grad
+            variance.lerp_(grad_squared, 1 - beta2_t)
+            # avoid writing into variance during update
+            var_estimate = variance.clone()
 
+        update = var_estimate.sqrt_().clamp_(min=eps1).reciprocal_()
         update.mul_(grad)
         denom = max(1.0, update.norm(2).item() / ((update.numel() ** 0.5) * d))
         param.add_(update, alpha=-alpha / denom)
@@ -383,9 +393,9 @@ def _single_tensor_adafactor(
 def adafactor(
     params: List[Tensor],
     grads: List[Tensor],
-    row_vars: List[Tensor],
-    col_vars: List[Tensor],
-    variances: List[Tensor],
+    row_vars: List[Optional[Tensor]],
+    col_vars: List[Optional[Tensor]],
+    variances: List[Optional[Tensor]],
     state_steps: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
