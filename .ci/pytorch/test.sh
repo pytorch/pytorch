@@ -391,7 +391,10 @@ test_inductor_cpp_wrapper_abi_compatible() {
 # .github/workflows/inductor-perf-test-nightly.yml
 DYNAMO_BENCHMARK_FLAGS=()
 
-if [[ "${TEST_CONFIG}" == *dynamo_eager* ]]; then
+
+if [[ "${TEST_CONFIG}" == *test_laith* ]]; then
+  test_laith
+elif [[ "${TEST_CONFIG}" == *dynamo_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend eager)
 elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend aot_eager)
@@ -1305,8 +1308,6 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   elif [[ "${TEST_CONFIG}" == *torchbench_gcp_smoketest* ]]; then
     checkout_install_torchbench
     TORCHBENCHPATH=$(pwd)/torchbench test_torchbench_gcp_smoketest
-  elif [[ "${TEST_CONFIG}" == *laith_test* ]]; then
-    test_laith
   else
     checkout_install_torchbench
     # Do this after checkout_install_torchbench to ensure we clobber any
