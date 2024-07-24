@@ -18,8 +18,12 @@ def check_cpp_to_python_exceptions_raised(actual_csv, expected_csv, expected_fil
     improved = []
 
     for model in actual_csv["name"]:
-        cpp_to_python_exceptions_raised = get_field(actual_csv, model, "cpp_to_python_exceptions_raised")
-        expected_cpp_to_python_exceptions_raised = get_field(expected_csv, model, "cpp_to_python_exceptions_raised")
+        cpp_to_python_exceptions_raised = get_field(
+            actual_csv, model, "cpp_to_python_exceptions_raised"
+        )
+        expected_cpp_to_python_exceptions_raised = get_field(
+            expected_csv, model, "cpp_to_python_exceptions_raised"
+        )
 
         if cpp_to_python_exceptions_raised == expected_cpp_to_python_exceptions_raised:
             status = "PASS"
@@ -32,8 +36,10 @@ def check_cpp_to_python_exceptions_raised(actual_csv, expected_csv, expected_fil
         elif cpp_to_python_exceptions_raised < expected_cpp_to_python_exceptions_raised:
             status = "IMPROVED:"
             improved.append(model)
+        exp_str = expected_cpp_to_python_exceptions_raised
+        act_str = cpp_to_python_exceptions_raised
         print(
-            f"{model:34}  {status:9} cpp_to_python_exceptions_raised={cpp_to_python_exceptions_raised}, expected={expected_cpp_to_python_exceptions_raised}"
+            f"{model:34}  {status:9} cpp_to_python_exceptions_raised={act_str}, expected={exp_str}"
         )
 
     msg = ""
