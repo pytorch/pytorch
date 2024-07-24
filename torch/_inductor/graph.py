@@ -210,7 +210,10 @@ def mark_nodes_dislike_padding(g):
     def _get_overload_packet(node):
         return (
             node.target._overloadpacket
-            if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
+            if node.op == "call_function"
+            # hasattr on OpOverloadPacket is slow, do isinstance first
+            and isinstance(node.target, torch._ops.OpOverload)
+            and hasattr(node.target, "_overloadpacket")
             else None
         )
 
@@ -913,7 +916,10 @@ class GraphLowering(torch.fx.Interpreter):
         if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
             return super().call_function(target, args, kwargs)
 
-        if hasattr(target, "_inductor_lowering_function"):
+        # hasattr on OpOverloadPacket is slow, check isinstance first
+        if not isinstance(target, torch._ops.OpOverloadPacket) and hasattr(
+            target, "_inductor_lowering_function"
+        ):
             # passthrough lowerings from .pattern_matcher
             return target(*args, **kwargs)
 
