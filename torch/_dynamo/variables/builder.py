@@ -2345,7 +2345,9 @@ def _automatic_dynamic(
         frame_state_entry = tx.output.frame_state[name]
     elif st.all_states is None:
         # Preflight, always pretend as if it's static
-        frame_state_entry = FrameStateSizeEntry(size=e.size(), scalar=None, stride=e.stride())
+        frame_state_entry = FrameStateSizeEntry(
+            size=e.size(), scalar=None, stride=e.stride()
+        )
         st.local_state.input_sizes[name] = list(e.size())
         st.local_state.input_strides[name] = list(e.stride())
     else:
