@@ -909,6 +909,24 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
             expected_node_occurrence=node_occurrence,
         )
 
+    def test_fold_bn_erases_bn_node(self):
+        """
+        Ensure the BN node is erased from the graph after folding
+        it into conv in `convert_pt2e` even in train mode.
+        """
+        m = self._get_conv_bn_model(has_conv_bias=False, has_bn=True, has_relu=False)
+        m = capture_pre_autograd_graph(m, self.example_inputs)
+        quantizer = XNNPACKQuantizer()
+        quantizer.set_global(
+            get_symmetric_quantization_config(is_per_channel=False, is_qat=True),
+        )
+        m = prepare_qat_pt2e(m, quantizer)
+        m = convert_pt2e(m)
+        (conv_node, bn_node, getitem_node) = _get_conv_bn_getitem_nodes(m)
+        self.assertTrue(conv_node is not None)
+        self.assertTrue(bn_node is None)
+        self.assertTrue(getitem_node is None)
+
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EQAT_ConvBn1d(TestQuantizePT2EQAT_ConvBn_Base):
