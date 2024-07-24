@@ -15,7 +15,7 @@ hf_Longformer,amp,dynamic,default,0.997006035
 hf_Bert_large,amp,dynamic,default,0.99391146
 llama,amp,static,default,1.32950568
 timm_regnet,amp,static,cpp,1.157188305
-lennard_jones,amp,static,cpp,2.240104485
+lennard_jones,amp,static,cpp,2.124114
 #hf_T5_generate,amp,dynamic,cpp,1.29339502
 timm_vovnet,amp,dynamic,cpp,1.07856471
 mobilenet_v2,amp,dynamic,cpp,2.27774577
