@@ -821,8 +821,8 @@ class InstructionTranslatorBase(
         try:
             self.dispatch_table[inst.opcode](self, inst)
             return not self.output.should_exit
-        except exc.ObservedException:
-            self.exception_handler()
+        except exc.ObservedException as e:
+            self.exception_handler(e)
             return True
         except ReturnValueOp:
             return False
@@ -1272,7 +1272,7 @@ class InstructionTranslatorBase(
             val = it.next_variable(self)
             self.push(it)
             self.push(val)
-        except (StopIteration, exc.UserStopIteration):
+        except (StopIteration, exc.ObservedUserStopIteration):
             # leave iterator upon exhaustion in 3.12
             if sys.version_info >= (3, 12):
                 # CPython 3.12 actually jumps to the instruction after the END_FOR
@@ -1288,13 +1288,6 @@ class InstructionTranslatorBase(
             unimplemented("re-raise")
         elif inst.arg == 1:
             val = self.pop()
-
-            # TODO(anijain2305) - Merge StopIterationVariable to use the same exception infra.
-            if (
-                isinstance(val, BuiltinVariable) and val.fn is StopIteration
-            ) or isinstance(val, variables.StopIterationVariable):
-                raise exc.UserStopIteration
-
             # User can raise exception in 2 ways
             #   1) raise exception type - raise NotImplementedError
             #   2) raise execption instance - raise NotImplemetedError("foo")
@@ -1310,12 +1303,15 @@ class InstructionTranslatorBase(
 
             # 2) when user raises exception instance
             if isinstance(val, variables.ExceptionVariable):
+                if val.exc_type is StopIteration:
+                    # StopIteration is used to find the end of iteration while tracing __next__
+                    raise exc.ObservedUserStopIteration(f"raised exception {val}")
                 raise exc.ObservedException(f"raised exception {val}")
             unimplemented(f"raise {exc}")
         else:
             unimplemented("raise ... from ...")
 
-    def exception_handler(self):
+    def exception_handler(self, raised_exception):
         if sys.version_info >= (3, 11):
             exn_tab_entry = self.current_instruction.exn_tab_entry
             if exn_tab_entry:
@@ -1348,7 +1344,7 @@ class InstructionTranslatorBase(
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
                     raise Unsupported("Observed exception")
-                raise exc.ObservedException
+                raise raised_exception
         else:
             if len(self.block_stack):
                 # base implementation - https://github.com/python/cpython/blob/3.10/Python/ceval.c#L4455
@@ -1409,7 +1405,7 @@ class InstructionTranslatorBase(
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
                     raise Unsupported("Observed exception")
-                raise exc.ObservedException
+                raise raised_exception
 
     def PUSH_EXC_INFO(self, inst):
         val = self.pop()
@@ -3186,7 +3182,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
         try:
             val = tos.next_variable(self)
-        except (StopIteration, exc.UserStopIteration) as ex:
+        except (StopIteration, exc.ObservedUserStopIteration) as ex:
             # The iterator is exhausted. Stop the loop and return.
             self.pop()
             self.push(ConstantVariable.create(ex.value))
@@ -3213,7 +3209,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             if isinstance(val, ConstantVariable) and val.value is None:
                 try:
                     val = tos.next_variable(self)
-                except (StopIteration, exc.UserStopIteration) as ex:
+                except (StopIteration, exc.ObservedUserStopIteration) as ex:
                     # To implement SEND, we have to look at the implementation
                     # when the iterator returns StopIteration. This translates to this code
                     # 3.11: https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2613-L2619
