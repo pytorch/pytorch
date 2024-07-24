@@ -461,8 +461,6 @@ class Module:
     # As JIT does not support Set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
     _forward_pre_hooks_with_kwargs: Dict[int, bool]
-    # The bool indicates whether the hook comes from the private method
-    # or the public method.
     _state_dict_hooks: Dict[int, Callable]
     _load_state_dict_pre_hooks: Dict[int, Callable]
     _state_dict_pre_hooks: Dict[int, Callable]
@@ -2006,7 +2004,7 @@ class Module:
         The registered hooks can modify the ``state_dict`` inplace.
         """
         handle = RemovableHandle(self._state_dict_hooks)
-        hook._from_public_api = False
+        hook._from_public_api = True
         self._state_dict_hooks[handle.id] = hook
         return handle
 
@@ -2149,7 +2147,8 @@ class Module:
         for hook in self._state_dict_hooks.values():
             hook_result = hook(self, destination, prefix, local_metadata)
             if not getattr(hook, "_from_public_api", False):
-                destination = hook_result
+                if hook_result is not None:
+                    destination = hook_result
         return destination
 
     def _register_load_state_dict_pre_hook(self, hook, with_module=False):

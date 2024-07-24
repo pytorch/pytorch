@@ -904,11 +904,20 @@ class TestStateDictHooks(TestCase):
         hook_registration_fn = (
             m._register_state_dict_hook if private else m.register_state_dict_post_hook
         )
-        hook_registration_fn(lambda m, s, p, l: OrderedDict())
+
+        def fn(m, s, p, l):
+            return OrderedDict()
+
+        handle = hook_registration_fn(fn)
         if private:
+            self.assertTrue(not hasattr(fn, "_from_public_api"))
             self.assertTrue(len(m.state_dict()) == 0)
         else:
+            self.assertTrue(fn._from_public_api)
+            self.assertTrue(len(m.state_dict()) > 0)
             _check_sd(m.state_dict())
+            handle.remove()
+            self.assertTrue(not hasattr(fn, "_from_public_api"))
 
 
 class TestModuleGlobalHooks(TestCase):

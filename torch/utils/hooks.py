@@ -35,11 +35,11 @@ class RemovableHandle:
     def remove(self) -> None:
         hooks_dict = self.hooks_dict_ref()
         if hooks_dict is not None and self.id in hooks_dict:
-            # The `_from_legacy_api` flag is added to distinguish between
+            # The `_from_public_api` flag is added to distinguish between
             # hooks registered via private _register_state_dict_hook and
             # register_state_dict_hook, we clean up this state here.
-            if hasattr(hooks_dict[self.id], "_from_legacy_api"):
-                del hooks_dict[self.id]._from_legacy_api
+            if hasattr(hooks_dict[self.id], "_from_public_api"):
+                del hooks_dict[self.id]._from_public_api
             del hooks_dict[self.id]
 
         for ref in self.extra_dict_ref:
