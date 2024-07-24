@@ -52,6 +52,7 @@ from torch._inductor.utils import (
     run_and_get_code,
     run_and_get_cpp_code,
     run_and_get_triton_code,
+    run_fw_bw_and_get_code,
 )
 from torch._inductor.virtualized import V
 from torch._prims_common import is_integer_dtype
@@ -223,15 +224,6 @@ def define_custom_op_3_for_test(id_, fn_cpu, fn_cuda, fn_xpu, fn_meta, tags=()):
 
 
 f32 = torch.float32
-
-
-def run_fw_bw_and_get_code(fn):
-    def run_with_backward():
-        result = fn()
-        result.sum().backward()
-        return result
-
-    return run_and_get_code(run_with_backward)
 
 
 def register_ops_with_aoti_compile(ns, op_set, dispatch_key, torch_compile_op_lib_impl):

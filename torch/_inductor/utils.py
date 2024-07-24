@@ -1227,6 +1227,15 @@ def run_and_get_code(fn, *args, **kwargs):
     return result, source_codes
 
 
+def run_fw_bw_and_get_code(fn):
+    def run_with_backward():
+        result = fn()
+        result.sum().backward()
+        return result
+
+    return run_and_get_code(run_with_backward)
+
+
 def get_code(fn, *args, **kwargs):
     """Get the inductor-generated code, but skip any actual compilation or running."""
     from .graph import GraphLowering
