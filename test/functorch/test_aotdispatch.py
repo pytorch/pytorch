@@ -80,6 +80,7 @@ from torch.testing._internal.optests import (
 )
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 
+
 USE_TORCHVISION = False
 try:
     import torchvision
@@ -723,6 +724,59 @@ def forward(self, primals_1):
     add = torch.ops.aten.add.Tensor(alias, view);  alias = view = None
     return [add]""",
         )
+
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix the test case")
+    @unittest.skipIf(IS_MACOS, "TODO: need to fix the test case")
+    def test_input_mutation_fsdp_set__into_same_input(self):
+        import torch.distributed._composable.fsdp._fsdp_param
+
+        def f(a):
+            b = torch.arange(9, dtype=a.dtype).view(3, 3)
+            c = torch.arange(9, dtype=a.dtype).view(3, 3)
+            d = torch.arange(9, dtype=a.dtype).view(3, 3)
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(a):
+                torch.ops.fsdp.set_.default(a, b)
+            x = a * a
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(a):
+                torch.ops.fsdp.set_.default(a, c)
+            y = a * a
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(a):
+                torch.ops.fsdp.set_.default(a, c)
+            z = a * a
+            return x + y + z
+
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        fw_graph = self.verify_aot_autograd(
+            f, inp, test_mutation=True, keep_inp_mutations=True
+        )
+        inp = [torch.ones(3, 3, requires_grad=False)]
+        self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
+        """
+        Expected behavior:
+        (1) When there are multiple set_() calls on the same graph input primal_X,
+        we want those set_() calls to all show up with primal_X as the first arg in the graph.
+        (2) Behavior (1) is not the case today with normal aten.set_ (blocked on #129892),
+        but using a custom fsdp.set_ op with no returns is a simple workaround to achieve that behavior.
+        """
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, primals_1):
+    arange = torch.ops.aten.arange.default(9, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    view = torch.ops.aten.view.default(arange, [3, 3]);  arange = None
+    arange_1 = torch.ops.aten.arange.default(9, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+    view_1 = torch.ops.aten.view.default(arange_1, [3, 3]);  arange_1 = None
+    set_ = torch.ops.fsdp.set_.default(primals_1, view);  view = None
+    mul = torch.ops.aten.mul.Tensor(primals_1, primals_1)
+    set__1 = torch.ops.fsdp.set_.default(primals_1, view_1)
+    mul_1 = torch.ops.aten.mul.Tensor(primals_1, primals_1)
+    set__2 = torch.ops.fsdp.set_.default(primals_1, view_1);  view_1 = None
+    mul_2 = torch.ops.aten.mul.Tensor(primals_1, primals_1)
+    add = torch.ops.aten.add.Tensor(mul, mul_1);  mul = mul_1 = None
+    add_1 = torch.ops.aten.add.Tensor(add, mul_2);  add = mul_2 = None
+    return [add_1, primals_1]""",
+        )
+        self.assertEqual(torch.compile(f, backend="inductor")(*inp), f(*inp))
 
     def test_input_mutation_simple_with_none_and_nontensor(self):
         # Tensor, None, int
@@ -4237,7 +4291,7 @@ def forward(self, arg0_1, arg1_1):
                         return x.cos()
 
                     return torch.cond(
-                        y.cos().shape[0] > 5, true_true_fn, true_false_fn, [y.cos()]
+                        y.cos().sum() > 5, true_true_fn, true_false_fn, [y.cos()]
                     )
 
                 def false_fn(x):
@@ -4245,7 +4299,7 @@ def forward(self, arg0_1, arg1_1):
                     z.add_(6)
                     return z.sin()
 
-                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+                a = torch.cond(x.sum() > 4, true_fn, false_fn, [x])
                 return (a + 3, a + 4)
 
         inp = torch.randn(2, 2)
@@ -4254,10 +4308,12 @@ def forward(self, arg0_1, arg1_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1)
+    gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
-    getitem = conditional[0];  conditional = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+    getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
     return (add, add_1)""",  # noqa: B950
@@ -4270,11 +4326,13 @@ def forward(self, arg0_1):
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
     add = torch.ops.aten.add.Tensor(sin, 5);  sin = None
     cos = torch.ops.aten.cos.default(add)
+    sum_1 = torch.ops.aten.sum.default(cos);  cos = None
+    gt = torch.ops.aten.gt.Scalar(sum_1, 5);  sum_1 = None
     cos_1 = torch.ops.aten.cos.default(add);  add = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [cos_1]);  true_graph_0 = false_graph_0 = cos_1 = None
-    getitem = conditional[0];  conditional = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [cos_1]);  gt = true_graph_0 = false_graph_0 = cos_1 = None
+    getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
 
@@ -4317,7 +4375,7 @@ def forward(self, arg0_1):
                         + control_flow.map(f, z, r).sum()
                     )
 
-                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x, y])
+                a = torch.cond(x.sum() > 4, true_fn, false_fn, [x, y])
                 return (a + 3, a + 4)
 
         inps = [torch.randn(2, 2), torch.ones(2)]
@@ -4326,10 +4384,12 @@ def forward(self, arg0_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1)
+    gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1, arg1_1]);  true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
-    getitem = conditional[0];  conditional = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1, arg1_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
+    getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
     return (add, add_1)""",  # noqa: B950
@@ -4434,7 +4494,7 @@ def forward(self, arg0_1, arg1_1):
                     z.add_(6)
                     return z.sin()
 
-                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+                a = torch.cond(x.sum() > 4, true_fn, false_fn, [x])
                 return (a + 3, a + 4)
 
         inp = torch.randn(2, 2)
@@ -4443,10 +4503,12 @@ def forward(self, arg0_1, arg1_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1)
+    gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
-    getitem = conditional[0];  conditional = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+    getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
     return (add, add_1)""",  # noqa: B950
@@ -4867,7 +4929,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                     y.add_(6)
                     return x.sin()
 
-                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+                a = torch.cond(x.sum() > 4, true_fn, false_fn, [x])
                 return (a + 3, a + 4)
 
         inp = torch.randn(3, 4)
@@ -4876,10 +4938,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             gm.code.strip(),
             """\
 def forward(self, arg0_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1)
+    gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
-    getitem = conditional[0];  conditional = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+    getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
     return (add, add_1)""",  # noqa: B950
@@ -4934,6 +4998,26 @@ def forward(self, arg0_1):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=False)
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
             aot_export_module(mod, [inp], trace_joint=False)
+
+    def test_aot_export_unbacked_arg(self):
+        class M(torch.nn.Module):
+            def forward(self):
+                full = torch.full((), 11)
+                i0 = full.item()
+                return (torch.full((i0,), 0),)
+
+        gm, _ = aot_export_module(
+            mod=M(), args=(), trace_joint=False, dynamic_shapes=True
+        )
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self):
+    full = torch.ops.aten.full.default([], 11, device = device(type='cpu'), pin_memory = False)
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(full);  full = None
+    full_1 = torch.ops.aten.full.default([_local_scalar_dense], 0, device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return (full_1,)""",  # noqa: B950
+        )
 
 
 class TestPartitioning(AOTTestCase):
@@ -5917,7 +6001,6 @@ symbolic_aot_autograd_failures = {
     xfail(
         "index_fill", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail("kthvalue", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
         "linalg.lstsq", ""
     ),  # aten.linalg_lstsq.default - couldn't find symbolic meta function/decomposition
@@ -6248,7 +6331,7 @@ class MockFXGraphCache:
         self.cache[key] = gm
 
     def load(self, gm, inputs):
-        key = compiled_fx_graph_hash(gm, inputs, {}, {})
+        key, _ = compiled_fx_graph_hash(gm, inputs, {}, {})
         if key in self.cache:
             gm = make_boxed_func(gm)
             gm._fx_graph_cache_key = key

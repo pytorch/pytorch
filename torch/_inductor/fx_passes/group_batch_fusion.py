@@ -28,6 +28,7 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 
+
 try:
     # importing this will register fbgemm lowerings for inductor
     import deeplearning.fbgemm.fbgemm_gpu.fb.inductor_lowerings  # noqa: F401
@@ -112,8 +113,8 @@ class GroupBatchFusionBase:
         raise NotImplementedError("fuse called on base")
 
 
-PRE_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = dict()
-POST_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = dict()
+PRE_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = {}
+POST_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = {}
 
 
 def register_fusion(name: str, pre_grad=True):
@@ -562,11 +563,7 @@ class BatchLinearLHSFusion(BatchFusion):
 
 
 def is_node_meta_valid(node: Optional[torch.fx.Node]):
-    if node is None:
-        return True
-    if "example_value" not in node.meta and "val" not in node.meta:
-        return False
-    return True
+    return node is None or "example_value" in node.meta or "val" in node.meta
 
 
 # Poor person's check for if a node in the graph mutates its input.

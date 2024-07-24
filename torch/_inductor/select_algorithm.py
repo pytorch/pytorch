@@ -6,7 +6,6 @@ import inspect
 import itertools
 import json
 import logging
-
 import math
 import operator
 import os
@@ -16,7 +15,6 @@ import time
 from collections import namedtuple
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
-
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
@@ -32,7 +30,6 @@ from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer, KernelTemplate
-
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -40,7 +37,6 @@ from .codegen.triton import (
     TritonPrinter,
     TritonScheduling,
 )
-
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
@@ -58,10 +54,11 @@ from .utils import (
 )
 from .virtualized import V
 
+
 log = logging.getLogger(__name__)
 
 # correctness checks struggle with fp16/tf32
-VERIFY: Dict[str, Any] = dict()
+VERIFY: Dict[str, Any] = {}
 PRINT_AUTOTUNE = True
 DEBUG = False
 
@@ -86,10 +83,14 @@ class PartialRender:
         self.code = code
         self.replacement_hooks = replacement_hooks
 
-    def finalize_hook(self, hook_key: str) -> None:
-        assert (
-            hook_key in self.replacement_hooks
-        ), f"{hook_key} not registered in self.replacement_hooks"
+    def finalize_hook(self, hook_key: str, strict=True) -> None:
+        if hook_key not in self.replacement_hooks:
+            if strict:
+                raise RuntimeError(
+                    f"{hook_key} not registered in self.replacement_hooks"
+                )
+            else:
+                return
         assert (
             self.replacement_hooks[hook_key] is not None
         ), "hook_key can only be called once"
@@ -154,7 +155,7 @@ class TritonTemplateKernel(TritonKernel):
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
         self.epilogue_fn = epilogue_fn
-        self.render_hooks = dict()  # type: ignore[var-annotated]
+        self.render_hooks = {}  # type: ignore[var-annotated]
         self.triton_meta: Optional[Dict[str, object]] = None
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: Optional[List[ir.ComputedBuffer]] = subgraphs
@@ -242,6 +243,18 @@ class TritonTemplateKernel(TritonKernel):
             )
             @triton.jit
         """
+
+    def gen_argdefs(self):
+        def hook():
+            # python_argdefs() cannot be run until after the rest of the template lazily adds more args
+            arg_defs, *_ = self.args.python_argdefs()
+            return f"{', '.join(arg_defs)}"
+
+        self.render_hooks["<ARGDEFS>"] = hook
+        return "<ARGDEFS>"
+
+    def gen_defines(self):
+        return self.defines
 
     def def_kernel(self, *argnames):
         """
@@ -501,6 +514,8 @@ class TritonTemplateKernel(TritonKernel):
                 self.store_output,
                 self.make_load,
                 self.modification,
+                self.gen_argdefs,
+                self.gen_defines,
             ]
         }
 
@@ -575,7 +590,7 @@ def _jinja2_env():
 
 class TritonTemplate(KernelTemplate):
     index_counter = itertools.count()
-    all_templates: Dict[str, "TritonTemplate"] = dict()
+    all_templates: Dict[str, "TritonTemplate"] = {}
 
     def __init__(self, name: str, grid: Any, source: str, debug=False):
         super().__init__(name)
@@ -618,7 +633,7 @@ class TritonTemplate(KernelTemplate):
         assert self.template, "requires jinja2"
         defines = StringIO()
         for name, val in kwargs.items():
-            defines.write(f"    {name} : tl.constexpr = {val}\n")
+            defines.write(f"{name} : tl.constexpr = {val}\n")
         defines = defines.getvalue()
 
         fake_out = ir.Buffer("buf_out", layout)
@@ -736,7 +751,7 @@ class TritonTemplate(KernelTemplate):
             num_stages=num_stages,
             num_warps=num_warps,
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
-            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),
+            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
 
@@ -1204,8 +1219,13 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
-            precompile_key = (
-                f"{name}: {inputs_key} : {torch.get_float32_matmul_precision()}"
+            precompile_key = ":".join(
+                [
+                    name,
+                    inputs_key,
+                    torch.get_float32_matmul_precision(),
+                ]
+                + [choice.hash_key() for choice in choices]
             )
             if precompile_func := self.precompile_cache.get(precompile_key):
                 return precompile_func
