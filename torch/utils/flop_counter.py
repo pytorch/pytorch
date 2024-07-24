@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+# mypy: allow-untyped-decorators
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
