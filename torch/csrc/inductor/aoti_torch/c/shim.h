@@ -52,6 +52,7 @@
 #endif // __GNUC__
 
 #include <c10/util/Half.h>
+#include <c10/util/BFloat16.h>
 
 #ifdef __cplusplus
 extern "C" {
