@@ -506,7 +506,7 @@ def export(
             "The option will be removed in a future release.",
             category=FutureWarning,
         )
-    if training != _C_onnx.TrainingMode.EVAL:
+    if training == _C_onnx.TrainingMode.TRAINING:
         warnings.warn(
             "Setting `training` to something other than default is deprecated. "
             "The option will be removed in a future release. Please set the training mode "
@@ -527,14 +527,10 @@ def export(
             "do_constant_folding, keep_initializers_as_inputs, custom_opsets, export_modules_as_functions, and "
             "autograd_inlining are not supported for dynamo export at the moment."
         )
+        args, kwargs = _get_torch_export_args(args, kwargs)
         if isinstance(model, torch.export.ExportedProgram):
-            # The model is already exported program, so the args, kwargs, and dynamic_shapes
-            # are not used
-            args = ()
-            kwargs = {}
             exported_program = model
         else:
-            args, kwargs = _get_torch_export_args(args, kwargs)
             if dynamic_shapes is None and dynamic_axes is not None:
                 dynamic_shapes = _from_dynamic_axes_to_dynamic_shapes(
                     model, dynamic_axes, input_names

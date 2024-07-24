@@ -1,15 +1,18 @@
-# mypy: allow-untyped-defs
 """Utility for deprecating functions."""
 
 import functools
 import textwrap
 import warnings
 from typing import Callable, TypeVar
+from typing_extensions import ParamSpec
 
-T = TypeVar("T", bound=Callable)
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 
-def deprecated(since: str, removed_in: str, instructions: str) -> Callable[[T], T]:
+def deprecated(
+    since: str, removed_in: str, instructions: str
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """Marks functions as deprecated.
 
     It will result in a warning when the function is called and a note in the
@@ -21,9 +24,9 @@ def deprecated(since: str, removed_in: str, instructions: str) -> Callable[[T], 
         instructions: The action users should take.
     """
 
-    def decorator(function: T) -> T:
+    def decorator(function: Callable[_P, _T]) -> Callable[_P, _T]:
         @functools.wraps(function)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             warnings.warn(
                 f"'{function.__module__}.{function.__name__}' "
                 f"is deprecated in version {since} and will be "
@@ -63,6 +66,6 @@ def deprecated(since: str, removed_in: str, instructions: str) -> Callable[[T], 
 
         wrapper.__doc__ = "".join(new_docstring_parts)
 
-        return wrapper  # type: ignore
+        return wrapper
 
     return decorator
