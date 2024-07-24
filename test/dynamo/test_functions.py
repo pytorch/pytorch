@@ -2811,8 +2811,8 @@ class GraphModule(torch.nn.Module):
         self.assertIsInstance(m, map)
 
     @make_test
-    def test_max_map(a, b):
-        return max(map(lambda x: x + 1, [a, b]))
+    def test_map_max(a, b):
+        return max(map(lambda x: x.sum(), [a, b]))
 
     @make_test
     def test_map_list(a, b):
@@ -2835,7 +2835,7 @@ class GraphModule(torch.nn.Module):
                 [map(lambda x: x - 1, [y]) for y in [3, 4, 5]],
             )
         )
-        return list(d[3])[1], a + 1
+        return list(d[3])[0], a + 1
 
     @make_test
     def test_map_dict_fromkeys(a):
