@@ -327,6 +327,19 @@ class Library:
         _impls.add(key)
         self._op_impls.add(key)
 
+    def fallback(self, fn, dispatch_key="", *, with_keyset=False):
+        if dispatch_key == "":
+            dispatch_key = self.dispatch_key
+
+        assert dispatch_key != ""
+        assert self.m is not None
+
+        self.m.fallback(
+            dispatch_key,
+            fn,
+            with_keyset,
+        )
+
     def _destroy(self):
         if self.m is not None:
             self.m.reset()

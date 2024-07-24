@@ -69,6 +69,26 @@ class TestPythonRegistration(TestCase):
         if hasattr(torch.ops, self.test_ns):
             del torch.ops._test_python_registration
 
+    def test_fallback(self) -> None:
+        with _scoped_library("_", "IMPL") as my_lib:
+            orig_args = ((2, 2),)
+            orig_kwargs = {"device": torch.device("fpga"), "dtype": torch.float64}
+            def my_fallback(op, *args, **kwargs):
+                self.assertIs(op, torch.ops.aten.empty.memory_format)
+                self.assertEqual(args, orig_args)
+                # Why pin_memory was added?
+                self.assertEqual(kwargs, orig_kwargs | {"pin_memory": False})
+                # Any return is fine here
+                return torch.empty(*args)
+
+            # Use PrivateUse1 here as there are no key-specific kernels
+            # registered and so our fallback will always get called
+            my_lib.fallback(my_fallback, "FPGA")
+
+            torch.empty(*orig_args, **orig_kwargs)
+
+
+
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])
         with _scoped_library("aten", "IMPL") as my_lib2:
