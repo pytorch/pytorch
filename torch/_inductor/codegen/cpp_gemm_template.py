@@ -449,7 +449,7 @@ class CppPackedGemmTemplate(CppTemplate):
                         W.get_name() + "_BMatrixCompens",
                     )
                 else:
-                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)
+                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)  # type: ignore[assignment]
                 new_inputs.append(BCompensate)
             return new_inputs, layout_or_out
 
