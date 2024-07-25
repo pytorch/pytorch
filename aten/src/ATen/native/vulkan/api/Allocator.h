@@ -5,8 +5,8 @@
 // Always include this file (Allocator.h) instead.
 //
 
-#include <c10/macros/Macros.h>
 #include <ATen/native/vulkan/api/vk_api.h>
+#include <c10/macros/Macros.h>
 
 #ifdef USE_VULKAN_API
 
