@@ -5583,9 +5583,10 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             value_ndim == 0,
             lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value_ndim} dimension",
         )
-        # `masked_fill` allows cpu scalar to be moved to cuda and xpu but not otherwise.
+        # `masked_fill` allows cpu scalar to be moved to cuda, xpu and hpu but not otherwise.
         is_cpu_scalar = (
-            a.device.type in ["cuda", "xpu", torch._C._get_privateuse1_backend_name()]
+            a.device.type
+            in ["cuda", "xpu", torch._C._get_privateuse1_backend_name(), "hpu"]
             and value.device.type == "cpu"
         )
         torch._check(

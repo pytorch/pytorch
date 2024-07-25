@@ -528,6 +528,13 @@ class CodeGen:
                 body.append('\n')
                 return
             nodes_to_delete = user_to_last_uses.get(user, [])
+
+            if len(user.users.keys()) == 0:
+                # This node is not used by any others. however it's also not
+                # removed by DCE since side-effect. We want to free it's outputs
+                # right after its execution done to save memory.
+                nodes_to_delete.append(user)
+
             if len(nodes_to_delete):
                 to_delete_str = ' = '.join([repr(n) for n in nodes_to_delete] + ['None'])
                 body.append(f';  {dim(to_delete_str)}\n')
