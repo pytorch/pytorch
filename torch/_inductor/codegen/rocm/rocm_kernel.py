@@ -213,7 +213,7 @@ class ROCmTemplateKernel(ROCmKernel):
         val = sympy_product(sizes)
         return cexpr(self.rename_indexing(val))
 
-    def contiguous_stride(self, node: IRNode, default_value: int = 0) -> str:
+    def contiguous_stride(self, node: IRNode | None, default_value: int = 0) -> str:
         """
         Hook called from template call to get the contiguous stride of an arg.
         """
