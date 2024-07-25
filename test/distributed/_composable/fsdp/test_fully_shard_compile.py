@@ -5,6 +5,7 @@ import contextlib
 import copy
 import functools
 import unittest
+from itertools import product
 from unittest import mock
 
 import torch
@@ -376,7 +377,7 @@ class TestFullyShardCompile(FSDPTest):
                 fullgraph=fullgraph,
             )
 
-    def _create_transformer_factory_fns(self):
+    def _create_transformer_factory_fns(self, checkpoint_activations):
         seq_len = 16
         vocab_size = 8
 
@@ -384,7 +385,9 @@ class TestFullyShardCompile(FSDPTest):
             torch.manual_seed(self.rank)
             fsdp_config = {}
             mesh = init_device_mesh("cuda", (self.world_size,))
-            model_args = ModelArgs(vocab_size=vocab_size)
+            model_args = ModelArgs(
+                vocab_size=vocab_size, checkpoint_activations=checkpoint_activations
+            )
             model = Transformer(model_args)
             for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
@@ -424,12 +427,14 @@ class TestFullyShardCompile(FSDPTest):
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_transformer_backend_aot_eager(self):
-        for fullgraph in [True, False]:
+        for fullgraph, checkpoint_activations in product([True, False], [True, False]):
             with self._mock_sdpa(fullgraph), self._mock_reinplace_fsdp_all_gather(
                 fullgraph
             ):
                 self._test_traceable_fsdp(
-                    *self._create_transformer_factory_fns(),
+                    *self._create_transformer_factory_fns(
+                        checkpoint_activations=checkpoint_activations
+                    ),
                     "aot_eager",
                     fullgraph=fullgraph,
                 )
@@ -439,10 +444,12 @@ class TestFullyShardCompile(FSDPTest):
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_aot_eager_decomp_partition(self):
-        for fullgraph in [True, False]:
+        for fullgraph, checkpoint_activations in product([True, False], [True, False]):
             with self._mock_sdpa(fullgraph):
                 self._test_traceable_fsdp(
-                    *self._create_transformer_factory_fns(),
+                    *self._create_transformer_factory_fns(
+                        checkpoint_activations=checkpoint_activations
+                    ),
                     "aot_eager_decomp_partition",
                     fullgraph=fullgraph,
                 )
@@ -453,13 +460,15 @@ class TestFullyShardCompile(FSDPTest):
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor(self):
-        for fullgraph in [True, False]:
+        for fullgraph, checkpoint_activations in product([True, False], [True, False]):
             with self._mock_sdpa(fullgraph), self._mock_reinplace_fsdp_all_gather(
                 fullgraph
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
-                        *self._create_transformer_factory_fns(),
+                        *self._create_transformer_factory_fns(
+                            checkpoint_activations=checkpoint_activations
+                        ),
                         "inductor",
                         fullgraph=fullgraph,
                     )
