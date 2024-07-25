@@ -1267,6 +1267,9 @@ class KernelArgs:
         if str(name) == "seed":
             self.sizevars["seed"] = "seed"
             return "seed"
+        for prefix in ["zuf", "zf"]:
+            if str(name).startswith(prefix):
+                return self._lookup(prefix, self.sizevars, name)
         return self._lookup("ks", self.sizevars, name)
 
     def call_names(self):
@@ -1313,9 +1316,13 @@ class KernelArgs:
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.sizevars.items():
-            arg_defs.append(f"const {INDEX_TYPE} {inner}")
+            if symbol_is_type(outer, (SymT.UNBACKED_FLOAT, SymT.FLOAT)):
+                arg_type = DTYPE_TO_CPP[torch.float32]
+            else:
+                arg_type = INDEX_TYPE
+            arg_defs.append(f"const {arg_type} {inner}")
             call_args.append(self.wrap_size_arg(outer))
-            arg_types.append(f"const {INDEX_TYPE}")
+            arg_types.append(f"const {arg_type}")
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
         assert self.workspace_arg is None, "Workspace not supported on CPU "
@@ -2021,6 +2028,8 @@ class Kernel(CodeGen):
                     SymT.UNBACKED_INT,
                     SymT.SIZE,
                     SymT.PRECOMPUTED_SIZE,
+                    SymT.UNBACKED_FLOAT,
+                    SymT.FLOAT,
                 ),
             )
         }

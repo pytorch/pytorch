@@ -10779,6 +10779,18 @@ class CommonTemplate:
         _, code = run_and_get_code(fn, x, x2)
         FileCheck().check("aten.view.dtype(reinterpret_tensor").run(code[0])
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_scalar_outputs(self):
+        def fn(x):
+            return x.sum().item()
+
+        def fn2(x):
+            return x.sum().item() + 1
+
+        x = torch.rand([20], device=self.device)
+        self.common(fn, (x,))
+        self.common(fn2, (x,))
+
     def test_float16_to_int16(self):
         def fn(x):
             x_view = x.view(dtype=torch.int16)
