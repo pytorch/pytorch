@@ -4167,7 +4167,9 @@ class TestNestedTensorSubclass(TestCase):
         for reduce_dim, _ in reduce_dims:
             nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
             out_actual = torch.nn.functional.softmax(nt, dim=reduce_dim)
-            self.assertEqual(len(out_actual.shape), len(output_shape))
+            torch._dynamo.disable(self.assertEqual)(
+                len(out_actual.shape), len(output_shape)
+            )  # disable if running on dynamo
             for dim_actual, dim_expected in zip(out_actual.shape, output_shape):
                 if dim_expected is not None:
                     self.assertEqual(dim_actual, dim_expected)
