@@ -2312,12 +2312,12 @@ class TritonKernel(SIMDKernel):
             return tuple(result_vars)
 
         assert self.range_trees[-1].prefix == "r"
-        rmask = "None" if self._has_constant_mask(self.range_trees[-1]) else "rmask"
+        rnumel = "None" if self._has_constant_mask(self.range_trees[-1]) else "rnumel"
 
         if len(values) == 2:
             line = (
                 f"triton_helpers.sort_with_index({broadcasted_values[0]}, {broadcasted_values[1]},"
-                f" {rmask}, {dim}, stable={stable}, descending={descending})"
+                f" {rnumel}, {dim}, stable={stable}, descending={descending})"
             )
             result_vars = cse_multiple(line, len(values), masks)
         else:
