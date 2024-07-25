@@ -1086,9 +1086,9 @@ _igamc_helper_continued_fraction(opmath_t a, opmath_t x) {
   return ans * ax;
 } // _igamc_helper_continued_fraction
 
-template <typename opmath_t>
-C10_HOST_DEVICE opmath_t
-_calc_igammac_opmath(opmath_t a, opmath_t x) {
+template <typename scalar_t>
+C10_HOST_DEVICE at::opmath_type<scalar_t>
+calc_igammac(scalar_t a_, scalar_t x_) {
   /* the calculation of the regularized upper incomplete gamma function
    * is done differently based on the values of a and x:
    * - if x and/or a is at the boundary of defined region, then assign the
@@ -1099,6 +1099,9 @@ _calc_igammac_opmath(opmath_t a, opmath_t x) {
    *   incomplete gamma
    * - otherwise, calculate the series from [igam2] eq (5)
    */
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t a = static_cast<opmath_t>(a_);
+  opmath_t x = static_cast<opmath_t>(x_);
   constexpr opmath_t zero = opmath_t(0.0);
   constexpr opmath_t one = opmath_t(1.0);
   constexpr opmath_t SMALL = opmath_t(20.0);
@@ -1168,20 +1171,11 @@ _calc_igammac_opmath(opmath_t a, opmath_t x) {
     }
   }
 
-} // _calc_igammac_opmath
-
-template <typename scalar_t>
-C10_HOST_DEVICE scalar_t
-calc_igammac(scalar_t a_, scalar_t x_) {
-  using opmath_t = at::opmath_type<scalar_t>;
-  opmath_t a = static_cast<opmath_t>(a_);
-  opmath_t x = static_cast<opmath_t>(x_);
-  return static_cast<scalar_t>(_calc_igammac_opmath(a, x));
 } // calc_igammac
 
-template <typename opmath_t>
-C10_HOST_DEVICE opmath_t
-_calc_igamma_opmath(opmath_t a, opmath_t x) {
+template <typename scalar_t>
+C10_HOST_DEVICE at::opmath_type<scalar_t>
+calc_igamma(scalar_t a_, scalar_t x_) {
   /* the calculation of the regularized lower incomplete gamma function
    * is done differently based on the values of a and x:
    * - if x and/or a is at the boundary of defined region, then assign the
@@ -1192,6 +1186,9 @@ _calc_igamma_opmath(opmath_t a, opmath_t x) {
    *   incomplete gamma
    * - otherwise, calculate the series from [igam2] eq (4)
    */
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t a = static_cast<opmath_t>(a_);
+  opmath_t x = static_cast<opmath_t>(x_);
   constexpr opmath_t zero = opmath_t(0.0);
   constexpr opmath_t one = opmath_t(1.0);
   constexpr opmath_t SMALL = opmath_t(20.0);
@@ -1233,25 +1230,16 @@ _calc_igamma_opmath(opmath_t a, opmath_t x) {
   if ((a > SMALL) && (a < LARGE) && (absxma_a < SMALLRATIO)) {
     return _igam_helper_asymptotic_series(a, x, true);
   }
-  else if ((a > LARGE) && (absxma_a < LARGERATIO / ::sqrt(a))) {
+  else if ((a > LARGE) && (absxma_a < LARGERATIO / std::sqrt(a))) {
     return _igam_helper_asymptotic_series(a, x, true);
   }
 
   if ((x > one) && (x > a)) {
-    return one - _calc_igammac_opmath(a, x);
+    return one - calc_igammac(a, x);
   }
 
   return _igam_helper_series(a, x);
 
-} // _calc_igamma_opmath
-
-template <typename scalar_t>
-C10_HOST_DEVICE scalar_t
-calc_igamma(scalar_t a_, scalar_t x_) {
-  using opmath_t = at::opmath_type<scalar_t>;
-  opmath_t a = static_cast<opmath_t>(a_);
-  opmath_t x = static_cast<opmath_t>(x_);
-  return static_cast<scalar_t>(_calc_igamma_opmath(a, x));
 } // calc_igamma
 
 // The derivative w.r.t. the first argument of the regularized upper incomplete
@@ -1319,7 +1307,7 @@ _igammac_grada_helper_asymptotic_series(opmath_t a, opmath_t x) {
   }
 
   return (
-    _calc_igammac_opmath(a, x) * (logx - calc_digamma(a)) +
+    calc_igammac(a, x) * (logx - calc_digamma(a)) +
       sum * std::exp((a - one) * logx - x - std::lgamma(a))
   );
 
@@ -1368,7 +1356,7 @@ _igammac_grada_helper_series(opmath_t a, opmath_t x) {
   }
 
   return (
-    (one - _calc_igammac_opmath(a, x)) * (calc_digamma(a) - logx) +
+    (one - calc_igammac(a, x)) * (calc_digamma(a) - logx) +
       sum * std::exp(a * logx - std::lgamma(a))
   );
 
