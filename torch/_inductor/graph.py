@@ -380,9 +380,15 @@ class GraphLowering(torch.fx.Interpreter):
         self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
         self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
-        self.extern_node_serializer: Optional[
-            Callable[[List[ir.ExternKernelNode]], Any]
-        ] = extern_node_serializer
+
+        from torch._inductor.extern_node_serializer import extern_node_json_serializer
+
+        self.extern_node_serializer: Callable[[List[ir.ExternKernelNode]], Any] = (
+            extern_node_serializer
+            if config.is_fbcode() and extern_node_serializer
+            else extern_node_json_serializer
+        )
+
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
@@ -1808,11 +1814,7 @@ class GraphLowering(torch.fx.Interpreter):
             output_code_log.debug("Output code: \n%s", code)
 
             serialized_extern_kernel_nodes = None
-            if (
-                config.is_fbcode()
-                and self.extern_kernel_nodes
-                and self.extern_node_serializer
-            ):
+            if self.extern_kernel_nodes:
                 serialized_extern_kernel_nodes = self.extern_node_serializer(
                     self.extern_kernel_nodes
                 )
