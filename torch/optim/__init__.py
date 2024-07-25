@@ -24,6 +24,27 @@ from torch.optim.sgd import SGD
 from torch.optim.sparse_adam import SparseAdam
 
 
+__all__ = [
+    'lr_scheduler',
+    'swa_utils',
+    'Adafactor',
+    'Adadelta',
+    'Adagrad',
+    'Adam',
+    'Adamax',
+    'AdamW',
+    'ASGD',
+    'LBFGS',
+    'NAdam',
+    'Optimizer',
+    'RAdam',
+    'RMSprop',
+    'Rprop',
+    'SGD',
+    'SparseAdam',
+]
+
+
 del adadelta  # type: ignore[name-defined] # noqa: F821
 del adagrad  # type: ignore[name-defined] # noqa: F821
 del adam  # type: ignore[name-defined] # noqa: F821
