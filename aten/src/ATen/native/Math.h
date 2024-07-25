@@ -637,6 +637,7 @@ _igam_helper_fac(opmath_t a, opmath_t x) {
   // compute x^a * exp(-a) / gamma(a)
   // corrected from (15) and (16) in [igam2] by replacing exp(x - a) with
   // exp(a - x).
+  constexpr opmath_t ZERO = opmath_t(0.0);
   constexpr opmath_t HALF = opmath_t(0.5);
   constexpr opmath_t LARGE = opmath_t(200.0);
   const opmath_t MAXLOG = std::is_same<opmath_t, double>::value ?
@@ -648,7 +649,7 @@ _igam_helper_fac(opmath_t a, opmath_t x) {
   if (std::fabs(a - x) > opmath_t(0.4) * std::fabs(a)) {
     ax = a * std::log(x) - x - std::lgamma(a);
     if (ax < -MAXLOG) {
-      return opmath_t(0.0);
+      return ZERO;
     }
     return std::exp(ax);
   }
