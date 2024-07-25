@@ -25,7 +25,6 @@ from typing import (
     Literal,
     Optional,
     overload,
-    Self,
     Sequence,
     Set,
     Tuple,
@@ -33,7 +32,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Never, TypeAlias
+from typing_extensions import Never, TypeAlias, Self
 from unittest.mock import patch
 
 import sympy
