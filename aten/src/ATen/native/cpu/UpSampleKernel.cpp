@@ -480,8 +480,8 @@ void cpu_upsample_nearest_channels_last(
   int64_t channels =  input_sizes[1];
   int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
   int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
-  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
-  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
+  int64_t input_height = input_sizes[ndim - 2];
+  int64_t output_height = output_sizes[ndim - 2];
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
   int64_t numel = output.numel();
@@ -586,8 +586,8 @@ void cpu_upsample_linear_channels_last(
   int64_t channels =  input_sizes[1];
   int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
   int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
-  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
-  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
+  int64_t input_height = input_sizes[ndim - 2];
+  int64_t output_height = output_sizes[ndim - 2];
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
 
@@ -866,7 +866,7 @@ struct HelperInterpBase {
     std::vector<Tensor> output;
 
     scalar_t support;
-    int max_interp_size;
+    int max_interp_size = 0;
     if (antialias) {
         support = (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
         max_interp_size = (int) std::ceil(support) * 2 + 1;
@@ -1503,32 +1503,16 @@ template <typename scalar_t, bool is_horizontal>
 void cpu_upsample_generic_aa(at::TensorIterator& iter, unsigned int weights_precision) {
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-    if (is_horizontal) {
+    if constexpr (is_horizontal) {
 
       // Strides are : X 0 | 8 8 8 0 8  (Channels first)
       // Strides are : X X | 0 0 0 0 0  (Channels last)
-      // upsampling data within a contiguous dimension (aka horizontal resampling)
-      if ((strides[0] == sizeof(scalar_t)) && (strides[1] == sizeof(scalar_t)) &&
-          is_zero_stride<3 + 2>(&strides[2])) {
-        // channels last case
-        basic_loop_aa_horizontal<scalar_t>(
-            data, strides, n, weights_precision);
-      } else {
-        basic_loop_aa_horizontal<scalar_t>(
-            data, strides, n, weights_precision);
-      }
+      basic_loop_aa_horizontal<scalar_t>(data, strides, n, weights_precision);
     } else {
       // Strides are : X Y | 0 0 0 0 0 (Channels first)
       // Strides are : X X | 0 0 0 0 0 (Channels last)
       // upsampling data between contiguous dimensions (aka vertical resampling)
-      if ((strides[0] == sizeof(scalar_t)) && (strides[1] == sizeof(scalar_t)) &&
-          is_zero_stride<3 + 2>(&strides[2])) {
-        basic_loop_aa_vertical<scalar_t>(
-            data, strides, n, weights_precision);
-      } else {
-        basic_loop_aa_vertical<scalar_t>(
-            data, strides, n, weights_precision);
-      }
+      basic_loop_aa_vertical<scalar_t>(data, strides, n, weights_precision);
     }
   };
 
@@ -1563,11 +1547,11 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
 
   std::vector<Tensor> indices_weights;
   unsigned int weights_precision = 0;
-  int unused;
 
   if (input_scalar_type == at::kByte) {
     // This is a special branch to provide uint8 dtype support for bilinear and bicubic modes only
     TORCH_INTERNAL_ASSERT(F::interp_size == 2 || F::interp_size == 4);
+    int unused = 0;
     std::tie(indices_weights, unused, weights_precision) =
       F::compute_index_ranges_int16_weights(
         input.size(interp_dim), oshape[interp_dim],
@@ -1996,9 +1980,8 @@ void cpu_upsample_genNd_backward_aa(
     std::vector<scalar_t> wx(interp_width, 0.0);
     std::vector<scalar_t> wy(interp_height, 0.0);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t xmin, ymin;
-    int64_t xsize, ysize;
+    int64_t xmin = 0, ymin = 0;
+    int64_t xsize = 0, ysize = 0;
 
     typedef scalar_t (*aa_filter_fn_t)(scalar_t);
     aa_filter_fn_t filter_fn = &F::aa_filter;
