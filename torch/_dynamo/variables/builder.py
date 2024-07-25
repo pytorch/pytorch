@@ -15,11 +15,14 @@ import re
 import sys
 import types
 import weakref
-from typing import Any, List, NamedTuple, Optional, Union
+from typing import Any, List, NamedTuple, Optional, TYPE_CHECKING, Union
 
 from torch._utils_internal import justknobs_check
 
 from torch.utils._sympy.value_ranges import ValueRanges
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 try:
     import numpy as np
@@ -2631,7 +2634,7 @@ class SourcelessBuilder:
         raise AssertionError("Use SourcelessBuilder.create()")
 
     @staticmethod
-    def create(tx, value) -> VariableTracker:
+    def create(tx: "InstructionTranslator", value) -> VariableTracker:
         value_type = type(value)
         fast_handler = SourcelessBuilder._type_handlers.get(value_type)
         if fast_handler:
@@ -2721,7 +2724,7 @@ class SourcelessBuilder:
             value, mutable_local=MutableLocal()
         )
 
-        def passthrough(tx, value):
+        def passthrough(tx: "InstructionTranslator", value):
             return value
 
         for cls in VariableTrackerMeta.all_subclasses:
