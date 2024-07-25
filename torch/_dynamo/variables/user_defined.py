@@ -120,9 +120,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return key in self.value.__dict__
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        from .. import trace_rules
         from . import ConstantVariable, EnumVariable
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         source = AttrSource(self.source, name) if self.source is not None else None
 
