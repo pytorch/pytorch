@@ -194,15 +194,19 @@ static void AddRocblasValidator() {
 static void AddHipblasltValidator() {
   auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
   if (validators.find("HIPBLASLT_VERSION") == validators.end()) {
-    std::string hipblaslt_version = c10::str(
-        XSTRINGIFY(HIPBLASLT_VERSION_MAJOR), ".",
-        XSTRINGIFY(HIPBLASLT_VERSION_MINOR), ".",
-        XSTRINGIFY(HIPBLASLT_VERSION_PATCH), "-",
-        XSTRINGIFY(HIPBLASLT_VERSION_TWEAK));
+    int version;
+    std::string revision(128, '\0');
+    auto handle = at::cuda::getCurrentCUDABlasLtHandle();
+    hipblasLtGetVersion(handle, &version);
+    hipblasLtGetGitRevision(handle, revision.data());
+    std::string hipblaslt_version =
+        c10::str(version, "-", revision.c_str());
     getTuningContext()->GetTuningResultsValidator().RegisterValidator(
         "HIPBLASLT_VERSION",
         [hipblaslt_version]() { return hipblaslt_version; },
-        [hipblaslt_version](auto&& k) { return hipblaslt_version == k ? OK : FAIL; });
+        [hipblaslt_version](auto&& k) {
+          return hipblaslt_version == k ? OK : FAIL;
+        });
   }
 }
 
@@ -317,8 +321,6 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
  public:
   ScaledGemmTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());
-
-    auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
 
 #if defined(USE_ROCM)
     for (auto&& [name, op] : GetHipBlasLtScaledGemmTypeStringAndOps<AT, BT, CT, ALayout, BLayout>()) {

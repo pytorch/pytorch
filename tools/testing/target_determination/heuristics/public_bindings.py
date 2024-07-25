@@ -8,7 +8,6 @@ from tools.testing.target_determination.heuristics.interface import (
     TestPrioritizations,
 )
 from tools.testing.target_determination.heuristics.utils import query_changed_files
-
 from tools.testing.test_run import TestRun
 
 

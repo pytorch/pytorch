@@ -15,11 +15,14 @@ import re
 import sys
 import types
 import weakref
-from typing import Any, List, NamedTuple, Optional, Union
+from typing import Any, List, NamedTuple, Optional, TYPE_CHECKING, Union
 
 from torch._utils_internal import justknobs_check
 
 from torch.utils._sympy.value_ranges import ValueRanges
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 try:
     import numpy as np
@@ -1133,6 +1136,9 @@ class VariableBuilder:
                 source_i = GetItemSource(base=source, index=i, index_is_slice=False)
                 # access unpacked tensor from this list instead of from a lifted arg
                 self.tx.output.input_source_to_var[source_i] = tensor_variable
+                tensor_variable.proxy.node.meta["tensor_dict"] = value[
+                    i
+                ].__dict__.copy()
 
                 guard = functools.partial(
                     GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
@@ -1587,25 +1593,42 @@ class VariableBuilder:
                 return ConstantVariable.create(value=value, source=self.source)
 
             name = self.source.name()
-            if name not in self.tx.output.frame_state:
-                # Note - this essentially means that if this name gets reused as a tensor,
-                # it will start fully dynamic. That should always be a safe option, and not awfully inefficient.
-                # Alternatively, if we want to improve pef here, we can add a third state of unset, but I am not
-                # sure that is necessary for now.
-                frame_state_entry = FrameStateSizeEntry(
-                    scalar=value, size=None, stride=None
-                )
-            else:
-                frame_state_entry = self.tx.output.frame_state[name]
-                if frame_state_entry.scalar != value:
-                    log.debug(
-                        "automatic dynamic int %s val %s != %s",
-                        name,
-                        value,
-                        frame_state_entry.scalar,
+
+            def update_frame_state(value):
+                if name not in self.tx.output.frame_state:
+                    # Note - this essentially means that if this name gets reused as a tensor,
+                    # it will start fully dynamic. That should always be a safe option, and not awfully inefficient.
+                    # Alternatively, if we want to improve pef here, we can add a third state of unset, but I am not
+                    # sure that is necessary for now.
+                    frame_state_entry = FrameStateSizeEntry(
+                        scalar=value, size=None, stride=None
                     )
-                    frame_state_entry.scalar = None
-            self.tx.output.frame_state[name] = frame_state_entry
+                else:
+                    frame_state_entry = self.tx.output.frame_state[name]
+                    if frame_state_entry.scalar != value:
+                        log.debug(
+                            "automatic dynamic int %s val %s != %s",
+                            name,
+                            value,
+                            frame_state_entry.scalar,
+                        )
+                        frame_state_entry.scalar = None
+                self.tx.output.frame_state[name] = frame_state_entry
+
+            if (st := self.tx.distributed_state) is None:
+                update_frame_state(value)
+                frame_state_entry = self.tx.output.frame_state[name]
+            elif st.all_states is None:
+                # Preflight, always pretend as if it's static
+                frame_state_entry = FrameStateSizeEntry(
+                    size=None, scalar=value, stride=None
+                )
+                st.local_state.input_sizes[name] = value
+            else:
+                # Apply the updates
+                for sub_state in st.all_states:
+                    update_frame_state(sub_state.input_sizes[name])
+                frame_state_entry = self.tx.output.frame_state[name]
 
             # TODO: This should be dynamic, as we in general do not
             # know if bare integers are actually going to be sizevars
@@ -2151,7 +2174,8 @@ def wrap_fx_proxy_cls(
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
-            + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
+            + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}",
+            case_name="unsupported_operator",
         )
 
 
@@ -2323,8 +2347,23 @@ def _automatic_dynamic(
                                 frame_state_entry.stride[i] = None
         tx.output.frame_state[name] = frame_state_entry
 
-    update_frame_state(e.size(), e.stride())
-    frame_state_entry = tx.output.frame_state[name]
+    if (st := tx.distributed_state) is None:
+        update_frame_state(e.size(), e.stride())
+        frame_state_entry = tx.output.frame_state[name]
+    elif st.all_states is None:
+        # Preflight, always pretend as if it's static
+        frame_state_entry = FrameStateSizeEntry(
+            size=e.size(), scalar=None, stride=e.stride()
+        )
+        st.local_state.input_sizes[name] = list(e.size())
+        st.local_state.input_strides[name] = list(e.stride())
+    else:
+        # Apply the updates
+        for sub_state in st.all_states:
+            update_frame_state(
+                sub_state.input_sizes[name], sub_state.input_strides[name]
+            )
+        frame_state_entry = tx.output.frame_state[name]
 
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
@@ -2595,7 +2634,7 @@ class SourcelessBuilder:
         raise AssertionError("Use SourcelessBuilder.create()")
 
     @staticmethod
-    def create(tx, value) -> VariableTracker:
+    def create(tx: "InstructionTranslator", value) -> VariableTracker:
         value_type = type(value)
         fast_handler = SourcelessBuilder._type_handlers.get(value_type)
         if fast_handler:
@@ -2632,6 +2671,8 @@ class SourcelessBuilder:
             return DeviceMeshVariable(value)
         elif isinstance(value, re.Pattern):
             return RegexPatternVariable(value)
+        elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
+            return ConstantVariable.create(str(value))
         unimplemented(
             f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
         )
@@ -2685,7 +2726,7 @@ class SourcelessBuilder:
             value, mutable_local=MutableLocal()
         )
 
-        def passthrough(tx, value):
+        def passthrough(tx: "InstructionTranslator", value):
             return value
 
         for cls in VariableTrackerMeta.all_subclasses:
