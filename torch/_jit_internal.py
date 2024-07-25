@@ -32,8 +32,10 @@ from typing import (
     Optional,
     Tuple,
     Type,
+    TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 
 import torch
 
@@ -47,6 +49,8 @@ from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 IS_PY39_PLUS: Final[bool] = sys.version_info >= (3, 9)
 IS_PY310_PLUS: Final[bool] = sys.version_info >= (3, 10)
@@ -551,7 +555,7 @@ class FunctionModifiers:
     _DROP = "_drop (function is fully ignored, declaration can be unscriptable)"
 
 
-def export(fn):
+def export(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     """
     This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
     :class:`ScriptModule` and should be compiled.
@@ -593,7 +597,7 @@ def export(fn):
         # any compiled methods and wasn't decorated with `@torch.jit.export`
         m = torch.jit.script(MyModule())
     """
-    fn._torchscript_modifier = FunctionModifiers.EXPORT
+    fn._torchscript_modifier = FunctionModifiers.EXPORT  # type: ignore[attr-defined]
     return fn
 
 
@@ -768,8 +772,8 @@ def _drop(fn):
     return fn
 
 
-def _copy_to_script_wrapper(fn):
-    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER
+def _copy_to_script_wrapper(fn: _T) -> _T:
+    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER  # type: ignore[attr-defined]
     return fn
 
 
@@ -953,7 +957,7 @@ _overloaded_methods: Dict[str, Dict[str, List[Callable]]] = {}  # noqa: T484
 _overloaded_method_class_fileno: Dict[Tuple[str, str], int] = {}
 
 
-def _overload_method(func):
+def _overload_method(func: Callable[_P, _T]) -> Callable[_P, _T]:
     _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_methods

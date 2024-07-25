@@ -292,6 +292,7 @@ flex_attention_template = TritonTemplate(
 
 
     # Store output and logsumexp
+    l_i = tl.where(l_i == 0, 1, l_i)
     acc = acc / l_i[:, None]
     idx_z = tl.program_id(1) // H
     idx_h = tl.program_id(1) % H
@@ -382,13 +383,14 @@ def forward_inner(
 
         # -- compute scaling constant ---
         m_ij = tl.maximum(m_i, tl.max(post_mod_scores, 1))
-
-        alpha = tl.math.exp2(m_i - m_ij)
-        p = tl.math.exp2(post_mod_scores - m_ij[:, None])
         if not ROWS_GUARANTEED_SAFE:
             masked_out_rows = (m_ij == float("-inf"))
-            alpha = tl.where(masked_out_rows, 0, alpha)
-            p = tl.where(masked_out_rows[:, None], 0, p)
+            m_ij_masked = tl.where(masked_out_rows, 0, m_ij)
+        else:
+            m_ij_masked = m_ij
+
+        alpha = tl.math.exp2(m_i - m_ij_masked)
+        p = tl.math.exp2(post_mod_scores - m_ij_masked[:, None])
 
         # NB: l_i update is pulled up here since it's a bit faster
         # NB: For headdim=256, it's faster to move it back down to after m_i =
@@ -555,21 +557,6 @@ def flex_attention(
         SPARSE_Q_BLOCK_SIZE,
         mask_graph,
     ) = block_mask
-    for buf in [
-        query,
-        key,
-        value,
-        kv_num_blocks,
-        kv_indices,
-        q_num_blocks,
-        q_indices,
-        full_kv_num_blocks,
-        full_kv_indices,
-        full_q_num_blocks,
-        full_q_indices,
-    ]:
-        if buf is not None:
-            buf.realize()
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -590,6 +577,7 @@ def flex_attention(
             key,
             value,
             subgraph,
+            block_mask,
             scale,
             *score_mod_other_buffers,
         )
@@ -605,6 +593,22 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
+    for buf in [
+        query,
+        key,
+        value,
+        kv_num_blocks,
+        kv_indices,
+        q_num_blocks,
+        q_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        full_q_num_blocks,
+        full_q_indices,
+    ]:
+        if buf is not None:
+            buf.realize()
+
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
@@ -1142,7 +1146,6 @@ def bwd_dkdv_inner(
         Di = tl.load(DELTA + offs_m1)
         # Compute dP and dS.
         dpT = tl.dot(v, tl.trans(do))
-        # dpT = tl.where(offs_m1[None, :] < Q_LEN, dpT, 0.0)
         dsT = pT * (dpT - Di[None, :])
         # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m1[None, :]

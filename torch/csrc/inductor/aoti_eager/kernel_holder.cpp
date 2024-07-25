@@ -59,41 +59,6 @@ inline void unpack_optional_tensor_list_ivalue(
   }
 }
 
-inline void unpack_scalar_ivalue(
-    const c10::IValue& ivalue,
-    const c10::Device& device,
-    std::vector<at::Tensor>& inputs) {
-  inputs.push_back(at::scalar_tensor(
-      ivalue.toScalar(),
-      c10::TensorOptions().device(device).dtype(ivalue.toScalar().type())));
-}
-
-bool unpack_ivalue(
-    const c10::Argument& argument,
-    const c10::IValue& ivalue,
-    const c10::Device& device,
-    std::vector<at::Tensor>& inputs) {
-  if (ivalue.isTensor()) {
-    unpack_tensor_ivalue(ivalue, device, inputs);
-  } else if (ivalue.isTensorList()) {
-    unpack_tensor_list_ivalue(ivalue, device, inputs);
-  } else if (ivalue.isOptionalTensorList()) {
-    unpack_optional_tensor_list_ivalue(ivalue, device, inputs);
-  } else if (ivalue.isScalar()) {
-    // ivalue is scalar
-    unpack_scalar_ivalue(ivalue, device, inputs);
-  } else if (
-      *argument.real_type() == *c10::getTypePtr<std::optional<at::Tensor>>()) {
-    // ivalue is std::optional<at::Tensor>
-    unpack_optional_tensor_ivalue(ivalue, device, inputs);
-  } else {
-    // Unsupport IValue type.
-    return false;
-  }
-
-  return true;
-}
-
 std::vector<at::Tensor> unpack_tensors(
     const std::vector<c10::Argument>& arguments,
     const torch::jit::Stack& stack,
