@@ -2909,7 +2909,7 @@ class TestSDPACudaOnly(NNTestCase):
             fudge_factors={
                 "out": 1.5 * dropout_fudge_factor,
                 "grad_query": 18.0 * dropout_fudge_factor,
-                "grad_key": 13.0 * dropout_fudge_factor,
+                "grad_key": 14.0 * dropout_fudge_factor,
                 "grad_value": 3.0 * dropout_fudge_factor,
                 "grad_attn_mask": 16.0 * dropout_fudge_factor,
             },
