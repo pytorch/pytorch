@@ -3162,7 +3162,7 @@ class TilingSelect:
                 if (
                     not reduction_group
                     and group
-                    and len(tiling_indices)
+                    and len(tiling_indices) == 1
                     and not has_free_symbols(group[tiling_indices[0]])
                     and group[tiling_indices[0]] < tiling_factor / 2
                 ):
