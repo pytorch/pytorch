@@ -2835,7 +2835,7 @@ class GraphModule(torch.nn.Module):
                 [map(lambda x: x - 1, [y]) for y in [3, 4, 5]],
             )
         )
-        return list(d[3])[0], a + 1
+        return list(d[3])[0], a + 1  # noqa: RUF015
 
     @make_test
     def test_map_dict_fromkeys(a):
