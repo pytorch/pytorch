@@ -613,14 +613,9 @@ def handle_effect_tokens_fn(
         with disable_above:
             # See Note [Side-Effectful Tokens in AOTAutograd]
             if trace_joint:
-                assert (
-                    isinstance(args, tuple)
-                    and len(args) == 2
-                    and isinstance(args[0], (list, tuple))
-                )
+                assert isinstance(args, tuple) and isinstance(args[0], (list, tuple))
                 tokens = args[0][:num_tokens]
-                actual_args = args[0][num_tokens:]
-                args = (actual_args, args[1])
+                args = (args[0][num_tokens:], *args[1:])
             else:
                 tokens = args[:num_tokens]
                 args = args[num_tokens:]
