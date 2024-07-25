@@ -1415,6 +1415,8 @@ class BuiltinVariable(VariableTracker):
         ]
         return variables.ZipVariable(args, strict=strict, mutable_local=MutableLocal())
 
+    _call_enumerate_polyfill = _polyfill_call_impl("enumerate")
+
     def call_enumerate(self, tx: "InstructionTranslator", *args):
         if len(args) == 1:
             start = 0
@@ -1430,7 +1432,11 @@ class BuiltinVariable(VariableTracker):
                 for idx, var in enumerate(args[0].unpack_var_sequence(tx), start)
             ]
             return variables.TupleVariable(items)
-        # could have an iterable version
+        elif isinstance(args[0], variables.IteratorVariable):
+            return variables.ZipVariable(
+                [variables.CountIteratorVariable(item=start)], args[0]
+            )
+        return self._call_enumerate_polyfill(tx, *args)
 
     def call_len(self, tx: "InstructionTranslator", *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
