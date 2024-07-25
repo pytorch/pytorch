@@ -1,17 +1,72 @@
 import functools
 import random
 import time
+from filelock import FileLock
 from functools import cached_property
+from pathlib import Path
 from statistics import median
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.config import benchmarking as benchmarking_config
+from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import is_cpu_device
 
 
 log = torch._logging.getArtifactLogger(__name__, "benchmarking")
+
+
+@functools.lru_cache(None)
+def get_local_cache_dir() -> Path:
+    return Path(cache_dir()) / "benchmarking"
+
+
+@functools.lru_cache_(None)
+def get_locally_cached_timing_ms(key: str) -> Optional[float]:
+    maybe_cached_timing_ms_path = get_local_cache_dir() / key
+    if maybe_cached_timing_ms_path.is_file():
+        with open(maybe_cached_timing_ms_path, "r") as cached_timing_ms_fp:
+            cached_timing_ms = float(cached_timing_ms_fp.read().strip())
+        return cached_timing_ms
+    return None
+
+
+@functools.lru_cache_(None)
+def put_locally_cached_timing_ms(key: str, timing_ms: float) -> None:
+    cached_timing_ms_path = get_local_cache_dir() / key
+    with open(cached_timing_ms_path, "w") as cached_timing_ms_fp:
+        cached_timing_ms_fp.write(str(timing_ms))
+
+
+def lock_and_cache(fn: Callable[..., Any]) -> Callable[..., Any]:
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        timing_or_timings_ms = fn(*args, **kwargs)
+        if "key" or "keys" not in kwargs:
+            return timing_or_timings_ms
+        is_single_callable = callable(args[1])
+        if is_single_callable:
+            timings_ms = [timing_or_timings_ms]
+            callables = [args[1]]
+            keys = [kwargs["key"]]
+        else:
+            timings_ms = timing_or_timings_ms
+            callables = args[1]
+            keys = kwargs["keys"]
+        synchronized_timings_ms = []
+        for _callable, key, timing_ms in zip(callables, keys, timings_ms):
+            lock = FileLock(get_local_cache_dir() / (key + ".lock"))
+            with lock:
+                maybe_cached_timing_ms = get_locally_cached_timing_ms(key)
+                if maybe_cached_timing_ms is None:
+                    put_locally_cached_timing_ms(key, timing_ms)
+                    synchronized_timings_ms.append(timing_ms)
+                else:
+                    synchronized_timings_ms.append(maybe_cached_timing_ms)
+        if is_single_callable:
+            return synchronized_timings_ms[0]
+        return synchronized_timings_ms
 
 
 def time_and_log(fn: Callable[..., Any]) -> Callable[..., Any]:
