@@ -1,5 +1,7 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import List, Optional
+r"""Implementation for the RMSprop algorithm."""
+from typing import List, Optional, Union
 
 import torch
 from torch import Tensor
@@ -21,11 +23,11 @@ from .optimizer import (
 __all__ = ["RMSprop", "rmsprop"]
 
 
-class RMSprop(Optimizer):
+class RMSprop(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
-        lr: float = 1e-2,
+        lr: Union[float, Tensor] = 1e-2,
         alpha: float = 0.99,
         eps: float = 1e-8,
         weight_decay: float = 0,
@@ -35,7 +37,9 @@ class RMSprop(Optimizer):
         foreach: Optional[bool] = None,
         maximize: bool = False,
         differentiable: bool = False,
-    ):
+    ):  # noqa: D107
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -61,7 +65,7 @@ class RMSprop(Optimizer):
         )
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("momentum", 0)
@@ -135,7 +139,7 @@ class RMSprop(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -237,7 +241,7 @@ RMSprop.__doc__ = (
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float, optional): learning rate (default: 1e-2)
+        lr (float, Tensor, optional): learning rate (default: 1e-2)
         momentum (float, optional): momentum factor (default: 0)
         alpha (float, optional): smoothing constant (default: 0.99)
         eps (float, optional): term added to the denominator to improve
@@ -464,6 +468,7 @@ def rmsprop(
     centered: bool,
 ):
     r"""Functional API that performs rmsprop algorithm computation.
+
     See :class:`~torch.optim.RMSProp` for details.
     """
     # this check is slow during compilation, so we skip it

@@ -361,12 +361,11 @@ def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
         run_fwd_maybe_bwd(gm, clone_inputs_retaining_gradness(example_inputs))
         compiled_gm = compiler_fn(gm, example_inputs)
         run_fwd_maybe_bwd(compiled_gm, clone_inputs_retaining_gradness(example_inputs))
-        return False
     except Exception as e:
         new_failure = str(e)
         if SequenceMatcher(None, orig_failure, new_failure).ratio() > 0.5:
             return True
-        return False
+    return False
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #

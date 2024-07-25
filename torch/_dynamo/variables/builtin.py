@@ -9,10 +9,12 @@ import math
 import operator
 import types
 from collections import defaultdict, OrderedDict
+from collections.abc import KeysView, MutableMapping
 from typing import Dict, List
 
 import torch
 from torch import sym_float, sym_int
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, polyfill, variables
 from ..exc import (
@@ -1252,7 +1254,17 @@ class BuiltinVariable(VariableTracker):
             return variables.ConstantVariable.create(True)
         elif isinstance(arg, UserDefinedVariable):
             return variables.ConstantVariable.create(callable(arg.value))
-        elif isinstance(arg, (ConstantVariable, SymNodeVariable, TensorVariable)):
+        elif isinstance(
+            arg,
+            (
+                ConstantVariable,
+                SymNodeVariable,
+                TensorVariable,
+                ListVariable,
+                TupleVariable,
+                ListIteratorVariable,
+            ),
+        ):
             return variables.ConstantVariable.create(False)
 
     def call_cast(self, _, *args, **kwargs):
@@ -1287,6 +1299,18 @@ class BuiltinVariable(VariableTracker):
                     x.unpack_var_sequence(tx) for x in arg.unpack_var_sequence(tx)
                 )
                 return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
+            elif isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
+                arg.value, MutableMapping
+            ):
+                # This is applicable for user defined objects which seem like dict, but are not really dicts. For
+                # example, TensorDict derives from MutableMapping. For such cases, we can directly inline the .items
+                # method and create a new dict.
+                out = tx.inline_user_function_return(
+                    arg.var_getattr(tx, "items"), args, kwargs
+                )
+                if isinstance(out, ConstDictVariable):
+                    return out
+                return BuiltinVariable(user_cls).call_custom_dict(tx, user_cls, out)
         elif not args and kwargs:
             items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
             return variables.ConstDictVariable(
@@ -1338,6 +1362,17 @@ class BuiltinVariable(VariableTracker):
         elif arg.has_unpack_var_sequence(tx):
             items = arg.unpack_var_sequence(tx)
             return SetVariable(items, mutable_local=MutableLocal())
+        elif isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
+            arg.value, KeysView
+        ):
+            iter_fn = arg.var_getattr(tx, "__iter__")
+            if isinstance(iter_fn, variables.UserMethodVariable):
+                out = tx.inline_user_function_return(iter_fn, args, kwargs)
+                if isinstance(out, SetVariable):
+                    return out
+                return BuiltinVariable(set).call_set(tx, out)
+            else:
+                unimplemented(f"set(): {args} {kwargs}")
         else:
             unimplemented(f"set(): {args} {kwargs}")
 
@@ -1392,7 +1427,17 @@ class BuiltinVariable(VariableTracker):
             def _tensor_isinstance(tensor_var, tensor_type):
                 def check_type(ty):
                     if ty not in tensortype_to_dtype:
-                        return issubclass(arg.python_type(), ty)
+                        example_val = arg.as_proxy().node.meta["example_value"]
+                        if (
+                            is_traceable_wrapper_subclass(example_val)
+                            and ty is torch.nn.parameter.Parameter
+                        ):
+                            # N.B: we are calling isinstance directly on the example value.
+                            # torch.nn.Parameter has a meta-class that overrides __isinstance__,
+                            # the isinstance check here allows us to invoke that logic.
+                            return isinstance(example_val, ty)
+                        else:
+                            return issubclass(arg.python_type(), ty)
 
                     dtypes = tensortype_to_dtype[ty]
                     return arg.dtype in dtypes
@@ -1459,9 +1504,10 @@ class BuiltinVariable(VariableTracker):
                 return variables.ConstantVariable(hasattr(obj.fn, name))
             return obj.call_hasattr(tx, name)
 
-    def call_map(self, tx, fn, seq):
-        if seq.has_unpack_var_sequence(tx):
-            items = [fn.call_function(tx, [x], {}) for x in seq.unpack_var_sequence(tx)]
+    def call_map(self, tx, fn, *seqs):
+        if all(seq.has_unpack_var_sequence(tx) for seq in seqs):
+            unpacked = [seq.unpack_var_sequence(tx) for seq in seqs]
+            items = [fn.call_function(tx, list(args), {}) for args in zip(*unpacked)]
             return variables.TupleVariable(items)
 
     def call_sum(self, tx, seq, start=_SENTINEL):
@@ -1494,9 +1540,6 @@ class BuiltinVariable(VariableTracker):
                 ],
                 {},
             )
-
-    def call_StopIteration(self, tx, *args):
-        return variables.StopIterationVariable([*args])
 
     def call_reduce(self, tx, function, iterable, initial=_SENTINEL):
         if iterable.has_unpack_var_sequence(tx):
@@ -1546,11 +1589,8 @@ class BuiltinVariable(VariableTracker):
                         f"pending mutation on nn module, so graph breaking at {name!r} call"
                     )
 
-            try:
-                # re-read a pending side effect?
-                return tx.output.side_effects.load_attr(obj, name)
-            except KeyError:
-                pass
+        if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
+            return tx.output.side_effects.load_attr(obj, name)
 
         if default is not None:
             hasattr_var = self.call_hasattr(tx, obj, name_var)

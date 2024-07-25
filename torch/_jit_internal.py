@@ -40,12 +40,13 @@ import torch
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
-import torch.distributed as dist
+import torch.distributed.rpc
 import torch.package._mangling as package_mangling
 from torch._awaits import _Await
 from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
+
 
 IS_PY39_PLUS: Final[bool] = sys.version_info >= (3, 9)
 IS_PY310_PLUS: Final[bool] = sys.version_info >= (3, 10)
@@ -1087,7 +1088,7 @@ def is_await(ann) -> bool:
     return get_origin(ann) is _Await
 
 
-if dist.rpc.is_available():
+if torch.distributed.rpc.is_available():
     from torch._C._distributed_rpc import PyRRef
     from torch.distributed.rpc import RRef
 
@@ -1517,6 +1518,15 @@ def _extract_tensors(obj):
     extractor = _TensorExtractor(io.BytesIO(), protocol=-1, tensors=tensors)
     extractor.dump(obj)
     return tensors
+
+
+def _get_model_id(obj) -> Optional[str]:
+    if isinstance(obj, torch.jit.ScriptModule):
+        return str(obj._c._type())
+    elif isinstance(obj, torch.jit.ScriptFunction):
+        return obj.qualified_name
+    else:
+        return None
 
 
 # In Python-3.11+ typed enums (i.e. IntEnum for example) retain number of base class methods in subclass
