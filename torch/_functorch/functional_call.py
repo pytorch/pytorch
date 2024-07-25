@@ -1,5 +1,5 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from collections import defaultdict
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch

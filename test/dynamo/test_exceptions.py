@@ -170,28 +170,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    def test_dynamo_undo_kw_names(self):
-        def g(x, k=None):
-            if k:
-                raise TypeError("error")
-            return x.sin()
-
-        def fn(x):
-            d = {"a": x}
-            try:
-                g(x, k=True)
-            except Exception:
-                y = 0
-                for _, b in d.items():  # noqa: PERF102
-                    y += b.sum()
-            return y
-
-        x = torch.randn(2, 3)
-        expected = fn(x)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        got = opt_fn(x)
-        self.assertEqual(expected, got)
-
     def test_nn_module_getattr(self):
         class A:
             def __init__(self):
@@ -248,6 +226,33 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(4)
         self.assertEqual(mod(x), opt_mod(x))
+
+    def test_stop_iteration(self):
+        def zip_longest(*iterables, fillvalue=None):
+            # Get the iterators for each iterable
+            iterators = [iter(it) for it in iterables]
+
+            result = []
+            while True:
+                for it in iterators:
+                    try:
+                        value = next(it)
+                    except StopIteration:
+                        result.append(fillvalue)
+                        return result
+                    result.append(value)
+
+        def fn(x, y):
+            torch.cos(torch.randn(4))
+            return tuple(zip_longest(x, y))
+
+        x = [1, 2, 3, 4]
+        y = [10, 11, 12]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":
