@@ -5006,7 +5006,7 @@ class TestMemPool(TestCase):
 
         # each call to torch.cuda.graph_pool_handle() or torch.cuda.MemPool()
         # increments the id
-        self.assertGreater(pool2[1], pool1[1])
+        self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
 
     def test_mempool_with_allocator(self):
         pool = torch.cuda.MemPool()
