@@ -346,8 +346,6 @@ class FakeTensorConverter:
         if type(t) is torch.nn.Parameter:
             assert not make_constant
 
-        maybe_constant_t = t if make_constant else None
-
         def mk_fake_tensor(make_meta_t: Callable[[], object]) -> FakeTensor:
             # NB: don't use in_kernel_invocation_manager. to
             # ensure FakeTensor can internally do constant computation
@@ -356,23 +354,15 @@ class FakeTensorConverter:
             # invariant is that make_meta_t only calls factories
             # for which it is not strictly necessary to use the
             # invocation manager (I think!)
-            if orig_t is not None:
-                maybe_memo = self._get_memo(orig_t)
-                if maybe_memo is not None:
-                    return maybe_memo
-
             with no_dispatch():
-                out = FakeTensor(
+                return FakeTensor(
                     fake_mode,
                     make_meta_t(),
                     existing_device,
                     # TODO: callback might be used in recursive contexts, in
                     # which case using t is wrong!  BUG!
-                    constant=maybe_constant_t,
+                    constant=t if make_constant else None,
                 )
-            if orig_t is not None:
-                self.set_tensor_memo(orig_t, out)
-            return out
 
         out = self.meta_converter(
             t,
