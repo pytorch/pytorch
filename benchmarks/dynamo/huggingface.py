@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import functools
 import importlib
 import logging
 import os
@@ -7,6 +8,8 @@ import re
 import subprocess
 import sys
 import warnings
+
+import yaml
 
 
 try:
@@ -104,18 +107,6 @@ with open(MODELS_FILENAME, "r") as fh:
 assert len(BATCH_SIZE_KNOWN_MODELS)
 
 
-SKIP = {
-    # Difficult to setup accuracy test because .eval() not supported
-    "Reformer",
-    # Fails deepcopy
-    "BlenderbotForConditionalGeneration",
-    "GPTNeoForCausalLM",
-    "GPTNeoForSequenceClassification",
-    # Fails with even batch size = 1
-    "GPTJForCausalLM",
-    "GPTJForQuestionAnswering",
-}
-
 # TODO - Fails even after fake tensors
 BATCH_SIZE_DIVISORS = {
     "AlbertForMaskedLM": 2,
@@ -202,10 +193,6 @@ REQUIRE_HIGHER_TOLERANCE_INFERENCE_CPU_ONLY = {
 }
 
 
-SKIP_FOR_CPU = {
-    "OPTForCausalLM",  # OOMs
-}
-
 ONLY_EVAL_MODE = {
     "M2M100ForConditionalGeneration",  # Fails with dynamo for train mode
 }
@@ -213,6 +200,38 @@ ONLY_EVAL_MODE = {
 FP32_ONLY_MODELS = {
     "GoogleFnet",
 }
+
+
+# TODO(kit1980): deduplicate with the same in torchbench.py
+@functools.lru_cache(maxsize=1)
+def load_yaml_file():
+    filename = "huggingface.yaml"
+    filepath = os.path.join(os.path.dirname(__file__), filename)
+
+    with open(filepath) as f:
+        data = yaml.safe_load(f)
+
+    internal_file_path = os.path.join(os.path.dirname(__file__), "fb", filename)
+    if os.path.exists(internal_file_path):
+        with open(internal_file_path) as f:
+            internal_data = yaml.safe_load(f)
+            data.update(internal_data)
+
+    def flatten(lst):
+        for item in lst:
+            if isinstance(item, list):
+                yield from flatten(item)
+            else:
+                yield item
+
+    def maybe_list_to_set(obj):
+        if isinstance(obj, dict):
+            return {k: maybe_list_to_set(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return set(flatten(obj))
+        return obj
+
+    return maybe_list_to_set(data)
 
 
 def get_module_cls_by_model_name(model_cls_name):
@@ -435,8 +454,20 @@ class HuggingfaceRunner(BenchmarkRunner):
         self.suite_name = "huggingface"
 
     @property
+    def _config(self):
+        return load_yaml_file()
+
+    @property
+    def _skip(self):
+        return self._config["skip"]
+
+    @property
+    def skip_models(self):
+        return self._skip["all"]
+
+    @property
     def skip_models_for_cpu(self):
-        return SKIP_FOR_CPU
+        return self._skip["device"]["cpu"]
 
     @property
     def fp32_only_models(self):
@@ -546,7 +577,7 @@ class HuggingfaceRunner(BenchmarkRunner):
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
                 or model_name in args.exclude_exact
-                or model_name in SKIP
+                or model_name in self.skip_models
             ):
                 continue
             yield model_name

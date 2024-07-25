@@ -1,0 +1,16 @@
+skip:
+  all:
+    # Difficult to setup accuracy test because .eval() not supported
+    - Reformer
+    # Fails deepcopy
+    - BlenderbotForConditionalGeneration
+    - GPTNeoForCausalLM
+    - GPTNeoForSequenceClassification
+    # Fails with even batch size = 1
+    - GPTJForCausalLM
+    - GPTJForQuestionAnswering
+
+  device:
+    cpu:
+      # OOMs
+      - OPTForCausalLM
