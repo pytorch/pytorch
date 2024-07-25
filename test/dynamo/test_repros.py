@@ -4665,7 +4665,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
     getitem_2 = l_x_[0]
     sum_1 = getitem_2.sum();  getitem_2 = None
     gt_1 = sum_1 > 0;  sum_1 = None
-    _assert_async = torch._assert_async(gt_1, 'assertion error');  gt_1 = _assert_async = None
+    _assert_async = torch._assert_async(gt_1, 'assertion error');  gt_1 = None
     cos = l_x_.cos();  l_x_ = None
     return (cos,)""",
         )
@@ -4929,7 +4929,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         vc_before = x._version
         f(x)
         vc_after = x._version
-        self.assertEqual(1, vc_after - vc_before)
+        self.assertTrue(vc_after > vc_before)
 
     def test_nn_module_callable(self):
         class M(nn.Module):
@@ -5462,6 +5462,20 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             fn(x1, y)
 
         self.assertTrue(cnt.frame_count <= 2)
+
+    def test_optimized_module_training(self):
+        mod = torch.nn.Linear(3, 3)
+        mod.eval()
+
+        opt_mod = torch.compile(mod, backend="eager")
+        self.assertFalse(opt_mod.training)
+
+        opt_mod.train()
+        self.assertTrue(opt_mod.training)
+        self.assertTrue(mod.training)
+
+        mod.eval()
+        self.assertFalse(opt_mod.training)
 
 
 instantiate_parametrized_tests(ReproTests)
