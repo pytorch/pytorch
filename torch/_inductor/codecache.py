@@ -2145,7 +2145,7 @@ def custom_op_wrapper(op: str, *args):
 class CppCodeCache:
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
-    deprecated_cpp_compile_command_flags: Dict[str, Any] = {}
+    cpp_compile_command_flags: Dict[str, Any] = {}
 
     @staticmethod
     def _load_library_inner(path: str, key: str) -> Union[CDLL, ModuleType]:
@@ -2177,7 +2177,7 @@ class CppCodeCache:
     @classmethod
     def load_async(cls, source_code: str, cuda=False, submit_fn=None, extra_flags=()):
         compile_command = {
-            **cls.deprecated_cpp_compile_command_flags,
+            **cls.cpp_compile_command_flags,
             "cuda": cuda,
             "vec_isa": pick_vec_isa(),
             "extra_flags": extra_flags,
@@ -2284,7 +2284,7 @@ def _worker_compile_cpp(
 class CppPythonBindingsCodeCache(CppCodeCache):
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
-    deprecated_cpp_compile_command_flags = {
+    cpp_compile_command_flags = {
         # kernels have no dependency on libtorch
         "include_pytorch": False,
         "shared": True,
@@ -2450,7 +2450,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
-    deprecated_cpp_compile_command_flags = {
+    cpp_compile_command_flags = {
         "include_pytorch": True,
         "shared": True,
     }
