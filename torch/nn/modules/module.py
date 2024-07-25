@@ -2944,8 +2944,10 @@ class Module:
             max_epochs: int = 10,
             log_interval: int = 100):
         if isinstance(optimizer, str):
+            optimizer_ = self._get_optimizer_by_name(optimizer, **self.optimizer_kwargs)
+            
             def default_optimizer_factory(batch_idx: int, batch) -> Optimizer:
-                return self._get_optimizer_by_name(optimizer, **self.optimizer_kwargs)
+                return optimizer_
 
             optimizer_factory = default_optimizer_factory
         else:
