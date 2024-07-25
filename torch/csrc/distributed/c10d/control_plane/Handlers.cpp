@@ -4,9 +4,9 @@
 #include <mutex>
 #include <shared_mutex>
 #include <stdexcept>
+#include <utility>
 
-namespace c10d {
-namespace control_plane {
+namespace c10d::control_plane {
 
 namespace {
 
@@ -20,7 +20,7 @@ class HandlerRegistry {
           fmt::format("Handler {} already registered", name));
     }
 
-    handlers_[name] = f;
+    handlers_[name] = std::move(f);
   }
 
   HandlerFunc getHandler(const std::string& name) {
@@ -38,6 +38,7 @@ class HandlerRegistry {
     std::shared_lock<std::shared_mutex> lock(handlersMutex_);
 
     std::vector<std::string> names;
+    names.reserve(handlers_.size());
     for (const auto& [name, _] : handlers_) {
       names.push_back(name);
     }
@@ -62,7 +63,7 @@ RegisterHandler pingHandler{"ping", [](const Request&, Response& res) {
 } // namespace
 
 void registerHandler(const std::string& name, HandlerFunc f) {
-  return getHandlerRegistry().registerHandler(name, f);
+  return getHandlerRegistry().registerHandler(name, std::move(f));
 }
 
 HandlerFunc getHandler(const std::string& name) {
@@ -73,5 +74,4 @@ std::vector<std::string> getHandlerNames() {
   return getHandlerRegistry().getHandlerNames();
 }
 
-} // namespace control_plane
-} // namespace c10d
+} // namespace c10d::control_plane

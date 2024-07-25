@@ -57,7 +57,7 @@ struct FullDataLoaderOptions {
   size_t batch_size;
   size_t workers;
   size_t max_jobs;
-  optional<std::chrono::milliseconds> timeout;
+  std::optional<std::chrono::milliseconds> timeout;
   bool enforce_ordering;
   bool drop_last;
 };

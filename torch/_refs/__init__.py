@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import builtins
 import collections
@@ -260,7 +261,6 @@ __all__ = [
     "dstack",
     "expand",
     "expand_as",
-    "expand_copy",
     "flatten",
     "flip",
     "fliplr",
@@ -274,7 +274,6 @@ __all__ = [
     "native_group_norm",
     "native_layer_norm",
     "permute",
-    "permute_copy",
     "ravel",
     "repeat",
     "reshape",
@@ -285,18 +284,15 @@ __all__ = [
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
-    "squeeze_copy",
     "t",
     "t_copy",
     "T",
     "take_along_dim",
     "tensor_split",
     "transpose",
-    "transpose_copy",
     "unfold",
     "unfold_copy",
     "unsqueeze",
-    "unsqueeze_copy",
     "view",
     "view_as",
     "view_copy",
@@ -362,9 +358,7 @@ aten = torch._ops.ops.aten
 
 
 def is_noncontiguous_supported(device):
-    if device is not None and device.type == "hpu":
-        return False
-    return True
+    return device is None or device.type != "hpu"
 
 
 def handle_noncontiguous_outputs(input_tlist, output):
@@ -522,7 +516,7 @@ def _make_inplace(fn):
 
     inplace_name = f"{fn.__name__}_"
     _fn.__name__ = inplace_name
-    _fn = register_decomposition(getattr(aten, inplace_name))(_fn)
+    _fn = register_decomposition(getattr(aten, inplace_name))(_fn)  # type: ignore[assignment]
 
     # We access the __all__ attribute of the module where fn is defined
     # There may be a cleaner way of doing this...
@@ -999,7 +993,7 @@ def view_as_complex(self: TensorLikeType) -> TensorLikeType:
     )
     dims = old_strides[:-1]
     torch._check(
-        py_all(stride % 2 == 0 for stride in dims),
+        builtins.all(stride % 2 == 0 for stride in dims),
         lambda: "Tensor must have a stride divisible by 2 for all but last dimension",
     )
     torch._check(
@@ -2174,7 +2168,7 @@ def _reduction(
         dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
-        valid_shape = a.ndim == 0 or py_all(a.shape[i] for i in dims)
+        valid_shape = a.ndim == 0 or builtins.all(a.shape[i] for i in dims)
         if not valid_shape:
             raise RuntimeError(
                 "reducing over zero-size dimension for reduction operation without identity"
@@ -2209,7 +2203,7 @@ def _make_copy_from_view(fn):
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
     aten_fn = getattr(aten, fn.__name__)
-    annotations = fn.__annotations__
+    annotations = getattr(fn, "__annotations__", {})
     fn = out_wrapper()(aten_fn)
 
     @wraps(fn)
@@ -2230,10 +2224,6 @@ def _make_copy_from_view(fn):
     return _fn
 
 
-# Saves Python all
-py_all = all
-
-
 @register_decomposition(aten.all)
 @out_wrapper()
 def all(
@@ -2247,10 +2237,6 @@ def all(
         result = result.to(dtype=torch.uint8)
 
     return result
-
-
-# Saves Python any
-py_any = any
 
 
 @register_decomposition(aten.any)
@@ -3149,7 +3135,9 @@ def native_group_norm(
         [batch_size, num_groups, num_channels // num_groups, flattened_inner_size],
     )
     out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
-    if input.device.type == "cpu":
+    if input.device.type == "cpu" and input.is_contiguous(
+        memory_format=torch.channels_last
+    ):
         unsqueeze_bias = None
         if bias is not None:
             unsqueeze_bias = torch.reshape(
@@ -3803,9 +3791,7 @@ def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
 
 @register_decomposition(aten.roll)
 @out_wrapper()
-def roll(
-    a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
-) -> TensorLikeType:
+def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
     dims = utils.canonicalize_dims(a.ndim, dims)
     # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
@@ -3965,7 +3951,7 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
         lambda: "Dimension specified as 0 but tensor has no dimensions",
     )
     if guard_size_oblivious(t.shape[dim] == 0):
-        return tuple()
+        return ()
     else:
         return tuple(
             torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim)
@@ -4533,6 +4519,14 @@ def unfold(
     return self.as_strided(shape, strides)
 
 
+@register_decomposition(aten.unfold_copy)
+@out_wrapper()
+def unfold_copy(self: TensorLikeType, dimension: int, size: int, step: int):
+    return self.unfold(dimension, size, step).clone(
+        memory_format=torch.contiguous_format
+    )
+
+
 def _cumsumprod_common(
     func,
     init,
@@ -5092,7 +5086,7 @@ def linspace(
         )
         end = _maybe_convert_to_dtype(end, torch.float64)
 
-    if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
+    if builtins.any(isinstance(arg, complex) for arg in (start, end, steps)):
         default_complex_dtype = utils.corresponding_complex_dtype(
             torch.get_default_dtype()
         )
@@ -5191,7 +5185,7 @@ def logspace(
             )
             end = _maybe_convert_to_dtype(end, dtype)
 
-    if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
+    if builtins.any(isinstance(arg, complex) for arg in (start, end, steps)):
         default_complex_dtype = utils.corresponding_complex_dtype(
             torch.get_default_dtype()
         )
@@ -5226,7 +5220,7 @@ def meshgrid(*tensors: TensorLikeType, indexing: str):
     pass
 
 
-@register_decomposition(aten.meshgrid)
+@register_decomposition(aten.meshgrid)  # type: ignore[misc]
 def meshgrid(
     *tensors: Union[TensorLikeType, List[TensorLikeType], Tuple[TensorLikeType]],
     indexing: str,
@@ -5239,7 +5233,7 @@ def meshgrid(
         tensors = tuple(tensors[0])
 
     torch._check(
-        py_all(isinstance(a, TensorLike) for a in tensors),
+        builtins.all(isinstance(a, TensorLike) for a in tensors),
         lambda: "meshgrid expects its inputs to be tensors",
     )
 
@@ -6332,23 +6326,14 @@ geometric_ = _make_inplace(geometric)
 log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
 
-# make copy variants of ops that returns views
-alias_copy = _make_copy_from_view(alias)
-as_strided_copy = _make_copy_from_view(as_strided)
-diagonal_copy = _make_copy_from_view(diagonal)
-expand_copy = _make_copy_from_view(expand)
-# TODO: narrow_copy must return a sparse tensor if the input is sparse, but refs have
+alias_copy = _make_copy_from_view(aten.alias)
+as_strided_copy = _make_copy_from_view(aten.as_strided)
+diagonal_copy = _make_copy_from_view(aten.diagonal)
+# TODO: This must return a sparse tensor if the input is sparse, but refs have
 # no sparse support. See narrow_copy_sparse in core.
-narrow_copy = _make_copy_from_view(narrow)
-permute_copy = _make_copy_from_view(permute)
-squeeze_copy = _make_copy_from_view(squeeze)
-t_copy = _make_copy_from_view(t)
-transpose_copy = _make_copy_from_view(transpose)
-unfold_copy = _make_copy_from_view(unfold)
-unsqueeze_copy = _make_copy_from_view(unsqueeze)
-view_copy = _make_copy_from_view(view)
-
-# TODO: unbind_copy
+narrow_copy = _make_copy_from_view(aten.narrow)
+t_copy = _make_copy_from_view(aten.t)
+view_copy = _make_copy_from_view(aten.view)
 
 
 # xref: isStorage in torch/csrc/DynamicTypes.cpp
