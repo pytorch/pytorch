@@ -42,8 +42,6 @@ from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
-import logging
-torch_log = logging.getLogger("torch")
 
 
 def initialize_lazy_module(tx, mod, args, kwargs):
@@ -54,9 +52,8 @@ def initialize_lazy_module(tx, mod, args, kwargs):
     useful now that 'allowed' modules graph-break on hooks, calling this first ensures there is no hook
     by the time we trace __call__ and thus no graph-break for lazy allowed modules.
     """
-    torch_log.warn(f"hasattr(mod, '_initialize_hook'): {hasattr(mod, '_initialize_hook')}")
     if hasattr(mod, "_initialize_hook"):
-        torch_log.warn(f"mod._initialize_hook: {mod._initialize_hook}")
+
         def convert_to_fake(x):
             if is_namedtuple(x):
                 return type(x)(*(convert_to_fake(elem) for elem in x))
@@ -340,7 +337,6 @@ class NNModuleVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         mod = tx.output.get_submodule(self.module_key)
-        torch_log.warn(f"here2 mod: {mod}, is_lazy_module: {is_lazy_module(mod)}")
 
         with record_nn_module_stack(
             self.module_key, self.get_nn_module_stack_source(), tx, mod
@@ -843,7 +839,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         mod = self.value
         # see comment on lazy module handling in NNModuleVariable.call_function for context
-        torch_log.warn(f"here1: mod: {mod}, is_lazy_module: {is_lazy_module(mod)}")
         if is_lazy_module(mod):
             if mod.cls_to_become is not None:
                 self.value_type = mod.cls_to_become

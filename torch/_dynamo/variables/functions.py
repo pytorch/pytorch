@@ -315,7 +315,10 @@ class UserMethodVariable(UserFunctionVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         try:
-            from torch.distributed._composable.fsdp import _fsdp_param_group, _fsdp_state
+            from torch.distributed._composable.fsdp import (
+                _fsdp_param_group,
+                _fsdp_state,
+            )
         except ModuleNotFoundError:
             _fsdp_param_group = None
             _fsdp_state = None

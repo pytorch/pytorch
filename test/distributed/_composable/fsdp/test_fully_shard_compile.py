@@ -415,10 +415,10 @@ class TestFullyShardCompile(FSDPTest):
                     *self._create_transformer_factory_fns(), "inductor", fullgraph=True
                 )
             )
-        print(f"len(triton_codes): {len(triton_codes)}")
         self.assertTrue(
             len(triton_codes) == 2,
-            "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
+            "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph. "
+            "If more than two lowerings are found, it's likely due to recompiles.",
         )
         for code in triton_codes:
             FileCheck().check(
