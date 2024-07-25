@@ -2814,6 +2814,12 @@ class GraphModule(torch.nn.Module):
     def test_map_max(a, b):
         return max(map(lambda x: x.sum(), [a, b]))
 
+    # max(map(...)) graph breaks
+    @unittest.expectedFailure
+    @make_test
+    def test_map_max_const(a):
+        return max(map(lambda x: x, [1, 2, 3])), a + 1
+
     @make_test
     def test_map_list(a, b):
         return list(map(lambda x: x + 1, [a, b]))
@@ -2873,6 +2879,10 @@ class GraphModule(torch.nn.Module):
         d.extendleft(map(lambda x: x + 1, [b, c]))
         return d
 
+    @make_test
+    def test_map_str_join(a):
+        return "".join(map(lambda x: x, ["a", "b", "c"])), a + 1
+
     def test_map_with_graph_break(self):
         def f(a):
             a += 1
@@ -2922,6 +2932,13 @@ class GraphModule(torch.nn.Module):
 
         l = list(zip([a, b], map(f, [1, 2, 3, 4])))
         return a + y
+
+    @make_test
+    def test_map_call_function_ex(a, b):
+        def f(x, y):
+            return x + y
+
+        return f(*map(lambda x: x + 1, [a, b]))
 
 
 def udf_mul(x, y):
