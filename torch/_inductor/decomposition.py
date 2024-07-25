@@ -4,7 +4,7 @@ import logging
 import math
 import sys
 import typing
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch._decomp as decomp
@@ -108,7 +108,9 @@ decomps_to_exclude = [
 remove_decompositions(decompositions, decomps_to_exclude)
 
 
-def register_decomposition(ops: List[torch._ops.OperatorBase]) -> Callable[..., Any]:
+def register_decomposition(
+    ops: List[Union[torch._ops.OperatorBase, torch._ops.OpOverloadPacket]]
+) -> Callable[..., Any]:
     for op in [ops] if callable(ops) else ops:  # type: ignore[attr-defined]
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
@@ -132,8 +134,8 @@ def functional_assert_async_msg_decomp(tensor: torch.Tensor, msg: str) -> None:
 def sym_constrain_range_for_size(
     symbol: torch.SymInt,
     *,
-    min: Optional[int] = None,
-    max: Optional[int] = None,
+    min: Optional[torch.types.Number] = None,
+    max: Optional[torch.types.Number] = None,
 ) -> None:
     return
 
@@ -142,8 +144,8 @@ def sym_constrain_range_for_size(
 @pw_cast_for_opmath
 def clamp(
     x: torch.Tensor,
-    min: Optional[Union[int, float]] = None,
-    max: Optional[Union[int, float]] = None,
+    min: Optional[torch.types.Number] = None,
+    max: Optional[torch.types.Number] = None,
 ) -> torch.Tensor:
     if min is not None:
         x = x.clamp_min(min)
@@ -155,7 +157,7 @@ def clamp(
 @register_decomposition([aten.full])
 def full(
     size: List[Union[int, torch.SymInt]],
-    fill_value: Union[int, float],
+    fill_value: torch.types.Number,
     **kwargs: Any,
 ) -> torch.Tensor:
     dtype = kwargs.get("dtype")
@@ -249,8 +251,8 @@ def addmm(
     self: torch.Tensor,
     mat1: torch.Tensor,
     mat2: torch.Tensor,
-    beta: float = 1,
-    alpha: float = 1,
+    beta: torch.types.Number = 1,
+    alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
     if self.device.type == "cpu":
         if guard_size_oblivious(mat1.size(0) == 1) and guard_size_oblivious(
@@ -311,7 +313,7 @@ def mm(
 #   don't remove ALL empty tensors, only the naughty ones)
 @register_decomposition([aten.cat.default])
 def cat(
-    tensors: torch.Tensor,
+    tensors: List[torch.Tensor],
     dim: int = 0,
 ) -> torch.Tensor:
     from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
@@ -377,7 +379,7 @@ def add(
     x: torch.Tensor,
     y: torch.Tensor,
     *,
-    alpha: Optional[float] = None,
+    alpha: Optional[torch.types.Number] = None,
 ) -> torch.Tensor:
     # Require both x and y to be complex tensors.
     x_is_complex_tensor = torch.is_tensor(x) and x.is_complex()
@@ -679,7 +681,7 @@ def grid_sampler_2d(
 
 @register_decomposition(aten._foreach_addcmul.Scalar)
 def _foreach_addcmul_scalar(
-    self: torch.Tensor,
+    self: List[torch.Tensor],
     left_tensors: List[torch.Tensor],
     right_tensors: List[torch.Tensor],
     scalar: float = 1,
@@ -691,7 +693,7 @@ def _foreach_addcmul_scalar(
 
 @register_decomposition(aten._foreach_addcdiv.Scalar)
 def _foreach_addcdiv_scalar(
-    self: torch.Tensor,
+    self: List[torch.Tensor],
     left_tensors: List[torch.Tensor],
     right_tensors: List[torch.Tensor],
     scalar: float = 1,
@@ -705,7 +707,7 @@ def _foreach_addcdiv_scalar(
 def _foreach_lerp_scalar(
     start_tensors: List[torch.Tensor],
     end_tensors: List[torch.Tensor],
-    weight: float,
+    weight: torch.types.Number,
 ) -> List[torch.Tensor]:
     return aten._foreach_add.List(
         start_tensors,
@@ -748,11 +750,13 @@ def miopen_batch_norm(
 
 
 @functools.lru_cache(None)
-def fast_random_decomps():  # type: ignore[no-untyped-def]
+def fast_random_decomps() -> Dict[Any, Callable[..., Any]]:
     return {**decompositions, **extra_random_decomps}
 
 
-def select_decomp_table():  # type: ignore[no-untyped-def]
+# TODO(aakhundov): replace this (and the above) Any by more
+# specific type and fix all the cascading mypy errors
+def select_decomp_table() -> Dict[Any, Callable[..., Any]]:
     """decomps can change based on config"""
     if config.fallback_random:
         return decompositions
