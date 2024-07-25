@@ -20,7 +20,7 @@ void igamma_self_backward_kernel_cuda(TensorIteratorBase& iter) {
 void igammac_self_backward_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igammac_self_backward_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t x) -> scalar_t {
-      return calc_igammac_grada<scalar_t, /*is_cuda=*/true>(a, x);
+      return calc_igammac_grada(a, x);
     });
   });
 }
