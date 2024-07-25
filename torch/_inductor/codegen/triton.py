@@ -393,7 +393,7 @@ class TritonPrinter(PythonPrinter):
         quot, div = expr.args
         quot = self.doprint(quot)
         div = self.doprint(div)
-        return f"triton_helpers.div_floor_integer({quot},  {div})"
+        return f"triton_helpers.div_floor_integer({quot}, {div})"
 
     # TODO: This is wrong, when lhs, rhs > 2**53, Python does a higher
     # precision algorithm, which we would need to replicate here
