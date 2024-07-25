@@ -85,10 +85,8 @@ from torch._inductor.cudagraph_utils import (
     check_for_mutation,
     CheckInvariantStatus,
     FunctionID,
-    InputType,
     log_cudagraph_skip_and_bump_counter,
     log_data_ptr_mismatch,
-    maybe_get_static_data_ptr,
     ModelType,
     OutputType,
     WrappedFunction,
@@ -100,6 +98,7 @@ from torch.utils.weak import TensorWeakRef
 
 
 if TYPE_CHECKING:
+    from torch._inductor.utils import InputType
     from torch.types import _bool
 
 StorageWeakRefPointer = int
@@ -357,7 +356,7 @@ def get_manager(
 
 def cudagraphify_impl(
     model: ModelType,
-    inputs: InputType,
+    inputs: List[InputType],
     static_input_idxs: Sequence[int],
     *args: Any,
     **kwargs: Any,
@@ -370,7 +369,7 @@ def cudagraphify_impl(
 
     del inputs
 
-    def deferred_cudagraphify(inputs: InputType) -> OutputType:
+    def deferred_cudagraphify(inputs: List[InputType]) -> OutputType:
         int_key = get_ints(inputs)
         fn = fn_cache.get(int_key)
         if fn is not None:
@@ -398,7 +397,7 @@ def cudagraphify_impl(
 
 def cudagraphify(
     model: ModelType,
-    inputs: InputType,
+    inputs: List[InputType],
     static_input_idxs: Sequence[int] = (),
     *,
     device_index: int,
@@ -767,7 +766,7 @@ class CUDAGraphNode:
         wrapped_function: WrappedFunction,
         id: GraphID,
         parent: Optional[CUDAGraphNode],
-        inputs: InputType,
+        inputs: List[InputType],
         cuda_graphs_pool: Tuple[int, int],
         device_index: int,
         stack_traces: Optional[StackTraces],
@@ -844,6 +843,16 @@ class CUDAGraphNode:
             if i not in self.cudagraph_managed_idxs
         ]
 
+        def maybe_get_static_data_ptr(
+            idx: int,
+            inputs: List[Union[torch.Tensor, int]],
+            static_input_idxs: List[int],
+        ) -> Optional[int]:
+            inp = inputs[idx]
+            if isinstance(inp, torch.Tensor) and idx in static_input_idxs:
+                return inp.data_ptr()
+            return None
+
         self.static_input_data_ptrs: InputList[Optional[int]] = [
             maybe_get_static_data_ptr(i, inputs, self.static_input_idxs)
             for i in range(len(inputs))
@@ -904,7 +913,7 @@ class CUDAGraphNode:
         # we reconstruct tensors at the correct data pointers of our inputs which are
         # non owning and do not prevent deallocation. On subsequent executions, input values
         # will be copied over to these tensors.
-        self.reconstructed_inputs: InputType = [
+        self.reconstructed_inputs: List[InputType] = [
             self._reconstruct_from_tensor_metadata(self._tensor_metadata(x))
             if isinstance(x, torch.Tensor)
             else x
@@ -971,7 +980,7 @@ class CUDAGraphNode:
         self.graph.replay()
 
     def _copy_inputs_and_remove_from_src(
-        self, dsts: InputType, srcs: InputType
+        self, dsts: List[InputType], srcs: List[InputType]
     ) -> None:
         dst_tensors = []
         src_tensors = []
@@ -986,7 +995,7 @@ class CUDAGraphNode:
         if dst_tensors:
             torch._foreach_copy_(dst_tensors, src_tensors)
 
-    def check_static_inputs_are_stable(self, new_inputs: InputType) -> None:
+    def check_static_inputs_are_stable(self, new_inputs: List[InputType]) -> None:
         # avoid checking managed tensor static points since we already checked those in check_invariants
         if (
             not self.rerecord_if_static_inputs_change
@@ -1006,7 +1015,7 @@ class CUDAGraphNode:
             )
             torch._check(False, lambda: error_msg)
 
-    def run_first_inputs(self, new_inputs: InputType) -> OutputType:
+    def run_first_inputs(self, new_inputs: List[InputType]) -> OutputType:
         if config.triton.fast_path_cudagraph_asserts:
             self.debug_check_invariants_before_invocation()
 
@@ -1018,7 +1027,7 @@ class CUDAGraphNode:
         assert outputs is not None
         return outputs
 
-    def run(self, new_inputs: InputType) -> OutputType:
+    def run(self, new_inputs: List[InputType]) -> OutputType:
         self.check_static_inputs_are_stable(new_inputs)
 
         self._copy_inputs_and_remove_from_src(self.reconstructed_inputs, new_inputs)
@@ -1143,7 +1152,7 @@ class CUDAGraphNode:
                 return False
         return True
 
-    def _record(self, model: ModelType, inputs: InputType) -> OutputType:
+    def _record(self, model: ModelType, inputs: List[InputType]) -> OutputType:
         "Record the model"
 
         def static_input_iter() -> Generator[torch.Tensor, None, None]:
@@ -1559,7 +1568,7 @@ class CUDAGraphNode:
         )
 
     def _allocate_and_copy_recording_inputs(
-        self, inputs: InputType
+        self, inputs: List[InputType]
     ) -> List[Union[torch.Tensor, int]]:
         """
         Allocate inputs for non static, non cudagraph managraphed managed tensors in the memory pool
@@ -1568,7 +1577,7 @@ class CUDAGraphNode:
 
         torch.cuda.synchronize()
         self.stream.wait_stream(torch.cuda.current_stream())
-        recording_inputs: InputType = []
+        recording_inputs: List[InputType] = []
 
         with warnings.catch_warnings(record=True), torch.cuda.device(
             self.device
@@ -1592,7 +1601,7 @@ class CUDAGraphNode:
         return recording_inputs
 
     def check_invariants(
-        self, inputs: InputType
+        self, inputs: List[InputType]
     ) -> Tuple[CheckInvariantStatus, Callable[..., str]]:
         """
         Checks if this node can be run. The same pattern of tensor liveness, static inputs,
@@ -1894,7 +1903,7 @@ class CUDAGraphTreeManager:
 
         self.running_forwards_with_pending_backwards = False
 
-    def run(self, new_inputs: InputType, function_id: FunctionID) -> OutputType:
+    def run(self, new_inputs: List[InputType], function_id: FunctionID) -> OutputType:
         assert self.graph is not None, "Running CUDAGraph after shutdown"
         out = self._run(new_inputs, function_id)
 
@@ -1921,7 +1930,7 @@ class CUDAGraphTreeManager:
         return GraphID(next(self.warmup_node_counter))
 
     def _update_non_cudagraph_managed_mutation(
-        self, function_id: FunctionID, inputs: InputType
+        self, function_id: FunctionID, inputs: List[InputType]
     ) -> None:
         node_id = self._get_node_id()
         if maybe_mutation_str := check_for_mutation(
@@ -1957,7 +1966,7 @@ class CUDAGraphTreeManager:
             > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
         )
 
-    def _run(self, new_inputs: InputType, function_id: FunctionID) -> OutputType:
+    def _run(self, new_inputs: List[InputType], function_id: FunctionID) -> OutputType:
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
@@ -2090,7 +2099,7 @@ class CUDAGraphTreeManager:
         self.current_node = None
 
     def record_function(
-        self, new_inputs: InputType, function_id: FunctionID
+        self, new_inputs: List[InputType], function_id: FunctionID
     ) -> OutputType:
         assert not isinstance(self.current_node, CUDAWarmupNode)
         graph_id = self.new_graph_id()
@@ -2120,13 +2129,17 @@ class CUDAGraphTreeManager:
         torch.cuda.synchronize()
         return node.run_first_inputs(new_inputs)
 
-    def execute_node(self, node: CUDAGraphNode, new_inputs: InputType) -> OutputType:
+    def execute_node(
+        self, node: CUDAGraphNode, new_inputs: List[InputType]
+    ) -> OutputType:
         self.current_node = node
         self.path_state = ExecutionState.EXECUTION
         self.update_generation()
         return node.run(new_inputs)
 
-    def run_eager(self, new_inputs: InputType, function_id: FunctionID) -> OutputType:
+    def run_eager(
+        self, new_inputs: List[InputType], function_id: FunctionID
+    ) -> OutputType:
         # this is only stored on current node, because when we start a new path,
         # we will deallocate it
         already_warm = function_id in self.warmed_up_functions
@@ -2163,7 +2176,7 @@ class CUDAGraphTreeManager:
     def add_function(
         self,
         model: ModelType,
-        inputs: InputType,
+        inputs: List[InputType],
         static_input_idxs: Sequence[int],
         stack_traces: Optional[StackTraces],
         mode: CompilationMode,

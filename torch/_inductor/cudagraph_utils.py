@@ -5,14 +5,13 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._dynamo.utils import counters
-
+from torch._inductor.utils import InputType
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 
-InputType = List[Union[torch.Tensor, int]]
 OutputType = List[Optional[Union[int, torch.Tensor]]]
-ModelType = Callable[[InputType], OutputType]
+ModelType = Callable[[List[InputType]], OutputType]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -79,7 +78,7 @@ def get_mutation_stack_trace(
 
 def check_for_mutation(
     func: WrappedFunction,
-    inputs: InputType,
+    inputs: List[InputType],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
 ) -> Optional[str]:
     # doesnt work for non-trees because the warmup run would apply mutation twice
@@ -213,7 +212,7 @@ class CheckInvariantStatus(Enum):
 
 def log_data_ptr_mismatch(
     placeholders: Sequence[torch.fx.Node],
-    inputs: InputType,
+    inputs: List[InputType],
     recorded_data_ptr: Sequence[Optional[int]],
     target_idxs: Sequence[int],
     mismatch: CheckInvariantStatus,
@@ -240,12 +239,3 @@ def log_data_ptr_mismatch(
                 f"input stack trace: {get_placeholder_stack_trace(placeholder)}\n"
             )
     return error_msg
-
-
-def maybe_get_static_data_ptr(
-    idx: int, inputs: List[Union[torch.Tensor, int]], static_input_idxs: List[int]
-) -> Optional[int]:
-    inp = inputs[idx]
-    if isinstance(inp, torch.Tensor) and idx in static_input_idxs:
-        return inp.data_ptr()
-    return None
