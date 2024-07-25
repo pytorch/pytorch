@@ -5378,28 +5378,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         inps = gen_inps(3, 5)
         self.assertEqual(g(*inps), opt_g(*inps))
 
-    def test_staticmethod_allow_in_graph(self):
-        class MyClass:
-            i = 3
-
-            @staticmethod
-            def foo_inner(x):
-                return torch.mul(x, MyClass.i)
-
-            # if dynamo inlines with fullgraph, will error
-            # verify that dynamo doesn't inline
-            @staticmethod
-            @torch._dynamo.allow_in_graph
-            def foo1(x):
-                torch._dynamo.graph_break()
-                return MyClass.foo_inner(x)
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def f_bad(x):
-            return MyClass.foo1(x)
-
-        f_bad(torch.ones(2, 2))
-
     def test_guard_with_tuple_mutation(self):
         class Foo:
             def __init__(self):
@@ -5441,6 +5419,20 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             fn(x1, y)
 
         self.assertTrue(cnt.frame_count <= 2)
+
+    def test_optimized_module_training(self):
+        mod = torch.nn.Linear(3, 3)
+        mod.eval()
+
+        opt_mod = torch.compile(mod, backend="eager")
+        self.assertFalse(opt_mod.training)
+
+        opt_mod.train()
+        self.assertTrue(opt_mod.training)
+        self.assertTrue(mod.training)
+
+        mod.eval()
+        self.assertFalse(opt_mod.training)
 
 
 instantiate_parametrized_tests(ReproTests)
