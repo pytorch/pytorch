@@ -450,7 +450,7 @@ def cudagraph_post_compile(
     is_inference: bool,
     is_backward: bool,
     stack_traces: List[Optional[str]],
-    placeholders: tuple[torch.fx.Node, ...],
+    placeholders: Tuple[torch.fx.Node, ...],
     example_inputs: List[Any],
     static_input_idxs: Sequence[int],
 ):
