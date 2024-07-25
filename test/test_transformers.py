@@ -99,15 +99,23 @@ def _check_equal(
     Compare test tensor against golden and reference tensors.
     Raises ValueError if compiled error exceeds threshold.
     """
-    test_error = (golden - test).abs().mean()
-    ref_error = (golden - reference).abs().mean()
+    if golden.is_nested and reference.is_nested and test.is_nested:
+        for gold, ref, tst in zip(golden.unbind(), reference.unbind(), test.unbind()):
+            _check_equal(gold, ref, tst, fudge_factor, tensor_name)
+        return
+
+    # Compute error between golden
+    test_error = (golden - test).abs().max()
+    ref_error = (golden - reference).abs().max()
 
     if torch.isnan(test_error).any() and not torch.isnan(ref_error).any():
         raise ValueError("Output/Grad with NaN")
 
-    if test_error > ref_error * fudge_factor:
+    # We take the max between a default tolerance set else where for float32 or the calculated fudge_factor numbers
+    threshold = max(default_atol[torch.float32], ref_error * fudge_factor)
+    if test_error > threshold:
         name = tensor_name or ""
-        msg = f"{name} Test error {test_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
+        msg = f"{name} Test error {test_error} is greater than threshold {threshold}!"
         raise ValueError(msg)
 
 
@@ -2801,17 +2809,17 @@ class TestSDPACudaOnly(NNTestCase):
         out_ref.backward(upstream_grad.to(out_ref.dtype))
         out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
-        dropout_fudge_factor = 1.5 if dropout_p == 0.0 else 2.0
+        dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
             (query_ref, query_ref_lp, query),
             (key_ref, key_ref_lp, key),
             (value_ref, value_ref_lp, value),
             fudge_factors={
-                'out': 7.0 * dropout_fudge_factor,
-                'grad_query': 12.0 * dropout_fudge_factor,
-                'grad_key': 25.0 * dropout_fudge_factor,
-                'grad_value': 5.0 * dropout_fudge_factor,
+                'out': 1.5 * dropout_fudge_factor,
+                'grad_query': 18.0 * dropout_fudge_factor,
+                'grad_key': 13.0 * dropout_fudge_factor,
+                'grad_value': 2.0 * dropout_fudge_factor,
             }
         )
 
@@ -2904,7 +2912,7 @@ class TestSDPACudaOnly(NNTestCase):
         out_ref.backward(upstream_grad.to(out_ref.dtype))
         out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
-        dropout_fudge_factor = 1.5 if dropout_p == 0.0 else 2.0
+        dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
             (query_ref, query_ref_lp, query),
@@ -2912,11 +2920,11 @@ class TestSDPACudaOnly(NNTestCase):
             (value_ref, value_ref_lp, value),
             (attn_mask_ref, attn_mask_ref_lp, attn_mask),
             fudge_factors={
-                "out": 7.0 * dropout_fudge_factor,
-                "grad_query": 12.0 * dropout_fudge_factor,
-                "grad_key": 25.0 * dropout_fudge_factor,
-                "grad_value": 5.0 * dropout_fudge_factor,
-                "grad_attn_mask": 5.0 * dropout_fudge_factor,
+                "out": 1.5 * dropout_fudge_factor,
+                "grad_query": 18.0 * dropout_fudge_factor,
+                "grad_key": 13.0 * dropout_fudge_factor,
+                "grad_value": 2.0 * dropout_fudge_factor,
+                "grad_attn_mask": 16.0 * dropout_fudge_factor,
             },
         )
 
@@ -3009,17 +3017,17 @@ class TestSDPACudaOnly(NNTestCase):
         out_ref.backward(upstream_grad.to(out_ref.dtype))
         out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
-        dropout_fudge_factor = 1.5 if dropout_p == 0.0 else 2.0
+        dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
             (query_ref, query_ref_lp, query),
             (key_ref, key_ref_lp, key),
             (value_ref, value_ref_lp, value),
             fudge_factors={
-                'out': 7.0 * dropout_fudge_factor,
+                'out': 1.5 * dropout_fudge_factor,
                 'grad_query': 12.0 * dropout_fudge_factor,
-                'grad_key': 25.0 * dropout_fudge_factor,
-                'grad_value': 5.0 * dropout_fudge_factor,
+                'grad_key': 2.0 * dropout_fudge_factor,
+                'grad_value': 1.5 * dropout_fudge_factor,
             }
         )
 
@@ -3165,17 +3173,17 @@ class TestSDPACudaOnly(NNTestCase):
             out_ref.backward(upstream_grad.to(out_ref.dtype))
             out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
-            dropout_fudge_factor = 1.5 if dropout_p == 0.0 else 2.0
+            dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
             check_out_and_grad(
                 (out_ref, out_lp_ref, out),
                 (query_ref, query_ref_lp, query),
                 (key_ref, key_ref_lp, key),
                 (value_ref, value_ref_lp, value),
                 fudge_factors={
-                    'out': 7.0 * dropout_fudge_factor,
+                    'out': 1.5 * dropout_fudge_factor,
                     'grad_query': 12.0 * dropout_fudge_factor,
-                    'grad_key': 25.0 * dropout_fudge_factor,
-                    'grad_value': 5.0 * dropout_fudge_factor,
+                    'grad_key': 20 * dropout_fudge_factor,
+                    'grad_value': 1.5 * dropout_fudge_factor,
                 }
             )
 
@@ -3437,17 +3445,17 @@ class TestSDPACudaOnly(NNTestCase):
         out_ref.backward(upstream_grad.to(out_ref.dtype))
         out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
-        dropout_fudge_factor = 1.5 if dropout_p == 0.0 else 2.0
+        dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 2.0
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
             (query_ref, query_ref_lp, query),
             (key_ref, key_ref_lp, key),
             (value_ref, value_ref_lp, value),
             fudge_factors={
-                'out': 7.0 * dropout_fudge_factor,
+                'out': 1.5 * dropout_fudge_factor,
                 'grad_query': 12.0 * dropout_fudge_factor,
-                'grad_key': 25.0 * dropout_fudge_factor,
-                'grad_value': 5.0 * dropout_fudge_factor,
+                'grad_key': 1.5 * dropout_fudge_factor,
+                'grad_value': 2.0 * dropout_fudge_factor,
             }
         )
 
