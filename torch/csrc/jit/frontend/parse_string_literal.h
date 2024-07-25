@@ -3,8 +3,7 @@
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <optional>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 inline bool isCharCount(char c, const std::string& str, size_t start, int len) {
   // count checks from [start, start + len)
@@ -83,5 +82,4 @@ inline std::string parseStringLiteral(
   return ret_str;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
