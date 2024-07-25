@@ -8,6 +8,7 @@ import torch.fx
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
+
 class TestDCE(TestCase):
     def _custom_is_impure_node(self, node: torch.fx.Node) -> bool:
         if node.is_impure():
