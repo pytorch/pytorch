@@ -96,6 +96,11 @@ DeviceIndex XPUHooks::deviceCount() const {
 
 DeviceIndex XPUHooks::getCurrentDevice() const {
   return at::xpu::current_device();
+
+void XPUHooks::setCurrentDevice(DeviceIndex device) const {
+  at::xpu::set_device(device);
+}
+
 }
 
 REGISTER_XPU_HOOKS(XPUHooks);

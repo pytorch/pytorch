@@ -463,6 +463,14 @@ void CUDAHooks::deviceSynchronize(DeviceIndex device_index) const {
   c10::cuda::device_synchronize();
 }
 
+void CUDAHooks::setCurrentDevice(DeviceIndex device) const {
+  c10::cuda::set_device(device);
+}
+
+DeviceIndex CUDAHooks::getCurrentDevice() const {
+  return c10::cuda::current_device();
+}
+
 // Sigh, the registry doesn't support namespaces :(
 using at::CUDAHooksRegistry;
 using at::RegistererCUDAHooksRegistry;
