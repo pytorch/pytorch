@@ -139,7 +139,6 @@ static PyObject* THPEvent_from_ipc_handle(
   auto r = parser.parse(args, kwargs, parsed_args);
 
   at::Device device = r.device(0);
-  std::string handle_string = r.string(1);
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       "torch.Event ipc is not supported yet, please open an issue if you need this!");
