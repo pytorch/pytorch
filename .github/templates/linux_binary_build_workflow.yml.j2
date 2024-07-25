@@ -57,6 +57,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:!{{ upload.binary_env_as_input(config) }}
+      runner_prefix: amz2023.
       {%- if "aarch64" in build_environment %}
       runs_on: linux.arm64.m7g.4xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -86,6 +87,7 @@ jobs:
     with:!{{ upload.binary_env_as_input(config) }}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
+      runner_prefix: amz2023.
       {%- if "aarch64" in build_environment %}
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"

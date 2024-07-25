@@ -50,6 +50,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       DESIRED_PYTHON: "3.9"
+      runner_prefix: amz2023.
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       build_name: manywheel-py3_9-cpu-s390x
@@ -73,6 +74,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-s390x
       build_environment: linux-s390x-binary-manywheel
+      runner_prefix: amz2023.
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
     secrets:
@@ -113,6 +115,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       DESIRED_PYTHON: "3.10"
+      runner_prefix: amz2023.
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       build_name: manywheel-py3_10-cpu-s390x
@@ -136,6 +139,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-s390x
       build_environment: linux-s390x-binary-manywheel
+      runner_prefix: amz2023.
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
     secrets:
@@ -176,6 +180,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       DESIRED_PYTHON: "3.11"
+      runner_prefix: amz2023.
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       build_name: manywheel-py3_11-cpu-s390x
@@ -199,6 +204,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-s390x
       build_environment: linux-s390x-binary-manywheel
+      runner_prefix: amz2023.
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
     secrets:
@@ -239,6 +245,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       DESIRED_PYTHON: "3.12"
+      runner_prefix: amz2023.
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       build_name: manywheel-py3_12-cpu-s390x
@@ -262,6 +269,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-s390x
       build_environment: linux-s390x-binary-manywheel
+      runner_prefix: amz2023.
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
     secrets:
