@@ -241,8 +241,8 @@ class FunctionalTensor(torch.Tensor):
     def mark_mutation_hidden_from_autograd(self) -> None:
         torch._functionalize_mark_mutation_hidden_from_autograd(self.elem)
 
-    def nested_int(self, *, coeff=1):
-        return torch._from_functional_tensor(self.elem).nested_int(coeff=coeff)
+    def get_nested_int(self, *, coeff=1):
+        return torch._from_functional_tensor(self.elem).get_nested_int(coeff=coeff)
 
     def set_nested_int(self, val):
         self._nested_int_memo = val

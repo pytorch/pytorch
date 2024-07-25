@@ -1690,7 +1690,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, fullgraph=True, backend="aot_eager")
         compiled(nt)
 
-    def test_construct_from_jagged_with_intermediate_offsets_mixed_case(self):
+    def test_construct_from_jagged_with_input_offsets_mixed_case(self):
         nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
         values = nt.values().requires_grad_(True)
 
@@ -1715,7 +1715,18 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
         out = torch.compile(fn, fullgraph=True, backend="aot_eager")(nt, values, nt.offsets())
 
-    def test_construct_from_jagged_with_intermediate_offsets_mixed_case_2(self):
+        #
+        # Guarding
+        #
+        compiled_f = torch._dynamo.optimize(nopython=True, backend="aot_eager", guard_export_fn=guard_export_print, dynamic=True)(fn)
+        out = compiled_f(values, nt.offsets(), nt.offsets())
+        self.assertIn("L['offsets'] is L['offsets2']", guard_codes)
+
+        # Triggers recompile, and then properly errors due to jagged mismatch
+        with self.assertRaisesRegex(RuntimeError, "cannot call binary pointwise function mul.Tensor"):
+             compiled_f(values, nt.offsets(), nt2.offsets())
+
+    def test_construct_from_jagged_with_input_offsets_mixed_case_2(self):
         nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
         nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
         values = nt.values().requires_grad_(True)

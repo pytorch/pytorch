@@ -629,10 +629,7 @@ from a multi-output view call"
                     t, lambda _, inner_t: view_avoid_dupes_with_primals(inner_t)
                 )
             if isinstance(t, Tensor):
-                out = t.view(t.shape)
-                if t.has_nested_int():
-                    out.set_nested_int(t.nested_int())
-                return out
+                return t.view(t.shape)
             return t
 
         # This analysis function returns *only* the outputs that are meant to be tangents to the backwards.

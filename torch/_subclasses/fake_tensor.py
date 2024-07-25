@@ -861,9 +861,7 @@ class FakeTensor(Tensor):
     def has_nested_int(self) -> bool:
         return self._nested_int_memo is not None
 
-    def nested_int(self, *, hint=None, coeff=1):
-        import torch.nested._internal.nested_tensor
-
+    def get_nested_int(self, *, hint=None, coeff=1):
         # Version counter based tracking isn't 100% sound but it's close
         # enough
         if self._nested_int_memo_vc != self._version:
@@ -871,23 +869,10 @@ class FakeTensor(Tensor):
             self._nested_int_memo_vc = self._version
 
         if self._nested_int_memo is None:
-            shape_env = self.fake_mode.shape_env
-
-            if hint is None:
-                hint = torch._C._get_nested_int(self.fake_mode.nt_tensor_id_counter, coeff)
-                self.fake_mode.incr_nt_tensor_id_counter()
-
-            src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
-
-            self._nested_int_memo = shape_env.create_symintnode(
-                sym=shape_env.create_symbol(
-                    val=hint,
-                    source=src,
-                ),
-                hint=hint,
-                source=src,
+            self._nested_int_memo = self.fake_mode.create_symbolic_nested_int(
+                hint
             )
-        return self._nested_int_memo
+        return self._nested_int_memo * coeff
 
     def set_nested_int(self, val):
         self._nested_int_memo = val
@@ -1145,6 +1130,8 @@ class FakeTensorMode(TorchDispatchMode):
         # Indicates to our torch_dispatch dispatching infra that
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.FAKE
+
+        import torch.nested._internal.nested_tensor
 
         self.nt_tensor_id_initial_count = torch.nested._internal.nested_tensor._tensor_id_counter
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
@@ -2067,6 +2054,26 @@ class FakeTensorMode(TorchDispatchMode):
     def incr_nt_tensor_id_counter(self):
         assert self.enter_stack, "should only called while FakeTensorMode is active"
         self.nt_tensor_id_counter += 1
+
+    def create_symbolic_nested_int(self, hint):
+        # Returned nested int always has coeff=1; multiply the result by coeff if needed
+        import torch.nested._internal.nested_tensor
+
+        if hint is None:
+            hint = torch._C._get_nested_int(self.nt_tensor_id_counter, 1)
+            self.incr_nt_tensor_id_counter()
+
+        src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
+
+        ret = self.shape_env.create_symintnode(
+            sym=self.shape_env.create_symbol(
+                val=hint,
+                source=src,
+            ),
+            hint=hint,
+            source=src,
+        )
+        return ret
 
     _cpp_meta_supports_symint = ordered_set(
         aten.empty.memory_format,

@@ -854,22 +854,6 @@ class MetaConverter:
                     )
                     inner_tensors[attr] = new_empty_tensor
 
-                if t.is_nested:
-                    offsets = inner_tensors["_offsets"]
-                    lengths = inner_tensors.get("_lengths", None)
-                    ragged_source = offsets if lengths is None else lengths
-                    outer_size = list(outer_size)
-                    # If the fake offsets tensor has already been associated
-                    # with a symbolic nested int, discard the one we just
-                    # created. Otherwise, cache it onto the offsets tensor.
-                    if ragged_source.has_nested_int():
-                        # Simplifies away the ephemeral source
-                        assert outer_size[t.ctx["ragged_idx"]] == ragged_source.nested_int()
-                        # Replace the outer size's nested int with the cached one
-                        outer_size[t.ctx["ragged_idx"]] = ragged_source.nested_int()
-                    else:
-                        ragged_source.set_nested_int(outer_size[t.ctx["ragged_idx"]])
-
                 return t.type.__tensor_unflatten__(
                     inner_tensors, t.ctx, outer_size, outer_stride
                 )
@@ -1594,7 +1578,7 @@ class MetaConverter:
                 r._is_param = True
 
             if t.nested_int is not None:
-                r.nested_int(hint=t.nested_int)
+                r.get_nested_int(hint=t.nested_int)
 
             self.set_tensor_memo(t, r)
 
