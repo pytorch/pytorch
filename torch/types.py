@@ -17,7 +17,7 @@ from builtins import (  # noqa: F401
 from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch import SymInt
+from torch import SymBool, SymFloat, SymInt
 
 
 if TYPE_CHECKING:
@@ -46,6 +46,9 @@ _dispatchkey = Union[builtins.str, torch._C.DispatchKey]
 
 # int or SymInt
 IntLikeType = Union[_int, torch.SymInt]
+
+py_sym_types = (SymInt, SymFloat, SymBool)
+PySymType = Union[SymInt, SymFloat, SymBool]
 
 # Meta-type for "numeric" things; matches our docs
 Number = Union[builtins.int, builtins.float, builtins.bool]

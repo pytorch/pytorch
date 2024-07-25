@@ -6,9 +6,7 @@ from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
-
 import torch._inductor.test_case
-
 from torch._higher_order_ops.triton_kernel_wrap import (
     generate_ttir,
     triton_kernel_wrapper_functional,
@@ -19,10 +17,11 @@ from torch._inductor.utils import run_and_get_code
 from torch._library import capture_triton
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu, TEST_WITH_ROCM
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
+
 
 if HAS_GPU:
     import triton
@@ -672,6 +671,29 @@ def forward(self, x_1, output_1):
 
         output2 = torch.zeros_like(t1, requires_grad=grad)
         self.assertEqual(compiled_func(t1, t2, output2), torch_add)
+
+    @requires_gpu
+    @skipIfRocm  # https://github.com/pytorch/pytorch/actions/runs/10051552819/job/27782048305?pr=131431
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @patch.object(
+        torch._inductor.config, "unsafe_ignore_unsupported_triton_autotune_args", True
+    )
+    def test_triton_kernel_autotune_with_unsupported_args(self, backend):
+        def call_triton(x: torch.Tensor, y: torch.Tensor):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            add_kernel_autotuned_with_unsupported_args[(n_elements,)](
+                x, y, output, n_elements
+            )
+            return output
+
+        t1 = torch.rand(256, device=GPU_TYPE)
+        t2 = torch.rand(256, device=GPU_TYPE)
+
+        torch_add = call_triton(t1, t2)
+        compiled_func = torch.compile(call_triton, backend=backend, fullgraph=True)
+        compiled_add = compiled_func(t1, t2)
+        self.assertEqual(compiled_add, torch_add)
 
     @requires_gpu
     @common_utils.parametrize("grad", [False, True])
@@ -2266,7 +2288,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
     @requires_gpu
     @common_utils.parametrize("autotuned", [False, True])
-    def test_add_kernel(self, autotuned):
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_add_kernel(self, autotuned, dynamic):
         from torch._inductor.utils import run_and_get_code
 
         libname = "my_cool_namespace"
@@ -2295,7 +2318,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         out = f(x, y)
         expected = x + y
         self.assertEqual(out, expected)
-        out_compiled, codes = run_and_get_code(torch.compile(f), x, y)
+        out_compiled, codes = run_and_get_code(torch.compile(f, dynamic=dynamic), x, y)
         self.assertEqual(out_compiled, expected)
         self.assertEqual(len(codes), 1)
 
