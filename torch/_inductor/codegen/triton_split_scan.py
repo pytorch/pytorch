@@ -1,16 +1,12 @@
 # mypy: allow-untyped-defs
 import functools
-
 from typing import Optional, Set
 
 import torch._inductor.runtime.hints
 from torch._inductor import config
 from torch._inductor.codegen.simd import IterationRangesRoot
-
 from torch._inductor.codegen.triton import triton_compute_type, TritonKernel
-
 from torch._prims_common import prod
-
 from torch.utils._sympy.functions import CeilDiv
 
 
@@ -47,6 +43,9 @@ class TritonSplitScanKernel(TritonKernel):
             min_elem_per_thread=min_elem_per_thread,
         )
         self.no_x_dim = True
+
+    def should_use_persistent_reduction(self) -> bool:
+        return False
 
     def initialize_range_tree(self, pid_cache):
         prefixes = "yxr"
