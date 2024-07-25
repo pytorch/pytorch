@@ -134,6 +134,7 @@ Algorithms
     :nosignatures:
 
     Adadelta
+    Adafactor
     Adagrad
     Adam
     AdamW
@@ -177,6 +178,7 @@ Below is a table showing the available and default implementations of each algor
     :delim: ;
 
     :class:`Adadelta`;foreach;yes;no
+    :class:`Adafactor`;for-loop;no;no
     :class:`Adagrad`;foreach;yes;yes (cpu only)
     :class:`Adam`;foreach;yes;yes
     :class:`AdamW`;foreach;yes;yes
@@ -198,6 +200,7 @@ Below table is showing the stability status for fused implementations:
     :delim: ;
 
     :class:`Adadelta`;unsupported;unsupported;unsupported
+    :class:`Adafactor`;unsupported;unsupported;unsupported
     :class:`Adagrad`;beta;unsupported;unsupported
     :class:`Adam`;beta;stable;beta
     :class:`AdamW`;beta;stable;beta
