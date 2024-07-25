@@ -7,6 +7,5 @@ If you are adding a new entry/functionality, please, add it to the
 appropriate file under the `torch/ao/nn/qat/modules`,
 while adding an import statement here.
 """
-from torch.ao.nn.qat.modules.conv import Conv1d
-from torch.ao.nn.qat.modules.conv import Conv2d
-from torch.ao.nn.qat.modules.conv import Conv3d
+
+from torch.ao.nn.qat.modules.conv import Conv1d, Conv2d, Conv3d
