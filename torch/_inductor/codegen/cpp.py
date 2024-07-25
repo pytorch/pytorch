@@ -2979,10 +2979,10 @@ class CppVecKernelChecker(CppVecKernel):
         self.simd_vec = False
         self.simd_masked_vec = False
 
-    def disable_masked_vec(self, msg=None):
-        if schedule_log.isEnabledFor(logging.DEBUG):
-            schedule_log.debug("Disabled masked vectorization: %s", msg)
-        self.simd_masked_vec = False
+    # def disable_masked_vec(self, msg=None):
+    #     if schedule_log.isEnabledFor(logging.DEBUG):
+    #         schedule_log.debug("Disabled masked vectorization: %s", msg)
+    #     self.simd_masked_vec = False
 
     def load(self, name: str, index: sympy.Expr):
         with RecordOptimizationContext(__name__) as node_ctx:
