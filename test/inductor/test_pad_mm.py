@@ -11,12 +11,17 @@ from torch._inductor.fx_passes.pad_mm import (
     should_pad_common,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class PadMMTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        if not is_big_gpu(0):
+            return self.skipTest("Need a big GPU to run max_autotune=True")
+
     @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
     def test_pad_mm_dyn_m(self):
         M = 40
