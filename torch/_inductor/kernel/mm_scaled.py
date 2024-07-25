@@ -1,9 +1,9 @@
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import sympy
 
 import torch
-from ..ir import Layout, StorageBox, TensorBox
+from ..ir import ChoiceCaller, Layout, StorageBox, TensorBox
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -246,15 +246,13 @@ def tuned_scaled_mm(
         input_nodes = (mat_a, mat_b, scale_a, scale_b, bias)
         triton_template = scaled_mm_bias_template
 
-    choices = (
-        [
+    choices: List[ChoiceCaller] = []
+    if use_aten_gemm_kernels():
+        choices.append(
             aten__fp8_mm.bind(
                 input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum
             )
-        ]
-        if use_aten_gemm_kernels()
-        else []
-    )
+        )
 
     static_shape, is_nonzero = _is_static_problem([mat_a, mat_b], layout)
     if is_nonzero and use_triton_template(layout, enable_float8=True):

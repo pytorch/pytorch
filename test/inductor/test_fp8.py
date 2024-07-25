@@ -415,9 +415,10 @@ class TestFP8Lowering(TestCase):
         w_fp8, w_inverse_scale = _quantize_tensorwise(w, dtype_float8)
         w_t_fp8 = w_fp8.t()
 
-        def linear(x, w_t_fp8, w_inverse_scale, bias):
-            # quantize input x
-            x_fp8, x_inverse_scale = _quantize_tensorwise(x, dtype_float8)
+        # quantize input x
+        x_fp8, x_inverse_scale = _quantize_tensorwise(x, dtype_float8)
+
+        def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
             y = torch._scaled_mm(
                 x_fp8,
                 w_t_fp8,
@@ -430,21 +431,23 @@ class TestFP8Lowering(TestCase):
             return y
 
         y_eager = linear(
-            x,
+            x_fp8,
+            x_inverse_scale,
             w_t_fp8,
             w_inverse_scale,
             bias,
         )
         linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
         y_compiled = linear_compiled(
-            x,
+            x_fp8,
+            x_inverse_scale,
             w_t_fp8,
             w_inverse_scale,
             bias,
         )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
-        torch.testing.assert_close(y_eager, y_compiled, rtol=5e-2, atol=0)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0)
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
@@ -470,9 +473,10 @@ class TestFP8Lowering(TestCase):
         w_t_fp8 = w_fp8.t()
         w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
 
-        def linear(x, w_t_fp8, w_inverse_scale, bias):
-            # quantize input x
-            x_fp8, x_inverse_scale = _quantize_rowwise(x, dtype_float8)
+        # quantize input x
+        x_fp8, x_inverse_scale = _quantize_rowwise(x, dtype_float8)
+
+        def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
             y = torch._scaled_mm(
                 x_fp8,
                 w_t_fp8,
@@ -485,14 +489,16 @@ class TestFP8Lowering(TestCase):
             return y
 
         y_eager = linear(
-            x,
+            x_fp8,
+            x_inverse_scale,
             w_t_fp8,
             w_inverse_scale,
             bias,
         )
         linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
         y_compiled = linear_compiled(
-            x,
+            x_fp8,
+            x_inverse_scale,
             w_t_fp8,
             w_inverse_scale,
             bias,
@@ -513,15 +519,14 @@ class TestFP8Lowering(TestCase):
         device = "cuda"
         dtype_float8 = torch.float8_e4m3fn
 
-        x = torch.rand(M, K, dtype=dtype, device=device)
-        w = torch.rand(N, K, dtype=dtype, device=device)
-        bias = torch.rand(N, device=device, dtype=torch.bfloat16)
-
+        x = torch.randn(M, K, dtype=dtype, device=device)
+        w = torch.randn(N, K, dtype=dtype, device=device)
+        bias = None
         w_fp8, w_inverse_scale = _quantize_tensorwise(w, dtype_float8)
         w_t_fp8 = w_fp8.t()
+        x_fp8, x_inverse_scale = _quantize_tensorwise(x, dtype_float8)
 
-        def linear(x, w_t_fp8, w_inverse_scale, bias):
-            x_fp8, x_inverse_scale = _quantize_tensorwise(x, dtype_float8)
+        def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
             y = torch._scaled_mm(
                 x_fp8,
                 w_t_fp8,
@@ -534,21 +539,23 @@ class TestFP8Lowering(TestCase):
             return y
 
         y_eager = linear(
-            x,
+            x_fp8,
+            x_inverse_scale,
             w_t_fp8,
             w_inverse_scale,
             bias,
         )
         linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
         y_compiled = linear_compiled(
-            x,
+            x_fp8,
+            x_inverse_scale,
             w_t_fp8,
             w_inverse_scale,
             bias,
         )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
-        torch.testing.assert_close(y_eager, y_compiled, rtol=6e-2, atol=0)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0)
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
@@ -568,9 +575,9 @@ class TestFP8Lowering(TestCase):
         w_fp8, w_inverse_scale = _quantize_rowwise(w, dtype_float8)
         w_t_fp8 = w_fp8.t()
         w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
+        x_fp8, x_inverse_scale = _quantize_rowwise(x, dtype_float8)
 
-        def linear(x, w_t_fp8, w_inverse_scale, bias):
-            x_fp8, x_inverse_scale = _quantize_rowwise(x, dtype_float8)
+        def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
             y = torch._scaled_mm(
                 x_fp8,
                 w_t_fp8,
@@ -583,21 +590,23 @@ class TestFP8Lowering(TestCase):
             return y
 
         y_eager = linear(
-            x,
+            x_fp8,
+            x_inverse_scale,
             w_t_fp8,
             w_inverse_scale,
             bias,
         )
         linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
         y_compiled = linear_compiled(
-            x,
+            x_fp8,
+            x_inverse_scale,
             w_t_fp8,
             w_inverse_scale,
             bias,
         )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
-        torch.testing.assert_close(y_eager, y_compiled, rtol=5e-2, atol=0)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0)
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
