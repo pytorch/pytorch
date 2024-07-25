@@ -65,7 +65,8 @@ static c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
 template <typename Func>
 inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
   if (key[0] != '\0') {
-    return torch::dispatch(c10::parseDispatchKey(key), std::forward<Func>(raw_f));
+    return torch::dispatch(
+        c10::parseDispatchKey(key), std::forward<Func>(raw_f));
   } else {
     torch::CppFunction f(std::forward<Func>(raw_f));
     return f;
