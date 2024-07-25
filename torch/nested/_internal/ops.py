@@ -44,8 +44,8 @@ def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1, allow_batch_dim=False):
     """
     from torch._prims_common import canonicalize_dims
 
-    assert isinstance(dims, tuple) or isinstance(
-        dims, list
+    assert isinstance(
+        dims, (tuple, list)
     ), f"_wrap_jagged_dims(): cannot iterate over dimensions of type {type(dims)}"
 
     wrapped_dims = [
@@ -527,14 +527,17 @@ def _softmax_default(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
 
-    new_kwargs["dim"], reduce_on_batch, reduce_on_ragged, reduce_on_non_batch = (
-        _wrap_jagged_dims(
-            inp.dim(),
-            (new_kwargs["dim"],),
-            "softmax",
-            inp._ragged_idx,
-            allow_batch_dim=True,
-        )
+    (
+        new_kwargs["dim"],
+        reduce_on_batch,
+        reduce_on_ragged,
+        reduce_on_non_batch,
+    ) = _wrap_jagged_dims(
+        inp.dim(),
+        (new_kwargs["dim"],),
+        "softmax",
+        inp._ragged_idx,
+        allow_batch_dim=True,
     )
 
     new_kwargs["dim"] = new_kwargs["dim"][
