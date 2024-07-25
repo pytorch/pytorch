@@ -1065,14 +1065,6 @@ if(USE_XPU)
         "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
     endif()
   endif()
-
-  # Set exported torch-xpu-ops header to torch
-  set(INCLUDE_DIR_FOR_TORCH "${CMAKE_BINARY_DIR}/aten/src/ATen/xpu" )
-  file(MAKE_DIRECTORY ${INCLUDE_DIR_FOR_TORCH})
-  file(GLOB xpu_h "${TORCH_ROOT}/third_party/torch-xpu-ops/src/aten/*.h")
-  foreach(HEADER  ${xpu_h})
-    file(COPY ${HEADER} DESTINATION ${INCLUDE_DIR_FOR_TORCH})
-  endforeach()
 endif()
 
 if(NOT MSVC AND USE_XNNPACK)
