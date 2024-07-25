@@ -1054,6 +1054,10 @@ class BuiltinVariable(VariableTracker):
         return functools.reduce(functools.partial(self._call_min_max_binary, tx), items)
 
     def _call_min_max_binary(self, tx: "InstructionTranslator", a, b):
+        if a is None or b is None:
+            # a or b could be none if we reduce and _call_min_max_binary failed
+            # to return something
+            return
         if self.tensor_args(a, b):
             if not isinstance(a, variables.TensorVariable):
                 a, b = b, a
