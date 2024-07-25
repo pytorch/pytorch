@@ -1690,7 +1690,7 @@ class OnnxModelFromTorchScript(OnnxModel):
             torch_onnx.patch_torch(
                 error_report=True,
                 profile=True,
-                dump_exported_program=False,
+                dump_exported_program=True,
                 artifacts_dir=os.path.dirname(output_path),
             )
         else:
