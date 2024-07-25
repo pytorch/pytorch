@@ -83,7 +83,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-
     def test_exception_with_another_exception(self):
         def fn(x):
             x = torch.cos(x)
