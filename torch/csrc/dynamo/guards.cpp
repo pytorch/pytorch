@@ -196,7 +196,8 @@ std::string TensorCheck::check_verbose(
       return fail_reason.str();
     }
   }
-  const bool supports_stride = !v.is_sparse() && !at::sparse_csr::is_sparse_compressed(v);
+  const bool supports_stride =
+      !v.is_sparse() && !at::sparse_csr::is_sparse_compressed(v);
   if (supports_stride) {
     const auto& strides = v.sym_strides();
     for (auto i : c10::irange(ndim)) {
