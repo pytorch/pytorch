@@ -2435,25 +2435,42 @@ def forward(self, primals_1, primals_2):
         f.register_fake(f_fake)
         f.register_autograd(backward, setup_context=setup_context)
 
-        def fn(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
-            return torch.ops._test._clone(x, x1)
+        def fn(x: torch.Tensor, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
+            x2.mul_(5)
+            return torch.ops._test._clone(x, x1) + x2
 
-        inp_x, inp_x1 = torch.randn(3, requires_grad=True), torch.randn(
-            3, requires_grad=False
+        inp_x, inp_x1, inp_x2 = (
+            torch.randn(3, requires_grad=True),
+            torch.randn(3, requires_grad=False),
+            torch.randn(3, requires_grad=False),
         )
 
-        ref_x, ref_x1 = inp_x.clone(), inp_x1.clone()
-        ref_y = f(ref_x, ref_x1)
-        ref_y.sum().backward()
-        x, x1 = inp_x.clone(), inp_x1.clone()
-        compiled_f = aot_function(fn, nop)
-        y = compiled_f(x, x1)
-        loss = y.sum()
-        loss.backward()
+        ref_x, ref_x1, ref_x2 = inp_x.clone(), inp_x1.clone(), inp_x2.clone()
+        ref_y = fn(ref_x, ref_x1, ref_x2)
 
+        compiled_f = aot_function(fn, nop, keep_inference_input_mutations=True)
+
+        x, x1, x2 = inp_x.clone(), inp_x1.clone(), inp_x2.clone()
+        y = compiled_f(x, x1, x2)
+
+        # Verify mutation in forward applied and mutation in backward is not in forward
         self.assertEqual(ref_x, x)
         self.assertEqual(ref_x1, x1)
+        self.assertEqual(ref_x2, x2)
         self.assertEqual(ref_y, y)
+
+        ref_y.sum().backward()
+        y.sum().backward()
+
+        # Verify mutations in backward applied
+        self.assertEqual(ref_x, x)
+        self.assertEqual(ref_x1, x1)
+        self.assertEqual(ref_x2, x2)
+        self.assertEqual(ref_y, y)
+
+        self.assertEqual(ref_x.grad, x.grad)
+        self.assertEqual(ref_x1.grad, x1.grad)
+        self.assertEqual(ref_x2.grad, x2.grad)
 
     def test_backward_mutation_forward_inputs_create_graph(self):
         @torch.library.custom_op("_test::_clone_create_graph", mutates_args={})
@@ -2495,10 +2512,7 @@ def forward(self, primals_1, primals_2):
             "aot_autograd does not support input mutations with requires_grad in backward for create_graph=True",
         ):
             torch.autograd.grad(loss, inp_x, create_graph=True)
-
-        self.assertEqual(ref_x, x)
-        self.assertEqual(ref_x1, x1)
-        self.assertEqual(ref_y, y)
+        # Not checking equality of ref and x as Exception is expected
 
     # Partially addresses https://github.com/pytorch/pytorch/issues/106457
     def test_input_mutation_false_aliasing(self):
