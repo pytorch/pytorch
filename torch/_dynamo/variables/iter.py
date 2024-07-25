@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 from .. import polyfill, variables
-from ..bytecode_transformation import create_instruction
+from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import (
     ObservedUserStopIteration,
     raise_observed_user_stop_iteration,
@@ -200,8 +200,14 @@ class ItertoolsVariable(VariableTracker):
 
 
 class IteratorVariable(VariableTracker):
+    _nonvar_fields = {
+        "force_unpacked",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.force_unpacked = False
 
     def next_variable(self, tx):
         unimplemented("abstract method, must implement")
@@ -211,6 +217,11 @@ class IteratorVariable(VariableTracker):
     # Example of safe eager unpacking: list(map(f, seq))
     # Example of unsafe eager unpacking: list(islice(map(f, seq), 5))
     def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
+        if self.force_unpacked:
+            raise RuntimeError(
+                "force_unpack_var_sequence should be called at most once per Variable"
+            )
+        self.force_unpacked = True
         result = []
         while True:
             try:
@@ -239,7 +250,7 @@ class RepeatIteratorVariable(IteratorVariable):
             lambda: codegen.extend_output(
                 [
                     codegen.create_load_python_module(itertools),
-                    codegen.create_load_attr("count"),
+                    codegen.create_load_attr("repeat"),
                 ]
             )
         )
@@ -330,7 +341,7 @@ class ZipVariable(IteratorVariable):
     _nonvar_fields = {
         "index",
         "strict",
-        *VariableTracker._nonvar_fields,
+        *IteratorVariable._nonvar_fields,
     }
 
     def __init__(
