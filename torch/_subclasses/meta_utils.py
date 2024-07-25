@@ -809,13 +809,16 @@ class MetaConverter:
                 # We are hitting plain meta_desc tensor so actually
                 # create a tensor here.
                 if t.attrs is None:
-                    r = callback(
-                        lambda: empty_create(
-                            t,
-                            source,
-                            symbolic_context,
+                    r = self.get_tensor_memo(t)
+                    if r is None:
+                        r = callback(
+                            lambda: empty_create(
+                                t,
+                                source,
+                                symbolic_context,
+                            )
                         )
-                    )
+                        self.set_tensor_memo(t, r)
                     if self.copy_data:
                         with torch.no_grad(), no_dispatch():
                             r.real_tensor = torch.empty_strided(
