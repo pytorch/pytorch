@@ -15,22 +15,29 @@ the regular environment parameters (--name or --prefix)::
     $ ./tools/nightly.py checkout -b my-nightly-branch -n my-env
     $ conda activate my-env
 
+To install the nightly binaries built with CUDA, you can pass in the flag --cuda::
+
+    $ ./tools/nightly.py checkout -b my-nightly-branch --cuda
+    $ conda activate pytorch-deps
+
 You can also use this tool to pull the nightly commits into the current branch as
-well. This can be done with
+well. This can be done with::
 
     $ ./tools/nightly.py pull -n my-env
     $ conda activate my-env
 
-Pulling will reinstalle the conda dependencies as well as the nightly binaries into
+Pulling will reinstall the conda dependencies as well as the nightly binaries into
 the repo directory.
 """
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import datetime
 import functools
 import glob
+import itertools
 import json
 import logging
 import os
@@ -41,8 +48,8 @@ import sys
 import tempfile
 import time
 import uuid
-from argparse import ArgumentParser
 from ast import literal_eval
+from platform import system as platform_system
 from typing import Any, Callable, cast, Generator, Iterable, Iterator, Sequence, TypeVar
 
 
@@ -52,7 +59,7 @@ DATETIME_FORMAT = "%Y-%m-%d_%Hh%Mm%Ss"
 SHA1_RE = re.compile("([0-9a-fA-F]{40})")
 USERNAME_PASSWORD_RE = re.compile(r":\/\/(.*?)\@")
 LOG_DIRNAME_RE = re.compile(
-    r"(\d{4}-\d\d-\d\d_\d\dh\d\dm\d\ds)_" r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}"
+    r"(\d{4}-\d\d-\d\d_\d\dh\d\dm\d\ds)_[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}"
 )
 SPECS_TO_INSTALL = ("pytorch", "mypy", "pytest", "hypothesis", "ipython", "sphinx")
 
@@ -261,6 +268,8 @@ def _make_channel_args(
 
 @timed("Solving conda environment")
 def conda_solve(
+    specs: Iterable[str],
+    *,
     name: str | None = None,
     prefix: str | None = None,
     channels: Iterable[str] = ("pytorch-nightly",),
@@ -302,12 +311,13 @@ def conda_solve(
         channels=channels, override_channels=override_channels
     )
     cmd.extend(channel_args)
-    cmd.extend(SPECS_TO_INSTALL)
+    cmd.extend(specs)
     p = subprocess.run(cmd, capture_output=True, check=True)
     # parse solution
     solve = json.loads(p.stdout)
     link = solve["actions"]["LINK"]
     deps = []
+    pytorch, platform = "", ""
     for pkg in link:
         url = URL_FORMAT.format(**pkg)
         if pkg["name"] == "pytorch":
@@ -315,6 +325,8 @@ def conda_solve(
             platform = pkg["platform"]
         else:
             deps.append(url)
+    assert pytorch, "PyTorch package not found in solve"
+    assert platform, "Platform not found in solve"
     return deps, pytorch, platform, existing_env, env_opts
 
 
@@ -412,23 +424,33 @@ def pull_nightly_version(spdir: str) -> None:
 
 
 def _get_listing_linux(source_dir: str) -> list[str]:
-    listing = glob.glob(os.path.join(source_dir, "*.so"))
-    listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.so")))
-    return listing
+    return list(
+        itertools.chain(
+            glob.iglob(os.path.join(source_dir, "*.so")),
+            glob.iglob(os.path.join(source_dir, "lib", "*.so")),
+            glob.iglob(os.path.join(source_dir, "lib", "*.so.*")),
+        )
+    )
 
 
 def _get_listing_osx(source_dir: str) -> list[str]:
     # oddly, these are .so files even on Mac
-    listing = glob.glob(os.path.join(source_dir, "*.so"))
-    listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.dylib")))
-    return listing
+    return list(
+        itertools.chain(
+            glob.iglob(os.path.join(source_dir, "*.so")),
+            glob.iglob(os.path.join(source_dir, "lib", "*.dylib")),
+        )
+    )
 
 
 def _get_listing_win(source_dir: str) -> list[str]:
-    listing = glob.glob(os.path.join(source_dir, "*.pyd"))
-    listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.lib")))
-    listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.dll")))
-    return listing
+    return list(
+        itertools.chain(
+            glob.iglob(os.path.join(source_dir, "*.pyd")),
+            glob.iglob(os.path.join(source_dir, "lib", "*.lib")),
+            glob.iglob(os.path.join(source_dir, "lib", "*.dll")),
+        )
+    )
 
 
 def _glob_pyis(d: str) -> set[str]:
@@ -480,6 +502,8 @@ def _move_single(
     is_dir = os.path.isdir(src)
     relpath = os.path.relpath(src, source_dir)
     trg = os.path.join(target_dir, relpath)
+    src = os.path.normpath(src)
+    trg = os.path.normpath(trg)
     _remove_existing(trg, is_dir)
     # move over new files
     if is_dir:
@@ -488,8 +512,8 @@ def _move_single(
             relroot = os.path.relpath(root, src)
             for name in files:
                 relname = os.path.join(relroot, name)
-                s = os.path.join(src, relname)
-                t = os.path.join(trg, relname)
+                s = os.path.normpath(os.path.join(src, relname))
+                t = os.path.normpath(os.path.join(trg, relname))
                 print(f"{verb} {s} -> {t}")
                 mover(s, t)
             for name in dirs:
@@ -515,7 +539,9 @@ def move_nightly_files(spdir: str, platform: str) -> None:
     """Moves PyTorch files from temporary installed location to repo."""
     # get file listing
     source_dir = os.path.join(spdir, "torch")
-    target_dir = os.path.abspath("torch")
+    target_dir = os.path.abspath(
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "torch")
+    )
     listing = _get_listing(source_dir, target_dir, platform)
     # copy / link files
     if platform.startswith("win"):
@@ -569,6 +595,7 @@ def write_pth(env_opts: list[str], platform: str) -> None:
 
 
 def install(
+    specs: Iterable[str],
     *,
     logger: logging.Logger,
     subcommand: str = "checkout",
@@ -579,8 +606,13 @@ def install(
     override_channels: bool = False,
 ) -> None:
     """Development install of PyTorch"""
+    specs = list(specs)
     deps, pytorch, platform, existing_env, env_opts = conda_solve(
-        name=name, prefix=prefix, channels=channels, override_channels=override_channels
+        specs=specs,
+        name=name,
+        prefix=prefix,
+        channels=channels,
+        override_channels=override_channels,
     )
     if deps:
         deps_install(deps, existing_env, env_opts)
@@ -602,12 +634,12 @@ def install(
     )
 
 
-def make_parser() -> ArgumentParser:
-    p = ArgumentParser("nightly")
+def make_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser()
     # subcommands
     subcmd = p.add_subparsers(dest="subcmd", help="subcommand to execute")
-    co = subcmd.add_parser("checkout", help="checkout a new branch")
-    co.add_argument(
+    checkout = subcmd.add_parser("checkout", help="checkout a new branch")
+    checkout.add_argument(
         "-b",
         "--branch",
         help="Branch name to checkout",
@@ -619,9 +651,9 @@ def make_parser() -> ArgumentParser:
         "pull", help="pulls the nightly commits into the current branch"
     )
     # general arguments
-    subps = [co, pull]
-    for subp in subps:
-        subp.add_argument(
+    subparsers = [checkout, pull]
+    for subparser in subparsers:
+        subparser.add_argument(
             "-n",
             "--name",
             help="Name of environment",
@@ -629,7 +661,7 @@ def make_parser() -> ArgumentParser:
             default=None,
             metavar="ENVIRONMENT",
         )
-        subp.add_argument(
+        subparser.add_argument(
             "-p",
             "--prefix",
             help="Full path to environment location (i.e. prefix)",
@@ -637,7 +669,7 @@ def make_parser() -> ArgumentParser:
             default=None,
             metavar="PATH",
         )
-        subp.add_argument(
+        subparser.add_argument(
             "-v",
             "--verbose",
             help="Provide debugging info",
@@ -645,21 +677,36 @@ def make_parser() -> ArgumentParser:
             default=False,
             action="store_true",
         )
-        subp.add_argument(
+        subparser.add_argument(
             "--override-channels",
             help="Do not search default or .condarc channels.",
             dest="override_channels",
             default=False,
             action="store_true",
         )
-        subp.add_argument(
+        subparser.add_argument(
             "-c",
             "--channel",
-            help="Additional channel to search for packages. 'pytorch-nightly' will always be prepended to this list.",
+            help=(
+                "Additional channel to search for packages. "
+                "'pytorch-nightly' will always be prepended to this list."
+            ),
             dest="channels",
             action="append",
             metavar="CHANNEL",
         )
+        if platform_system() in {"Linux", "Windows"}:
+            subparser.add_argument(
+                "--cuda",
+                help=(
+                    "CUDA version to install "
+                    "(defaults to the latest version available on the platform)"
+                ),
+                dest="cuda",
+                nargs="?",
+                default=argparse.SUPPRESS,
+                metavar="VERSION",
+            )
     return p
 
 
@@ -673,12 +720,23 @@ def main(args: Sequence[str] | None = None) -> None:
     status = status or check_branch(ns.subcmd, ns.branch)
     if status:
         sys.exit(status)
+    specs = list(SPECS_TO_INSTALL)
     channels = ["pytorch-nightly"]
+    if hasattr(ns, "cuda"):
+        if ns.cuda is not None:
+            specs.append(f"pytorch-cuda={ns.cuda}")
+        else:
+            specs.append("pytorch-cuda")
+        specs.append("pytorch-mutex=*=*cuda*")
+        channels.append("nvidia")
+    else:
+        specs.append("pytorch-mutex=*=*cpu*")
     if ns.channels:
         channels.extend(ns.channels)
     with logging_manager(debug=ns.verbose) as logger:
         LOGGER = logger
         install(
+            specs=specs,
             subcommand=ns.subcmd,
             branch=ns.branch,
             name=ns.name,
