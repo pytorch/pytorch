@@ -903,9 +903,7 @@ def sum_dim_IntList(func, *args, **kwargs):
             # _jagged_to_padded_dense_forward requires values to be a 2D tensor
             # with the ragged dimension as the 0th dimension
             padded = torch.ops.aten._jagged_to_padded_dense_forward(
-                values_ragged_dim_outer.reshape(
-                    values_ragged_dim_outer.shape[0], -1
-                ),
+                values_ragged_dim_outer.reshape(values_ragged_dim_outer.shape[0], -1),
                 [inp._offsets],
                 max_lengths=[inp._max_seqlen],
             )
