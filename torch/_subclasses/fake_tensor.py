@@ -1149,10 +1149,8 @@ class FakeTensorMode(TorchDispatchMode):
         self.nt_tensor_id_initial_count = torch.nested._internal.nested_tensor._tensor_id_counter
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
 
-
     def reset_nt_tensor_id_counter(self):
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
-
 
     # Typically, there is only one fake tensor mode and you test for it by
     # doing an isinstance test.  However, in some situations, there might be
@@ -1221,7 +1219,6 @@ class FakeTensorMode(TorchDispatchMode):
             # no-op (still need to re-set the fake mode though since we unset it)
             torch._C._set_dispatch_mode(self)
             self.enter_stack.append((False, None, prev_only_lift_cpu_tensors))
-
         return self
 
     def __exit__(

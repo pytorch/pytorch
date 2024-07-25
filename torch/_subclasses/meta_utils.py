@@ -1597,7 +1597,6 @@ class MetaConverter:
                 r.nested_int(hint=t.nested_int)
 
             self.set_tensor_memo(t, r)
-            r.source = source
 
         return self.get_tensor_memo(t)
 
