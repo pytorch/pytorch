@@ -12,6 +12,7 @@ import itertools
 import linecache
 import logging
 import operator
+import re
 import sys
 import textwrap
 import threading
@@ -1938,7 +1939,16 @@ class InstructionTranslatorBase(
 
         value = self.pop()
         if isinstance(value, SymNodeVariable):
-            value = ConstantVariable.create(str(value.sym_num))
+            from torch._dynamo.variables.lazy import (
+                LazySymNodeFormatString,
+                LazyVariableTracker,
+            )
+
+            value = LazyVariableTracker.create(
+                LazySymNodeFormatString(value, fmt_spec), source=value.source
+            )
+            self.push(value)
+            return
         if (flags & 0x03) == 0x01:
             value = BuiltinVariable(str).call_function(self, [value], {})  # type: ignore[arg-type]
         elif (flags & 0x03) == 0x02:
@@ -2370,6 +2380,11 @@ class InstructionTranslatorBase(
             getattr(self.f_code, "co_name", "<unknown>"),
             lookup_line=False,
         )
+
+    def is_co_filename_from_nn_modules(self):
+        filename = getattr(self.f_code, "co_filename", "<unknown>")
+        nn_modules_pattern = re.compile(r".*torch/nn/modules.*")
+        return nn_modules_pattern.match(filename) is not None
 
     def store_global_weakref_by_id(self, prefix, value):
         global_name = self.output.install_global_by_id(prefix, weakref.ref(value))
