@@ -60,6 +60,9 @@ class _ComputationType(Enum):
     RECV_B = 9
     SEND_F_RECV_B = 10
     SEND_B_RECV_F = 11
+    # TODO- probably want to reconsider naming backward_input 'B' and having 'FULL_BACKWARD'.
+    # instead, B = full backward, Bx, Bw are the partials?
+    FULL_BACKWARD = 12
 
     def __str__(self):
         str_map = {
@@ -74,6 +77,7 @@ class _ComputationType(Enum):
             _ComputationType.RECV_B: "RECV_B",
             _ComputationType.SEND_F_RECV_B: "SEND_F_RECV_B",
             _ComputationType.SEND_B_RECV_F: "SEND_B_RECV_F",
+            _ComputationType.FULL_BACKWARD: "BW",
         }
         return str_map[self]
 
@@ -101,6 +105,8 @@ class _ComputationType(Enum):
             return _ComputationType.SEND_F_RECV_B
         elif action == "SEND_B_RECV_F":
             return _ComputationType.SEND_B_RECV_F
+        elif action == "BW":
+            return _ComputationType.FULL_BACKWARD
         else:
             raise RuntimeError(f"Invalid computation type {action}")
 
@@ -116,15 +122,17 @@ SEND_B = _ComputationType.SEND_B
 RECV_B = _ComputationType.RECV_B
 SEND_F_RECV_B = _ComputationType.SEND_F_RECV_B
 SEND_B_RECV_F = _ComputationType.SEND_B_RECV_F
+FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 
 # Convenience shorthand for compute actions only since they are used in 'simple schedule format'
 F = FORWARD
 B = BACKWARD
 W = WEIGHT
+BW = FULL_BACKWARD
 
 # Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
 _action_regex = re.compile(
-    r"(\d+)([F,B,W]|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B{0,1})(\d*)"
+    r"(\d+)(F|B|W|BW|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B{0,1})(\d*)"
 )
 
 
@@ -203,7 +211,8 @@ def _format_pipeline_order(pipeline_order: Dict[int, List[Optional[_Action]]]) -
     for rank in pipeline_order:
         for i in range(len(pipeline_order[rank])):
             if pipeline_order[rank][i] is None:
-                pipeline_order[rank][i] = ""
+                # TODO make a real 'None action' that prints as empty string and make mypy happy
+                pipeline_order[rank][i] = ""  # type: ignore[call-overload]
     # Calculate the maximum number of steps across all ranks
     num_steps = max(len(actions) for actions in pipeline_order.values())
     step_labels = [
@@ -925,16 +934,20 @@ def _batch_send_recv(ops, peer_ops):
     send_b_i = [i for i, o in enumerate(peer_ops) if o.computation_type == SEND_B]
     recv_f_i = [i for i, o in enumerate(peer_ops) if o.computation_type == RECV_F]
     if len(send_f_i):
-        assert len(send_f_i) == 1, f"Expect at most one send_f per step, {len(send_f)}"
+        assert (
+            len(send_f_i) == 1
+        ), f"Expect at most one send_f per step, {len(send_f_i)}"
 
     if len(send_f_i) == 1 and len(recv_b_i):
         # we have a batch candidate
-        assert len(recv_b_i) == 1, f"Expect at most one recv_b per step, {len(send_f)}"
+        assert (
+            len(recv_b_i) == 1
+        ), f"Expect at most one recv_b per step, {len(recv_b_i)}"
         assert len(send_b_i) == 1, "Expected matching send_b for recv_b"
         assert len(recv_f_i) == 1, "Expected matching recv_f for send_f"
         send_f = ops[send_f_i[0]]
         recv_b = ops[recv_b_i[0]]
-        for idx in reversed(sorted([send_f_i[0], recv_b_i[0]])):
+        for idx in sorted([send_f_i[0], recv_b_i[0]], reverse=True):
             ops.pop(idx)
         new_ops.append(
             _Action(
@@ -961,7 +974,7 @@ def _batch_send_recv(ops, peer_ops):
             send_b.microbatch_index == recv_b.microbatch_index
         ), "Expected matching microbatch indices for send_b and recv_b"
 
-        for idx in reversed(sorted([send_b_i[0], recv_f_i[0]])):
+        for idx in sorted([send_b_i[0], recv_f_i[0]], reverse=True):
             peer_ops.pop(idx)
         new_peer_ops.append(
             _Action(
@@ -1064,7 +1077,9 @@ def _add_send_recv(
     while compute_actions:
         progress = False
         # go in order of ranks even if dict keys aren't ordered
-        new_comms = {rank: defaultdict(list) for rank in sorted(compute_actions)}
+        new_comms: Dict[int, defaultdict[int, list]] = {
+            rank: defaultdict(list) for rank in sorted(compute_actions)
+        }
         for rank in sorted(compute_actions):
             if rank not in compute_actions:
                 continue
@@ -1089,8 +1104,8 @@ def _add_send_recv(
             progress = True
 
         if not progress:
-            print(f"WIP comms schedule:\n", _format_pipeline_order(comm_actions))
-            print(f"remaining compute actions:\n", compute_actions)
+            print("WIP comms schedule:\n", _format_pipeline_order(comm_actions))  # type: ignore[arg-type]
+            print("remaining compute actions:\n", compute_actions)
         assert progress, "Malformed compute schedule, can't schedule sends/recvs"
 
         # comm batching needs to be done carefully to avoid reordering comms and causing a hang
@@ -1136,7 +1151,9 @@ def _simulate_comms_compute(
         rank: [a for a in pipeline_order[rank] if a is not None]
         for rank in sorted(pipeline_order)
     }
-    schedule: Dict[int, List[_Action]] = {rank: [] for rank in sorted(pipeline_order)}
+    schedule: Dict[int, List[_Action | None]] = {
+        rank: [] for rank in sorted(pipeline_order)
+    }
 
     def _prev_ops(stage_idx):
         rank = stage_to_rank(stage_idx)
@@ -1217,7 +1234,9 @@ def _simulate_comms_compute(
                     continue
                 elif (
                     p.computation_type == SEND_B_RECV_F
+                    and action.other_stage_index is not None
                     and p.stage_index == action.other_stage_index + 1
+                    and p.other_stage_index is not None
                     and p.other_stage_index == action.stage_index + 1
                     and p.microbatch_index == action.other_microbatch_index
                     and p.other_microbatch_index == action.microbatch_index
@@ -1240,7 +1259,7 @@ def _simulate_comms_compute(
                     and p.other_microbatch_index == action.microbatch_index
                 ):
                     return True
-            return None
+            return False
 
         else:
             raise ValueError(f"Unsupported action type {action}")
@@ -1260,7 +1279,7 @@ def _simulate_comms_compute(
             else:
                 schedule[rank].append(None)
 
-        for i in reversed(sorted(pipeline_order)):
+        for i in sorted(pipeline_order, reverse=True):
             if len(pipeline_order[i]) == 0:
                 del pipeline_order[i]
 
@@ -1279,12 +1298,12 @@ def _simulate_comms_compute(
                     schedule[rank][-1] = action
                 pipeline_order[rank].pop(0)
 
-        for i in reversed(sorted(pipeline_order)):
+        for i in sorted(pipeline_order, reverse=True):
             if len(pipeline_order[i]) == 0:
                 del pipeline_order[i]
 
         if not progress:
-            print(f"WIP comms schedule:\n", _format_pipeline_order(schedule))
+            print("WIP comms schedule:\n", _format_pipeline_order(schedule))
             for rank in pipeline_order:
                 print(f"{rank=} next action= {pipeline_order[rank][0]}")
             breakpoint()
@@ -1292,23 +1311,28 @@ def _simulate_comms_compute(
 
     return schedule
 
-def _dump_chrometrace(schedule, filename):
 
+def _dump_chrometrace(schedule, filename):
     events = []
     for rank in sorted(schedule):
         for timestep, action in enumerate(schedule[rank]):
             if action is None:
                 continue
-            events.append({
-                "name": str(action),
-                "cat": "computation" if action.computation_type in (F, B, W) else "communication",
-                "ph": "X",
-                "pid": rank,
-                "tid": rank,
-                "ts": timestep,
-                "dur": 1
-            })
+            events.append(
+                {
+                    "name": str(action),
+                    "cat": "computation"
+                    if action.computation_type in (F, B, W)
+                    else "communication",
+                    "ph": "X",
+                    "pid": rank,
+                    "tid": rank,
+                    "ts": timestep,
+                    "dur": 1,
+                }
+            )
     import json
+
     with open(filename, "w") as f:
         json.dump({"traceEvents": events}, f)
 
@@ -1718,7 +1742,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
 
     def _simulate(self):
         return _simulate_comms_compute(
-            self.pipeline_order_with_comms, lambda s: self.stage_index_to_group_rank[s]
+            self.pipeline_order_with_comms,
+            lambda s: self.stage_index_to_group_rank[s],
+            self._num_stages,
         )
 
     def _step_microbatches(
