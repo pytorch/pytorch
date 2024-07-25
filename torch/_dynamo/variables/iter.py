@@ -270,10 +270,10 @@ class CountIteratorVariable(IteratorVariable):
 
     def next_variable(self, tx):
         assert self.mutable_local
+        old_item = self.item
         tx.output.side_effects.mutation(self)
-        next_item = self.item.call_method(tx, "__add__", [self.step], {})
-        self.item = next_item
-        return self.item
+        self.item = self.item.call_method(tx, "__add__", [self.step], {})
+        return old_item
 
     def reconstruct(self, codegen):
         codegen.add_push_null(

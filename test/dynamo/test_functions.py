@@ -23,7 +23,6 @@ from torch import sub
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
-    expectedFailureDynamic,
     normalize_gm,
 )
 from torch._dynamo.utils import ifdynstaticdefault, same
@@ -185,18 +184,19 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_itertools_reconstruct(self):
         def fn(a):
-            it1 = itertools.repeat(0)
-            it2 = itertools.count(0)
+            it1 = itertools.repeat(1)
+            it2 = itertools.count(2)
             for _ in range(3):
-                next(it1)
-                next(it2)
-            return it1, it2, a + 1
+                a += next(it1)
+                a += next(it2)
+            return it1, it2, a
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        i1, i2, _ = fn(torch.ones(3, 3))
-        it1, it2, _ = opt_fn(torch.ones(3, 3))
+        i1, i2, a = fn(torch.ones(3, 3))
+        it1, it2, b = opt_fn(torch.ones(3, 3))
         self.assertEqual(next(i1), next(it1))
         self.assertEqual(next(i2), next(it2))
+        self.assertEqual(a, b)
 
     @make_test
     def test_obj_eq(a, b):
@@ -1604,8 +1604,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if tmp.startswith("1.23"):
             return a + b
 
-    # https://github.com/pytorch/pytorch/issues/103602
-    @expectedFailureDynamic
     @make_test
     def test_fstrings2(x):
         tmp = f"{x.shape[0]} bar"
@@ -1616,6 +1614,24 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_fstrings3(x):
         tmp = f"{x.__class__.__name__} foo"
         if tmp.startswith("Tensor"):
+            return x + 1
+
+    @make_test
+    def test_fstrings4(x):
+        tmp = f"{x.shape[0]} bar"
+        if "10" in tmp:
+            return x + 1
+
+    @make_test
+    def test_fstrings5(x):
+        tmp = f"{x.shape[0]} bar"
+        if "10" in (tmp + "haha"):
+            return x + 1
+
+    @make_test
+    def test_fstrings6(x):
+        tmp = f"{x.shape[0] + x.shape[1]}"
+        if "20" in tmp:
             return x + 1
 
     @make_test
