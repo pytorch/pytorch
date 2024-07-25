@@ -6620,7 +6620,8 @@ utils_device.CURRENT_DEVICE == None""".split(
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_symnode_as_device_kwarg(self):
         def f(rank):
-            return torch.ones(10, device=rank.size(0))
+            # -2 to make device id 0 for easier testing on CI
+            return torch.ones(10, device=rank.size(0) - 2)
 
         x = torch.randn(2)
         out = f(torch.randn(2))
