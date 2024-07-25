@@ -25,7 +25,6 @@ from typing import (
     Literal,
     Optional,
     overload,
-    Protocol,
     Self,
     Sequence,
     Set,
@@ -55,11 +54,9 @@ from torch._prims_common import (
     is_boolean_dtype,
     is_float_dtype,
     make_channels_last_strides_for,
-    NumberType,
     StrideType,
 )
 from torch._subclasses.fake_tensor import get_schema_info
-from torch.fx import Proxy
 from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
     compute_unbacked_bindings,
@@ -109,7 +106,7 @@ if TYPE_CHECKING:
     from torch._inductor.codegen.wrapper import WrapperCodeGen
     from torch._inductor.index_propagation import IndexPropVar
     from torch._subclasses.fake_tensor import FakeTensor
-    from torch.fx import Node
+    from torch.fx import Node, Proxy
     from .bounds import BoundVars
     from .codegen.cpp_template import CppTemplate
 
@@ -182,7 +179,9 @@ _NodeOrNodes: TypeAlias = Union[
     Dict[str, "TensorBox"],
     "Symbol",
     "IRNode",
-    Sequence[Optional[Union[int, Dict[str, "TensorBox"], "TensorBox", "Symbol", "IRNode"]]],
+    Sequence[
+        Optional[Union[int, Dict[str, "TensorBox"], "TensorBox", "Symbol", "IRNode"]]
+    ],
 ]
 
 
@@ -215,20 +214,6 @@ def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
 
     # Be picky about the accepted data structure (don't use pytree here)
     _check_tensorbox(node_or_nodes)
-
-
-class _AddTypeWrapper(Protocol):
-    def __call__(
-        self,
-        a: object,
-        b: object,
-        *,
-        alpha: Optional[NumberType] = None,
-    ) -> OpsValue:
-        ...
-
-
-_GenericOpsWrapper: TypeAlias = Callable[[object, object], OpsValue]
 
 
 def ops_wrapper(name: str) -> Callable[..., OpsValue]:
@@ -4926,9 +4911,7 @@ class ExternKernel(InputsKernel):
                     )
                 elif isinstance(
                     real_layout, FixedLayout
-                ) and real_layout.is_stride_ordered(
-                    order
-                ):
+                ) and real_layout.is_stride_ordered(order):
                     return x
 
         # TODO - Storage to InputBuffer
@@ -4986,9 +4969,7 @@ class ExternKernel(InputsKernel):
                     if self.arg_properties and idx < len(self.arg_properties)
                     else None
                 )
-                result.append(
-                    V.graph.wrapper_code.val_to_arg_str(x, type_)
-                )
+                result.append(V.graph.wrapper_code.val_to_arg_str(x, type_))
             return result
         else:
             return map(V.graph.wrapper_code.val_to_arg_str, self.constant_args)
@@ -5006,11 +4987,7 @@ class ExternKernel(InputsKernel):
                         self.arg_properties
                     ), "Invalid access to ExternKernel.arg_properties"
                     type_ = self.arg_properties[i].get("type")
-                    args.append(
-                        V.graph.wrapper_code.val_to_arg_str(
-                            x, type_
-                        )
-                    )
+                    args.append(V.graph.wrapper_code.val_to_arg_str(x, type_))
                 else:
                     args.append(x.codegen_reference())
         args.extend(self.codegen_const_args())
@@ -5041,11 +5018,7 @@ class ExternKernel(InputsKernel):
                         if self.allarg_properties and arg_name in self.allarg_properties
                         else None
                     )
-                    kwargs.append(
-                        V.graph.wrapper_code.val_to_arg_str(
-                            v, type_
-                        )
-                    )
+                    kwargs.append(V.graph.wrapper_code.val_to_arg_str(v, type_))
         else:
             kwargs = [
                 f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"  # type: ignore[misc]
@@ -5242,7 +5215,7 @@ class MutationOutput(Buffer):
     An output buffer that represents the mutation of a pre-existing buffer
     """
 
-    def __init__(self, layout, mutated_node, mutating_node: Operation):
+    def __init__(self, layout, mutated_node, mutating_node: Operation):  # type: ignore[no-untyped-def]
         super().__init__(name=None, layout=layout)
         mutated_node_name = mutated_node.get_name()
         V.graph.mark_buffer_mutated(mutated_node_name)
@@ -5701,7 +5674,9 @@ class DynamicScalar(ExternKernel):
 
     def __init__(self, sym: Symbol, keypath: Sequence[Expr], data: IRNode) -> None:
         data.realize()
-        super().__init__(None, NoneLayout(torch.device("cpu")), self.unwrap_storage([data]))
+        super().__init__(
+            None, NoneLayout(torch.device("cpu")), self.unwrap_storage([data])
+        )
         self.sym = sym
         self.keypath = keypath
 
@@ -5899,9 +5874,9 @@ class FallbackKernel(ExternKernelAlloc):
             if info.alias_info is None:
                 return
 
-            def add_alias(t):
+            def add_alias(t):  # type: ignore[no-untyped-def]
                 self.alias_names.append(t.get_name())
-                if info.alias_info.is_write:
+                if info.alias_info.is_write:  # type: ignore[union-attr]
                     self.mutation_outputs.append(
                         MutationOutput(NoneLayout(t.get_device()), t, self)
                     )
@@ -6460,9 +6435,7 @@ class MutableBox(IRNode):
 
 class TensorBox(MutableBox):
     @staticmethod
-    def create(
-        data: Optional[_NodeOrNodes]
-    ) -> TensorBox:
+    def create(data: Optional[_NodeOrNodes]) -> TensorBox:
         return TensorBox(StorageBox(data))  # type: ignore[arg-type]
 
 
