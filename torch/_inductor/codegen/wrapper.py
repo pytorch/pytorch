@@ -1560,7 +1560,7 @@ class WrapperCodeGen(CodeGen):
             return buf_name
         elif issubclass(arg_type, sympy.Basic) or isinstance(arg, SymbolicCallArg):
             # arg is a symbol or symbolic expression
-            if isinstance(arg, str):	            
+            if isinstance(arg, str):
                 if arg in self._meta_vars:
                     return arg
                 if raw_arg is None:
