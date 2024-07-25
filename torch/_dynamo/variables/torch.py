@@ -998,7 +998,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         return result
 
     @staticmethod
-    def _nn_param_via_prefix_insert(tx, data, requires_grad):
+    def _nn_param_via_prefix_insert(tx: "InstructionTranslator", data, requires_grad):
         # Alternate version if we have a .source
         from .builder import VariableBuilder
 
