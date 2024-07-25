@@ -632,7 +632,7 @@ class TritonOverrides(OpOverrides):
         if use_compute_types:
             out_dtype = triton_compute_type(dtype)
         else:
-            out_dtype = f"tl.{str(dtype).split('.')[-1]}"
+            out_dtype = triton_store_type(dtype)
 
         return f"{x}.to({out_dtype})"
 
