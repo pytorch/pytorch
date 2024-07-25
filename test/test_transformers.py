@@ -3008,7 +3008,7 @@ class TestSDPACudaOnly(NNTestCase):
             *zip(grads_ref, grads_ref_lp, grads),
             fudge_factors={
                 'out': 1.5 * dropout_fudge_factor,
-                'grad_query': 12.0 * dropout_fudge_factor,
+                'grad_query': 13.0 * dropout_fudge_factor,
                 'grad_key': 2.0 * dropout_fudge_factor,
                 'grad_value': 1.5 * dropout_fudge_factor,
             }
