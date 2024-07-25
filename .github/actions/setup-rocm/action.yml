@@ -1,7 +1,12 @@
 name: Setup ROCm host
 
 description: Set up ROCm host for CI
-
+inputs:
+  test-matrix:
+      required: true
+      type: string
+      description: |
+        A JSON description of what test configs to run later on.
 runs:
   using: composite
   steps:
@@ -61,11 +66,18 @@ runs:
             echo "$msg"
             exit 1
         fi
-        if [[ $ngpu -eq 1 ]]; then
-            echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
-            echo "$msg"
-            exit 1
-        fi
+        for ((i = 0; i < ${#test-matrix.include}; i++ ))
+        do
+          if [[ ${ "${test-matrix.include[i]}" } != "default" ]]; then
+            if [[ $ngpu -eq 1 ]]; then
+                echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
+                echo "$msg"
+                exit 1
+            fi
+          fi
+        done
+      with:
+        test-matrix: ${{ inputs.test-matrix }}
 
     - name: Runner diskspace health check
       uses: ./.github/actions/diskspace-cleanup
