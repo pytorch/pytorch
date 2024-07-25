@@ -1,6 +1,6 @@
 from typing import Callable, Iterable, Optional, Union
 
-from .custom_ops import custom_op
+from .custom_ops import custom_op, CustomOpDef
 
 
 def triton_op(
@@ -89,7 +89,7 @@ def triton_op(
 
     """
 
-    def dec(fn: Callable) -> Callable:
+    def dec(fn: Callable[..., object]) -> CustomOpDef:
         result = custom_op(name, fn, mutates_args=mutates_args)
         from .._subclasses.functional_tensor import FunctionalTensorMode
 

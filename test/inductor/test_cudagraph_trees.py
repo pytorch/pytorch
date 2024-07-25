@@ -6,12 +6,14 @@ import importlib
 import sys
 import unittest
 import warnings
+from unittest import mock
 
 import torch
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
 from torch._inductor.cudagraph_utils import FunctionID
@@ -610,6 +612,51 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(new_id, 1)
 
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
+
+        @torch._inductor.config.patch("fx_graph_cache", True)
+        def test_cache_hit_forward_miss_backward(self):
+            # Test that we don't cache cudagraphs, skipping cudagraphs on backward on a cache miss
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            def complex_memory_overlap_new(t):
+                return True
+
+            # Run forwards, fx graph should cache miss
+            for _ in range(3):
+                torch._dynamo.reset()
+                counters.clear()
+                FxGraphCache.clear()
+
+                with mock.patch(
+                    "torch._inductor.compile_fx.complex_memory_overlap",
+                    new=complex_memory_overlap_new,
+                ):
+                    inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+                    out = foo(inp)
+                    self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+                    # Reset dynamo and related caches except for FXGraphCache
+                    torch._dynamo.reset()
+
+                    # Forwards should be a cache hit now, we still skip cudagraphs
+                    inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+                    out = foo(inp)
+                    self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+                    self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+                    # Run backward without complex memory overlap being set
+
+                # Run the backward without complex memory overlap reason
+                # cache should miss, but cudagraphs should not run
+                # because forward skipped it
+                back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
+                out.backward(back_inp)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+
+            # we should not have cudagraph'd anything
+            assert self.get_manager() is None
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         def test_forward_backward_not_called(self, backend):
@@ -1223,7 +1270,10 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     foo(*inps)
                 except Exception as e:
                     thrown = True
-                    self.assertTrue("at::cuda::blas::gemm<float>" in str(e))
+                    self.assertTrue(
+                        "at::cuda::blas::gemm<float>" in str(e)
+                        or "at::cuda::blas::gemm_internal_cublas<float>" in str(e)
+                    )
                     self.assertTrue(
                         "getCurrentCUDABlasHandle" in str(e)
                         or "getNewWorkspace" in str(e)

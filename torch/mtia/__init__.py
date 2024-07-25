@@ -48,8 +48,8 @@ def _lazy_init() -> None:
     if is_initialized() or hasattr(_tls, "is_initializing"):
         return
     with _initialization_lock:
-        # We be double-checked locking, boys!  This is OK because
-        # the above test was GIL protected anyway.  The inner test
+        # We be double-checking locking, boys! This is OK because
+        # the above test was GIL protected anyway. The inner test
         # is for when a thread blocked on some other thread which was
         # doing the initialization; when they get the lock, they will
         # find there is nothing left to do.
@@ -148,6 +148,19 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
     return torch._C._mtia_getDefaultStream(_get_device_index(device, optional=True))
 
 
+def memory_stats(device: Optional[_device_t] = None) -> Dict[str, Any]:
+    r"""Return a dictionary of MTIA memory allocator statistics for a given device.
+
+    Args:
+        device (torch.device or int, optional) selected device. Returns
+            statistics for the current device, given by current_device(),
+            if device is None (default).
+    """
+    if not is_initialized():
+        return {}
+    return torch._C._mtia_memoryStats(_get_device_index(device, optional=True))
+
+
 def set_stream(stream: Stream):
     r"""Set the current stream.This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
@@ -209,6 +222,7 @@ class StreamContext:
     cur_stream: Optional["torch.mtia.Stream"]
 
     def __init__(self, stream: Optional["torch.mtia.Stream"]):
+        self.cur_stream = None
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if not torch.jit.is_scripting():
@@ -304,6 +318,7 @@ __all__ = [
     "current_device",
     "current_stream",
     "default_stream",
+    "memory_stats",
     "set_device",
     "set_stream",
     "stream",

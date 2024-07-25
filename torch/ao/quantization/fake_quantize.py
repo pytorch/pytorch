@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """Implements modules  used to perform fake quantization."""
 
@@ -392,7 +391,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
         )
 
     @torch.jit.export
-    def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:  # type: ignore[override]
         return self.activation_post_process.calculate_qparams()
 
     @torch.jit.export
