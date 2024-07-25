@@ -17,7 +17,6 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-
 from typing_extensions import TypeAlias
 
 import torch
@@ -40,7 +39,6 @@ from torch.ao.quantization.quantizer.quantizer import (
     Quantizer,
     SharedQuantizationSpec,
 )
-
 from torch.ao.quantization.quantizer.utils import _get_module_name_filter
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     get_bias_qspec,
@@ -56,6 +54,7 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
     SourcePartition,
 )
+
 
 FilterFn: TypeAlias = Callable[[List[Node]], bool]
 
