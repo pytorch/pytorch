@@ -27,7 +27,7 @@ import threading
 import warnings
 from bisect import bisect_right
 from copy import copy
-from ctypes import c_void_p, cdll, CDLL
+from ctypes import c_void_p, CDLL, cdll
 from functools import partial
 from pathlib import Path
 from time import time, time_ns
@@ -58,6 +58,7 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compiler,
 )
 
+
 """
 codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
 https://github.com/pytorch/pytorch/issues/124245#issuecomment-2197778902
@@ -86,7 +87,6 @@ from torch._inductor.runtime.compile_tasks import (
 )
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import ALIGN_BYTES, clear_on_fresh_inductor_cache, is_linux
-
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -94,6 +94,7 @@ from torch._subclasses.fake_tensor import (
     TensorMetadata,
 )
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
+
 
 if TYPE_CHECKING:
     from concurrent.futures import Future
@@ -178,16 +179,20 @@ class CacheBase:
 
         try:
             system: Dict[str, Any] = {
-                "device": {
-                    "name": torch.cuda.get_device_properties(
-                        torch.cuda.current_device()
-                    ).name,
-                },
+                "device": {"name": None},
                 "version": {
-                    "cuda": torch.version.cuda,
                     "triton": triton_version,
                 },
             }
+            device_properties = torch.cuda.get_device_properties(
+                torch.cuda.current_device()
+            )
+            if torch.version.cuda is not None:
+                system["device"]["name"] = device_properties.name
+                system["version"]["cuda"] = torch.version.cuda
+            else:
+                system["device"]["name"] = device_properties.gcnArchName
+                system["version"]["hip"] = torch.version.hip
         except (AssertionError, RuntimeError):
             # If cuda is not installed, none of the above config is relevant.
             system = {}
@@ -385,7 +390,7 @@ def get_path(
 def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
     if hash_type == "code":
         return code_hash(content, extra)
-    if hash_type in ["cubin", "hsaco"]:
+    if hash_type in ["cubin", "hsaco", "spv"]:
         return code_hash(repr(content))
     raise AssertionError(f"Unknown hash type {hash_type}")
 
@@ -1079,11 +1084,11 @@ class FxGraphCache:
                 cache_id = "fx-graph-v1"
                 try:
                     if config.is_fbcode():
-                        from triton.fb.fb_memcache import (
-                            FbMemcacheRemoteFxGraphCacheBackend,
+                        from torch._inductor.fb.remote_cache import (
+                            FbRemoteFxGraphCacheBackend,
                         )
 
-                        remote_cache = FbMemcacheRemoteFxGraphCacheBackend(cache_id)
+                        remote_cache = FbRemoteFxGraphCacheBackend(cache_id)
                     else:
                         from torch._inductor.remote_cache import RedisRemoteCacheBackend
 
@@ -1581,8 +1586,7 @@ class CudaKernelParamCache:
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
-    def set(cls, key: str, params: Dict[str, str], cubin: str) -> None:
-        bin_type = "cubin" if torch.version.hip is None else "hsaco"
+    def set(cls, key: str, params: Dict[str, str], cubin: str, bin_type: str) -> None:
         _, path = write(
             cubin,
             bin_type,
@@ -1614,6 +1618,9 @@ class AotCodeCompiler:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> str:
+        if sys.platform == "win32":
+            raise RuntimeError("AotCodeCompiler not yet supported for inductor")
+
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
         picked_vec_isa = pick_vec_isa()
@@ -1790,7 +1797,7 @@ class AotCodeCompiler:
         with lock:
             # Currently, this only support serializing extern nodes in fbcode
             # Eventually, we should also have a serializer for OSS.
-            if config.is_fbcode() and serialized_extern_kernel_nodes:
+            if serialized_extern_kernel_nodes:
                 output_json = os.path.splitext(input_path)[0] + ".json"
                 with open(output_json, "w") as f:
                     f.write(serialized_extern_kernel_nodes)

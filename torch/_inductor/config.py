@@ -433,6 +433,12 @@ assert_indirect_indexing = True
 # compute CSE bounds on variables that do not appear in the FX graph
 compute_all_bounds = False
 
+# benchmark combo kernels and only allow ones with perf gains
+benchmark_combo_kernel = False
+# combo_kernel autotuning options: 0 - disable, 1 - enable except for foreach,
+# 2 - enable for all
+combo_kernels_autotune = 1
+
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 
@@ -619,6 +625,12 @@ decompose_mem_bound_mm: bool = False
 # code using this assumption, and clone tensors before use if they aren't aligned.
 # In the common case, most inputs will be aligned.
 assume_aligned_inputs: bool = False
+
+# For the user-written Triton kernels compiled with the model, ignore the unsupported
+# arguments passed to the @triton.autotune in the user's code; this is unsafe, as
+# ignoring the unsupported args may lead to unexpected autotuning behavior: don't
+# set unless you know what you're doing.
+unsafe_ignore_unsupported_triton_autotune_args: bool = False
 
 
 # config specific to codegen/cpp.py
@@ -1077,6 +1089,7 @@ if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
+
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
