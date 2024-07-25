@@ -1,6 +1,6 @@
 #include <sstream>
 
-#if __has_include(<nvtx3/nvToolsExt.h>)
+#ifdef TORCH_CUDA_USE_NVTX3
 #include <nvtx3/nvToolsExt.h>
 #else
 #include <nvToolsExt.h>

@@ -1,7 +1,7 @@
 #ifdef _WIN32
 #include <wchar.h> // _wgetenv for nvtx
 #endif
-#if __has_include(<nvtx3/nvToolsExt.h>)
+#ifdef TORCH_CUDA_USE_NVTX3
 #include <nvtx3/nvToolsExt.h>
 #else
 #include <nvToolsExt.h>
