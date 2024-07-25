@@ -1,22 +1,25 @@
 # mypy: allow-untyped-defs
 import contextlib
+import logging
+import math
 from typing import Any, Callable, cast, List, Optional, Set, Union
 from unittest.mock import patch
 
 import torch
 import torch.utils
+
 from ..._dynamo.utils import counters
 from .. import ir, lowering as L
-
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
 from ..virtualized import ops, V
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
-
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import GemmBlocking, get_gemm_template_output_and_compute_dtype
+
+log = logging.getLogger(__name__)
 
 GEMM_TEMPLATE = r"""
 {{template.header().getvalue()}}
@@ -34,17 +37,14 @@ extern "C"
 {
     {{kernel.maybe_codegen_profile()}}
     constexpr int64_t num_threads = {{num_threads}};
-    constexpr int64_t N = {{kernel.size(GemmOut, 1)}};
-    constexpr int64_t K = {{kernel.size(X, 1)}};
+    constexpr int64_t N = {{N}};
+    constexpr int64_t K = {{K}};
     constexpr int64_t M0 = {{micro_gemm.register_blocking.block_m}};
     constexpr int64_t N0 = {{micro_gemm.register_blocking.block_n}};
     constexpr int64_t K0 = {{micro_gemm.register_blocking.block_k}};
     constexpr int64_t N0_blocks = (N + N0 - 1) / N0;
     constexpr int64_t K0_blocks = (K + K0 - 1) / K0;
 
-    static_assert(N % N0 == 0, "N dimension must be multiple of N0");
-
-    // TODO(jgong5): improve cache blocking with CPU info (Mc, Kc)
     {%- if is_dynamic_M %}
     const int64_t M = {{kernel.size(GemmOut, 0)}};
     const int64_t M0_blocks = (M + M0 - 1) / M0;
@@ -96,14 +96,14 @@ extern "C"
         {{ micro_gemm.codegen_init(kernel) }}
         for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
             const int64_t m_start = mc * M0;
-            const int64_t m_end = std::min((mc + Mc_blocks) * M0, M);
+            const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * M0, M);
             const int64_t m_size = m_end - m_start;
             {%- if use_local_acc %}
             {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "N0"], acc_buf_dtype) }}
             {%- endif %}
             for (int64_t nc = n_block_start; nc < n_block_end; ++nc) {
                 const int64_t n_start = nc * N0;
-                const int64_t n_size = N0;
+                const int64_t n_end = std::min((nc + 1) * N0, N);
                 {%- if use_local_acc %}
                 {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {%- else %}
@@ -121,9 +121,15 @@ extern "C"
                         {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(24, false) }}
                     }
                 }
-                {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
+                {%- if N == PADDED_N %}
+                    {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
+                    {%- set tile_acc = acc %}
+                {%- else %}
+                    {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
+                    {%- set tile_acc = kernel.slice_nd(acc, [(), ("0", "n_end - n_start")]) %}
+                {%- endif %}
                 {{ kernel.store_output(
-                      tile_Y, acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
+                      tile_Y, tile_acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                    )|indent(16, false)
                 }}
             }
@@ -132,6 +138,10 @@ extern "C"
     }
 }
 """
+
+
+def get_padded_n(n, block_n):
+    return (n + block_n - 1) // block_n * block_n
 
 
 class CppPackedGemmTemplate(CppTemplate):
@@ -161,14 +171,23 @@ class CppPackedGemmTemplate(CppTemplate):
         m, n = layout.size
         _, k = input_nodes[0].get_size()
         self.m, self.n, self.k = m, n, k
+        self.padded_n = get_padded_n(n, self.register_blocking.block_n)
         self.is_dynamic_M = has_free_symbols((m,))
 
     @cache_on_self
     def thread_blocking(self) -> GemmBlocking:
-        # TODO(jgong5): allow tuning various blocking options
+        """
+        NOTE [Thread blocking in Cpp GEMM]
+        We use simple heuristics to decide the thread blocking:
+        1. Make sure all threads are occupied as much as possible.
+        2. Favor more square-sized thread blocks for better data reuse.
+        TODO(jgong5): we only do blocking on on M and N now, add blocking on K
+                      after supporting k-slicing.
+        TODO(jgong5): allow tuning various blocking options
+        """
+
         def get_factors(number):
             factors = []
-            # priorize more evenly divided factors
             for i in range(int(number**0.5), 0, -1):
                 if number % i == 0:
                     factors.append(number // i)
@@ -190,31 +209,123 @@ class CppPackedGemmTemplate(CppTemplate):
         k_blocks = (self.k + register_blocking.block_k - 1) // register_blocking.block_k
         factors = get_factors(self.num_threads)
         assert len(factors) > 0
+
+        # we favor square-sized thread blocks for good data reuse
+        def get_better_blocking(blocking, best_blocking):
+            if best_blocking is None:
+                best_blocking = blocking
+            else:
+                block_m_size = blocking.block_m * register_blocking.block_m
+                block_n_size = blocking.block_n * register_blocking.block_n
+                best_block_m_size = best_blocking.block_m * register_blocking.block_m
+                best_block_n_size = best_blocking.block_n * register_blocking.block_n
+                if block_m_size + block_n_size < best_block_m_size + best_block_n_size:
+                    best_blocking = blocking
+            return best_blocking
+
+        best_blocking = None
+        # check if we can have a thread-blocking to occupy all threads
         for factor in factors:
-            if n_blocks % factor == 0 and m_blocks % (self.num_threads // factor) == 0:
-                return get_blocking(
-                    self.num_threads, factor, m_blocks, n_blocks, k_blocks
-                )
-        for factor in factors:
-            if n_blocks % factor == 0:
-                return get_blocking(
-                    self.num_threads, factor, m_blocks, n_blocks, k_blocks
-                )
             cofactor = self.num_threads // factor
-            if m_blocks % cofactor == 0:
-                return get_blocking(
+            if n_blocks >= factor and m_blocks >= cofactor:
+                blocking = get_blocking(
                     self.num_threads, factor, m_blocks, n_blocks, k_blocks
                 )
-        raise AssertionError("Should not reach here.")
+                best_blocking = get_better_blocking(blocking, best_blocking)
+
+        if best_blocking is None:
+            for factor in factors:
+                cofactor = self.num_threads // factor
+                if n_blocks >= factor or m_blocks >= cofactor:
+                    blocking = get_blocking(
+                        self.num_threads, factor, m_blocks, n_blocks, k_blocks
+                    )
+                    best_blocking = get_better_blocking(blocking, best_blocking)
+
+        assert best_blocking is not None
+        return best_blocking
 
     @cache_on_self
     def cache_blocking(self) -> GemmBlocking:
-        # TODO(jgong5): improve cache blocking with CPU info
+        def get_cache_blocking(register_blocking, thread_blocking):
+            M0 = register_blocking.block_m
+            N0 = register_blocking.block_n
+            K0 = register_blocking.block_k
+
+            Mc_blocks = thread_blocking.block_m
+            # Nc_blocks is always 1
+            Nc_blocks = 1
+            Kc_blocks = thread_blocking.block_k
+
+            # TODO: tune the factor here
+            L1_limit_factor = 1
+            L2_limit_factor = 0.5
+
+            L1_cache_size = (
+                torch._C._cpu._L1d_cache_size()
+            )  # per core cache size in Bytes
+            assert (
+                L1_cache_size > 0
+            ), f"Expect L1_cache_size > 0 but got {L1_cache_size}"
+            L2_cache_size = (
+                torch._C._cpu._L2_cache_size()
+            )  # per core cache size in Bytes
+            assert (
+                L2_cache_size > 0
+            ), f"Expect L2_cache_size > 0 but got {L2_cache_size}"
+            B_size_limit = L1_cache_size * L1_limit_factor
+            A_size_limit = L2_cache_size * L2_limit_factor
+
+            def get_num_byte(dtype):
+                return torch.tensor([], dtype=dtype).element_size()
+
+            num_byte_A = get_num_byte(self.input_nodes[0].get_dtype())
+            num_byte_B = get_num_byte(self.input_nodes[1].get_dtype())
+
+            size_cache_B = K0 * Kc_blocks * N0 * Nc_blocks * num_byte_B
+
+            if size_cache_B > B_size_limit:
+                Kc_blocks = math.floor(
+                    B_size_limit / (K0 * N0 * Nc_blocks * num_byte_B)
+                )
+
+            size_cache_A = M0 * Mc_blocks * K0 * Kc_blocks * num_byte_A
+            if size_cache_A > A_size_limit:
+                Mc_blocks = math.floor(
+                    A_size_limit / (M0 * Kc_blocks * K0 * num_byte_A)
+                )
+
+            return Mc_blocks, Nc_blocks, Kc_blocks
+
         assert (
             not self.is_dynamic_M
         ), "Unable to determine cache blocking for dynamic M."
+        register_blocking = self.register_blocking
         thread_blocking = self.thread_blocking()
-        return GemmBlocking(thread_blocking.block_m, 1, thread_blocking.block_k)
+
+        return GemmBlocking(*get_cache_blocking(register_blocking, thread_blocking))
+
+    def log_blockings(self):
+        log.debug(f"Register blocking: {self.register_blocking}")  # noqa: G004
+        if self.is_dynamic_M:
+            # thread and cache blockings are determined at runtime for dynamic shapes
+            return
+        log.debug(f"Cache blocking: {self.cache_blocking()}")  # noqa: G004
+        thread_blocking = self.thread_blocking()
+        log.debug(f"Thread blocking: {thread_blocking}")  # noqa: G004
+
+        def get_occupancy():
+            m_blocks = math.ceil(self.m / self.register_blocking.block_m)
+            n_blocks = math.ceil(self.n / self.register_blocking.block_n)
+            k_blocks = math.ceil(self.k / self.register_blocking.block_k)
+            m = math.ceil(m_blocks / thread_blocking.block_m)
+            n = math.ceil(n_blocks / thread_blocking.block_n)
+            k = math.ceil(k_blocks / thread_blocking.block_k)
+            return (m, n, k)
+
+        log.debug(
+            f"Number of threads: {self.num_threads}, occupancy: {get_occupancy()}"  # noqa: G004
+        )
 
     @staticmethod
     def add_choices(
@@ -308,38 +419,30 @@ class CppPackedGemmTemplate(CppTemplate):
         )
         assert micro_gemm is not None
         _, block_n, _ = micro_gemm.register_blocking
+        padded_n = get_padded_n(n, block_n)
 
         def pack_weight(inputs, layout_or_out):
             W = inputs[1]
             new_inputs = list(inputs)
+            blocked_w: Union[ir.IRNode, torch.Tensor] = W
             if isinstance(W, ir.IRNode):
-                if not isinstance(W, ir.TensorBox):
-                    W = ir.TensorBox(W)
-                k, n = W.get_size()
-                assert (
-                    n % block_n == 0
-                ), f"The last dimension of W must be a multiple of {block_n}."
-                blocked_w = L.permute(
-                    L.view(W, (k, n // block_n, block_n)),
-                    [1, 0, 2],
+                new_size = [padded_n // block_n, k, block_n]
+                blocked_w = ir.Buffer(
+                    W.get_name(),  # Borrow the registered buffer name
+                    ir.FixedLayout(
+                        W.get_device(),
+                        W.get_dtype(),
+                        new_size,
+                        ir.FlexibleLayout.contiguous_strides(new_size),
+                        0,
+                    ),
                 )
-                blocked_w = ir.ExternKernel.realize_input(blocked_w)
-                blocked_w = ir.ExternKernel.require_contiguous(blocked_w)
-                if isinstance(blocked_w, ir.ReinterpretView):
-                    # normalize stride to be "contiguous_strides" per size
-                    # this avoids the problems in L.view during template codegen
-                    assert isinstance(blocked_w.layout, ir.FixedLayout)
-                    blocked_w.layout = ir.FixedLayout(
-                        blocked_w.layout.device,
-                        blocked_w.layout.dtype,
-                        blocked_w.layout.size,
-                        ir.FlexibleLayout.contiguous_strides(blocked_w.layout.size),
-                        blocked_w.layout.offset,
-                    )
             else:
-                k, n = list(W.shape)
                 blocked_w = (
-                    W.reshape(k, n // block_n, block_n).transpose(0, 1).contiguous()
+                    torch.nn.functional.pad(W, (0, padded_n - n))
+                    .reshape(k, padded_n // block_n, block_n)
+                    .transpose(0, 1)
+                    .contiguous()
                 )
                 if micro_gemm.get_b_layout() != LayoutType.NORMAL:
                     layout_str = (
@@ -358,10 +461,12 @@ class CppPackedGemmTemplate(CppTemplate):
                         k % vnni_size == 0
                     ), f"k should be divisible by vnni_size for {layout_str} layout"
                     blocked_w = (
-                        blocked_w.view(n // block_n, k // vnni_size, vnni_size, block_n)
+                        blocked_w.view(
+                            padded_n // block_n, k // vnni_size, vnni_size, block_n
+                        )
                         .transpose(-1, -2)
                         .contiguous()
-                        .view(n // block_n, k, block_n)
+                        .view(padded_n // block_n, k, block_n)
                     )
                 # normalize stride to be "contiguous_strides" per size
                 # this avoids the problems in L.view during template codegen
@@ -388,7 +493,7 @@ class CppPackedGemmTemplate(CppTemplate):
                         W.get_name() + "_BMatrixCompens",
                     )
                 else:
-                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)
+                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)  # type: ignore[assignment]
                 new_inputs.append(BCompensate)
             return new_inputs, layout_or_out
 
@@ -539,7 +644,9 @@ class CppPackedGemmTemplate(CppTemplate):
                     )
 
         Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
-        use_local_acc = self.layout.dtype != torch.float or int8_gemm
+        use_local_acc = (
+            self.layout.dtype != torch.float or int8_gemm or self.padded_n != self.n
+        )
         acc_buf_name = "local_acc_buf"
         if epilogue_nodes:
             epilogues.extend(epilogue_nodes)
@@ -587,6 +694,7 @@ class CppPackedGemmTemplate(CppTemplate):
         )
         assert micro_gemm is not None
         assert self.register_blocking == micro_gemm.register_blocking
+        self.log_blockings()
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
 
@@ -595,6 +703,9 @@ class CppPackedGemmTemplate(CppTemplate):
             W=W,
             inp=inp,
             Y=Y,
+            N=self.n,
+            K=self.k,
+            PADDED_N=self.padded_n,
             GemmOut=gemm_output_buffer,
             aliases={alias: Y.get_name() for alias in Y_aliases},
             beta=self.beta,
