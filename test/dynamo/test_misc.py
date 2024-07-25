@@ -2140,6 +2140,23 @@ utils_device.CURRENT_DEVICE == None""".split(
         res = optimized_fn()
         self.assertTrue(same(res, 3))
 
+    def test_tensor_hasattr(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            if hasattr(x, "attr"):
+                return 0
+            else:
+                return 4
+
+        t = torch.tensor([1])
+        res = fn(t)
+        self.assertTrue(same(res, 4))
+        t.attr = "val"
+        res = fn(t)
+        self.assertTrue(same(res, 0))
+
     def test_user_property(self):
         class MyConfig:
             @property
