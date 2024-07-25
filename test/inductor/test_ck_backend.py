@@ -62,9 +62,10 @@ class TestCKBackend(TestCase):
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
-    def test_max_autotune_precompile(self, max_autotune_gemm_backends):
+    @parametrize("autotune_in_subproc", (True, False))
+    def test_max_autotune_precompile_matmul(self, max_autotune_gemm_backends, autotune_in_subproc):
         """
-        Make sure autotuning mm in subprocesses doesn't crash.
+        Make sure autotuning mm doesn't crash.
         """
 
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
@@ -82,7 +83,7 @@ class TestCKBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": True,
+                "autotune_in_subproc": autotune_in_subproc,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "compile_threads": 2,
                 "rocm.n_max_profiling_configs": 2,
