@@ -1,8 +1,5 @@
 #include <filesystem>
-#include <mutex>
-#include <shared_mutex>
 #include <sstream>
-#include <tuple>
 #include <unordered_map>
 
 #include <ATen/core/interned_strings.h>
@@ -11,8 +8,7 @@
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 
-namespace c10d {
-namespace control_plane {
+namespace c10d::control_plane {
 
 namespace {
 class RequestImpl : public Request {
@@ -192,5 +188,4 @@ WorkerServer::~WorkerServer() {
   }
 }
 
-} // namespace control_plane
-} // namespace c10d
+} // namespace c10d::control_plane
