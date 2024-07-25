@@ -133,7 +133,8 @@ def forward_inner(
     q, K_block_ptr, V_block_ptr,
     # accumulated values
     acc, l_i, m_i,
-    # Offsets
+    # Offsets used as inputs to score_mod & mask_mod
+    # of size [BLOCK_M, BLOCK_N] or scalar.
     off_z, off_h, offs_m, offs_n,
     # blocksparse data
     kv_indices, kv_num_blocks,
@@ -164,8 +165,6 @@ def forward_inner(
         if not PRESCALE_QK:
             qk *= SM_SCALE
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-        m = offs_m[:, None]
-        n = offs_n[None, :]
         # TODO: Add load mask in modification when M/N Boundary is not safe
         {{ modification(
             subgraph_number=0,
@@ -173,8 +172,8 @@ def forward_inner(
             score="qk",
             b="off_z",
             h="off_h",
-            m="m",
-            n="n",
+            m="offs_m",
+            n="offs_n",
             out="qk"
         ) | indent_except_first(2) }}
 
@@ -185,8 +184,8 @@ def forward_inner(
                 score="qk",
                 b="off_z",
                 h="off_h",
-                m="m",
-                n="n",
+                m="offs_m",
+                n="offs_n",
             ) | indent_except_first(3) }}
             # apply mask for partially unmasked blocks
             post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
@@ -353,7 +352,7 @@ flex_attention_template = TritonTemplate(
     acc, l_i, m_i = forward_inner(
         q, K_block_ptr, V_block_ptr,
         acc, l_i, m_i,
-        off_z, off_hq, offs_m, offs_n,
+        off_z, off_hq, offs_m[:, None], offs_n[None, :],
         kv_indices, kv_num_blocks,
         0, kv_num_blocks * SPARSE_KV_MULTIPLE,
         MATMUL_PRECISION,
@@ -391,7 +390,7 @@ flex_attention_template = TritonTemplate(
         acc, l_i, m_i = forward_inner(
             q, K_block_ptr, V_block_ptr,
             acc, l_i, m_i,
-            off_z, off_hq, offs_m, offs_n,
+            off_z, off_hq, offs_m[:, None], offs_n[None, :],
             kv_indices, kv_num_blocks,
             0, kv_num_blocks * SPARSE_KV_MULTIPLE,
             MATMUL_PRECISION,

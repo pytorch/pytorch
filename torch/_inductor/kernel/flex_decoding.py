@@ -9,7 +9,7 @@ from torch._inductor.virtualized import V
 
 from ..ir import FixedLayout, FlexibleLayout
 from ..lowering import empty, empty_strided, lowerings
-from ..runtime.runtime_utils import next_power_of_2
+from ..runtime.runtime_utils import is_power_of_2, next_power_of_2
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 from .flex_attention import compute_forward_block, compute_next_offset_func
 
@@ -170,7 +170,7 @@ flex_decoding_template = TritonTemplate(
     V_block_ptr = tl.make_block_ptr(
         base=V + v_offset,
         shape=(KV_LEN, BLOCK_DMODEL),
-        strides=(stride_vk, stride_vn),
+        strides=(stride_vn, stride_vk),
         offsets=(off_n, 0),
         block_shape=(BLOCK_N, BLOCK_DMODEL),
         order=(1, 0)
@@ -182,7 +182,7 @@ flex_decoding_template = TritonTemplate(
         # accumulatd values
         acc, l_i, m_i,
         #offsets
-        off_z, offs_hq, offs_m, offs_n,
+        off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
         #block sparse data
         kv_indices, kv_num_blocks,
         block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
@@ -215,7 +215,7 @@ flex_decoding_template = TritonTemplate(
         V_block_ptr = tl.make_block_ptr(
             base=V + v_offset,
             shape=(KV_LEN, BLOCK_DMODEL),
-            strides=(stride_vk, stride_vn),
+            strides=(stride_vn, stride_vk),
             offsets=(off_n, 0),
             block_shape=(BLOCK_N, BLOCK_DMODEL),
             order=(1, 0)
@@ -227,7 +227,7 @@ flex_decoding_template = TritonTemplate(
             # accumulatd values
             acc, l_i, m_i,
             #offsets
-            off_z, offs_hq, offs_m, offs_n,
+            off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
             #block sparse data
             kv_indices, kv_num_blocks,
             block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
@@ -328,6 +328,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     # Calculate GQA head sharing
     gqa_shared_heads = query.get_size()[1] // key.get_size()[1]
+    if not is_power_of_2(gqa_shared_heads):
+        raise ValueError(
+            "Number of shared query heads sharing the same KV head must be power of 2. "
+        )
 
     # Determine if there are "full" blocks where we only need to apply score_mod, and can skip mask_mod
     has_full_blocks = full_kv_num_blocks is not None
