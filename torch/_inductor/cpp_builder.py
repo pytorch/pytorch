@@ -24,6 +24,7 @@ from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
 
+
 if config.is_fbcode():
     from triton.fb import build_paths  # noqa: F401
 
@@ -244,6 +245,12 @@ def run_command_line(cmd_line, cwd=None):
     return status
 
 
+def normalize_path_separator(orig_path: str) -> str:
+    if _IS_WINDOWS:
+        return orig_path.replace(os.sep, "/")
+    return orig_path
+
+
 class BuildOptionsBase:
     """
     This is the Base class for store cxx build options, as a template.
@@ -349,6 +356,12 @@ def _get_warning_all_cflag(warning_all: bool = True) -> List[str]:
 
 def _get_cpp_std_cflag(std_num: str = "c++17") -> List[str]:
     if _IS_WINDOWS:
+        """
+        On Windows, only c++20 can support `std::enable_if_t`.
+        Ref: https://learn.microsoft.com/en-us/cpp/overview/cpp-conformance-improvements-2019?view=msvc-170#checking-for-abstract-class-types # noqa: B950
+        TODO: discuss upgrade pytorch to c++20.
+        """
+        std_num = "c++20"
         return [f"std:{std_num}"]
     else:
         return [f"std={std_num}"]
@@ -1250,7 +1263,7 @@ class CppBuilder:
                     f"{compiler} {include_dirs_args} {definations_args} {cflags_args} {sources} "
                     f"{passthougn_args} /LD /Fe{target_file} /link {libraries_dirs_args} {libraries_args} {ldflags_args} "
                 )
-                cmd = cmd.replace("\\", "/")
+                cmd = normalize_path_separator(cmd)
             else:
                 compile_only_arg = "-c" if self._compile_only else ""
                 cmd = re.sub(
@@ -1278,7 +1291,7 @@ class CppBuilder:
         return command_line
 
     def get_target_file_path(self):
-        return self._target_file
+        return normalize_path_separator(self._target_file)
 
     def build(self) -> Tuple[int, str]:
         """

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 import logging
@@ -36,6 +37,7 @@ from .utils import (
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
 )
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -420,6 +422,11 @@ def amin(self, dim=None, keepdim=False):
 @register_decomposition([aten.narrow_copy])
 def narrow_copy(self, dim, start, length):
     return torch.narrow(self, dim, start, length).clone()
+
+
+@register_decomposition([aten.expand_copy])
+def expand_copy(self, size, *, implicit=False):
+    return aten.expand(self, size, implicit=implicit).clone()
 
 
 @register_decomposition([aten.view_copy.default])

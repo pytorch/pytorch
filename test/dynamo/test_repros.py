@@ -5378,27 +5378,47 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         inps = gen_inps(3, 5)
         self.assertEqual(g(*inps), opt_g(*inps))
 
-    def test_staticmethod_allow_in_graph(self):
-        class MyClass:
-            i = 3
+    def test_guard_with_tuple_mutation(self):
+        class Foo:
+            def __init__(self):
+                self.x = 10
 
-            @staticmethod
-            def foo_inner(x):
-                return torch.mul(x, MyClass.i)
+        foo = Foo()
+        d = {
+            "a": 2,
+            "b": (foo,),
+        }
 
-            # if dynamo inlines with fullgraph, will error
-            # verify that dynamo doesn't inline
-            @staticmethod
-            @torch._dynamo.allow_in_graph
-            def foo1(x):
-                torch._dynamo.graph_break()
-                return MyClass.foo_inner(x)
+        def fn(x, d):
+            return x * d["a"] * d["b"][0].x
 
-        @torch.compile(backend="eager", fullgraph=True)
-        def f_bad(x):
-            return MyClass.foo1(x)
+        opt_fn = torch.compile(fn, backend="eager")
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(inp, d), opt_fn(inp, d))
+        d["b"][0].x = 12
+        self.assertEqual(fn(inp, d), opt_fn(inp, d))
 
-        f_bad(torch.ones(2, 2))
+    def test_changing_stride(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x, y):
+            return x * y
+
+        for i in range(1, 4):
+            x = torch.randn(4, i)
+
+            # create a view for i > 1
+            if i == 1:
+                x1 = x
+            else:
+                x1 = x[:, 0:1]
+
+            y = torch.randn(4, 1)
+            print(x1.shape, y.shape)
+            fn(x1, y)
+
+        self.assertTrue(cnt.frame_count <= 2)
 
 
 instantiate_parametrized_tests(ReproTests)
