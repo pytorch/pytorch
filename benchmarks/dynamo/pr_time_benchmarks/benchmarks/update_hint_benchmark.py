@@ -1,8 +1,8 @@
 import random
 
-import torch
-
 from benchmarks.dynamo.pr_time_benchmarks.benchmark_base import Benchmark
+
+import torch
 
 
 class P0(Benchmark):
