@@ -1,8 +1,8 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 import collections
 from enum import Enum
-from typing import Any, Callable, Dict, List, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
@@ -96,7 +96,7 @@ def is_side_effect_safe(m: MutableLocalBase):
 
 
 class VariableTrackerMeta(type):
-    all_subclasses = []
+    all_subclasses: List[type] = []
 
     def __instancecheck__(cls, instance) -> bool:
         """Make isinstance work with LazyVariableTracker"""
@@ -349,8 +349,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def __init__(
         self,
         *,
-        source: Source = None,
-        mutable_local: MutableLocal = None,
+        source: Optional[Source] = None,
+        mutable_local: Optional[MutableLocal] = None,
     ):
         super().__init__()
         self.source = source
