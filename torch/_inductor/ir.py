@@ -15,6 +15,7 @@ from typing import (
     Any,
     Callable,
     ClassVar,
+    ContextManager,
     Dict,
     Iterable,
     List,
@@ -31,9 +32,7 @@ import sympy
 from sympy import Expr, Integer
 
 import torch._export.serde.schema as export_schema
-
 import torch._logging
-
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
@@ -89,6 +88,7 @@ from .utils import (
     sympy_subs,
 )
 from .virtualized import ops, V
+
 
 if TYPE_CHECKING:
     from .graph import GraphLowering
@@ -250,16 +250,17 @@ def ir_node_to_tensor(x, guard_shape=True):
     device = x.get_device()
     size = convert_shape_to_symint(size)
     stride = convert_shape_to_symint(stride)
-    t = torch.empty_strided(
-        size=size, stride=stride, dtype=dtype, device=device
-    ).zero_()
+    with V.graph.sizevars.shape_env.suppress_guards():
+        t = torch.empty_strided(
+            size=size, stride=stride, dtype=dtype, device=device
+        ).zero_()
     return t
 
 
 def may_convert_to_optional(value):
     if isinstance(value, list) and not value:
         # [None] makes sure the cpp wrapper codegen will generate something like
-        # {c10::nullopt} instead of {}
+        # {std::nullopt} instead of {}
         return [None]
     return value
 
@@ -1749,6 +1750,9 @@ class Scan(Loops):
         axis: int,
         combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
+        *,
+        # Whether we have the option to fallback to aten
+        can_fallback_to_aten: bool = True,
         **kwargs,
     ) -> List[Optional[TensorBox]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
@@ -1789,15 +1793,17 @@ class Scan(Loops):
             combine_fn=combine_fn,
             scan_numel=scan_numel,
         )
-        scan_type = Scan if num_splits <= 1 else SplitScan
-
-        if num_splits > 1 and torch.version.hip is not None:
-            # Fallback for split-scan on ROCm
-            return [None] * len(dtypes)
-
-        if num_splits > 1 and len(dtypes) > 1:
-            # Fallback for split-scans for multiple inputs
-            return [None] * len(dtypes)
+        scan_type = Scan
+        if num_splits > 1:
+            supports_split = torch.version.hip is None and len(dtypes) == 1
+            if not supports_split:
+                if can_fallback_to_aten:
+                    # Fallback to ATen
+                    return [None] * len(dtypes)
+                else:
+                    num_splits = 1
+            else:
+                scan_type = SplitScan
 
         def reindex(index, scan_index):
             assert len(scan_index) == len(scan_ranges)
@@ -2561,7 +2567,11 @@ class ReinterpretView(BaseView):
     def make_loader(self):
         def loader(index):
             indexer = self.layout.make_indexer()
-            return ops.load(self.get_name(), indexer(index))
+            tmp_loader = ops.load(self.get_name(), indexer(index))
+            if self.layout.dtype != self.data.dtype:
+                return ops.to_dtype_bitcast(tmp_loader, self.dtype, self.data.dtype)
+            else:
+                return tmp_loader
 
         return loader
 
@@ -2591,7 +2601,49 @@ class ReinterpretView(BaseView):
             self.layout.stride,
             self.layout.offset,
             writer,
+            dtype=self.layout.dtype,
         )
+
+
+@dataclasses.dataclass
+class DtypeView(BaseView):
+    """Pretend our storage has a different type"""
+
+    target_dtype: torch.dtype
+
+    @classmethod
+    def create(cls, x, new_dtype):
+        if is_storage_and_layout(x):
+            storage, old_layout = as_storage_and_layout(x)
+            new_layout = FixedLayout(
+                old_layout.device,
+                new_dtype,
+                old_layout.size,
+                old_layout.stride,
+                old_layout.offset,
+            )
+            return ReinterpretView(storage, new_layout)
+        return DtypeView(x, new_dtype)
+
+    def __str__(self):
+        return self.str_helper([self.data, self.target_dtype])
+
+    __repr__ = __str__
+
+    @property
+    def dtype(self):
+        return self.target_dtype
+
+    def get_size(self):
+        return self.data.get_size()
+
+    def make_loader(self):
+        inner = self.data.make_loader()
+
+        def loader(idx):
+            return ops.to_dtype_bitcast(inner(idx), self.target_dtype, self.data.dtype)
+
+        return loader
 
 
 class SliceView(View):
@@ -3943,15 +3995,12 @@ class CppTemplateBuffer(TemplateBuffer):
 class InputsKernel(OperationBuffer):
     inputs: List[Buffer]
 
-    def get_read_writes_input(self, x):
-        return dependencies.StarDep(x.get_name())
-
     def get_read_writes(self):
         reads: Set[dependencies.Dep] = set()
         StarDep = dependencies.StarDep
         for input in self.inputs:
             if isinstance(input, list):
-                reads.update({StarDep(x.get_name()) for x in input})
+                reads.update(StarDep(x.get_name()) for x in input)
             else:
                 reads.add(StarDep(input.get_name()))
 
@@ -4149,9 +4198,9 @@ class ConcatKernel(NopKernel):
 
 def get_aten_cpp_kernel_name(kernel):
     # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=std::nullopt)
     # repeat_interleave(const at::Tensor & self, int64_t repeats,
-    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+    #       c10::optional<int64_t> dim=std::nullopt, c10::optional<int64_t> output_size=std::nullopt)
     if not isinstance(kernel, torch._ops.OpOverload) or kernel.namespace != "aten":
         return None
     opname = (
@@ -4437,9 +4486,9 @@ class ExternKernel(InputsKernel):
         # NOTE: Don't use extract_read_writes here as it fails when
         # make_loader() inlines the computation
         x_unwrap_view = x.unwrap_view()
-        x_unwrap_view_fx_node = V.graph.get_buffer(
-            x_unwrap_view.get_name()
-        ).get_origin_node()
+        buf = V.graph.get_buffer(x_unwrap_view.get_name())
+        assert buf is not None
+        x_unwrap_view_fx_node = buf.get_origin_node()
         # Prefer channels last format according to how the format is set from eager.
         if (
             x_unwrap_view_fx_node is not None
@@ -4921,25 +4970,13 @@ class UserDefinedTritonKernel(ExternKernel):
         new_name, triton_meta = wrapper.define_user_defined_triton_kernel(
             kernel, configs, self.kwargs
         )
-
-        args = self.codegen_kwargs()
-        raw_args = list(self.kwargs.values())
-
-        if V.graph.cpp_wrapper:
-            # in C++ wrapper, we don't pass constexpr args, as they don't
-            # get added as parameters to the PTX code compiled from the
-            # user-defined Triton kernel (only non-constexpr args do)
-            args = [arg for i, arg in enumerate(args) if i not in kernel.constexprs]
-            # Unify raw_args computation between cpp wrapper and python wrapper
-            raw_args = []
-            for i, arg_name in enumerate(self.ordered_kwargs_for_cpp_kernel):
-                if i not in kernel.constexprs:
-                    raw_args.append(self.get_kwargs_value(arg_name))
-
+        raw_args = [
+            self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
+        ]
         # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            new_name, self.grid, configs, args, triton_meta, raw_args
+            new_name, raw_args, self.grid, configs, triton_meta, kernel.constexprs
         )
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
@@ -4952,7 +4989,7 @@ class UserDefinedTritonKernel(ExternKernel):
 
     def __init__(self, *, kernel_idx, grid, kernel_args):
         inputs = []
-        kwargs = dict()
+        kwargs = {}
         constant_args = []
         for k, v in kernel_args.items():
             if isinstance(v, TensorBox):
@@ -5467,7 +5504,7 @@ class FallbackKernel(ExternKernelAlloc):
         self.op_overload = kernel
         self.unflatten_args = unflatten_args
         self.kwargs = {} if kwargs is None else kwargs
-        V.graph.warn_fallback(self.python_kernel_name)
+        V.graph.warn_fallback(self.python_kernel_name)  # type: ignore[arg-type]
 
         # args that are aliased
         self.alias_names: List[str] = []
@@ -5770,12 +5807,18 @@ class FallbackKernel(ExternKernelAlloc):
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
+                from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
                 if (
                     config.is_fbcode()
                     and kernel not in has_c_shim
                     # C shim v2 is torchgen-ed, which should cover all aten ops.
                     # If you do hit a missed op, please update gen_aoti_c_shim.py.
                     and config.c_shim_version == "1"
+                ) or (
+                    config.abi_compatible
+                    and config.c_shim_version == "2"
+                    and str(kernel) not in inductor_fallback_ops
                 ):
                     log.warning(
                         "%s is missing a c-shim implementation, using proxy executor as fallback",
@@ -5783,8 +5826,7 @@ class FallbackKernel(ExternKernelAlloc):
                     )
                     self.use_runtime_dispatch = True
                     self.set_cpp_kernel(kernel)
-            else:
-                self.python_kernel_name = str(kernel)
+            self.python_kernel_name = f"torch.ops.{kernel}"
         elif kernel.namespace == "_quantized":  # type: ignore[union-attr]
             # Internal Quantized Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
@@ -5846,8 +5888,8 @@ class FallbackKernel(ExternKernelAlloc):
     @classmethod
     def create(cls, kernel, *args, **kwargs):
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
-        context = (
-            V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
+        context: ContextManager[None] = (
+            V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()  # type: ignore[assignment]
         )
         with context:
             (
@@ -6561,6 +6603,7 @@ class LoopBody:
         self.submodules = {"get_index": self.get_index}
         self.subblocks = {}
         self.indirect_vars = []
+        self.indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr] = {}
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
 
@@ -6613,7 +6656,9 @@ class LoopBody:
 
     def add_indirect(self, size):
         var = sympy_index_symbol_with_prefix(SymT.INDIRECT, len(self.indirect_vars))
+        assert var not in self.indirect_var_ranges
         self.indirect_vars.append(var)
+        self.indirect_var_ranges[var] = size
         return var
 
     def replace_indirect(self, old, new):
@@ -6758,7 +6803,7 @@ class LoopBodyBlock:
                 return (result[0], result[1])
 
             @staticmethod
-            def indirect_indexing(index_proxy, size, check=True):
+            def indirect_indexing(index_proxy, size, check=True, wrap_neg=True):
                 """
                 Flow data from tensors into indexing formulas.
                 Introduce a call_module to update the indexing.
@@ -6768,7 +6813,7 @@ class LoopBodyBlock:
 
                 def set_indirect(new_var):
                     self.body.replace_indirect(
-                        var, V.ops.indirect_indexing(new_var, size, check)
+                        var, V.ops.indirect_indexing(new_var, size, check, wrap_neg)
                     )
 
                 tracer.create_proxy(
@@ -6794,7 +6839,9 @@ class LoopBodyBlock:
             CaptureIndexing(proxy_ops), self.body.var_ranges
         )
         if config.constant_and_index_propagation:
-            handler = IndexPropagation(handler, self.body.var_ranges)
+            handler = IndexPropagation(
+                handler, self.body.var_ranges, self.body.indirect_var_ranges
+            )
 
         with V.set_ops_handler(handler):
             # This indirection is just a cute way to get IndexPropagation to
@@ -6874,12 +6921,19 @@ class _CollectiveKernel(FallbackKernel):
         packed.cpp_kernel_name = cpp_kernel_name
         packed.python_kernel_name = python_kernel_name
 
+        inps = pytree.tree_leaves(inputs)
         packed.mutation_outputs.extend(
-            [
-                MutationOutput(NoneLayout(device), buf, packed)
-                for buf in pytree.tree_leaves(inputs)
-            ]
+            [MutationOutput(NoneLayout(device), buf, packed) for buf in inps]
         )
+
+        # For inplace collective ops, the input is guaranteed to be alias of the returned value of op.
+        packed.alias_names.extend([inp.get_name() for inp in inps])
+        if "out" in kwargs:
+            packed.mutation_outputs.append(
+                MutationOutput(NoneLayout(device), kwargs["out"], packed)
+            )
+            # For out-variant collective ops, the `out=` arg is guaranteed to be alias of the returned value of op.
+            packed.alias_names.append(kwargs["out"].get_name())
 
     # NOTE: [Out-of-Place Collective Safety]
     # Between the initiation and completion of an out-of-place collective:

@@ -16,71 +16,6 @@ endforeach()
 set(${OUTPUT} ${OUT} PARENT_SCOPE)
 endfunction(prepend)
 
-
-################################################################################################
-# Clears variables from list
-# Usage:
-#   caffe_clear_vars(<variables_list>)
-macro(caffe_clear_vars)
-  foreach(_var ${ARGN})
-    unset(${_var})
-  endforeach()
-endmacro()
-
-################################################################################################
-# Prints list element per line
-# Usage:
-#   caffe_print_list(<list>)
-function(caffe_print_list)
-  foreach(e ${ARGN})
-    message(STATUS ${e})
-  endforeach()
-endfunction()
-
-################################################################################################
-# Reads set of version defines from the header file
-# Usage:
-#   caffe_parse_header(<file> <define1> <define2> <define3> ..)
-macro(caffe_parse_header FILENAME FILE_VAR)
-  set(vars_regex "")
-  set(__parnet_scope OFF)
-  set(__add_cache OFF)
-  foreach(name ${ARGN})
-    if("${name}" STREQUAL "PARENT_SCOPE")
-      set(__parnet_scope ON)
-    elseif("${name}" STREQUAL "CACHE")
-      set(__add_cache ON)
-    elseif(vars_regex)
-      set(vars_regex "${vars_regex}|${name}")
-    else()
-      set(vars_regex "${name}")
-    endif()
-  endforeach()
-  if(EXISTS "${FILENAME}")
-    file(STRINGS "${FILENAME}" ${FILE_VAR} REGEX "#define[ \t]+(${vars_regex})[ \t]+[0-9]+" )
-  else()
-    unset(${FILE_VAR})
-  endif()
-  foreach(name ${ARGN})
-    if(NOT "${name}" STREQUAL "PARENT_SCOPE" AND NOT "${name}" STREQUAL "CACHE")
-      if(${FILE_VAR})
-        if(${FILE_VAR} MATCHES ".+[ \t]${name}[ \t]+([0-9]+).*")
-          string(REGEX REPLACE ".+[ \t]${name}[ \t]+([0-9]+).*" "\\1" ${name} "${${FILE_VAR}}")
-        else()
-          set(${name} "")
-        endif()
-        if(__add_cache)
-          set(${name} ${${name}} CACHE INTERNAL "${name} parsed from ${FILENAME}" FORCE)
-        elseif(__parnet_scope)
-          set(${name} "${${name}}" PARENT_SCOPE)
-        endif()
-      else()
-        unset(${name} CACHE)
-      endif()
-    endif()
-  endforeach()
-endmacro()
-
 ################################################################################################
 # Parses a version string that might have values beyond major, minor, and patch
 # and set version variables for the library.
@@ -453,11 +388,12 @@ function(torch_compile_options libname)
     if(WERROR)
       list(APPEND private_compile_options
         -Werror
-        -Wno-strict-overflow
         -Werror=inconsistent-missing-override
         -Werror=inconsistent-missing-destructor-override
         -Werror=unused-function
-        -Werror=unused-variable)
+        -Werror=unused-variable
+        -Werror=pedantic
+      )
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         list(APPEND private_compile_options -Werror=unused-but-set-variable)
       endif()
@@ -468,14 +404,9 @@ function(torch_compile_options libname)
   target_compile_options(${libname} PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>:${private_compile_options}>)
   if(USE_CUDA)
-    string(FIND "${private_compile_options}" " " space_position)
-    if(NOT space_position EQUAL -1)
-      message(FATAL_ERROR "Found spaces in private_compile_options='${private_compile_options}'")
-    endif()
-    # Convert CMake list to comma-separated list
-    string(REPLACE ";" "," private_compile_options "${private_compile_options}")
-    target_compile_options(${libname} PRIVATE
-        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${private_compile_options}>)
+    foreach(option IN LISTS private_compile_options)
+      target_compile_options(${libname} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler ${option}>)
+    endforeach()
   endif()
 
   if(NOT WIN32 AND NOT USE_ASAN)

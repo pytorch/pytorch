@@ -15,7 +15,6 @@ import torch._dynamo
 import torch._dynamo.testing
 import torch.nn
 import torch.nn.functional as F
-
 from torch.nested._internal.nested_tensor import (
     buffer_from_jagged,
     jagged_from_list,
@@ -57,8 +56,8 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
-
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
+
 
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
@@ -227,6 +226,11 @@ def random_nt_from_similar(other, dims=None):
 def layout_name(layout):
     # e.g. "torch.jagged" -> "jagged"
     return layout.__repr__().split(".")[-1]
+
+
+def get_op_name(layout):
+    # e.g. "<OpOverload(op='aten.sum', overload='dim_IntList')>" -> "sum"
+    return layout.__name__.split(".")[0]
 
 
 # Helper function for test_dummy_mha_with_nt
@@ -3481,7 +3485,10 @@ class TestNestedTensorSubclass(TestCase):
         return out
 
     def _get_example_tensor_lists(
-        self, include_list_of_lists=True, include_requires_grad=True
+        self,
+        include_list_of_lists=True,
+        include_requires_grad=True,
+        include_inner_dim_size_1=False,
     ):
         def _make_tensor(
             *shape, include_requires_grad=include_requires_grad, requires_grad=True
@@ -3528,6 +3535,24 @@ class TestNestedTensorSubclass(TestCase):
                     _make_tensor(3, 5).tolist(),
                     _make_tensor(4, 5).tolist(),
                 ]
+            )
+
+        if include_inner_dim_size_1:
+            example_lists.append(
+                [
+                    _make_tensor(2, 1),
+                    _make_tensor(3, 1, requires_grad=False),
+                    _make_tensor(4, 1, requires_grad=False),
+                    _make_tensor(6, 1),
+                ]  # (B, *, 1)
+            )
+            example_lists.append(
+                [
+                    _make_tensor(2, 5, 1),
+                    _make_tensor(3, 5, 1, requires_grad=False),
+                    _make_tensor(4, 5, 1, requires_grad=False),
+                    _make_tensor(6, 5, 1),
+                ]  # (B, *, 5, 1)
             )
 
         return example_lists
@@ -3761,7 +3786,11 @@ class TestNestedTensorSubclass(TestCase):
 
     def test_softmax(self, device):
         nt = random_nt_from_dims(
-            [3, None, 5], device=device, dtype=torch.float32, layout=torch.jagged
+            [3, None, 5],
+            device=device,
+            dtype=torch.float32,
+            layout=torch.jagged,
+            requires_grad=True,
         )
 
         # operate on dim=2
@@ -3779,6 +3808,15 @@ class TestNestedTensorSubclass(TestCase):
         output2 = nt.softmax(dim=-1)
         torch._dynamo.disable(self.assertEqual)(output, output2)
         _compare_to_ref(nt, output2, dim=-1)
+
+        def grad_test_func(a, b):
+            nt = torch.nested.as_nested_tensor([a, b], layout=torch.jagged)
+            out = nt.softmax(dim=-1)
+            return out.values()
+
+        a = torch.rand(4, 5, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.rand(8, 5, requires_grad=True, dtype=torch.float64, device=device)
+        gradcheck(grad_test_func, inputs=(a, b), check_batched_grad=False)
 
     def test_views_inherit_ragged_dim(self, device):
         # view
@@ -3997,59 +4035,450 @@ class TestNestedTensorSubclass(TestCase):
 
         self.assertEqual(res_dense, res_nt.values())
 
+    @dtypes(torch.float32)
+    @parametrize(
+        "func",
+        [torch.ops.aten.sum.dim_IntList, torch.ops.aten.mean.dim],
+        name_fn=get_op_name,
+    )
     @parametrize("keepdim", [False, True])
-    def test_sum_int_DimList(self, device, keepdim):
-        # (B, j0, 3, 4)
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_jagged_op_dim(
+        self, device, dtype, keepdim, requires_grad, components_require_grad, func
+    ):
+        """
+        Operator passes when reducing on valid reduction dimensions
+        """
+        if get_op_name(func) == "mean" and not keepdim:
+            return
+
+        op_name = get_op_name(func)
+
         ts = self._get_list_for_jagged_tensor(
             ((2, 3, 4), 3, 4), device=device, requires_grad=True
+        )  # (B, j0, 3, 4)
+
+        # verify correctness of shapes (assuming that ragged_idx == 1)
+        if op_name == "sum":
+            reduce_dims = (
+                ((0, 1), (3, 4), (1, 1, 3, 4), (0,)),  # batch, ragged
+                ((2, 3), (3, None), (3, None, 1, 1), (1, 2)),  # non-batch, non-batch
+                ((0, 1, 3), (3,), (1, 1, 3, 1), (0, 2)),  # batch, ragged, non-batch
+                ((0, 1, 2), (4,), (1, 1, 1, 4), (0, 1)),  # batch, ragged, non-batch
+                (
+                    (0, 1, 2, 3),
+                    (),
+                    (1, 1, 1, 1),
+                    (0, 1, 2),
+                ),  # batch, ragged, non-batch, non-batch
+                ((2,), (3, None, 4), (3, None, 1, 4), (1,)),  # non-batch
+            )  # (dims, expected shape, expected keepdim shape, reduce_dim_expected), where j0 is represented as None
+        elif op_name == "mean":
+            reduce_dims = (
+                ((2,), (3, None, 4), (3, None, 1, 4), (1,)),
+                ((3,), (3, None, 3), (3, None, 3, 1), (2,)),
+            )
+
+        for rd, ref_shape_no_keepdim, ref_shape_keepdim, _ in reduce_dims:
+            nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
+            out = func(nt, dim=rd, keepdim=keepdim)
+            ref_shape = ref_shape_keepdim if keepdim else ref_shape_no_keepdim
+            if not torch.compiler.is_compiling:  # if not using torch dynamo
+                self.assertEqual(len(out.shape), len(ref_shape))
+                for o, r in zip(out.shape, ref_shape):
+                    if r is not None:
+                        self.assertEqual(o, r)
+                    else:
+                        self.assertTrue(isinstance(o, torch.SymInt))
+
+        # verify correctness of values
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False,
+            include_requires_grad=components_require_grad,
+        )
+        for tensor_list, reduce_dim_tuple in itertools.product(
+            tensor_lists, reduce_dims
+        ):
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            reduce_dim, _, _, reduce_dim_expected = reduce_dim_tuple
+
+            if nt.dim() > reduce_dim[-1]:
+                out_actual = func(nt, dim=reduce_dim, keepdim=keepdim)
+                if nt._ragged_idx in reduce_dim:  # raggedness reduced away
+                    out_expected = func(
+                        nt.values(), dim=reduce_dim_expected, keepdim=keepdim
+                    )
+                    self.assertTrue(torch.allclose(out_actual, out_expected))
+                else:  # raggedness preserved
+                    out_expected = func(nt.values(), dim=reduce_dim_expected)
+                    self.assertTrue(
+                        torch.allclose(
+                            out_actual.values().view(-1), out_expected.view(-1)
+                        )
+                    )
+
+    @dtypes(torch.float32)
+    @parametrize(
+        "func",
+        [torch.ops.aten.sum.dim_IntList, torch.ops.aten.mean.dim],
+        name_fn=get_op_name,
+    )
+    @parametrize("keepdim", [False, True])
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_jagged_op_dim_reduce_ragged_idx_1(
+        self, device, dtype, keepdim, requires_grad, components_require_grad, func
+    ):
+        """
+        Operator on NestedTensor passes when trying to reduce across ragged dimension, where ragged_idx == 1
+        """
+        if get_op_name(func) == "mean" and not keepdim:
+            return
+
+        op_name = get_op_name(func)
+
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False,
+            include_requires_grad=components_require_grad,
+            include_inner_dim_size_1=True,  # (B, *, 1)
+        )
+        reduce_dim = (1,)  # ragged
+
+        for tensor_list in tensor_lists:
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            out_actual = func(nt, dim=reduce_dim, keepdim=keepdim)
+            out_expected = torch.cat(
+                [func(t, dim=(reduce_dim[0] - 1)).unsqueeze(0) for t in nt.unbind()]
+            )
+
+            self.assertFalse(
+                out_actual.is_nested,
+                f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
+            )  # output is a dense tensor
+            self.assertTrue(torch.allclose(out_actual, out_expected))
+
+    @dtypes(torch.float32)
+    @parametrize("keepdim", [False, True])
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_sum_dim_reduce_ragged_and_non_batch(
+        self,
+        device,
+        dtype,
+        keepdim,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Sum on NestedTensor fails when trying to reduce across ragged and non-batch dimensions
+        """
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False, include_requires_grad=components_require_grad
+        )
+        reduce_dims = (
+            (1, 2),  # ragged, non-batch
+            (1, 3),  # ragged, non-batch
         )
 
-        # Check shape correctness
-        reduce_dims = (
-            # dims, expected shape, expected keepdim shape
-            # j0 is represented as None
-            ((0, 1), (3, 4), (1, 1, 3, 4)),
-            ((1, 2), None, None),
-            ((2, 3), (3, None), (3, None, 1, 1)),
-            ((0, 1, 3), (3,), (1, 1, 3, 1)),
-            ((0, 1, 2), (4,), (1, 1, 1, 4)),
-            ((0, 1, 2, 3), tuple(), (1, 1, 1, 1)),
-        )
-        for rd, ref_shape_no_keepdim, ref_shape_keepdim in reduce_dims:
-            if (0 in rd) ^ (1 in rd):
+        for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            if nt.dim() > reduce_dim[-1]:
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "applying over the ragged dimension, but not the batch dimension",
+                    "not supported along a ragged and non-batch dimension for NestedTensor",
                 ):
-                    nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
-                    out = torch.sum(nt, dim=rd, keepdim=keepdim)
-                continue
+                    out = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
 
-            nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
-            out = torch.sum(nt, dim=rd, keepdim=keepdim)
-            ref_shape = ref_shape_keepdim if keepdim else ref_shape_no_keepdim
-            self.assertEqual(len(out.shape), len(ref_shape))
-            for o, r in zip(out.shape, ref_shape):
-                if r is not None:
-                    self.assertEqual(o, r)
+    @dtypes(torch.float32)
+    @parametrize("keepdim", [False, True])
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_sum_dim_reduce_batch_and_non_batch(
+        self,
+        device,
+        dtype,
+        keepdim,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Sum on NestedTensor fails when trying to reduce across batch and non-batch dimensions
+        """
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False, include_requires_grad=components_require_grad
+        )
+        reduce_dims = (
+            (0, 2),  # batch, non-batch
+            (0, 3),  # batch, non-batch
+        )
+
+        for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            if nt.dim() > reduce_dim[-1]:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "not supported along only the batch dimension for NestedTensor",
+                ):
+                    out = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
+
+    @dtypes(torch.float32)
+    @parametrize("keepdim", [False, True])
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_sum_dim_reduce_batch(
+        self,
+        device,
+        dtype,
+        keepdim,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Sum on NestedTensor fails when trying to reduce across batch dimension
+        """
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False, include_requires_grad=components_require_grad
+        )
+        reduce_dim = (0,)  # batch
+
+        for tensor_list in tensor_lists:
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "not supported along only the batch dimension for NestedTensor",
+            ):
+                out = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
+
+    @dtypes(torch.float32)
+    @parametrize(
+        "func",
+        [torch.ops.aten.sum.dim_IntList, torch.ops.aten.mean.dim],
+        name_fn=get_op_name,
+    )
+    @parametrize("keepdim", [False, True])
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_jagged_op_dim_ragged_dim_not_1(
+        self,
+        device,
+        dtype,
+        keepdim,
+        requires_grad,
+        components_require_grad,
+        func,
+    ):
+        """
+        Operator on NestedTensor fails when trying to reduce a nested tensor with ragged_idx != 1
+        """
+        if get_op_name(func) == "mean" and not keepdim:
+            return
+
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False, include_requires_grad=components_require_grad
+        )
+        reduce_dims = (
+            (1,),
+            (2,),
+        )
+
+        for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            if (
+                nt.dim() > 2 and nt.dim() > reduce_dim[-1]
+            ):  # ensure that we can transpose dims 1 and 2
+                nt_transposed = nt.transpose(1, 2)
+
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "not supported when ragged_idx != 1 for NestedTensor",
+                ):
+                    out = func(nt_transposed, dim=reduce_dim, keepdim=keepdim)
+
+    @dtypes(torch.float32)
+    @parametrize(
+        "func",
+        [torch.ops.aten.sum.dim_IntList, torch.ops.aten.mean.dim],
+        name_fn=get_op_name,
+    )
+    @parametrize("keepdim", [False, True])
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_jagged_op_dim_with_lengths(
+        self,
+        device,
+        dtype,
+        keepdim,
+        requires_grad,
+        components_require_grad,
+        func,
+    ):
+        """
+        Operator on NestedTensor fails when trying to reduce a nested tensor with lengths,
+        i.e. a nested tensor with holes, if reducing on the ragged dimension
+        """
+        if get_op_name(func) == "mean" and not keepdim:
+            return
+
+        reduce_dims = (
+            (1,),
+            (2,),
+            (2, 3),
+        )
+
+        lengths = torch.randint(5, 10, (20,), device=device)
+        offsets = torch.zeros((21,), device=device, dtype=torch.int)
+        torch.cumsum(lengths, dim=0, out=offsets[1:])
+
+        values = torch.randn(
+            (offsets[-1].item(), 20),
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+
+        nt_with_holes = torch.nested.nested_tensor_from_jagged(
+            values,
+            offsets,
+            lengths=offsets.diff() - 2,  # arbitrary subtraction to create holes
+        )
+
+        for reduce_dim in reduce_dims:
+            if nt_with_holes.dim() > reduce_dim[-1]:
+                if nt_with_holes._ragged_idx in reduce_dim:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "not supported where lengths is not None "
+                        + "if reducing across the ragged dimension for NestedTensor",
+                    ):
+                        out = func(nt_with_holes, dim=reduce_dim, keepdim=keepdim)
                 else:
-                    self.assertTrue(isinstance(o, torch.SymInt))
+                    out = func(nt_with_holes, dim=reduce_dim, keepdim=keepdim)
 
-        # Check values correctness
-        # raggedness not reduced
-        nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
-        out = torch.sum(nt, dim=(2, 3), keepdim=keepdim)
-        out_ref = torch.sum(nt.values(), dim=(1, 2))
-        self.assertIsInstance(out, NestedTensor)
-        # flatten to avoid having to replicate unsqueeze logic depending on keepdim
-        self.assertTrue(torch.allclose(out.values().view(-1), out_ref.view(-1)))
+    @dtypes(torch.float32)
+    @parametrize("keepdim", [True])
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_mean_dim_reduce_multiple_dims(
+        self,
+        device,
+        dtype,
+        keepdim,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Mean on NestedTensor fails when trying to reduce across multiple dimensions
+        """
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False, include_requires_grad=components_require_grad
+        )
+        reduce_dims = (
+            (0, 1),
+            (2, 3),
+            (2, 3, 4),
+        )
 
-        # raggedness reduced away
-        nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
-        out = torch.sum(nt, dim=(0, 1), keepdim=keepdim)
-        out_ref = torch.sum(nt.values(), dim=(0,))
-        self.assertNotIsInstance(out, NestedTensor)
-        self.assertTrue(torch.allclose(out, out_ref))
+        for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            if nt.dim() > reduce_dim[-1]:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "not supported across multiple dimensions for NestedTensor",
+                ):
+                    out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
+
+    @dtypes(torch.float32)
+    @parametrize("keepdim", [False, True])
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_mean_dim_keepdim_False(
+        self,
+        device,
+        dtype,
+        keepdim,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Mean on NestedTensor fails when keepdim=False
+        """
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False, include_requires_grad=components_require_grad
+        )
+        reduce_dims = (
+            (1,),
+            (2,),
+            (3,),
+        )
+
+        for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            if nt.dim() > reduce_dim[-1]:
+                if not keepdim:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "not supported when keepdim=False for NestedTensor",
+                    ):
+                        out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
+                else:
+                    out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
 
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
@@ -4454,6 +4883,20 @@ class TestNestedTensorSubclass(TestCase):
         ):
             torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
 
+    @onlyCPU
+    def test_nested_tensor_from_jagged_fx_trace(self, device):
+        def fn(x, y):
+            return torch.nested.nested_tensor_from_jagged(x, y)
+
+        def user_unwrapped(x, y):
+            return fn(x, y)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "torch.nested.nested_tensor_from_jagged does not support tracing with fx.symbolic_trace",
+        ):
+            torch.fx.symbolic_trace(user_unwrapped)
+
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("dim", range(5))
     @parametrize(
@@ -4499,9 +4942,8 @@ class TestNestedTensorSubclass(TestCase):
             dim=dim,
             batch_size=expected_batch_size,
             contiguous=True,
-            # TODO: compute min / max during construction for this case since it's easy
-            cached_min_seqlen=None,
-            cached_max_seqlen=None,
+            cached_min_seqlen=expected_seqlen,
+            cached_max_seqlen=expected_seqlen,
         )
 
         if torch.device(device) == t.device and dtype == t.dtype and contiguous:
@@ -4536,9 +4978,8 @@ class TestNestedTensorSubclass(TestCase):
             dim=dim,
             batch_size=expected_batch_size,
             contiguous=True,
-            # TODO: compute min / max during construction for this case since it's easy
-            cached_min_seqlen=None,
-            cached_max_seqlen=None,
+            cached_min_seqlen=expected_seqlen,
+            cached_max_seqlen=expected_seqlen,
         )
 
         # we don't support conversion between layouts this way atm
@@ -5206,6 +5647,15 @@ class TestNestedTensorSubclass(TestCase):
         ).transpose(1, 2)
         d1_grads = torch.autograd.grad(attn_d1.sum(), (q_d1, k_d1, v_d1))
         d2_grads = torch.autograd.grad(attn_d2.sum(), (q_d2, k_d2, v_d2))
+
+        # Simple case 3: batch_size = 1, seq_len = 1
+        q_3 = torch.randn(1, 8, 16, dtype=dtype, device=device)
+        q_nt_3 = torch.nested.as_nested_tensor([q_3], layout=torch.jagged)
+        q_nt_3 = q_nt_3.transpose(1, 2)
+        attn_out = torch.nn.functional.scaled_dot_product_attention(
+            q_nt_3, q_nt_3, q_nt_3
+        )
+        self.assertEqual(attn_out.shape, q_nt_3.shape)
 
         def check_forward_backward():
             attn_nt = torch.nn.functional.scaled_dot_product_attention(
