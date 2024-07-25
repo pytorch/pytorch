@@ -42,6 +42,12 @@ def pytest_addoption(parser: Parser) -> None:
         default=None,
         dest="stepcurrent",
     )
+    group.addoption(
+        "--rs",
+        action="store",
+        default=None,
+        dest="run_single",
+    )
 
     parser.addoption("--use-main-module", action="store_true")
     group = parser.getgroup("terminal reporting")
@@ -106,6 +112,8 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(config.stash[xml_key])
     if config.getoption("stepcurrent_skip"):
         config.option.stepcurrent = config.getoption("stepcurrent_skip")
+    if config.getoption("run_single"):
+        config.option.stepcurrent = config.getoption("run_single")
     if config.getoption("stepcurrent"):
         config.pluginmanager.register(StepcurrentPlugin(config), "stepcurrentplugin")
     if config.getoption("num_shards"):
@@ -307,6 +315,7 @@ class StepcurrentPlugin:
         self.lastrun: Optional[str] = self.cache.get(self.directory, None)
         self.initial_val = self.lastrun
         self.skip: bool = config.getoption("stepcurrent_skip")
+        self.run_single: bool = config.getoption("run_single")
 
     def pytest_collection_modifyitems(self, config: Config, items: List[Any]) -> None:
         if not self.lastrun:
@@ -330,6 +339,10 @@ class StepcurrentPlugin:
             self.report_status = f"skipping {failed_index} already run items."
             deselected = items[:failed_index]
             del items[:failed_index]
+            if self.run_single:
+                self.report_status += f" Running only {items[0].nodeid}"
+                deselected += items[1:]
+                del items[1:]
             config.hook.pytest_deselected(items=deselected)
 
     def pytest_report_collectionfinish(self) -> Optional[str]:
@@ -342,5 +355,5 @@ class StepcurrentPlugin:
         self.cache.set(self.directory, self.lastrun)
 
     def pytest_sessionfinish(self, session, exitstatus):
-        if exitstatus == 0:
+        if exitstatus == 0 and not self.run_single:
             self.cache.set(self.directory, self.initial_val)

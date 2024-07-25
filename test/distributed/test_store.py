@@ -3,6 +3,7 @@
 import datetime
 import os
 import socket
+import struct
 import sys
 import tempfile
 import threading
@@ -1003,6 +1004,46 @@ class InitPgWithNonUvStore(TestCase):
         self.assertTrue(isinstance(store, dist.TCPStore))
         self.assertFalse(store.libuvBackend)
         dist.destroy_process_group()
+
+
+class TestClientProtocol(TestCase):
+    def test_client_connect(self) -> None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("localhost", 0))
+        port = sock.getsockname()[1]
+
+        def listen() -> None:
+            sock.listen()
+            conn, _ = sock.accept()
+
+            # VALIDATE
+            # 0x3C85F7CE
+            self.assertEqual(conn.recv(5), b"\x00\xce\xf7\x85\x3c")
+
+            # PING
+            data = conn.recv(5)
+            self.assertEqual(data[0], 13)
+            nonce = struct.unpack("i", data[1:])[0]
+            self.assertEqual(nonce, os.getpid())
+
+            # send PING nonce response
+            conn.sendall(data[1:])
+
+            conn.close()
+
+        thread = threading.Thread(target=listen)
+        thread.start()
+
+        store = dist.TCPStore(
+            host_name="localhost",
+            port=port,
+            world_size=2,
+            is_master=False,
+            timeout=timedelta(seconds=2),
+            wait_for_workers=False,
+        )
+
+        thread.join()
 
 
 if __name__ == "__main__":

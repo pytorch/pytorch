@@ -5,8 +5,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/TensorBody.h>
 #include <c10/core/SymInt.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -29,7 +29,7 @@ constexpr int64_t INDEX_MAX = -(INDEX_MIN + 1);
 
 enum class TensorIndexType { None, Ellipsis, SymInt, Boolean, Slice, Tensor };
 
-constexpr c10::nullopt_t None = c10::nullopt;
+constexpr std::nullopt_t None = std::nullopt;
 
 struct TORCH_API EllipsisIndexType final {
   EllipsisIndexType() = default;
@@ -39,9 +39,9 @@ TORCH_API extern const EllipsisIndexType Ellipsis;
 struct TORCH_API Slice final {
  public:
   Slice(
-      std::optional<c10::SymInt> start_index = c10::nullopt,
-      std::optional<c10::SymInt> stop_index = c10::nullopt,
-      std::optional<c10::SymInt> step_index = c10::nullopt) {
+      std::optional<c10::SymInt> start_index = std::nullopt,
+      std::optional<c10::SymInt> stop_index = std::nullopt,
+      std::optional<c10::SymInt> step_index = std::nullopt) {
     if (!step_index.has_value()) {
       step_ = c10::SymInt(1);
     } else {
@@ -110,7 +110,7 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
 // `torch.tensor([1, 2])`) | `torch::tensor({1, 2})`
 struct TORCH_API TensorIndex final {
   // Case 1: `at::indexing::None`
-  TensorIndex(c10::nullopt_t) : type_(TensorIndexType::None) {}
+  TensorIndex(std::nullopt_t) : type_(TensorIndexType::None) {}
 
   // Case 2: "..." / `at::indexing::Ellipsis`
   TensorIndex(at::indexing::EllipsisIndexType)
@@ -530,7 +530,7 @@ inline Tensor applySlicing(
     auto& obj = indices[i];
     // See NOTE [nested tensor size for indexing]
     std::optional<SymIntArrayRef> result_sizes = result.is_nested()
-        ? std::optional<SymIntArrayRef>(c10::nullopt)
+        ? std::optional<SymIntArrayRef>(std::nullopt)
         : std::optional<SymIntArrayRef>(result.sym_sizes());
     result = handleDimInMultiDimIndexing(
         /*prev_dim_result=*/result,
@@ -606,7 +606,7 @@ inline Tensor get_item(
   // as null may need to be changed after we reach a better solution for nested
   // tensor size
   std::optional<SymIntArrayRef> self_sizes = self.is_nested()
-      ? std::optional<SymIntArrayRef>(c10::nullopt)
+      ? std::optional<SymIntArrayRef>(std::nullopt)
       : std::optional<SymIntArrayRef>(self.sym_sizes());
 
   // handle simple types: integers, slices, none, ellipsis, bool

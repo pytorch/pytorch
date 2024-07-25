@@ -133,8 +133,8 @@ void _sparse_binary_op_intersection_kernel_impl(
     const Tensor& x_,
     const Tensor& y_,
     const std::vector<int64_t>& broadcasted_shape,
-    const std::optional<Tensor>& x_hash_opt_ = c10::nullopt,
-    const std::optional<Tensor>& y_hash_opt_ = c10::nullopt,
+    const std::optional<Tensor>& x_hash_opt_ = std::nullopt,
+    const std::optional<Tensor>& y_hash_opt_ = std::nullopt,
     const bool accumulate_matches = true,
     const bool distributive_with_sum = true
 ) {
@@ -157,7 +157,7 @@ void _sparse_binary_op_intersection_kernel_impl(
       return std::make_tuple(t, t_hash_opt);
     } else {
       // Otherwise coalesce and force hash recompute.
-      return std::make_tuple(t.coalesce(), static_cast<OptTensor>(c10::nullopt));
+      return std::make_tuple(t.coalesce(), static_cast<OptTensor>(std::nullopt));
     }
   };
 
@@ -212,7 +212,7 @@ void _sparse_binary_op_intersection_kernel_impl(
       constexpr int64_t MAX_COPIES_PER_THREAD = 50;
       return max_count_lower_bound > MAX_COPIES_PER_THREAD
         // coalesce invalidates hash values, so force-recompute
-        ? std::make_tuple(larger.coalesce(), static_cast<OptTensor>(c10::nullopt), smaller, smaller_hash_opt)
+        ? std::make_tuple(larger.coalesce(), static_cast<OptTensor>(std::nullopt), smaller, smaller_hash_opt)
         : std::make_tuple(larger, larger_hash_opt, smaller, smaller_hash_opt);
     }
   }();
@@ -426,8 +426,8 @@ void _sparse_binary_op_intersection_kernel_out(
     Tensor& res,
     const Tensor& x,
     const Tensor& y,
-    const std::optional<Tensor>& x_hash_opt = c10::nullopt,
-    const std::optional<Tensor>& y_hash_opt = c10::nullopt,
+    const std::optional<Tensor>& x_hash_opt = std::nullopt,
+    const std::optional<Tensor>& y_hash_opt = std::nullopt,
     // If op distributes with the sum, the arguments are processed as is,
     // without the calls to coalesce().
     const bool distributive_with_sum = true

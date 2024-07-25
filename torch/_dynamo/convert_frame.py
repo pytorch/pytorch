@@ -216,7 +216,7 @@ def has_tensor_in_frame(frame):
             if np and config.trace_numpy and (obj is np or is_numpy(obj)):
                 return True
 
-    seen_ids: Dict[int, bool] = dict()
+    seen_ids: Dict[int, bool] = {}
 
     def has_tensor(obj):
         """Recursively check if the obj has a tensor"""
@@ -519,7 +519,6 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
-@compile_time_strobelight_meta(phase_name="_compile")
 @_use_lazy_graph_module(config.use_lazy_graph_module)
 def _compile(
     code: types.CodeType,
@@ -604,6 +603,7 @@ def _compile(
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
     @dynamo_timed(phase_name="entire_frame_compile")
+    @compile_time_strobelight_meta(phase_name="compile_inner")
     @maybe_cprofile
     def compile_inner(
         code: types.CodeType,
@@ -728,7 +728,7 @@ def _compile(
             hooks.guard_fail_fn if hooks else None,
         )
 
-        guarded_code = GuardedCode(out_code, check_fn.check_fn)
+        guarded_code = GuardedCode(out_code, check_fn.check_fn, compile_id)
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
             # We should not run the guard_export_fn when Dynamo does not

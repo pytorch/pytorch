@@ -38,7 +38,6 @@ from torch.utils.weak import WeakIdKeyDictionary, weakref
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
 
-
 # This value is hard-coded here:
 # https://github.com/pytorch/pytorch/blob/5fba5d83f0703ff8077ab65448a998e9ad6598fd/c10/cuda/CUDACachingAllocator.cpp#L117
 _PYTORCH_MIN_ALLOCATE = (
@@ -543,12 +542,7 @@ class MemTracker(TorchDispatchMode):
 
         for mod_stats in self.memory_tracking.values():
             if mod_stats.mod_fqn in self._mod_tracker.parents:
-                if peak_state not in mod_stats.snapshots:
-                    mod_stats.local_peak = {
-                        dev: dev_snap[_TOTAL_KEY] for dev, dev_snap in curr_snap.items()
-                    }
-                    mod_stats.snapshots[peak_state] = [deepcopy(curr_snap)]
-                else:
+                if peak_state in mod_stats.snapshots:
                     for dev, dev_snap in curr_snap.items():
                         if mod_stats.local_peak.get(dev, 0) < dev_snap[_TOTAL_KEY]:
                             mod_stats.local_peak[dev] = dev_snap[_TOTAL_KEY]
@@ -617,12 +611,11 @@ class MemTracker(TorchDispatchMode):
         # If install_grad_hooks is True, install a gradient hook on the parameters
         #  to track the gradients, if it has not already been installed.
         # Return the total memory consumed by the parameters and buffers.
-        def _grad_hook(param: nn.Parameter) -> None:
-            if param.grad is not None:
-                self._update_and_maybe_create_winfos(
-                    param.grad,
-                    _MemRefType.GRAD,
-                )
+        def _grad_hook(grad: torch.Tensor) -> None:
+            self._update_and_maybe_create_winfos(
+                grad,
+                _MemRefType.GRAD,
+            )
 
         param_memory = 0
         for param in module.parameters():
@@ -640,8 +633,14 @@ class MemTracker(TorchDispatchMode):
                 self._param_to_grad_hook_handles.get(param, None) is None
                 and install_grad_hooks
             ):
-                grad_hook_handle = param.register_post_accumulate_grad_hook(_grad_hook)
-                self._param_to_grad_hook_handles[param] = grad_hook_handle
+                grad_hook_handle = param.register_hook(_grad_hook)
+                post_acc_grad_hook_handle = param.register_post_accumulate_grad_hook(
+                    lambda p: (_grad_hook(p.grad))
+                )
+                self._param_to_grad_hook_handles[param] = (
+                    grad_hook_handle,
+                    post_acc_grad_hook_handle,
+                )
         buffer_memory = 0
         for buffer in module.buffers():
             winfos = self._update_and_maybe_create_winfos(
@@ -804,8 +803,12 @@ class MemTracker(TorchDispatchMode):
         )
 
     def _deregister_param_and_optimizer_hooks(self) -> None:
-        for grad_hook_handle in self._param_to_grad_hook_handles.values():
+        for (
+            grad_hook_handle,
+            post_acc_grad_hook_handle,
+        ) in self._param_to_grad_hook_handles.values():
             grad_hook_handle.remove()
+            post_acc_grad_hook_handle.remove()
         self._param_to_grad_hook_handles.clear()
 
         if self._optimizer_hook_handles is not None:

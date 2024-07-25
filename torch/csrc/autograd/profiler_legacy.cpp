@@ -122,7 +122,7 @@ using torch::profiler::impl::ProfilerStateBase;
 struct ProfilerLegacyThreadLocalState : public ProfilerStateBase {
   explicit ProfilerLegacyThreadLocalState(
       const torch::profiler::impl::ProfilerConfig& config)
-      : ProfilerStateBase(config), remoteProfiledEvents_{c10::nullopt} {}
+      : ProfilerStateBase(config), remoteProfiledEvents_{std::nullopt} {}
   ~ProfilerLegacyThreadLocalState() override = default;
 
   static ProfilerLegacyThreadLocalState* getTLS() {

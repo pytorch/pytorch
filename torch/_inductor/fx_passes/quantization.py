@@ -505,11 +505,11 @@ def _register_quantized_linear_binary_lowering(
             packed_weight,
             w_scale,
             w_zp,
+            x2,
             b,
             o_inv_scale,
             o_zero_point,
             output_dtype,
-            x2,
             x2_scale,
             x2_zp,
             binary_op_name,
@@ -607,13 +607,7 @@ def _is_valid_quantized_op_binary_optimization_pattern(
             )
         )
         if (
-            len(
-                _get_remaining_users(
-                    extra_input_of_pattern,
-                    compute_node,
-                )
-            )
-            > 1
+            len(_get_remaining_users(extra_input_of_pattern, compute_node)) > 1
             or extra_input_of_pattern == compute_node.args[0]
         ):
             return False

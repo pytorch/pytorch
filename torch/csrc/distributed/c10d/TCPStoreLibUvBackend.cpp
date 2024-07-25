@@ -678,6 +678,10 @@ class UvClient : public UvTcpSocket {
           return;
       } else {
         switch ((QueryType)command) {
+          case QueryType::PING:
+            if (!parse_ping_command())
+              return;
+            break;
           case QueryType::SET:
             if (!parse_set_command())
               return;
@@ -746,6 +750,18 @@ class UvClient : public UvTcpSocket {
 
     if (validateNumber != c10d::detail::validationMagicNumber)
       return false;
+    return true;
+  }
+
+  bool parse_ping_command() {
+    uint32_t nonce;
+    if (!stream.read_value(nonce)) {
+      return false;
+    }
+
+    StreamWriter sw(iptr());
+    sw.write_value(nonce);
+    sw.send();
     return true;
   }
 
