@@ -557,6 +557,7 @@ class Stats:
         ok = torch._dynamo.utils.counters["frames"]["ok"]
         total = torch._dynamo.utils.counters["frames"]["total"]
         torch._dynamo.utils.counters.clear()
+        torch._C._clear_cpp_to_python_translated_exception_count(),
         return ok, total
 
     @classmethod
@@ -2211,6 +2212,7 @@ def get_dynamo_stats():
             "cudagraph_skips": torch._dynamo.utils.counters["inductor"][
                 "cudagraph_skips"
             ],
+            "cpp_to_python_exceptions_raised": torch._C._get_cpp_to_python_translated_exception_count(),
         }
     )
 
@@ -2643,8 +2645,6 @@ class BenchmarkRunner:
             for k, v in dynamo_stats.items():
                 headers.append(k)
                 fields.append(v)
-            headers.append("cpp_to_python_exceptions_raised")
-            fields.append(torch._C._get_cpp_to_python_translated_exception_count())
 
             output_csv(output_filename, headers, fields)
             return accuracy_status

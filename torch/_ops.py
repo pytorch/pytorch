@@ -1084,9 +1084,15 @@ class OpOverloadPacket:
             # This is ok since we are guaranteed that an overload name for an aten op can't be 'default'
             use_key = "" if key == "default" else key
             # TODO: disallow access to overloads registered by JIT
-            op_, op_dk_, tags = torch._C._get_operation_overload(
+            op_dk_tags = torch._C._get_operation_overload(
                 self._qualified_op_name, use_key
             )
+            if op_dk_tags is None:
+                raise AttributeError(
+                    f"The underlying op of '{str(self)}' has no overload name '{key}'"
+                )
+
+            op_, op_dk_, tags = op_dk_tags
             schema = torch._C._get_schema(self._qualified_op_name, use_key)
             overload = (
                 OpOverload(self, op_, op_dk_, schema, tags)
@@ -1097,10 +1103,12 @@ class OpOverloadPacket:
             setattr(self, key, overload)
             self._dir.append(key)
             return overload
-        except RuntimeError:
-            raise AttributeError(
+        except RuntimeError as e:
+            # TEMPORARY, WILL REMOVE.
+            # I want to see where this actually shows up in CI.
+            raise RuntimeError(
                 f"The underlying op of '{str(self)}' has no overload name '{key}'"
-            ) from None
+            ) from e
 
     def __iter__(self):
         return iter(self._dir)

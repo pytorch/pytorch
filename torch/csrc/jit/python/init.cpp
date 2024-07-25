@@ -201,6 +201,9 @@ void initJITBindings(PyObject* module) {
   m.def("_get_cpp_to_python_translated_exception_count", []() {
     return cpp_to_python_translated_exception_count;
   });
+  m.def("_clear_cpp_to_python_translated_exception_count", []() {
+    cpp_to_python_translated_exception_count = 0;
+  });
 
   m.def(
       "_get_caught_jit_exception_class_name",
@@ -1671,7 +1674,8 @@ void initJITBindings(PyObject* module) {
 
   m.def(
       "_get_operation_overload",
-      [](const std::string& op_name, const std::string& overload_name) {
+      [](const std::string& op_name,
+         const std::string& overload_name) -> std::optional<py::tuple> {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
@@ -1694,11 +1698,11 @@ void initJITBindings(PyObject* module) {
                     return _get_operation_for_overload_or_packet(
                         {op}, symbol, args, kwargs, /*is_overload*/ true, dk);
                   });
-              return py::make_tuple(
-                  func, func_dk, py::cast(op->getTags().vec()));
+              return std::make_optional(
+                  py::make_tuple(func, func_dk, py::cast(op->getTags().vec())));
             }
           }
-          throw std::runtime_error("Found no matching operator overload");
+          return std::nullopt;
         } catch (const c10::Error& e) {
           auto msg = torch::get_cpp_stacktraces_enabled()
               ? e.what()
