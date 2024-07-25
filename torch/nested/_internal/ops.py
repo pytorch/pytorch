@@ -900,10 +900,12 @@ def sum_dim_IntList(func, *args, **kwargs):
                 *range(inp._ragged_idx, inp.dim() - 1),
             )  # shift reduction dimension of values backward to outer dimension
 
+            # _jagged_to_padded_dense_forward requires values to be a 2D tensor
+            # with the ragged dimension as the 0th dimension
             padded = torch.ops.aten._jagged_to_padded_dense_forward(
                 values_ragged_dim_outer.reshape(
                     values_ragged_dim_outer.shape[0], -1
-                ),  # _jagged_to_padded_dense_forward requires values to be a 2D tensor with the ragged dimension as the 0th dimension
+                ),
                 [inp._offsets],
                 max_lengths=[inp._max_seqlen],
             )
