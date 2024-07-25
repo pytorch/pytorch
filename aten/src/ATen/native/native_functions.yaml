@@ -4545,9 +4545,10 @@
 - func: is_pinned(Tensor self, Device? device=None) -> bool
   variants: method
   dispatch:
-    NestedTensorCUDA, CUDA: is_pinned_cuda
-    MPS: is_pinned_mps
-    CompositeExplicitAutograd: is_pinned_default
+    # the NestedTensor keys are necessary because NestedTensor has been removed
+    # from the CompositeExplicitAutograd keyset see Note [NestedTensor Not Included in Backend Keys]
+    CompositeExplicitAutograd, NestedTensorCPU: is_pinned
+    SparseCPU, SparseCsrCPU: is_pinned_sparse
 
 # TODO: add a copy kwarg that guarantees that the tensor is put into fresh
 # pinned memory
@@ -4557,9 +4558,9 @@
 # Unlike pin_memory, this is guaranteed to give a new non-aliasing tensor
 - func: _pin_memory(Tensor self, Device? device=None) -> Tensor
   dispatch:
-    CUDA: _pin_memory_cuda
-    MPS: _pin_memory_mps
-    NestedTensorCUDA, NestedTensorCPU: _pin_memory_nested
+    NestedTensorCPU: _pin_memory_nested
+    SparseCPU, SparseCsrCPU: _pin_memory_sparse
+    CompositeExplicitAutograd: _pin_memory
   autogen: _pin_memory.out
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
@@ -14746,6 +14747,11 @@
 
 - func: _scaled_dot_product_attention_math(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, Tensor? dropout_mask=None, *, float? scale=None) -> (Tensor, Tensor)
   variants: function
+  tags: nondeterministic_seeded
+
+- func: _scaled_dot_product_attention_math_for_mps(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, Tensor? dropout_mask=None, *, float? scale=None) -> (Tensor, Tensor)
+  dispatch:
+    MPS: _scaled_dot_product_attention_math_mps
   tags: nondeterministic_seeded
 
 - func: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)

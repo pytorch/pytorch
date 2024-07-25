@@ -19,7 +19,9 @@ class SaliencyPruner(BaseStructuredSparsifier):
 
         # use negative weights so we can use topk (we prune out the smallest)
         if weights.dim() <= 1:
-            raise Exception("Structured pruning can only be applied to a 2+dim weight tensor!")  # noqa: TRY002
+            raise Exception(  # noqa: TRY002
+                "Structured pruning can only be applied to a 2+dim weight tensor!"
+            )
         saliency = -weights.norm(dim=tuple(range(1, weights.dim())), p=1)
         assert saliency.shape == mask.shape
 

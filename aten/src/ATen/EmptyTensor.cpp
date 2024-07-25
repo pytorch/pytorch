@@ -330,7 +330,7 @@ struct MetaAllocator final : public at::Allocator {
   static void deleter(void* const pointer) {
     TORCH_INTERNAL_ASSERT(!pointer);
   }
-  DataPtr allocate(const size_t nbytes) override {
+  DataPtr allocate(const size_t nbytes [[maybe_unused]]) override {
     return {nullptr, nullptr, &deleter, at::Device(DeviceType::Meta)};
   }
   DeleterFnPtr raw_deleter() const override {
@@ -444,8 +444,7 @@ TensorBase empty_strided_symint_meta(
     SymIntArrayRef stride,
     std::optional<ScalarType> dtype_opt,
     std::optional<Layout> layout_opt,
-    std::optional<Device> device_opt,
-    std::optional<bool> pin_memory_opt) {
+    std::optional<Device> device_opt) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_or_default(device_opt).type() == DeviceType::Meta);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
@@ -462,8 +461,7 @@ TensorBase empty_strided_symint_meta(
       stride,
       optTypeMetaToScalarType(options.dtype_opt()),
       options.layout_opt(),
-      options.device_opt(),
-      options.pinned_memory_opt());
+      options.device_opt());
 }
 
 } // namespace at::detail

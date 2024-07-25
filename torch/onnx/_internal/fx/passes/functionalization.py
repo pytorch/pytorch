@@ -3,17 +3,19 @@ from __future__ import annotations
 
 import contextlib
 
-from typing import Callable, Optional
+from typing import Callable, TYPE_CHECKING
 
 import torch
 import torch._ops
 import torch.func
 import torch.fx
-from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.onnx._internal.fx.passes import _utils
 from torch.utils import _pytree as pytree
+
+if TYPE_CHECKING:
+    from torch._subclasses import fake_tensor
 
 
 class Functionalize(_pass.Transform):
@@ -66,7 +68,7 @@ class Functionalize(_pass.Transform):
         diagnostic_context: diagnostics.DiagnosticContext,
         module: torch.fx.GraphModule,
         enable_dynamic_axes: bool,
-        allow_fake_constant: Optional[bool] = False,
+        allow_fake_constant: bool | None = False,
     ):
         super().__init__(diagnostic_context, module)
         self.enable_dynamic_axes = enable_dynamic_axes
@@ -105,7 +107,7 @@ class Functionalize(_pass.Transform):
 
         # Mimic `torch._dynamo.export(aten_graph=True)` behavior in invoking `make_fx`.
         # TODO: May need revisit for user fake mode export + dynamic shape scenario.
-        fake_mode: Optional[fake_tensor.FakeTensorMode] = self.fake_mode
+        fake_mode: fake_tensor.FakeTensorMode | None = self.fake_mode
         maybe_fake_args = self._maybe_fakefy_args(fake_mode, *args)
         if fake_mode is not None:
             # Using existing fake mode as context, signal `make_fx` that it does not need

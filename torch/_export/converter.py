@@ -83,6 +83,8 @@ _TORCH_DTYPE_TO_ENUM = {
     torch.bfloat16: 15,
 }
 
+_TORCH_ENUM_TO_DTYPE = {value: key for key, value in _TORCH_DTYPE_TO_ENUM.items()}
+
 
 def get_dtype_as_int(tensor):
     """
@@ -257,14 +259,14 @@ class TS2FXGraphConverter:
     def __init__(
         self,
         ts_graph: Union[torch._C.Graph, torch._C.Block],
-        name_to_param_map: Dict[str, torch.Tensor],
-        name_to_buffer_map: Dict[str, torch.Tensor],
+        name_to_param: Dict[str, torch.Tensor],
+        name_to_buffer: Dict[str, torch.Tensor],
         blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
         name_to_non_tensor_attribute: Dict[str, Any],
     ):
         self.ts_graph = ts_graph
-        self.name_to_param_map = name_to_param_map
-        self.name_to_buffer_map = name_to_buffer_map
+        self.name_to_param = name_to_param
+        self.name_to_buffer = name_to_buffer
 
         self.fx_graph: torch.fx.Graph = torch.fx.Graph()
         self.input_specs: List[InputSpec] = []
@@ -352,8 +354,8 @@ class TS2FXGraphConverter:
         gm = torch.fx.GraphModule(
             {
                 **self.subgraphs,
-                **self.name_to_param_map,
-                **self.name_to_buffer_map,
+                **self.name_to_param,
+                **self.name_to_buffer,
                 **self.name_to_tensor_constants,
                 **self.name_to_non_tensor_attribute,
             },
@@ -370,7 +372,7 @@ class TS2FXGraphConverter:
         for graph_input in self.ts_graph.inputs():
             name = graph_input.debugName()
 
-            if name in self.name_to_param_map:
+            if name in self.name_to_param:
                 normalized_name = normalize_name(name)
                 self.input_specs.append(
                     InputSpec(
@@ -382,7 +384,7 @@ class TS2FXGraphConverter:
                 fx_node = get_node_for_param_and_buffer(
                     self.fx_graph, name, self.is_top_level_graph()
                 )
-            elif name in self.name_to_buffer_map:
+            elif name in self.name_to_buffer:
                 normalized_name = normalize_name(name)
                 self.input_specs.append(
                     InputSpec(
@@ -411,16 +413,30 @@ class TS2FXGraphConverter:
     def convert_aten_tensor(self, node: torch._C.Node):
         """aten::tensor creates a constant tensor ad-hoc --> GetAttr"""
         args, kwargs = self.get_args_kwargs(node, torch.ops.aten.tensor.default._schema)
+
         for k in kwargs:
             if k == "requires_grad":
                 kwargs[k] = bool(kwargs[k])  # 0 -> False, 1 -> True
-        tensor = torch.tensor(*args, **kwargs)
+
+        to_tensor = (
+            torch.tensor
+            if all(isinstance(a, int) for a in args)
+            else torch._refs.tensor
+        )
+
+        def target(*args, **kwargs):
+            if "dtype" in kwargs and kwargs["dtype"] is not None:
+                kwargs["dtype"] = _TORCH_ENUM_TO_DTYPE[kwargs["dtype"]]
+            return to_tensor(*args, **kwargs)
+
+        # def to_dynamic_tensor(*args, **kwargs):
+        #     if "dtype" in kwargs and kwargs["dtype"] is not None:
+        #         kwargs["dtype"] = _TORCH_ENUM_TO_DTYPE[kwargs["dtype"]]
+        #     return torch._refs.tensor(*args, **kwargs)
 
         output_name = node.output().debugName()
-        alias_name = f"lifted_tensor_{output_name}"
-        fx_node = self.fx_graph.get_attr(alias_name)
+        fx_node = self.fx_graph.call_function(target, args, kwargs)
         self.name_to_node[output_name] = fx_node
-        self.name_to_tensor_constants[alias_name] = tensor
 
     def convert_prim_Constant(self, node: torch._C.Node):
         name = node.output().debugName()
@@ -690,7 +706,11 @@ class TS2FXGraphConverter:
             for block in entry.blocks():
                 for block_node in block.nodes():
                     for block_node_in in block_node.inputs():
-                        if block_node_in.debugName() in self.name_to_node:
+                        if (
+                            block_node_in.debugName() in self.name_to_node
+                            and block_node_in.debugName()
+                            not in self.name_to_attribute_fqn
+                        ):
                             arguments.add(block_node_in.debugName())
                     arguments = arguments.union(
                         _identify_inputs_as_arguments(block_node)
@@ -826,7 +846,7 @@ class TS2FXGraphConverter:
         # the entire logic here, we simply keep first line from node string (getting rid
         # of sub-blocks IR prints).
         node_str = "".join(str(node).split("\n")[:1])
-        log.debug(f"[{handler_func.__name__}] converts [{node_str}]")  # noqa: G004
+        log.debug("[%s] converts [%s]", handler_func.__name__, node_str)
         try:
             handler_func(node)
         except Exception as e:
@@ -884,9 +904,6 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
             # If the original dictionary has the key, return its value.
             # Otherwise, return the mock value.
             if not super().__contains__(key):
-                warnings.warn(
-                    f"{key} is not found in <class 'dict'>. Mock is instead used."
-                )
                 return self.mock_value
             return super().__getitem__(key)
 
@@ -896,15 +913,15 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
     def __init__(
         self,
         ts_graph: Union[torch._C.Graph, torch._C.Block],
-        name_to_param_map: Dict[str, torch.Tensor],
-        name_to_buffer_map: Dict[str, torch.Tensor],
+        name_to_param: Dict[str, torch.Tensor],
+        name_to_buffer: Dict[str, torch.Tensor],
         blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
         name_to_non_tensor_attribute: Dict[str, Any],
     ):
         super().__init__(
             ts_graph,
-            name_to_param_map,
-            name_to_buffer_map,
+            name_to_param,
+            name_to_buffer,
             blocks_to_lifted_attrs,
             name_to_non_tensor_attribute,
         )
@@ -954,54 +971,79 @@ TS2EPConverter logging starts from here.
 INFO: (TORCH_LOGS="export" <cmd>)
     * Log TorchScript IR.
 
-DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
+DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
     * Log conversion IR by IR in a format of [<conversion handler name>] converts [<IR>].
         """
         )
 
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
-        log.info(f"TorchScript graph\n\n{self.ts_graph}\n")  # noqa: G004
+        log.info("TorchScript graph\n\n%s\n", self.ts_graph)
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
 
-        self.name_to_param_map: Dict[str, torch.Tensor] = (
-            dict(ts_model.named_parameters())
-            if isinstance(ts_model, torch.jit.ScriptModule)
-            else {}
+        self.name_to_param: Dict[str, torch.Tensor] = {}
+        self.name_to_buffer: Dict[str, torch.Tensor] = {}
+        param_list = (
+            list(self.ts_model.parameters())
+            if not isinstance(self.ts_model, torch._C.ScriptFunction)
+            else []
         )
-        self.name_to_buffer_map: Dict[str, torch.Tensor] = (
-            dict(ts_model.named_buffers())
-            if isinstance(ts_model, torch.jit.ScriptModule)
-            else {}
-        )
+        if not isinstance(self.ts_model, torch._C.ScriptFunction):
+            for k, tensor in self.ts_model.state_dict().items():  # type: ignore[union-attr]
+                # Check if tensor belongs to any parameter.
+                if any(
+                    (tensor == param).all()
+                    for param in param_list
+                    if tensor.shape == param.shape
+                ):
+                    self.name_to_param[k] = tensor
+                else:
+                    self.name_to_buffer[k] = tensor
+
         self.name_to_non_tensor_attributes: Dict[str, Any] = {}
 
         self.lift_tensor_constants_to_buffer()
 
     def convert(self) -> ExportedProgram:
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
+
         graph_converter = TS2FXGraphConverter(
             self.ts_graph,
-            self.name_to_param_map,
-            self.name_to_buffer_map,
+            self.name_to_param,
+            self.name_to_buffer,
             blocks_to_lifted_attrs,
             self.name_to_non_tensor_attributes,
         )
         gm = graph_converter.convert()
+        log.info("GraphModule: %s", gm.print_readable(print_output=False))
+
         ep = self.retrace_as_exported_program(
             gm, graph_converter.name_to_tensor_constants
         )
+        log.info("%s", ep)
+
+        # Post-processing step to ensure ExportedProgram has the same state_dict as
+        # the original TorchScript model. Throw warnings for additionally populated
+        # state_dict entries.
+        if not isinstance(self.ts_model, torch._C.ScriptFunction):
+            for k, tensor in self.ts_model.state_dict().items():  # type: ignore[union-attr]
+                if k not in ep.state_dict:
+                    warnings.warn(
+                        f"Manually populate {k} into state_dict ExportedProgram, but it is never used by the ExportedProgram."
+                    )
+                    ep.state_dict[k] = tensor
+
         return ep
 
-    def explain(self):
+    def explain(self, print_output=True):
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
 
         graph_converter = ExplainTS2FXGraphConverter(
             self.ts_graph,
-            self.name_to_param_map,
-            self.name_to_buffer_map,
+            self.name_to_param,
+            self.name_to_buffer,
             blocks_to_lifted_attrs,
             self.name_to_non_tensor_attributes,
         )
@@ -1011,9 +1053,11 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
             for i, n in enumerate(graph_converter.unsupported_node_list):
                 node_str = "".join(str(n).split("\n")[:1])
                 explain_str += f"\n\n    {i}. {n.kind()} [{node_str}]"
-            print(explain_str)
         else:
-            print("Success!")
+            explain_str = "Success!"
+        if print_output:
+            print(explain_str)
+        return explain_str
 
     def retrace_as_exported_program(
         self, gm: torch.fx.GraphModule, tensor_constants: Dict[str, torch.Tensor]
@@ -1030,7 +1074,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
         # Because during conversion, we set tensor constants as GetAttr,
         # retracing cannot recognize them as tensor constants but instead
         # treat them as buffers. We need to set them again here.
-        ep._constants = tensor_constants
+        ep._constants = {**ep._constants, **tensor_constants}
         for k in tensor_constants:
             ep.state_dict.pop(k, None)
         for spec in ep.graph_signature.input_specs:
@@ -1051,7 +1095,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
         # This function should happen in TS2EPConverter instead of
         # TS2FXGraphConverter since it gets attributes from self.ts_model
         # which is not accessable in TS2FXGraphConverter. It is similar to where
-        # we collect self.name_to_param_map and self.name_to_buffer_map.
+        # we collect self.name_to_param and self.name_to_buffer.
         name_to_attribute_fqn: Dict[str, str] = {}
 
         def get_attr(fqn: str):
@@ -1080,12 +1124,9 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
                     output_name = node.output().debugName()
                     name_to_attribute_fqn[output_name] = attr_fqn
                     if isinstance(value, torch.Tensor):
-                        if attr_fqn not in self.name_to_buffer_map:
+                        if attr_fqn not in self.name_to_buffer:
                             # Lift tensor constants to be a buffer
-                            warnings.warn(
-                                f"ts converter lifted tensor constant {attr_fqn} to be a buffer"
-                            )
-                            self.name_to_buffer_map[attr_fqn] = value
+                            self.name_to_buffer[attr_fqn] = value
                     else:
                         self.name_to_non_tensor_attributes[attr_fqn] = value
 

@@ -1020,7 +1020,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         q, k, v = (torch.randn(1, 8, 1024, 64, device="cuda") for _ in range(3))
         metrics.reset()
         _, code = run_and_get_code(f, q, k, v)
-        # TODO: attention output is not being DCE'd
         fc = FileCheck()
         fc.check("triton_tem_fused")  # template call
         fc.check_not("poi_fused_cos")  # No cos pointwise operation
@@ -1028,10 +1027,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         accessed_bytes = 1 * 8 * 1024 * 64 * torch.float32.itemsize
         num_accesses = 4  # q, k, v reads, one output.
         # TODO: Get rid of this fudge factor
-        # We need this fudge factor for now, since
-        # 1. For some reason we materialize the output of the attention unnecessarily (it's related to the mutation somehow)
-        # 2. We also write the extraneous logsumexp
-        num_accesses += 2
+        # We need this fudge factor for now as we write the extraneous logsumexp
+        num_accesses += 1
         self.assertLess(metrics.num_bytes_accessed, accessed_bytes * num_accesses)
 
     @supported_platform
@@ -1538,16 +1535,16 @@ class GraphModule(torch.nn.Module):
         l_kwargs_block_mask_full_q_num_blocks = L_kwargs_block_mask_full_q_num_blocks
         l_kwargs_block_mask_full_q_indices = L_kwargs_block_mask_full_q_indices
 
-        child_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child: "f64[]" = l_args_0_.new_empty([], requires_grad = True)
+        child_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_1 = None
+        child_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_2 = None
+        child_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_3 = None
+        child_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_4 = None
+        child: "f64[]" = l_args_0_.new_empty([], requires_grad = True);  child = None
         score_mod_0 = self.score_mod_0
-        child_5: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_6: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        child_5: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_5 = None
+        child_6: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_6 = None
+        child_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_7 = None
+        child_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_8 = None
         mask_fn_0 = self.mask_fn_0
         flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (l_kwargs_block_mask_kv_num_blocks, l_kwargs_block_mask_kv_indices, l_kwargs_block_mask_full_kv_num_blocks, l_kwargs_block_mask_full_kv_indices, l_kwargs_block_mask_q_num_blocks, l_kwargs_block_mask_q_indices, l_kwargs_block_mask_full_q_num_blocks, l_kwargs_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = l_kwargs_block_mask_kv_num_blocks = l_kwargs_block_mask_kv_indices = l_kwargs_block_mask_full_kv_num_blocks = l_kwargs_block_mask_full_kv_indices = l_kwargs_block_mask_q_num_blocks = l_kwargs_block_mask_q_indices = l_kwargs_block_mask_full_q_num_blocks = l_kwargs_block_mask_full_q_indices = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
@@ -1602,7 +1599,7 @@ class GraphModule(torch.nn.Module):
 
     class <lambda>(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]", arg5_1: "f64[]"):
-            mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1)
+            mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  mul = None
             mul_1: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1)
             mul_2: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1);  arg5_1 = arg0_1 = None
             add: "f64[]" = torch.ops.aten.add.Tensor(mul_2, mul_1);  mul_2 = mul_1 = None
@@ -1621,9 +1618,9 @@ class GraphModule(torch.nn.Module):
             NotImplementedError, "NYI: L must be a multiple of 128"
         ):
             flex_attention(
-                torch.randn((2, 3, 4)),
-                torch.randn((2, 10, 5)),
-                torch.randn((2, 10, 5)),
+                torch.randn((1, 2, 3, 4)),
+                torch.randn((1, 2, 10, 5)),
+                torch.randn((1, 2, 10, 5)),
                 score_mod=_identity,
             )
 
@@ -1632,9 +1629,9 @@ class GraphModule(torch.nn.Module):
         ):
             compiled_flex = torch.compile(flex_attention)
             compiled_flex(
-                torch.randn((2, 3, 4)),
-                torch.randn((2, 10, 5)),
-                torch.randn((2, 10, 5)),
+                torch.randn((1, 2, 3, 4)),
+                torch.randn((1, 2, 10, 5)),
+                torch.randn((1, 2, 10, 5)),
                 score_mod=_identity,
             )
 

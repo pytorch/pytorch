@@ -2,8 +2,10 @@
 import collections
 import contextlib
 import copy
+import dataclasses
 import functools
 import itertools
+import json
 import logging
 import operator
 import re
@@ -18,6 +20,7 @@ import sympy
 import torch._guards
 
 import torch._logging
+import torch.distributed as dist
 
 import torch.nn
 import torch.utils._pytree as pytree
@@ -30,7 +33,7 @@ from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, Sha
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from . import config, logging as torchdynamo_logging, variables
+from . import config, exc, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_call_function,
@@ -803,6 +806,10 @@ class OutputGraph:
                 # Track the object so to avoid duplicate registration in case of
                 # different sources pointing to the same tensor object.
                 vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
+
+                assert "tensor_dict" not in vt.proxy.node.meta
+                vt.proxy.node.meta["tensor_dict"] = target.__dict__.copy()
+
                 return vt
 
         elif isinstance(target, torch.nn.Module):
@@ -1256,6 +1263,25 @@ class OutputGraph:
         """
         from .decorators import disable
 
+        if (ds := tx.distributed_state) is not None and ds.all_states is None:
+            compile_pg = ds.compile_pg
+            log.info("compiler_collective %s", ds.local_state)
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "compiler_collective",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(
+                    dataclasses.asdict(ds.local_state),
+                ),
+            )
+            with torch.cuda.device(compile_pg.rank() % torch.cuda.device_count()):
+                all_states = [None] * compile_pg.size()
+                dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
+                ds.all_states = all_states
+            raise exc.CompileCollectiveRestartAnalysis
+
         assert self.should_exit
 
         name = unique_id("__compiled_fn")
@@ -1327,7 +1353,7 @@ class OutputGraph:
 
         if isinstance(compiled_fn, _LazyGraphModule) or (
             isinstance(getattr(compiled_fn, "__self__", None), _LazyGraphModule)
-            and compiled_fn.__name__ == "_lazy_forward"
+            and compiled_fn.__name__ == "_lazy_forward"  # type: ignore[attr-defined]
         ):
             # Since dynamo will run the forward method for the GraphModule shortly
             # anyways, it does not hurt to do the real recompilation here if
@@ -1337,7 +1363,7 @@ class OutputGraph:
             lazy_gm = (
                 compiled_fn
                 if isinstance(compiled_fn, _LazyGraphModule)
-                else compiled_fn.__self__
+                else compiled_fn.__self__  # type: ignore[attr-defined]
             )
 
             _LazyGraphModule.force_recompile(lazy_gm)
