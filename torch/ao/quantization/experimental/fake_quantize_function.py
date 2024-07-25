@@ -1,17 +1,22 @@
 # mypy: allow-untyped-defs
 import torch
 from torch import Tensor
-from torch.ao.quantization.experimental.quantizer import quantize_APoT, dequantize_APoT
+from torch.ao.quantization.experimental.quantizer import dequantize_APoT, quantize_APoT
+
 
 class fake_quantize_function(torch.autograd.Function):
     @staticmethod
-    def forward(ctx,  # type: ignore[override]
-                x: Tensor,
-                alpha: Tensor,
-                gamma: Tensor,
-                quantization_levels: Tensor,
-                level_indices: Tensor) -> Tensor:
-        quantized_result = quantize_APoT(x, alpha, gamma, quantization_levels, level_indices)
+    def forward(  # type: ignore[override]
+        ctx,
+        x: Tensor,
+        alpha: Tensor,
+        gamma: Tensor,
+        quantization_levels: Tensor,
+        level_indices: Tensor,
+    ) -> Tensor:
+        quantized_result = quantize_APoT(
+            x, alpha, gamma, quantization_levels, level_indices
+        )
 
         # calculate mask tensor
         mask = x.detach().apply_(lambda x: (x <= alpha and x >= -alpha))
