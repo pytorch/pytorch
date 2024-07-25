@@ -1,6 +1,6 @@
 import random
 
-from benchmarks.dynamo.pr_time_benchmarks.benchmark_base import Benchmark
+from ..benchmark_base import Benchmark
 
 import torch
 
