@@ -578,10 +578,7 @@ def _softmax_default(func, *args, **kwargs):
             -1, *inp._values.shape[1:]
         )  # expand softmax_values back to original shape (inp._values.shape)
 
-        return torch.nested._internal.nested_tensor.NestedTensor(
-            softmax_values,
-            offsets=inp._offsets,
-        )
+        return NestedTensor(softmax_values, **extract_kwargs(inp))
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
@@ -1197,10 +1194,7 @@ def native_layer_norm_default(func, *args, **kwargs):
         )
 
         return (
-            torch.nested._internal.nested_tensor.NestedTensor(
-                jagged_layer_norm_values,
-                offsets=inp._offsets,
-            ),
+            NestedTensor(jagged_layer_norm_values, **extract_kwargs(inp)),
             mean,
             std,
         )
