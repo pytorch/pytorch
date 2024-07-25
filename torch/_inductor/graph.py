@@ -788,6 +788,9 @@ class GraphLowering(torch.fx.Interpreter):
         assert name in self.allocated_constant_name and name in self.constants, (
             "Can not find the original value for " + name
         )
+        if self.allocated_constant_name[name] is None:
+            print("name: ", name)
+            print("self.allocated_constant_name:", self.allocated_constant_name)
         orig_name = get_cloned_parameter_buffer_name(self.allocated_constant_name[name])
         return (
             self.module.meta[orig_name]
