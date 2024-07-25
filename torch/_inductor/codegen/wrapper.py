@@ -1560,8 +1560,10 @@ class WrapperCodeGen(CodeGen):
             return buf_name
         elif issubclass(arg_type, sympy.Basic) or isinstance(arg, SymbolicCallArg):
             # arg is a symbol or symbolic expression
-            if raw_arg is not None:
-                arg = raw_arg
+            if arg in self._meta_vars:
+                return arg
+            if raw_arg is None:
+                return "None"
             if isinstance(arg, SymbolicCallArg):
                 arg = arg.inner_expr
             if arg in V.graph.sizevars.inv_precomputed_replacements:
@@ -1573,10 +1575,6 @@ class WrapperCodeGen(CodeGen):
                 )
             )
         elif isinstance(arg, (str, int, float, bool)):
-            if arg in self._meta_vars:
-                return arg
-            if raw_arg is None:
-                return "None"
             return str(arg)
         else:
             breakpoint()
