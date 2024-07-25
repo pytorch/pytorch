@@ -4827,11 +4827,11 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
       c10::str(AdaptiveMaxPool2d(AdaptiveMaxPool2dOptions({5, 6}))),
       "torch::nn::AdaptiveMaxPool2d(output_size=[5, 6])");
   ASSERT_EQ(
-      c10::str(AdaptiveMaxPool2d(AdaptiveMaxPool2dOptions({5, c10::nullopt}))),
+      c10::str(AdaptiveMaxPool2d(AdaptiveMaxPool2dOptions({5, std::nullopt}))),
       "torch::nn::AdaptiveMaxPool2d(output_size=[5, None])");
   ASSERT_EQ(
       c10::str(AdaptiveMaxPool2d(
-          AdaptiveMaxPool2dOptions({c10::nullopt, c10::nullopt}))),
+          AdaptiveMaxPool2dOptions({std::nullopt, std::nullopt}))),
       "torch::nn::AdaptiveMaxPool2d(output_size=[None, None])");
 
   ASSERT_EQ(
@@ -4842,11 +4842,11 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
       "torch::nn::AdaptiveMaxPool3d(output_size=[5, 6, 7])");
   ASSERT_EQ(
       c10::str(
-          AdaptiveMaxPool3d(AdaptiveMaxPool3dOptions({5, c10::nullopt, 7}))),
+          AdaptiveMaxPool3d(AdaptiveMaxPool3dOptions({5, std::nullopt, 7}))),
       "torch::nn::AdaptiveMaxPool3d(output_size=[5, None, 7])");
   ASSERT_EQ(
       c10::str(AdaptiveMaxPool3d(AdaptiveMaxPool3dOptions(
-          {c10::nullopt, c10::nullopt, c10::nullopt}))),
+          {std::nullopt, std::nullopt, std::nullopt}))),
       "torch::nn::AdaptiveMaxPool3d(output_size=[None, None, None])");
 }
 
@@ -4862,11 +4862,11 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveAvgPool) {
       c10::str(AdaptiveAvgPool2d(AdaptiveAvgPool2dOptions({5, 6}))),
       "torch::nn::AdaptiveAvgPool2d(output_size=[5, 6])");
   ASSERT_EQ(
-      c10::str(AdaptiveAvgPool2d(AdaptiveAvgPool2dOptions({5, c10::nullopt}))),
+      c10::str(AdaptiveAvgPool2d(AdaptiveAvgPool2dOptions({5, std::nullopt}))),
       "torch::nn::AdaptiveAvgPool2d(output_size=[5, None])");
   ASSERT_EQ(
       c10::str(AdaptiveAvgPool2d(
-          AdaptiveAvgPool2dOptions({c10::nullopt, c10::nullopt}))),
+          AdaptiveAvgPool2dOptions({std::nullopt, std::nullopt}))),
       "torch::nn::AdaptiveAvgPool2d(output_size=[None, None])");
 
   ASSERT_EQ(
@@ -4877,11 +4877,11 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveAvgPool) {
       "torch::nn::AdaptiveAvgPool3d(output_size=[5, 6, 7])");
   ASSERT_EQ(
       c10::str(
-          AdaptiveAvgPool3d(AdaptiveAvgPool3dOptions({5, c10::nullopt, 7}))),
+          AdaptiveAvgPool3d(AdaptiveAvgPool3dOptions({5, std::nullopt, 7}))),
       "torch::nn::AdaptiveAvgPool3d(output_size=[5, None, 7])");
   ASSERT_EQ(
       c10::str(AdaptiveAvgPool3d(AdaptiveAvgPool3dOptions(
-          {c10::nullopt, c10::nullopt, c10::nullopt}))),
+          {std::nullopt, std::nullopt, std::nullopt}))),
       "torch::nn::AdaptiveAvgPool3d(output_size=[None, None, None])");
 }
 

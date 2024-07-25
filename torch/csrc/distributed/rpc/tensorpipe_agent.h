@@ -80,8 +80,8 @@ constexpr auto kDefaultNumWorkerThreads = 16;
 struct TORCH_API TensorPipeRpcBackendOptions : public RpcBackendOptions {
   TensorPipeRpcBackendOptions(
       int numWorkerThreads,
-      optional<std::vector<std::string>> transports,
-      optional<std::vector<std::string>> channels,
+      std::optional<std::vector<std::string>> transports,
+      std::optional<std::vector<std::string>> channels,
       float rpc_timeout,
       std::string init_method,
       std::unordered_map<std::string, DeviceMap> device_maps = {},
@@ -135,8 +135,8 @@ struct TORCH_API TensorPipeRpcBackendOptions : public RpcBackendOptions {
   }
 
   int numWorkerThreads;
-  const optional<std::vector<std::string>> transports;
-  const optional<std::vector<std::string>> channels;
+  const std::optional<std::vector<std::string>> transports;
+  const std::optional<std::vector<std::string>> channels;
   std::unordered_map<std::string, DeviceMap> deviceMaps;
   std::vector<c10::Device> devices;
 };
@@ -165,7 +165,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
       const c10::intrusive_ptr<::c10d::Store>& store,
       std::string selfName,
       worker_id_t selfId,
-      optional<int> worldSize,
+      std::optional<int> worldSize,
       TensorPipeRpcBackendOptions opts,
       std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
       std::vector<c10::Device> devices,

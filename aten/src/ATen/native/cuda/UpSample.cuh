@@ -3,11 +3,11 @@
 #include <ATen/cuda/Atomic.cuh>
 
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/OptionalArrayRef.h>
 
 #include <math.h>
+#include <optional>
 
 namespace at {
 namespace native {
@@ -25,7 +25,7 @@ namespace upsample_cuda {
 // TODO: Remove duplication with Upsample.h (CPU).
 inline std::optional<double> get_scale_value(std::optional<c10::ArrayRef<double>> scales, int idx) {
   if (!scales) {
-    return nullopt;
+    return std::nullopt;
   }
   return scales->at(idx);
 }
