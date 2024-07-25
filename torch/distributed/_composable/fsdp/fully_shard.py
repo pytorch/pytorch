@@ -185,7 +185,7 @@ class FSDPModule:
             # Under compile, always run the root module initialization in eager mode
             state = self._get_fsdp_state()
             if state._is_root is None:
-                with torch.random.fork_rng():
+                with torch.random.fork_rng(range(torch.cuda.device_count())):
                     module(*args, **kwargs)
                     # Clean up dry-run artifacts and reset model to pre-forward state
                     state._root_post_backward_final_callback()
