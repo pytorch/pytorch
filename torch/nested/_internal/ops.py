@@ -575,9 +575,9 @@ def _softmax_default(func, *args, **kwargs):
             -1, *inp._values.shape[1:]
         )  # expand softmax_values back to original shape (inp._values.shape)
 
-        return torch.nested.nested_tensor_from_jagged(
+        return torch.nested._internal.nested_tensor.NestedTensor(
             softmax_values,
-            inp._offsets,
+            offsets=inp._offsets,
         )
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
