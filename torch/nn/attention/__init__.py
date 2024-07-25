@@ -126,4 +126,4 @@ def sdpa_kernel(backends: Union[List[SDPBackend], SDPBackend]):
 
 def _get_flash_version() -> str:
     """This returns the closest matching tag for the flash attention backend"""
-    return "2.5.6"
+    return "2.5.7"
