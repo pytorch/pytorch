@@ -35,11 +35,8 @@ struct UsageStream {
   UsageStream(const UsageStream& us) = default;
   UsageStream(const UsageStream&& us) noexcept
       : stream(us.stream), device(us.device) {}
-  UsageStream& operator=(UsageStream other) {
-    stream = other.stream;
-    device = other.device;
-    return *this;
-  }
+  UsageStream& operator=(const UsageStream& other) = default;
+  UsageStream& operator=(UsageStream&& other) noexcept = default;
 };
 
 bool operator==(const UsageStream& lhs, const UsageStream& rhs) {
