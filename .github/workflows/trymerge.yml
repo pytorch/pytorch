@@ -1,0 +1,109 @@
+name: Validate and merge PR
+
+on:
+  repository_dispatch:
+    types: [try-merge]
+
+jobs:
+  do_merge:
+    name: try_merge_pr_${{ github.event.client_payload.pr_num }}
+    runs-on: linux.20_04.4x
+    environment: mergebot
+    permissions:
+      id-token: write
+    env:
+        GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Checkout repo
+        id: checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.MERGEBOT_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          check-latest: false
+          cache: pip
+          architecture: x64
+      - run: pip install pyyaml==6.0 rockset==1.0.3
+
+      - name: Setup committer id
+        run: |
+          git config --global user.email "pytorchmergebot@users.noreply.github.com"
+          git config --global user.name "PyTorch MergeBot"
+      - name: Merge PR
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+          PR_NUM: ${{ github.event.client_payload.pr_num }}
+          FORCE: ${{ github.event.client_payload.force}}
+          COMMENT_ID: ${{ github.event.client_payload.comment_id }}
+          REBASE: ${{ github.event.client_payload.rebase }}
+          IGNORE_CURRENT: ${{ github.event.client_payload.ignore_current }}
+          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+          DRCI_BOT_KEY: ${{ secrets.DRCI_BOT_KEY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -x
+          if [ -n "${REBASE}" ]; then
+            # attempt to rebase, if it fails then comment on the PR that it failed
+            if ! python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"; then
+              python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
+              exit 0
+            fi
+            git checkout main
+            git fetch -p
+            # give github some time between the push and start workflows so that Github's messages
+            # on the PR appear in chronological order (timing issues can shuffle them around)
+            sleep 60
+          fi
+          if [ -n "${FORCE}" ]; then
+            if [ -n "${COMMENT_ID}" ]; then
+              python3 .github/scripts/trymerge.py --force --comment-id "${COMMENT_ID}" "${PR_NUM}"
+            else
+              python3 .github/scripts/trymerge.py --force "${PR_NUM}"
+            fi
+          elif [ -n "${IGNORE_CURRENT}" ]; then
+            if [ -n "${COMMENT_ID}" ]; then
+              python3 .github/scripts/trymerge.py --ignore-current --comment-id "${COMMENT_ID}" "${PR_NUM}"
+            else
+              python3 .github/scripts/trymerge.py --ignore-current "${PR_NUM}"
+            fi
+          elif [ -n "${COMMENT_ID}" ]; then
+            python3 .github/scripts/trymerge.py --comment-id "${COMMENT_ID}" "${PR_NUM}"
+          else
+            python3 .github/scripts/trymerge.py "${PR_NUM}"
+          fi
+      - name: Comment on Canceled
+        if: ${{ cancelled() && steps.checkout.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+          PR_NUM: ${{ github.event.client_payload.pr_num }}
+        run: |
+          set -x
+          python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        continue-on-error: true
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/upload_to_ossci_raw_job_status
+          aws-region: us-east-1
+
+      - name: Upload merge record to s3
+        if: always()
+        continue-on-error: true
+        uses: seemethere/upload-artifact-s3@v5
+        with:
+          s3-bucket: ossci-raw-job-status
+          s3-prefix: merges/${{ github.repository }}/${{ github.event.client_payload.pr_num }}/${{ github.event.client_payload.comment_id }}/${{ github.run_id }}
+          path: merge_record.json
+
+# We want newer merge commands to supercede old ones
+concurrency:
+  group: try-merge-${{ github.event.client_payload.pr_num }}
+  cancel-in-progress: true
