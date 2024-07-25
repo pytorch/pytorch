@@ -2,17 +2,18 @@
 import torch
 import torch.ao.nn.intrinsic as nni
 
-__all__ = [
-    "BatchNorm2d",
-    "BatchNorm3d"
-]
+
+__all__ = ["BatchNorm2d", "BatchNorm3d"]
+
 
 class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(
+        self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(num_features, eps, momentum, True, True, **factory_kwargs)
-        self.register_buffer('scale', torch.tensor(1.0, **factory_kwargs))
-        self.register_buffer('zero_point', torch.tensor(0, **factory_kwargs))
+        self.register_buffer("scale", torch.tensor(1.0, **factory_kwargs))
+        self.register_buffer("zero_point", torch.tensor(0, **factory_kwargs))
 
     @staticmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
@@ -36,7 +37,7 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
             bn.eps,
             bn.momentum,
             device=bn.weight.device,
-            dtype=bn.weight.dtype
+            dtype=bn.weight.dtype,
         )
         qbn.weight = bn.weight
         qbn.bias = bn.bias
@@ -46,18 +47,20 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
         qbn.zero_point = output_zero_point
         return qbn
 
+
 class BatchNorm2d(_BatchNorm):
-    r"""This is the quantized version of :class:`~torch.nn.BatchNorm2d`.
-    """
+    r"""This is the quantized version of :class:`~torch.nn.BatchNorm2d`."""
 
     _NNI_BN_RELU_MODULE = nni.BNReLU2d
 
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(
+        self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(num_features, eps, momentum, **factory_kwargs)
 
     def _get_name(self):
-        return 'QuantizedBatchNorm2d'
+        return "QuantizedBatchNorm2d"
 
     def _check_input_dim(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -69,25 +72,34 @@ class BatchNorm2d(_BatchNorm):
         # disabling this since this is not symbolically traceable
         # self._check_input_dim(input)
         return torch.ops.quantized.batch_norm2d(
-            input, self.weight, self.bias, self.running_mean,
-            self.running_var, self.eps, self.scale, self.zero_point)
+            input,
+            self.weight,
+            self.bias,
+            self.running_mean,
+            self.running_var,
+            self.eps,
+            self.scale,
+            self.zero_point,
+        )
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
-        return _BatchNorm.from_float(cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+        return _BatchNorm.from_float(
+            cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant
+        )
+
 
 class BatchNorm3d(_BatchNorm):
-    r"""This is the quantized version of :class:`~torch.nn.BatchNorm3d`.
-    """
+    r"""This is the quantized version of :class:`~torch.nn.BatchNorm3d`."""
 
     _NNI_BN_RELU_MODULE = nni.BNReLU3d
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
-        factory_kwargs = {'device': device, 'dtype': dtype}
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(num_features, eps, momentum, **factory_kwargs)
 
     def _get_name(self):
-        return 'QuantizedBatchNorm3d'
+        return "QuantizedBatchNorm3d"
 
     def _check_input_dim(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -99,9 +111,18 @@ class BatchNorm3d(_BatchNorm):
         # disabling this since this is not symbolically traceable
         # self._check_input_dim(input)
         return torch.ops.quantized.batch_norm3d(
-            input, self.weight, self.bias, self.running_mean,
-            self.running_var, self.eps, self.scale, self.zero_point)
+            input,
+            self.weight,
+            self.bias,
+            self.running_mean,
+            self.running_var,
+            self.eps,
+            self.scale,
+            self.zero_point,
+        )
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
-        return _BatchNorm.from_float(cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+        return _BatchNorm.from_float(
+            cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant
+        )
