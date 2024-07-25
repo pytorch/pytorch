@@ -3135,20 +3135,40 @@ def native_group_norm(
         [batch_size, num_groups, num_channels // num_groups, flattened_inner_size],
     )
     out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
-    out = out.view(input.shape)
+    if input.device.type == "cpu" and input.is_contiguous(
+        memory_format=torch.channels_last
+    ):
+        unsqueeze_bias = None
+        if bias is not None:
+            unsqueeze_bias = torch.reshape(
+                bias, [1, num_groups, num_channels // num_groups, 1]
+            )
+        unsqueeze_weight = None
+        if weight is not None:
+            unsqueeze_weight = torch.reshape(
+                weight, [1, num_groups, num_channels // num_groups, 1]
+            )
 
-    broadcast_dims = [0] + list(range(2, input.ndim))
-    unsqueeze_bias = None
-    if bias is not None:
-        unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
-    unsqueeze_weight = None
-    if weight is not None:
-        unsqueeze_weight = _unsqueeze_multiple(weight, broadcast_dims)
+        if unsqueeze_weight is not None:
+            out = out * unsqueeze_weight
+        if unsqueeze_bias is not None:
+            out = out + unsqueeze_bias
+        out = out.as_strided(input.shape, input.stride())
+    else:
+        out = out.view(input.shape)
 
-    if unsqueeze_weight is not None:
-        out = out * unsqueeze_weight
-    if unsqueeze_bias is not None:
-        out = out + unsqueeze_bias
+        broadcast_dims = [0] + list(range(2, input.ndim))
+        unsqueeze_bias = None
+        if bias is not None:
+            unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
+        unsqueeze_weight = None
+        if weight is not None:
+            unsqueeze_weight = _unsqueeze_multiple(weight, broadcast_dims)
+
+        if unsqueeze_weight is not None:
+            out = out * unsqueeze_weight
+        if unsqueeze_bias is not None:
+            out = out + unsqueeze_bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
