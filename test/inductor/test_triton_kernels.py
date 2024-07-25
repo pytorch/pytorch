@@ -2265,7 +2265,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
     @requires_gpu
     @common_utils.parametrize("autotuned", [False, True])
-    def test_add_kernel(self, autotuned):
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_add_kernel(self, autotuned, dynamic):
         from torch._inductor.utils import run_and_get_code
 
         libname = "my_cool_namespace"
@@ -2294,7 +2295,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         out = f(x, y)
         expected = x + y
         self.assertEqual(out, expected)
-        out_compiled, codes = run_and_get_code(torch.compile(f), x, y)
+        out_compiled, codes = run_and_get_code(torch.compile(f, dynamic=dynamic), x, y)
         self.assertEqual(out_compiled, expected)
         self.assertEqual(len(codes), 1)
 

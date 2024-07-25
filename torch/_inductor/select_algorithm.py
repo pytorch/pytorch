@@ -384,7 +384,7 @@ class TritonTemplateKernel(TritonKernel):
 
                     return f"({fixed_inputs[name]})"
 
-                def indirect_indexing(self, index_var, size, check):
+                def indirect_indexing(self, index_var, size, check, wrap_neg=True):
                     return sympy_index_symbol(str(index_var))
 
             with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
@@ -1134,13 +1134,7 @@ def get_env_num_workers() -> Optional[int]:
     return None
 
 
-# keeps track of the situations where autotuning results should be transfered to AutoHeuristic
-autoheuristic_registry: Dict[
-    str, Callable[[List[Tuple[ChoiceCaller, float]]], None]
-] = {}
-
-
-def create_inputs_key(input_nodes):
+def create_inputs_key(input_nodes) -> str:
     return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes])
 
 
@@ -1166,6 +1160,12 @@ class AlgorithmSelectorCache(PersistentCache):
         # first to benchmark it. share a single precompilation function for all lowerings
         # of a particular key
         self.precompile_cache: Dict[str, Callable[[], None]] = {}
+        # list of callbacks that are called after benchmarking
+        self.feedback_saver_fns: List[
+            Callable[
+                [Dict[ChoiceCaller, float], str, List[Any], List[ChoiceCaller]], None
+            ]
+        ] = []
 
     def __call__(
         self,
@@ -1347,13 +1347,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     name, input_nodes, timings, autotune_elapse, precompile_elapse
                 )
 
-            if config.collect_autoheuristic(name):
-                precompile_key = create_precompile_key(name, inputs_key, choices)
-                if precompile_key in autoheuristic_registry:
-                    ah_feedback = []
-                    for choice, timing in timings.items():
-                        ah_feedback.append((choice, timing))
-                    autoheuristic_registry[precompile_key](ah_feedback)
+            for feedback_fn in self.feedback_saver_fns:
+                feedback_fn(timings, name, input_nodes, choices)
 
             return timings
 
@@ -1704,6 +1699,14 @@ class AlgorithmSelectorCache(PersistentCache):
             ),
         )
 
+    def add_feedback_saver(
+        self,
+        fn: Callable[
+            [Dict[ChoiceCaller, float], str, List[Any], List[ChoiceCaller]], None
+        ],
+    ):
+        self.feedback_saver_fns.append(fn)
+
 
 _ALGORITHM_SELECTOR_CACHE: Optional[AlgorithmSelectorCache] = None
 
@@ -1719,6 +1722,15 @@ def autotune_select_algorithm(*args, **kwargs):
         ] = torch._inductor.config.benchmark_epilogue_fusion
 
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
+
+
+def add_feedback_saver(
+    fn: Callable[[Dict[ChoiceCaller, float], str, List[Any], List[ChoiceCaller]], None]
+):
+    global _ALGORITHM_SELECTOR_CACHE
+    if _ALGORITHM_SELECTOR_CACHE is None:
+        _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
+    _ALGORITHM_SELECTOR_CACHE.add_feedback_saver(fn)
 
 
 def realize_inputs(*args):
