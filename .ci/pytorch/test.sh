@@ -396,7 +396,7 @@ pr_time_benchmarks() {
   pip install cirron
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  PYTHONPATH="$(pwd)/benchmarks" sudo python3 benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.py "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
+  source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "content before"
   cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
 
