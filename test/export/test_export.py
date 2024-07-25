@@ -5273,27 +5273,39 @@ def forward(self, x, b_t, y):
             def forward(self, x):
                 return self.foo + x
 
+        class MyOuterModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = MyModule()
+
+            def forward(self, x):
+                return self.inner(x)
+
         inp = torch.rand(2, 3)
-        m = MyModule()
-        ep = export(m, (inp,), {})
 
-        self.assertEqual(ep.module()(inp), m(inp))
-        # Non-persistent buffers should not show up in the state dict
-        self.assertNotIn("foo", ep.state_dict)
-        named_buffers = {name: buffer for (name, buffer) in ep.named_buffers()}
-        # But they should show up in named_buffers()
-        self.assertIn("foo", named_buffers)
-        self.assertIn("foo", ep.constants)
-        self.assertEqual(len(ep.constants), 1)
+        def _test(m, non_persistent_buffer):
+            ep = export(m, (inp,), {})
 
-        # Check the same properties of the unlifted module
-        mod = ep.module()
-        self.assertNotIn("foo", mod.state_dict())
-        mod_named_buffers = {name: buffer for (name, buffer) in mod.named_buffers()}
-        self.assertIn("foo", mod_named_buffers)
-        self.assertIn("foo", ep.constants)
-        self.assertEqual(len(ep.constants), 1)
-        self.assertEqual(mod(inp), m(inp))
+            self.assertEqual(ep.module()(inp), m(inp))
+            # Non-persistent buffers should not show up in the state dict
+            self.assertNotIn(non_persistent_buffer, ep.state_dict)
+            named_buffers = {name: buffer for (name, buffer) in ep.named_buffers()}
+            # But they should show up in named_buffers()
+            self.assertIn(non_persistent_buffer, named_buffers)
+            self.assertIn(non_persistent_buffer, ep.constants)
+            self.assertEqual(len(ep.constants), 1)
+
+            # Check the same properties of the unlifted module
+            mod = ep.module()
+            self.assertNotIn(non_persistent_buffer, mod.state_dict())
+            mod_named_buffers = {name: buffer for (name, buffer) in mod.named_buffers()}
+            self.assertIn(non_persistent_buffer, mod_named_buffers)
+            self.assertIn(non_persistent_buffer, ep.constants)
+            self.assertEqual(len(ep.constants), 1)
+            self.assertEqual(mod(inp), m(inp))
+
+        _test(MyModule(), "foo")
+        _test(MyOuterModule(), "inner.foo")
 
     def test_export_as_backend(self):
         def f(x, y):

@@ -56,7 +56,6 @@ from torch.fx.passes.infra.pass_manager import PassManager
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 from .graph_signature import (  # noqa: F401
-    _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
     CustomObjArgument,
