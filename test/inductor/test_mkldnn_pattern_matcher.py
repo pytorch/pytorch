@@ -2610,7 +2610,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         class M(torch.nn.Module):
             def forward(self, x, weight, scales):
                 return (
-                    torch.matmul(x, weight.permute([1, 0]).to(dtype=x.dtype)) * scales
+                    torch.ops.aten.mm.default(x, weight.permute([1, 0]).to(dtype=x.dtype)) * scales
                 )
 
         mod = M().eval()
