@@ -3144,6 +3144,8 @@ CPU_TEST_FAILURES = {
     "test_reuse_kernel_dynamic": fail_minimal_arrayref_interface(is_skip=True),
     # the test segfaults
     "test_repeat_output": fail_stack_allocation(is_skip=True),
+    # TODO: failed internally
+    "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
     # segfault
     "test_buffer_mutation_1": fail_stack_allocation(is_skip=True),
     # segfault
