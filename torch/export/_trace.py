@@ -991,14 +991,14 @@ _EXPORT_FLAGS: Optional[Set[str]] = None
 _EXPORT_MODULE_HIERARCHY: Optional[Dict[str, str]] = None
 
 
-_ALLOW_LIST = {
-    torch._dynamo.exc.Unsupported,
-    torch._dynamo.exc.UserError,
-    torch._dynamo.exc.TorchRuntimeError,
-}
-
-
 def _get_class_if_classified_error(e):
+    from torch._dynamo.exc import TorchRuntimeError, Unsupported, UserError
+
+    _ALLOW_LIST = {
+        Unsupported,
+        UserError,
+        TorchRuntimeError,
+    }
     case_name = getattr(e, "case_name", None)
     if type(e) in _ALLOW_LIST and case_name is not None:
         return case_name
