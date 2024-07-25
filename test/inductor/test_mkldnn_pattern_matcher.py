@@ -2619,7 +2619,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         s_shape = 12
         x = torch.randn(x_shape, dtype=torch.bfloat16)
         w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
-        s = torch.randn(s_shape, dtype=torch.float32)
+        s = torch.randn(s_shape, dtype=torch.bfloat16)
 
         def matcher_check_fn():
             self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)

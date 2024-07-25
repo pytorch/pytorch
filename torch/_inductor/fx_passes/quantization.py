@@ -1449,7 +1449,7 @@ def _is_valid_woq_optimization_pattern():
             # with x.type=bfloat16 and w.type=int8
             x.dtype == torch.bfloat16
             and weight.dtype == torch.int8
-            and scales.dtype in [torch.bfloat16, torch.float32]
+            and scales.dtype == torch.bfloat16
             # _weight_int8pack_mm kernel only supports cpu now
             # TODO: add cuda kernel support instead of calling mul+sum
             and x.device.type == "cpu"
@@ -1471,9 +1471,6 @@ def _register_woq_lowering(pattern, computation_woq, computation_reshape=None):
         scales = kwargs["scales"]
         counters["inductor"]["woq_matcher_count"] += 1
         counters["inductor"]["woq_matcher_nodes"] += len(match.nodes)
-        scales_dtype = scales.dtype
-        if scales_dtype == torch.float32:
-            scales = L[prims.convert_element_type.default](scales, torch.bfloat16)
         if computation_reshape:
             out_features = weight.get_size()[0]
             origin_x_size = x.get_size()
@@ -1483,12 +1480,9 @@ def _register_woq_lowering(pattern, computation_woq, computation_reshape=None):
             ]
             func1 = L[computation_reshape](x, x_shape)
             func2 = L[computation_woq](func1, weight, scales)
-            func = L[computation_reshape](func2, out_shape)
+            return L[computation_reshape](func2, out_shape)
         else:
-            func = L[computation_woq](x, weight, scales)
-        if scales_dtype == torch.float32:
-            func = L[prims.convert_element_type.default](func, torch.float32)
-        return func
+            return L[computation_woq](x, weight, scales)
 
     return woq
 
@@ -1600,6 +1594,7 @@ def _register_quantization_lowerings():
 
 
 def _register_woq_lowerings():
+    print("enter _register_woq_lowerings")
     _register_woq_mm_int8_pattern1()
     _register_woq_mm_int8_pattern2()
     _register_woq_mm_int8_pattern3()
