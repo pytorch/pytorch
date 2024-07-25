@@ -799,7 +799,7 @@ class SliceVariable(BaseListVariable):
 class ListIteratorVariable(IteratorVariable):
     _nonvar_fields = {
         "index",
-        *VariableTracker._nonvar_fields,
+        *IteratorVariable._nonvar_fields,
     }
 
     def __init__(self, items, index: int = 0, **kwargs):
