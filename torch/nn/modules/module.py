@@ -24,9 +24,12 @@ from typing_extensions import Self
 import torch
 from torch import device, dtype, Tensor
 from torch._prims_common import DeviceLikeType
+from torch import optim
 from torch.nn.parameter import Parameter
+from torch.optim import Optimizer
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.hooks import BackwardHook, RemovableHandle
+from torch.utils.data import DataLoader
 
 
 __all__ = [
@@ -46,6 +49,20 @@ _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
 # the type of the subclass, not the looser type of `Module`.
 T = TypeVar("T", bound="Module")
+OptimizerFactory = Callable[[int, Any], Optimizer]
+
+
+# Define a dictionary that maps short names to optimizer classes
+optimizer_dict = {
+    'sgd': optim.SGD,
+    'adam': optim.Adam,
+    'adadelta': optim.Adadelta,
+    'adagrad': optim.Adagrad,
+    'adamw': optim.AdamW,
+    'adamax': optim.Adamax,
+    'rmsprop': optim.RMSprop,
+    'lbfgs': optim.LBFGS
+}
 
 
 class _IncompatibleKeys(
@@ -2906,3 +2923,58 @@ class Module:
         See :func:`torch.compile` for details on the arguments for this function.
         """
         self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
+    
+    def train_step(self, batch_idx, batch):
+        """
+        Abstract method to be implemented by the subclass
+        
+        This method is used inside of self.fit(...)
+        """
+        raise NotImplementedError
+
+    def _get_optimizer_by_name(self, name, **kwargs) -> Optimizer:
+        if name in optimizer_dict:
+            return optimizer_dict[name](self.parameters(), **kwargs)
+        else:
+            raise ValueError(f"Optimizer '{name}' is not supported.")
+
+    def fit(self,
+            train_loader: DataLoader,
+            optimizer: Union[str, OptimizerFactory] = 'adam',
+            max_epochs: int = 10,
+            log_interval: int = 100):
+        if isinstance(optimizer, str):
+            def default_optimizer_factory(batch_idx: int, batch) -> Optimizer:
+                return self._get_optimizer_by_name(optimizer, **self.optimizer_kwargs)
+
+            optimizer_factory = default_optimizer_factory
+        else:
+            optimizer_factory = optimizer
+
+        training = self.training
+
+        self.train()
+
+        with torch.enable_grad():
+            # Training loop
+            for epoch in range(max_epochs):  # loop over the dataset multiple times
+                running_loss = 0.0
+                for i, data in enumerate(train_loader, 0):
+                    inputs, _ = data
+
+                    optimizer = optimizer_factory(i, inputs)
+
+                    optimizer.zero_grad()
+
+                    loss = self.train_step(i, inputs)
+                    loss.backward()
+
+                    optimizer.step()
+
+                    running_loss += loss.item()
+                    if i % log_interval == log_interval-1:  # print every 100 mini-batches
+                        print(f"Epoch: {epoch + 1}, Data Idx: {i + 1}, Loss: {running_loss / 100:.3f}")
+                        running_loss = 0.0
+
+        if not training:
+            self.eval()
