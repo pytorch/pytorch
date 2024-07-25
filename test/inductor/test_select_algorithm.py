@@ -11,6 +11,7 @@ from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import TritonBenchmarkRequest
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import is_big_gpu
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -46,6 +47,11 @@ def patches(fn):
 
 
 class TestSelectAlgorithm(TestCase):
+    def setUp(self):
+        super().setUp()
+        if not is_big_gpu(0):
+            return self.skipTest("Need a big GPU to run max_autotune=True")
+
     @expectedFailureDynamicWrapper
     @patches
     def test_linear_relu_cuda(self):
@@ -341,7 +347,5 @@ class TestSelectAlgorithm(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._inductor.utils import is_big_gpu
-
     if IS_LINUX and HAS_CUDA and is_big_gpu(0):
         run_tests()

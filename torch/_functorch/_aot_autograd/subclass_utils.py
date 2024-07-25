@@ -52,7 +52,7 @@ def create_subclass_metadata(a, start_idx, extra_sizes_offset):
     # It *must* be because is_traceable_wrapper_subclass() - but mypy is not smart.
     assert isinstance(a, Tensor)
 
-    symint_placeholders = [True if isinstance(s, SymInt) else False for s in a.size()]
+    symint_placeholders = [isinstance(s, SymInt) for s in a.size()]
 
     return (
         SubclassCreationMeta(
@@ -103,7 +103,7 @@ def create_subclass_meta(
             assert isinstance(a, Tensor)
             start_idx = idx
             extra_sizes_offset = num_extra_sizes - extra_sizes_count
-            extra_sizes_count += len(a.shape)
+            extra_sizes_count += len([s for s in a.shape if isinstance(s, SymInt)])
             subclass_meta, _ = create_subclass_metadata(
                 a, start_idx, extra_sizes_offset
             )
@@ -243,9 +243,7 @@ def wrap_tensor_subclasses(
             assert subclass_meta.outer_size is not None
             num_args_tallied += subclass_meta.arg_count
             num_args_tallied += sum(  # extra SymInts
-                count_extra
-                for sz in subclass_meta.outer_size
-                if isinstance(sz, SymInt)
+                count_extra for sz in subclass_meta.outer_size if isinstance(sz, SymInt)
             )
 
     # Note: [Partitioner handling for Subclasses, Part 2]
@@ -422,12 +420,8 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
             end = length - offset + num_extra_symints
             updated_input_info += inner_metadata.input_info[start:end]
 
-    if inner_metadata is not None and False:
-        from rich import print
-        print()
-        print(inner_metadata.input_info)
-        print(updated_input_info)
-        assert len(inner_metadata.input_info) == len(updated_input_info), (len(inner_metadata.input_info), len(updated_input_info))
+    if inner_metadata is not None:
+        assert len(inner_metadata.input_info) == len(updated_input_info)
 
     return [
         i

@@ -3,6 +3,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
 #include <c10/core/Allocator.h>
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
 // AcceleratorHooksInterface is a shared interface provided by all
@@ -52,3 +53,4 @@ struct TORCH_API AcceleratorHooksInterface {
 };
 
 } // namespace at
+C10_CLANG_DIAGNOSTIC_POP()

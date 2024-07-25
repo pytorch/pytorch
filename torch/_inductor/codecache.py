@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import base64
@@ -27,7 +26,7 @@ import threading
 import warnings
 from bisect import bisect_right
 from copy import copy
-from ctypes import c_void_p, cdll, CDLL
+from ctypes import c_void_p, CDLL, cdll
 from functools import partial
 from pathlib import Path
 from time import time, time_ns
@@ -40,16 +39,19 @@ from typing import (
     Dict,
     Generator,
     List,
+    NoReturn,
     Optional,
     Sequence,
     Set,
     Tuple,
     TYPE_CHECKING,
+    TypeVar,
     Union,
 )
 from typing_extensions import TypeAlias
 
 import torch
+from torch import SymInt, Tensor
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -57,27 +59,30 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
-from .cpp_builder import (
-    _get_python_include_dirs,
-    get_cpp_compiler,
-    homebrew_libomp,
-    is_apple_clang,
-    is_clang,
-    is_conda_llvm_openmp_installed,
-)
+
+T = TypeVar("T")
+
+from _collections_abc import dict_keys  # noqa: TCH003
 
 """
 codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
 https://github.com/pytorch/pytorch/issues/124245#issuecomment-2197778902
 """
 from torch._inductor.cpp_builder import (
+    _get_python_include_dirs,
     _set_gpu_runtime_env,
     _transform_cuda_paths,
     CppBuilder,
     CppOptions,
     CppTorchCudaOptions,
     get_compiler_version_info,
+    get_cpp_compiler,
     get_name_and_dir_from_output_file_path,
+    homebrew_libomp,
+    is_apple_clang,
+    is_clang,
+    is_conda_llvm_openmp_installed,
+    normalize_path_separator,
 )
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, pick_vec_isa, VecISA
 from torch._inductor.runtime.compile_tasks import (
@@ -87,7 +92,6 @@ from torch._inductor.runtime.compile_tasks import (
 )
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import ALIGN_BYTES, clear_on_fresh_inductor_cache, is_linux
-
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -95,6 +99,7 @@ from torch._subclasses.fake_tensor import (
     TensorMetadata,
 )
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
+
 
 if TYPE_CHECKING:
     from concurrent.futures import Future
@@ -122,13 +127,13 @@ if config.is_fbcode():
     )
 else:
 
-    def log_global_cache_errors(*args, **kwargs):
+    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:
         pass
 
-    def log_global_cache_stats(*args, **kwargs):
+    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:
         pass
 
-    def log_global_cache_vals(*args, **kwargs):
+    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:
         pass
 
     def use_global_cache() -> bool:
@@ -160,7 +165,7 @@ def cpp_wrapper_cache_dir(name: str) -> str:
     return cpp_wrapper_build_directory
 
 
-def get_cpp_wrapper_cubin_path_name():
+def get_cpp_wrapper_cubin_path_name() -> str:
     return "cubin_path" if torch.version.hip is None else "hsaco_path"
 
 
@@ -179,16 +184,20 @@ class CacheBase:
 
         try:
             system: Dict[str, Any] = {
-                "device": {
-                    "name": torch.cuda.get_device_properties(
-                        torch.cuda.current_device()
-                    ).name,
-                },
+                "device": {"name": None},
                 "version": {
-                    "cuda": torch.version.cuda,
                     "triton": triton_version,
                 },
             }
+            device_properties = torch.cuda.get_device_properties(
+                torch.cuda.current_device()
+            )
+            if torch.version.cuda is not None:
+                system["device"]["name"] = device_properties.name
+                system["version"]["cuda"] = torch.version.cuda
+            else:
+                system["device"]["name"] = device_properties.gcnArchName
+                system["version"]["hip"] = torch.version.hip
         except (AssertionError, RuntimeError):
             # If cuda is not installed, none of the above config is relevant.
             system = {}
@@ -261,7 +270,7 @@ class LocalCache(CacheBase):
 
 class PersistentCache(CacheBase):
     @functools.lru_cache(None)  # noqa: B019
-    def get_global_cache(self):
+    def get_global_cache(self) -> Dict[str, Any]:
         global_cache_path = self.get_global_cache_path()
         if global_cache_path is None or not global_cache_path.is_file():
             return {}
@@ -296,7 +305,7 @@ class PersistentCache(CacheBase):
         )
         timings = {}
 
-        def check_cache(cache, callback=None) -> bool:
+        def check_cache(cache: Dict[str, Any], callback: Any = None) -> bool:
             """Check if `cache` contains data for all the choices"""
             hit = True
             for choice in choices:
@@ -362,7 +371,7 @@ def sha256_hash(data: bytes) -> str:
     return base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
 
 
-def code_hash(code: Union[str, bytes], extra: str = ""):
+def code_hash(code: Union[str, bytes], extra: str = "") -> str:
     hashing_str = code if isinstance(code, bytes) else code.encode("utf-8")
     if extra != "":
         hashing_str = hashing_str + b"||" + extra.encode("utf-8")
@@ -383,10 +392,12 @@ def get_path(
     return basename, subdir, path
 
 
-def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
+def get_hash(
+    content: Union[str, bytes], extra: str = "", hash_type: str = "code"
+) -> str:
     if hash_type == "code":
         return code_hash(content, extra)
-    if hash_type in ["cubin", "hsaco"]:
+    if hash_type in ["cubin", "hsaco", "spv"]:
         return code_hash(repr(content))
     raise AssertionError(f"Unknown hash type {hash_type}")
 
@@ -444,11 +455,13 @@ class TensorMetadataAndValues:
     values: List[Any]
 
 
-def _ident(x: Any) -> Any:
+def _ident(x: T) -> T:
     return x
 
 
-def extract_tensor_metadata_for_cache_key(device_map, t):
+def extract_tensor_metadata_for_cache_key(
+    device_map: Dict[torch.device, torch.device], t: Tensor
+) -> TensorMetadata:
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
     that are not needed for caching
@@ -471,7 +484,9 @@ def extract_tensor_metadata_for_cache_key(device_map, t):
     return meta
 
 
-def _reduce_fake_tensor(device_map, t):
+def _reduce_fake_tensor(
+    device_map: Dict[torch.device, torch.device], t: Tensor
+) -> Tuple[Callable[[T], T], Tuple[TensorMetadata]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
@@ -479,7 +494,9 @@ def _reduce_fake_tensor(device_map, t):
     return (_ident, (metadata,))
 
 
-def _reduce_tensor(device_map, t):
+def _reduce_tensor(
+    device_map: Dict[torch.device, torch.device], t: Tensor
+) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     If we see tensors, we know they're constants stored as attributes on
@@ -510,7 +527,7 @@ def _reduce_tensor(device_map, t):
     return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
-def _reduce_symint(s):
+def _reduce_symint(s: SymInt) -> Tuple[Callable[[T], T], Tuple[str]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle SymInts.
     """
@@ -520,7 +537,7 @@ def _reduce_symint(s):
     return (_ident, (str(s),))
 
 
-def _reduce_unsupported(s):
+def _reduce_unsupported(s: Any) -> NoReturn:
     """
     See FxGraphCachePickler. Custom reducer to handle any objects that we don't
     support and therefore raise to bypass caching.
@@ -549,7 +566,7 @@ class FxGraphCachePickler(pickle.Pickler):
     ] = _reduce_unsupported
 
     @classmethod
-    def dumps(cls, obj) -> bytes:
+    def dumps(cls, obj: Any) -> bytes:
         """
         Pickle an object using the FxGraphCachePickler.
         """
@@ -576,14 +593,14 @@ class FxGraphCachePickler(pickle.Pickler):
         return sha256_hash(serialized_data)
 
     @classmethod
-    def debug_lines(cls, inp: Any) -> List[str]:
+    def debug_lines(cls, inp: FxGraphHashDetails) -> List[str]:
         """
         Get a printable string describing in more detail all the attributes
         comprising an object. Useful for debugging when one graph hashes
         to a different value than another.
         """
 
-        def get_str(obj) -> str:
+        def get_str(obj: Any) -> str:
             if isinstance(obj, torch.Tensor):
                 return str(extract_tensor_metadata_for_cache_key(cls._device_map, obj))
             elif isinstance(obj, bytes):
@@ -610,7 +627,9 @@ class FxGraphCachePickler(pickle.Pickler):
         return lines
 
 
-def build_code_hash(roots, prefix, hasher):
+def build_code_hash(
+    roots: List[str] | None, prefix: str, hasher: hashlib._Hash
+) -> None:
     for lib in sorted(pkgutil.iter_modules(roots, prefix), key=lambda x: x.name):
         spec = lib.module_finder.find_spec(lib.name, None)
         assert spec is not None
@@ -625,13 +644,13 @@ def build_code_hash(roots, prefix, hasher):
 
 
 @functools.lru_cache(None)
-def torch_key():
+def torch_key() -> bytes:
     """
     Compute a key that contains relevant information about torch source files
     """
     if not config.is_fbcode():
 
-        def get_code_hash(root):
+        def get_code_hash(root: str) -> bytes:
             # This function isn't meant to be used outside of torch_key, just a
             # helper for clarity. Instead, use torch_key() directly when you need
             # a hash representing the state of the source code.
@@ -659,7 +678,7 @@ def torch_key():
     return parutil.get_file_contents("torch/src_hash.txt").rstrip()
 
 
-def get_inductor_root():
+def get_inductor_root() -> str:
     return os.path.dirname(__file__)
 
 
@@ -696,7 +715,7 @@ class FxGraphHashDetails:
         example_inputs: List[torch.Tensor],
         fx_kwargs: Dict[str, Any],
         inputs_to_check: Sequence[int],
-    ):
+    ) -> None:
         self.gm = gm
         self.example_inputs = example_inputs
 
@@ -960,10 +979,10 @@ class FxGraphCache:
         key: str,
         compiled_graph: CompiledFxGraph,
         example_inputs: List[torch.Tensor],
-        time_taken_ns,
-        local,
-        remote_cache,
-    ):
+        time_taken_ns: int,
+        local: bool,
+        remote_cache: None,
+    ) -> None:
         """
         Store a serialized CompiledFxGraph on disk.
         """
@@ -1024,7 +1043,7 @@ class FxGraphCache:
             counters["inductor"]["fxgraph_cache_write_error"] += 1
 
     @staticmethod
-    def _check_can_cache(gm: torch.fx.GraphModule):
+    def _check_can_cache(gm: torch.fx.GraphModule) -> None:
         """
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
@@ -1051,7 +1070,7 @@ class FxGraphCache:
                 raise BypassFxGraphCache
 
     @staticmethod
-    def load(
+    def load(  # type: ignore[no-untyped-def]
         compile_fx_fn: Callable[..., Any],
         gm: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
@@ -1080,11 +1099,11 @@ class FxGraphCache:
                 cache_id = "fx-graph-v1"
                 try:
                     if config.is_fbcode():
-                        from triton.fb.fb_memcache import (
-                            FbMemcacheRemoteFxGraphCacheBackend,
+                        from torch._inductor.fb.remote_cache import (
+                            FbRemoteFxGraphCacheBackend,
                         )
 
-                        remote_cache = FbMemcacheRemoteFxGraphCacheBackend(cache_id)
+                        remote_cache = FbRemoteFxGraphCacheBackend(cache_id)
                     else:
                         from torch._inductor.remote_cache import RedisRemoteCacheBackend
 
@@ -1137,7 +1156,7 @@ class FxGraphCache:
         return compiled_graph
 
     @staticmethod
-    def clear():
+    def clear() -> None:
         """
         Clear out the on-disk cache.
         """
@@ -1189,7 +1208,7 @@ class CompiledFxGraph:
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
         counter_deltas: Counter[str],
-    ):
+    ) -> None:
         self.current_callable = current_callable
         self.cache_key = graph.cache_key
         if graph.cache_path:
@@ -1557,7 +1576,7 @@ def cpp_compile_command(
     ).strip()
 
 
-def run_command_and_check(cmd: str):
+def run_command_and_check(cmd: str) -> None:
     cmd = shlex.split(cmd)
     try:
         subprocess.check_call(cmd)
@@ -1582,8 +1601,7 @@ class CudaKernelParamCache:
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
-    def set(cls, key: str, params: Dict[str, str], cubin: str) -> None:
-        bin_type = "cubin" if torch.version.hip is None else "hsaco"
+    def set(cls, key: str, params: Dict[str, str], cubin: str, bin_type: str) -> None:
         _, path = write(
             cubin,
             bin_type,
@@ -1602,7 +1620,7 @@ class CudaKernelParamCache:
         return cls.cache.get(key, None)
 
     @classmethod
-    def get_keys(cls):
+    def get_keys(cls) -> dict_keys[str, Dict[str, str]]:
         return cls.cache.keys()
 
 
@@ -1615,6 +1633,9 @@ class AotCodeCompiler:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> str:
+        if sys.platform == "win32":
+            raise RuntimeError("AotCodeCompiler not yet supported for inductor")
+
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
         picked_vec_isa = pick_vec_isa()
@@ -1791,7 +1812,7 @@ class AotCodeCompiler:
         with lock:
             # Currently, this only support serializing extern nodes in fbcode
             # Eventually, we should also have a serializer for OSS.
-            if config.is_fbcode() and serialized_extern_kernel_nodes:
+            if serialized_extern_kernel_nodes:
                 output_json = os.path.splitext(input_path)[0] + ".json"
                 with open(output_json, "w") as f:
                     f.write(serialized_extern_kernel_nodes)
@@ -1861,7 +1882,7 @@ class AotCodeCompiler:
                     run_command_and_check(compile_cmd)
 
             def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
-                def _pad_to_alignment(raw_bytes):
+                def _pad_to_alignment(raw_bytes: bytes) -> bytes:
                     padded_bytes = raw_bytes.ljust(
                         (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
                         b"\x00",
@@ -2001,7 +2022,7 @@ def cpp_prefix_path() -> str:
             content,
             "h",
         )
-    return filename
+    return normalize_path_separator(filename)
 
 
 def cpp_prefix() -> str:
@@ -2070,10 +2091,10 @@ def compile_file(
 _libgomp: Optional[CDLL] = None
 
 
-def custom_op_wrapper(op: str, *args):
+def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
     # This function will be called from generated cpp wrapper code in the JIT mode.
     # Because tensors will be passed in as AtenTensorHandle, we need to explicitly convert them.
-    def convert_arg(arg):
+    def convert_arg(arg: Any) -> Any:
         if str(type(arg)) == "<class 'PyCapsule'>":
             # No easy way to do isinstance check on PyCapsule
             return torch._C._aoti.alloc_tensor_by_stealing_from_void_ptr(arg)
@@ -2138,7 +2159,13 @@ class CppCodeCache:
             raise
 
     @classmethod
-    def load_async(cls, source_code: str, cuda=False, submit_fn=None, extra_flags=()):
+    def load_async(
+        cls,
+        source_code: str,
+        cuda: bool = False,
+        submit_fn: Any = None,
+        extra_flags: Sequence[str] = (),
+    ) -> Any:
         compile_command = {
             **cls.cpp_compile_command_flags,
             "cuda": cuda,
@@ -2188,13 +2215,13 @@ class CppCodeCache:
                 fb_output_path,
             )
 
-            binary_path = (
+            binary_path = normalize_path_separator(
                 fb_output_path
                 if config.is_fbcode()
                 else cpp_builder.get_target_file_path()
             )
 
-            def load_fn():
+            def load_fn() -> Any:
                 nonlocal lib
                 if lib is None:
                     if future is not None:
@@ -2215,16 +2242,16 @@ class CppCodeCache:
         return cls.cache[key]
 
     @classmethod
-    def load(cls, source_code: str, cuda: bool = False):
+    def load(cls, source_code: str, cuda: bool = False) -> Any:
         return cls.load_async(source_code, cuda)()
 
 
 def _worker_compile_cpp(
-    lock_path,
+    lock_path: str,
     cpp_builder: CppBuilder,
     fb_input_path: str,
     fb_output_path: str,
-):
+) -> None:
     from filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
@@ -2361,8 +2388,8 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         source_code: str,
         cuda: bool = False,
         num_outputs: int = -1,
-        submit_fn=None,
-        extra_flags=(),
+        submit_fn: Any = None,
+        extra_flags: Sequence[str] = (),
     ) -> Any:
         """
         Wrap a C++ function in fast Python bindings.
@@ -2395,7 +2422,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         )
         result = None
 
-        def future():
+        def future() -> Any:
             nonlocal result
             if result is None:
                 result = get_result()
@@ -2405,7 +2432,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         return future
 
     @classmethod
-    def load_pybinding(cls, *args, **kwargs) -> Any:
+    def load_pybinding(cls, *args: Any, **kwargs: Any) -> Any:
         return cls.load_pybinding_async(*args, **kwargs)()
 
 
@@ -2473,7 +2500,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
 
 
 # TODO: Will remove the temp code after switch to new cpp_builder
-def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
+def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]) -> None:
     new_diff: List[str] = [x for x in new_cmd if x not in old_cmd]
     old_diff: List[str] = [y for y in old_cmd if y not in new_cmd]
 
@@ -2492,7 +2519,7 @@ def _do_validate_cpp_commands(
     mmap_weights: bool,
     use_absolute_path: bool,
     aot_mode: bool,
-):
+) -> None:
     # PreCI will failed if test machine can't run cuda.
     temp_dir = tempfile.TemporaryDirectory()
     test_dir_path = temp_dir.name
@@ -2554,7 +2581,7 @@ def _do_validate_cpp_commands(
 
 # TODO: Will remove the temp code after switch to new cpp_builder
 # It could help on sync new cpp_builder generate same command line as the old one.
-def validate_new_cpp_commands():
+def validate_new_cpp_commands() -> None:
     cuda = [True, False]
     use_mmap_weights = [True, False]
     compile_only = [True, False]
@@ -2665,7 +2692,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     )
 
     @classmethod
-    def _codegen_buffer(cls, name: str, arg: HalideInputSpec, cuda: bool):
+    def _codegen_buffer(cls, name: str, arg: HalideInputSpec, cuda: bool) -> List[str]:
         assert arg.shape is not None
         assert arg.stride is not None and len(arg.shape) == len(arg.stride)
         assert arg.offset is not None
@@ -2699,7 +2726,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         ]
 
     @classmethod
-    def _codegen_glue(cls, meta, headerfile):
+    def _codegen_glue(cls, meta: HalideMeta, headerfile: object) -> str:
         is_cuda = meta.is_cuda()
         assert is_cuda is ("user_context" in meta.target)
         assert "no_runtime" in meta.target
@@ -2732,7 +2759,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
     @classmethod
     @functools.lru_cache(None)
-    def config_hash(cls):
+    def config_hash(cls) -> str:
         command_gen = CppBuilder(
             name="O",
             sources="I",
@@ -2751,7 +2778,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         )
 
     @staticmethod
-    def _search_for_file(suffix, errmsg):
+    def _search_for_file(suffix: str, errmsg: str) -> str:
         spec = importlib.machinery.PathFinder.find_spec("halide")
         if spec is None or not spec.submodule_search_locations:
             raise RuntimeError("halide python bindings not installed")
@@ -2776,7 +2803,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
     @staticmethod
     @functools.lru_cache(None)
-    def find_libautoschedule(name):
+    def find_libautoschedule(name: str) -> str:
         sofile = f"libautoschedule_{name.lower()}.so"
         if "HALIDE_LIB" in os.environ:
             path = os.path.join(os.environ["HALIDE_LIB"], sofile)
@@ -2789,7 +2816,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
     @staticmethod
     @functools.lru_cache(None)
-    def find_header(name):
+    def find_header(name: str) -> str:
         if "HALIDE_INCLUDE" in os.environ:
             path = os.path.join(os.environ["HALIDE_INCLUDE"], name)
             if os.path.exists(path):
@@ -2806,7 +2833,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         return HalideCodeCache._search_for_file(f"../include/{name}", errmsg)
 
     @classmethod
-    def generate_halide_async(cls, meta: HalideMeta, source_code: str, submit_fn=None):
+    def generate_halide_async(
+        cls, meta: HalideMeta, source_code: str, submit_fn: Any = None
+    ) -> Callable[[], Any]:
         dirpath = Path(
             get_path(
                 code_hash(
@@ -2865,7 +2894,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             else:
                 task()
 
-        def load():
+        def load() -> Callable[[], Any]:
             if wait_for_compile:
                 wait_for_compile()
             return bindings_future()
@@ -2873,11 +2902,11 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         return load
 
     @classmethod
-    def generate_halide(cls, *args, **kwargs):
+    def generate_halide(cls, *args: Any, **kwargs: Any) -> Callable[[], Any]:
         return cls.generate_halide_async(*args, **kwargs)()
 
     @classmethod
-    def build_standalone_runtime(cls):
+    def build_standalone_runtime(cls) -> str:
         if cls._standalone_runtime_path and os.path.exists(
             cls._standalone_runtime_path
         ):
@@ -2935,7 +2964,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         return sofile
 
 
-def _worker_task_halide(lockfile, jobs):
+def _worker_task_halide(lockfile: str, jobs: List[partial[Any]]) -> None:
     from filelock import FileLock
 
     try:
@@ -2951,7 +2980,7 @@ def _worker_task_halide(lockfile, jobs):
                 assert code.count(main) == 1
 
                 class Out:
-                    def __repr__(self):
+                    def __repr__(self) -> str:
                         return "out"
 
                 cmd[cmd.index("-o") + 1] = Out()  # type: ignore[call-overload]
@@ -2973,7 +3002,7 @@ def _worker_task_halide(lockfile, jobs):
         raise
 
 
-def touch(filename):
+def touch(filename: str):  # type: ignore[no-untyped-def]
     open(filename, "a").close()
 
 
@@ -3213,12 +3242,12 @@ class DLLWrapper:
         self.DLL = cdll.LoadLibrary(lib_path)
         self.is_open = True
 
-    def close(self):
+    def close(self) -> None:
         if self.is_open:
             self._dlclose()
             self.is_open = False
 
-    def _dlclose(self):
+    def _dlclose(self) -> None:
         f_dlclose = None
 
         if is_linux():
@@ -3240,26 +3269,26 @@ class DLLWrapper:
                 "dll unloading function was not found, library may not be unloaded properly!"
             )
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Callable[..., None]:
         if not self.is_open:
             raise RuntimeError(f"Cannot use closed DLL library: {self.lib_path}")
 
         method = getattr(self.DLL, name)
 
-        def _wrapped_func(*args):
+        def _wrapped_func(*args: Any) -> None:
             err = method(*args)
             if err:
                 raise RuntimeError(f"Error in function: {method.__name__}")
 
         return _wrapped_func
 
-    def __enter__(self):
+    def __enter__(self) -> DLLWrapper:  # noqa: PYI034
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: Any) -> None:
         self.close()
 
-    def __del__(self):
+    def __del__(self) -> None:
         self.close()
 
 
@@ -3275,7 +3304,7 @@ class CUDACodeCache:
     _SOURCE_CODE_SUFFIX = "cu"
 
     @classmethod
-    def write(cls, source_code, dst_file_ext) -> Tuple[str, str]:
+    def write(cls, source_code: str, dst_file_ext: str) -> Tuple[str, str]:
         """
         Writes source code into a file with dst_file_ext as the file extension.
         Returns the hash key of source code, and the path to the file.
@@ -3291,7 +3320,7 @@ class CUDACodeCache:
 
     @classmethod
     def compile(
-        cls, source_code, dst_file_ext, extra_args: Optional[List[str]] = None
+        cls, source_code: str, dst_file_ext: str, extra_args: Optional[List[str]] = None
     ) -> Tuple[str, str, str]:
         """
         Compiles CUDA source_code into a file with dst_file_ext extension.
@@ -3319,7 +3348,7 @@ class CUDACodeCache:
                     except subprocess.CalledProcessError as error:
                         raise exc.CUDACompileError(cmd_parts, error.output) from error
                     end_time = time()
-                    log_duration_msg = f"CUDA Compilation took {end_time-start_time} seconds. Compile command: {cmd}"
+                    log_duration_msg = f"CUDA Compilation took {end_time - start_time} seconds. Compile command: {cmd}"
                     log.info(log_duration_msg)
                 else:
                     log.debug(
@@ -3331,7 +3360,7 @@ class CUDACodeCache:
         return (cls.cache[key].output_path, key, input_path)
 
     @classmethod
-    def load(cls, source_code, dst_file_ext) -> Tuple[DLLWrapper, str, str]:
+    def load(cls, source_code: str, dst_file_ext: str) -> Tuple[DLLWrapper, str, str]:
         """
         Compiles source code and loads the generated .so file.
         Returns a tuple of DLLWrapper, hash_key, source_code_path
@@ -3361,7 +3390,7 @@ class ROCmCodeCache:
     _logged_compiler_version = False
 
     @classmethod
-    def write(cls, source_code, dst_file_ext) -> Tuple[str, str]:
+    def write(cls, source_code: str, dst_file_ext: str) -> Tuple[str, str]:
         """
         Writes source code into a file with dst_file_ext as the file extension.
         Returns the hash key of source code, and the path to the file.
@@ -3377,7 +3406,7 @@ class ROCmCodeCache:
 
     @classmethod
     def compile(
-        cls, source_code, dst_file_ext, extra_args: Optional[List[str]] = None
+        cls, source_code: str, dst_file_ext: str, extra_args: Optional[List[str]] = None
     ) -> Tuple[str, str, str]:
         """
         Compiles source_code into a file with dst_file_ext extension,
@@ -3413,7 +3442,7 @@ class ROCmCodeCache:
                     except subprocess.CalledProcessError as error:
                         raise exc.CUDACompileError(cmd_parts, error.output) from error
                     end_time = time()
-                    log_duration_msg = f"Compilation took {end_time-start_time} seconds. Compile command: {cmd}"
+                    log_duration_msg = f"Compilation took {end_time - start_time} seconds. Compile command: {cmd}"
                     log.info(log_duration_msg)
                 else:
                     log.debug(
@@ -3425,7 +3454,7 @@ class ROCmCodeCache:
         return (cls.cache[key].output_path, key, input_path)
 
     @classmethod
-    def load(cls, source_code, dst_file_ext) -> Tuple[DLLWrapper, str, str]:
+    def load(cls, source_code: str, dst_file_ext: str) -> Tuple[DLLWrapper, str, str]:
         """
         Compiles source code and loads the generated .so file.
         Returns a tuple of DLLWrapper, hash_key, source_code_path
@@ -3443,7 +3472,7 @@ class ROCmCodeCache:
 
 
 class CodeCacheFuture:
-    def result(self):
+    def result(self) -> None:
         raise NotImplementedError
 
 
@@ -3454,12 +3483,12 @@ class TritonFuture(CodeCacheFuture):
         self,
         kernel: Any,
         future: Optional[Future[Any]],
-    ) -> None:
+    ):
         self.kernel = kernel
         self.future = future
 
     # @dynamo_utils.dynamo_timed
-    def result(self) -> ModuleType:
+    def result(self) -> ModuleType:  # type: ignore[override]
         if self.future is not None:
             # If the worker failed this will throw an exception.
             result = self.future.result()
@@ -3470,8 +3499,8 @@ class TritonFuture(CodeCacheFuture):
 
 
 class LambdaFuture(CodeCacheFuture):
-    def __init__(self, result_fn):
+    def __init__(self, result_fn: Callable[..., Any]) -> None:
         self.result_fn = result_fn
 
-    def result(self):
+    def result(self) -> Callable[..., Any]:  # type: ignore[override]
         return self.result_fn()

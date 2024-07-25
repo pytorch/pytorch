@@ -2225,8 +2225,8 @@ class GraphModule(torch.nn.Module):
         view: "f32[3*s0]" = torch.ops.aten.view.default(clone, [-1])
         view_1: "f32[3*s0]" = torch.ops.aten.view.default(clone_1, [-1])
 
-        sym_numel_default: "Sym(3*s0)" = torch.ops.aten.sym_numel.default(clone)
-        return [clone, view, view_1, clone_1, sym_numel_default, primals_4]
+        sym_size_int_1: "Sym(3*s0)" = torch.ops.aten.sym_size.int(view, 0)
+        return [clone, view, view_1, clone_1, sym_size_int_1, primals_4]
 """,  # noqa: B950
         )
 
@@ -2282,8 +2282,8 @@ class GraphModule(torch.nn.Module):
         view: "f32[3*s0]" = torch.ops.aten.view.default(clone, [-1])
         view_1: "f32[3*s0]" = torch.ops.aten.view.default(clone_1, [-1])
 
-        sym_numel_default: "Sym(3*s0)" = torch.ops.aten.sym_numel.default(clone)
-        return [clone, view, view_1, clone_1, sym_numel_default, primals_4]
+        sym_size_int_1: "Sym(3*s0)" = torch.ops.aten.sym_size.int(view, 0)
+        return [clone, view, view_1, clone_1, sym_size_int_1, primals_4]
 """,  # noqa: B950
         )
 
@@ -2500,15 +2500,15 @@ class GraphModule(torch.nn.Module):
         )
 
         self.assertExpectedInline(
-                normalize_gm(bw[0].print_readable(print_output=False)),
-                """\
+            normalize_gm(bw[0].print_readable(print_output=False)),
+            """\
     # code below is wrong!
     class GraphModule(torch.nn.Module):
         def forward(self, primals_4: "Sym(s0)", tangents_1: "f32[4*s0]"):
             view_1: "f32[s0, 4]" = torch.ops.aten.view.default(tangents_1, [primals_4, 4]);  tangents_1 = None
             return [view_1, None, None, primals_4]
     """,  # noqa: B950
-            )
+        )
 
     def test_nested_tensor_simple(self):
         def f(nt):
