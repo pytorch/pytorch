@@ -53,7 +53,7 @@ jobs:
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
       test-matrix: |
         { include: [
-          { config: "test_laith", shard: 1, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
+          { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
           { config: "default", shard: 1, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
           { config: "default", shard: 2, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
           { config: "default", shard: 3, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
@@ -109,7 +109,6 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
-
 
   linux-jammy-py3_10-clang15-asan-build:
     name: linux-jammy-py3.10-clang15-asan
@@ -241,6 +240,7 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3.12-clang10
       test-matrix: |
         { include: [
+          { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
           { config: "default", shard: 1, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
           { config: "default", shard: 2, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
           { config: "default", shard: 3, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
