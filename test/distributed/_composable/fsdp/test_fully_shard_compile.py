@@ -460,6 +460,9 @@ class TestFullyShardCompile(FSDPTest):
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor(self):
+        # TODO(yf225):
+        # fullgraph=True, AC=True -> error out
+        # fullgraph=False, AC=True -> numerical issue
         for fullgraph, checkpoint_activations in product([True, False], [True, False]):
             with self._mock_sdpa(fullgraph), self._mock_reinplace_fsdp_all_gather(
                 fullgraph
