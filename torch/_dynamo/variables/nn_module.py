@@ -66,11 +66,10 @@ def initialize_lazy_module(tx, mod, args, kwargs):
             else:
                 return x
 
-        # proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
-        # fake_args = [convert_to_fake(arg) for arg in proxy_args]
-        # fake_kwargs = {k: convert_to_fake(v) for k, v in proxy_kwargs.items()}
-        # mod._infer_parameters(mod, fake_args, fake_kwargs)
-        mod._infer_parameters(mod, args, kwargs)
+        proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+        fake_args = [convert_to_fake(arg) for arg in proxy_args]
+        fake_kwargs = {k: convert_to_fake(v) for k, v in proxy_kwargs.items()}
+        mod._infer_parameters(mod, fake_args, fake_kwargs)
 
 
 @contextmanager
