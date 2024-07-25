@@ -24,6 +24,9 @@ well. This can be done with
 Pulling will reinstalle the conda dependencies as well as the nightly binaries into
 the repo directory.
 """
+
+from __future__ import annotations
+
 import contextlib
 import datetime
 import functools
@@ -40,23 +43,10 @@ import time
 import uuid
 from argparse import ArgumentParser
 from ast import literal_eval
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Generator,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    TypeVar,
-)
+from typing import Any, Callable, cast, Generator, Iterable, Iterator, Sequence, TypeVar
 
-LOGGER: Optional[logging.Logger] = None
+
+LOGGER: logging.Logger | None = None
 URL_FORMAT = "{base_url}/{platform}/{dist_name}.tar.bz2"
 DATETIME_FORMAT = "%Y-%m-%d_%Hh%Mm%Ss"
 SHA1_RE = re.compile("([0-9a-fA-F]{40})")
@@ -68,9 +58,9 @@ SPECS_TO_INSTALL = ("pytorch", "mypy", "pytest", "hypothesis", "ipython", "sphin
 
 
 class Formatter(logging.Formatter):
-    redactions: Dict[str, str]
+    redactions: dict[str, str]
 
-    def __init__(self, fmt: Optional[str] = None, datefmt: Optional[str] = None):
+    def __init__(self, fmt: str | None = None, datefmt: str | None = None) -> None:
         super().__init__(fmt, datefmt)
         self.redactions = {}
 
@@ -192,7 +182,7 @@ def logging_manager(*, debug: bool = False) -> Generator[logging.Logger, None, N
         sys.exit(1)
 
 
-def check_in_repo() -> Optional[str]:
+def check_in_repo() -> str | None:
     """Ensures that we are in the PyTorch repo."""
     if not os.path.isfile("setup.py"):
         return "Not in root-level PyTorch repo, no setup.py found"
@@ -203,7 +193,7 @@ def check_in_repo() -> Optional[str]:
     return None
 
 
-def check_branch(subcommand: str, branch: Optional[str]) -> Optional[str]:
+def check_branch(subcommand: str, branch: str | None) -> str | None:
     """Checks that the branch name can be checked out."""
     if subcommand != "checkout":
         return None
@@ -259,7 +249,7 @@ def timed(prefix: str) -> Callable[[F], F]:
 def _make_channel_args(
     channels: Iterable[str] = ("pytorch-nightly",),
     override_channels: bool = False,
-) -> List[str]:
+) -> list[str]:
     args = []
     for channel in channels:
         args.append("--channel")
@@ -271,11 +261,11 @@ def _make_channel_args(
 
 @timed("Solving conda environment")
 def conda_solve(
-    name: Optional[str] = None,
-    prefix: Optional[str] = None,
+    name: str | None = None,
+    prefix: str | None = None,
     channels: Iterable[str] = ("pytorch-nightly",),
     override_channels: bool = False,
-) -> Tuple[List[str], str, str, bool, List[str]]:
+) -> tuple[list[str], str, str, bool, list[str]]:
     """Performs the conda solve and splits the deps from the package."""
     # compute what environment to use
     if prefix is not None:
@@ -329,7 +319,7 @@ def conda_solve(
 
 
 @timed("Installing dependencies")
-def deps_install(deps: List[str], existing_env: bool, env_opts: List[str]) -> None:
+def deps_install(deps: list[str], existing_env: bool, env_opts: list[str]) -> None:
     """Install dependencies to deps environment"""
     if not existing_env:
         # first remove previous pytorch-deps env
@@ -342,7 +332,7 @@ def deps_install(deps: List[str], existing_env: bool, env_opts: List[str]) -> No
 
 
 @timed("Installing pytorch nightly binaries")
-def pytorch_install(url: str) -> "tempfile.TemporaryDirectory[str]":
+def pytorch_install(url: str) -> tempfile.TemporaryDirectory[str]:
     """Install pytorch into a temporary directory"""
     pytdir = tempfile.TemporaryDirectory()
     cmd = ["conda", "create", "--yes", "--no-deps", "--prefix", pytdir.name, url]
@@ -421,33 +411,33 @@ def pull_nightly_version(spdir: str) -> None:
     p = subprocess.run(cmd, check=True)
 
 
-def _get_listing_linux(source_dir: str) -> List[str]:
+def _get_listing_linux(source_dir: str) -> list[str]:
     listing = glob.glob(os.path.join(source_dir, "*.so"))
     listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.so")))
     return listing
 
 
-def _get_listing_osx(source_dir: str) -> List[str]:
+def _get_listing_osx(source_dir: str) -> list[str]:
     # oddly, these are .so files even on Mac
     listing = glob.glob(os.path.join(source_dir, "*.so"))
     listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.dylib")))
     return listing
 
 
-def _get_listing_win(source_dir: str) -> List[str]:
+def _get_listing_win(source_dir: str) -> list[str]:
     listing = glob.glob(os.path.join(source_dir, "*.pyd"))
     listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.lib")))
     listing.extend(glob.glob(os.path.join(source_dir, "lib", "*.dll")))
     return listing
 
 
-def _glob_pyis(d: str) -> Set[str]:
+def _glob_pyis(d: str) -> set[str]:
     search = os.path.join(d, "**", "*.pyi")
     pyis = {os.path.relpath(p, d) for p in glob.iglob(search)}
     return pyis
 
 
-def _find_missing_pyi(source_dir: str, target_dir: str) -> List[str]:
+def _find_missing_pyi(source_dir: str, target_dir: str) -> list[str]:
     source_pyis = _glob_pyis(source_dir)
     target_pyis = _glob_pyis(target_dir)
     missing_pyis = [os.path.join(source_dir, p) for p in (source_pyis - target_pyis)]
@@ -455,7 +445,7 @@ def _find_missing_pyi(source_dir: str, target_dir: str) -> List[str]:
     return missing_pyis
 
 
-def _get_listing(source_dir: str, target_dir: str, platform: str) -> List[str]:
+def _get_listing(source_dir: str, target_dir: str, platform: str) -> list[str]:
     if platform.startswith("linux"):
         listing = _get_listing_linux(source_dir)
     elif platform.startswith("osx"):
@@ -510,12 +500,12 @@ def _move_single(
         mover(src, trg)
 
 
-def _copy_files(listing: List[str], source_dir: str, target_dir: str) -> None:
+def _copy_files(listing: list[str], source_dir: str, target_dir: str) -> None:
     for src in listing:
         _move_single(src, source_dir, target_dir, shutil.copy2, "Copying")
 
 
-def _link_files(listing: List[str], source_dir: str, target_dir: str) -> None:
+def _link_files(listing: list[str], source_dir: str, target_dir: str) -> None:
     for src in listing:
         _move_single(src, source_dir, target_dir, os.link, "Linking")
 
@@ -537,7 +527,7 @@ def move_nightly_files(spdir: str, platform: str) -> None:
             _copy_files(listing, source_dir, target_dir)
 
 
-def _available_envs() -> Dict[str, str]:
+def _available_envs() -> dict[str, str]:
     cmd = ["conda", "env", "list"]
     p = subprocess.run(
         cmd,
@@ -559,7 +549,7 @@ def _available_envs() -> Dict[str, str]:
 
 
 @timed("Writing pytorch-nightly.pth")
-def write_pth(env_opts: List[str], platform: str) -> None:
+def write_pth(env_opts: list[str], platform: str) -> None:
     """Writes Python path file for this dir."""
     env_type, env_dir = env_opts
     if env_type == "--name":
@@ -582,9 +572,9 @@ def install(
     *,
     logger: logging.Logger,
     subcommand: str = "checkout",
-    branch: Optional[str] = None,
-    name: Optional[str] = None,
-    prefix: Optional[str] = None,
+    branch: str | None = None,
+    name: str | None = None,
+    prefix: str | None = None,
     channels: Iterable[str] = ("pytorch-nightly",),
     override_channels: bool = False,
 ) -> None:
@@ -673,7 +663,7 @@ def make_parser() -> ArgumentParser:
     return p
 
 
-def main(args: Optional[Sequence[str]] = None) -> None:
+def main(args: Sequence[str] | None = None) -> None:
     """Main entry point"""
     global LOGGER
     p = make_parser()

@@ -368,13 +368,43 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 3)
 
     def _test_mark_static_address(self, guarded):
+        # This test verifies that dynamo properly marks inputs as static
+        # when using the mark_static_address API.
+        # On 1st compile, we expect the input to be marked as static, with guarded
+        # set depending on the `guarded` flag.
+        # On 2nd compile, we expect the input to be unmarked
+        # if inlining NN modules, we expect metadata to be present on the tensor, indicating
+        # the static address type of the input
+        # if not inlining NN modules, we expect the tensor to be present in the buffers attribute
+        # of the graph.
+
         compiles_with_buffers = 0
         compiles = 0
 
         def debug_compiler(gm, _):
             nonlocal compiles_with_buffers
             nonlocal compiles
-            compiles_with_buffers += len(gm._buffers) > 0
+            if torch._dynamo.config.inline_inbuilt_nn_modules:
+                input_node = [
+                    n
+                    for n in gm.graph.nodes
+                    if n.op == "placeholder" and n.name == "l_x_"
+                ]
+                self.assertEqual(len(input_node), 1)
+                input_node = input_node[0]
+                if compiles == 0:
+                    self.assertEqual(
+                        input_node.meta["tensor_dict"]["_dynamo_static_input_type"],
+                        "guarded" if guarded else "unguarded",
+                    )
+                elif compiles == 1:
+                    self.assertFalse(
+                        "_dynamo_statc_input_type" in input_node.meta["tensor_dict"]
+                    )
+                else:
+                    raise RuntimeError(f"Unexpected number of compiles: {compiles}")
+            else:
+                compiles_with_buffers += len(gm._buffers) > 0
             compiles += 1
             return gm
 
@@ -387,7 +417,8 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.mark_static_address(inp, guard=guarded)
 
         fn(inp)
-        self.assertEqual(compiles_with_buffers, 1)
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+            self.assertEqual(compiles_with_buffers, 1)
 
         inp2 = torch.ones(2)
 
@@ -395,13 +426,22 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # since it was not marked static, compiles with buffers
         # should not be incremented
         fn(inp2)
-        self.assertEqual(compiles_with_buffers, 1)
+
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+            self.assertEqual(compiles_with_buffers, 1)
+
         self.assertEqual(compiles, 2 if guarded else 1)
 
     def test_mark_static_address_guarded(self):
+        with torch._dynamo.config.patch("inline_inbuilt_nn_modules", True):
+            self._test_mark_static_address(guarded=True)
+
         self._test_mark_static_address(guarded=True)
 
     def test_mark_static_address_unguarded(self):
+        with torch._dynamo.config.patch("inline_inbuilt_nn_modules", True):
+            self._test_mark_static_address(guarded=False)
+
         self._test_mark_static_address(guarded=False)
 
     def test_class_methods(self):
@@ -463,6 +503,44 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(v9, (C, 9))
 
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_assume_constant_result_on_user_defined_fn(self):
+        @torch._dynamo.assume_constant_result
+        def const_fn(n, s):
+            return torch.full([n], s)
+
+        def fn(B):
+            B = const_fn(B.size(0), 13)
+            X = B * 2
+            return X.tolist()
+
+        B_list = [8] * 32
+
+        B = torch.tensor(B_list, dtype=torch.int32)
+        torch._dynamo.decorators.mark_static(B, 0)
+
+        torch._dynamo.config.capture_scalar_outputs = True
+        torch._dynamo.config.capture_dynamic_output_shape_ops = True
+
+        self.assertEqual(
+            fn(B), torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(B)
+        )
+
+    def test_assume_constant_result_on_computation_with_graph_input(self):
+        @torch._dynamo.assume_constant_result
+        def check(y):
+            return y[0].item() == 1
+
+        def fn(x, y):
+            if check(y):
+                return x + 2
+            else:
+                return x + 1
+
+        y = torch.tensor([1])
+        x = torch.tensor(1)
+
+        self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
 
 
 if __name__ == "__main__":

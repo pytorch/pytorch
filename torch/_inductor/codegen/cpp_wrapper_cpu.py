@@ -10,19 +10,17 @@ import sympy
 from sympy import Expr
 
 import torch
-
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
-from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey
+from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
+
 from .. import config, ir
-from ..codecache import CudaKernelParamCache
 from ..utils import _align, ALIGN_BYTES, cache_on_self, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
 from .cpp_utils import (
     cexpr,
-    CppPrinter,
     DEVICE_TO_ATEN,
     DTYPE_TO_ATEN,
     DTYPE_TO_CPP,
@@ -71,20 +69,6 @@ class CppWrapperCpu(WrapperCodeGen):
         self.custom_op_wrapper_loaded = False
         self.expr_printer = cexpr
 
-        # CppPrinter sometimes calls at::native functions which causes problems in
-        # the ABI-compatible mode. Currently we are hitting this problem when codegen
-        # Grid computation expressions, but we my need to fix other size computation
-        # as well.
-        class GridExprCppPrinter(CppPrinter):
-            def _print_FloorDiv(self, expr):
-                x, div = expr.args
-                x = self.paren(self.doprint(x))
-                div = self.paren(self.doprint(div))
-                assert expr.is_integer, "Expect integers in GridExprPrinter"
-                return f"({x}/{div})"
-
-        self.grid_expr_printer = GridExprCppPrinter().doprint
-
     def generate_kernel_call(
         self,
         name,
@@ -94,6 +78,7 @@ class CppWrapperCpu(WrapperCodeGen):
         cuda=True,
         triton=True,
         arg_types=None,
+        raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
     ):
@@ -254,7 +239,7 @@ class CppWrapperCpu(WrapperCodeGen):
         # mark output type to unwrap tensor back to python scalar
         from ..ir import ShapeAsConstantBuffer
 
-        output_is_tensor = dict()
+        output_is_tensor = {}
         for idx, x in enumerate(V.graph.graph_outputs):
             if isinstance(x, ShapeAsConstantBuffer):
                 output_is_tensor[idx] = False
@@ -328,12 +313,9 @@ class CppWrapperCpu(WrapperCodeGen):
                         """
                     )
                 else:
-                    assert isinstance(
-                        d, sympy.Symbol
-                    ), f"dimention at {dim_idx=} for tensor {name=} must be a sympy.Symbol"
-                    sym_range = V.graph.sizevars.shape_env.var_to_range.get(d, None)
-                    if sym_range is None:
-                        continue
+                    from torch.utils._sympy.value_ranges import bound_sympy
+
+                    sym_range = bound_sympy(d, V.graph.sizevars.shape_env.var_to_range)
                     if not math.isinf(sym_range.lower):
                         self.prefix.splice(
                             f"""
@@ -397,7 +379,6 @@ class CppWrapperCpu(WrapperCodeGen):
                     f"{CppWrapperCpu.get_input_cpp_type(x)}"
                     for x in V.graph.graph_inputs.values()
                 )
-
                 output_arrayref_types = ", ".join(
                     f"ArrayRefTensor<{DTYPE_TO_CPP[x.get_dtype()]}>"
                     for x in V.graph.graph_outputs
@@ -943,6 +924,10 @@ class CppWrapperCpu(WrapperCodeGen):
         dtype_str = str(dtype).split(".")[-1]
         writer = indented_buffer or self
         writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
+
+        # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
+        tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+
         writer.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
         )
@@ -1190,6 +1175,8 @@ class CppWrapperCpu(WrapperCodeGen):
             # FIXME: no need to do this after we switch to the torchgen-ed C shim
             if kernel_suffix == "_scaled_dot_product_flash_attention":
                 shim_fn = "aoti_torch__scaled_dot_product_flash_attention_v2"
+            elif kernel_suffix == "_scaled_mm":
+                shim_fn = "aoti_torch__scaled_mm_v2"
             elif kernel_suffix.startswith("wrapped_fbgemm"):
                 assert self.device == "cpu", "Using wrapped_fbgemm out of CPU!"
                 shim_fn = f"aoti_torch_cpu_{kernel_suffix}"
@@ -1298,34 +1285,6 @@ class CppWrapperCpu(WrapperCodeGen):
             self.generate_c_shim_extern_kernel_call(kernel, args)
         else:
             self.writeline(self.wrap_kernel_call(kernel, args))
-
-    def generate_user_defined_triton_kernel(
-        self, kernel_name, grid, configs, args, triton_meta, arg_types=None
-    ):
-        assert len(grid) != 0
-        if len(grid) == 1:
-            grid_decision = grid[0]
-        else:
-            meta = CudaKernelParamCache.get(kernel_name)
-            assert meta is not None
-            grid_decision = None
-            for i, c in enumerate(configs):
-                if all(arg == meta["meta"][key] for key, arg in c.kwargs.items()):
-                    grid_decision = grid[i]
-                    break
-            assert grid_decision is not None
-
-        current_device = V.graph.scheduler.get_current_device_or_throw()
-        self.generate_kernel_call(
-            kernel_name,
-            args,
-            arg_types=arg_types,
-            grid=grid_decision,
-            device_index=current_device.index,
-            cuda=True,
-            triton=True,
-            triton_meta=triton_meta,
-        )
 
     def generate_scatter_fallback(
         self,
@@ -2356,6 +2315,10 @@ if (py_{buf_name}.get() == NULL) {{
         elif isinstance(val, (list, tuple)):
             # FIXME: This happens because type_ is not always properly set to torch.ListType
             return f"{{{', '.join(self.val_to_arg_str(x, None) for x in val)}}}"
+        elif isinstance(val, SymTypes):
+            return self.expr_printer(val.node.expr)
+        elif isinstance(val, sympy.Expr):
+            return self.expr_printer(val)
         else:
             return repr(val)
 
@@ -2421,7 +2384,16 @@ if (py_{buf_name}.get() == NULL) {{
                     # type_ is Optional[Tensor]
                     # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
                     base_handle = self.val_to_arg_str(val, element_type)
-                    if "wrap_with_raii_handle_if_needed" in base_handle:
+                    if config.use_minimal_arrayref_interface:
+                        base_handle = (
+                            f"convert_arrayref_tensor_to_tensor({base_handle})"
+                        )
+                    if base_handle.startswith(
+                        (
+                            "convert_arrayref_tensor_to_tensor",
+                            "wrap_with_raii_handle_if_needed",
+                        )
+                    ):
                         # wrap_with_raii_handle_if_needed creates a temp RAIIAtenTensorHandle, so we need to
                         # explicitly store it. Otherwise, it will be destroyed before the fallback kernel call.
                         tmp_var_name = f"var_{next(self.arg_var_id)}"

@@ -25,6 +25,8 @@ namespace native {
 namespace {
 // TODO: This function is the same as that of Pooling.cpp. We should refactor this into quantized directory
 // so that we don't need to duplicate the function
+#ifdef USE_CUDA
+#if AT_CUDNN_ENABLED()
 void check_maxpool2d_params(
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -39,6 +41,8 @@ void check_maxpool2d_params(
   TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
               "Expected 1d or 2d dilation, got ", dilation.size());
 }
+#endif
+#endif
 }
 
 // The current implementation of quantized cuda adaptive average pooling uses the following:

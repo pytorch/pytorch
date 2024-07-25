@@ -77,9 +77,10 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfTorchDynamo,
 )
-
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+
 
 USE_TORCHVISION = False
 try:
@@ -2341,8 +2342,7 @@ class TestJac(VmapTearDownMixin, TestCase):
         self.assertEqual(actual, expected)
 
     # https://github.com/pytorch/pytorch/issues/127036
-    # it won't fail as jacrev/jacfwd were not inlined (see #128255)
-    # @xfailIfTorchDynamo
+    @xfailIfTorchDynamo
     @parametrize("_preallocate_and_copy", (True, False))
     def test_chunk_jacrev_chunksize_one(self, device, _preallocate_and_copy):
         # With chunk_size=1, we shouldn't `vmap` and hence not be limited
@@ -3397,12 +3397,14 @@ class TestComposability(TestCase):
         new_cotangent = torch.randn(())
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
 
+    # FIXME: test fails in Windows
+    @unittest.skipIf(IS_WINDOWS, "fails in Windows; needs investigation")
     @unittest.skipIf(IS_FBCODE, "can't subprocess in fbcode")
     # it is redundant to run this test twice on a machine that has GPUs
     @onlyCPU
     def test_no_warning_on_import_functorch(self, device):
         out = subprocess.check_output(
-            [sys.executable, "-W", "all", "-c", "import functorch"],
+            [sys.executable, "-W", "always", "-c", "import functorch"],
             stderr=subprocess.STDOUT,
             cwd=os.path.dirname(os.path.realpath(__file__)),
         ).decode("utf-8")
@@ -3527,13 +3529,10 @@ class TestComposability(TestCase):
     @parametrize(
         "transform",
         [
-            "vmap",
             "grad",
             "jacrev",
-            "jacfwd",
             "grad_and_value",
             "hessian",
-            "functionalize",
         ],
     )
     def test_transforms_dont_support_saved_tensor_hooks(self, device, transform):
@@ -3573,7 +3572,7 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
             vjp(g, x)
 
-    def test_jvp_doesnt_support_saved_tensor_hooks(self, device):
+    def test_jvp_supports_saved_tensor_hooks(self, device):
         def f(x):
             return torch.sin(x).sum()
 
@@ -3584,12 +3583,12 @@ class TestComposability(TestCase):
         x = torch.randn(3, device=device)
         t = torch.randn(3, device=device)
 
-        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
-            with torch.autograd.graph.save_on_cpu():
-                jvp(f, (x,), (t,))
+        # smoke tests
+        with torch.autograd.graph.save_on_cpu():
+            jvp(f, (x,), (t,))
 
-        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
-            jvp(g, (x,), (t,))
+        # smoke tests
+        jvp(g, (x,), (t,))
 
     def test_can_use_functionalize_when_key_is_excluded(self, device):
         def f(x):
@@ -5083,9 +5082,9 @@ def traceable(f):
 @markDynamoStrictTest
 class TestCompileTransforms(TestCase):
     @skipIfRocm(msg="test leaks memory on ROCm")
-    # torch.compile is not supported on Windows
+    # torch.compile is not supported on Windows CUDA.
     # Triton only supports GPU with SM70 or later.
-    @expectedFailureIf(IS_WINDOWS or (TEST_CUDA and not SM70OrLater))
+    @expectedFailureIf((IS_WINDOWS and TEST_CUDA) or (TEST_CUDA and not SM70OrLater))
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:

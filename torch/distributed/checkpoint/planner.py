@@ -7,7 +7,6 @@ from functools import reduce
 from typing import Any, List, Optional, Tuple, Union
 
 import torch
-
 from torch.distributed.checkpoint.metadata import (
     ChunkStorageMetadata,
     Metadata,
@@ -331,7 +330,7 @@ class LoadPlanner:
     >>>
     >>>     def load_bytes(self, read_item, value):
     >>>         # Remove the "foo_" prefix
-    >>>         self.original_state_dict[read_item.dest_index.fqn[4:]] = torch.load(value)
+    >>>         self.original_state_dict[read_item.dest_index.fqn[4:]] = torch.load(value, weights_only=False)
 
 
     Modifying resolve_tensor and commit_tensor to handle load time transformation.
@@ -426,39 +425,3 @@ class LoadPlanner:
         The contents of tensor will follow its device synchronization model.
         """
         pass
-
-
-class _Checkpointable:
-    """
-    Interface for checkpointable objects.
-    This is to allow arbitrary objects/tensor subclasses to hook into DCP seamlessly through implementing the interface.
-    """
-
-    @abc.abstractmethod
-    def _create_write_items(self, fqn: str, object: Any) -> List[WriteItem]:
-        """
-        Return a list of WriteItems based on object's contents.
-        """
-        raise NotImplementedError(
-            "_Checkpointable._create_write_items is not implemented"
-        )
-
-    @abc.abstractmethod
-    def _create_chunk_list(self, tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
-        """
-        Return a list of `ChunkStorageMetadata` based on object's contents.
-        """
-        raise NotImplementedError(
-            "_Checkpointable._create_chunk_list is not implemented"
-        )
-
-    @abc.abstractmethod
-    def _get_tensor_shard(
-        self, tensor: torch.Tensor, index: MetadataIndex
-    ) -> torch.Tensor:
-        """
-        Return a 'torch.Tensor' shard based on 'MetadataIndex'.
-        """
-        raise NotImplementedError(
-            "_Checkpointable._get_tensor_shard is not implemented"
-        )

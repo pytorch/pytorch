@@ -28,6 +28,7 @@ from ..pattern_matcher import (
 )
 from .group_batch_fusion import is_node_meta_valid, POST_GRAD_FUSIONS, PRE_GRAD_FUSIONS
 
+
 log = logging.getLogger(__name__)
 
 _Arguments: TypeAlias = Tuple[torch.fx.node.Argument, ...]
@@ -40,8 +41,8 @@ _TransformParam: TypeAlias = Tuple[
 _Range: TypeAlias = Tuple[int, int]
 
 
-PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
-POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
+PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
+POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
 
 pre_grad_pass_names = [
     "normalization_pass",
@@ -58,6 +59,7 @@ post_grad_pass_names = [
     "normalization_aten_pass",
     "decompose_mm_pass",
     "unbind_stack_aten_pass",
+    "shape_padding_multiplier",
 ]
 
 for pass_name in pre_grad_pass_names:
@@ -66,7 +68,6 @@ for pass_name in pre_grad_pass_names:
     if pass_name in PRE_GRAD_FUSIONS:
         continue
     PRE_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
-        prevent_match_across_mutations=True,
         pass_name=pass_name,
     )
 
@@ -76,7 +77,6 @@ for pass_name in post_grad_pass_names:
     if pass_name in POST_GRAD_FUSIONS:
         continue
     POST_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
-        prevent_match_across_mutations=True,
         pass_name=pass_name,
     )
 
@@ -602,6 +602,7 @@ class SplitCatSimplifier:
             graph, split_node, next_users, user_inputs_list_new, transform_params_list  # type: ignore[arg-type]
         )
         self.erase_old_nodes(graph, split_node, next_users)  # type: ignore[arg-type]
+        counters["inductor"]["unbind_stack_pass"] += 1
 
     def get_user_input_list(
         self, split_node: torch.fx.Node, next_users: List[torch.fx.Node]

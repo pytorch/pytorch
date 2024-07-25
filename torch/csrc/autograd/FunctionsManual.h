@@ -39,7 +39,7 @@ TORCH_API inline std::optional<Tensor> wrap_opt_if(
     const Tensor& t,
     const bool cond) {
   using OptTensor = std::optional<Tensor>;
-  return cond ? OptTensor(t) : static_cast<OptTensor>(c10::nullopt);
+  return cond ? OptTensor(t) : static_cast<OptTensor>(std::nullopt);
 }
 
 TORCH_API Tensor
@@ -75,26 +75,26 @@ Tensor scale_grad_by_count(
 at::Tensor norm_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
-    const optional<at::Scalar>& p_,
+    const std::optional<at::Scalar>& p_,
     const at::Tensor& norm);
 at::Tensor norm_backward(
     at::Tensor grad,
     const at::Tensor& self,
-    const optional<at::Scalar>& p_,
+    const std::optional<at::Scalar>& p_,
     at::Tensor norm,
     at::IntArrayRef dim,
     bool keepdim);
 Tensor norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
-    const optional<Scalar>& p_,
+    const std::optional<Scalar>& p_,
     Tensor norm,
     IntArrayRef dim,
     bool keepdim);
 Tensor norm_jvp(
     const Tensor& grad,
     const Tensor& self,
-    const optional<Scalar>& p_,
+    const std::optional<Scalar>& p_,
     Tensor norm);
 Tensor _nested_from_padded_backward(
     const Tensor& grad,
@@ -244,6 +244,10 @@ at::Tensor unbind_backward_nested(
     const Tensor& nt_sizes,
     int64_t dim,
     const at::TensorOptions& options);
+at::Tensor unbind_backward_nested_jagged(
+    const variable_list& grads,
+    const Tensor& self,
+    int64_t dim);
 at::Tensor unsqueeze_to(const at::Tensor& self, c10::SymIntArrayRef sym_sizes);
 at::Tensor unsqueeze_to(
     const at::Tensor& self,
@@ -269,8 +273,8 @@ std::vector<at::Tensor> block_diag_backward(
 at::Tensor clamp_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
-    const optional<at::Scalar>& min,
-    const optional<at::Scalar>& max);
+    const std::optional<at::Scalar>& min,
+    const std::optional<at::Scalar>& max);
 at::Tensor clamp_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
@@ -769,14 +773,14 @@ Tensor as_strided_backward(
     const TensorGeometry& input_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
-    const optional<c10::SymInt>& storage_offset_);
+    const std::optional<c10::SymInt>& storage_offset_);
 Tensor as_strided_scatter_backward(
     const Tensor& grad,
     const TensorGeometry& input_geometry,
     const TensorGeometry& src_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
-    optional<c10::SymInt> storage_offset);
+    std::optional<c10::SymInt> storage_offset);
 std::tuple<Tensor, Tensor> atan2_backward(
     const Tensor& grad,
     const Tensor& self,

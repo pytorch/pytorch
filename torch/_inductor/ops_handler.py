@@ -18,7 +18,9 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
+
 from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sympy_str
+
 
 T = TypeVar("T")
 StoreMode = Optional[Literal["atomic_add"]]
@@ -109,7 +111,8 @@ class OpsHandler(Protocol[T]):
         evaluates to true.  For example, you would use this if you needed to
         perform an indirect load that may not be valid on some elements;
         without masking, invalid accesses can cause IMAs.  When mask is true,
-        the result is the result of body; otherwise it is other.
+        the result is the result of body; otherwise it is other. Here, `other`
+        needs to be a constant.
 
         Contrast this with ops.where, which can multiplex between two values
         that have been unconditionally computed.
@@ -267,6 +270,18 @@ class OpsHandler(Protocol[T]):
         Perform an associative scan on 'value'.
         """
         # TODO: Improve the description with some pseudocode
+        ...
+
+    def sort(
+        self,
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[T, ...],
+        stable: bool,
+        descending: bool,
+    ) -> Tuple[T, ...]:
+        """
+        Sort values along the reduction dimension.
+        """
         ...
 
     def bucketize(
@@ -742,7 +757,11 @@ class NoopHandler:
 
     @staticmethod
     def scan(dtypes, combine_fn, values) -> Tuple[None, ...]:
-        return tuple(None for i in range(len(values)))
+        return (None,) * len(values)
+
+    @staticmethod
+    def sort(dtypes, values, stable, descending) -> Tuple[None, ...]:
+        return (None,) * len(values)
 
     @staticmethod
     def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
@@ -778,6 +797,13 @@ class MockHandler:
     def scan(dtypes, combine_fn, values):
         return tuple(
             f"ops.scan({dtypes}, {combine_fn}, {values})[{i}]"
+            for i in range(len(values))
+        )
+
+    @staticmethod
+    def sort(dtypes, values, stable, descending):
+        return tuple(
+            f"ops.sort({dtypes}, {values}, stable={stable}, descending={descending})[{i}]"
             for i in range(len(values))
         )
 
@@ -908,6 +934,20 @@ class WrapperHandler(Generic[T]):
 
 # Use mypy to check protocol implemented correctly
 def _typecheck_WrapperHandler(h: WrapperHandler[T]) -> OpsHandler[T]:
+    return h
+
+
+class AddParenHandler(WrapperHandler[T]):
+    def __getattr__(self, name):
+        def inner(*args, **kwargs):
+            val = getattr(self._inner, name)(*args, **kwargs)
+            return f"({val})"
+
+        return inner
+
+
+# Use mypy to check protocol implemented correctly
+def _typecheck_AddParenHandler(h: AddParenHandler[T]) -> OpsHandler[T]:
     return h
 
 

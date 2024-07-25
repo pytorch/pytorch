@@ -93,6 +93,7 @@ class ReplicateTest(MultiProcessTestCase):
         setup_func: Optional[Callable] = None,
         no_inductor: bool = False,
         no_compile_forward: bool = False,
+        checkpoint: bool = False,
     ):
         backend = "nccl" if use_gpu else "gloo"
         dist.init_process_group(
@@ -113,7 +114,7 @@ class ReplicateTest(MultiProcessTestCase):
             else "python_reducer"
         )
         torch.manual_seed(123)
-        model = Net().to(device)
+        model = Net(checkpoint=checkpoint).to(device)
         input = torch.randn([1, DIM], device=device)
 
         compiled_replicate_model = replicate(deepcopy(model))
@@ -209,8 +210,16 @@ class ReplicateTest(MultiProcessTestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm
     @skip_if_lt_x_gpu(2)
+    @torch._inductor.config.patch(reorder_for_locality=False)
     def test_compile_gpu(self):
-        self._test_compile(use_gpu=True, no_sync=False)
+        self._test_compile(use_gpu=True, no_sync=False, checkpoint=False)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_rocm
+    @skip_if_lt_x_gpu(2)
+    @torch._inductor.config.patch(reorder_for_locality=False)
+    def test_compile_gpu_ac(self):
+        self._test_compile(use_gpu=True, no_sync=False, checkpoint=True)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm
@@ -279,12 +288,16 @@ class ReplicateTest(MultiProcessTestCase):
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         return code
 
-    def test_bucketing_coalesced_op(self):
-        torch._inductor.config._fuse_ddp_communication_passes = [
+    @torch._inductor.config.patch(
+        _fuse_ddp_communication_passes=[
             "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
-
+    )
+    # todo: This pass mucks things up since Inductor thinks its inference
+    # and can apply this. Should turn off these passes in compiled autograd
+    @torch._inductor.config.patch(reorder_for_locality=False)
+    def test_bucketing_coalesced_op(self):
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
@@ -311,12 +324,16 @@ class ReplicateTest(MultiProcessTestCase):
 
         fc.run(code)
 
-    def test_bucketing_concat_op(self):
-        torch._inductor.config._fuse_ddp_communication_passes = [
+    @torch._inductor.config.patch(
+        _fuse_ddp_communication_passes=[
             "fuse_ddp_with_concat_op",
             "schedule_comm_wait",
         ]
-
+    )
+    # todo: This pass mucks things up since Inductor thinks its inference
+    # and can apply this. Should turn off these passes in compiled autograd
+    @torch._inductor.config.patch(reorder_for_locality=False)
+    def test_bucketing_concat_op(self):
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)

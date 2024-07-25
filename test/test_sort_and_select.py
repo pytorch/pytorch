@@ -7,7 +7,6 @@ import numpy as np
 
 import torch
 from torch import nan
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -31,9 +30,6 @@ from torch.testing._internal.common_utils import (
     slowTest,
     TestCase,
 )
-
-# TODO: remove this
-SIZE = 100
 
 
 class TestSortAndSelect(TestCase):
@@ -476,6 +472,7 @@ class TestSortAndSelect(TestCase):
             sortKVal, sortKInd = topKViaSort(t, k, dim, dir)
             compareTensors(t, sortKVal, sortKInd, topKVal, topKInd, dim)
 
+        SIZE = 100
         t = torch.rand(
             random.randint(1, SIZE),
             random.randint(1, SIZE),

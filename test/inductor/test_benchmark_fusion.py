@@ -10,12 +10,11 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
-    skipIfRocm,
     slowTest,
     TEST_WITH_ASAN,
 )
-
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -68,7 +67,6 @@ class BenchmarkFusionTestTemplate:
         self.common(f, (torch.rand(2, 8192),))
 
     @slowTest
-    @skipIfRocm  # fail accuracy check on ROCm
     def test_resnet18(self):
         import torchvision
 

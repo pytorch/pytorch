@@ -14,7 +14,6 @@ from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 import torch
 from torch.nn import Parameter
 from torch.optim import Optimizer, SGD
-
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.optim.optimizer import (
     register_optimizer_step_post_hook,
@@ -32,6 +31,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_optimizers import (
+    _get_device_type,
     _get_optim_inputs_including_global_cliquey_kwargs,
     optim_db,
     OptimizerErrorEnum,
@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
 
 FP16_REDUCED_PRECISION = {"atol": 1e-5, "rtol": 1e-4}
 
@@ -738,7 +739,7 @@ class TestOptimRenewed(TestCase):
         for optim_input in optim_inputs:
             models, optimizers = [], []
             kwargs = deepcopy(optim_input.kwargs)
-            if kwargs.get("capturable", False) and str(device) == "cpu":
+            if kwargs.get("capturable", False) and _get_device_type(device) == "cpu":
                 # capturable is not supported on CPU
                 continue
             for flag_value in (False, True):
@@ -833,7 +834,7 @@ class TestOptimRenewed(TestCase):
         for optim_input in optim_inputs:
             updated_params, state = [], []
             kwargs = deepcopy(optim_input.kwargs)
-            if kwargs.get("capturable", False) and str(device) == "cpu":
+            if kwargs.get("capturable", False) and _get_device_type(device) == "cpu":
                 # capturable is not supported on CPU
                 continue
             for use_impl in (False, True):
@@ -1004,7 +1005,6 @@ class TestOptimRenewed(TestCase):
 
             self.assertLessEqual(mt_max_mem, expected_max_mem)
 
-    @onlyNativeDeviceTypes
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=floating_types_and(
@@ -1013,10 +1013,15 @@ class TestOptimRenewed(TestCase):
         ),
     )
     def test_fused_matches_forloop(self, device, dtype, optim_info):
-        if device not in optim_info.supports_fused_on:
+        if _get_device_type(device) not in optim_info.supports_fused_on:
             self.skipTest(
                 f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
             )
+        if _get_device_type(device) == "mps" and dtype not in (
+            torch.float16,
+            torch.float32,
+        ):
+            self.skipTest("MPS supports only torch.float16 and torch.float32")
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
 
     @onlyNativeDeviceTypes
@@ -1076,7 +1081,6 @@ class TestOptimRenewed(TestCase):
                         )
                 self.assertEqual(params, params_c)
 
-    @onlyCUDA
     @parametrize("impl", ["fused", "capturable"])
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
@@ -1100,8 +1104,15 @@ class TestOptimRenewed(TestCase):
         ):
             # Capturable SGD/Adagrad does not exist
             self.skipTest("SGD does not currently support capturable")
-        if impl == "fused" and device not in optim_info.supports_fused_on:
+        if _get_device_type(device) == "cpu":
+            self.skipTest("Test is only for non-cpu devices")
+        elif (
+            impl == "fused"
+            and _get_device_type(device) not in optim_info.supports_fused_on
+        ):
             self.skipTest(f"{device} is not supported for fused on {opt_name}")
+        elif impl == "capturable" and _get_device_type(device) == "mps":
+            self.skipTest("MPS does not support capturable")
 
         cpu_optim_inputs = optim_info.optim_inputs_func(device="cpu")
         for optim_input in cpu_optim_inputs:
@@ -1114,12 +1125,12 @@ class TestOptimRenewed(TestCase):
 
             # load
             optim_input.kwargs[impl] = True
-            param_cuda = param.clone().detach().to(device="cuda")
-            optimizer_cuda = optim_cls([param_cuda], **optim_input.kwargs)
-            optimizer_cuda.load_state_dict(optim_state_dict_cpu)
-            optimizer_cuda.zero_grad()
-            param_cuda.grad = torch.rand_like(param_cuda)
-            optimizer_cuda.step()
+            param_device = param.clone().detach().to(device=device)
+            optimizer_device = optim_cls([param_device], **optim_input.kwargs)
+            optimizer_device.load_state_dict(optim_state_dict_cpu)
+            optimizer_device.zero_grad()
+            param_device.grad = torch.rand_like(param_device)
+            optimizer_device.step()
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_param_groups_weight_decay(self, device, dtype, optim_info):
@@ -1316,6 +1327,11 @@ class TestOptimRenewed(TestCase):
             optim.zero_grad()
             loss = (w.mv(i) + b).pow(2).sum()
             loss.backward()
+            if optim_info.only_supports_sparse_grads:
+                if w.grad is not None:
+                    w.grad = w.grad.to_sparse()
+                if b.grad is not None:
+                    b.grad = b.grad.to_sparse()
             return loss
 
         for optim_input in all_optim_inputs:

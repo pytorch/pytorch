@@ -92,6 +92,38 @@ def get_model(
     return m, inputs, outputs
 
 
+class MutatingModel(nn.Module):
+    def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
+        super().__init__()
+        self.ctx_manager = ctx_manager
+        self.net = nn.Sequential(
+            *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, out_feat), nn.ReLU()]
+        )
+        self.state = 1
+
+    def forward(self, inputs):
+        self.state = 2
+        return self.net(inputs) * self.state
+
+
+def get_mutating_model(
+    device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None
+):
+    m = MutatingModel(
+        in_feat=in_feat,
+        hidden_feat=hidden_feat,
+        out_feat=out_feat,
+        ctx_manager=ctx_manager,
+    ).to(device)
+    m.apply(init_weights)
+    inputs = torch.rand(bsz, in_feat).to(device)
+    outputs = m(inputs)
+    return m, inputs, outputs
+
+
 class ToyInnerModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -233,10 +265,9 @@ class CheckSplitsCompiler:
 # other important thing is patching _active_ddp_module, which is what actually
 # triggers DDP optimization
 class FakeDDP(nn.Module):
-    def __init__(self, module):
+    def __init__(self, module, bucket_cap_mb=25):
         super().__init__()
         self.module = module
-        bucket_cap_mb = 25
         self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
 
     @contextmanager
@@ -318,6 +349,98 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 
         opt_model = torch.compile(dynamic=True)(model)
         opt_model(torch.randn(20, 512))
+
+    @config.patch(optimize_ddp=True, capture_scalar_outputs=True)
+    def test_unbacked_symbol_splitting_direct(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight1 = nn.Parameter(torch.randn(512, 512))
+                self.weight2 = nn.Parameter(torch.randn(512, 512))
+
+            def forward(self, x, y):
+                u0, u1 = y.tolist()
+                x = torch.cat([x, x])
+                y = x @ self.weight1
+                z = (x + y @ self.weight2) * u0
+                return z
+
+        model = Model()
+        model = FakeDDP(model)
+
+        opt_model = torch.compile(dynamic=True)(model)
+        opt_model(torch.randn(20, 512), torch.tensor([12, 13]))
+
+    @config.patch(optimize_ddp=True, capture_scalar_outputs=True)
+    def test_unbacked_symbol_splitting_indirect(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight1 = nn.Parameter(torch.randn(512, 512))
+                self.weight2 = nn.Parameter(torch.randn(512, 512))
+
+            def forward(self, x, y):
+                u0, u1 = y.tolist()
+                a = torch.ones(u0)
+                x = torch.cat([x, x])
+                y = x @ self.weight1
+                z = (x + y @ self.weight2) * a.sum()
+                return z
+
+        model = Model()
+        model = FakeDDP(model)
+
+        opt_model = torch.compile(dynamic=True)(model)
+        opt_model(torch.randn(20, 512), torch.tensor([12, 13]))
+
+    @config.patch(optimize_ddp=True, capture_scalar_outputs=True)
+    def test_unbacked_symbol_splitting_torture_multi(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight1 = nn.Parameter(torch.randn(512, 512))
+                self.weight2 = nn.Parameter(torch.randn(512, 512))
+                self.weight3 = nn.Parameter(torch.randn(512, 512))
+
+            def forward(self, x, y):
+                # partition one (contains the u0 def)
+                u0, u1 = y.tolist()
+                x = torch.cat([x, x])
+                y1 = x @ self.weight1
+                # partition two (contains the variable)
+                y2 = y1 @ self.weight2
+                a = torch.ones(u0)
+                # partition three
+                z = (x + y2 @ self.weight3) * a.sum()
+                return z
+
+        model = Model()
+        model = FakeDDP(model, bucket_cap_mb=1)
+
+        opt_model = torch.compile(dynamic=True)(model)
+        opt_model(torch.randn(20, 512), torch.tensor([12, 13]))
+
+    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/130534"
+    @config.patch(optimize_ddp=True, capture_dynamic_output_shape_ops=True)
+    def test_unbacked_symbol_splitting_no_binding(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight1 = nn.Parameter(torch.randn(512, 512))
+                self.weight2 = nn.Parameter(torch.randn(512, 512))
+
+            def forward(self, x, y):
+                nz = y.nonzero()
+                x = torch.cat([x, x])
+                y = x @ self.weight1
+                z = (x + y @ self.weight2) * (nz + 1).sum()
+                return z
+
+        model = Model()
+        model = FakeDDP(model)
+
+        opt_model = torch.compile(dynamic=True)(model)
+        opt_model(torch.randn(20, 512), torch.tensor([0.0, 12.0, 0.0, 11.0]))
 
     @patch.object(config, "optimize_ddp", True)
     def test_call_method_forward(self):
@@ -483,6 +606,26 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             fsdp_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
+
+    @skip_if_lt_x_gpu(1)
+    def test_fsdp_setattr(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            # Test with basic FSDP wrapping (outer wrap around whole model)
+            m, inputs, correct_outputs = get_mutating_model(f"cuda:{self.rank}")
+            fsdp_m = FSDP(m, use_orig_params=True)
+            prof = torch._dynamo.utils.CompileProfiler()
+            fsdp_m = torch.compile(fsdp_m, backend=prof, fullgraph=False)
+            outputs = fsdp_m(inputs)
+            self.assertTrue(same(correct_outputs, outputs))
+            FileCheck().check("Torchdynamo Profiler Report").check(
+                "Graph Breaks"
+            ).check_not(
+                "setattr(FSDPManagedNNModuleVariable(MutatingModel), state, ...)"
+            ).check_not(
+                "setattr(FSDPManagedNNModuleVariable(FullyShardedDataParallel), _is_root, ...)"
+            ).run(
+                prof.report()
+            )
 
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -1083,18 +1226,13 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
             # far from an exhaustive check of all the expected guards, just check a couple of them.
             FileCheck().check("""local "L['self']" TYPE_MATCH""").check(
-                """local "L['self']" ID_MATCH"""
-            ).check(
                 f"""{expected_guard_source} "L['self']._modules['net']" TYPE_MATCH"""
             ).check(
-                f"""{expected_guard_source} "L['self']._modules['net']" ID_MATCH"""
-            ).check(
                 f"""{expected_guard_source} "L['self']._modules['net']._modules['0']" TYPE_MATCH"""
-            ).check(
-                f"""{expected_guard_source} "L['self']._modules['net']._modules['1']" ID_MATCH"""
             ).run(
                 GUARDS_FILE.getvalue()
             )
+
             self.assertTrue(same(correct_outputs, outputs))
 
     def test_fsdp_skip_register_attr_or_module(self):

@@ -10,6 +10,7 @@
 
 #include <cstddef>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
 struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
@@ -55,6 +56,9 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
   virtual size_t getDriverAllocatedMemory() const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  virtual size_t getRecommendedMaxMemory() const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
   virtual void setMemoryFraction(double /*ratio*/) const {
@@ -104,3 +108,4 @@ TORCH_API const MPSHooksInterface& getMPSHooks();
 
 } // namespace detail
 } // namespace at
+C10_CLANG_DIAGNOSTIC_POP()

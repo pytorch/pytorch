@@ -48,6 +48,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(arctan2);
   OP_DECOMPOSE(arctan2_);
   OP_DECOMPOSE(argsort);
+  OP_DECOMPOSE2(argsort, stable);
   OP_DECOMPOSE(avg_pool1d);
   OP_DECOMPOSE(adaptive_max_pool1d);
   OP_DECOMPOSE(adaptive_avg_pool1d);
@@ -324,6 +325,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(type_as);
   OP_DECOMPOSE(linalg_diagonal);
   OP_DECOMPOSE(diagonal_copy);
+  OP_DECOMPOSE(alias_copy);
+  m.impl("as_strided_copy", native::as_strided_copy_symint);
   m.impl("pad", native::pad_symint);
   m.impl("_pad_circular", native::_pad_circular_symint);
   OP_DECOMPOSE(swapdims_);
