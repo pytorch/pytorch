@@ -58,15 +58,10 @@ struct TORCH_API CapturedTraceback : public c10::GatheredContext {
   int traversePython(visitproc visit, void* arg);
   int clearPython();
 
-  void recordUserDefinedFrame(const unwind::Frame& frame) {
-    user_defined_frames_.push_back(frame);
-  }
-
  private:
   std::vector<PyFrame> frames_;
   std::vector<void*> cpp_frames_;
   std::vector<jit::StackEntry> script_frames_;
-  std::vector<unwind::Frame> user_defined_frames_;
   friend TORCH_API SymbolizedTracebacks
   symbolize(const std::vector<CapturedTraceback*>& to_symbolize);
 
