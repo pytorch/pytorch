@@ -16,10 +16,7 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.pipelining import PipelineStage
 from torch.distributed.pipelining.schedules import (
     PipelineScheduleSingle,
-    Schedule1F1B,
-    ScheduleFlexibleInterleaved1F1B,
     ScheduleGPipe,
-    ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
 )
 from torch.nn.parallel import DistributedDataParallel as DDP
