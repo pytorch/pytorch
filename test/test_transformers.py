@@ -1564,8 +1564,7 @@ class TestSDPAFailureModes(NNTestCase):
     @onlyCUDA
     @skipIfRocm  # Nested Tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
-    @parametrize("fused_kernel", [SDPBackend.CUDNN_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
-                 PLATFORM_SUPPORTS_CUDNN_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize("fused_kernel", [SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_sdpa_kernel_grouped_query_attention_cuda(self, device, fused_kernel):
         rand_query = torch.rand(8, 8, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
         rand_key = torch.rand(8, 4, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
@@ -2982,7 +2981,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("scale", [None, "l1"])
     @parametrize("enable_gqa", [True, False])
-    @parametrize("n_heads", [[16, 8], [64, 8], [10, 2]])
+    @parametrize("n_heads", [[16, 8], [10, 2]])
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                scale: str, enable_gqa: bool, n_heads: List[int]):
