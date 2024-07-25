@@ -90,7 +90,10 @@ C10_API std::ostream& operator<<(std::ostream& os, const SymBool& s);
 #define TORCH_SYM_INTERNAL_ASSERT(cond, ...) \
   TORCH_INTERNAL_ASSERT((cond).expect_true(__FILE__, __LINE__), __VA_ARGS__)
 
-inline bool guard_size_oblivious(bool b, const char* file, int64_t line) {
+inline bool guard_size_oblivious(
+    bool b,
+    const char* file [[maybe_unused]],
+    int64_t line [[maybe_unused]]) {
   return b;
 }
 
