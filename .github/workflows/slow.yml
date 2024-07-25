@@ -36,6 +36,15 @@ jobs:
       id-token: write
       contents: read
 
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build:
     name: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
     uses: ./.github/workflows/_linux-build.yml
@@ -97,7 +106,8 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3.8-clang10
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "slow", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "slow", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
         ]}
 
   linux-focal-py3_8-clang10-test:
@@ -119,7 +129,8 @@ jobs:
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
+          { config: "slow", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "slow", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
         ]}
 
   linux-focal-rocm6_1-py3_8-test:
@@ -138,15 +149,17 @@ jobs:
 
   linux-jammy-py3_10-clang15-asan-build:
     name: linux-jammy-py3.10-clang15-asan
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       build-environment: linux-jammy-py3.10-clang15-asan
       docker-image-name: pytorch-linux-jammy-py3-clang15-asan
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 3, runner: "linux.4xlarge" },
-          { config: "slow", shard: 2, num_shards: 3, runner: "linux.4xlarge" },
-          { config: "slow", shard: 3, num_shards: 3, runner: "linux.4xlarge" },
+          { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
         ]}
       sync-tag: asan-build
 

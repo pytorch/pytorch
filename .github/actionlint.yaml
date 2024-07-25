@@ -47,3 +47,5 @@ self-hosted-runner:
     - macos-latest-xlarge
     - macos-13-xlarge
     - macos-14-xlarge
+    # Organization-wide Intel hosted XPU runners
+    - linux.idc.xpu

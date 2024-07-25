@@ -6,7 +6,6 @@ from typing import Any, cast, List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
-
 from torch.distributed._tensor._collective_utils import (
     fill_empty_tensor_to_shards,
     mesh_broadcast,
@@ -351,9 +350,7 @@ class Replicate(Placement):
     """
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Replicate):
-            return False
-        return True
+        return isinstance(other, Replicate)
 
     def __hash__(self) -> int:
         # every replicate placement is the same

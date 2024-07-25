@@ -210,7 +210,7 @@ Tensor q_avg_pool2d(
         input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
     // fast path for channel last: qavg_pool_2d_nhwc_stub
     qavg_pool2d_nhwc_stub(
         input.device().type(),

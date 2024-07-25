@@ -8,16 +8,15 @@ import io
 import os
 import shutil
 import zipfile
-from typing import Any, List, Mapping, Set, Tuple, Union
+from typing import Any, Mapping
 
 import torch
 import torch.jit._trace
 import torch.serialization
 from torch.onnx import _constants, _exporter_states, errors
-from torch.onnx._internal import _beartype, jit_utils, registration
+from torch.onnx._internal import jit_utils, registration
 
 
-@_beartype.beartype
 def export_as_test_case(
     model_bytes: bytes, inputs_data, outputs_data, name: str, dir: str
 ) -> str:
@@ -73,8 +72,7 @@ def export_as_test_case(
     return test_case_dir
 
 
-@_beartype.beartype
-def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
+def load_test_case(dir: str) -> tuple[bytes, Any, Any]:
     """Load a self contained ONNX test case from a directory.
 
     The test case must contain the model and the inputs/outputs data. The directory structure
@@ -124,7 +122,6 @@ def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
     return model_bytes, inputs, outputs
 
 
-@_beartype.beartype
 def export_data(data, value_info_proto, f: str) -> None:
     """Export data to ONNX protobuf format.
 
@@ -163,10 +160,9 @@ def export_data(data, value_info_proto, f: str) -> None:
             )
 
 
-@_beartype.beartype
 def _export_file(
     model_bytes: bytes,
-    f: Union[io.BytesIO, str],
+    f: io.BytesIO | str,
     export_type: str,
     export_map: Mapping[str, bytes],
 ) -> None:
@@ -210,7 +206,6 @@ def _export_file(
         raise ValueError("Unknown export type")
 
 
-@_beartype.beartype
 def _add_onnxscript_fn(
     model_bytes: bytes,
     custom_opsets: Mapping[str, int],
@@ -230,8 +225,8 @@ def _add_onnxscript_fn(
 
     # Iterate graph nodes to insert only the included custom
     # function_proto into model_proto
-    onnx_function_list = list()  # type: ignore[var-annotated]
-    included_node_func = set()  # type: Set[str]
+    onnx_function_list = []  # type: ignore[var-annotated]
+    included_node_func: set[str] = set()
     # onnx_function_list and included_node_func are expanded in-place
     _find_onnxscript_op(
         model_proto.graph, included_node_func, custom_opsets, onnx_function_list
@@ -243,12 +238,11 @@ def _add_onnxscript_fn(
     return model_bytes
 
 
-@_beartype.beartype
 def _find_onnxscript_op(
     graph_proto,
-    included_node_func: Set[str],
+    included_node_func: set[str],
     custom_opsets: Mapping[str, int],
-    onnx_function_list: List,
+    onnx_function_list: list,
 ):
     """Recursively iterate ModelProto to find ONNXFunction op as it may contain control flow Op."""
     for node in graph_proto.node:

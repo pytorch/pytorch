@@ -1,28 +1,37 @@
 # mypy: allow-untyped-defs
-from ._ops import OpOverload
-from typing import Any, Optional, Set, List, Union, Callable, Tuple, Dict, Sequence
-from typing_extensions import deprecated
-import traceback
-import torch
-import weakref
+import contextlib
 import functools
 import inspect
 import re
-import contextlib
 import sys
-from torch._library.custom_ops import custom_op, _maybe_get_opdef, device_types_t, CustomOpDef
+import traceback
+import weakref
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing_extensions import deprecated
+
+import torch
 import torch._library as _library
+from torch._library.custom_ops import (
+    _maybe_get_opdef,
+    custom_op,
+    CustomOpDef,
+    device_types_t,
+)
+from torch._library.infer_schema import infer_schema  # noqa: F401
+from torch._ops import OpOverload
 
 
 __all__ = [
-    'Library',
-    'impl',
-    'define',
-    'fallthrough_kernel',
-    'impl_abstract',
-    'register_fake',
-    'get_ctx',
-    'custom_op',
+    "Library",
+    "impl",
+    "define",
+    "fallthrough_kernel",
+    "impl_abstract",
+    "register_fake",
+    "register_torch_dispatch",
+    "get_ctx",
+    "custom_op",
+    "infer_schema",
 ]
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
@@ -33,13 +42,15 @@ _impls: Set[str] = set()
 _defs: Set[str] = set()
 
 # prim is reserved by TorchScript interpreter
-_reserved_namespaces = ['prim']
+_reserved_namespaces = ["prim"]
+
 
 def fallthrough_kernel():
     """
     A dummy function to pass to ``Library.impl`` in order to register a fallthrough.
     """
     raise NotImplementedError("fallthrough_kernel() should never be called.")
+
 
 class Library:
     """
@@ -59,16 +70,22 @@ class Library:
         kind: "DEF", "IMPL" (default: "IMPL"), "FRAGMENT"
         dispatch_key: PyTorch dispatch key (default: "")
     """
+
     def __init__(self, ns, kind, dispatch_key=""):
-        if kind not in ('IMPL', 'DEF', 'FRAGMENT'):
+        if kind not in ("IMPL", "DEF", "FRAGMENT"):
             raise ValueError("Unsupported kind: ", kind)
 
-        if ns in _reserved_namespaces and (kind == "DEF" or kind == 'FRAGMENT'):
-            raise ValueError(ns, " is a reserved namespace. Please try creating a library with another name.")
+        if ns in _reserved_namespaces and (kind == "DEF" or kind == "FRAGMENT"):
+            raise ValueError(
+                ns,
+                " is a reserved namespace. Please try creating a library with another name.",
+            )
 
         frame = traceback.extract_stack(limit=3)[0]
         filename, lineno = frame.filename, frame.lineno
-        self.m: Optional[Any] = torch._C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
+        self.m: Optional[Any] = torch._C._dispatch_library(
+            kind, ns, dispatch_key, filename, lineno
+        )
         self.ns = ns
         self._op_defs: Set[str] = set()
         self._op_impls: Set[str] = set()
@@ -79,13 +96,21 @@ class Library:
         # Python __del__ can lead to weird things (globals and locals may already
         # be gone when __del__ actually gets called!). finalizers help the
         # situation because it lets us capture references and keeps them alive
-        weakref.finalize(self, _del_library, _impls, self._op_impls, _defs, self._op_defs, self._registration_handles)
+        weakref.finalize(
+            self,
+            _del_library,
+            _impls,
+            self._op_impls,
+            _defs,
+            self._op_defs,
+            self._registration_handles,
+        )
 
     def __repr__(self):
         return f"Library(kind={self.kind}, ns={self.ns}, dispatch_key={self.dispatch_key})>"
 
     def define(self, schema, alias_analysis="", *, tags=()):
-        r'''Defines a new operator and its semantics in the ns namespace.
+        r"""Defines a new operator and its semantics in the ns namespace.
 
         Args:
             schema: function schema to define a new operator.
@@ -102,7 +127,7 @@ class Library:
         Example::
             >>> my_lib = Library("mylib", "DEF")
             >>> my_lib.define("sum(Tensor self) -> Tensor")
-        '''
+        """
         # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
         # AliasAnalysis type in C++
         if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
@@ -113,7 +138,9 @@ class Library:
 
         name = schema.split("(")[0]
         packet_name = name.split(".")[0] if "." in name else name
-        has_preexisting_packet = hasattr(torch.ops, self.ns) and hasattr(getattr(torch.ops, self.ns), packet_name)
+        has_preexisting_packet = hasattr(torch.ops, self.ns) and hasattr(
+            getattr(torch.ops, self.ns), packet_name
+        )
 
         result = self.m.define(schema, alias_analysis, tuple(tags))
         name = schema.split("(")[0]
@@ -131,7 +158,7 @@ class Library:
         return result
 
     def _register_fake(self, op_name, fn, _stacklevel=1):
-        r'''Registers the fake impl for an operator defined in the library.'''
+        r"""Registers the fake impl for an operator defined in the library."""
         source = torch._library.utils.get_source(_stacklevel + 1)
         frame = sys._getframe(_stacklevel)
         caller_module = inspect.getmodule(frame)
@@ -141,7 +168,9 @@ class Library:
 
         # TODO(rzou): We're gonna need to stage this change with torchvision,
         # since torchvision is github first.
-        if caller_module_name is not None and caller_module_name.startswith("torchvision."):
+        if caller_module_name is not None and caller_module_name.startswith(
+            "torchvision."
+        ):
             caller_module_name = None
 
         qualname = f"{self.ns}::{op_name}"
@@ -151,11 +180,32 @@ class Library:
         else:
             func_to_register = fn
 
-        handle = entry.abstract_impl.register(func_to_register, source)
+        handle = entry.fake_impl.register(func_to_register, source)
         self._registration_handles.append(handle)
 
-    def _impl_with_aoti_compile(self, op_name, dispatch_key=''):
-        r'''Register the operator to use the AOTI-compiled implementation.
+    def _register_torch_dispatch_rule(self, op_name, torch_dispatch_class, fn):
+        r"""Registers a torch_dispatch rule for the given operator and torch_dispatch_class.
+
+        This allows for open registration to specify the behavior between the operator
+        and the torch_dispatch_class without needing to modify the torch_dispatch_class
+        or the operator directly.
+
+        The torch_dispatch_class is either a Tensor subclass with `__torch_dispatch__` or a
+        TorchDispatchMode.
+
+        If it is a Tensor subclass, we expect fn to have the following signature:
+        (cls, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any
+
+        If it is a TorchDispatchMode, we expect fn to have the following signature:
+        (mode, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any
+        """
+        qualname = f"{self.ns}::{op_name}"
+        entry = torch._library.simple_registry.singleton.find(qualname)
+        handle = entry.torch_dispatch_rules.register(torch_dispatch_class, fn)
+        self._registration_handles.append(handle)
+
+    def _impl_with_aoti_compile(self, op_name, dispatch_key=""):
+        r"""Register the operator to use the AOTI-compiled implementation.
 
         Args:
             op_name: operator name (along with the overload) or OpOverload object.
@@ -165,8 +215,8 @@ class Library:
         Example::
             >>> my_lib = Library("aten", "IMPL")
             >>> my_lib._impl_with_aoti_compile("div.Tensor", "CPU")
-        '''
-        if dispatch_key == '':
+        """
+        if dispatch_key == "":
             dispatch_key = self.dispatch_key
         assert torch.DispatchKeySet(dispatch_key).has(torch._C.DispatchKey.Dense)
 
@@ -175,19 +225,24 @@ class Library:
         elif isinstance(op_name, OpOverload):
             name = op_name._schema.name
             overload_name = op_name._schema.overload_name
-            if overload_name != '':
-                name = name + '.' + overload_name
+            if overload_name != "":
+                name = name + "." + overload_name
         else:
-            raise RuntimeError("_impl_with_aoti_compile should be passed either a name or an OpOverload object "
-                               "as the first argument")
+            raise RuntimeError(
+                "_impl_with_aoti_compile should be passed either a name or an OpOverload object "
+                "as the first argument"
+            )
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
         if key in _impls:
             # TODO: in future, add more info about where the existing function is registered (this info is
             # today already returned by the C++ warning when _impl_with_aoti_compile is called but we error out before that)
-            raise RuntimeError("This is not allowed since there's already a kernel registered from python overriding {}"
-                               "'s behavior for {} dispatch key and {} namespace.".
-                               format(name.split("::")[-1], dispatch_key, self.ns))
+            raise RuntimeError(
+                "This is not allowed since there's already a kernel registered from python overriding {}"
+                "'s behavior for {} dispatch key and {} namespace.".format(
+                    name.split("::")[-1], dispatch_key, self.ns
+                )
+            )
 
         assert self.m is not None
         impl_fn: Callable = self.m.impl_with_aoti_compile
@@ -196,8 +251,8 @@ class Library:
         _impls.add(key)
         self._op_impls.add(key)
 
-    def impl(self, op_name, fn, dispatch_key='', *, with_keyset=False):
-        r'''Registers the function implementation for an operator defined in the library.
+    def impl(self, op_name, fn, dispatch_key="", *, with_keyset=False):
+        r"""Registers the function implementation for an operator defined in the library.
 
         Args:
             op_name: operator name (along with the overload) or OpOverload object.
@@ -211,10 +266,12 @@ class Library:
             >>> def div_cpu(self, other):
             >>>     return self * (1 / other)
             >>> my_lib.impl("div.Tensor", div_cpu, "CPU")
-        '''
+        """
         if not callable(fn):
-            raise TypeError(f"Input function is required to be a callable but found type {type(fn)}")
-        if dispatch_key == '':
+            raise TypeError(
+                f"Input function is required to be a callable but found type {type(fn)}"
+            )
+        if dispatch_key == "":
             dispatch_key = self.dispatch_key
 
         if isinstance(op_name, str):
@@ -222,37 +279,50 @@ class Library:
         elif isinstance(op_name, OpOverload):
             name = op_name._schema.name
             overload_name = op_name._schema.overload_name
-            if overload_name != '':
-                name = name + '.' + overload_name
+            if overload_name != "":
+                name = name + "." + overload_name
         else:
-            raise RuntimeError("impl should be passed either a name or an OpOverload object as the first argument")
+            raise RuntimeError(
+                "impl should be passed either a name or an OpOverload object as the first argument"
+            )
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
         if key in _impls:
             # TODO: in future, add more info about where the existing function is registered (this info is
             # today already returned by the C++ warning when impl is called but we error out before that)
-            raise RuntimeError("This is not allowed since there's already a kernel registered from python overriding {}"
-                               "'s behavior for {} dispatch key and {} namespace.".
-                               format(name.split("::")[-1], dispatch_key, self.ns))
+            raise RuntimeError(
+                "This is not allowed since there's already a kernel registered from python overriding {}"
+                "'s behavior for {} dispatch key and {} namespace.".format(
+                    name.split("::")[-1], dispatch_key, self.ns
+                )
+            )
 
         if dispatch_key == "Meta":
             dispatcher_op_name = name
-            if '::' not in dispatcher_op_name:
-                dispatcher_op_name = f'{self.ns}::{dispatcher_op_name}'
+            if "::" not in dispatcher_op_name:
+                dispatcher_op_name = f"{self.ns}::{dispatcher_op_name}"
 
             # Internally, we shouldn't be registering meta kernels for any operators that
             # have CompositeImplicitAutograd kernels.
             # Instead, we should be letting those decompositions run, and writing meta kernels
             # only for the base operators.
-            if torch._C._dispatch_has_kernel_for_dispatch_key(dispatcher_op_name, "CompositeImplicitAutograd"):
+            if torch._C._dispatch_has_kernel_for_dispatch_key(
+                dispatcher_op_name, "CompositeImplicitAutograd"
+            ):
                 raise RuntimeError(
                     f"We should not register a meta kernel directly to the operator '{name}',"
                     " because it has a CompositeImplicitAutograd kernel in core."
                     " Instead we should let the operator decompose, and ensure that we have meta kernels"
-                    " for the base ops that it decomposes into.")
+                    " for the base ops that it decomposes into."
+                )
 
         assert self.m is not None
-        self.m.impl(name, dispatch_key if dispatch_key != "" else "CompositeImplicitAutograd", fn, with_keyset)
+        self.m.impl(
+            name,
+            dispatch_key if dispatch_key != "" else "CompositeImplicitAutograd",
+            fn,
+            with_keyset,
+        )
 
         _impls.add(key)
         self._op_impls.add(key)
@@ -283,7 +353,13 @@ class Library:
             delattr(namespace, name)
 
 
-def _del_library(captured_impls, op_impls, captured_defs, op_defs, registration_handles):
+def _del_library(
+    captured_impls,
+    op_impls,
+    captured_defs,
+    op_defs,
+    registration_handles,
+):
     captured_impls -= op_impls
     captured_defs -= op_defs
     for handle in registration_handles:
@@ -357,7 +433,8 @@ def define(qualname, schema, *, lib=None, tags=()):
     if not isinstance(qualname, str):
         raise ValueError(
             f"define(qualname, schema): expected qualname "
-            f"to be instance of str, got {type(qualname)}")
+            f"to be instance of str, got {type(qualname)}"
+        )
     namespace, name = torch._library.utils.parse_namespace(qualname)
     if lib is None:
         lib = Library(namespace, "FRAGMENT")
@@ -366,7 +443,8 @@ def define(qualname, schema, *, lib=None, tags=()):
         raise ValueError(
             f"define(qualname, schema, ...): expected schema "
             f'to look like e.g. "(Tensor x) -> Tensor" but '
-            f'got "{schema}"')
+            f'got "{schema}"'
+        )
     lib.define(name + schema, alias_analysis="", tags=tags)
 
 
@@ -375,10 +453,12 @@ def _(lib: Library, schema, alias_analysis=""):
     """The old torch.library.define.
     We're keeping this around for BC reasons
     """
+
     def wrap(f):
         name = lib.define(schema, alias_analysis)
         lib.impl(name, f)
         return f
+
     return wrap
 
 
@@ -460,9 +540,11 @@ def _device_type_to_key(device_type: str) -> str:
 @impl.register
 def _(lib: Library, name, dispatch_key=""):
     """Legacy torch.library.impl API. Kept around for BC"""
+
     def wrap(f):
         lib.impl(name, f, dispatch_key)
         return f
+
     return wrap
 
 
@@ -480,16 +562,19 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     return register_fake(qualname, func, lib=lib, _stacklevel=_stacklevel)
 
 
-_op_identifier = Union[str, "torch._ops.OpOverload", "torch._library.custom_ops.CustomOpDef"]
+_op_identifier = Union[
+    str, "torch._ops.OpOverload", "torch._library.custom_ops.CustomOpDef"
+]
 
 
 def register_kernel(
-        op: _op_identifier,
-        device_types: device_types_t,
-        func: Optional[Callable] = None,
-        /,
-        *,
-        lib: Optional[Library] = None):
+    op: _op_identifier,
+    device_types: device_types_t,
+    func: Optional[Callable] = None,
+    /,
+    *,
+    lib: Optional[Library] = None,
+):
     """Register an implementation for a device type for this operator.
 
     Some valid device_types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
@@ -530,7 +615,9 @@ def register_kernel(
 
     """
 
-    if not isinstance(op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)):
+    if not isinstance(
+        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
+    ):
         raise ValueError("register_kernel(op): got unexpected type for op: {type(op)}")
     if isinstance(op, torch._ops.OpOverload):
         op = op._name
@@ -544,12 +631,13 @@ def register_kernel(
 
 
 def register_fake(
-        op: _op_identifier,
-        func: Optional[Callable] = None,
-        /,
-        *,
-        lib: Optional[Library] = None,
-        _stacklevel: int = 1):
+    op: _op_identifier,
+    func: Optional[Callable] = None,
+    /,
+    *,
+    lib: Optional[Library] = None,
+    _stacklevel: int = 1,
+):
     r"""Register a FakeTensor implementation ("fake impl") for this operator.
 
     Also sometimes known as a "meta kernel", "abstract impl".
@@ -571,7 +659,7 @@ def register_fake(
     This API may be used as a decorator (see examples).
 
     For a detailed guide on custom ops, please see
-    https://pytorch.org/docs/main/notes/custom_operators.html
+    https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html
 
     Examples:
         >>> import torch
@@ -630,7 +718,9 @@ def register_fake(
         >>> assert torch.allclose(trace(x), torch.ops.mylib.custom_nonzero(x))
 
     """
-    if not isinstance(op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)):
+    if not isinstance(
+        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
+    ):
         raise ValueError("register_fake(op): got unexpected type for op: {type(op)}")
     if isinstance(op, torch._ops.OpOverload):
         op = op._name
@@ -661,7 +751,14 @@ def register_fake(
         return register(func)
 
 
-def register_autograd(op: _op_identifier, backward: Callable, /, *, setup_context: Optional[Callable] = None, lib=None) -> None:
+def register_autograd(
+    op: _op_identifier,
+    backward: Callable,
+    /,
+    *,
+    setup_context: Optional[Callable] = None,
+    lib=None,
+) -> None:
     r"""Register a backward formula for this custom op.
 
     In order for an operator to work with autograd, you need to register
@@ -737,8 +834,12 @@ def register_autograd(op: _op_identifier, backward: Callable, /, *, setup_contex
         >>> assert torch.allclose(grad_x, torch.full_like(x, 3.14))
 
     """
-    if not isinstance(op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)):
-        raise ValueError(f"register_autograd(op): got unexpected type for op: {type(op)}")
+    if not isinstance(
+        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
+    ):
+        raise ValueError(
+            f"register_autograd(op): got unexpected type for op: {type(op)}"
+        )
     if isinstance(op, torch._ops.OpOverload):
         op = op._name
     opdef = _maybe_get_opdef(op)
@@ -760,7 +861,8 @@ def register_autograd(op: _op_identifier, backward: Callable, /, *, setup_contex
         raise NotImplementedError(
             f"register_autograd with kwarg-only Tensor args. In the original "
             f"definition of the op, please make your tensors not kwarg-only. "
-            f"Got: {schema}")
+            f"Got: {schema}"
+        )
 
     info = _library.autograd.Info(backward, setup_context)
     autograd_kernel = _library.autograd.make_autograd_impl(op, info)
@@ -769,6 +871,87 @@ def register_autograd(op: _op_identifier, backward: Callable, /, *, setup_contex
         lib = Library(namespace, "FRAGMENT")
         _keep_alive.append(lib)
     lib.impl(opname, autograd_kernel, "Autograd", with_keyset=True)
+
+
+def register_torch_dispatch(
+    op: _op_identifier,
+    torch_dispatch_class: Any,
+    func: Optional[Callable] = None,
+    /,
+    *,
+    lib: Optional[Library] = None,
+):
+    r"""Registers a torch_dispatch rule for the given operator and ``torch_dispatch_class``.
+
+    This allows for open registration to specify the behavior between the operator
+    and the ``torch_dispatch_class`` without needing to modify the ``torch_dispatch_class``
+    or the operator directly.
+
+    The ``torch_dispatch_class`` is either a Tensor subclass with ``__torch_dispatch__`` or a
+    TorchDispatchMode.
+
+    If it is a Tensor subclass, we expect ``func`` to have the following signature:
+    ``(cls, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any``
+
+    If it is a TorchDispatchMode, we expect ``func`` to have the following signature:
+    ``(mode, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any``
+
+    ``args`` and ``kwargs`` will have been normalized the same way they are
+    in ``__torch_dispatch__`` (see :ref:`torch-dispatch-calling-convention`).
+
+    Examples:
+
+        >>> import torch
+        >>>
+        >>> @torch.library.custom_op("mylib::foo", mutates_args={})
+        >>> def foo(x: torch.Tensor) -> torch.Tensor:
+        >>>     return x.clone()
+        >>>
+        >>> class MyMode(torch.utils._python_dispatch.TorchDispatchMode):
+        >>>     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        >>>         return func(*args, **kwargs)
+        >>>
+        >>> @torch.library.register_torch_dispatch("mylib::foo", MyMode)
+        >>> def _(mode, func, types, args, kwargs):
+        >>>     x, = args
+        >>>     return x + 1
+        >>>
+        >>> x = torch.randn(3)
+        >>> y = foo(x)
+        >>> assert torch.allclose(y, x)
+        >>>
+        >>> with MyMode():
+        >>>     y = foo(x)
+        >>> assert torch.allclose(y, x + 1)
+
+    """
+    if not isinstance(
+        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
+    ):
+        raise ValueError(
+            "register_torch_dispatch(op): got unexpected type for op: {type(op)}"
+        )
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None:
+        return opdef.register_torch_dispatch(torch_dispatch_class, func)
+    assert isinstance(op, str)
+
+    def register(func):
+        namespace, op_name = torch._library.utils.parse_namespace(op)
+        if lib is None:
+            use_lib = Library(namespace, "FRAGMENT")
+            _keep_alive.append(use_lib)
+        else:
+            use_lib = lib
+        use_lib._register_torch_dispatch_rule(op_name, torch_dispatch_class, func)
+        return func
+
+    if func is None:
+        return register
+    else:
+        return register(func)
 
 
 # If the op was defined in C++, then we want to make sure there was an
@@ -788,8 +971,8 @@ def _check_pystubs_once(func, qualname, actual_module_name):
             return func(*args, **kwargs)
 
         maybe_pystub = torch._C._dispatch_pystub(
-            op._schema.name,
-            op._schema.overload_name)
+            op._schema.name, op._schema.overload_name
+        )
         if maybe_pystub is None:
             if torch._library.utils.requires_set_python_module():
                 namespace = op.namespace
@@ -800,7 +983,8 @@ def _check_pystubs_once(func, qualname, actual_module_name):
                     f'companion C++ `m.set_python_module("{actual_module_name}")` '
                     f"call, but we could not find one. Please add that to "
                     f"to the top of the C++ TORCH_LIBRARY({namespace}, ...) block the "
-                    f"operator was registered in ({cpp_filename})")
+                    f"operator was registered in ({cpp_filename})"
+                )
         else:
             pystub_module = maybe_pystub[0]
             if actual_module_name != pystub_module:
@@ -809,9 +993,11 @@ def _check_pystubs_once(func, qualname, actual_module_name):
                     f"Operator '{qualname}' specified that its python fake impl "
                     f"is in the Python module '{pystub_module}' but it was actually found "
                     f"in '{actual_module_name}'. Please either move the fake impl "
-                    f"or correct the m.set_python_module call ({cpp_filename})")
+                    f"or correct the m.set_python_module call ({cpp_filename})"
+                )
         checked = True
         return func(*args, **kwargs)
+
     return inner
 
 
@@ -822,13 +1008,13 @@ def _check_pystubs_once(func, qualname, actual_module_name):
 #
 # This is done via us setting the global_ctx_getter function every time a fake
 # implementation is invoked.
-def get_ctx() -> "torch._library.abstract_impl.AbstractImplCtx":
+def get_ctx() -> "torch._library.fake_impl.FakeImplCtx":
     """get_ctx() returns the current AbstractImplCtx object.
 
     Calling ``get_ctx()`` is only valid inside of an fake impl
     (see :func:`torch.library.register_fake` for more usage details.
     """
-    return torch._library.abstract_impl.global_ctx_getter()
+    return torch._library.fake_impl.global_ctx_getter()
 
 
 _OPCHECK_DEFAULT_UTILS = (
@@ -929,4 +1115,7 @@ def opcheck(
 
     """
     import torch.testing._internal.optests as optests
-    return optests.opcheck(op, args, kwargs, test_utils=test_utils, raise_exception=raise_exception)
+
+    return optests.opcheck(
+        op, args, kwargs, test_utils=test_utils, raise_exception=raise_exception
+    )

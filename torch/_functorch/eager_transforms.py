@@ -767,8 +767,6 @@ def jacrev(
     # wraps only if we're not tracing with dynamo.
     if not torch._dynamo.is_compiling():
         wrapper_fn = wraps(func)(wrapper_fn)
-    else:
-        wrapper_fn = torch._dynamo.disable(wrapper_fn)
 
     return wrapper_fn
 
@@ -1088,7 +1086,6 @@ def jvp(
     )
 
 
-@doesnt_support_saved_tensors_hooks
 def _jvp_with_argnums(
     func: Callable,
     primals: Any,
@@ -1350,8 +1347,6 @@ def jacfwd(
     # wraps only if we're not tracing with dynamo.
     if not torch._dynamo.is_compiling():
         wrapper_fn = wraps(func)(wrapper_fn)
-    else:
-        wrapper_fn = torch._dynamo.disable(wrapper_fn)
 
     return wrapper_fn
 
@@ -1679,7 +1674,6 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
             " replaced with their non-aliasing counterparts, {view}_copy.\n"
         )
 
-    @doesnt_support_saved_tensors_hooks
     @wraps(func)
     def wrapped(*args, **kwargs):
         try:

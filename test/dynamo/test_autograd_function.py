@@ -10,7 +10,6 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
-from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
 if HAS_CUDA:
@@ -527,22 +526,22 @@ class GraphModule(torch.nn.Module):
         return (autograd_function_apply,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, function_ctx, l_x_: "f32[]", l_z_: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
+        def forward(self, ctx, x: "f32[]", z: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
             mul: "f32[]" = l_weird_b * l_weird_c
-            clone: "f32[]" = l_x_.clone();  l_x_ = None
+            clone: "f32[]" = x.clone();  x = None
             mul_1: "f32[]" = mul * clone;  mul = clone = None
             return (mul_1, [l_weird_b, l_weird_c])
 
     class GraphModule(torch.nn.Module):
-        def forward(self, function_ctx, mul_1: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
+        def forward(self, ctx, grad: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False)
 
-            mul: "f32[]" = mul_1 * l_weird_b;  l_weird_b = None
-            mul_2: "f32[]" = mul * l_weird_c;  mul = l_weird_c = None
-            mul_3: "f32[]" = mul_1 * 2;  mul_1 = None
+            mul: "f32[]" = grad * l_weird_b;  l_weird_b = None
+            mul_1: "f32[]" = mul * l_weird_c;  mul = l_weird_c = None
+            mul_2: "f32[]" = grad * 2;  grad = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
-            return (mul_2, mul_3)
+            return (mul_1, mul_2)
 """,
         )
 
@@ -1105,7 +1104,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.op_count, 2)
 
     @requires_cuda
-    @skipIfRocm
     def test_triton_kernel_basic(self):
         class Add(torch.autograd.Function):
             @staticmethod
@@ -1137,7 +1135,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x + y, z)
 
     @requires_cuda
-    @skipIfRocm
     def test_triton_kernel_multiple_out(self):
         class Add(torch.autograd.Function):
             @staticmethod

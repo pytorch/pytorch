@@ -1,14 +1,24 @@
 # mypy: allow-untyped-defs
-import os.path as _osp
-import torch
 
-from .throughput_benchmark import ThroughputBenchmark
-from .cpp_backtrace import get_cpp_backtrace
-from .backend_registration import rename_privateuse1_backend, generate_methods_for_privateuse1_backend
-from . import deterministic
-from . import collect_env
-import weakref
 import copyreg
+import os.path as _osp
+import weakref
+
+import torch
+from torch.utils import (
+    backcompat as backcompat,
+    collect_env as collect_env,
+    data as data,
+    deterministic as deterministic,
+    hooks as hooks,
+)
+from torch.utils.backend_registration import (
+    generate_methods_for_privateuse1_backend,
+    rename_privateuse1_backend,
+)
+from torch.utils.cpp_backtrace import get_cpp_backtrace
+from torch.utils.throughput_benchmark import ThroughputBenchmark
+
 
 def set_module(obj, mod):
     """
@@ -18,11 +28,15 @@ def set_module(obj, mod):
         raise TypeError("The mod argument should be a string")
     obj.__module__ = mod
 
+
 if torch._running_with_deploy():
     # not valid inside torch_deploy interpreter, no paths exists for frozen modules
     cmake_prefix_path = None
 else:
-    cmake_prefix_path = _osp.join(_osp.dirname(_osp.dirname(__file__)), 'share', 'cmake')
+    cmake_prefix_path = _osp.join(
+        _osp.dirname(_osp.dirname(__file__)), "share", "cmake"
+    )
+
 
 def swap_tensors(t1, t2):
     """
@@ -48,17 +62,21 @@ def swap_tensors(t1, t2):
         setattr(t2, name, tmp)
 
     def error_pre_hook(grad_outputs):
-        raise RuntimeError("Trying to execute AccumulateGrad node that was poisoned by swap_tensors "
-                           "this can happen when you try to run backward on a tensor that was swapped. "
-                           "For a module m with `torch.__future__.set_swap_module_params_on_conversion(True)` "
-                           "you should not change the device or dtype of the module (e.g. `m.cpu()` or `m.half()`) "
-                           "between running forward and backward. To resolve this, please only change the "
-                           "device/dtype before running forward (or after both forward and backward).")
+        raise RuntimeError(
+            "Trying to execute AccumulateGrad node that was poisoned by swap_tensors "
+            "this can happen when you try to run backward on a tensor that was swapped. "
+            "For a module m with `torch.__future__.set_swap_module_params_on_conversion(True)` "
+            "you should not change the device or dtype of the module (e.g. `m.cpu()` or `m.half()`) "
+            "between running forward and backward. To resolve this, please only change the "
+            "device/dtype before running forward (or after both forward and backward)."
+        )
 
-    def check_use_count(t, name='t1'):
+    def check_use_count(t, name="t1"):
         use_count = t._use_count()
-        error_str = (f"Expected use_count of {name} to be 1 or 2 with an AccumulateGrad node but got {use_count} "
-                     f"make sure you are not holding references to the tensor in other places.")
+        error_str = (
+            f"Expected use_count of {name} to be 1 or 2 with an AccumulateGrad node but got {use_count} "
+            f"make sure you are not holding references to the tensor in other places."
+        )
         if use_count > 1:
             if use_count == 2 and t.is_leaf:
                 accum_grad_node = torch.autograd.graph.get_gradient_edge(t).node
@@ -70,8 +88,8 @@ def swap_tensors(t1, t2):
             else:
                 raise RuntimeError(error_str)
 
-    check_use_count(t1, 't1')
-    check_use_count(t2, 't2')
+    check_use_count(t1, "t1")
+    check_use_count(t2, "t2")
 
     # Swap the types
     # Note that this will fail if there are mismatched slots
