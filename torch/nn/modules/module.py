@@ -24,7 +24,7 @@ from typing_extensions import Self
 import torch
 from torch import device, dtype, Tensor
 from torch._prims_common import DeviceLikeType
-from torch import optim
+from torch import nn, optim
 from torch.nn.parameter import Parameter
 from torch.optim import Optimizer
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -62,6 +62,25 @@ optimizer_dict = {
     'adamax': optim.Adamax,
     'rmsprop': optim.RMSprop,
     'lbfgs': optim.LBFGS
+}
+
+loss_dict = {
+    'mse': nn.MSELoss,
+    'l1': nn.L1Loss,
+    'cross_entropy': nn.CrossEntropyLoss,
+    'bce': nn.BCELoss,
+    'bce_logits': nn.BCEWithLogitsLoss,
+    'nll': nn.NLLLoss,
+    'kl_div': nn.KLDivLoss,
+    'poisson_nll': nn.PoissonNLLLoss,
+    'cosine_embedding': nn.CosineEmbeddingLoss,
+    'huber': nn.SmoothL1Loss,
+    'hinge_embedding': nn.HingeEmbeddingLoss,
+    'multi_label_margin': nn.MultiLabelMarginLoss,
+    'multi_label_soft_margin': nn.MultiLabelSoftMarginLoss,
+    'multi_margin': nn.MultiMarginLoss,
+    'triplet_margin': nn.TripletMarginLoss,
+    'ctc': nn.CTCLoss
 }
 
 
@@ -2924,27 +2943,34 @@ class Module:
         """
         self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
     
-    def train_step(self, batch_idx, batch):
-        """
-        Abstract method to be implemented by the subclass
-        
-        This method is used inside of self.fit(...)
-        """
-        raise NotImplementedError
-
     def _get_optimizer_by_name(self, name, **kwargs) -> Optimizer:
         if name in optimizer_dict:
             return optimizer_dict[name](self.parameters(), **kwargs)
         else:
             raise ValueError(f"Optimizer '{name}' is not supported.")
 
+    def _get_loss_by_name(self, name, **kwargs):
+        if name in loss_dict:
+            return loss_dict[name](**kwargs)
+        else:
+            raise ValueError(f"Unknown loss function: {name}")
+
     def fit(self,
             train_loader: DataLoader,
+            loss: str,
+            loss_args: Optional[Dict[str, Any]] = None,
             optimizer: Union[str, OptimizerFactory] = 'adam',
+            optimizer_args: Optional[Dict[str, Any]] = None,
             max_epochs: int = 10,
             log_interval: int = 100):
+        if loss_args is None:
+            loss_args = {}
+        criterion = self._get_loss_by_name(loss, **loss_args)
+        
+        if optimizer_args is None:
+            optimizer_args = {}
         if isinstance(optimizer, str):
-            optimizer_ = self._get_optimizer_by_name(optimizer, **self.optimizer_kwargs)
+            optimizer_ = self._get_optimizer_by_name(optimizer, **optimizer_args)
             
             def default_optimizer_factory(batch_idx: int, batch) -> Optimizer:
                 return optimizer_
@@ -2962,13 +2988,14 @@ class Module:
             for epoch in range(max_epochs):  # loop over the dataset multiple times
                 running_loss = 0.0
                 for i, data in enumerate(train_loader, 0):
-                    inputs, _ = data
+                    inputs, labels = data
 
                     optimizer = optimizer_factory(i, inputs)
 
                     optimizer.zero_grad()
 
-                    loss = self.train_step(i, inputs)
+                    outputs = self.forward(inputs)
+                    loss = criterion(outputs, labels)
                     loss.backward()
 
                     optimizer.step()
