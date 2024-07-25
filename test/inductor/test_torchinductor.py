@@ -3764,6 +3764,35 @@ class CommonTemplate:
             (torch.randn([2, 2, 10]),),
         )
 
+    def test_low_memory_max_pool(self):
+        prims = torch.ops.prims
+
+        def fn(x):
+            kernel_size = [3, 3]
+            stride = [2, 2]
+            padding = [1, 1]
+            dilation = [1, 1]
+            ceil_mode = False
+
+            vals, offsets = prims._low_memory_max_pool2d_with_offsets(
+                x,
+                kernel_size,
+                stride,
+                padding,
+                dilation,
+                ceil_mode,
+            )
+            indices = prims._low_memory_max_pool2d_offsets_to_indices(
+                offsets,
+                kernel_size[1],
+                x.size(-1),
+                stride,
+                padding,
+            )
+            return vals, indices, offsets
+
+        self.common(fn, (torch.randn(1, 3, 10, 10),))
+
     def test_to_dtype(self):
         def fn(a, b):
             return (

@@ -127,7 +127,13 @@ def _low_memory_max_pool2d_with_offsets_aten(
     hbase = bh * stride[0] - padding[0]
     wbase = bw * stride[1] - padding[1]
 
-    offsets = indices - wbase - hbase * input_width
+    ih = indices // input_width
+    iw = indices - (ih * input_width)
+
+    h_inc = ih - hbase
+    w_inc = iw - wbase
+
+    offsets = h_inc * kernel_width + w_inc
 
     return vals, offsets.to(torch.int8)
 
