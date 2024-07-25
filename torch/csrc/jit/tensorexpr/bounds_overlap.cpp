@@ -8,7 +8,7 @@
 namespace torch::jit::tensorexpr::analysis {
 
 // Returns true if the given expression is guaranteed to be positive.
-static bool mustBePositive(ExprPtr e) {
+static bool mustBePositive(const ExprPtr& e) {
   if (e->isConstant()) {
     int e_val = immediateAs<int>(e);
     return e_val > 0;
@@ -17,7 +17,7 @@ static bool mustBePositive(ExprPtr e) {
 }
 
 // Returns true if the given expression is guaranteed to be negative.
-static bool mustBeNegative(ExprPtr e) {
+static bool mustBeNegative(const ExprPtr& e) {
   if (e->isConstant()) {
     int e_val = immediateAs<int>(e);
     return e_val < 0;
@@ -26,7 +26,7 @@ static bool mustBeNegative(ExprPtr e) {
 }
 
 // Returns true if the given expression is guaranteed to be zero.
-static bool mustBeZero(ExprPtr e) {
+static bool mustBeZero(const ExprPtr& e) {
   if (e->isConstant()) {
     int e_val = immediateAs<int>(e);
     return e_val == 0;
