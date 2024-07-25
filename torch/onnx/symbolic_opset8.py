@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """
 Note [ONNX operators that are added/updated from opset 8 to opset 9]

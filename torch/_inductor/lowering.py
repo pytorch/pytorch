@@ -3368,7 +3368,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         ndim = len(shape)
         indirect_idx = list(idx)
         indirect_idx[dim] = ops.indirect_indexing(
-            index_loader(idx), 1 if ndim == 0 else shape[dim]
+            index_loader(idx), 1 if ndim == 0 else shape[dim], wrap_neg=False
         )
         return indirect_idx
 
@@ -6190,7 +6190,7 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int, lifted_args: Tupl
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
         for x in itertools.chain(input, input)
     ]
-    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
+    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
 
     def wrapped_combine_fn(lhs, rhs):
         return lowered_combine_fn(

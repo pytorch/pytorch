@@ -440,7 +440,7 @@ def _compile(
         gm = make_fx(
             partial(stateless_func, func),
             tracing_mode=tracing_mode,
-            decomposition_table=SPMD_DECOMP_TABLE,
+            decomposition_table=SPMD_DECOMP_TABLE,  # type: ignore[arg-type]
             _allow_non_fake_inputs=False,
         )(params, buffers, named_states, args, kwargs)
 
