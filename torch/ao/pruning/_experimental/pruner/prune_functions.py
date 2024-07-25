@@ -3,13 +3,15 @@
 Collection of conversion functions for linear / conv2d structured pruning
 Also contains utilities for bias propagation
 """
-from typing import cast, List, Optional, Callable, Tuple
+from typing import Callable, cast, List, Optional, Tuple
 
 import torch
 from torch import nn, Tensor
 from torch.nn.utils import parametrize
 from torch.nn.utils.parametrize import ParametrizationList
-from .parametrization import FakeStructuredSparsity, BiasHook
+
+from .parametrization import BiasHook, FakeStructuredSparsity
+
 
 # BIAS PROPAGATION
 def _remove_bias_handles(module: nn.Module) -> None:
@@ -455,22 +457,22 @@ def prune_lstm_output_layernorm_linear(
             # otherwise need to prune the columns of the input of the next LSTM layer
             else:
                 with torch.no_grad():
-                    if parametrize.is_parametrized(lstm, f"weight_ih_l{i+1}"):
+                    if parametrize.is_parametrized(lstm, f"weight_ih_l{i + 1}"):
                         parametrization_dict = cast(
                             nn.ModuleDict, lstm.parametrizations
                         )
                         weight_parameterizations = cast(
                             ParametrizationList,
-                            getattr(parametrization_dict, f"weight_ih_l{i+1}"),
+                            getattr(parametrization_dict, f"weight_ih_l{i + 1}"),
                         )
 
                         weight_parameterizations.original = nn.Parameter(
                             weight_parameterizations.original[:, M_ho]
                         )
                     else:
-                        next_layer_weight = getattr(lstm, f"weight_ih_l{i+1}")
+                        next_layer_weight = getattr(lstm, f"weight_ih_l{i + 1}")
                         setattr(
                             lstm,
-                            f"weight_ih_l{i+1}",
+                            f"weight_ih_l{i + 1}",
                             nn.Parameter(next_layer_weight[:, M_ho]),
                         )
