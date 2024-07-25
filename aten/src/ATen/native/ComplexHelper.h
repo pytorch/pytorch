@@ -56,14 +56,14 @@ inline Tensor _view_as_real_physical(const Tensor& self) {
 // expects as input a complex tensor and returns back a tensor
 // with corresponding real dtype containing the complex values
 // in the last two dimensions
-Tensor view_as_real(const Tensor& self) {
+inline Tensor view_as_real(const Tensor& self) {
   TORCH_CHECK(!self.is_conj(), "view_as_real doesn't work on unresolved conjugated tensors.  To resolve the conjugate tensor so you can view it as real, use self.resolve_conj(); however, be warned that the resulting tensor will NOT alias the original.");
   return _view_as_real_physical(self);
 }
 
 inline SymDimVector computeStrideForViewAsComplex(SymIntArrayRef oldstride) {
-  const int64_t dim = oldstride.size();
-  TORCH_CHECK(oldstride[dim-1] == 1, "Tensor must have a last dimension with stride 1");
+  const auto dim = oldstride.size();
+  TORCH_CHECK(dim > 0 && oldstride[dim - 1] == 1, "Tensor must have a last dimension with stride 1");
 
   SymDimVector res(dim - 1);
   for (const auto i : c10::irange(res.size())) {
@@ -75,7 +75,7 @@ inline SymDimVector computeStrideForViewAsComplex(SymIntArrayRef oldstride) {
 
 // expects as input a float or double tensor with last dimension of size 2
 // and returns back a tensor with corresponding complex dtype
-Tensor view_as_complex(const Tensor& self) {
+inline Tensor view_as_complex(const Tensor& self) {
   TORCH_CHECK(
     self.scalar_type() == kFloat || self.scalar_type() == kDouble || self.scalar_type() == kHalf,
     "view_as_complex is only supported for half, float and double tensors, but got a tensor of scalar type: ", self.scalar_type());
