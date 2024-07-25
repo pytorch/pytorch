@@ -62,7 +62,7 @@ jobs:
 
   linux-focal-cuda12_4-py3_10-gcc9-build:
     name: linux-focal-cuda12.4-py3.10-gcc9
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
@@ -277,8 +277,9 @@ jobs:
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
-          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu" },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu" },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu" },
         ]}
 
   linux-focal-rocm6_1-py3_8-test:
@@ -297,7 +298,7 @@ jobs:
 
   linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build:
     name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     with:
       use_split_build: true
       build-environment: linux-focal-cuda12.1-py3.10-gcc9
@@ -322,7 +323,7 @@ jobs:
 
   linux-focal-cuda11_8-py3_9-gcc9-experimental-split-build:
     name: linux-focal-cuda11.8-py3.9-gcc9-experimental-split-build
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     with:
       use_split_build: true
       build-environment: linux-focal-cuda11.8-py3.9-gcc9
