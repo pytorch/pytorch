@@ -38,9 +38,8 @@ from torch._inductor.codecache import (
 )
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
-    get_placeholder_info,
+    get_placeholders,
     log_cudagraph_skip_and_bump_counter,
-    PlaceholderInfo,
 )
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -53,6 +52,7 @@ from torch._inductor.utils import (
 )
 from torch._logging import trace_structured
 from torch._ops import OpOverload
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -443,7 +443,6 @@ def with_fresh_cache_if_config(fn):
 
 def cudagraph_post_compile(
     cudagraphs: BoxedBool,
-    example_inputs: List[Any],
     compiled_graph: CompiledFxGraph,
     cudagraph_fail_reasons: List[str],
     inputs_to_check: Sequence[int],
@@ -451,7 +450,8 @@ def cudagraph_post_compile(
     is_inference: bool,
     is_backward: bool,
     stack_traces: List[Optional[str]],
-    placeholders: Sequence[PlaceholderInfo],
+    placeholders: Tuple[torch.fx.Node, ...],
+    example_inputs: List[Any],
     static_input_idxs: Sequence[int],
 ):
     """
@@ -476,6 +476,7 @@ def cudagraph_post_compile(
 
         compiled_graph.current_callable = cudagraphify(
             compiled_graph.current_callable,
+            example_inputs,
             static_input_idxs=static_input_idxs,
             device_index=next(iter(compiled_graph.device_idxs)),
             stack_traces=stack_traces,
@@ -733,10 +734,9 @@ def compile_fx_inner(
                 for arg in output.args[0]
             ]
             cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
-            placeholders = tuple(get_placeholder_info(gm.graph))
+            placeholders = tuple(get_placeholders(gm.graph))
             cudagraph_post_compile(
                 cudagraphs,
-                example_inputs,
                 compiled_graph,
                 cudagraph_fail_reasons,
                 inputs_to_check,
@@ -745,6 +745,7 @@ def compile_fx_inner(
                 is_backward,
                 stack_traces,
                 placeholders,
+                example_inputs,
                 static_input_idxs,
             )
 
@@ -1047,6 +1048,7 @@ def align_inputs_from_check_idxs(
 @dynamo_utils.dynamo_timed
 def cudagraphify(
     model: Callable[..., Any],
+    inputs: List[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
     *,
     device_index: int,
@@ -1054,7 +1056,7 @@ def cudagraphify(
     is_backward: bool,
     is_inference: bool,
     constants: Tuple[torch.Tensor, ...] = (),
-    placeholders: Sequence[PlaceholderInfo] = (),
+    placeholders: Tuple[torch.fx.Node, ...] = (),
     mutated_input_idxs: Tuple[int, ...] = (),
 ) -> Callable[..., Any]:
     from torch._inductor.cudagraph_trees import (
@@ -1075,6 +1077,10 @@ def cudagraphify(
         )
     else:
         cudagraphify_fn = cudagraphify_impl
+
+    # if using fake tensors, defer cudagraphs until we get real inputs at runtime
+    if not any(isinstance(inp, FakeTensor) for inp in inputs):
+        return cudagraphify_fn(model, inputs, static_input_idxs)
 
     compiled_fn = None
 
