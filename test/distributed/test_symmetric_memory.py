@@ -222,33 +222,42 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             torch.rand(N, K, device="cuda").to(torch.float8_e4m3fn).T for _ in range(3)
         ]
         B_scales = [torch.tensor(0.1, device="cuda") for _ in range(3)]
+        output_dtypes = [None, torch.bfloat16, torch.float32]
 
-        ag_output_0, mm_outputs_0 = _fused_all_gather_scaled_matmul_fallback(
-            A_shard,
-            Bs,
-            A_scale,
-            B_scales,
-            gather_dim=gather_dim,
-            group_name=group.group_name,
-        )
         ag_output_1, mm_outputs_1 = torch.ops.symm_mem.fused_all_gather_scaled_matmul(
             A_shard,
             Bs,
             A_scale,
             B_scales,
+            output_dtypes,
+            gather_dim=gather_dim,
+            group_name=group.group_name,
+        )
+        ag_output_0, mm_outputs_0 = _fused_all_gather_scaled_matmul_fallback(
+            A_shard,
+            Bs,
+            A_scale,
+            B_scales,
+            output_dtypes,
             gather_dim=gather_dim,
             group_name=group.group_name,
         )
 
-        assert torch.allclose(
-            ag_output_0.to(torch.bfloat16), ag_output_1.to(torch.bfloat16)
-        )
-        assert ag_output_0.stride() == ag_output_1.stride()
-        for mm_output_0, mm_output_1 in zip(mm_outputs_0, mm_outputs_1):
-            assert torch.allclose(
-                mm_output_0.to(torch.bfloat16), mm_output_1.to(torch.bfloat16)
+        self.assertTrue(
+            torch.allclose(
+                ag_output_0.to(torch.float32),
+                ag_output_1.to(torch.float32),
             )
-            assert mm_output_0.stride(), mm_output_1.stride()
+        )
+        self.assertEqual(ag_output_0.stride(), ag_output_1.stride())
+        for mm_output_0, mm_output_1 in zip(mm_outputs_0, mm_outputs_1):
+            self.assertTrue(
+                torch.allclose(
+                    mm_output_0.to(torch.float32), mm_output_1.to(torch.float32)
+                )
+            )
+            self.assertEqual(mm_output_0.stride(), mm_output_1.stride())
+            self.assertEqual(mm_output_0.dtype, mm_output_1.dtype)
 
         dist.destroy_process_group()
 
