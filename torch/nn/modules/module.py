@@ -2972,8 +2972,8 @@ class Module:
                     optimizer.step()
 
                     running_loss += loss.item()
-                    if i % log_interval == log_interval-1:  # print every 100 mini-batches
-                        print(f"Epoch: {epoch + 1}, Data Idx: {i + 1}, Loss: {running_loss / 100:.3f}")
+                    if i % log_interval == log_interval-1:  # print every `log_interval` mini-batches
+                        print(f"Epoch: {epoch + 1}, Data Idx: {i + 1}, Loss: {running_loss / log_interval:.3f}")
                         running_loss = 0.0
 
         if not training:
