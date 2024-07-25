@@ -5,7 +5,6 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/Pool.h>
 #include <c10/util/irange.h>
-#include <tuple>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -214,15 +213,13 @@ static void avg_pool3d_out_frame(
               continue;
             }
 
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-            int divide_factor;
+            int64_t divide_factor = 0;
             if (divisor_override.has_value()) {
               divide_factor = divisor_override.value();
             } else {
               if(count_include_pad) {
                 divide_factor = pool_size;
               } else {
-                // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
                 divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
               }
             }
@@ -396,15 +393,13 @@ static void avg_pool3d_backward_out_frame(
             hend = std::min(hend, iheight);
             wend = std::min(wend, iwidth);
 
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-            int divide_factor;
+            int64_t divide_factor = 0;
             if (divisor_override.has_value()) {
               divide_factor = divisor_override.value();
             } else {
               if(count_include_pad) {
                 divide_factor = pool_size;
               } else {
-                // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
                 divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
               }
             }
