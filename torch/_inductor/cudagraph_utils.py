@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-from __future__ import annotations
-
 import dataclasses
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -19,21 +17,6 @@ class FunctionID:
 
 
 @dataclasses.dataclass(frozen=True)
-class PlaceholderInfo:
-    """
-    A serializable version of torch.fx.Node that contains information
-    pertinent to placeholder stack traces. We use these in logging and error messages
-    related to cudagraphs, and will cache these results.
-    """
-
-    name: str
-    stack_trace: Optional[str]
-    # This field is recursive, but never cyclic (since a node never uses itself)
-    users: List[PlaceholderInfo]
-    mutating_use_stack_trace: Optional[str]
-
-
-@dataclasses.dataclass(frozen=True)
 class WrappedFunction:
     """
     Represents a function that you want to record for CUDA graph replay,
@@ -45,13 +28,15 @@ class WrappedFunction:
     static_input_idxs: List[int]
     id: FunctionID
     constants: Tuple[torch.Tensor, ...]
-    placeholders: List[PlaceholderInfo]
+    placeholders: List[torch.fx.Node]
     mutated_input_idxs: List[int]
 
 
-def get_mutating_use_stack_trace_from_node(
-    placeholder_node: torch.fx.Node,
-) -> Optional[str]:
+def get_placeholders(graph: torch.fx.Graph) -> List[torch.fx.Node]:
+    return [node for node in graph.nodes if node.op == "placeholder"]
+
+
+def get_mutating_use_stack_trace(placeholder_node: torch.fx.Node) -> Optional[str]:
     # reinplaced uses might have a single, non-copy_ use
     if len(placeholder_node.users) == 1:
         return next(iter(placeholder_node.users)).meta.get("stack_trace", None)
@@ -64,37 +49,12 @@ def get_mutating_use_stack_trace_from_node(
     return None
 
 
-def get_mutating_use_stack_trace(placeholder_info: PlaceholderInfo) -> Optional[str]:
-    return placeholder_info.mutating_use_stack_trace
-
-
-def to_placeholder_info(placeholder_node: torch.fx.Node) -> PlaceholderInfo:
-    name = placeholder_node.name
-    stack_trace = placeholder_node.meta.get("stack_trace", None)
-    users = []
-    mutating_use_stack_trace = None
-    # Only recurse to users once, since we only care about user's stack traces
-    if placeholder_node.op == "placeholder":
-        users = [to_placeholder_info(i) for i in placeholder_node.users]
-        mutating_use_stack_trace = get_mutating_use_stack_trace_from_node(
-            placeholder_node
-        )
-
-    return PlaceholderInfo(name, stack_trace, users, mutating_use_stack_trace)
-
-
-def get_placeholder_info(graph: torch.fx.Graph) -> List[PlaceholderInfo]:
-    return [
-        to_placeholder_info(node) for node in graph.nodes if node.op == "placeholder"
-    ]
-
-
 def format_default_skip_message(reason: str) -> str:
     return f"skipping cudagraphs due to {reason}"
 
 
 def get_mutation_stack_trace(
-    placeholders: List[PlaceholderInfo], mutation_indices: List[int]
+    placeholders: List[torch.fx.Node], mutation_indices: List[int]
 ) -> str:
     stack_trace: Optional[str] = ""
 
@@ -138,7 +98,7 @@ def check_for_mutation(
     )
 
 
-def _get_use_stack_trace(node) -> Optional[str]:
+def get_use_stack_trace(node) -> Optional[str]:
     for use in node.users:
         if stack_trace := use.meta.get("stack_trace", None):
             return stack_trace
@@ -150,7 +110,7 @@ def check_multiple_devices_or_any_cpu_nodes(
 ) -> Optional[str]:
     if cpu_node := device_node_mapping.get(torch.device("cpu")):
         msg = f"cpu device ({cpu_node.name})"
-        if stack_trace := _get_use_stack_trace(cpu_node):
+        if stack_trace := get_use_stack_trace(cpu_node):
             return format_default_skip_message(f"{msg}. Found from : \n {stack_trace}")
 
         return format_default_skip_message(msg)
@@ -200,7 +160,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
         has_mutation = len(mutation_indices) != 0
         if not has_mutation:
             return None
-        placeholders = get_placeholder_info(gm.graph)
+        placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
         return get_mutation_stack_trace(placeholders, mutation_indices)
 
     else:
@@ -208,7 +168,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
         return None if not has_mutation else default_msg
 
 
-def get_placeholder_stack_trace(placeholder: PlaceholderInfo) -> Optional[str]:
+def get_placeholder_stack_trace(placeholder: torch.fx.Node) -> Optional[str]:
     """
     Gets the first non-empty stack trace of a placeholder or its users.
     """
@@ -247,7 +207,7 @@ class CheckInvariantStatus(Enum):
 
 
 def log_data_ptr_mismatch(
-    placeholders: List[PlaceholderInfo],
+    placeholders: List[torch.fx.Node],
     inputs: List[torch.Tensor],
     recorded_data_ptr: List[Optional[int]],
     target_idxs: List[int],
