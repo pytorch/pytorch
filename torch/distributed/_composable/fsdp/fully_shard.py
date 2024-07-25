@@ -156,6 +156,7 @@ def fully_shard(
         # However, `fully_shard()` is usually called outside of compile context
         # and we don't know whether the model will then be run under compile.
         # Hence we need to unconditionally set it here (which does not affect eager mode behavior).
+        # See [Note: FSDP2 dry-run initialization for torch.compile] for details.
         module._initialize_hook = True  # type: ignore[assignment]
     return arg_module
 
@@ -181,6 +182,16 @@ class FSDPModule:
         return self
 
     def _infer_parameters(self, module, args, kwargs=None):
+        """
+        [Note: FSDP2 dry-run initialization for torch.compile]
+        It's difficult for torch.compile to trace through the init logic of FSDP2,
+        hence we want to do a dry-run initialization of FSDP2 in eager mode
+        before torch.compile tracing.
+        We leverage `LazyModuleMixin` to do the dry-run initialization:
+        Under compile, if an nn.Module is inherited from `LazyModuleMixin`
+        and its `_initialize_hook` attribute is defined, then its `_infer_parameters()`
+        is guaranteed to be run in the module pre-forward in eager mode.
+        """
         if ca.compiled_autograd_enabled and hasattr(module, "_initialize_hook"):
             # Under compile, always do the dry-run initialization in eager mode
             state = self._get_fsdp_state()
