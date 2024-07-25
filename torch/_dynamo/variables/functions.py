@@ -36,7 +36,7 @@ except ModuleNotFoundError:
     _fsdp_param_group = None
 
 
-def wrap_bound_arg(tx, val, source=None):
+def wrap_bound_arg(tx: "InstructionTranslator", val, source=None):
     # Source propagation is best effort since not every object we encounter has a source to begin with.
     if isinstance(val, VariableTracker):
         return val
@@ -50,7 +50,7 @@ def wrap_bound_arg(tx, val, source=None):
         return variables.LazyVariableTracker.create(val, source)
 
 
-def wrap_args_kwargs(tx, result):
+def wrap_args_kwargs(tx: "InstructionTranslator", result):
     for k, v in list(result.items()):
         if isinstance(v, (tuple, dict)):
             # args/kwargs
@@ -413,7 +413,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         return result
 
 
-def invoke_and_store_as_constant(tx, fn, name, args, kwargs):
+def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kwargs):
     def convert(x):
         if isinstance(x, variables.TensorVariable):
             return x.get_real_value()
@@ -756,7 +756,7 @@ def _traceable_collective_remaps():
     return {}
 
 
-def _traceable_collectives_source(tx, fn):
+def _traceable_collectives_source(tx: "InstructionTranslator", fn):
     assert torch.distributed.is_available(), "Illegal invocation."
     assert fn in _traceable_collective_remaps().values()
 
@@ -782,7 +782,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         self.replacement_var = replacement_var
 
     @staticmethod
-    def create(tx, old_fn, source, **options):
+    def create(tx: "InstructionTranslator", old_fn, source, **options):
         new_fn, new_source = CollectiveFunctionRewriteVariable.rewrite(tx, old_fn)
         return CollectiveFunctionRewriteVariable(
             old_fn,
@@ -798,7 +798,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         )
 
     @staticmethod
-    def rewrite(tx, fn):
+    def rewrite(tx: "InstructionTranslator", fn):
         new_fn = _traceable_collective_remaps()[fn]
         return new_fn, _traceable_collectives_source(tx, new_fn)
 

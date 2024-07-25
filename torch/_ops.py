@@ -1103,12 +1103,10 @@ class OpOverloadPacket:
             setattr(self, key, overload)
             self._dir.append(key)
             return overload
-        except RuntimeError as e:
-            # TEMPORARY, WILL REMOVE.
-            # I want to see where this actually shows up in CI.
-            raise RuntimeError(
+        except RuntimeError:
+            raise AttributeError(
                 f"The underlying op of '{str(self)}' has no overload name '{key}'"
-            ) from e
+            ) from None
 
     def __iter__(self):
         return iter(self._dir)
