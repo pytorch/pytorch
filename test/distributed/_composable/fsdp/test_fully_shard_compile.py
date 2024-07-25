@@ -143,34 +143,34 @@ class TestFullyShardCompile(FSDPTest):
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
 
-    def _reinplace_all_gather_with_checks(self, graph, orig_fn):
-        self.assertTrue(
-            _is_op_in_graph(
-                graph,
-                torch.ops._c10d_functional.all_gather_into_tensor.default,
+    def _reinplace_all_gather_with_optional_checks(self, fullgraph):
+        def _run_with_checks(graph, orig_fn):
+            self.assertTrue(
+                _is_op_in_graph(
+                    graph,
+                    torch.ops._c10d_functional.all_gather_into_tensor.default,
+                )
             )
-        )
-        orig_fn(graph)
-        self.assertFalse(
-            _is_op_in_graph(
-                graph,
-                torch.ops._c10d_functional.all_gather_into_tensor.default,
+            orig_fn(graph)
+            self.assertFalse(
+                _is_op_in_graph(
+                    graph,
+                    torch.ops._c10d_functional.all_gather_into_tensor.default,
+                )
             )
-        )
-        self.assertTrue(
-            _is_op_in_graph(
-                graph,
-                torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+            self.assertTrue(
+                _is_op_in_graph(
+                    graph,
+                    torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                )
             )
-        )
 
-    def _mock_reinplace_fsdp_all_gather(self, fullgraph):
         if fullgraph:
             return mock.patch.object(
                 comms,
                 "reinplace_fsdp_all_gather",
                 functools.partial(
-                    self._reinplace_all_gather_with_checks,
+                    _run_with_checks,
                     orig_fn=comms.reinplace_fsdp_all_gather,
                 ),
             )
@@ -371,11 +371,32 @@ class TestFullyShardCompile(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_nested_fully_shard_backend_inductor(self):
         for fullgraph in [True, False]:
-            self._test_traceable_fsdp(
-                *self._create_nested_fully_shard_factory_fns(fullgraph=fullgraph),
-                "inductor",
-                fullgraph=fullgraph,
-            )
+            with self._reinplace_all_gather_with_optional_checks(fullgraph):
+                _, triton_codes = run_and_get_code(
+                    lambda: self._test_traceable_fsdp(
+                        *self._create_nested_fully_shard_factory_fns(
+                            fullgraph=fullgraph
+                        ),
+                        "inductor",
+                        fullgraph=fullgraph,
+                    )
+                )
+            if fullgraph:
+                self.assertTrue(
+                    len(triton_codes) == 2,
+                    "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
+                )
+                for code in triton_codes:
+                    FileCheck().check(
+                        "torch.ops._c10d_functional.all_gather_into_tensor_out."
+                    ).run(code)
+            else:
+                # TODO: when fullgraph=False and there is graph break in FWD graph,
+                # there are several recompiles, need to figure out why.
+                self.assertTrue(
+                    len(triton_codes) > 2,
+                    "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
+                )
 
     def _create_transformer_factory_fns(self, checkpoint_activations):
         seq_len = 16
@@ -386,7 +407,9 @@ class TestFullyShardCompile(FSDPTest):
             fsdp_config = {}
             mesh = init_device_mesh("cuda", (self.world_size,))
             model_args = ModelArgs(
-                vocab_size=vocab_size, checkpoint_activations=checkpoint_activations
+                vocab_size=vocab_size,
+                n_layers=3,
+                checkpoint_activations=checkpoint_activations,
             )
             model = Transformer(model_args)
             for layer_id, mod in enumerate(model.layers):
@@ -406,19 +429,17 @@ class TestFullyShardCompile(FSDPTest):
 
         return model_init_fn, input_creation_fn
 
-    def _scaled_dot_product_attention_with_graph_break(
-        self, orig_fn, fullgraph, *args, **kwargs
-    ):
-        if not fullgraph:
-            torch._dynamo.graph_break()
-        return orig_fn(*args, **kwargs)
+    def _maybe_add_graph_break_to_sdpa(self, fullgraph):
+        def _sdpa_with_graph_break(orig_fn, fullgraph, *args, **kwargs):
+            if not fullgraph:
+                torch._dynamo.graph_break()
+            return orig_fn(*args, **kwargs)
 
-    def _mock_sdpa(self, fullgraph):
         return mock.patch.object(
             F,
             "scaled_dot_product_attention",
             functools.partial(
-                self._scaled_dot_product_attention_with_graph_break,
+                _sdpa_with_graph_break,
                 F.scaled_dot_product_attention,
                 fullgraph,
             ),
@@ -428,9 +449,9 @@ class TestFullyShardCompile(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_transformer_backend_aot_eager(self):
         for fullgraph, checkpoint_activations in product([True, False], [True, False]):
-            with self._mock_sdpa(fullgraph), self._mock_reinplace_fsdp_all_gather(
+            with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
-            ):
+            ), self._reinplace_all_gather_with_optional_checks(fullgraph):
                 self._test_traceable_fsdp(
                     *self._create_transformer_factory_fns(
                         checkpoint_activations=checkpoint_activations
@@ -445,7 +466,7 @@ class TestFullyShardCompile(FSDPTest):
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_aot_eager_decomp_partition(self):
         for fullgraph, checkpoint_activations in product([True, False], [True, False]):
-            with self._mock_sdpa(fullgraph):
+            with self._maybe_add_graph_break_to_sdpa(fullgraph):
                 self._test_traceable_fsdp(
                     *self._create_transformer_factory_fns(
                         checkpoint_activations=checkpoint_activations
@@ -464,9 +485,9 @@ class TestFullyShardCompile(FSDPTest):
         # fullgraph=True, AC=True -> error out
         # fullgraph=False, AC=True -> numerical issue
         for fullgraph, checkpoint_activations in product([True, False], [True, False]):
-            with self._mock_sdpa(fullgraph), self._mock_reinplace_fsdp_all_gather(
+            with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
-            ):
+            ), self._reinplace_all_gather_with_optional_checks(fullgraph):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
                         *self._create_transformer_factory_fns(
@@ -486,8 +507,10 @@ class TestFullyShardCompile(FSDPTest):
                         "torch.ops._c10d_functional.all_gather_into_tensor_out."
                     ).run(code)
             else:
+                # TODO: when fullgraph=False and there is graph break in FWD graph,
+                # there are several recompiles, need to figure out why.
                 self.assertTrue(
-                    len(triton_codes) >= 3,
+                    len(triton_codes) > 2,
                     "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
                 )
 
