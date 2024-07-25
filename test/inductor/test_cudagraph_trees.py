@@ -2146,7 +2146,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             class Foo(torch.nn.Module):
                 def __init__(self) -> None:
                     super().__init__()
-                    self.static_tensor = torch.zeros((2, 2), device="cuda")
+                    self.register_buffer(
+                        "static_tensor", torch.zeros((2, 2), device="cuda")
+                    )
                     self.goo = Goo()
 
                 def forward(self, x) -> torch.Tensor:
@@ -2164,11 +2166,20 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             foo.static_tensor = torch.ones((2, 2), device="cuda")
             foo.goo.linear.bias = torch.nn.Parameter(torch.ones((2,), device="cuda"))
 
-            # Run with specific function id to avoid dynamo recompiling
-            self.get_manager().run(
-                [foo.goo.linear.weight, foo.goo.linear.bias, foo.static_tensor, inp],
-                FunctionID(0),
-            )
+            if torch._dynamo.config.inline_inbuilt_nn_modules:
+                for _ in range(3):
+                    foo(inp)
+            else:
+                # Run with specific function id to avoid dynamo recompiling
+                self.get_manager().run(
+                    [
+                        foo.goo.linear.weight,
+                        foo.goo.linear.bias,
+                        foo.static_tensor,
+                        inp,
+                    ],
+                    FunctionID(0),
+                )
 
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
