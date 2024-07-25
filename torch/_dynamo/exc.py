@@ -53,6 +53,10 @@ class UnspecializeRestartAnalysis(RestartAnalysis):
     pass
 
 
+class CompileCollectiveRestartAnalysis(RestartAnalysis):
+    pass
+
+
 class SkipFrame(TorchDynamoException):
     pass
 
@@ -163,19 +167,6 @@ class UserError(Unsupported):
         self.message = msg
 
 
-class UserStopIteration(TorchDynamoException):
-    value: Optional[Any]
-
-    # Reference `StopIteration_init` in CPython
-    # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
-    def __init__(self, *args, **kwargs):
-        super().__init__("unhandled `raise StopIteration`")
-        if len(args) > 0:
-            self.value = args[0]
-        else:
-            self.value = None
-
-
 class UnsafeScriptObjectError(TorchDynamoException):
     pass
 
@@ -189,7 +180,22 @@ class IncorrectUsage(Exception):
 
 
 class ObservedException(TorchDynamoException):
+    # An exception observed during the tracing. This exception is used by Dynamo to handle exceptions.
     pass
+
+
+class ObservedUserStopIteration(ObservedException):
+    # An UserStopIteraion exception observed during the Dynamo tracing (e.g Dynamo tracing __next__)
+    value: Optional[Any]
+
+    # Reference `StopIteration_init` in CPython
+    # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
+    def __init__(self, *args, **kwargs):
+        super().__init__("unhandled `raise StopIteration`")
+        if len(args) > 0:
+            self.value = args[0]
+        else:
+            self.value = None
 
 
 # These exceptions are ok to fallback to eager/graph_break.

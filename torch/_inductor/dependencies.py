@@ -128,7 +128,7 @@ class MemoryDep(Dep):
             for var, size in zip(self.var_names, self.size):
                 if var in vars:
                     numel = numel * size
-        return numel
+        return numel  # type: ignore[return-value]
 
     def rename(self, renames: Dict[str, str]) -> "MemoryDep":
         if self.name in renames:
@@ -201,7 +201,7 @@ class StarDep(Dep):
         raise NotImplementedError("StarDep does not have an index")
 
     def get_numel(self) -> sympy.Expr:
-        return V.graph.get_numel(self.name)
+        return V.graph.get_numel(self.name)  # type: ignore[return-value]
 
     def rename(self, renames: Dict[str, str]) -> "StarDep":
         if self.name in renames:
@@ -596,7 +596,9 @@ class FreeUnbackedSymbolsOpsHandler:
 
         return inner
 
-    def indirect_indexing(self, index_var, size, check=True) -> sympy.Symbol:
+    def indirect_indexing(
+        self, index_var, size, check=True, wrap_neg=True
+    ) -> sympy.Symbol:
         assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
         self.symbols |= free_unbacked_symbols(size)
         return sympy_index_symbol(f"({str(index_var)})")
