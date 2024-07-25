@@ -1383,7 +1383,6 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_can_load_older_state_dict(self, device, dtype, optim_info):
-        new_flags = ["maximize", "foreach", "fused", "differentiable", "capturable"]
         optim_cls = optim_info.optim_cls
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
@@ -1417,7 +1416,7 @@ class TestOptimRenewed(TestCase):
             old_state_dict = deepcopy(optimizer.state_dict())
             old_state_dict_pg = old_state_dict["param_groups"]
             for group in old_state_dict_pg:
-                for flag in new_flags:
+                for flag in optim_info.not_og_supported_flags:
                     if flag in group:
                         del group[flag]
 
