@@ -202,6 +202,7 @@ class TestFlexAttention(InductorTestCase):
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
+        # TODO: Make this check stricter after updating eager SDPA masked_softmax semantics
         if torch.isnan(compiled_error).any() and not torch.isnan(ref_error).any():
             self.assertTrue(False, "Output/Grad with NaN")
         if compiled_error > ref_error * fudge_factor:
@@ -949,34 +950,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
 
     @supported_platform
-    def test_fully_masked_out_rows(self):
-        # Ensure fully masked out rows won't cause NaNs
-        query = torch.randn(
-            (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
-        )
-        key = torch.randn(
-            (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
-        )
-        value = torch.randn(
-            (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
-        )
-        do = torch.randn((B, H, S, D), dtype=torch.float32, device="cuda")
-
-        M = S // 2
-
-        def mask_mod(b, h, q, kv):
-            return q < M
-
-        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
-        out = torch.compile(flex_attention, dynamic=False)(
-            query, key, value, block_mask=block_mask
-        )
-        self.assertEqual(out[:, :, M:, :].sum(), 0)
-
-        out.backward(do)
-        self.assertEqual(query.grad[:, :, M:, :].sum(), 0)
-
-    @supported_platform
     def test_multiple_score_mod_calls2(self):
         query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
         keys = [
@@ -1413,6 +1386,35 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         block_mask = create_block_mask(mask_mod, 2, 1, 128, 128)
         out = func(query, key, value, block_mask=block_mask)
         out.sum().backward()
+
+    @supported_platform
+    def test_fully_masked_out_rows(self):
+        # Ensure fully masked out rows won't cause NaNs.
+        query = torch.randn(
+            (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        key = torch.randn(
+            (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        value = torch.randn(
+            (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        do = torch.randn((B, H, S, D), dtype=torch.float32, device="cuda")
+
+        M = S // 2
+
+        def mask_mod(b, h, q, kv):
+            return q < M
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        out = torch.compile(flex_attention, dynamic=False)(
+            query, key, value, block_mask=block_mask
+        )
+        # TODO: Switch to self.run_test_with_call after updating eager SDPA masked_softmax semantics
+        self.assertEqual(out[:, :, M:, :].sum(), 0)
+
+        out.backward(do)
+        self.assertEqual(query.grad[:, :, M:, :].sum(), 0)
 
     @supported_platform
     def test_comparison_vs_sdpa(self):
