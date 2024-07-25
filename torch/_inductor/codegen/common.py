@@ -1269,7 +1269,7 @@ class KernelArgs:
             return "seed"
         for prefix in ["zuf", "zf"]:
             if str(name).startswith(prefix):
-                return self._lookup(prefix, self.sizevars, name)
+                return self._lookup("ks", self.sizevars, name)
         return self._lookup("ks", self.sizevars, name)
 
     def call_names(self):
