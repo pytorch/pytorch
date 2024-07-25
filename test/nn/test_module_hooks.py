@@ -876,7 +876,6 @@ class TestStateDictHooks(TestCase):
                 state_dict[prefix + name] = torch.nn.Parameter(
                     state_dict[prefix + name]
                 )
-            return dict()
 
         def register_linear_hook(module):
             if isinstance(module, nn.Linear):
@@ -910,14 +909,18 @@ class TestStateDictHooks(TestCase):
 
         handle = hook_registration_fn(fn)
         if private:
-            self.assertTrue(not hasattr(fn, "_from_public_api"))
+            self.assertTrue(hasattr(fn, "_from_private_api"))
             self.assertTrue(len(m.state_dict()) == 0)
+            with self.assertRaisesRegex(
+                RuntimeError, "previously registered via _register_state_dict_hook"
+            ):
+                m.register_state_dict_post_hook(fn)
         else:
-            self.assertTrue(fn._from_public_api)
-            self.assertTrue(len(m.state_dict()) > 0)
-            _check_sd(m.state_dict())
-            handle.remove()
-            self.assertTrue(not hasattr(fn, "_from_public_api"))
+            self.assertFalse(hasattr(fn, "_from_private_api"))
+            with self.assertRaisesRegex(
+                RuntimeError, "state_dict post-hook must return None"
+            ):
+                sd = m.state_dict()
 
 
 class TestModuleGlobalHooks(TestCase):

@@ -1992,6 +1992,7 @@ class Module:
         module that :meth:`~nn.Module.state_dict` is called from.
         """
         handle = RemovableHandle(self._state_dict_hooks)
+        hook._from_private_api = True
         self._state_dict_hooks[handle.id] = hook
         return handle
 
@@ -2003,8 +2004,11 @@ class Module:
 
         The registered hooks can modify the ``state_dict`` inplace.
         """
+        if getattr(hook, "_from_private_api", False):
+            raise RuntimeError(
+                "Cannot register a state dict post hook previously registered via _register_state_dict_hook"
+            )
         handle = RemovableHandle(self._state_dict_hooks)
-        hook._from_public_api = True
         self._state_dict_hooks[handle.id] = hook
         return handle
 
@@ -2146,9 +2150,12 @@ class Module:
                 )
         for hook in self._state_dict_hooks.values():
             hook_result = hook(self, destination, prefix, local_metadata)
-            if not getattr(hook, "_from_public_api", False):
+            if getattr(hook, "_from_private_api", False):
                 if hook_result is not None:
                     destination = hook_result
+            else:
+                if hook_result is not None:
+                    raise RuntimeError("state_dict post-hook must return None")
         return destination
 
     def _register_load_state_dict_pre_hook(self, hook, with_module=False):
