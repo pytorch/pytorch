@@ -683,9 +683,6 @@ def is_dynamo_supported():
 def check_if_inductor_supported():
     check_if_dynamo_supported()
 
-    if sys.platform == "win32":
-        raise RuntimeError("Windows not yet supported for inductor")
-
 
 def is_inductor_supported():
     try:
