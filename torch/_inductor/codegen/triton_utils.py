@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 import sympy
 
 import torch
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config
 from ..runtime.hints import instance_descriptor
@@ -42,6 +43,10 @@ def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
             return "*i8"
         elif isinstance(arg.expr, (float, sympy.Float)):
             return "fp32"
+        elif isinstance(arg.expr, sympy.Symbol) and symbol_is_type(
+            arg.expr, (SymT.UNBACKED_FLOAT, SymT.FLOAT)
+        ):
+            return "fp64"
         if size_dtype == "tl.int32":
             return "i32"
         elif size_dtype == "tl.int64":

@@ -10784,12 +10784,14 @@ class CommonTemplate:
         def fn(x):
             return x.sum().item()
 
-        def fn2(x):
-            return x.sum().item() + 1
+        def fn2(x, y):
+            a = x.sum().item() + 1
+            return y + a
 
         x = torch.rand([20], device=self.device)
-        self.common(fn, (x,))
-        self.common(fn2, (x,))
+        y = torch.rand([4], device=self.device)
+        self.common(fn, (x,), check_lowp=False)
+        self.common(fn2, (x, y), check_lowp=False)
 
     def test_float16_to_int16(self):
         def fn(x):

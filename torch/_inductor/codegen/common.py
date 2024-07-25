@@ -1317,7 +1317,7 @@ class KernelArgs:
             arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.sizevars.items():
             if symbol_is_type(outer, (SymT.UNBACKED_FLOAT, SymT.FLOAT)):
-                arg_type = DTYPE_TO_CPP[torch.float32]
+                arg_type = DTYPE_TO_CPP[torch.float64]
             else:
                 arg_type = INDEX_TYPE
             arg_defs.append(f"const {arg_type} {inner}")
