@@ -141,10 +141,10 @@ class SocketImpl {
   static constexpr Handle invalid_socket = -1;
 #endif
 
-  explicit SocketImpl(
-      Handle hnd,
-      std::optional<::addrinfo> remote = std::nullopt) noexcept
-      : hnd_{hnd}, remote_(remote) {}
+  explicit SocketImpl(Handle hnd) noexcept : hnd_{hnd} {}
+
+  explicit SocketImpl(Handle hnd, const ::addrinfo& remote)
+      : hnd_{hnd}, remote_{fmt::format("{}", remote)} {}
 
   SocketImpl(const SocketImpl& other) = delete;
 
@@ -182,7 +182,7 @@ class SocketImpl {
     return hnd_;
   }
 
-  const std::optional<::addrinfo>& remote() const noexcept {
+  const std::optional<std::string>& remote() const noexcept {
     return remote_;
   }
 
@@ -192,7 +192,7 @@ class SocketImpl {
   bool setSocketFlag(int level, int optname, bool value) noexcept;
 
   Handle hnd_;
-  const std::optional<::addrinfo> remote_;
+  const std::optional<std::string> remote_;
 };
 } // namespace c10d::detail
 
@@ -278,7 +278,7 @@ struct formatter<c10d::detail::SocketImpl> {
     addr.ai_addrlen = addr_len;
 
     auto remote = socket.remote();
-    std::string remoteStr = remote ? fmt::format("{}", *remote) : "none";
+    std::string remoteStr = remote ? *remote : "none";
 
     return fmt::format_to(
         ctx.out(),
