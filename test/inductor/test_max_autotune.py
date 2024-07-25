@@ -730,11 +730,11 @@ class TestMaxAutotune(TestCase):
         self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
 
     def test_non_contiguous_input_mm_plus_mm(self):
-        x1 = rand_strided((50257, 32768), (1, 50304), device="cuda")
-        y1 = rand_strided((32768, 768), (768, 1), device="cuda")
+        x1 = rand_strided((50257, 1768), (1, 50304), device="cuda")
+        y1 = rand_strided((1768, 768), (768, 1), device="cuda")
 
-        x2 = rand_strided((50257, 32768), (1, 50304), device="cuda")
-        y2 = rand_strided((32768, 768), (768, 1), device="cuda")
+        x2 = rand_strided((50257, 1768), (1, 50304), device="cuda")
+        y2 = rand_strided((1768, 768), (768, 1), device="cuda")
 
         @torch.compile(mode="max-autotune")
         def f(x1, y1, x2, y2):
