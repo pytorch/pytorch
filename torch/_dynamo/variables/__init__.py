@@ -73,18 +73,13 @@ from .misc import (
     NumpyVariable,
     PythonModuleVariable,
     RegexPatternVariable,
-    StopIterationVariable,
     StringFormatVariable,
     SuperVariable,
     TorchVersionVariable,
     TypingVariable,
     UnknownVariable,
 )
-from .nn_module import (
-    NNModuleVariable,
-    UnspecializedBuiltinNNModuleVariable,
-    UnspecializedNNModuleVariable,
-)
+from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
@@ -150,7 +145,6 @@ __all__ = [
     "SDPAParamsVariable",
     "SkipFunctionVariable",
     "SliceVariable",
-    "StopIterationVariable",
     "StringFormatVariable",
     "SuperVariable",
     "TensorVariable",
@@ -160,7 +154,6 @@ __all__ = [
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",
-    "UnspecializedBuiltinNNModuleVariable",
     "UnspecializedPythonVariable",
     "UntypedStorageVariable",
     "UserDefinedClassVariable",
