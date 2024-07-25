@@ -22,6 +22,7 @@ from torch.distributed.pipelining.schedules import (
     RECV_F,
     RESHARD,
     SEND_B,
+    SEND_B_RECV_F,
     UNSHARD,
     W,
 )
@@ -143,6 +144,7 @@ class TestScheduleLowering(TestCase):
             ("3RESHARD", _Action(3, RESHARD, None)),
             ("2SEND_B2", _Action(2, SEND_B, 2)),
             ("1RECV_F1", _Action(1, RECV_F, 1)),
+            ("1SEND_B2_0RECV_F4", _Action(1, SEND_B_RECV_F, 2, 0, 4)),
         ],
     )
     def test_action_parse(self, action_str_and_ref):
