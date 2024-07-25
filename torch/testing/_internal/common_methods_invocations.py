@@ -16121,7 +16121,7 @@ op_db: List[OpInfo] = [
         skip_cow_input_backward=True,
         # FIXME: mask_type == 2 (LowerRight)
         decorators=[
-            skipCUDAIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "This platform doesn't support efficient attention")],
+            skipCUDAIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "This platform doesn't support efficient attention"),],
         skips=(
             # for element 1, was torch.Size([4, 4, 11]) but real shape was torch.Size([16, 11])
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace", device_type="cuda",
@@ -16131,6 +16131,24 @@ op_db: List[OpInfo] = [
                          dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace", device_type="cuda",
                          dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            # Device mismatch due to philox seed and offset
+            DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive',
+                         device_type='cuda',
+                         active_if=TEST_WITH_ROCM),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_view_replay',
+                         device_type='cuda',
+                         active_if=TEST_WITH_ROCM),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
+                         device_type='cuda',
+                         active_if=TEST_WITH_ROCM),
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast',
+                         device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake', device_type='cuda'),
+            # meta implementation is in fake_impls.py instead of being a meta registration
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
             # Checking the scaler value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
