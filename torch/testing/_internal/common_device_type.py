@@ -53,8 +53,9 @@ try:
     import psutil  # type: ignore[import]
 
     HAS_PSUTIL = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_PSUTIL = False
+    psutil = None
 
 # Note [Writing Test Templates]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -505,7 +506,12 @@ class DeviceTypeTestBase(TestCase):
             decorator_fn,
         ) in parametrize_fn(test, generic_cls, cls):
             test_suffix = "" if test_suffix == "" else "_" + test_suffix
-            device_suffix = "_" + cls.device_type
+            cls_device_type = (
+                cls.device_type
+                if cls.device_type != "privateuse1"
+                else torch._C._get_privateuse1_backend_name()
+            )
+            device_suffix = "_" + cls_device_type
 
             # Note: device and dtype suffix placement
             # Special handling here to place dtype(s) after device according to test name convention.
@@ -704,7 +710,7 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
 def get_device_type_test_bases():
     # set type to List[Any] due to mypy list-of-union issue:
     # https://github.com/python/mypy/issues/3351
-    test_bases: List[Any] = list()
+    test_bases: List[Any] = []
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:
@@ -1124,11 +1130,13 @@ class ops(_TestParametrizer):
                         except Exception as e:
                             tracked_input = get_tracked_input()
                             if PRINT_REPRO_ON_FAILURE and tracked_input is not None:
-                                raise Exception(  # noqa: TRY002
+                                e_tracked = Exception(  # noqa: TRY002
                                     f"Caused by {tracked_input.type_desc} "
                                     f"at index {tracked_input.index}: "
                                     f"{_serialize_sample(tracked_input.val)}"
-                                ) from e
+                                )
+                                e_tracked._tracked_input = tracked_input  # type: ignore[attr]
+                                raise e_tracked from e
                             raise e
                         finally:
                             clear_tracked_input()
@@ -1384,6 +1392,25 @@ def onlyNativeDeviceTypes(fn):
     return only_fn
 
 
+# Only runs the test on the native device types and devices specified in the devices list
+def onlyNativeDeviceTypesAnd(devices=None):
+    def decorator(fn):
+        @wraps(fn)
+        def only_fn(self, *args, **kwargs):
+            if (
+                self.device_type not in NATIVE_DEVICES
+                and self.device_type not in devices
+            ):
+                reason = f"onlyNativeDeviceTypesAnd {devices} : doesn't run on {self.device_type}"
+                raise unittest.SkipTest(reason)
+
+            return fn(self, *args, **kwargs)
+
+        return only_fn
+
+    return decorator
+
+
 # Specifies per-dtype precision overrides.
 # Ex.
 #
@@ -1509,6 +1536,11 @@ class dtypesIfCUDA(dtypes):
 class dtypesIfMPS(dtypes):
     def __init__(self, *args):
         super().__init__(*args, device_type="mps")
+
+
+class dtypesIfHPU(dtypes):
+    def __init__(self, *args):
+        super().__init__(*args, device_type="hpu")
 
 
 class dtypesIfPRIVATEUSE1(dtypes):

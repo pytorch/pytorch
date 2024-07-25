@@ -22,7 +22,6 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
-from .. import config
 
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 
@@ -223,6 +222,8 @@ def gen_alias_from_base(
     target_meta_tensor,
     target_requires_grad,
     target_functional_tensor: Optional[FunctionalTensorMetadataEq] = None,
+    *,
+    replay_views,
 ):
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
@@ -240,7 +241,7 @@ def gen_alias_from_base(
     # functions applied to itself (collected during functionalization) so as
     # to replay them (view functions) on the aliased_base_tensor.
     if (
-        config.view_replay_for_aliased_outputs
+        replay_views
         and target_functional_tensor is not None
         and not torch._functionalize_is_symbolic(target_functional_tensor.tensor)
     ):
@@ -393,6 +394,13 @@ def was_tensor_metadata_updated(arg, new_arg):
 
 # Returns the number of detected copy_
 def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
+    allowed_mutation_ops = [
+        torch.ops.aten.copy_.default,
+        torch.ops.aten.set_.source_Tensor,
+    ]
+    if hasattr(torch.ops.fsdp, "set_"):
+        allowed_mutation_ops.append(torch.ops.fsdp.set_.default)
+
     placeholders = set()
     mutation_count = 0
     # NB: It would also be nice to verify that the mutations all happen at the
@@ -402,19 +410,15 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
         if n.op == "placeholder":
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
-            if n.target in [
-                torch.ops.aten.copy_.default,
-                torch.ops.aten.set_.source_Tensor,
-            ]:
+            if n.target in allowed_mutation_ops:
                 suffix = True
-                # Can only copy_/set_ into an input, and can only do so once
+                # Can only copy_/set_ into an input
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
                 if "set_buffer_donor_" not in str(n.args[0]):
                     assert (
                         n.args[0] in placeholders
                     ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
-                    placeholders.remove(n.args[0])
                 mutation_count += 1
             else:
                 assert (

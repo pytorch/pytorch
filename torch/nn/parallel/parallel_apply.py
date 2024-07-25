@@ -4,9 +4,7 @@ from typing import Any, cast, Dict, List, Optional, Sequence, Tuple, Union
 import torch
 from torch._utils import ExceptionWrapper
 from torch.cuda._utils import _get_device_index
-from torch.cuda.amp import autocast
-
-from ..modules import Module
+from torch.nn.modules import Module
 
 
 __all__ = ["get_a_var", "parallel_apply"]
@@ -89,9 +87,9 @@ def parallel_apply(
         if stream is None:
             stream = torch.cuda.current_stream(device)
         try:
-            with torch.cuda.device(device), torch.cuda.stream(stream), autocast(
-                enabled=autocast_enabled
-            ):
+            with torch.cuda.device(device), torch.cuda.stream(
+                stream
+            ), torch.amp.autocast("cuda", enabled=autocast_enabled):
                 # this also avoids accidental slicing of `input` if it is a Tensor
                 if not isinstance(input, (list, tuple)):
                     input = (input,)

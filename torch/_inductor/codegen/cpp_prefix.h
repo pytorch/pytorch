@@ -325,6 +325,10 @@ void mm_get_thread_blocking(
     int64_t& Mt,
     int64_t& Nt,
     int64_t& Kt) {
+  // see NOTE [Thread blocking in Cpp GEMM] for heuristics
+  // TODO(jgong5): cache thread blocking results
+  Mt = Nt = Kt = 0;
+
   auto get_factors = [](int64_t number) {
     int count = 0;
     for (int64_t i = std::sqrt(number); i > 0; --i) {
@@ -354,6 +358,15 @@ void mm_get_thread_blocking(
     return std::make_tuple(thread_block_m, thread_block_n, k_blocks);
   };
 
+  auto is_better_blocking = [=](int64_t Mt_,
+                              int64_t Nt_,
+                              int64_t Kt_,
+                              int64_t Mt,
+                              int64_t Nt,
+                              int64_t Kt) {
+    return Mt == 0 || Mt_ * M0 + Nt_ * N0 < Mt * M0 + Nt * N0;
+  };
+
   int64_t m_blocks = (M + M0 - 1) / M0;
   int64_t n_blocks = (N + N0 - 1) / N0;
   int64_t k_blocks = (K + K0 - 1) / K0;
@@ -363,32 +376,33 @@ void mm_get_thread_blocking(
 
   for (int i = 0; i < count; ++i) {
     int64_t factor = factors[i];
-    if (n_blocks % factor == 0 &&
-        m_blocks % (num_threads / factor) == 0) {
-      std::tie(Mt, Nt, Kt) = get_blocking(
+    if (n_blocks >= factor &&
+        m_blocks >= num_threads / factor) {
+      auto [Mt_, Nt_, Kt_] = get_blocking(
           num_threads, factor, m_blocks, n_blocks, k_blocks);
-      return;
+      if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
+        std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
+      }
     }
+  }
+
+  if (Mt != 0) {
+    return;
   }
 
   for (int i = 0; i < count; ++i) {
     int64_t factor = factors[i];
-    if (n_blocks % factor == 0) {
-      std::tie(Mt, Nt, Kt) = get_blocking(
-          num_threads, factor, m_blocks, n_blocks, k_blocks);
-      return;
-    }
     int64_t cofactor = num_threads / factor;
-    if (m_blocks % cofactor == 0) {
-      std::tie(Mt, Nt, Kt) = get_blocking(
+    if (n_blocks >= factor || m_blocks >= cofactor) {
+      auto [Mt_, Nt_, Kt_] = get_blocking(
           num_threads, factor, m_blocks, n_blocks, k_blocks);
-      return;
+      if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
+        std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
+      }
     }
   }
 
-  assert(false && "Should not reach here.");
-  // Dummy return to avoid compiler warning
-  return;
+  assert(Mt != 0);
 }
 
 inline void mm_get_thread_blocks(
@@ -416,3 +430,65 @@ inline void mm_get_thread_blocks(
   m_block_start = std::min(thread_id * Mt_blocks, M_blocks);
   m_block_end = std::min(m_block_start + Mt_blocks, M_blocks);
 }
+
+struct amx_tilecfg {
+  uint8_t palette_id;
+  uint8_t start_row;
+  uint8_t reserved_0[14];
+  uint16_t colsb[16];
+  uint8_t rows[16];
+};
+
+class AMXState {
+ private:
+  amx_tilecfg tilecfg_;
+  uint8_t rows_;
+  uint16_t colsb_;
+  uint8_t num_tile_rows_;
+  uint8_t num_tile_columns_;
+
+ public:
+  AMXState() : rows_(0), colsb_(0), num_tile_rows_(0), num_tile_columns_(0) {
+    memset(&tilecfg_, 0, sizeof(tilecfg_));
+  }
+
+  inline void configure(
+      uint8_t rows,
+      uint16_t colsb,
+      uint8_t num_tile_rows,
+      uint8_t num_tile_columns,
+      void (*loadconfig)(const amx_tilecfg&)) {
+    if (tilecfg_.palette_id == 1 && rows_ == rows && colsb_ == colsb &&
+        num_tile_rows_ == num_tile_rows &&
+        num_tile_columns_ == num_tile_columns) {
+      return;
+    }
+    tilecfg_.palette_id = 1;
+    rows_ = rows;
+    colsb_ = colsb;
+    num_tile_rows_ = num_tile_rows;
+    num_tile_columns_ = num_tile_columns;
+    const auto num_c_tiles = num_tile_rows * num_tile_columns;
+    // For C
+    for (int i = 0; i < num_c_tiles; i++) {
+      tilecfg_.rows[i] = rows;
+      tilecfg_.colsb[i] = 64;
+    }
+    // For A
+    for (int i = 0; i < num_tile_rows; i++) {
+      tilecfg_.rows[i + num_c_tiles] = rows;
+      tilecfg_.colsb[i + num_c_tiles] = colsb;
+    }
+    // For B
+    for (int i = 0; i < num_tile_columns; i++) {
+      tilecfg_.rows[i + num_c_tiles + num_tile_rows] = colsb / 4;
+      tilecfg_.colsb[i + num_c_tiles + num_tile_rows] = 64;
+    }
+    loadconfig(tilecfg_);
+  }
+
+  inline void release(void (*tile_release)()) {
+    tilecfg_.palette_id = 0;
+    tile_release();
+  }
+};

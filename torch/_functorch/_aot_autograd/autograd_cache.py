@@ -4,7 +4,6 @@ Utils for caching the outputs of AOTAutograd
 """
 from __future__ import annotations
 
-import functools
 import logging
 import os
 import pickle
@@ -12,7 +11,7 @@ import shutil
 
 from dataclasses import dataclass
 
-from typing import Callable, List, Optional, TYPE_CHECKING
+from typing import Callable, List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters
@@ -22,15 +21,14 @@ from torch._inductor.codecache import (
     _ident,
     BypassFxGraphCache,
     CompiledFxGraph,
+    extract_tensor_metadata_for_cache_key,
     FxGraphCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
-    get_code_hash,
     write_atomic,
 )
 
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._subclasses.fake_tensor import extract_tensor_metadata
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
@@ -63,11 +61,36 @@ def check_node_safe(node: Node):
     """
     Checks that the node only uses supported operators. We are starting with very
     conservative cacheability constraints, and incrementally adding more support as we expand.
+
+    [Note: AOTAutograd Cacheability checks]
+    - Our cache key is computed from the FX graph produced by Dynamo and the input example values
+    - A node is "safe" if the same cache key results in a compiled artifact that has the same behavior
+        (i.e, the set of inputs that go into our cache key is sufficient to distinguish its behavior)
+
+    To accomplish this safety check, we consider the following functions to be safe:
+        - Public functions under modules torch, torch.functional, and torch.nn.functional: these are
+        allowed in the graph by dynamo, so we can assume they are safe to cache.
+        - method calls on base tensor types
+        - Any call_module that dynamo deemed safe to allow AOTAutograd to trace
+        - Non callable nodes, such as placeholder, output, get_attr
+
+    The test suite test_aot_autograd_cache.py::AOTAutogradCachePicklerTests tries its best to fully cover/specify this behavior.
     """
+    SAFE_TORCH_MODULES = ("torch.functional", "torch.nn.functional")
+
+    def is_public_torch_api(target):
+        # Don't blindly allow private functions in the torch namespace
+        is_private = target.__name__.startswith("_")
+        return (
+            getattr(target, "__module__", None) in SAFE_TORCH_MODULES and not is_private
+        )
 
     def is_torch_function(target):
+        if isinstance(target, torch._ops.OpOverload):
+            return True
+        if is_public_torch_api(target):
+            return True
         is_builtin_fun_or_type = type(target).__name__ == "builtin_function_or_method"
-        # TODO: handle torch.nn.functional and other non inlined targets, which don't compile down to a builtin
         return is_builtin_fun_or_type
 
     def is_tensor(target):
@@ -110,18 +133,12 @@ def check_node_safe(node: Node):
         raise BypassAOTAutogradCache(f"Unsupported node op {node.op}")
 
 
-@functools.lru_cache(None)
-def get_autograd_code_hash():
-    autograd_root = os.path.dirname(__file__)
-    return get_code_hash([autograd_root])
-
-
 def check_cacheable(gm: torch.fx.GraphModule):
     """
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
-    if torch._dynamo.compiled_autograd.compiled_autograd_enabled_count:
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         raise BypassAOTAutogradCache(
             "Cannot cache a graph with compiled autograd enabled"
         )
@@ -155,27 +172,18 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.grad_enabled = torch.is_grad_enabled()
         self.disable_amp = torch._C._is_any_autocast_enabled()
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
-        self.code_hash = get_autograd_code_hash()
         self.autograd_config = config.save_config()
         try:
-            # We don't use FxGraphHashDetails to hash example_inputs because it expects
-            # example_inputs to always be FakeTensors, but at AOTAutograd's entry point,
-            # they're still regular. So instead we store their metadata here.
-            # TODO: this currently causes more cache misses than necessary
+            # TODO: example_inputs causes more cache misses than necessary
             # with dynamic shapes, because this is before we add
             # symints to tensor metadata. Improve this later.
-            self.example_input_metadata = [
-                extract_tensor_metadata(t)
-                for t in example_inputs
-                if isinstance(t, torch.Tensor)
-            ]
-            super().__init__(gm, [], {}, [])
+            super().__init__(gm, example_inputs, {}, [])
         except BypassFxGraphCache as e:
             # Sometimes inductor configs are unpickleable and can fail
             raise BypassAOTAutogradCache from e
 
-    def debug_str(self) -> str:
-        return AOTAutogradCachePickler.debug_str(self)
+    def debug_lines(self) -> List[str]:
+        return AOTAutogradCachePickler.debug_lines(self)
 
 
 def _reduce_aot_config(aot_config: AOTConfig):
@@ -197,9 +205,24 @@ def _reduce_aot_config(aot_config: AOTConfig):
     )
 
 
+def _reduce_tensor(tensor):
+    """
+    Reduce the tensor to a stable key for caching.
+    """
+    return (
+        _ident,
+        (
+            extract_tensor_metadata_for_cache_key(
+                FxGraphCachePickler._device_map, tensor
+            ),
+        ),
+    )
+
+
 class AOTAutogradCachePickler(FxGraphCachePickler):
     dispatch_table = FxGraphCachePickler.dispatch_table.copy()
     dispatch_table[AOTConfig] = _reduce_aot_config
+    dispatch_table[torch.Tensor] = _reduce_tensor
 
 
 def autograd_cache_key(
@@ -215,9 +238,8 @@ def autograd_cache_key(
     details = AOTAutogradCacheDetails(gm, example_inputs, config)
     # The prefix distinguishes among the other kinds of objects we cache
     key = "a" + AOTAutogradCachePickler.get_hash(details)
-    log.debug(
-        "Autograd graph cache hash details for key %s:\n%s", key, details.debug_str()
-    )
+    debug_str = "\n".join(details.debug_lines())
+    log.debug("Autograd graph cache hash details for key %s:\n%s", key, debug_str)
     return key
 
 
@@ -418,13 +440,14 @@ class AOTAutogradCache:
     @staticmethod
     def load(
         dispatch_and_compile: Callable,
-        gm: torch.fx.GraphModule,
+        mod: Union[torch.fx.GraphModule, torch._dynamo.utils.GmWrapper],
         args,
         aot_config: AOTConfig,
     ) -> Callable:
         """
         Load a result from the cache, and reconstruct a runtime wrapper around the object
         """
+        gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
         compiled_fn = None
         cache_key = None
         try:
@@ -438,11 +461,15 @@ class AOTAutogradCache:
                 log.info("AOTAutograd cache miss for key %s", cache_key)
                 counters["aot_autograd"]["autograd_cache_miss"] += 1
         # Count missing the FXGraphCache as a miss not a bypass
-        except FXGraphCacheMiss:
+        except FXGraphCacheMiss as e:
             counters["aot_autograd"]["autograd_cache_miss"] += 1
-        except BypassAOTAutogradCache:
+            if config.strict_autograd_cache:
+                raise e
+        except BypassAOTAutogradCache as e:
             cache_key = None
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
+            if config.strict_autograd_cache:
+                raise e
         if compiled_fn is None:
             # Set the cache key so we can save a cache result later
             aot_config.cache_key = cache_key
@@ -469,6 +496,8 @@ class AOTAutogradCache:
             return entry
         except Exception as e:
             log.warning("AOTAutograd cache unable to load compiled graph: %s", e)
+            if config.strict_autograd_cache:
+                raise e
             return None
 
     @staticmethod
@@ -478,7 +507,9 @@ class AOTAutogradCache:
             content = pickle.dumps(entry)
         except Exception as e:
             log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)
-            raise e
+            if config.strict_autograd_cache:
+                raise e
+            return None
         subdir = os.path.join(AOTAutogradCache._get_tmp_dir(), key)
         if not os.path.exists(subdir):
             os.makedirs(subdir, exist_ok=True)

@@ -87,11 +87,7 @@ static void THPEvent_dealloc(THPEvent* self) {
 
 static PyObject* THPEvent_get_device(THPEvent* self, void* unused) {
   HANDLE_TH_ERRORS
-  at::optional<at::Device> device = self->event.device();
-  if (!device) {
-    Py_RETURN_NONE;
-  }
-  return THPDevice_New(device.value());
+  return THPDevice_New(self->event.device());
   END_HANDLE_TH_ERRORS
 }
 
@@ -143,7 +139,6 @@ static PyObject* THPEvent_from_ipc_handle(
   auto r = parser.parse(args, kwargs, parsed_args);
 
   at::Device device = r.device(0);
-  std::string handle_string = r.string(1);
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       "torch.Event ipc is not supported yet, please open an issue if you need this!");

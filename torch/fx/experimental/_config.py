@@ -71,6 +71,9 @@ validate_shape_env_version_key = False
 # irrelevant.)
 symbol_guard_limit_before_specialize: Optional[int] = None
 
+# This flag changes whether we should use the same symbolic variable to represent input sizes that are the same.
+use_duck_shape = True
+
 from torch.utils._config_module import install_config_module
 
 install_config_module(sys.modules[__name__])

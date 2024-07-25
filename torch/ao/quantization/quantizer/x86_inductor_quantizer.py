@@ -17,7 +17,6 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-
 from typing_extensions import TypeAlias
 
 import torch
@@ -40,7 +39,6 @@ from torch.ao.quantization.quantizer.quantizer import (
     Quantizer,
     SharedQuantizationSpec,
 )
-
 from torch.ao.quantization.quantizer.utils import _get_module_name_filter
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     get_bias_qspec,
@@ -56,6 +54,7 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
     SourcePartition,
 )
+
 
 FilterFn: TypeAlias = Callable[[List[Node]], bool]
 
@@ -1068,13 +1067,8 @@ class X86InductorQuantizer(Quantizer):
         quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[FilterFn] = None,
     ):
-        if (quantization_config is None) or (
-            quantization_config.input_activation
-            and not quantization_config.input_activation.is_dynamic
-        ):
-            # <TODO> Weiwen: Dynamic Quant of linear unary will be supported in next step
-            self._annotate_linear_binary_unary(model, quantization_config, filter_fn)
-            self._annotate_linear_unary(model, quantization_config, filter_fn)
+        self._annotate_linear_binary_unary(model, quantization_config, filter_fn)
+        self._annotate_linear_unary(model, quantization_config, filter_fn)
         self._annotate_linear(model, quantization_config, filter_fn)
 
     def _annotate_matmul(

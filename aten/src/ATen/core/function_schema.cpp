@@ -69,7 +69,7 @@ bool FunctionSchema::canAliasTypeSetsAlias(const std::optional<AliasTypeSet> &lh
 
 std::optional<AliasTypeSet> FunctionSchema::getAliasTypeSetContainedTypes(const std::optional<AliasTypeSet> &aliasTypeSet) const {
   if (!aliasTypeSet) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   std::unordered_set<TypePtr> containedTypes;
   std::stack<TypePtr> typeStack;
@@ -114,7 +114,7 @@ std::optional<AliasTypeSet> FunctionSchema::mapTypeToAliasTypeSet(const TypePtr&
         }
       }
       if (mutable_types.empty()) {
-        return c10::nullopt;
+        return std::nullopt;
       }
       return mutable_types;
     }
@@ -135,12 +135,12 @@ std::optional<AliasTypeSet> FunctionSchema::mapTypeToAliasTypeSet(const TypePtr&
         }
       }
       if (mutable_types.empty()) {
-        return c10::nullopt;
+        return std::nullopt;
       }
       return {AliasTypeSet{TupleType::create(std::move(mutable_types))}};
     }
     default:
-      return c10::nullopt;
+      return std::nullopt;
   }
 }
 

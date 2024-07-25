@@ -514,6 +514,9 @@ c10::SymInt FunctionalTensorWrapper::sym_size_custom(int64_t d) const {
 c10::SymInt FunctionalTensorWrapper::sym_storage_offset_custom() const {
   return value_.unsafeGetTensorImpl()->sym_storage_offset();
 }
+c10::Layout FunctionalTensorWrapper::layout_impl() const {
+  return value_.unsafeGetTensorImpl()->layout();
+}
 
 namespace functionalization {
 namespace impl {
@@ -528,9 +531,9 @@ Tensor to_functional_tensor(const Tensor& tensor) {
 }
 std::optional<Tensor> to_functional_tensor(const std::optional<Tensor>& tensor) {
   if (tensor.has_value()) {
-    return c10::make_optional<Tensor>(to_functional_tensor(*tensor));
+    return std::make_optional<Tensor>(to_functional_tensor(*tensor));
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 c10::List<::std::optional<Tensor>> to_functional_tensor(const c10::List<::std::optional<Tensor>>& t_list) {
   c10::List<::std::optional<Tensor>> outputs;
@@ -566,9 +569,9 @@ Tensor from_functional_tensor(const Tensor& tensor, bool assert_functional) {
 }
 std::optional<Tensor> from_functional_tensor(const std::optional<Tensor>& t, bool assert_functional) {
   if (t.has_value()) {
-    return c10::make_optional<Tensor>(from_functional_tensor(*t, assert_functional));
+    return std::make_optional<Tensor>(from_functional_tensor(*t, assert_functional));
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 std::vector<Tensor> from_functional_tensor(ITensorListRef t_list) {
   std::vector<Tensor> outputs;

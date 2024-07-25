@@ -2,6 +2,11 @@
 
 from inspect import getattr_static
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
 from ..bytecode_transformation import create_call_function
 from ..exc import Unsupported
 from .base import VariableTracker
@@ -12,7 +17,7 @@ class SDPAParamsVariable(VariableTracker):
     This is a read-only container."""
 
     @staticmethod
-    def create(tx, value, source):
+    def create(tx: "InstructionTranslator", value, source):
         from torch.backends.cuda import SDPAParams
         from ..source import AttrSource
         from .builder import VariableBuilder
@@ -48,14 +53,16 @@ class SDPAParamsVariable(VariableTracker):
     def reconstruct(self, codegen):
         assert self.source is None
         assert self.param_vars is not None
-        codegen.load_import_from("torch._C", "_SDPAParams")
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("torch._C", "_SDPAParams")
+        )
         codegen.foreach(self.param_vars)
-        codegen.extend_output(create_call_function(len(self.param_vars), True))
+        codegen.extend_output(create_call_function(len(self.param_vars), False))
 
     def as_proxy(self):
         return self.proxy
 
-    def var_getattr(self, tx, name: str) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         import torch._C
         from ..source import AttrSource
         from .builder import wrap_fx_proxy

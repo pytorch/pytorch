@@ -49,7 +49,6 @@ import traceback
 import warnings
 import weakref
 from collections import defaultdict
-
 from enum import auto, Enum
 from typing import (
     Any,
@@ -68,7 +67,7 @@ from typing import (
 import torch.fx
 from torch import Tensor
 from torch._dynamo.mutation_guard import GenerationTracker
-from torch._dynamo.utils import preserve_rng_state
+from torch._dynamo.utils import counters, preserve_rng_state
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,
     copy_misaligned_inputs,
@@ -80,15 +79,17 @@ from torch._inductor.compile_fx import (
 )
 from torch._inductor.cudagraph_utils import (
     check_for_mutation,
+    CheckInvariantStatus,
     FunctionID,
-    get_placeholder_stack_trace,
     log_cudagraph_skip_and_bump_counter,
+    log_data_ptr_mismatch,
     WrappedFunction,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
 from torch.utils.weak import TensorWeakRef
+
 
 if TYPE_CHECKING:
     from torch.types import _bool
@@ -754,10 +755,12 @@ class CUDAGraphNode:
         self.device = device_index
         self.stack_traces = stack_traces
         self.stream = stream
-        # If we are inlining builtin nn modules we will re-record if static inputs change
-        # if not we should error because dynamo should have recompiled in this case
+
+        # Enable re-record a cudagraph when static tensor address changed.
+        # if not we should error when it changed.
         self.rerecord_if_static_inputs_change = (
             torch._dynamo.config.inline_inbuilt_nn_modules
+            or torch._inductor.config.triton.cudagraph_support_input_mutation
         )
 
         # if this is a root parent will be None. use weakref to prevent reference cycle
@@ -805,6 +808,10 @@ class CUDAGraphNode:
         self.non_static_input_idx: LevelList[int] = [
             i for i in range(len(inputs)) if i not in self.static_input_idxs
         ]
+
+        counters["inductor"]["cudagraph_recorded_non_static_inputs"] += len(
+            self.non_static_input_idx
+        )
 
         self.non_managed_static_input_idxs: LevelList[int] = [
             i
@@ -967,21 +974,13 @@ class CUDAGraphNode:
             )
         ):
             # this should error
-            static_tensors = [new_inputs[i] for i in self.non_managed_static_input_idxs]
-            data_ptrs = [
-                self.static_input_data_ptrs[i]
-                for i in self.non_managed_static_input_idxs
-            ]
-            error_msg = "static input data pointer changed.\n"
-            for i, (t, data_ptr) in enumerate(zip(static_tensors, data_ptrs)):
-                index = self.non_managed_static_input_idxs[i]
-                if t.data_ptr() != data_ptr:
-                    placeholder = self.wrapped_function.placeholders[index]
-                    error_msg = (
-                        f"{error_msg}input name: {placeholder.name}. "
-                        f"data pointer changed from {data_ptr} to {t.data_ptr()}. "
-                        f"input stack trace: {get_placeholder_stack_trace(placeholder)}\n"
-                    )
+            error_msg = log_data_ptr_mismatch(
+                self.wrapped_function.placeholders,
+                new_inputs,
+                self.static_input_data_ptrs,
+                self.non_managed_static_input_idxs,
+                CheckInvariantStatus.StaticInputIdxMismatch,
+            )
             torch._check(False, lambda: error_msg)
 
     def run_first_inputs(self, new_inputs):
@@ -1565,11 +1564,20 @@ class CUDAGraphNode:
 
         return recording_inputs
 
-    def check_invariants(self, inputs: List[Tensor]) -> bool:
+    def check_invariants(
+        self, inputs: List[Tensor]
+    ) -> Tuple[CheckInvariantStatus, Callable[..., str]]:
         """
         Checks if this node can be run. The same pattern of tensor liveness, static inputs,
         and tensors managed in the cudagraph private pool must remain stable.
         """
+
+        _logger = functools.partial(
+            log_data_ptr_mismatch,
+            self.wrapped_function.placeholders,
+            inputs,
+            self.static_input_data_ptrs,
+        )
 
         # previously managed data pointers remain stable
         # this is on the hot path so moved to C++. equivalent to:
@@ -1577,7 +1585,19 @@ class CUDAGraphNode:
         if not torch._C._tensors_data_ptrs_at_indices_equal(
             inputs, self.static_input_data_ptrs, self.cudagraph_managed_idxs
         ):
-            return False
+            status = CheckInvariantStatus.CudagraphManagedIdxMismatch
+            _logger = functools.partial(
+                _logger,
+                self.cudagraph_managed_idxs,
+                status,
+            )
+            return status, _logger
+
+        if not self._check_liveness(
+            self.expected_dead_indices_before_graph, self.path_weakrefs
+        ):
+            status = CheckInvariantStatus.ExpectedDeadIndicesBeforeGraphMismatch
+            return status, lambda: f"{status}"
 
         # static input data pointers should remain stable
         # if we are inlining builtin nn modules we re-record in this case
@@ -1589,12 +1609,13 @@ class CUDAGraphNode:
                 inputs, self.static_input_data_ptrs, self.static_input_idxs
             )
         ):
-            return False
-
-        if not self._check_liveness(
-            self.expected_dead_indices_before_graph, self.path_weakrefs
-        ):
-            return False
+            status = CheckInvariantStatus.StaticInputIdxMismatch
+            _logger = functools.partial(
+                _logger,
+                self.static_input_idxs,
+                status,
+            )
+            return status, _logger
 
         # the cudagraph managed tensors which died upon recording must also die upon
         # this invocation. it is too late to check after we've replayed the graph,
@@ -1609,7 +1630,7 @@ class CUDAGraphNode:
             lambda: "TODO: graph recording observed an input tensor deallocate during graph "
             " recording that did not occur during replay. Please file an issue.",
         )
-        return True
+        return CheckInvariantStatus.SUCCESS, lambda: f"{CheckInvariantStatus.SUCCESS}"
 
     def num_descendants(self) -> int:
         "Total number of descendents of this node"
@@ -1686,7 +1707,7 @@ def check_memory_pool(device, pool_id, live_storages_ptrs: List[StorageWeakRefWr
         lambda: f"These storage data ptrs are not allocated in pool {pool_id} but should be {unique_storages}",
     )
 
-    if allocated_not_in_live_storages != 0:
+    if len(allocated_not_in_live_storages) != 0:
         formatted = []
         for dp, block in allocated_not_in_live_storages.items():
             trace = format_tb(block.get("frames", []))
@@ -1796,6 +1817,12 @@ class CUDAGraphTreeManager:
         ] = defaultdict(dict)
         self.warmup_node_counter = itertools.count(start=-1, step=-1)
 
+        # mapping from graph_id to (function id to re-record count). We fall back to
+        # eager function if a function is re-recorded frequently on a node.
+        self.num_rerecord: Dict[Optional[GraphID], Dict[FunctionID, int]] = defaultdict(
+            lambda: defaultdict(lambda: 0)
+        )
+
         # whether we the current node is in a state of warmup, recording, execution. If
         # there is no current node the state will be ExecutionState.None.
         self.path_state = ExecutionState.NONE
@@ -1888,6 +1915,17 @@ class CUDAGraphTreeManager:
         else:
             raise RuntimeError(f"Unknown node type {type(self.current_node)}")
 
+    def exceed_rerecord_limit(
+        self, node_id: Optional[GraphID], function_id: FunctionID
+    ):
+        if torch._dynamo.config.inline_inbuilt_nn_modules:
+            return False
+
+        return (
+            self.num_rerecord[node_id][function_id]
+            > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
+        )
+
     def _run(self, new_inputs: List[Tensor], function_id: FunctionID):
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
@@ -1906,7 +1944,9 @@ class CUDAGraphTreeManager:
         # Early exit if the function mutates inputs which are neither parameters/buffers nor
         # cudagraph recorded tensors. This check should happen after `try_end_curr_recording`
         # and `try_end_curr_warmup` which may change self.current_node.
-        if self.non_cudagraph_managed_mutation_hint[node_id][function_id]:
+        if self.non_cudagraph_managed_mutation_hint[node_id][
+            function_id
+        ] or self.exceed_rerecord_limit(node_id, function_id):
             return self.ids_to_funcs[function_id].model(new_inputs)
 
         # warming up a function and subsequentally recording may use different memory addresses
@@ -1936,12 +1976,21 @@ class CUDAGraphTreeManager:
         )
 
         if not self.in_recording:
+            unexpected_rerecord, unexpected_rerecord_reason = False, lambda: ""
             for child in child_nodes[function_id]:
                 # here we are checking memory consistency between recording and execution,
                 # as well as things like stability of tensor locations, etc
                 # and other
-                if child.check_invariants(new_inputs):
+                status, status_logger = child.check_invariants(new_inputs)
+                if status == CheckInvariantStatus.SUCCESS:
                     return self.execute_node(child, new_inputs)
+
+                if (
+                    status == CheckInvariantStatus.StaticInputIdxMismatch
+                    or status == CheckInvariantStatus.CudagraphManagedIdxMismatch
+                ):
+                    unexpected_rerecord = True
+                    unexpected_rerecord_reason = status_logger
 
             # now that we know the new function can't be run as a child of the
             # current node, if it is a root, try to end the current execution.
@@ -1959,6 +2008,22 @@ class CUDAGraphTreeManager:
                 if self.non_cudagraph_managed_mutation_hint[self._get_node_id()][
                     function_id
                 ]:
+                    return self.ids_to_funcs[function_id].model(new_inputs)
+
+            # nb: run before checkpointing because checkpointing is slow, and we will
+            # be using the eager caching allocator pool which does not require live
+            # accounting of tensors in cudagraph allocator
+            if unexpected_rerecord:
+                curr_node_id = self._get_node_id()
+                self.num_rerecord[curr_node_id][function_id] += 1
+                if self.exceed_rerecord_limit(curr_node_id, function_id):
+                    _id = curr_node_id.id if curr_node_id else None
+                    log_cudagraph_skip_and_bump_counter(
+                        f"skipping cudagraph due to function {function_id.id} exceeding max "
+                        f"re-recording limit "
+                        f"(={torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit}) "
+                        f"on cudagraph node {_id} due to {unexpected_rerecord_reason()}."
+                    )
                     return self.ids_to_funcs[function_id].model(new_inputs)
 
             # at this point, we necessarily will do a new recording

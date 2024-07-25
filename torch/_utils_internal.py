@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 import torch
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
 
+
 log = logging.getLogger(__name__)
 
 if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
@@ -123,7 +124,11 @@ def log_export_usage(**kwargs):
     pass
 
 
-def log_torchscript_usage(api: str):
+def log_trace_structured_event(*args, **kwargs) -> None:
+    pass
+
+
+def log_torchscript_usage(api: str, **kwargs):
     _ = api
     return
 
