@@ -2947,13 +2947,13 @@ class Module:
         if name in optimizer_dict:
             return optimizer_dict[name](self.parameters(), **kwargs)
         else:
-            raise ValueError(f"Optimizer '{name}' is not supported.")
+            raise ValueError(f"Optimizer '{name}' is not supported")
 
     def _get_loss_by_name(self, name, **kwargs):
         if name in loss_dict:
             return loss_dict[name](**kwargs)
         else:
-            raise ValueError(f"Unknown loss function: {name}")
+            raise ValueError(f"Loss '{name}' is not supported")
 
     def fit(self,
             train_loader: DataLoader,
