@@ -810,12 +810,22 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 # changed. If it has, graph break.
                 fake_out_shape = kwargs["out"].proxy.node.meta["example_value"].shape
 
+            proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+
+            if "device" in kwargs and isinstance(
+                kwargs["device"], variables.SymNodeVariable
+            ):
+                # when SymNodeVariables are used as device kwargs, we evaluate_expr() to
+                # specialize and guard on the sym expression.
+                proxy_kwargs["device"] = kwargs["device"].evaluate_expr()
+
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
                     fn_,
-                    *proxy_args_kwargs(args, kwargs),
+                    proxy_args,
+                    proxy_kwargs,
                 ),
             )
 

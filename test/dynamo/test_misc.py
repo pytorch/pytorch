@@ -6617,6 +6617,16 @@ utils_device.CURRENT_DEVICE == None""".split(
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_symnode_as_device_kwarg(self):
+        def f(rank):
+            return torch.ones(10, device=rank.size(0))
+
+        x = torch.randn(2)
+        out = f(torch.randn(2))
+        opt_out = torch.compile(dynamic=True, fullgraph=True)(f)(x)
+        self.assertEqual(out, opt_out)
+
     def test_call_parent_non_class_methods_from_child(self):
         class A:
             a = 4
