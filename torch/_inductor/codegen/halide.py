@@ -518,7 +518,7 @@ class HalideOverrides(OpOverrides):
         return var
 
     @classmethod
-    def indirect_indexing(cls, index_var, size, check=True):
+    def indirect_indexing(cls, index_var, size, check=True, wrap_neg=True):
         # TODO(jansel): Halide only supports 32-bit indexing, we should error on overflow
         index_var = ops.to_dtype(index_var, torch.int32)
         index_var = ops.halide_clamp(index_var, size, check)
