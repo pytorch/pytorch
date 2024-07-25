@@ -1428,7 +1428,6 @@ class BuiltinVariable(VariableTracker):
             assert isinstance(start, variables.ConstantVariable)
             start = start.as_python_constant()
 
-        breakpoint()
         if iterable.has_unpack_var_sequence(tx):
             return variables.EnumerateVariable(
                 variables.ListIteratorVariable(
