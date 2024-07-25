@@ -40,6 +40,19 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `hasPrimaryContext`.");
   }
 
+  virtual void setCurrentDevice(DeviceIndex device) const override {
+    TORCH_CHECK(
+        false,
+        "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `setCurrentDevice`.");
+  }
+
+  virtual DeviceIndex getCurrentDevice() const override {
+    TORCH_CHECK(
+        false,
+        "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getCurrentDevice`.");
+    return -1;
+  }
+
   virtual void initPrivateUse1() const {}
   virtual void resizePrivateUse1Bytes(const c10::Storage &storage, size_t newsize) const {
     TORCH_CHECK_NOT_IMPLEMENTED(

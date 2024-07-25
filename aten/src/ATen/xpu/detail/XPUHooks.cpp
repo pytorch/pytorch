@@ -85,6 +85,14 @@ bool XPUHooks::hasPrimaryContext(DeviceIndex device_index) const {
   return true;
 }
 
+void XPUHooks::setCurrentDevice(DeviceIndex device) const {
+  c10::xpu::set_device(device);
+}
+
+DeviceIndex XPUHooks::getCurrentDevice() const {
+  return c10::xpu::current_device();
+}
+
 REGISTER_XPU_HOOKS(XPUHooks);
 
 } // namespace at::xpu::detail
