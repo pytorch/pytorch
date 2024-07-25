@@ -19,6 +19,7 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
+#include <c10/util/WaitCounter.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
 #include <torch/csrc/cuda/nccl.h>
@@ -29,7 +30,6 @@
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
-#include <torch/csrc/monitor/instrumentation.h>
 #include <torch/torch.h>
 #include <optional>
 
@@ -538,9 +538,9 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
   std::unique_lock<std::mutex> lock(mutex_);
   exception_ = exception_ptr;
   if (exception_) {
-    LOG(INFO) << logPrefix()
-              << "found async exception when checking for NCCL errors: "
-              << getExceptionMsgFromExceptionPtr(exception_);
+    LOG(ERROR) << logPrefix()
+               << "found async exception when checking for NCCL errors: "
+               << getExceptionMsgFromExceptionPtr(exception_);
   }
 }
 
@@ -1293,9 +1293,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
             "Received a dump signal from this local rank and will ",
             "start to dump the debug info. ",
             "Last enqueued NCCL work: ",
-            pgStatus_.lastEnqueuedSeq,
+            pgStatus_->lastEnqueuedSeq,
             ", last completed NCCL work: ",
-            pgStatus_.lastCompletedSeq,
+            pgStatus_->lastCompletedSeq,
             ".");
         exitMsg = c10::str(
             "ProcessGroupNCCL's watchdog detected an exception from the local rank. ",
@@ -1355,9 +1355,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
               timeOutRank,
               ", and will start to dump the debug info. ",
               "Last enqueued NCCL work: ",
-              pgStatus_.lastEnqueuedSeq,
+              pgStatus_->lastEnqueuedSeq,
               ", last completed NCCL work: ",
-              pgStatus_.lastCompletedSeq,
+              pgStatus_->lastCompletedSeq,
               ".");
           exitMsg = c10::str(
               "ProcessGroupNCCL's watchdog detected a dump signal from rank ",
@@ -1627,9 +1627,9 @@ void ProcessGroupNCCL::watchdogHandler() {
         logPrefix(),
         "NCCL Work update periodically: ",
         "last enqueued NCCL work: ",
-        pgStatus_.lastEnqueuedSeq,
+        pgStatus_->lastEnqueuedSeq,
         ", last completed NCCL work: ",
-        pgStatus_.lastCompletedSeq,
+        pgStatus_->lastCompletedSeq,
         ".");
 #endif
     auto logger = ::c10d::C10dLogger::getLogger();
@@ -1642,19 +1642,21 @@ void ProcessGroupNCCL::watchdogHandler() {
       data.integers["pg_id"] = uid_;
       data.integers["rank"] = rank_;
       data.integers["global_rank"] = globalRank();
-      data.integers["last_enqueued_work"] = pgStatus_.lastEnqueuedSeq;
-      data.integers["last_started_work"] = pgStatus_.lastStartedSeq;
-      data.integers["last_completed_work"] = pgStatus_.lastCompletedSeq;
-      data.integers["last_enqueued_numel_in"] = pgStatus_.lastEnqueuedNumelIn;
-      data.integers["last_enqueued_numel_out"] = pgStatus_.lastEnqueuedNumelOut;
-      data.integers["last_completed_numel_in"] = pgStatus_.lastCompletedNumelIn;
+      data.integers["last_enqueued_work"] = pgStatus_->lastEnqueuedSeq;
+      data.integers["last_started_work"] = pgStatus_->lastStartedSeq;
+      data.integers["last_completed_work"] = pgStatus_->lastCompletedSeq;
+      data.integers["last_enqueued_numel_in"] = pgStatus_->lastEnqueuedNumelIn;
+      data.integers["last_enqueued_numel_out"] =
+          pgStatus_->lastEnqueuedNumelOut;
+      data.integers["last_completed_numel_in"] =
+          pgStatus_->lastCompletedNumelIn;
       data.integers["last_completed_numel_out"] =
-          pgStatus_.lastCompletedNumelOut;
+          pgStatus_->lastCompletedNumelOut;
       // logging strings
-      data.strings["last_enqueued_work_name"] = pgStatus_.lastEnqueuedWorkName;
-      data.strings["last_started_work_name"] = pgStatus_.lastStartedWorkName;
+      data.strings["last_enqueued_work_name"] = pgStatus_->lastEnqueuedWorkName;
+      data.strings["last_started_work_name"] = pgStatus_->lastStartedWorkName;
       data.strings["last_completed_work_name"] =
-          pgStatus_.lastCompletedWorkName;
+          pgStatus_->lastCompletedWorkName;
       data.strings["pg_name"] = pg_name_;
       data.strings["pg_desc"] = pg_desc_;
       logger->log(data);
@@ -1681,9 +1683,9 @@ void ProcessGroupNCCL::watchdogHandler() {
             "Exception (either an error or timeout) detected by watchdog at work: ",
             work.seq_,
             ", last enqueued NCCL work: ",
-            pgStatus_.lastEnqueuedSeq,
+            pgStatus_->lastEnqueuedSeq,
             ", last completed NCCL work: ",
-            pgStatus_.lastCompletedSeq,
+            pgStatus_->lastCompletedSeq,
             ".");
         // try to dump flight records if exception happens.
         // Flight recorder behavior should be independent of desync Debug
@@ -1728,9 +1730,9 @@ void ProcessGroupNCCL::watchdogHandler() {
               "Timeout at NCCL work: ",
               work.seq_,
               ", last enqueued NCCL work: ",
-              pgStatus_.lastEnqueuedSeq,
+              pgStatus_->lastEnqueuedSeq,
               ", last completed NCCL work: ",
-              pgStatus_.lastCompletedSeq,
+              pgStatus_->lastCompletedSeq,
               ".");
           if (desyncDebug_) {
             try {
@@ -1767,18 +1769,18 @@ void ProcessGroupNCCL::watchdogHandler() {
       // a work could be started but not completed, so we should not update
       // lastStartedSeq and lastStartedOpName if the work state is checked
       // multiple times after the start
-      if (pgStatus_.lastStartedSeq < static_cast<int64_t>(work.seq_) &&
+      if (pgStatus_->lastStartedSeq < static_cast<int64_t>(work.seq_) &&
           work.isStarted()) {
-        pgStatus_.lastStartedSeq = work.seq_;
-        pgStatus_.lastStartedWorkName = opTypeToString(work.opType_);
+        pgStatus_->lastStartedSeq = work.seq_;
+        pgStatus_->lastStartedWorkName = opTypeToString(work.opType_);
       }
 
       // Clean up completed work
       if (work.isCompleted()) {
-        pgStatus_.lastCompletedSeq = work.seq_;
-        pgStatus_.lastCompletedWorkName = opTypeToString(work.opType_);
-        pgStatus_.lastCompletedNumelIn = work.numelIn_;
-        pgStatus_.lastCompletedNumelOut = work.numelOut_;
+        pgStatus_->lastCompletedSeq = work.seq_;
+        pgStatus_->lastCompletedWorkName = opTypeToString(work.opType_);
+        pgStatus_->lastCompletedNumelIn = work.numelIn_;
+        pgStatus_->lastCompletedNumelOut = work.numelOut_;
         NCCLTraceBuffer::get()->retire_id(work.trace_id_, true);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
@@ -2376,6 +2378,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
         r->ncclStartEvent_.get(),
         r->ncclEndEvent_.get(),
         options_->timeout,
+        pgStatus_,
         isP2P);
   }
   return r;
@@ -2416,10 +2419,10 @@ void ProcessGroupNCCL::workEnqueue(
     // get deadlock. Here we enqueue work without outputs_.
     workMetaList_.emplace_back(*work);
     // update the PG status related to the last enqueued work
-    pgStatus_.lastEnqueuedSeq = work->seq_;
-    pgStatus_.lastEnqueuedWorkName = opTypeToString(work->opType_);
-    pgStatus_.lastEnqueuedNumelIn = work->numelIn_;
-    pgStatus_.lastEnqueuedNumelOut = work->numelOut_;
+    pgStatus_->lastEnqueuedSeq = work->seq_;
+    pgStatus_->lastEnqueuedWorkName = opTypeToString(work->opType_);
+    pgStatus_->lastEnqueuedNumelIn = work->numelIn_;
+    pgStatus_->lastEnqueuedNumelOut = work->numelOut_;
     lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   }
 }
@@ -2987,6 +2990,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         nullptr,
         nullptr,
         options_->timeout,
+        pgStatus_,
         /*isP2P=*/true);
     // TODO(whc) if we want to make the per-p2p-op flightrecorder entries get
     // their timings/states updated by proxy when the Work obj representing the
@@ -3021,6 +3025,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         work->ncclStartEvent_.get(),
         work->ncclEndEvent_.get(),
         options_->timeout,
+        pgStatus_,
         /*isP2P=*/true);
   }
 
