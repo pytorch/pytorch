@@ -915,14 +915,15 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
   }
 }
 
-class TraceEntryRingBuffer {
+template <class T>
+class RingBuffer {
  public:
-  TraceEntryRingBuffer() {
+  RingBuffer() {
     // alloc_trace is a pointer because we need to intentionally
     // leak this on deallocation it can hold references to Python
     // state which will already be destroyed when we are in exit handlers
     // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
-    alloc_trace = new std::vector<TraceEntry>();
+    alloc_trace = new std::vector<T>();
   }
 
   void setMaxEntries(size_t size) {
@@ -930,32 +931,32 @@ class TraceEntryRingBuffer {
     alloc_trace_max_entries_ = std::max(size_t(1), size);
   }
 
-  void insertTraceEntries(const TraceEntry& te) {
+  void insertEntries(const T& entry) {
     std::lock_guard<std::mutex> lk(alloc_trace_lock);
     if (alloc_trace->size() < alloc_trace_max_entries_) {
-      alloc_trace->emplace_back(te);
+      alloc_trace->emplace_back(entry);
     } else {
-      (*alloc_trace)[alloc_trace_next++] = te;
+      (*alloc_trace)[alloc_trace_next++] = entry;
       if (alloc_trace_next == alloc_trace_max_entries_) {
         alloc_trace_next = 0;
       }
     }
   }
 
-  void getTraceEntries(std::vector<TraceEntry>& result) {
+  void getEntries(std::vector<T>& result) {
     std::lock_guard<std::mutex> lk(alloc_trace_lock);
     result.reserve(alloc_trace->size());
     result.insert(
         result.end(),
         alloc_trace->begin() +
-            static_cast<std::vector<TraceEntry>::difference_type>(
+            static_cast<typename std::vector<T>::difference_type>(
                 alloc_trace_next),
         alloc_trace->end());
     result.insert(
         result.end(),
         alloc_trace->begin(),
         alloc_trace->begin() +
-            static_cast<std::vector<TraceEntry>::difference_type>(
+            static_cast<typename std::vector<T>::difference_type>(
                 alloc_trace_next));
   }
 
@@ -972,7 +973,7 @@ class TraceEntryRingBuffer {
   // under alloc_trace_lock.
   std::mutex alloc_trace_lock;
   size_t alloc_trace_next = 0;
-  std::vector<TraceEntry>*
+  std::vector<T>*
       alloc_trace; // pointer because we need to intentionally leak this on
                    // deallocation it can hold references to Python state which
                    // will already be destroyed when we are in exit handlers
@@ -1090,7 +1091,7 @@ class DeviceCachingAllocator {
   RecordContext record_context_ = RecordContext::NEVER;
 
   // Ring buffer for memory snapshot TraceEntry's
-  TraceEntryRingBuffer alloc_buffer;
+  RingBuffer<TraceEntry> alloc_buffer;
 
   // Members specific to CUDA graphs
 
@@ -1136,10 +1137,6 @@ class DeviceCachingAllocator {
     if (!enabled) {
       alloc_buffer.clear();
     }
-  }
-
-  void recordAnnotation(const std::shared_ptr<GatheredContext>& name) {
-    record_trace(TraceEntry::USER_DEFINED, 0, 0, nullptr, 0, name);
   }
 
   bool isHistoryEnabled() {
@@ -1988,7 +1985,7 @@ class DeviceCachingAllocator {
       const std::function<time_t(approx_time_t)>& tsc_to_us) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     std::vector<TraceEntry> result;
-    alloc_buffer.getTraceEntries(result);
+    alloc_buffer.getEntries(result);
 
     // Convert all the timestamps from tsc to epoch time in microseconds.
     for (auto& te : result) {
@@ -3106,7 +3103,7 @@ class DeviceCachingAllocator {
     }
 
     if (record_history) {
-      alloc_buffer.insertTraceEntries(te);
+      alloc_buffer.insertEntries(te);
     }
   }
 };
@@ -3162,7 +3159,10 @@ class NativeCachingAllocator : public CUDAAllocator {
     allocated_blocks[mutex_shard_id][block->ptr] = block;
   }
 
+  // Variables by memory snapshot
   c10::ApproximateClockToUnixTimeConverter clock_converter;
+  bool record_history = false;
+  RingBuffer<AnnotationEntry> annotation_buffer;
 
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
@@ -3252,16 +3252,29 @@ class NativeCachingAllocator : public CUDAAllocator {
       CreateContextFn context_recorder,
       size_t alloc_buffer_max_entries,
       RecordContext when) override {
+    record_history = enabled;
+    annotation_buffer.setMaxEntries(alloc_buffer_max_entries);
+    annotation_buffer.clear();
     for (auto& allocator : device_allocator) {
       allocator->recordHistory(
           enabled, context_recorder, alloc_buffer_max_entries, when);
     }
   }
 
-  void recordAnnotation(const std::shared_ptr<GatheredContext>& name) override {
+  void recordAnnotation(
+      const std::vector<std::pair<std::string, std::string>>& md) override {
+    if (!record_history) {
+      return;
+    }
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    device_allocator[device]->recordAnnotation(name);
+    auto ae = AnnotationEntry(
+        /*device=*/device,
+        /*time=*/getApproximateTime());
+    for (const auto& md_pair : md) {
+      ae.recordUserMetadata(md_pair.first, md_pair.second);
+    }
+    annotation_buffer.insertEntries(ae);
   }
 
   bool isHistoryEnabled() override {
@@ -3340,6 +3353,14 @@ class NativeCachingAllocator : public CUDAAllocator {
     };
 
     SnapshotInfo result;
+
+    // Get AnnotationEntry list and convert the timestamps.
+    annotation_buffer.getEntries(result.external_annotations);
+    for (auto& ae : result.external_annotations) {
+      ae.time_.t_ = tsc_to_us(ae.time_.approx_t_);
+    }
+
+    // Get the device_traces' TraceEntry lists.
     for (auto& da : device_allocator) {
       result.device_traces.emplace_back(da->trace(tsc_to_us));
       auto snap = da->snapshot();
