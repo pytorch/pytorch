@@ -1357,7 +1357,7 @@ class KernelArgs:
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(outer)
-            arg_types.append(type(outer))
+            arg_types.append(type(outer))  # type: ignore[arg-type]
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
@@ -1834,7 +1834,10 @@ class Kernel(CodeGen):
 
             @staticmethod
             def indirect_indexing(
-                var: CSEVariable, size: Union[sympy.Expr, int], check: bool = True
+                var: CSEVariable,
+                size: Union[sympy.Expr, int],
+                check: bool = True,
+                wrap_neg=True,
             ):
                 if isinstance(size, int):
                     size = sympy.Integer(size)
@@ -1842,11 +1845,14 @@ class Kernel(CodeGen):
                 # Skip CSE since this doesn't return an expression
 
                 if var.bounds.lower < 0:  # type: ignore[operator]
-                    stm = ops.add(var, ops.index_expr(size, torch.long))
-                    # Mixed negative and non-negative
-                    if var.bounds.upper >= 0:  # type: ignore[operator]
-                        lt = ops.lt(var, 0)
-                        stm = ops.where(lt, stm, var)
+                    if wrap_neg:
+                        stm = ops.add(var, ops.index_expr(size, torch.long))
+                        # Mixed negative and non-negative
+                        if var.bounds.upper >= 0:  # type: ignore[operator]
+                            lt = ops.lt(var, 0)
+                            stm = ops.where(lt, stm, var)
+                    else:
+                        stm = var
 
                     # Propagate bounds as we know how to compute them properly
                     new_bounds = ValueRanges.unknown()
