@@ -285,7 +285,7 @@ class CKGemmTemplate(CKTemplate):
 
         op = copy.deepcopy(op)
 
-        if Bias:
+        if Bias is not None:
             op.ds_layouts = (torch_layout_to_ck_layout(Bias.get_layout()),)
             op.ds_element_dtypes = ((self._TORCH_DTYPE_TO_CK[Bias.get_layout().dtype]),)
             op.c_elementwise_op = "ScaledAdd"
@@ -323,16 +323,16 @@ class CKGemmTemplate(CKTemplate):
             a_element_dtype=op.a_element_dtype,
             b_element_dtype=op.b_element_dtype,
             c_element_dtype=op.c_element_dtype,
-            bias_element_dtype=op.ds_element_dtypes[0] if Bias else '',
+            bias_element_dtype=op.ds_element_dtypes[0] if Bias is not None else '',
             a_stride=kernel.contiguous_stride(X),
             b_stride=kernel.contiguous_stride(W),
             c_stride=kernel.contiguous_stride(Y),
             d_stride=kernel.contiguous_stride(Bias),
             alpha=self.alpha,
             beta=self.beta,
-            epilogue=f"ScaledAdd {{ {self.alpha}, {self.beta} }}" if Bias else "PassThrough {}",
+            epilogue=f"ScaledAdd {{ {self.alpha}, {self.beta} }}" if Bias is not None else "PassThrough {}",
             has_bias=Bias is not None,
-            null_checks="".join(kernel.check_not_null(node) for node in (X, W, Y) + ((Bias,) if Bias else ())),
+            null_checks="".join(kernel.check_not_null(node) for node in (X, W, Y) + ((Bias,) if Bias is not None else ())),
             version_comment=version_comment,
         )
 
