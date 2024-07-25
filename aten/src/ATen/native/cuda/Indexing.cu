@@ -1342,7 +1342,7 @@ uint64_t getDefaultMaxThreadsPerBlock() {
 #else
   hipDeviceProp_t* prop = at::cuda::getCurrentDeviceProperties();
   // MI300x optimization
-  if (std::string(prop->gcnArchName).find("gfx942") != std::string::npos) {
+  if (std::string(prop->gcnArchName).find("gfx94") != std::string::npos) {
     return 1024;
   }
   // bigger default
