@@ -4,6 +4,7 @@ import os
 from typing import Any, List
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..codecache import PyCodeCache, TritonFuture
@@ -11,7 +12,6 @@ from ..runtime.runtime_utils import do_bench_gpu
 from ..utils import cache_on_self
 from ..virtualized import V
 from .common import TensorArg
-from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)

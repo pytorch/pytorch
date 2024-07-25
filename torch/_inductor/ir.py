@@ -57,9 +57,9 @@ from torch.fx.experimental.symbolic_shapes import (
     resolve_unbacked_bindings,
     SymTypes,
 )
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import SymT
-from torch.utils._ordered_set import OrderedSet
 
 from . import config, dependencies
 from .codegen.common import BackendFeature, index_prevent_reordering
@@ -702,12 +702,12 @@ class Reduction(Loops):
     src_dtype: torch.dtype
     reduction_hint: ReductionHint
 
-    def __str__(self):
+    def __str__(self) -> str:  # type: ignore[override]
         return Loops.__str__(  # type: ignore[call-arg]
             self, names=("ranges", "reduction_ranges", "reduction_type")
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:  # type: ignore[override]
         return self.__str__()
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
@@ -2364,7 +2364,7 @@ class GenericView(BaseView):
         index_new = list(self.reindex(index_old))
         return f"lambda {', '.join(map(str, index_old))}: {index_new}"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.str_helper(
             [self.data, f"size={self.size}", f"reindex={self.reindex_str()}"]
         )
@@ -2538,7 +2538,7 @@ class ReinterpretView(BaseView):
         if isinstance(self.data, BaseView):
             self.data = self.data.unwrap_view()
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.str_helper(
             [
                 self.data,
@@ -2628,7 +2628,7 @@ class DtypeView(BaseView):
             return ReinterpretView(storage, new_layout)
         return DtypeView(x, new_dtype)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.str_helper([self.data, self.target_dtype])
 
     __repr__ = __str__
@@ -2827,7 +2827,7 @@ class Layout(IRNode):
     def stride(self):
         return self._stride
 
-    def __str__(self):
+    def __str__(self) -> str:
         offset = ""
         if self.offset != 0:
             offset = f", offset={self.offset}"
@@ -3864,7 +3864,7 @@ class TritonTemplateBuffer(TemplateBuffer):
             ), f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
             mark_node_as_mutating(self, *mutated_inputs)
 
-    def __str__(self):
+    def __str__(self) -> str:
         out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
         return out
 
@@ -4798,7 +4798,7 @@ class ExternKernel(InputsKernel):
             r |= maybe_free_unbacked_symbols(arg)
         return r
 
-    def __str__(self):
+    def __str__(self) -> str:
         kernel_name = getattr(self, "python_kernel_name", None)
         lines = [
             f"python_kernel_name={kernel_name!r}",
@@ -5696,7 +5696,7 @@ class FallbackKernel(ExternKernelAlloc):
         class Shim:
             ref: Any
 
-            def __repr__(self):
+            def __repr__(self) -> str:
                 return self.ref
 
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
@@ -6099,7 +6099,7 @@ class MutableBox(IRNode):
     def dtype(self):
         return self.data.dtype
 
-    def __str__(self):
+    def __str__(self) -> str:
         if isinstance(self.data, MutableBox):
             line0 = f"{type(self).__name__}({type(self.data).__name__}("
             endl = "))"
