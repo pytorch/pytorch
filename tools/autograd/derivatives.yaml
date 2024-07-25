@@ -2275,6 +2275,10 @@
   self: pixel_shuffle(grad, downscale_factor)
   result: auto_linear
 
+- name: channel_shuffle(Tensor self, SymInt groups) -> Tensor
+  self: channel_shuffle_symint(grad, grad.sym_size(1) / groups)
+  result: auto_linear
+
 - name: _adaptive_avg_pool2d(Tensor self, SymInt[2] output_size) -> Tensor
   self: _adaptive_avg_pool2d_backward(grad, self)
   result: auto_linear
@@ -2831,8 +2835,8 @@
   self: "_nested_view_from_jagged(grad, at::_nested_get_offsets(self), at::_nested_get_jagged_dummy(self), at::_nested_get_lengths(self), at::_nested_get_ragged_idx(self), at::_nested_get_min_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_min_seqlen(self)) : ::std::nullopt, at::_nested_get_max_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_max_seqlen(self)) : ::std::nullopt)"
 
 # Transformer
-- name:  masked_softmax.int(Tensor self, Tensor mask, int dim, ScalarType? dtype=None) -> Tensor
-  self: masked_softmax_backward(grad, self, mask, result, dim)
+- name:  _safe_softmax.int(Tensor self, Tensor mask, int dim, ScalarType? dtype=None) -> Tensor
+  self: _safe_softmax_backward(grad, self, mask, result, dim)
 
 - name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
   output_differentiability: [True, False, False, False]

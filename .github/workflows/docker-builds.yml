@@ -65,6 +65,8 @@ jobs:
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11
             runner: linux.arm64.2xlarge
+          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks
+            runner: linux.arm64.2xlarge
     runs-on: [self-hosted, "${{ matrix.runner }}"]
     env:
       DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}

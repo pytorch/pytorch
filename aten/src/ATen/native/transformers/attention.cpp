@@ -33,6 +33,8 @@
 #include <ATen/ops/_nested_from_padded.h>
 #include <ATen/ops/_nested_tensor_softmax_with_shape.h>
 #include <ATen/ops/_scaled_dot_product_attention_math.h>
+#include <ATen/ops/_scaled_dot_product_attention_math_for_mps.h>
+#include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
 #include <ATen/ops/_scaled_dot_product_attention_math_native.h>
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
@@ -68,11 +70,11 @@
 #include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
+#include <ATen/ops/_safe_softmax.h>
 #endif
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 namespace at {
-
 namespace native {
 
 DEFINE_DISPATCH(_fused_sdp_choice_stub);
@@ -609,12 +611,14 @@ bool should_compute_logsumexp(const Tensor& query, const Tensor& key, const Tens
 
 } // namespace
 
-Tensor masked_softmax(
+Tensor _safe_softmax(
     const Tensor& self,
     const Tensor& mask,
     int64_t dim,
     const c10::optional<ScalarType> dtype) {
-  auto out = at::softmax(self, dim);
+  const auto attn_mask_float = convert_boolean_attn_mask(self, self.dtype());
+  TORCH_INTERNAL_ASSERT(attn_mask_float.has_value(), "Execpted attn_mask to return a tensor!");
+  auto out = at::softmax(self + attn_mask_float.value(), dim);
   return out.masked_fill(~mask, 0);
 }
 
@@ -701,6 +705,19 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::math:
+      if (query_.device().type() == DeviceType::MPS && dropout_p == 0.0
+          && query_.is_contiguous() && key.is_contiguous() && value.is_contiguous()
+          && !query_.is_nested() && !key.is_nested() && !value.is_nested()) {
+        return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
+            query_,
+            key,
+            value,
+            attn_mask,
+            dropout_p,
+            is_causal,
+            c10::nullopt, /*dropout_mask*/
+            scale));
+      }
       return std::get<0>(at::_scaled_dot_product_attention_math(
           query_,
           key,
@@ -993,5 +1010,6 @@ Tensor triton_multi_head_attention(
 #endif
   return proj;
 }
+
 } // namespace native
 } // namespace at
