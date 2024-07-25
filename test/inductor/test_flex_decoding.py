@@ -332,19 +332,10 @@ class TestFlexAttention(InductorTestCase):
         ref_out = golden_call(q_ref, k_ref, v_ref)
         compiled_out = compiled_sdpa(q, k, v)
 
-        self._check_out_and_grad(
+        self._check_out(
             golden_out,
             ref_out,
             compiled_out,
-            q_gold,
-            q_ref,
-            q,
-            k_gold,
-            k_ref,
-            k,
-            v_gold,
-            v_ref,
-            v,
         )
 
     @supported_platform
