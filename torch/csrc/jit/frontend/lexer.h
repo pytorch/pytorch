@@ -18,8 +18,7 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // single character tokens are just the character itself '+'
 // multi-character tokens need an entry here
@@ -143,7 +142,7 @@ TORCH_API int stringToKind(const std::string& str);
 struct TokenTrie;
 using TokenTrieRef = std::unique_ptr<TokenTrie>;
 struct TokenTrie {
-  TokenTrie() : kind(0) {}
+  TokenTrie() {}
   void insert(const char* str, int tok) {
     if (*str == '\0') {
       AT_ASSERT(kind == 0);
@@ -162,7 +161,7 @@ struct TokenTrie {
     child_tries.emplace_back(std::make_unique<TokenTrie>());
     child_tries.back()->insert(str + 1, tok);
   }
-  int kind; // 0 == invalid token
+  int kind{0}; // 0 == invalid token
 
   std::vector<char> child_chars;
   std::vector<TokenTrieRef> child_tries;
@@ -240,7 +239,7 @@ struct TORCH_API SharedParserData {
     // invariant: the next token is not whitespace or newline
     *start = pos;
     // check for a valid number
-    size_t len;
+    size_t len = 0;
     if (isNumber(pos.rest_line(), 0, &len)) {
       *end = *start;
       *end += len;
@@ -387,7 +386,7 @@ struct TORCH_API SharedParserData {
   }
 
   // Make an exception ignoring comments for type annotation comments
-  bool isTypeComment(StringCordView str, size_t pos) {
+  bool isTypeComment(const StringCordView& str, size_t pos) {
     const std::string type_string = "# type:";
     if (str.size() < pos + type_string.length()) {
       return false;
@@ -416,8 +415,7 @@ struct Token {
 struct Lexer {
   explicit Lexer(std::shared_ptr<Source> source)
       : source(std::move(source)),
-        pos(0),
-        nesting(0),
+
         indent_stack(),
         next_tokens(),
         shared(sharedParserData()) {
@@ -562,14 +560,13 @@ struct Lexer {
 
   std::shared_ptr<Source> source;
   std::unique_ptr<StringCordView::Iterator> current;
-  size_t pos;
-  size_t nesting; // depth of ( [ { nesting...
+  size_t pos{0};
+  size_t nesting{0}; // depth of ( [ { nesting...
   std::vector<int> indent_stack; // stack of indentation level of blocks
   // Invariant: this should always contain at least a single element
   std::vector<Token> next_tokens;
   SharedParserData& shared;
 };
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
 
 C10_CLANG_DIAGNOSTIC_POP()
