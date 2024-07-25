@@ -873,9 +873,6 @@ def sum_dim_IntList(func, *args, **kwargs):
         inp._ragged_idx,
     )
 
-    if inp._ragged_idx != 1:
-        raise RuntimeError("sum(): not supported when ragged_idx != 1 for NestedTensor")
-
     if reduce_on_ragged and inp._lengths is not None:
         raise RuntimeError(
             "sum(): not supported where lengths is not None "
@@ -897,16 +894,35 @@ def sum_dim_IntList(func, *args, **kwargs):
                     "sum(): not supported along a ragged and non-batch dimension for NestedTensor"
                 )
             # reduction cases: (ragged)
+            values_ragged_dim_outer = inp._values.permute(
+                inp._ragged_idx - 1,  # outer dimension
+                *range(0, inp._ragged_idx - 1),
+                *range(inp._ragged_idx, inp.dim() - 1),
+            )  # shift reduction dimension of values backward to outer dimension
+
+            # _jagged_to_padded_dense_forward requires values to be a 2D tensor
+            # with the ragged dimension as the 0th dimension
+            padded = torch.ops.aten._jagged_to_padded_dense_forward(
+                values_ragged_dim_outer.reshape(values_ragged_dim_outer.shape[0], -1),
+                [inp._offsets],
+                max_lengths=[inp._max_seqlen],
+            )
+
+            padded_ragged_dim_original = padded.view(
+                padded.shape[0],
+                inp._max_seqlen,
+                *values_ragged_dim_outer.shape[
+                    1:
+                ],  # expand non-batch dimensions of padded tensor
+            ).permute(
+                0,
+                *range(2, inp._ragged_idx + 1),
+                1,
+                *range(inp._ragged_idx + 1, inp.dim()),
+            )  # shift reduction dimension of padded tensor forward to original ragged dimension
+
             out = torch.sum(
-                torch.ops.aten._jagged_to_padded_dense_forward(
-                    inp._values.view(*inp._values.shape[: inp._ragged_idx], -1),
-                    [inp._offsets],
-                    max_lengths=[inp._max_seqlen],
-                ).view(
-                    *inp.shape[: inp._ragged_idx],
-                    inp._max_seqlen,
-                    *inp.shape[inp._ragged_idx + 1 :],
-                ),
+                padded_ragged_dim_original,
                 dim=inp._ragged_idx,
             )  # need to read offsets --> pad jagged dimension and apply sum
 
@@ -918,7 +934,7 @@ def sum_dim_IntList(func, *args, **kwargs):
             reduce_on_batch
         ):  # invalid reduction cases: (batch), (batch, non-batch), etc.
             raise RuntimeError(
-                "sum(): not supported along only the batch dimension for NestedTensor"
+                "sum(): not supported along the batch dimension but not the ragged dimension for NestedTensor"
             )
         # reduction cases: (non-batch), (non-batch, non-batch), etc.
         return NestedTensor(
@@ -1118,9 +1134,6 @@ def mean_dim(func, *args, **kwargs):
             "mean(): not supported across multiple dimensions for NestedTensor"
         )
 
-    if not new_kwargs["keepdim"]:
-        raise RuntimeError("mean(): not supported when keepdim=False for NestedTensor")
-
     inp = new_kwargs.pop("input")
 
     (
@@ -1135,9 +1148,9 @@ def mean_dim(func, *args, **kwargs):
         inp._ragged_idx,
     )
 
-    if inp._ragged_idx != 1:
+    if reduce_on_batch:
         raise RuntimeError(
-            "mean(): not supported when ragged_idx != 1 for NestedTensor"
+            "mean(): not supported along the batch dimension but not the ragged dimension for NestedTensor"
         )
 
     if reduce_on_ragged and inp._lengths is not None:
@@ -1146,14 +1159,17 @@ def mean_dim(func, *args, **kwargs):
             + "if reducing across the ragged dimension for NestedTensor"
         )
 
+    if not new_kwargs["keepdim"]:
+        raise RuntimeError("mean(): not supported when keepdim=False for NestedTensor")
+
     if reduce_on_ragged:  # raggedness reduced away
         torch_sum = torch.sum(inp, dim=inp._ragged_idx, keepdim=new_kwargs["keepdim"])
 
-        # for every non-batch dimension past the ragged dimension,
+        # for every non-batch dimension,
         #   unsqueeze lengths into the same shape as the PyTorch sum,
         #   as the extra dimensions must all be divided by the same length
         lengths = inp._offsets.diff()
-        for _ in range(inp.dim() - inp._ragged_idx - 1):
+        for _ in range(inp.dim() - 2):
             lengths = lengths.unsqueeze(-1)
 
         return torch_sum / lengths.broadcast_to(torch_sum.shape)
