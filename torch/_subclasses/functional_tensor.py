@@ -139,7 +139,7 @@ class FunctionalTensor(torch.Tensor):
             # We should probably eventually fix this so that the first overload can just handle dynamic shapes.
             cls,
             elem.shape,  # sizes
-            elem.stride() if not is_sparse_any(elem) else None, # strides
+            elem.stride() if not is_sparse_any(elem) else None,  # strides
             elem.storage_offset()
             if not is_sparse_any(elem)
             else None,  # storage_offset
