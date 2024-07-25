@@ -1922,6 +1922,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 self.assertEqual(cnts.frame_count, num_submodules)
 
     @patch.object(torch._dynamo.config, "accumulated_cache_size_limit", 2)
+    @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", False)
     def test_recompile_limit_on_freed_module(self):
         class Mod(torch.nn.Module):
             def __init__(self):
