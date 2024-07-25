@@ -1,12 +1,14 @@
 name: Setup ROCm host
 
 description: Set up ROCm host for CI
+
 inputs:
   test-matrix:
       required: true
       type: string
       description: |
         A JSON description of what test configs to run later on.
+
 runs:
   using: composite
   steps:
