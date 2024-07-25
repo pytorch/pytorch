@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
 import torch
 
+
 __all__ = [
     "LSTM",
 ]
+
 
 class LSTM(torch.ao.nn.quantizable.LSTM):
     r"""A quantized long short-term memory (LSTM).
@@ -33,20 +35,23 @@ class LSTM(torch.ao.nn.quantizable.LSTM):
     _FLOAT_MODULE = torch.ao.nn.quantizable.LSTM  # type: ignore[assignment]
 
     def _get_name(self):
-        return 'QuantizedLSTM'
+        return "QuantizedLSTM"
 
     @classmethod
     def from_float(cls, *args, **kwargs):
         # The whole flow is float -> observed -> quantized
         # This class does observed -> quantized only
-        raise NotImplementedError("It looks like you are trying to convert a "
-                                  "non-observed LSTM module. Please, see "
-                                  "the examples on quantizable LSTMs.")
+        raise NotImplementedError(
+            "It looks like you are trying to convert a "
+            "non-observed LSTM module. Please, see "
+            "the examples on quantizable LSTMs."
+        )
 
     @classmethod
     def from_observed(cls, other):
         assert type(other) == cls._FLOAT_MODULE  # type: ignore[has-type]
-        converted = torch.ao.quantization.convert(other, inplace=False,
-                                                  remove_qconfig=True)
+        converted = torch.ao.quantization.convert(
+            other, inplace=False, remove_qconfig=True
+        )
         converted.__class__ = cls
         return converted
