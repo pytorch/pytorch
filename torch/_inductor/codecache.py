@@ -1844,10 +1844,11 @@ class AotCodeCompiler:
                 compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
                 object_build_options.save_flags_to_file(compile_flags)
             else:
-                # TODO: replace this with using the CppBuilder above
-                compile_cmd = cpp_compile_command(
-                    input=input_path,
-                    output=output_o,
+                (
+                    object_output_name,
+                    object_output_dir,
+                ) = get_name_and_dir_from_output_file_path(input_path)
+                object_build_options = CppTorchCudaOptions(
                     vec_isa=picked_vec_isa,
                     cuda=cuda,
                     aot_mode=graph.aot_mode,
@@ -1855,6 +1856,27 @@ class AotCodeCompiler:
                     use_absolute_path=use_absolute_path,
                     use_mmap_weights=use_mmap_weights,
                 )
+                object_builder = CppBuilder(
+                    name=object_output_name,
+                    sources=input_path,
+                    output_dir=object_output_dir,
+                    BuildOption=object_build_options,
+                )
+                compile_cmd = object_builder.get_command_line()
+                output_o = object_builder.get_target_file_path()
+
+                if config.is_fbcode():
+                    # TODO: replace this with using the CppBuilder above
+                    compile_cmd = cpp_compile_command(
+                        input=input_path,
+                        output=output_o,
+                        vec_isa=picked_vec_isa,
+                        cuda=cuda,
+                        aot_mode=graph.aot_mode,
+                        compile_only=True,
+                        use_absolute_path=use_absolute_path,
+                        use_mmap_weights=use_mmap_weights,
+                    )
 
                 log.debug("aot compilation command: %s", compile_cmd)
                 if fbcode_aot_cpu_re:
@@ -1916,12 +1938,44 @@ class AotCodeCompiler:
                 "linux": _compile_consts_linux,
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
-            output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
-            so_builder = CppBuilder(
-                name=output_name,
-                sources=[output_o, consts_o],
-                output_dir=output_dir,
-                BuildOption=CppTorchCudaOptions(
+
+            if config.aot_inductor.package:
+                output_name, output_dir = get_name_and_dir_from_output_file_path(
+                    output_so
+                )
+                so_build_options = CppTorchCudaOptions(
+                    vec_isa=picked_vec_isa,
+                    cuda=cuda,
+                    aot_mode=graph.aot_mode,
+                    use_absolute_path=use_absolute_path,
+                )
+                so_builder = CppBuilder(
+                    name=output_name,
+                    sources=[output_o, consts_o],
+                    output_dir=output_dir,
+                    BuildOption=so_build_options,
+                )
+                link_cmd = so_builder.get_command_line()
+                output_so = so_builder.get_target_file_path()
+                linker_flags = os.path.splitext(input_path)[0] + "_linker_flags.json"
+                so_build_options.save_flags_to_file(linker_flags)
+                from torch._inductor.package import package_aoti
+
+                if use_mmap_weights:
+                    weight_file = (
+                        os.path.splitext(input_path)[0] + "_serialized_weights.bin"
+                    )
+                    with open(weight_file, "wb") as f_weights:
+                        f_weights.write(serialized_weights)
+                        f_weights.write(struct.pack("q", magic_number))
+
+                archive_path = package_aoti(os.path.split(input_path)[0])
+                return archive_path
+            else:
+                output_name, output_dir = get_name_and_dir_from_output_file_path(
+                    output_so
+                )
+                so_build_options = CppTorchCudaOptions(
                     vec_isa=picked_vec_isa,
                     cuda=cuda,
                     aot_mode=graph.aot_mode,
@@ -1936,52 +1990,37 @@ class AotCodeCompiler:
                 link_cmd = so_builder.get_command_line()
                 output_so = so_builder.get_target_file_path()
 
-                linker_flags = os.path.splitext(input_path)[0] + "_linker_flags.json"
-                so_build_options.save_flags_to_file(linker_flags)
+                if config.is_fbcode():
+                    # TODO: replace this with using the CppBuilder above
+                    link_cmd = cpp_compile_command(
+                        input=[output_o, consts_o],
+                        output=output_so,
+                        vec_isa=picked_vec_isa,
+                        cuda=cuda,
+                        aot_mode=graph.aot_mode,
+                        use_absolute_path=use_absolute_path,
+                    )
 
-                from torch._inductor.package import package_aoti
+                log.debug("aot linkage command: %s", link_cmd)
+                if fbcode_aot_cpu_re:
+                    compile_file([output_o, consts_o], output_so, link_cmd.split())
+                    os.chmod(output_so, 0o755)
+                else:
+                    run_command_and_check(link_cmd)
 
                 if use_mmap_weights:
-                    weight_file = (
-                        os.path.splitext(input_path)[0] + "_serialized_weights.bin"
-                    )
-                    with open(weight_file, "wb") as f_weights:
-                        f_weights.write(serialized_weights)
-                        f_weights.write(struct.pack("q", magic_number))
+                    with open(output_so, "a+b") as f_so:
+                        so_size = f_so.tell()
+                        # Page align the weights
+                        f_so.write(b" " * (16384 - so_size % 16384))
+                        f_so.write(serialized_weights)
+                        f_so.write(struct.pack("q", magic_number))
 
-                archive_path = package_aoti(os.path.split(input_path)[0])
-                return archive_path
-
-            # TODO: replace this with using the CppBuilder above
-            link_cmd = cpp_compile_command(
-                input=[output_o, consts_o],
-                output=output_so,
-                vec_isa=picked_vec_isa,
-                cuda=cuda,
-                aot_mode=graph.aot_mode,
-                use_absolute_path=use_absolute_path,
-            )
-
-            log.debug("aot linkage command: %s", link_cmd)
-            if fbcode_aot_cpu_re:
-                compile_file([output_o, consts_o], output_so, link_cmd.split())
-                os.chmod(output_so, 0o755)
-            else:
-                run_command_and_check(link_cmd)
-
-            if use_mmap_weights:
-                with open(output_so, "a+b") as f_so:
-                    so_size = f_so.tell()
-                    # Page align the weights
-                    f_so.write(b" " * (16384 - so_size % 16384))
-                    f_so.write(serialized_weights)
-                    f_so.write(struct.pack("q", magic_number))
-
-            # Append cmds to the end of codegen-ed wrapper file
-            with open(input_path, "a") as f:
-                f.write("\n")
-                f.write(f"// Compile cmd\n// {compile_cmd}\n")
-                f.write(f"// Link cmd\n// {link_cmd}\n")
+                # Append cmds to the end of codegen-ed wrapper file
+                with open(input_path, "a") as f:
+                    f.write("\n")
+                    f.write(f"// Compile cmd\n// {compile_cmd}\n")
+                    f.write(f"// Link cmd\n// {link_cmd}\n")
 
         return output_so
 
