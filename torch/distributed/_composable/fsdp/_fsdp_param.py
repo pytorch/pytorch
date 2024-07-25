@@ -146,6 +146,10 @@ class ShardedState(Enum):
     SHARDED_POST_FORWARD = auto()
     UNSHARDED = auto()
 
+print(f"here123: id(ShardedState.SHARDED): {id(ShardedState.SHARDED)}")
+print(f"here123: id(ShardedState.SHARDED_POST_FORWARD): {id(ShardedState.SHARDED_POST_FORWARD)}")
+print(f"here123: id(ShardedState.UNSHARDED): {id(ShardedState.UNSHARDED)}")
+
 
 @dataclass
 class ParamModuleInfo:

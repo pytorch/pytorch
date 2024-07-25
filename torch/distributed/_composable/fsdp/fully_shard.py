@@ -21,6 +21,7 @@ from ._fsdp_init import (
 )
 from ._fsdp_param_group import FSDPParamGroup
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
+import torch._dynamo.compiled_autograd as ca
 
 
 # The decorator adds a state object to `module` that can be accessed via
@@ -145,9 +146,13 @@ def fully_shard(
     for module in modules:
         cls = module.__class__
         dct = {"__deepcopy__": unimplemented_deepcopy}
-        new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
+        new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, torch.nn.modules.lazy.LazyModuleMixin, cls), dct)
         module.__class__ = new_cls
-        module._initialize_hook = True
+    # This flag only matters for compile mode.
+    # However, `fully_shard()` is usually called outside of compile context
+    # and we don't know whether the model will then be run under compile.
+    # Hence we need to unconditionally set it here (which does not affect eager mode behavior).
+    arg_module._initialize_hook = True
     return arg_module
 
 
@@ -157,7 +162,7 @@ def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     )
 
 
-class FSDPModule(torch.nn.modules.lazy.LazyModuleMixin):
+class FSDPModule:
     def __new__(cls, *args, **kwargs):
         """
         Override ``__new__`` to remove the FSDP class and directly construct
@@ -172,13 +177,16 @@ class FSDPModule(torch.nn.modules.lazy.LazyModuleMixin):
         return self
 
     def _infer_parameters(self, module, args, kwargs=None):
-        # TODO(yf225): how do we make sure all submodules also have their '_initialize_hook' removed?
-        module(*args, **kwargs)
-        # print(f"module._initialize_hook: {module._initialize_hook}")
-        # print(f"'_initialize_hook' in module.__dict__: {'_initialize_hook' in module.__dict__}")
-        for mod in module.modules():
-            if isinstance(mod, FSDPModule) and hasattr(mod, '_initialize_hook'):
-                delattr(mod, '_initialize_hook')
+        if ca.compiled_autograd_enabled and hasattr(module, '_initialize_hook'):
+            # Under compile, always run the root module initialization in eager mode
+            state = self._get_fsdp_state()
+            if state._is_root is None:
+                with torch.random.fork_rng():
+                    module(*args, **kwargs)
+                    # Clean up dry-run artifacts and reset model to pre-forward state
+                    state._root_post_backward_final_callback()
+                # Ensure that dry-run is only run once
+                delattr(module, '_initialize_hook')
 
     def reshard(self) -> None:
         """

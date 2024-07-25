@@ -310,7 +310,9 @@ class FSDPParamGroup:
             logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with record_function(self._with_fqn("FSDP::post_forward")):
             self.reshard()
-            self._record_post_forward()
+            if not (ca.compiled_autograd_enabled and hasattr(module, "_initialize_hook")):
+                # Only record the post-forward if it's not dry run for compile.
+                self._record_post_forward()
             self._training_state = TrainingState.IDLE
             return output
 
