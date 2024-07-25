@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import heapq
 import operator
-
 import sys
 from collections import defaultdict
 from typing import Dict, List, Set, TYPE_CHECKING
@@ -14,6 +13,7 @@ import torch
 from . import config, ir
 from .dependencies import WeakDep
 from .utils import is_collective, is_wait
+
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
@@ -96,14 +96,16 @@ def _schedule_for_comm(
     # When only raise_comms is True, only score_0 and score_2 are considered.
     # When only sink_waits is True, only score_1 and score_2 are considered.
     # When neither is True, the original order is yielded.
-    name_to_snode = {}
+    buf_name_to_snode = {}
     scores_0, scores_1, scores_2 = {}, {}, {}
     for idx, snode in enumerate(snodes):
-        for name in snode.get_names():
-            name_to_snode[name] = snode
-            scores_0[name] = sys.maxsize
-            scores_1[name] = 0
-            scores_2[name] = idx
+        for buf_name in snode.get_buffer_names():
+            buf_name_to_snode[buf_name] = snode
+
+        node_name = snode.get_name()
+        scores_0[node_name] = sys.maxsize
+        scores_1[node_name] = 0
+        scores_2[node_name] = idx
 
     comm_idx = 0
     for snode in snodes:
@@ -118,7 +120,7 @@ def _schedule_for_comm(
     class Runnable:
         def __init__(self, snode):
             self.snode = snode
-            name = next(iter(snode.get_names()))
+            name = next(iter(snode.get_operation_names()))
             self.score = (
                 scores_0[name],
                 scores_1[name],
@@ -128,25 +130,9 @@ def _schedule_for_comm(
         def __lt__(self, other):
             return self.score < other.score
 
-    # A mutating node's unmet_dependencies doesn't cover the dependencies
-    # caused by the mutation. Instead, they are described by associated
-    # MutationOutput node. Thus, to safely schedule a mutating node, we have to
-    # add the unmet_dependencies of the associated MutationOutput nodes to the
-    # mutating node.
-    # TODO(yifu): this is needed due to a mutation handling bug in the
-    # scheduler. It should be fixed by https://github.com/pytorch/pytorch/pull/128893.
-    # We can remove this logic once the fix is landed.
-    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {}
-    for snode in snodes:
-        if isinstance(snode.node, ir.MutationOutput):
-            src_name = snode.node.node_doing_mutating.get_name()
-            src_snode = name_to_snode[src_name]
-            assert src_snode in unmet_deps
-            unmet_deps[src_snode] |= {
-                dep.name for dep in snode.unmet_dependencies if dep.name != src_name
-            }
-        assert snode not in unmet_deps
-        unmet_deps[snode] = {dep.name for dep in snode.unmet_dependencies}
+    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {
+        snode: {dep.name for dep in snode.unmet_dependencies} for snode in snodes
+    }
 
     ready: List[Runnable] = []
     buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(set)
@@ -165,7 +151,7 @@ def _schedule_for_comm(
         Schedules `snode` and put all unblocked nodes onto the ready queue.
         """
         scheduled.append(snode)
-        for buf_name in snode.get_names():
+        for buf_name in snode.get_buffer_names():
             for snode in buffer_users[buf_name]:
                 unmet_deps[snode].remove(buf_name)
                 if len(unmet_deps[snode]) == 0:
@@ -226,9 +212,12 @@ def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
     TODO: Come up with a better approach
     """
     comm_nodes = [n for n in nodes if is_collective(n.node)]
+
     for i in range(1, len(comm_nodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
-        comm_nodes[i].add_fake_dep(WeakDep(comm_nodes[i - 1].get_name()))
+        mutating_buf = next(iter(comm_nodes[i].get_buffer_names()))
+        for buf in comm_nodes[i - 1].get_buffer_names():
+            comm_nodes[i].add_fake_dep(WeakDep(buf, mutating_buf=mutating_buf))
 
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:

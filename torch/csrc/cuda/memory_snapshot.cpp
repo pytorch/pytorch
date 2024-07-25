@@ -105,17 +105,13 @@ void _initRecordAnnotations() {
         at::RecordFunctionCallback(
             [](const at::RecordFunction& fn)
                 -> std::unique_ptr<at::ObserverContext> {
-              unwind::Frame frame{fn.name(), "START", 0};
-              auto r = std::make_shared<CapturedTraceback>();
-              r->recordUserDefinedFrame(frame);
-              c10::cuda::CUDACachingAllocator::recordAnnotation(r);
+              c10::cuda::CUDACachingAllocator::recordAnnotation(
+                  {{"name", fn.name()}, {"stage", "START"}});
               return nullptr;
             },
             [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
-              unwind::Frame frame{fn.name(), "END", 0};
-              auto r = std::make_shared<CapturedTraceback>();
-              r->recordUserDefinedFrame(frame);
-              c10::cuda::CUDACachingAllocator::recordAnnotation(r);
+              c10::cuda::CUDACachingAllocator::recordAnnotation(
+                  {{"name", fn.name()}, {"stage", "END"}});
             })
             .scopes({at::RecordScope::USER_SCOPE}));
   });
@@ -302,7 +298,6 @@ std::string _memory_snapshot_pickled() {
   IValue snapshot_s = "snapshot";
   IValue oom_s = "oom";
   IValue device_free_s = "device_free";
-  IValue user_defined_s = "user_defined";
 
   using namespace c10::cuda::CUDACachingAllocator;
 
@@ -326,8 +321,6 @@ std::string _memory_snapshot_pickled() {
         return segment_unmap_s;
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
-      case TraceEntry::USER_DEFINED:
-        return user_defined_s;
     }
     throw std::runtime_error("unreachable");
   };
@@ -351,6 +344,17 @@ std::string _memory_snapshot_pickled() {
       trace.push_back(trace_entry);
     }
     traces.push_back(trace);
+  }
+
+  auto external_annotations = new_list();
+  for (const auto& ae : snapshot.external_annotations) {
+    auto annotation_entry = new_dict();
+    for (const auto& md : ae.metadata_) {
+      annotation_entry.insert((IValue)md.first, md.second);
+    }
+    annotation_entry.insert(device_s, ae.device_);
+    annotation_entry.insert(time_us_s, ae.time_.t_);
+    external_annotations.push_back(annotation_entry);
   }
 
   auto allocator_settings = new_dict();
@@ -395,6 +399,7 @@ std::string _memory_snapshot_pickled() {
   result.insert("segments", segments);
   result.insert("device_traces", traces);
   result.insert("allocator_settings", allocator_settings);
+  result.insert("external_annotations", external_annotations);
 
   auto frames = ivalue_symbolize(frame_tracebacks);
   for (auto i : c10::irange(frames.size())) {

@@ -1,25 +1,15 @@
 # mypy: allow-untyped-defs
 import sys
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Type
+
 import torch
-from torch.fx.graph import (
-    Graph,
-    Node,
-)
-from torch.ao.quantization.utils import Pattern
-from .quantize_handler import (
-    QuantizeHandler,
-)
-from ..qconfig import (
-    QConfigAny,
-)
-from ..utils import (
-    MatchAllNode
-)
-from .graph_module import (
-    _is_observed_standalone_module,
-)
+from torch.ao.quantization.qconfig import QConfigAny
+from torch.ao.quantization.utils import MatchAllNode, Pattern
+from torch.fx.graph import Graph, Node
 from torch.nn.utils.parametrize import type_before_parametrizations
-from typing import Any, Dict, List, Callable, Optional, Tuple, Type, Set, Iterable
+
+from .graph_module import _is_observed_standalone_module
+from .quantize_handler import QuantizeHandler
 
 
 __all__: List[str] = []
@@ -28,20 +18,21 @@ __all__: List[str] = []
 # would be a recursive `List[Union[Node, Tuple[Union[Node, ...]]]]`
 _MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler]
 
-_MatchResultWithQConfig = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
-                                QConfigAny]
+_MatchResultWithQConfig = Tuple[
+    Node, List[Node], Optional[Pattern], QuantizeHandler, QConfigAny
+]
+
 
 # Note: The order of patterns is important! match function will take whatever is matched first, so we'll
 # need to put the fusion patterns before single patterns. For example, add_relu should be registered come before relu.
 # decorators are applied in the reverse order we see. Also when we match the nodes in the graph with these patterns,
 # we'll start from the last node of the graph and traverse back.
 def _is_match(modules, node, pattern, max_uses=sys.maxsize):
-    """ Matches a node in fx against a pattern
-    """
+    """Matches a node in fx against a pattern"""
     if isinstance(pattern, tuple):
         self_match, *arg_matches = pattern
         if self_match is getattr:
-            assert len(pattern) == 2, 'Expecting getattr pattern to have two elements'
+            assert len(pattern) == 2, "Expecting getattr pattern to have two elements"
             arg_matches = []
     else:
         self_match = pattern
@@ -57,18 +48,18 @@ def _is_match(modules, node, pattern, max_uses=sys.maxsize):
         return False
 
     if isinstance(self_match, type) and issubclass(self_match, torch.nn.Module):
-        if node.op != 'call_module':
+        if node.op != "call_module":
             return False
         if not type_before_parametrizations(modules[node.target]) == self_match:
             return False
     elif callable(self_match):
-        if node.op != 'call_function' or node.target is not self_match:
+        if node.op != "call_function" or node.target is not self_match:
             return False
         elif node.target is getattr:
             if node.args[1] != pattern[1]:
                 return False
     elif isinstance(self_match, str):
-        if node.op != 'call_method' or node.target != self_match:
+        if node.op != "call_method" or node.target != self_match:
             return False
     elif node.target != self_match:
         return False
@@ -79,16 +70,21 @@ def _is_match(modules, node, pattern, max_uses=sys.maxsize):
     if len(arg_matches) != len(node.args):
         return False
 
-    return all(_is_match(modules, node, arg_match, max_uses=1) for node, arg_match in zip(node.args, arg_matches))
+    return all(
+        _is_match(modules, node, arg_match, max_uses=1)
+        for node, arg_match in zip(node.args, arg_matches)
+    )
+
 
 def _find_matches(
-        graph: Graph,
-        modules: Dict[str, torch.nn.Module],
-        patterns: Dict[Pattern, QuantizeHandler],
-        root_node_getter_mapping: Dict[Pattern, Callable],
-        standalone_module_names: Optional[List[str]] = None,
-        standalone_module_classes: Optional[List[Type]] = None,
-        custom_module_classes: Optional[List[Any]] = None) -> Dict[str, _MatchResult]:
+    graph: Graph,
+    modules: Dict[str, torch.nn.Module],
+    patterns: Dict[Pattern, QuantizeHandler],
+    root_node_getter_mapping: Dict[Pattern, Callable],
+    standalone_module_names: Optional[List[str]] = None,
+    standalone_module_classes: Optional[List[Type]] = None,
+    custom_module_classes: Optional[List[Any]] = None,
+) -> Dict[str, _MatchResult]:
     """
     Matches the nodes in the input graph to quantization patterns, and
     outputs the information needed to quantize them in future steps.
@@ -121,49 +117,36 @@ def _find_matches(
         standalone_module_names = []
 
     match_map: Dict[str, _MatchResult] = {}
-    all_matched : Set[str] = set()
+    all_matched: Set[str] = set()
 
     def _recursive_record_node_in_match_map(
-            last_node,
-            match_map,
-            node_pattern,
-            matched_node_pattern,
-            pattern,
-            match_value):
+        last_node, match_map, node_pattern, matched_node_pattern, pattern, match_value
+    ):
         if isinstance(node_pattern, Node):
             match_map[node_pattern.name] = (
-                last_node, matched_node_pattern, pattern, match_value)
+                last_node,
+                matched_node_pattern,
+                pattern,
+                match_value,
+            )
         elif not isinstance(node_pattern, Iterable):
             return
         else:
             for n in node_pattern:
-                _recursive_record_node_in_match_map(last_node, match_map, n, matched_node_pattern, pattern, match_value)
+                _recursive_record_node_in_match_map(
+                    last_node, match_map, n, matched_node_pattern, pattern, match_value
+                )
 
     # TODO: 1. merge with fuse matcher 2. document the code
-    def record_match(
-            pattern,
-            node,
-            last_node,
-            matched_node_pattern,
-            match_map):
+    def record_match(pattern, node, last_node, matched_node_pattern, match_map):
         if isinstance(pattern, tuple):
             s, *args = pattern
             is_single_arg = len(args) == 1
             current_node_pattern: List[Node] = []
-            record_match(
-                s,
-                node,
-                last_node,
-                matched_node_pattern,
-                match_map)
+            record_match(s, node, last_node, matched_node_pattern, match_map)
             if pattern[0] is not getattr:
                 for subpattern, arg in zip(args, node.args):
-                    record_match(
-                        subpattern,
-                        arg,
-                        node,
-                        current_node_pattern,
-                        match_map)
+                    record_match(subpattern, arg, node, current_node_pattern, match_map)
             if len(current_node_pattern) > 1:
                 # current_node_pattern is  the node pattern we get from matching
                 # the subpattern with arguments of the node
@@ -187,16 +170,10 @@ def _find_matches(
                 root_node_getter = root_node_getter_mapping.get(pattern, None)
                 if _is_match(modules, node, pattern) and node.name not in match_map:
                     matched_node_pattern: List[Node] = []
-                    record_match(
-                        pattern,
-                        node,
-                        node,
-                        matched_node_pattern,
-                        match_map)
+                    record_match(pattern, node, node, matched_node_pattern, match_map)
                     quantize_handler = quantize_handler_cls(  # type: ignore[operator]
-                        matched_node_pattern,
-                        modules,
-                        root_node_getter)
+                        matched_node_pattern, modules, root_node_getter
+                    )
                     last_node = node
                     # record the match for all nodes in the pattern
                     _recursive_record_node_in_match_map(
@@ -207,32 +184,44 @@ def _find_matches(
                         # this is a part of the value corresponding to the node
                         matched_node_pattern,
                         pattern,
-                        quantize_handler)
+                        quantize_handler,
+                    )
                     break
 
     # add custom module instances to the match result
     assert modules is not None
     for node in graph.nodes:
-        if node.op == 'call_module' and \
-           type(modules[node.target]) in custom_module_classes:
+        if (
+            node.op == "call_module"
+            and type(modules[node.target]) in custom_module_classes
+        ):
             match_map[node.name] = (
-                node, node, None, QuantizeHandler(node, modules, is_custom_module=True))
+                node,
+                node,
+                None,
+                QuantizeHandler(node, modules, is_custom_module=True),
+            )
 
     def is_standalone_module(node_target: str, modules: Dict[str, torch.nn.Module]):
         assert modules is not None
         return (
-            node_target in standalone_module_names or  # type: ignore[operator]
-            type(modules[node_target]) in standalone_module_classes  # type: ignore[operator]
+            node_target in standalone_module_names
+            or type(modules[node_target])  # type: ignore[operator]
+            in standalone_module_classes  # type: ignore[operator]
         )
 
     # add standalone modules to the match
     for node in graph.nodes:
-        if node.op == 'call_module' and \
-           (is_standalone_module(node.target, modules) or
-                _is_observed_standalone_module(modules[node.target])):
+        if node.op == "call_module" and (
+            is_standalone_module(node.target, modules)
+            or _is_observed_standalone_module(modules[node.target])
+        ):
             # add node to matched nodes
             match_map[node.name] = (
-                node, node, None,
-                QuantizeHandler(node, modules, is_standalone_module=True))
+                node,
+                node,
+                None,
+                QuantizeHandler(node, modules, is_standalone_module=True),
+            )
 
     return match_map
