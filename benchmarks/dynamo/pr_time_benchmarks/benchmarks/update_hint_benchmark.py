@@ -2,7 +2,7 @@ import random
 
 import torch
 
-from ..benchmark_base import Benchmark
+from benchmarks.dynamo.pr_time_benchmarks.benchmark_base import Benchmark
 
 
 class P0(Benchmark):
