@@ -200,8 +200,8 @@ class TestFullyShardCompile(FSDPTest):
 
         def test_compiled():
             model, optim = model_init_fn()
-            # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
-            run_iters(model, optim, n_iter=1)
+            # # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
+            # run_iters(model, optim, n_iter=1)
 
             model_compiled = torch.compile(model, backend=backend, fullgraph=True)
             res = run_iters(model_compiled, optim, compiled_autograd_backend=backend)
@@ -209,8 +209,8 @@ class TestFullyShardCompile(FSDPTest):
 
         def test_eager():
             model, optim = model_init_fn()
-            # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
-            run_iters(model, optim, n_iter=1)
+            # # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
+            # run_iters(model, optim, n_iter=1)
 
             res = run_iters(model, optim)
             return res

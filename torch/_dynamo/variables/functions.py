@@ -27,11 +27,6 @@ from .constant import ConstantVariable
 if TYPE_CHECKING:
     from torch._guards import Source
 
-try:
-    from torch.distributed._composable.fsdp import _fsdp_param_group
-except ModuleNotFoundError:
-    _fsdp_param_group = None
-
 
 def wrap_bound_arg(tx, val, source=None):
     # Source propagation is best effort since not every object we encounter has a source to begin with.
@@ -319,6 +314,12 @@ class UserMethodVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        try:
+            from torch.distributed._composable.fsdp import _fsdp_param_group, _fsdp_state
+        except ModuleNotFoundError:
+            _fsdp_param_group = None
+            _fsdp_state = None
+
         # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
         # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
         # since we ensure `forward` of allowed modules can be traced by AOT safely.
@@ -352,6 +353,12 @@ class UserMethodVariable(UserFunctionVariable):
             return variables.TorchCtxManagerClassVariable(self.fn).call_function(
                 tx, (self.obj, *args), kwargs
             )
+        # elif (
+        #     _fsdp_state is not None
+        #     and self.fn is _fsdp_state.FSDPState._lazy_init
+        # ):
+        #     self.obj.value._lazy_init()
+        #     return ConstantVariable.create(None)
         if self.is_constant:
             fn = getattr(self.obj.value, self.fn.__name__)
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)

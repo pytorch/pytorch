@@ -147,6 +147,7 @@ def fully_shard(
         dct = {"__deepcopy__": unimplemented_deepcopy}
         new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
         module.__class__ = new_cls
+        module._initialize_hook = True
     return arg_module
 
 
@@ -156,18 +157,28 @@ def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     )
 
 
-class FSDPModule:
+class FSDPModule(torch.nn.modules.lazy.LazyModuleMixin):
     def __new__(cls, *args, **kwargs):
         """
         Override ``__new__`` to remove the FSDP class and directly construct
         the original class for cases like indexing into a container module.
         """
-        # Use index 2 since 0 is the dynamically constructed `FSDP<...>` class
+        # Use index 3 since 0 is the dynamically constructed `FSDP<...>` class
         # and index 1 is the `FSDPModule` class itself
-        orig_cls = cls.__mro__[2]
+        # and index 2 is the `LazyModuleMixin`
+        orig_cls = cls.__mro__[3]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
         self.__init__(*args, **kwargs)
         return self
+
+    def _infer_parameters(self, module, args, kwargs=None):
+        # TODO(yf225): how do we make sure all submodules also have their '_initialize_hook' removed?
+        module(*args, **kwargs)
+        # print(f"module._initialize_hook: {module._initialize_hook}")
+        # print(f"'_initialize_hook' in module.__dict__: {'_initialize_hook' in module.__dict__}")
+        for mod in module.modules():
+            if isinstance(mod, FSDPModule) and hasattr(mod, '_initialize_hook'):
+                delattr(mod, '_initialize_hook')
 
     def reshard(self) -> None:
         """

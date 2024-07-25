@@ -51,11 +51,6 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
-try:
-    from torch.distributed._composable.fsdp import _fsdp_param_group
-except ModuleNotFoundError:
-    _fsdp_param_group = None  # type: ignore[assignment]
-
 log = logging.getLogger(__name__)
 
 supported_ctx_manager_classes = dict.fromkeys(
@@ -219,6 +214,10 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             StreamVariable,
             VmapIncrementNestingCtxManagerVariable,
         )
+        try:
+            from torch.distributed._composable.fsdp import _fsdp_param_group
+        except ModuleNotFoundError:
+            _fsdp_param_group = None  # type: ignore[assignment]
 
         if self.value is torch.no_grad:
             if len(args) == 1 and isinstance(
