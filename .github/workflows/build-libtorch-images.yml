@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   build-docker-cuda:
-    runs-on: linux.12xlarge
+    runs-on: linux.9xlarge.ephemeral
     strategy:
       matrix:
         cuda_version: ["12.4", "12.1", "11.8"]
@@ -63,7 +63,7 @@ jobs:
         run: |
           .ci/docker/libtorch/build.sh libtorch-cxx11-builder:cuda${{matrix.cuda_version}}
   build-docker-rocm:
-    runs-on: linux.12xlarge
+    runs-on: linux.9xlarge.ephemeral
     strategy:
       matrix:
         rocm_version: ["6.0", "6.1"]
@@ -94,7 +94,7 @@ jobs:
         run: |
           .ci/docker/libtorch/build.sh libtorch-cxx11-builder:rocm${{matrix.rocm_version}}
   build-docker-cpu:
-    runs-on: linux.4xlarge
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
