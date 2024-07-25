@@ -93,6 +93,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         bool is_causal,
         int window_size_left,
         int window_size_right,
+        const float softcap,
         const bool return_softmax,
         std::optional<at::Generator> gen_) {
   auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
@@ -110,6 +111,8 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
   TORCH_CHECK(q.stride(-1) == 1, "Input tensor must have contiguous last dimension");
   TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
   TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+
+  TORCH_CHECK(softcap == 0.0, "Softcap is not supported for hip");
 
   const auto sizes = q.sizes();
 
@@ -257,6 +260,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                bool is_causal,
                int window_size_left,
                int window_size_right,
+               const float softcap,
                const bool return_softmax,
                std::optional<at::Generator> gen_) {
 
@@ -287,6 +291,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         const bool is_causal,
         int window_size_left,
         int window_size_right,
+        const float softcap,
         const bool deterministic,
         const at::Tensor philox_seed,
         const at::Tensor philox_offset) {
@@ -325,6 +330,8 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
   if (is_causal){
     TORCH_CHECK((seqlen_q == seqlen_k), "For backwards kernel seqlen_q must equal seqlen_k for causal kernels");
   }
+  // Some args are not supported
+  TORCH_CHECK(softcap == 0.0, "Softcap is not supported for hip");
 
   TORCH_CHECK(batch_size > 0, "batch size must be positive");
   TORCH_CHECK(head_size % 8 == 0, "head_size should be a multiple of 8");
@@ -473,6 +480,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                const bool is_causal,
                int window_size_left,
                int window_size_right,
+               const float softcap,
                const bool deterministic,
                const at::Tensor philox_seed,
                const at::Tensor philox_offset) {
