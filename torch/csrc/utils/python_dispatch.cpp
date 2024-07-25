@@ -198,11 +198,11 @@ class PythonKernelHolder : public c10::OperatorKernel {
     auto obj = with_op_ ? with_keyset_
             ? func(
                   keyset,
-                  torch::csrc::getTorchApiFunction(op),
+                  torch::detail::getTorchApiFunction(op),
                   *args_kwargs.first,
                   **args_kwargs.second)
             : func(
-                  torch::csrc::getTorchApiFunction(op),
+                  torch::detail::getTorchApiFunction(op),
                   *args_kwargs.first,
                   **args_kwargs.second)
         : with_keyset_ ? func(keyset, *args_kwargs.first, **args_kwargs.second)
@@ -1007,11 +1007,11 @@ void python_op_registration_trampoline_impl(
   auto callable = py::reinterpret_borrow<py::object>(pyobj);
   auto obj = with_op ? with_keyset ? callable(
                                          keyset,
-                                         torch::csrc::getTorchApiFunction(op),
+                                         torch::detail::getTorchApiFunction(op),
                                          *args_kwargs.first,
                                          **args_kwargs.second)
                                    : callable(
-                                         torch::csrc::getTorchApiFunction(op),
+                                         torch::detail::getTorchApiFunction(op),
                                          *args_kwargs.first,
                                          **args_kwargs.second)
       : with_keyset ? callable(keyset, *args_kwargs.first, **args_kwargs.second)

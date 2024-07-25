@@ -12,7 +12,7 @@ using namespace torch;
 using namespace at;
 using namespace c10;
 
-namespace torch::csrc {
+namespace torch::detail {
 
 namespace {
 
@@ -969,12 +969,12 @@ py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
   });
 }
 
-} // namespace torch::csrc
+} // namespace torch::detail
 
 c10::impl::PyInterpreter* getPyInterpreter() {
-  return torch::csrc::self_interpreter.get();
+  return torch::detail::self_interpreter.get();
 }
 
 bool isMainPyInterpreter() {
-  return torch::csrc::self_interpreter.is_main_interpreter();
+  return torch::detail::self_interpreter.is_main_interpreter();
 }

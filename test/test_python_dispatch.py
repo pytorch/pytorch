@@ -70,23 +70,135 @@ class TestPythonRegistration(TestCase):
             del torch.ops._test_python_registration
 
     def test_fallback(self) -> None:
+        test_key = "TESTING_ONLY_GenericMode"
+        test_keyset = torch._C.DispatchKeySet(test_key)
+        include_to_set = torch._C._dispatch_tls_local_include_set() | test_keyset
+        exclude_to_set = torch._C._dispatch_tls_local_exclude_set()
+
         with _scoped_library("_", "IMPL") as my_lib:
-            orig_args = ((2, 2),)
-            orig_kwargs = {"device": torch.device("fpga"), "dtype": torch.float64}
+            expected_op = None
+            expected_args = None
+            expected_kwargs = None
+            # Use this out shape to make sure the result from our fallback
+            # is what is returned to the user
+            out_shape = None
 
             def my_fallback(op, *args, **kwargs):
-                self.assertIs(op, torch.ops.aten.empty.memory_format)
-                self.assertEqual(args, orig_args)
-                # Why pin_memory was added?
-                self.assertEqual(kwargs, {**orig_kwargs, "pin_memory": False})
-                # Any return is fine here
-                return torch.empty(*args)
+                # Disable our handler during checks and generating the output
+                with torch._C._ForceDispatchKeyGuard(
+                    include_to_set, exclude_to_set | test_keyset
+                ):
+                    self.assertIs(op, expected_op)
+                    self.assertEqual(args, expected_args)
+                    self.assertEqual(kwargs, expected_kwargs)
+                    # Return something specific
+                    return torch.empty(out_shape)
 
-            # Use PrivateUse1 here as there are no key-specific kernels
-            # registered and so our fallback will always get called
-            my_lib.fallback(my_fallback, "FPGA")
+            my_lib.fallback(my_fallback, test_key)
 
-            torch.empty(*orig_args, **orig_kwargs)
+            a, b = torch.rand(2), torch.rand(2)
+
+            with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
+                # Check a factory function
+                expected_op = torch.ops.aten.empty.memory_format
+                expected_args = ((2, 2),)
+                # Extra kwargs to bypass issues with default args in factory functions
+                expected_kwargs = {
+                    "dtype": torch.float64,
+                    "pin_memory": False,
+                    "device": torch.device("cpu"),
+                }
+                out_shape = (3,)
+                out = torch.empty(*expected_args, **expected_kwargs)
+                self.assertEqual(out.size(), out_shape)
+
+                # Check a regular function
+                expected_op = torch.ops.aten.add.Tensor
+                expected_args = (a, b)
+                expected_kwargs = {}
+                out_shape = (4,)
+                out = a + b
+                self.assertEqual(out.size(), out_shape)
+
+    def test_fallback_keyset(self) -> None:
+        test_key_first = "TESTING_ONLY_GenericMode"
+        test_key_second = "TESTING_ONLY_GenericWrapper"
+        test_keyset = torch._C.DispatchKeySet(test_key_first) | torch._C.DispatchKeySet(
+            test_key_second
+        )
+        include_to_set = torch._C._dispatch_tls_local_include_set() | test_keyset
+        exclude_to_set = torch._C._dispatch_tls_local_exclude_set()
+
+        with _scoped_library("_", "IMPL") as my_lib:
+            first_called = False
+            second_called = False
+
+            def first_fallback(keyset, op, *args, **kwargs):
+                nonlocal first_called
+                if second_called:
+                    # Recursive call
+                    first_called = True
+                    with torch._C._ForceDispatchKeyGuard(
+                        include_to_set, exclude_to_set | test_keyset
+                    ):
+                        return op(*args, **kwargs)
+                else:
+                    # Redispatch down
+                    keyset = keyset.remove(test_key_first)
+                    return op.redispatch(keyset, *args, **kwargs)
+
+            def second_fallback(op, *args, **kwargs):
+                nonlocal second_called
+                # Set to avoid infinite recursion
+                second_called = True
+                # New dispatcher call should hit the first callback again
+                self.assertFalse(first_called)
+                a, b = args
+                # Make a substraction here instead of add !
+                c = a - b
+                self.assertTrue(first_called)
+                return c
+
+            my_lib.fallback(first_fallback, test_key_first, with_keyset=True)
+            my_lib.fallback(second_fallback, test_key_second)
+
+            a, b = torch.rand(2), torch.rand(2)
+            with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
+                c = a + b
+
+            self.assertEqual(c, a - b)
+            self.assertTrue(first_called)
+            self.assertTrue(second_called)
+
+    def test_fallback_fallthrough(self) -> None:
+        test_key_first = "TESTING_ONLY_GenericMode"
+        test_key_second = "TESTING_ONLY_GenericWrapper"
+        test_keyset = torch._C.DispatchKeySet(test_key_first) | torch._C.DispatchKeySet(
+            test_key_second
+        )
+        include_to_set = torch._C._dispatch_tls_local_include_set() | test_keyset
+        exclude_to_set = torch._C._dispatch_tls_local_exclude_set()
+
+        with _scoped_library("_", "IMPL") as my_lib:
+            is_called = False
+
+            def my_fallback(op, *args, **kwargs):
+                nonlocal is_called
+                is_called = True
+                with torch._C._ForceDispatchKeyGuard(
+                    include_to_set, exclude_to_set | test_keyset
+                ):
+                    return op(*args, **kwargs)
+
+            my_lib.fallback(torch.library.fallthrough_kernel, test_key_first)
+            my_lib.fallback(my_fallback, test_key_second)
+
+            a, b = torch.rand(2), torch.rand(2)
+            with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
+                c = a + b
+
+            self.assertEqual(c, a + b)
+            self.assertTrue(is_called)
 
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])
