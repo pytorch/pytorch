@@ -1459,7 +1459,7 @@ def find_matching_merge_rule(
 
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError(
-                "This PR has internal changes and must be landed via Phabricator"
+                "This PR has internal changes and must be landed via Phabricator! Please try reimporting/rexporting the PR!"
             )
 
         # Categorize all checks when skip_mandatory_checks (force merge) is set. Do it here
