@@ -1,5 +1,5 @@
 
-// Copyright (c) 2023, Tri Dao.
+// Copyright (c) 2024, Tri Dao.
 
 // Splitting the different head dimensions to different files to speed up compilation.
 // This file is auto-generated. See "generate_kernels.py"
