@@ -174,7 +174,7 @@ class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
     """represents torch grad requries grad"""
 
     @staticmethod
-    def create(tx, target_values, **kwargs):
+    def create(tx: "InstructionTranslator", target_values, **kwargs):
         return GradInplaceRequiresGradCtxManagerVariable(
             target_values=target_values,
             initial_values=None,
@@ -221,7 +221,7 @@ class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
 
     @staticmethod
-    def create(tx, **kwargs):
+    def create(tx: "InstructionTranslator", **kwargs):
         var = JvpIncrementNestingCtxManagerVariable(
             target_values=None,
             initial_values=None,
@@ -255,7 +255,7 @@ class SetFwdGradEnabledContextManager(ContextWrappingVariable):
     """represents torch.autograd.forward_ad._set_fwd_grad_enabled() to enable/disable fwd grad"""
 
     @staticmethod
-    def create(tx, target_values, **kwargs):
+    def create(tx: "InstructionTranslator", target_values, **kwargs):
         return SetFwdGradEnabledContextManager(
             target_values=target_values,
             initial_values=None,
@@ -295,7 +295,7 @@ class DualLevelContextManager(ContextWrappingVariable):
     _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.DUAL_LEVEL)
 
     @staticmethod
-    def create(tx, **kwargs):
+    def create(tx: "InstructionTranslator", **kwargs):
         return DualLevelContextManager(
             target_values=None,
             initial_values=None,
@@ -338,7 +338,7 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
 
     @staticmethod
-    def create(tx, **kwargs):
+    def create(tx: "InstructionTranslator", **kwargs):
         var = GradIncrementNestingCtxManagerVariable(
             target_values=None,
             initial_values=None,
@@ -370,7 +370,7 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
     """Delay a call to warnings.catch_warnings"""
 
     @staticmethod
-    def create(tx, catch_warnings_args):
+    def create(tx: "InstructionTranslator", catch_warnings_args):
         return CatchWarningsCtxManagerVariable(
             catch_warnings_args=catch_warnings_args,
             target_values=None,
@@ -408,7 +408,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
 
     @staticmethod
-    def create(tx, target_values, **kwargs):
+    def create(tx: "InstructionTranslator", target_values, **kwargs):
         var = VmapIncrementNestingCtxManagerVariable(
             target_values=target_values,
             initial_values=None,
@@ -443,7 +443,7 @@ class GradModeVariable(ContextWrappingVariable):
     _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)
 
     @staticmethod
-    def create(tx, target_value, initialized=False, **kwargs):
+    def create(tx: "InstructionTranslator", target_value, initialized=False, **kwargs):
         var = GradModeVariable(
             target_values=[target_value],
             initial_values=[torch.is_grad_enabled()],
@@ -495,7 +495,7 @@ class GradModeVariable(ContextWrappingVariable):
 
 class InferenceModeVariable(ContextWrappingVariable):
     @staticmethod
-    def create(tx, target_value, **kwargs):
+    def create(tx: "InstructionTranslator", target_value, **kwargs):
         var = InferenceModeVariable(
             [target_value], initial_values=torch.is_inference_mode_enabled(), **kwargs
         )
@@ -549,7 +549,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
     _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.TORCH_FUNCTION_STATE)
 
     @staticmethod
-    def create(tx, **kwargs):
+    def create(tx: "InstructionTranslator", **kwargs):
         var = TorchFunctionDisableVariable(
             target_values=[False],
             initial_values=[tx.output.torch_function_enabled],
@@ -582,7 +582,7 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     )
 
     @staticmethod
-    def create(tx, target_value, **kwargs):
+    def create(tx: "InstructionTranslator", target_value, **kwargs):
         var = DeterministicAlgorithmsVariable(
             target_values=[target_value],
             initial_values=[torch.are_deterministic_algorithms_enabled()],
@@ -620,7 +620,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
     """represents torch.autograd.graph.disable_saved_tensors_hook."""
 
     @staticmethod
-    def create(tx, target_value, **kwargs):
+    def create(tx: "InstructionTranslator", target_value, **kwargs):
         var = DisabledSavedTensorsHooksVariable(
             target_values=[target_value],
             initial_values=[
@@ -752,7 +752,7 @@ class NullContextVariable(ContextWrappingVariable):
 
 class StreamContextVariable(ContextWrappingVariable):
     @staticmethod
-    def create(tx, target_value, **kwargs):
+    def create(tx: "InstructionTranslator", target_value, **kwargs):
         from .builder import wrap_fx_proxy_cls
 
         current_stream_method = get_interface_for_device(
@@ -854,7 +854,7 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
     _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FSDP_TRAINING_STATE)
 
     @staticmethod
-    def create(tx, param_group_var, target_value, **kwargs):
+    def create(tx: "InstructionTranslator", param_group_var, target_value, **kwargs):
         var = FSDPParamGroupUseTrainingStateVariable(
             param_group_var=param_group_var,
             target_values=[target_value],
