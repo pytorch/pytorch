@@ -14709,7 +14709,7 @@
     CUDA, NestedTensorCUDA: native_multi_head_attention_cuda
   autogen: _native_multi_head_attention.out
 
-- func: _safe_softmax.int(Tensor self, Tensor mask, int dim, ScalarType? dtype=None) -> Tensor
+- func: _safe_softmax(Tensor self, Tensor mask, int dim, ScalarType? dtype=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: _safe_softmax
 
