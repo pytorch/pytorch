@@ -5,7 +5,7 @@ import torch
 import torch.distributed as dist
 from functorch import make_fx
 from torch._inductor.fx_passes.micro_pipeline_tp import (
-    _get_overlappable_collectives,
+    _get_unexposed_collectives,
     find_all_gather_patterns,
     find_reduce_scatter_patterns,
 )
@@ -152,7 +152,7 @@ class MicroPipelineTPTest(TestCase):
         inp = torch.rand(64, 32, device="cuda")
 
         gm = make_fx(func)(inp)
-        overlappable_collectives = _get_overlappable_collectives(gm.graph)
+        overlappable_collectives = _get_unexposed_collectives(gm.graph)
         self.assertEqual(
             list(map(str, overlappable_collectives)),
             ["all_gather_into_tensor", "reduce_scatter_tensor"],
