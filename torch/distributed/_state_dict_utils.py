@@ -379,7 +379,10 @@ def _copy_state_dict(
 
 
 def _create_cpu_state_dict(
-    state_dict: Dict[str, Any], pin_memory: bool = False, share_memory: bool = False
+    state_dict: Dict[str, Any],
+    pin_memory: bool = False,
+    share_memory: bool = False,
+    device: Optional[torch.device] = None
 ) -> Dict[str, Any]:
     """
     Given a state_dict, create another state_dict with the same structure and elements.
@@ -427,7 +430,7 @@ def _create_cpu_state_dict(
                 ), f"Pinning shared memory failed with error-code: {succ}"
             return t
         elif pin_memory:
-            return torch.empty(*tuple(obj.size()), dtype=obj.dtype).pin_memory()
+            return torch.empty(*tuple(obj.size()), dtype=obj.dtype).pin_memory(device)
         else:
             return torch.empty(*tuple(obj.size()), dtype=obj.dtype)
 
@@ -437,7 +440,7 @@ def _create_cpu_state_dict(
         _identity_func,
         tensor_func,
         pg=None,
-        device=None,
+        device=device,
         cpu_offload=False,
         ranks_only=(),
         type_check=False,
