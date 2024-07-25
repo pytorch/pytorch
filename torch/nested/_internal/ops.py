@@ -159,7 +159,7 @@ def squeeze_leading_ones(t):
     # If unsqueezing on the 0th dim becomes supported, we would unsqueeze
     # at step (4) and we would need to update this function to record how
     # many ones we unsqueezed.
-    while t.shape[0] == 1:
+    while t.dim() > 0 and t.shape[0] == 1:
         t = t.squeeze(0)
     return t
 
@@ -906,6 +906,7 @@ def sum_dim_IntList(func, *args, **kwargs):
             )  # need to read offsets --> pad jagged dimension and apply sum
 
         if new_kwargs["keepdim"]:
+            # TODO: Fix this; it's a bug. should be unsqueezing on ragged_idx
             out = out.unsqueeze(0)
         return out
     else:  # raggedness preserved --> return nested tensor
@@ -1061,7 +1062,14 @@ def select_int(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
-    new_kwargs["dim"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "select")
+    new_kwargs["dim"] = _wrap_jagged_dim(
+        inp.dim(), new_kwargs["dim"], "select", allow_batch_dim=True
+    )
+
+    # handle batch dim slicing via unbind() for now
+    # TODO: make this more efficient
+    if new_kwargs["dim"] == 0:
+        return inp.unbind()[new_kwargs["index"]]
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
@@ -1097,7 +1105,7 @@ def convolution_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten.mean.dim, "self: jt, dim: any?, keepdim: any, dtype: any?"
+    torch.ops.aten.mean.dim, "self: jt, dim: any?, keepdim: any?, dtype: any?"
 )
 def mean_dim(func, *args, **kwargs):
     _, new_kwargs = normalize_function(

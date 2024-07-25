@@ -5,12 +5,27 @@ from functools import partial
 
 import torch
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.opinfo.core import SampleInput, UnaryUfuncInfo
+from torch.testing._internal.opinfo.core import (
+    BinaryUfuncInfo,
+    ReductionOpInfo,
+    SampleInput,
+    UnaryUfuncInfo,
+)
+from torch.utils._pytree import tree_map
 
 
 # random integer used for sizes
 def _rnd():
     return torch.randint(3, 8, ()).item()
+
+
+def _raggedness_matches(nt1, nt2):
+    return (
+        nt1.is_nested
+        and nt2.is_nested
+        and nt1._ragged_idx == nt2._ragged_idx
+        and nt1.shape[nt1._ragged_idx] == nt2.shape[nt2._ragged_idx]
+    )
 
 
 # Generates a random NT.
@@ -57,6 +72,69 @@ def _sample_njts(device, dtype, requires_grad=False, dims=None):
     # TODO: add non-contiguous NJTs
 
 
+# Computes an unbind-based reference for a given OpInfo on a given SampleInput.
+# This reference unbinds the input NJT and invokes the op on each of the components,
+# optionally wrapping the result in an NJT.
+def unbind_reference(op, sample, wrap_output_as_njt=True):
+    assert sample.input.is_nested
+    out_ref_components = []
+    for i, component in enumerate(sample.input.unbind(dim=0)):
+
+        def _slice_njts(t, i=i, inp=sample.input):
+            # any NJT with the same ragged structure as the input should
+            # also be sliced to pass to the reference
+            if isinstance(t, torch.Tensor) and _raggedness_matches(t, inp):
+                return t[i]
+            else:
+                return t
+
+        args = tree_map(_slice_njts, sample.args)
+        kwargs = tree_map(_slice_njts, sample.kwargs)
+
+        from torch._prims_common import canonicalize_dims
+
+        # Need to adjust dim to apply on NJT component
+        if "dim" in kwargs:
+            kwargs["dim"] = canonicalize_dims(sample.input.dim(), kwargs["dim"]) - 1
+            assert kwargs["dim"] >= 0
+
+        # TODO: handle this
+        assert "dims" not in kwargs
+
+        out_ref_component = op.op(component, *args, **kwargs)
+
+        # TODO: handle list / tuple / non-NJT outputs
+        assert not isinstance(out_ref_component, (list, tuple))
+        out_ref_components.append(out_ref_component)
+
+    if wrap_output_as_njt:
+        return torch.nested.as_nested_tensor(out_ref_components, layout=torch.jagged)
+
+    return out_ref_components
+
+
+# Computes the reference value for a reduction op.
+def reduction_reference(op, sample):
+    assert sample.input.is_nested
+    dim = sample.kwargs.get("dim", None)
+    keepdim = sample.kwargs.get("keepdim", False)
+    assert dim != 0, "reductions over the batch dim are not supported"
+    assert "dims" not in sample.kwargs
+    assert sample.input._ragged_idx == 1
+
+    if dim is None:
+        # calculate reference value by running reduction on values buffer
+        return op.op(sample.input.values(), *sample.args, **sample.kwargs)
+
+    if dim == sample.input._ragged_idx:
+        # calculate reference value by running an unbind reference and stacking
+        out_ref_components = unbind_reference(op, sample, wrap_output_as_njt=False)
+        return torch.stack(out_ref_components, dim=0)
+
+    # unbind reference works for other reductions
+    return unbind_reference(op, sample)
+
+
 def sample_inputs_njt_general(op_info, device, dtype, requires_grad, **kwargs):
     for njt in _sample_njts(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
@@ -73,6 +151,42 @@ def sample_inputs_elementwise_njt_unary(
     for njt in _sample_njts(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
     ):
+        yield SampleInput(njt, kwargs=dict(op_kwargs))
+
+
+def sample_inputs_elementwise_njt_binary(
+    op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
+):
+    if not op_kwargs:
+        op_kwargs = {}
+
+    for njt1 in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
+    ):
+        # TODO: account for non-contiguous NJTs here
+        njt2 = torch.randn_like(njt1)
+        yield SampleInput(njt1, args=(njt2,), kwargs=dict(op_kwargs))
+
+
+def sample_inputs_elementwise_njt_reduction(
+    op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
+):
+    if not op_kwargs:
+        op_kwargs = {}
+
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
+    ):
+        # dim-wise reduction; includes reduction over the ragged dim
+        # NB: reduction over the batch dim is not supported!
+        # TODO: Cover this in the set of error inputs
+        for dim in range(1, njt.dim()):
+            for keepdim in [False, True]:
+                yield SampleInput(
+                    njt, kwargs={**op_kwargs, "dim": dim, "keepdim": keepdim}
+                )
+
+        # full reduction
         yield SampleInput(njt, kwargs=dict(op_kwargs))
 
 
@@ -127,12 +241,26 @@ def translate_opinfo(op):
     op_full_name = (
         f"{op.name}{'.' + op.variant_test_name if op.variant_test_name else ''}"
     )
+
     if op_full_name in njt_sample_inputs:
         new_op.sample_inputs_func = njt_sample_inputs[op_full_name]
+        # TODO: make the reference customizeable
+        new_op.ref = unbind_reference
     elif isinstance(op, UnaryUfuncInfo):
         new_op.sample_inputs_func = partial(
             sample_inputs_elementwise_njt_unary, op_kwargs=None
         )
+        new_op.ref = unbind_reference
+    elif isinstance(op, BinaryUfuncInfo):
+        new_op.sample_inputs_func = partial(
+            sample_inputs_elementwise_njt_binary, op_kwargs=None
+        )
+        new_op.ref = unbind_reference
+    elif isinstance(op, ReductionOpInfo):
+        new_op.sample_inputs_func = partial(
+            sample_inputs_elementwise_njt_reduction, op_kwargs=None
+        )
+        new_op.ref = reduction_reference
     # TODO: Translate the rest of the OpInfos
     else:
         new_op.sample_inputs_func = unsupported_sample_inputs_func(op_full_name)
