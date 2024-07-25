@@ -389,28 +389,12 @@ bool is_none(handle h) {
     return h.ptr() == Py_None;
 }
 
-bool is_bool(handle h) {
-    return PyBool_Check(h.ptr());
-}
-
 Py_ssize_t to_int(handle h) {
     Py_ssize_t r = PyLong_AsSsize_t(h.ptr());
     if (r == -1 && PyErr_Occurred()) {
         throw mpy::exception_set();
     }
     return r;
-}
-
-double to_float(handle h) {
-    double r = PyFloat_AsDouble(h.ptr());
-    if (PyErr_Occurred()) {
-        throw mpy::exception_set();
-    }
-    return r;
-}
-
-bool to_bool_unsafe(handle h) {
-    return h.ptr() == Py_True;
 }
 
 bool to_bool(handle h) {
