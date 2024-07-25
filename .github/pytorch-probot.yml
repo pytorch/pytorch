@@ -6,6 +6,7 @@ ciflow_push_tags:
 - ciflow/binaries_libtorch
 - ciflow/binaries_wheel
 - ciflow/inductor
+- ciflow/inductor-rocm
 - ciflow/inductor-perf-compare
 - ciflow/inductor-micro-benchmark
 - ciflow/inductor-cu124
