@@ -53,5 +53,5 @@ __all__ = [
     "softmin",
     "std",
     "sum",
-    "var"
+    "var",
 ]
