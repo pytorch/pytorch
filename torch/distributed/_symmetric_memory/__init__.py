@@ -1,14 +1,16 @@
+# mypy: allow-untyped-decorators
 import socket
 import uuid
 
 from contextlib import contextmanager
+from datetime import timedelta
 from functools import partial
 from typing import Callable, Dict, Generator, List, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
-from torch._C._distributed_c10d import _SymmetricMemory
+from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 
 _group_name_to_store: Dict[str, c10d.Store] = {}
 
@@ -24,8 +26,11 @@ def enable_symm_mem_for_group(group_name: str) -> None:
         return
 
     group = c10d._resolve_process_group(group_name)
+    global_ranks = sorted(c10d._world.pg_group_ranks[group].keys())
+    # Different subgroups with the same name should use different stores
+    global_ranks_str = "_".join(map(str, global_ranks))
     store = c10d.PrefixStore(
-        "symmetric_memory",
+        f"symmetric_memory-{global_ranks_str}",
         c10d._get_process_group_store(group),
     )
     # Use one store-based broadcast to bootstrap a file store from the process
@@ -253,7 +258,16 @@ lib.define(
     "fused_all_gather_matmul(Tensor A, Tensor[] Bs, int gather_dim, str group_name) -> (Tensor, Tensor[])"
 )
 lib.define(
+    "fused_all_gather_scaled_matmul("
+    "Tensor A, Tensor[] Bs, Tensor A_scale, Tensor[] B_scales, int gather_dim, str group_name"
+    ") -> (Tensor, Tensor[])"
+)
+lib.define(
     "fused_matmul_reduce_scatter(Tensor A, Tensor B, str reduce_op, int scatter_dim, str group_name) -> Tensor"
+)
+lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor")
+lib.define(
+    "_low_contention_reduce_scatter(Tensor tensor, str reduce_op, str group_name) -> Tensor"
 )
 
 
@@ -288,10 +302,9 @@ def _fused_all_gather_matmul(
 
         all_gather_tensor(A_shard, gather_dim, group_name) @ B
 
-    Optimal stride order for A_shard - if A_shard.movedim(scatter_dim, 0) is
+    Optimal stride order for A_shard - if A_shard.movedim(gather_dim, 0) is
     contiguous, no extra copy is required for input layout transformation.
     Otherwise A_shard needs to be copied once.
-
     """
     if _is_test_mode:
         return _fused_all_gather_matmul_fallback(A_shard, Bs, gather_dim, group_name)
@@ -360,14 +373,14 @@ def make_contiguous_for_perm(
 
 def restride_A_shard_for_fused_all_gather_matmul(
     t: torch.Tensor,
-    scatter_dim: int,
+    gather_dim: int,
 ) -> torch.Tensor:
     """
     Restride the `A_shard` arg of `fused_all_gather_matmul` for optimal perf.
     See the doc for `fused_all_gather_matmul` for detail.
     """
     perm = list(range(len(t.shape)))
-    perm.insert(0, perm.pop(scatter_dim))
+    perm.insert(0, perm.pop(gather_dim))
     return make_contiguous_for_perm(t, perm)
 
 
@@ -467,3 +480,329 @@ def restride_A_for_fused_matmul_reduce_scatter(
     perm = list(range(len(t.shape)))
     perm.insert(0, perm.pop(gather_dim))
     return make_contiguous_for_perm(t, perm)
+
+
+@torch.library.impl(lib, "fused_all_gather_scaled_matmul", "Meta")
+def _fused_all_gather_scaled_matmul_fallback(
+    A_shard: torch.Tensor,
+    Bs: List[torch.Tensor],
+    A_scale: torch.Tensor,
+    B_scales: List[torch.Tensor],
+    gather_dim: int,
+    group_name: str,
+) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+    group_size = c10d._get_group_size_by_name(group_name)
+    A = torch.ops._c10d_functional.all_gather_into_tensor(
+        A_shard.contiguous(), group_size, group_name
+    )
+    A = torch.ops._c10d_functional.wait_tensor(A)
+    A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
+
+    def scaled_matmul(
+        A: torch.Tensor, B: torch.Tensor, A_scale: torch.Tensor, B_scale: torch.Tensor
+    ) -> torch.Tensor:
+        leading_dims = A.shape[:-1]
+        res = torch.ops.aten._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale)
+        return res.unflatten(0, leading_dims)
+
+    return A.movedim(0, gather_dim), [
+        scaled_matmul(A, B, A_scale, B_scale).movedim(0, gather_dim)
+        for B, B_scale in zip(Bs, B_scales)
+    ]
+
+
+@torch.library.impl(lib, "fused_all_gather_scaled_matmul", "CUDA")
+def _fused_all_gather_scaled_matmul(
+    A_shard: torch.Tensor,
+    Bs: List[torch.Tensor],
+    A_scale: torch.Tensor,
+    B_scales: torch.Tensor,
+    gather_dim: int,
+    group_name: str,
+) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+    """
+    Perform the following logic with micro-pipelined computation and
+    communication:
+
+        A = all_gather_tensor(A_shard, gather_dim, group_name)
+        leading_dims = A.shape[:-1]
+        res = torch.ops.aten._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale)
+        res = res.unflatten(0, leading_dims)
+
+    Optimal stride order for A_shard - if A_shard.movedim(gather_dim, 0) is
+    contiguous, no extra copy is required for input layout transformation.
+    Otherwise A_shard needs to be copied once.
+    """
+    if _is_test_mode:
+        return _fused_all_gather_matmul_fallback(A_shard, Bs, gather_dim, group_name)
+    if A_shard.dim() < 2:
+        raise ValueError("A_shard must be a matrix")
+    for B in Bs:
+        if B.dim() != 2:
+            raise ValueError("B must be a matrix")
+    if gather_dim < 0 or gather_dim >= A_shard.dim():
+        raise ValueError("Invalid gather_dim")
+
+    group = c10d._resolve_process_group(group_name)
+
+    with torch.profiler.record_function("fused_all_gather_scaled_matmul"):
+        # Move the gather_dim to the front and flatten the tensor into a 2D matrix.
+        # The flattened tensor doesn't need to be contiguous (for computation
+        # efficiency), as _pipelined_all_gather_and_consume guarantees that shards
+        # passed to shard_consumer are contiguous.
+        x = A_shard.movedim(gather_dim, 0)
+        leading_dims = [group.size()] + list(x.shape[:-1])
+        x = x.flatten(0, -2)
+
+        # Helper function for reverting the above transformation
+        def unflatten(t: torch.Tensor) -> torch.Tensor:
+            return t.view(*leading_dims, -1).flatten(0, 1).movedim(0, gather_dim)
+
+        ag_out = x.new_empty(
+            x.shape[0] * group.size(),
+            x.shape[1],
+        )
+        outputs = [
+            x.new_empty(
+                x.shape[0] * group.size(),
+                B.shape[1],
+            )
+            for B in Bs
+        ]
+        output_shards = [output.chunk(group.size()) for output in outputs]
+
+        # Computing block-wise matmul along the first dim of A
+        def shard_consumer(shard: torch.Tensor, rank: int) -> None:
+            for idx, (B, B_scale) in enumerate(zip(Bs, B_scales)):
+                torch.ops.aten._scaled_mm(
+                    shard, B, A_scale, B_scale, out=output_shards[idx][rank]
+                )
+
+        _pipelined_all_gather_and_consume(
+            x,
+            shard_consumer,
+            ag_out,
+            group_name,
+        )
+        return unflatten(ag_out), [unflatten(output) for output in outputs]
+
+
+class Work(_Work):
+    def __init__(self) -> None:
+        super().__init__()
+        self.event = torch.cuda.Event()
+        self.event.record()
+
+    def wait(self, timeout: timedelta = timedelta(seconds=0)) -> bool:
+        self.event.wait()
+        return True
+
+
+"""
+NOTE [low-contention collectives]
+When a collective is overlapped with abundant compute, it makes sense to
+prioritize reducing the contention between the collective and the overlapped
+compute, even at the cost of a slightly slower collective.
+
+Common collective implementations (e.g., NCCL without user buffer
+registration) optimize for throughput with no ambient compute. However, such
+implementations may not be optimal when they are overlapped with compute:
+- These implementations typically fuse the entire collective into a single
+kernel and reserve SM resources based on the most demanding portion of the
+collective, even when a large portion of the collective does not require this
+much resource.
+- These implementations often use SM-based P2P copy as opposed to copy
+engine-based P2P copy. Copy engine-based P2P copy may not have a significant
+advantage when there's no ambient compute. However, it may significantly
+improve overall resource utilization in the presence of ambient compute.
+
+When overlapped with intensive compute (e.g., persistent matmul kernels), the
+SM-usage of a collective can lead to inefficient overlapping.
+
+Low-contention collectives achieve their goals with the following strategies:
+- Use copy engine-based copy whenever possible.
+- Break down portions of a collective with different resource requirements
+into multiple kernels. This improves the overlapping efficiency at the cost
+of additional launching overhead.
+"""
+
+
+@torch.library.impl(lib, "_low_contention_all_gather", "Meta")
+def _low_contention_all_gather_meta(
+    tensor: torch.Tensor,
+    group_name: str,
+) -> torch.Tensor:
+    group_size = c10d._get_group_size_by_name(group_name)
+    return tensor.new_empty(tensor.shape[0] * group_size, *tensor.shape[1:])
+
+
+@torch.library.impl(lib, "_low_contention_all_gather", "CUDA")
+def _low_contention_all_gather(
+    tensor: torch.Tensor,
+    group_name: str,
+) -> torch.Tensor:
+    """
+    Performs all-gather with symmetric memory in a low-contention fashion.
+
+    When `tensor` is already in symmetric memory:
+        - The collective is carried out without using SMs.
+        - No symmetric memory workspace is required.
+
+    When `tensor` is not in symmetric memory:
+        - An extra SM-based copy is performed to copy the input data into the
+          symmetric memory workspace.
+        - Symmetric memory workspace size requirement: the size of `tensor`.
+    """
+    symm_mem = _SymmetricMemory.rendezvous(tensor)
+    if symm_mem is not None:
+        input_is_symm_mem = True
+    else:
+        symm_mem = get_symm_mem_workspace(
+            group_name, tensor.numel() * tensor.element_size()
+        )
+        input_is_symm_mem = False
+
+    rank = symm_mem.rank
+    world_size = symm_mem.world_size
+
+    output = tensor.new_empty(tensor.shape[0] * world_size, *tensor.shape[1:])
+    chunks = output.chunk(world_size)
+
+    _get_backend_stream().wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(_get_backend_stream()):
+        if not input_is_symm_mem:
+            local_buf = symm_mem.get_buffer(rank, tensor.shape, tensor.dtype)
+            local_buf.copy_(tensor)
+        # pull
+        symm_mem.barrier()
+        for step in range(0, world_size):
+            remote_rank = (rank - step) % world_size
+            src_buf = symm_mem.get_buffer(remote_rank, tensor.shape, tensor.dtype)
+            chunks[remote_rank].copy_(src_buf)
+        symm_mem.barrier()
+        torch._C._distributed_c10d._register_work(output, Work())
+        return output
+
+
+@torch.library.impl(lib, "_low_contention_reduce_scatter", "Meta")
+def _low_contention_reduce_scatter_meta(
+    tensor: torch.Tensor,
+    reduce_op: str,
+    group_name: str,
+) -> torch.Tensor:
+    group_size = c10d._get_group_size_by_name(group_name)
+    return tensor.unflatten(0, (group_size, -1)).mean(dim=0)
+
+
+def _low_contention_reduce_scatter_with_symm_mem_input(
+    tensor: torch.Tensor,
+    reduce_op: str,
+    symm_mem: _SymmetricMemory,
+) -> torch.Tensor:
+    rank = symm_mem.rank
+    world_size = symm_mem.world_size
+
+    assert tensor.shape[0] % world_size == 0
+    a2a_res = torch.empty_like(tensor)
+    chunks = a2a_res.chunk(world_size)
+
+    _get_backend_stream().wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(_get_backend_stream()):
+        # pull + offline reduction
+        symm_mem.barrier()
+        for step in range(0, world_size):
+            remote_rank = (rank - step) % world_size
+            src_buf = symm_mem.get_buffer(
+                remote_rank,
+                chunks[0].shape,
+                chunks[0].dtype,
+                chunks[0].numel() * rank,
+            )
+            chunks[remote_rank].copy_(src_buf)
+        symm_mem.barrier()
+
+        ret = a2a_res.unflatten(0, (world_size, -1))
+        if reduce_op == "sum":
+            ret = ret.sum(dim=0)
+        elif reduce_op == "avg":
+            ret = ret.mean(dim=0)
+        else:
+            raise ValueError(f"reduce_op ({reduce_op}) is not supported")
+        torch._C._distributed_c10d._register_work(ret, Work())
+        return ret
+
+
+def _low_contention_reduce_scatter_with_workspace(
+    tensor: torch.Tensor,
+    reduce_op: str,
+    workspace: _SymmetricMemory,
+) -> torch.Tensor:
+    rank = workspace.rank
+    world_size = workspace.world_size
+
+    assert tensor.shape[0] % world_size == 0
+    chunks = tensor.chunk(world_size)
+
+    _get_backend_stream().wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(_get_backend_stream()):
+        # push + offline reduction
+        workspace.barrier()
+        for step in range(0, world_size):
+            remote_rank = (rank - step) % world_size
+            dst_buf = workspace.get_buffer(
+                remote_rank, chunks[0].shape, chunks[0].dtype, chunks[0].numel() * rank
+            )
+            dst_buf.copy_(chunks[remote_rank])
+        workspace.barrier()
+
+        buf = workspace.get_buffer(rank, tensor.shape, tensor.dtype)
+        ret = buf.unflatten(0, (world_size, -1))
+        if reduce_op == "sum":
+            ret = ret.sum(dim=0)
+        elif reduce_op == "avg":
+            ret = ret.mean(dim=0)
+        else:
+            raise ValueError(f"reduce_op ({reduce_op}) is not supported")
+        torch._C._distributed_c10d._register_work(ret, Work())
+        return ret
+
+
+@torch.library.impl(lib, "_low_contention_reduce_scatter", "CUDA")
+def _low_contention_reduce_scatter(
+    tensor: torch.Tensor,
+    reduce_op: str,
+    group_name: str,
+) -> torch.Tensor:
+    """
+    Performs reduce-scatter with symmetric memory in a low-contention fashion.
+
+    This implementation performs a P2P-based all-to-all followed by an offline
+    reduction.
+
+    When `tensor` is already in symmetric memory:
+        - Pull-based all-to-all is used.
+        - No symmetric memory workspace is required.
+
+    When `tensor` is not in symmetric memory:
+        - Push-based all-to-all is used.
+        - Symmetric memory workspace size requirement: the size of `tensor`.
+
+    SM-usage:
+        - SM-based copy of the rank's own chunk for the all-to-all.
+        - Reduction on the all-to-all result.
+
+    TODO(yifu): the SM-based copy can be avoided with a list-based reduction
+    kernel.
+    """
+    symm_mem = _SymmetricMemory.rendezvous(tensor)
+    if symm_mem is not None:
+        return _low_contention_reduce_scatter_with_symm_mem_input(
+            tensor, reduce_op, symm_mem
+        )
+    else:
+        workspace = get_symm_mem_workspace(
+            group_name, tensor.numel() * tensor.element_size()
+        )
+        return _low_contention_reduce_scatter_with_workspace(
+            tensor, reduce_op, workspace
+        )

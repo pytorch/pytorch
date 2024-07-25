@@ -5,7 +5,6 @@ import copy
 import itertools
 
 import torch
-
 from torch.distributed._tensor import DeviceMesh, distribute_module, distribute_tensor
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.ops.utils import is_tensor_partial, normalize_dim
@@ -344,10 +343,12 @@ class DistMathOpsTest(DTensorTestBase):
             comm_mode = CommDebugMode()
             with comm_mode:
                 y_dist = layer_norm_dist(x_dist)
+                y_dist.sum().backward()
 
             expected_fwd_comm = 0 if shard_dim < norm_idx else 1
+
             self.assertEqual(
-                comm_mode.get_total_counts(),
+                sum(comm_mode.comm_module_counts["Global"]["forward"].values()),
                 expected_fwd_comm,
                 f"comm count={comm_mode.get_total_counts()}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
@@ -357,13 +358,11 @@ class DistMathOpsTest(DTensorTestBase):
 
             # backward step
             y_local.sum().backward()
-            with comm_mode:
-                y_dist.sum().backward()
 
             expected_bwd_comm = 0 if shard_dim < norm_idx else 1
 
             self.assertEqual(
-                comm_mode.get_total_counts(),
+                sum(comm_mode.comm_module_counts["Global"]["backward"].values()),
                 expected_bwd_comm,
                 f"comm count={comm_mode.get_total_counts()}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
@@ -436,6 +435,25 @@ class DistMathOpsTest(DTensorTestBase):
         comm_counts = comm_mode.get_comm_counts()
         self.assertEqual(len(comm_counts), 1)
         self.assertEqual(comm_counts[funcol.all_gather_into_tensor], 1)
+
+    @with_comms
+    def test_foreach_norm(self):
+        device_mesh = self.build_device_mesh()
+
+        grad0 = torch.randn(12, 8)
+        grad1 = torch.randn(8, 8)
+
+        sharded_grad0 = distribute_tensor(grad0, device_mesh, [Shard(0)])
+        sharded_grad1 = distribute_tensor(grad1, device_mesh, [Shard(0)])
+
+        # non-sharded op
+        out = torch.ops.aten._foreach_norm([grad0, grad1], 2)
+
+        # sharded op
+        sharded_out = torch.ops.aten._foreach_norm([sharded_grad0, sharded_grad1], 2)
+
+        for o, so in zip(out, sharded_out):
+            self.assertEqual(so.full_tensor(), o)
 
 
 if __name__ == "__main__":
