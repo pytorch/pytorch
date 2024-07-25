@@ -17,7 +17,7 @@ class SDPAParamsVariable(VariableTracker):
     This is a read-only container."""
 
     @staticmethod
-    def create(tx, value, source):
+    def create(tx: "InstructionTranslator", value, source):
         from torch.backends.cuda import SDPAParams
         from ..source import AttrSource
         from .builder import VariableBuilder
