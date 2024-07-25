@@ -4,11 +4,13 @@ import unittest
 import torch
 import torch.distributed as dist
 from functorch import make_fx
+from torch._inductor.decomposition import decompositions
 from torch._inductor.fx_passes.micro_pipeline_tp import (
     _get_unexposed_collectives,
     find_all_gather_patterns,
     find_reduce_scatter_patterns,
 )
+from torch._inductor.fx_passes.post_grad import remove_noop_ops, view_to_reshape
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
 from torch.distributed._functional_collectives import (
     all_gather_tensor,
@@ -17,6 +19,7 @@ from torch.distributed._functional_collectives import (
 from torch.distributed._symmetric_memory import _test_mode
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.placement_types import Shard
+from torch.distributed.distributed_c10d import _get_group_size_by_name
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -31,6 +34,24 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._triton import has_triton
+
+
+def _make_post_grad_fx(f, *inps):
+    gm = make_fx(f, decompositions)(*inps)
+    remove_noop_ops(gm.graph)
+    view_to_reshape(gm)
+    return gm
+
+
+def _fp8_all_gather(tensor: torch.Tensor, gather_dim: int, group_name: str):
+    # We don't yet have a canonical pattern for fp8 all-gather. This is a
+    # pattern observed in DTensor + float8_experimental.
+    ag = all_gather_tensor(tensor, gather_dim=0, group=group_name)
+    if gather_dim == 0:
+        return ag.view(tensor.dtype)
+    chunks = ag.chunk(_get_group_size_by_name(group_name))
+    chunks = [chunk.view(torch.uint8) for chunk in chunks]
+    return torch.cat(chunks, dim=gather_dim).view(tensor.dtype)
 
 
 @instantiate_parametrized_tests
@@ -61,21 +82,19 @@ class MicroPipelineTPTest(TestCase):
         def func(inp: torch.Tensor) -> torch.Tensor:
             a = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
             b = all_gather_tensor(inp, gather_dim=1, group=group.group_name)
-            return a, b
+            c = _fp8_all_gather(inp, gather_dim=0, group_name=group.group_name)
+            d = _fp8_all_gather(inp, gather_dim=1, group_name=group.group_name)
+            return a, b, c
 
         inp = torch.rand(64, 32, device="cuda")
 
-        gm = make_fx(func)(inp)
+        gm = _make_post_grad_fx(func, inp)
         all_gathers = find_all_gather_patterns(gm.graph)
-        self.assertEqual(len(all_gathers), 2)
+        self.assertEqual(len(all_gathers), 4)
 
         # If this test fails, please update find_all_gather_patterns instead of
         # modifying the following assertions.
         for all_gather in all_gathers:
-            self.assertEqual(
-                all_gather.shard_node.op,
-                "placeholder",
-            )
             self.assertEqual(
                 all_gather.ag_node.target,
                 torch.ops._c10d_functional.all_gather_into_tensor.default,
@@ -92,6 +111,18 @@ class MicroPipelineTPTest(TestCase):
         self.assertEqual(
             all_gathers[1].res_node.target,
             torch.ops.aten.cat.default,
+        )
+
+        self.assertEqual(all_gathers[2].gather_dim, 0)
+        self.assertEqual(
+            all_gathers[2].res_node.target,
+            torch.ops.aten.view.dtype,
+        )
+
+        self.assertEqual(all_gathers[3].gather_dim, 1)
+        self.assertEqual(
+            all_gathers[3].res_node.target,
+            torch.ops.aten.view.dtype,
         )
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
