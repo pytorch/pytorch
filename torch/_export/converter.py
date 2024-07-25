@@ -83,6 +83,8 @@ _TORCH_DTYPE_TO_ENUM = {
     torch.bfloat16: 15,
 }
 
+_TORCH_ENUM_TO_DTYPE = {value: key for key, value in _TORCH_DTYPE_TO_ENUM.items()}
+
 
 def get_dtype_as_int(tensor):
     """
@@ -411,16 +413,30 @@ class TS2FXGraphConverter:
     def convert_aten_tensor(self, node: torch._C.Node):
         """aten::tensor creates a constant tensor ad-hoc --> GetAttr"""
         args, kwargs = self.get_args_kwargs(node, torch.ops.aten.tensor.default._schema)
+
         for k in kwargs:
             if k == "requires_grad":
                 kwargs[k] = bool(kwargs[k])  # 0 -> False, 1 -> True
-        tensor = torch.tensor(*args, **kwargs)
+
+        to_tensor = (
+            torch.tensor
+            if all(isinstance(a, int) for a in args)
+            else torch._refs.tensor
+        )
+
+        def target(*args, **kwargs):
+            if "dtype" in kwargs and kwargs["dtype"] is not None:
+                kwargs["dtype"] = _TORCH_ENUM_TO_DTYPE[kwargs["dtype"]]
+            return to_tensor(*args, **kwargs)
+
+        # def to_dynamic_tensor(*args, **kwargs):
+        #     if "dtype" in kwargs and kwargs["dtype"] is not None:
+        #         kwargs["dtype"] = _TORCH_ENUM_TO_DTYPE[kwargs["dtype"]]
+        #     return torch._refs.tensor(*args, **kwargs)
 
         output_name = node.output().debugName()
-        alias_name = f"lifted_tensor_{output_name}"
-        fx_node = self.fx_graph.get_attr(alias_name)
+        fx_node = self.fx_graph.call_function(target, args, kwargs)
         self.name_to_node[output_name] = fx_node
-        self.name_to_tensor_constants[alias_name] = tensor
 
     def convert_prim_Constant(self, node: torch._C.Node):
         name = node.output().debugName()
@@ -888,9 +904,6 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
             # If the original dictionary has the key, return its value.
             # Otherwise, return the mock value.
             if not super().__contains__(key):
-                warnings.warn(
-                    f"{key} is not found in <class 'dict'>. Mock is instead used."
-                )
                 return self.mock_value
             return super().__getitem__(key)
 
@@ -965,7 +978,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
 
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
-        log.info(f"TorchScript graph\n\n{self.ts_graph}\n")  # noqa: G004
+        log.info("TorchScript graph\n\n%s\n", self.ts_graph)  # noqa: G004
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
@@ -1004,8 +1017,10 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
             self.name_to_non_tensor_attributes,
         )
         gm = graph_converter.convert()
-        log.info(f"GraphModule: {gm.print_readable(print_output=False)}")  # noqa: G004
-
+        log.info(
+            "Converted graph, before retracing:\n\n%s\n",
+            gm.print_readable(print_output=False),
+        )
         ep = self.retrace_as_exported_program(
             gm, graph_converter.name_to_tensor_constants
         )
@@ -1024,7 +1039,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
 
         return ep
 
-    def explain(self):
+    def explain(self, print_output=True):
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
 
         graph_converter = ExplainTS2FXGraphConverter(
@@ -1040,9 +1055,11 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
             for i, n in enumerate(graph_converter.unsupported_node_list):
                 node_str = "".join(str(n).split("\n")[:1])
                 explain_str += f"\n\n    {i}. {n.kind()} [{node_str}]"
-            print(explain_str)
         else:
-            print("Success!")
+            explain_str = "Success!"
+        if print_output:
+            print(explain_str)
+        return explain_str
 
     def retrace_as_exported_program(
         self, gm: torch.fx.GraphModule, tensor_constants: Dict[str, torch.Tensor]
@@ -1059,7 +1076,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         # Because during conversion, we set tensor constants as GetAttr,
         # retracing cannot recognize them as tensor constants but instead
         # treat them as buffers. We need to set them again here.
-        ep._constants = tensor_constants
+        ep._constants = {**ep._constants, **tensor_constants}
         for k in tensor_constants:
             ep.state_dict.pop(k, None)
         for spec in ep.graph_signature.input_specs:
@@ -1111,9 +1128,6 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
                     if isinstance(value, torch.Tensor):
                         if attr_fqn not in self.name_to_buffer:
                             # Lift tensor constants to be a buffer
-                            warnings.warn(
-                                f"ts converter lifted tensor constant {attr_fqn} to be a buffer"
-                            )
                             self.name_to_buffer[attr_fqn] = value
                     else:
                         self.name_to_non_tensor_attributes[attr_fqn] = value

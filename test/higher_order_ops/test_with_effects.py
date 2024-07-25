@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.hooks import RemovableHandle  # noqa: TCH001
 
 
@@ -368,6 +369,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self.assertTrue("MockModule.linear:mean" in recorded_dict)
             self.assertTrue("MockModule:mean" in recorded_dict)
 
+    @skipIfNoDynamoSupport
     def test_effectful_custom_op_with_subclass(self):
         with torch.library._scoped_library("_mylib", "FRAGMENT") as lib:
             lib.define("foo(Tensor x) -> Tensor")
@@ -392,64 +394,14 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
             _register_effectful_op(torch.ops._mylib.foo.default, _EffectType.ORDERED)
 
-            class DoubleTensor(torch.Tensor):
-                @staticmethod
-                def __new__(cls, inner):
-                    outer_shape = inner.shape
-                    if inner.ndim > 0:
-                        outer_shape = (inner.shape[0] * 2,) + inner.shape[1:]
-                    return torch.Tensor._make_wrapper_subclass(
-                        cls,
-                        outer_shape,
-                        inner.stride(),
-                        None,
-                        None,
-                        inner.dtype,
-                        inner.layout,
-                        inner.device,
-                        False,
-                        inner.requires_grad,
-                    )
-
-                def __init__(self, inner):
-                    self.inner_elem = inner
-
-                def __repr__(self):
-                    inner_repr = repr(self.inner_elem)
-                    return f"DoubleTensor({inner_repr})"
-
-                def __tensor_flatten__(self):
-                    return ["inner_elem"], None
-
-                @staticmethod
-                def __tensor_unflatten__(inner_tensors, _, outer_size, outer_stride):
-                    return DoubleTensor(inner_tensors["inner_elem"])
-
-                @classmethod
-                def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                    if kwargs is None:
-                        kwargs = {}
-
-                    args_inner = torch.utils._pytree.tree_map_only(
-                        DoubleTensor, lambda x: x.inner_elem, args
-                    )
-                    kwargs_inner = torch.utils._pytree.tree_map_only(
-                        DoubleTensor, lambda x: x.inner_elem, kwargs
-                    )
-
-                    out_inner = func(*args_inner, **kwargs_inner)
-
-                    if not isinstance(out_inner, torch.Tensor):
-                        return out_inner
-
-                    return DoubleTensor(out_inner)
-
             def fn(x, y):
                 return torch.ops._mylib.foo(x) + y
 
             def ins_sc():
                 return (
-                    DoubleTensor(torch.tensor([1.0, 2.0, 3.0])),
+                    TwoTensor(
+                        torch.tensor([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 3.0])
+                    ),
                     torch.tensor([4.0, 5.0, 6.0]),
                 )
 
@@ -471,11 +423,14 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
             def ins_sc_req_grad():
                 return (
-                    DoubleTensor(torch.tensor([1.0, 2.0, 3.0], requires_grad=True)),
+                    TwoTensor(
+                        torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+                        torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+                    ),
                     torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
                 )
 
-            for ins_fn_req_grad in [ins_dense_req_grad]:  # , ins_sc_req_grad]:
+            for ins_fn_req_grad in [ins_dense_req_grad, ins_sc_req_grad]:
                 ref_ins = ins_fn_req_grad()
                 ref_out = fn(*ref_ins)
                 ref_out.sum().backward()
