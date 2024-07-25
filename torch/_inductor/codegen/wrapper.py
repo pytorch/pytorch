@@ -155,7 +155,7 @@ TritonGrid = Union[
 
 def user_defined_kernel_grid_fn_code(
     name: str,
-    configs: List[triton.Config],
+    configs: List[triton.Config],  # type: ignore[name-defined]
     grids: List[TritonGrid],
     wrapper: Optional[WrapperCodeGen] = None,
 ) -> Tuple[str, str]:
@@ -584,7 +584,7 @@ class WrapperCodeGen(CodeGen):
         import_str = f"""
             import triton
             import triton.language as tl
-            from {triton_heuristics.__name__} import grid, split_scan_grid, start_graph, end_graph
+            from {triton_heuristics.__name__} import grid, split_scan_grid, grid_combo_kernels, start_graph, end_graph
             """
         self.header.splice(import_str)
         if config.triton.autotune_at_compile_time:
@@ -1071,11 +1071,28 @@ class WrapperCodeGen(CodeGen):
             )
         )
 
-    def codegen_reinterpret_view(self, data, size, stride, offset, writer) -> str:
-        size = self.codegen_shape_tuple(size)
-        stride = self.codegen_shape_tuple(stride)
-        offset = self.codegen_sizevar(offset)
-        return f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
+    def codegen_reinterpret_view(
+        self, data, size, stride, offset, writer, dtype=None
+    ) -> str:
+        if (
+            size == data.layout.size
+            and stride == data.layout.stride
+            and offset == data.layout.offset
+        ):
+            if dtype is not None and dtype != data.dtype:
+                return f"aten.view.dtype({data.get_name()}, {dtype})"
+            else:
+                return f"{data.get_name()}"
+        else:
+            size = self.codegen_shape_tuple(size)
+            stride = self.codegen_shape_tuple(stride)
+            offset = self.codegen_sizevar(offset)
+            if dtype is not None and dtype != data.dtype:
+                return f"aten.view.dtype(reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset}), {dtype})"
+            else:
+                return (
+                    f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
+                )
 
     def codegen_device_copy(self, src, dst):
         self.writeline(f"{dst}.copy_({src})")
@@ -1342,8 +1359,8 @@ class WrapperCodeGen(CodeGen):
         compile_wrapper.splice(kernel.src, strip=True)
 
         # Also include any possible kernel being called indirectly
-        from triton import JITFunction
-        from triton.language import constexpr
+        from triton import JITFunction  # type: ignore[name-defined, attr-defined]
+        from triton.language import constexpr  # type: ignore[name-defined]
 
         # global constexpr vars handled above
         symbols_included = {original_name}
@@ -1491,7 +1508,7 @@ class WrapperCodeGen(CodeGen):
                     if not kernel.cuda_kernel_saved:
                         if len(kernel.launchers) == 0:
                             kernel.precompile()
-                        kernel.save_cuda_kernel(
+                        kernel.save_gpu_kernel(
                             grid=(0, 0, 0),   # use dummy grid
                             stream="stream",  # use dummy stream
                             launcher=kernel.launchers[0],
@@ -1499,8 +1516,15 @@ class WrapperCodeGen(CodeGen):
             """
         )
 
-    def generate_default_grid(self, name: str, grid_args: List[Any]):
-        return grid_args
+    def generate_default_grid(
+        self,
+        name: str,
+        grid: List[Any],
+        cuda: bool = True,
+        grid_callable: Optional[Callable[..., Any]] = None,
+        **grid_extra_kwags,
+    ):
+        return grid
 
     def prepare_triton_kernel_call(self, device_index, call_args):
         def wrap_arg(arg):
@@ -1522,7 +1546,7 @@ class WrapperCodeGen(CodeGen):
 
     def generate_example_arg_value(self, arg, arg_type=None, raw_arg=None, index=None):
         if isinstance(arg_type, torch_dtype):
-            if V.graph.get_buffer(arg) is not None:
+            if V.graph.try_get_buffer(arg) is not None:
                 buf_name = arg
                 buf = V.graph.get_buffer(arg)
             else:
@@ -1582,6 +1606,7 @@ class WrapperCodeGen(CodeGen):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        grid_extra_kwargs="",
     ):
         """
         Generates kernel call code.
@@ -1604,6 +1629,8 @@ class WrapperCodeGen(CodeGen):
                     grid_str = grid_fn
                 else:
                     grid_str = ", ".join(pexpr(item) for item in grid)
+                    if grid_extra_kwargs:
+                        grid_str = f"{grid_str}, {grid_extra_kwargs}"
                     grid_str = f"{grid_fn}({grid_str})"
                 self.writeline(
                     f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
