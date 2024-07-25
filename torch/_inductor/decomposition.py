@@ -4,7 +4,7 @@ import logging
 import math
 import sys
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch._decomp as decomp
@@ -748,11 +748,11 @@ def miopen_batch_norm(
 
 
 @functools.lru_cache(None)
-def fast_random_decomps() -> Dict[torch._ops.OperatorBase, Callable[..., Any]]:
+def fast_random_decomps():  # type: ignore[no-untyped-def]
     return {**decompositions, **extra_random_decomps}
 
 
-def select_decomp_table() -> Dict[torch._ops.OperatorBase, Callable[..., Any]]:
+def select_decomp_table():  # type: ignore[no-untyped-def]
     """decomps can change based on config"""
     if config.fallback_random:
         return decompositions
