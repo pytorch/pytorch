@@ -556,7 +556,8 @@ class AHTrainDecisionTree(AHTrain):
         self, heuristic_name, opt_name, threshold, shared_memory, device_capa, dt
     ):
         boiler_plate = f"""# flake8: noqa: B950
-from typing import Any, List, Optional, Tuple
+# fmt: off
+from typing import List, Optional, Tuple
 
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
