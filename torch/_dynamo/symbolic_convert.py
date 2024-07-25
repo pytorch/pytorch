@@ -1287,7 +1287,10 @@ class InstructionTranslatorBase(
             val = it.next_variable(self)
             self.push(it)
             self.push(val)
-        except (StopIteration, exc.ObservedUserStopIteration):
+        except (StopIteration, exc.ObservedUserStopIteration) as e:
+            if isinstance(e, exc.ObservedUserStopIteration):
+                exc.handle_observed_user_stop_iteration(self)
+
             # leave iterator upon exhaustion in 3.12
             if sys.version_info >= (3, 12):
                 # CPython 3.12 actually jumps to the instruction after the END_FOR
@@ -3229,6 +3232,9 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         try:
             val = tos.next_variable(self)
         except (StopIteration, exc.ObservedUserStopIteration) as ex:
+            if isinstance(ex, exc.ObservedUserStopIteration):
+                exc.handle_observed_user_stop_iteration(self)
+
             # The iterator is exhausted. Stop the loop and return.
             self.pop()
             self.push(ConstantVariable.create(ex.value))
