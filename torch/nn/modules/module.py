@@ -2010,8 +2010,11 @@ class Module:
         If a new ``state_dict`` is returned, it will only be respected if it is the root
         module that :meth:`~nn.Module.state_dict` is called from.
         """
+        if getattr(hook, "_from_public_api", False):
+            raise RuntimeError(
+                "Cannot register a state dict post hook previously registered via register_state_dict_post_hook"
+            )
         handle = RemovableHandle(self._state_dict_hooks)
-        hook._from_private_api = True
         self._state_dict_hooks[handle.id] = hook
         return handle
 
@@ -2023,10 +2026,7 @@ class Module:
 
         The registered hooks can modify the ``state_dict`` inplace.
         """
-        if getattr(hook, "_from_private_api", False):
-            raise RuntimeError(
-                "Cannot register a state dict post hook previously registered via _register_state_dict_hook"
-            )
+        hook._from_public_api = True
         handle = RemovableHandle(self._state_dict_hooks)
         self._state_dict_hooks[handle.id] = hook
         return handle
@@ -2169,7 +2169,7 @@ class Module:
                 )
         for hook in self._state_dict_hooks.values():
             hook_result = hook(self, destination, prefix, local_metadata)
-            if getattr(hook, "_from_private_api", False):
+            if not getattr(hook, "_from_public_api", False):
                 if hook_result is not None:
                     destination = hook_result
             else:

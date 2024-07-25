@@ -909,18 +909,18 @@ class TestStateDictHooks(TestCase):
 
         handle = hook_registration_fn(fn)
         if private:
-            self.assertTrue(hasattr(fn, "_from_private_api"))
+            self.assertFalse(hasattr(fn, "_from_public_api"))
             self.assertTrue(len(m.state_dict()) == 0)
-            with self.assertRaisesRegex(
-                RuntimeError, "previously registered via _register_state_dict_hook"
-            ):
-                m.register_state_dict_post_hook(fn)
         else:
-            self.assertFalse(hasattr(fn, "_from_private_api"))
+            self.assertTrue(hasattr(fn, "_from_public_api"))
             with self.assertRaisesRegex(
                 RuntimeError, "state_dict post-hook must return None"
             ):
                 sd = m.state_dict()
+            with self.assertRaisesRegex(
+                RuntimeError, "previously registered via register_state_dict_post_hook"
+            ):
+                m._register_state_dict_hook(fn)
 
 
 class TestModuleGlobalHooks(TestCase):
