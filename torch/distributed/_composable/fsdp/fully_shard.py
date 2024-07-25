@@ -4,6 +4,7 @@ import functools
 from typing import Any, cast, Iterable, List, NoReturn, Optional, Union
 
 import torch
+import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
 from torch.distributed._composable import contract
 from torch.distributed._tensor import DeviceMesh
@@ -145,8 +146,18 @@ def fully_shard(
     for module in modules:
         cls = module.__class__
         dct = {"__deepcopy__": unimplemented_deepcopy}
-        new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
+        new_cls = type(
+            f"FSDP{cls.__name__}",
+            (FSDPModule, torch.nn.modules.lazy.LazyModuleMixin, cls),
+            dct,
+        )
         module.__class__ = new_cls
+        # This flag only matters for compile mode.
+        # However, `fully_shard()` is usually called outside of compile context
+        # and we don't know whether the model will then be run under compile.
+        # Hence we need to unconditionally set it here (which does not affect eager mode behavior).
+        # See [Note: FSDP2 dry-run initialization for torch.compile] for details.
+        module._initialize_hook = True  # type: ignore[assignment]
     return arg_module
 
 
@@ -162,12 +173,42 @@ class FSDPModule:
         Override ``__new__`` to remove the FSDP class and directly construct
         the original class for cases like indexing into a container module.
         """
-        # Use index 2 since 0 is the dynamically constructed `FSDP<...>` class
+        # Use index 3 since 0 is the dynamically constructed `FSDP<...>` class
         # and index 1 is the `FSDPModule` class itself
-        orig_cls = cls.__mro__[2]
+        # and index 2 is the `LazyModuleMixin`
+        orig_cls = cls.__mro__[3]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
         self.__init__(*args, **kwargs)
         return self
+
+    def _infer_parameters(self, module, args, kwargs=None):
+        """
+        [Note: FSDP2 dry-run initialization for torch.compile]
+
+        It's difficult for torch.compile to trace through the init logic of FSDP2,
+        hence we want to do a dry-run initialization of FSDP2 in eager mode
+        before torch.compile tracing.
+        We leverage `LazyModuleMixin` to do the dry-run initialization:
+        Under compile, if an nn.Module is inherited from `LazyModuleMixin`
+        and its `_initialize_hook` attribute is defined, then its `_infer_parameters()`
+        is guaranteed to be run in the module pre-forward in eager mode.
+
+        Q: Why can't we do the same dry-run initialization for pure eager FSDP2 (no compile)?
+        A: Fundamentally this is running one extra forward pass in eager mode
+        at the beginning of model training, which might not be desired for pure eager FSDP2.
+        """
+        if ca.compiled_autograd_enabled and hasattr(module, "_initialize_hook"):
+            # Under compile, always do the dry-run initialization in eager mode
+            state = self._get_fsdp_state()
+            # Dry-run only if module is not initialized yet
+            if state._is_root is None:
+                with torch.random.fork_rng(range(torch.cuda.device_count())):
+                    module(*args, **kwargs)
+                    # Clean up dry-run artifacts and reset model to pre-forward state,
+                    # so that the module state is strictly the same as after 1 fwd-bwd run.
+                    state._root_post_backward_final_callback()
+                # Ensure that dry-run is only run once
+                delattr(module, "_initialize_hook")
 
     def reshard(self) -> None:
         """
