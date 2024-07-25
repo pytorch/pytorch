@@ -9,8 +9,8 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch import Tensor
 from torch.distributed._tensor import DTensor, Replicate, Shard
-from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
-from torch.distributed._tensor.ops.math_ops import (
+from torch.distributed._tensor.ops._embedding_ops import _MaskPartial
+from torch.distributed._tensor.ops._math_ops import (
     _skip_dim,
     Reduction,
     replicate_reduction_dims,
