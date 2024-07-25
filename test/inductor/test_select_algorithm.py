@@ -46,7 +46,6 @@ def patches(fn):
 
 
 class TestSelectAlgorithm(TestCase):
-    @expectedFailureDynamicWrapper
     @patches
     def test_linear_relu_cuda(self):
         @torch.compile
@@ -63,7 +62,6 @@ class TestSelectAlgorithm(TestCase):
         # It would be nice to assert this got fused into a single kernel, but that
         # only happens if we select a triton template (and not aten).
 
-    @expectedFailureDynamicWrapper
     @patches
     def test_addmm_cuda(self):
         @torch.compile
