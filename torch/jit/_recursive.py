@@ -661,7 +661,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         isinstance(nn_module, torch.nn.ModuleDict)
         and "__contains__" not in cpp_module._method_names()
     ):
-        if len(nn_module.keys()):
+        if len(nn_module.keys()):  # type: ignore[arg-type]
             keys = repr(list(nn_module.keys()))
             script_module.define(
                 f"def __contains__(self, key: str):\n   return key in {keys}\n"
