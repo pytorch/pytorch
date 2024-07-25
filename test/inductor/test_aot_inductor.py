@@ -1363,13 +1363,12 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(self.device), example_inputs)
 
     def test_non_tensor_input(self):
-        def fn(a, b, alpha=1.0):
-            return torch.add(a, b, alpha=alpha)
+        class Model(torch.nn.Module):
+            def forward(self, a, b, alpha=1.0):
+                return torch.add(a, b, alpha=alpha)
 
         a = torch.randn(10, device=self.device)
         b = torch.randn(10, device=self.device)
-        with self.assertRaises(RuntimeError):
-            torch._export.aot_compile(fn, args=(a, b), kwargs={"alpha": 2.0})
 
         for simdlen in [0, None]:
             with torch._inductor.config.patch({"cpp.simdlen": simdlen}):
@@ -1377,13 +1376,12 @@ class AOTInductorTestsTemplate:
                     torch.ops.aten.add,
                     args=(a, b),
                     kwargs={"alpha": 2.0},
-                    same_signature=False,
                 )
                 kernel_runner = AOTIRunnerUtil.load_runner(self.device, so_path)
                 res = kernel_runner.run([a, b])
                 self.assertTrue(isinstance(res, list))
                 self.assertTrue(len(res) == 1)
-                self.assertEqual(fn(a, b, alpha=2.0), res[0])
+                self.assertEqual(Model()(a, b, alpha=2.0), res[0])
 
     def test_buffer_mutation_2(self):
         class Model(torch.nn.Module):
@@ -2969,6 +2967,26 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(16, 16, 16, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_bool_input(self):
+        # Specialize on whichever branch the example input for b is
+        class Model(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x * x
+                else:
+                    return x + x
+
+        example_inputs = (torch.randn(3, 3, device=self.device), True)
+        self.check_model(Model(), example_inputs)
+
+    def test_int_list_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, i):
+                return x * i[0] * i[1]
+
+        example_inputs = (torch.randn(3, 3, device=self.device), [3, 4])
+        self.check_model(Model(), example_inputs)
+
     def test_nested_tensor_from_jagged(self):
         class Model(nn.Module):
             def __init__(self):
@@ -3178,6 +3196,10 @@ CPU_TEST_FAILURES = {
     "test_buffer_mutation_1": fail_stack_allocation(is_skip=True),
     # segfault
     "test_buffer_mutation_2": fail_stack_allocation(is_skip=True),
+    # segfault
+    "test_bool_input": fail_stack_allocation(is_skip=True),
+    # segfault
+    "test_int_list_input": fail_stack_allocation(is_skip=True),
     # segfault
     # 'AOTInductorTestABICompatibleCpuWithStackAllocation' object has no attribute 'code_check_count'
     "test_buffer_mutation_3": fail_stack_allocation(is_skip=True),
