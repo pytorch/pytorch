@@ -21,10 +21,11 @@ from sympy import Expr
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import bound_sympy
+from torch.utils._sympy.value_ranges import bound_sympy, IntInfinity, ValueRanges
 
 from .runtime.runtime_utils import is_power_of_2
 from .utils import (
+    has_free_symbols,
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
     sympy_subs,
@@ -118,10 +119,14 @@ class SizeVarAllocator:
 
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
+        value_ranges = {
+            k: ValueRanges(0, v - 1 if not has_free_symbols([v]) else IntInfinity())
+            for k, v in var_ranges.items()
+        }
 
         def remove_zero_terms(base, divisor):
             """Symbols smaller than the divisor are zero"""
-            if not self.statically_known_geq(base, 0):
+            if not (bound_sympy(base, value_ranges).lower >= 0):
                 return base
 
             for v in base.free_symbols:
@@ -142,10 +147,17 @@ class SizeVarAllocator:
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
-            if (
+
+            max_value = modulus * divisor - 1
+            can_remove_mod = (
                 self.statically_known_geq(base, 0)
-                and self.statically_known_lt(base, modulus * divisor)
-            ):
+                and self.statically_known_lt(base, max_value)
+            ) or (
+                not has_free_symbols([max_value])
+                and bound_sympy(base, value_ranges) in ValueRanges(0, max_value)
+            )
+
+            if can_remove_mod:
                 return FloorDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
