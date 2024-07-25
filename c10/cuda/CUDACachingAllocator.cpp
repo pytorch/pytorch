@@ -1762,12 +1762,12 @@ class DeviceCachingAllocator {
       params.stat_types = get_stat_types_for_pool(pool);
 
       // splitting a block depends on `max_split_size`, which may have changed
-      // between whe checkpoint was taken and now, so we make sure to recreate
+      // between when checkpoint was taken and now, so we make sure to recreate
       // the behavior from the checkpoint. Keep splitting as long as there is
       // space left in the block because the block is already the size of how it
       // appears in the segment, so any leftover space belongs to the next
       // block.
-      bool split = curr_block->size - block_state.size > 0;
+      bool split = curr_block->size > block_state.size;
 
       // curr_block will become next pointer if it is split, so reassign with
       // the returned value
