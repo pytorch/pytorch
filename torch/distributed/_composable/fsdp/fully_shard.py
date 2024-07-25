@@ -199,7 +199,8 @@ class FSDPModule:
             if state._is_root is None:
                 with torch.random.fork_rng(range(torch.cuda.device_count())):
                     module(*args, **kwargs)
-                    # Clean up dry-run artifacts and reset model to pre-forward state
+                    # Clean up dry-run artifacts and reset model to pre-forward state,
+                    # so that the module state is strictly the same as after 1 fwd-bwd run.
                     state._root_post_backward_final_callback()
                 # Ensure that dry-run is only run once
                 delattr(module, "_initialize_hook")
