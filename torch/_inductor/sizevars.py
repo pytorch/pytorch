@@ -121,6 +121,9 @@ class SizeVarAllocator:
 
         def remove_zero_terms(base, divisor):
             """Symbols smaller than the divisor are zero"""
+            if not self.statically_known_geq(base, 0):
+                return base
+
             for v in base.free_symbols:
                 if v in var_ranges:
                     # var smaller than divisor can be removed
@@ -139,25 +142,10 @@ class SizeVarAllocator:
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
-            base_pos = True
-            if isinstance(base, ModularIndexing):
-                # for modular indexing, biggest values from the ranges don't necessarily result in
-                # the biggest result, the biggest result is modulus - 1
-                base_s = base.args[2] - 1
-            elif not base.has(ModularIndexing):
-                # actual iteration range is to size-1
-                iter_ranges_zero = {k: 0 for k, v in var_ranges.items()}
-                base_lowest = sympy_subs(base, iter_ranges_zero)
-                if self.statically_known_leq(0, base_lowest):  # type: ignore[arg-type]
-                    # can't replace with indexing div if base can be negative
-                    base_pos = True
-                else:
-                    base_pos = False
-                iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
-                base_s = sympy_subs(base, iter_ranges)
-            else:
-                base_s = base
-            if self.statically_known_lt(base_s, modulus * divisor) and base_pos:
+            if (
+                self.statically_known_geq(base, 0)
+                and self.statically_known_lt(base, modulus * divisor)
+            ):
                 return FloorDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
