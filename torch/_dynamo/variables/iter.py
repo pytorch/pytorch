@@ -270,10 +270,10 @@ class CountIteratorVariable(IteratorVariable):
 
     def next_variable(self, tx):
         assert self.mutable_local
+        old_item = self.item
         tx.output.side_effects.mutation(self)
-        next_item = self.item.call_method(tx, "__add__", [self.step], {})
-        self.item = next_item
-        return self.item
+        self.item = self.item.call_method(tx, "__add__", [self.step], {})
+        return old_item
 
     def reconstruct(self, codegen):
         codegen.add_push_null(
@@ -482,3 +482,23 @@ class MapVariable(ZipVariable):
                 create_instruction("CALL_FUNCTION_EX", arg=0),
             ]
         )
+
+
+class EnumerateVariable(ZipVariable):
+    def __init__(
+        self,
+        iterable: Union[List[VariableTracker], VariableTracker],
+        start: int = 0,
+        **kwargs,
+    ):
+        super().__init__(
+            [CountIteratorVariable(start, mutable_local=MutableLocal()), iterable],
+            **kwargs,
+        )
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "enumerate"))
+        codegen(self.iterables[1])
+        assert isinstance(self.iterables[0], CountIteratorVariable)
+        codegen(self.iterables[0].item)
+        codegen.extend_output(codegen.create_call_function_kw(2, ("start",), False))

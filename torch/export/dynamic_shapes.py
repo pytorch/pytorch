@@ -629,7 +629,7 @@ def _tree_map(
     return tree_map(f, tree, *dynamic_shapes, is_leaf=is_leaf)
 
 
-def _combine_args(f, args, kwargs, _is_torch_jit_trace=False):
+def _combine_args(f, args, kwargs, _is_torch_jit_trace=False) -> Dict[str, Any]:
     # combine args and kwargs following the signature of f, as it happens
     # in the body of f when called with *args, **kwargs
     if isinstance(f, ExportedProgram):
