@@ -578,7 +578,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.needs_input_grad = needs_input_grad
 
     @staticmethod
-    def create(tx, args=None, kwargs=None):
+    def create(tx: "InstructionTranslator", args=None, kwargs=None):
         needs_input_grad = None
         if args and not kwargs:
             needs_input_grad = tuple(
