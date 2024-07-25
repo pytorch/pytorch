@@ -256,14 +256,12 @@ class CKGemmTemplate(CKTemplate):
         template_params = []
         for field_name, field_value in op.dict_items():
             if isinstance(field_value, tuple):
+                tuple_elements = ', '.join(map(str, iter(field_value)))
                 if "ds" in field_name:  # element type and layout for bias
-                    template_params.append(
-                        f"/* {field_name} */ Tuple<{', '.join(map(str, iter(field_value)))}>"
-                    )
+                    arg = f"/* {field_name} */ Tuple<{tuple_elements}>"
                 else:  # tile shape
-                    template_params.append(
-                        f"/* {field_name} */ S<{', '.join(map(str, iter(field_value)))}>"
-                    )
+                    arg = f"/* {field_name} */ S<{tuple_elements}>"
+                template_params.append(arg)
             else:
                 if field_value is not None:
                     template_params.append(f"/* {field_name} */ {field_value}")
