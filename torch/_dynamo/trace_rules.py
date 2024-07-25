@@ -51,6 +51,7 @@ from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 
 from .variables import (
     BuiltinVariable,
+    FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     NestedUserFunctionVariable,
     SkipFunctionVariable,
@@ -273,6 +274,9 @@ manual_torch_name_rule_map = {
     "torch._functorch.eager_transforms.safe_unflatten": UserFunctionVariable,
     # functorch/hessian
     "torch._functorch.eager_transforms.hessian": FunctorchHigherOrderVariable,
+    # functional_call
+    "torch._functorch.functional_call.functional_call": FunctionalCallVariable,
+    "torch.nn.utils.stateless._groupby_tensor": TorchInGraphFunctionVariable,
     # functorch/deprecated
     "torch._functorch.deprecated.jvp": UserFunctionVariable,
     "torch._functorch.deprecated.hessian": UserFunctionVariable,
@@ -2260,9 +2264,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms.functionalize",
         "torch._functorch.eager_transforms.lazy_dynamo_disable",
         "torch._functorch.eager_transforms.noop",
-        "torch._functorch.functional_call.construct_stacked_leaf",
-        "torch._functorch.functional_call.functional_call",
-        "torch._functorch.functional_call.stack_module_state",
         "torch._functorch.pyfunctorch.coerce_cinterpreter",
         "torch._functorch.pyfunctorch.dispatch_functorch",
         "torch._functorch.pyfunctorch.nested",
@@ -3233,6 +3234,7 @@ MOD_INLINELIST = {
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
     "torch._higher_order_ops.associative_scan",
+    "torch._functorch.functional_call",
 }
 
 
@@ -3428,7 +3430,7 @@ def check_verbose(obj, is_inlined_call=False):
     rule = torch._dynamo.trace_rules.lookup_inner(
         fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons
     )
-    if rule in [UserFunctionVariable, FunctorchHigherOrderVariable]:
+    if issubclass(rule, UserFunctionVariable):
         return SkipResult(
             False,
             f"inlined according trace_rules.lookup {reasons.pop()}",
