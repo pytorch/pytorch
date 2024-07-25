@@ -84,6 +84,7 @@ from torch._inductor.cudagraph_utils import (
     log_cudagraph_skip_and_bump_counter,
     log_data_ptr_mismatch,
     maybe_warning_due_to_dynamic_shape,
+    PlaceholderInfo,
     WrappedFunction,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -393,7 +394,7 @@ def cudagraphify(
     is_inference: bool,
     stack_traces: Optional[StackTraces] = None,
     constants: Tuple[torch.Tensor, ...] = (),
-    placeholders: Tuple[torch.fx.Node, ...] = (),
+    placeholders: Tuple[PlaceholderInfo, ...] = (),
     mutated_input_idxs: Tuple[int, ...] = (),
 ):
     manager = get_container(device_index).get_tree_manager()
