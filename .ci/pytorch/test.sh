@@ -430,8 +430,12 @@ test_perf_for_dashboard() {
 
   local device=cuda
   local taskset=""
-  if [[ "${TEST_CONFIG}" == *cpu_x86* ]]; then
-    device=cpu_x86
+  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
+    if [[ "${TEST_CONFIG}" == *cpu_x86* ]]; then
+      device=cpu_x86
+    elif [[ "${TEST_CONFIG}" == *cpu_aarch64* ]]; then
+      device=cpu_aarch64
+    fi
     test_inductor_set_cpu_affinity
     end_core=$(( $(test_inductor_get_core_number)-1 ))
     taskset="taskset -c 0-$end_core"
