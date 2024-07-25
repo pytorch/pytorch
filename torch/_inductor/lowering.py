@@ -2501,7 +2501,7 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     if isinstance(_unwrap(data), int):
         dtype = dtype or torch.int64
     else:
-        dtype = dtype or torch.get_default_dtype()
+        dtype = dtype or torch.float64
 
     ranges: List[sympy.Expr] = []
 
