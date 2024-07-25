@@ -1386,7 +1386,7 @@ elements, have ``nan`` values.
             total = sum(input, dim, keepdim=keepdim, dtype=dtype)
         else:
             inmask = _input_mask(input, mask=mask)
-            count = inmask.sum(dim=dim, keepdim=keepdim)
+            count = inmask.sum(dim=dim, keepdim=bool(keepdim))
             total = sum(input, dim, keepdim=keepdim, dtype=dtype, mask=inmask)
         return total / count
     elif input.layout == torch.sparse_csr:
