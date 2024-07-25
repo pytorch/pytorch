@@ -461,10 +461,8 @@ def make_pointwise(
             else:
                 out = fn(*[load(index) for load in loaders])
                 if emulate_precision_casts and dtype in (torch.bfloat16, torch.float16):
-                    downcast = ops.to_dtype(
-                        out, dtype, src_dtype=torch.float32, use_compute_types=False
-                    )
-                    return ops.to_dtype(downcast, torch.float32, src_dtype=dtype)
+                    downcast = ops.to_dtype(out, dtype, use_compute_types=False)
+                    return ops.to_dtype(downcast, dtype)
                 return out
 
         if not override_device:
