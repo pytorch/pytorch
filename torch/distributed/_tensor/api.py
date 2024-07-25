@@ -261,16 +261,21 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             requires_grad=requires_grad,
         )
 
-
         def maybe_pad_local_tensor(local_tensor, spec):
-            from torch.distributed._tensor._utils import compute_padded_and_unpadded_local_shape, compute_padding_size
-            from torch.distributed._tensor._collective_utils import get_padded_tensor, get_unpadded_tensor
+            from torch.distributed._tensor._collective_utils import get_padded_tensor
+            from torch.distributed._tensor._utils import (
+                compute_padded_and_unpadded_local_shape,
+                compute_padding_size,
+            )
 
             global_shape = spec.shape
             mesh = spec.mesh
             placements = spec.placements
 
-            full_shard_size, cur_unpadded_shard_size = compute_padded_and_unpadded_local_shape(global_shape, mesh, placements)
+            (
+                full_shard_size,
+                cur_unpadded_shard_size,
+            ) = compute_padded_and_unpadded_local_shape(global_shape, mesh, placements)
 
             # short-circuit return if no padding is needed for the given shard.
             if full_shard_size == cur_unpadded_shard_size:
@@ -278,22 +283,32 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 # so we don't need to re-calculate this during backward of _ToTorchTensor.
                 spec.unpadded_local_shard_size = None
                 return local_tensor, spec
-            
+
+            # corner case:
+            # where local_tensor is an empty tensor, we need the tensor to have correct size to be able to be padded correctly.
+            # For example, if the cur_unpadded_shard_size = [0, 3], we need the local tensor to be tensor([], size=(0, 3)).
+            if local_tensor.numel() == 0 and any(
+                shard_size == 0 for shard_size in cur_unpadded_shard_size
+            ):
+                local_tensor = local_tensor.new_zeros(*cur_unpadded_shard_size)
+
             # add a check to see whether the given local tensor is legit.
             if tuple(local_tensor.shape) != cur_unpadded_shard_size:
                 raise RuntimeError(
                     f"The given local tensor shape {local_tensor.shape} does not"
                     f"match the expected local tesnsor shape {cur_unpadded_shard_size}!"
                 )
-            
+
             spec.unpadded_local_shard_size = cur_unpadded_shard_size
 
             # create a padded tensor.
-            padding_size = compute_padding_size(full_shard_size, cur_unpadded_shard_size)
+            padding_size = compute_padding_size(
+                full_shard_size, cur_unpadded_shard_size
+            )
             padded_tensor = get_padded_tensor(local_tensor, padding_size)
-            
+
             return padded_tensor, spec
-        
+
         local_tensor, spec = maybe_pad_local_tensor(local_tensor, spec)
 
         r._spec = spec
