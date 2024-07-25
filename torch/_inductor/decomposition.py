@@ -24,7 +24,6 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import (
     associative_scan_op,
     generic_associative_scan,
-    wrap_combine_fn_flat
 )
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.utils import pad_listlike
@@ -809,7 +808,7 @@ def associative_scan_op_decomp(combine_fn, leaves, dim, lifted_args):
     if not all([l.device.type == "cuda" for l in leaves]):
         # Decompose into generic_associative_scan
         return generic_associative_scan(combine_fn, leaves, dim, lifted_args)
-    
+
     # This will handle the fallback to eager in case there
     # are non-pointwise operations involved in combine_fn
     if is_pointwise_subgraph(combine_fn.graph):

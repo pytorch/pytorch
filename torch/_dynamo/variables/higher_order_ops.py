@@ -983,7 +983,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):    
+class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @raise_hard_error_if_graph_break(
         reason="associative_scan must be captured completely with torch.compile."
     )
@@ -991,7 +991,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         from .builder import SourcelessBuilder, wrap_fx_proxy
-        
+
         def slice_along_axis(size, d=0):
             li = list(size)
             li[d] = 1
@@ -1014,10 +1014,28 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
         sub_args = [
             leaf.call_method(
-                tx, 
-                "new_empty", 
-                args=(SourcelessBuilder.create(tx, slice_along_axis(leaf.size, dim.as_proxy()) if leaf.size is not None else ()),), 
-                kwargs={"requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad)})
+                tx,
+                "new_empty",
+                # args=(SourcelessBuilder.create(tx, slice_along_axis(leaf.size, dim.as_proxy()) if leaf.size is not None else ()),),
+                args=(
+                    SourcelessBuilder.create(
+                        tx,
+                        slice_along_axis(leaf.size, dim.as_proxy())
+                        if leaf.size is not None
+                        else tuple(
+                            [
+                                int(sh)
+                                for sh in list(
+                                    leaf.as_proxy().node.meta["example_value"].shape
+                                )
+                            ]
+                        ),
+                    ),
+                ),
+                kwargs={
+                    "requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad)
+                },
+            )
             for leaf in itertools.chain(input.items, input.items)
         ]
         (
@@ -1064,7 +1082,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             make_attr(tx, combine_fn_name),
             input_proxy,
             dim.as_proxy(),
-            lifted_args
+            lifted_args,
         )
 
         with tx.fake_mode:
