@@ -1478,7 +1478,7 @@ def _lru_cache(fn, maxsize=None):
 # a particular specialization)
 @dataclass(frozen=True)
 class RuntimeAssert:
-    expr: sympy.Expr
+    expr: sympy.Rel
     msg: str = field(repr=False)
     stack: str = field(repr=False)
 

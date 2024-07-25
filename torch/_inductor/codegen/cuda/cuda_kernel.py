@@ -220,7 +220,7 @@ class CUDATemplateKernel(CUDAKernel):
 
         if node is None:
             return "0"
-        return str(node.get_layout().offset)
+        return str(node.get_layout().offset)  # type: ignore[union-attr]  # type: ignore[union-attr]  # type: ignore[union-attr]  # type: ignore[union-attr]
 
     def ptr(self, node: IRNode) -> str:
         """
@@ -388,9 +388,9 @@ class CUDATemplateCaller(ChoiceCaller):
         self.bmreq.update_workspace_size()
         return TensorBox.create(
             CUDATemplateBuffer(
-                layout=self.layout,
+                layout=self.layout,  # type: ignore[arg-type]
                 inputs=self.input_nodes,
-                make_kernel_render=self.make_kernel_render,
+                make_kernel_render=self.make_kernel_render,  # type: ignore[arg-type]
                 workspace_size=self.bmreq.workspace_size,
                 template=self.template,
             )

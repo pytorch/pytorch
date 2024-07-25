@@ -450,7 +450,7 @@ class TensorMeta:
                 fallback=config.unbacked_symint_fallback,
             ),
             offset=V.graph.sizevars.size_hint(
-                node.get_layout().offset,
+                node.get_layout().offset,  # type: ignore[union-attr]
                 fallback=config.unbacked_symint_fallback,
             ),
             name=node.get_name(),

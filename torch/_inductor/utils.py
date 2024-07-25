@@ -29,6 +29,7 @@ from typing import (
     Generic,
     Iterable,
     List,
+    Mapping,
     NamedTuple,
     Optional,
     Protocol,
@@ -66,6 +67,7 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
+_T_Expr = TypeVar("_T_Expr", bound="sympy.Expr")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 GPU_ALIGN_BYTES = 16
@@ -273,7 +275,7 @@ def _type_of(key):
 
 def convert_shape_to_inductor(
     lst: Iterable[Union[int, torch.SymInt]]
-) -> List[sympy.Expr]:
+) -> List[sympy.Integer]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
     trivial. But for symbolic tensors, we need to map from SymIntNode into
@@ -633,7 +635,7 @@ def sympy_index_symbol(name: str) -> sympy.Symbol:
     return sympy.Symbol(name, integer=True, nonnegative=True)
 
 
-def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.Expr:
+def sympy_subs(expr: _T_Expr, replacements: Mapping[sympy.Expr, Any]) -> _T_Expr:
     """
     When the passed replacement symbol v is a string, it is converted to a symbol with name v that
     have the same replaced expression integer and nonnegative properties.

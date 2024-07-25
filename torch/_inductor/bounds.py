@@ -38,10 +38,10 @@ class BoundVars:
         }
         # avoid computing these values, pessimistically assume that they are unbounded
         self.unbounded_vars = dominated_nodes(
-            node
+            node  # type: ignore[misc]
             for node in self.loop_body.get_nodes()
-            if node.target in ["load", "reduction", operator.getitem]
-            or "masked_subblock" in node.target
+            if node.target in ["load", "reduction", operator.getitem]  # type: ignore[attr-defined]
+            or "masked_subblock" in node.target  # type: ignore[attr-defined]
         )
         # To access this variable call `get_bounds()`
         self._bounds: Dict[torch.fx.Node, ValueRanges[Expr]] = {}
@@ -69,7 +69,7 @@ class BoundVars:
                 self._bounds[node] = ValueRanges[Expr].unknown()
 
         with V.set_ops_handler(ValueRangeAnalysis()):
-            interpreter = InterpreterShim(self.loop_body.root_block.graph, submodules)
+            interpreter = InterpreterShim(self.loop_body.root_block.graph, submodules)  # type: ignore[arg-type]
             log.debug("get_bounds:\n%s", self.loop_body.root_block.graph)
             interpreter.run(V.get_ops_handler(), initial_env=self._bounds)
         return self._bounds
@@ -125,16 +125,16 @@ class BoundVars:
 
     def set_indirect(self, old: Expr, new: ValueRanges[Expr]) -> ValueRanges[Expr]:
         assert isinstance(new, ValueRanges)
-        self.replacement_vals[old] = new
+        self.replacement_vals[old] = new  # type: ignore[index]
         return new
 
-    def get_index(self, name: Expr) -> ValueRanges[Expr]:
+    def get_index(self, name: str) -> ValueRanges[Expr]:
         expr = self.loop_body.indexing_exprs[name]
-        bound = self.replacement_vals.get(expr)
+        bound = self.replacement_vals.get(expr)  # type: ignore[call-overload]
         if bound is None:
             bound = bound_sympy(expr, self.replacement_vals)
         # The following assertion is true at the time of this writing
         # We don't assert is as to not execute bound_sympy when bound is not None
         # assert bound is None or bound == bound_sympy(expr, self.replacement_vals)
-        self.replacement_vals[name] = bound
+        self.replacement_vals[name] = bound  # type: ignore[index]
         return bound

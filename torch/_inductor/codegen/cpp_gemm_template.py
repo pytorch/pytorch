@@ -626,7 +626,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 )
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
-                template_buffer.inputs[1] = ir.InputsKernel.unwrap_storage_for_input(
+                template_buffer.inputs[1] = ir.InputsKernel.unwrap_storage_for_input(  # type: ignore[index]
                     W_packed_constant
                 )
             return output
@@ -777,13 +777,13 @@ class CppPackedGemmTemplate(CppTemplate):
                     ordered_size, template_buffer.get_size()
                 )
                 reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)
-                reindexers.extend([reindexer] * len(epilogue_nodes))
+                reindexers.extend([reindexer] * len(epilogue_nodes))  # type: ignore[list-item]
                 if isinstance(Y, ir.BaseView):
                     storage = ir.StorageBox(Y.unwrap_view())
                 else:
                     assert isinstance(Y, ir.Buffer)
                     storage = ir.StorageBox(Y)
-                Y_2d = ir.ReinterpretView(storage, template_buffer.get_layout())
+                Y_2d = ir.ReinterpretView(storage, template_buffer.get_layout())  # type: ignore[arg-type]
 
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             X.get_dtype()
