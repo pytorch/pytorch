@@ -1611,7 +1611,7 @@ def collect_defined_kernels(kernel_list):
 
 
 def get_cloned_parameter_buffer_name(name: str):
-    return name + "__original__"
+    return name if name is not None else "" + "__original__"
 
 
 def is_gpu(device: str):
