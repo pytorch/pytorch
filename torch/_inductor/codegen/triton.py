@@ -61,6 +61,7 @@ from .common import (
     PythonPrinter,
     SizeArg,
     TensorArg,
+    WorkspaceArg,
 )
 from .simd import (
     constant_repr,
@@ -2402,6 +2403,12 @@ class TritonKernel(SIMDKernel):
                     if "seed_offset" in arg_sig.name:
                         symval_hint = 0
                     result.writeline(f"{var_name} = {symval_hint}")
+                elif isinstance(arg_sig, WorkspaceArg):
+                    device = V.graph.scheduler.get_current_device_or_throw()
+                    nbytes = V.graph.sizevars.size_hint(arg_sig.nbytes)
+                    result.writeline(
+                        f"{var_name} = torch.zeros({nbytes}, device='{device}', dtype=torch.uint8)"
+                    )
                 else:
                     raise KeyError(
                         f"Don't find the buffer or const tensor for {arg_name}"
