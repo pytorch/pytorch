@@ -57,6 +57,8 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const override;
 #endif
   void deviceSynchronize(DeviceIndex device_index) const override;
+  void setCurrentDevice(DeviceIndex device) const override;
+  DeviceIndex getCurrentDevice() const override;
 };
 
 } // at::cuda::detail

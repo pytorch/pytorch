@@ -196,6 +196,15 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   virtual void deviceSynchronize(DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Cannot synchronize CUDA device without ATen_cuda library. ", CUDA_HELP);
   }
+
+  virtual void setCurrentDevice(DeviceIndex device) const override {
+    TORCH_CHECK(false, "Cannot set current device without ATen_cuda library. ", CUDA_HELP);
+  }
+
+  virtual DeviceIndex getCurrentDevice() const override {
+    TORCH_CHECK(false, "Cannot get current device without ATen_cuda library. ", CUDA_HELP);
+    return -1;
+  }
 };
 
 // NB: dummy argument to suppress "ISO C++11 requires at least one argument
