@@ -7,6 +7,7 @@ with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
 import collections
 import contextlib
 import copy
+import dataclasses
 import functools
 import gc
 import inspect
@@ -3524,6 +3525,35 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             gm(torch.zeros(6, 4), torch.tensor(2)),
         )
 
+    def test_dataclass_init_with_default_factory_with_inputs(self):
+        @dataclasses.dataclass
+        class DClass:
+            sharding_contexts: Any = dataclasses.field(default_factory=list)
+            a: int = 1
+
+        def fn(x, inp_list):
+            d = DClass(inp_list)
+            d.sharding_contexts.append(x.sin() + d.a)
+            return d
+
+        x = torch.randn(4)
+        inp_list1 = [1, 2, 3]
+        inp_list2 = [2, 3, 4]
+        inp_list3 = [1, 2]
+        ref1 = fn(x, inp_list1)
+        ref2 = fn(x, inp_list2)
+        ref3 = fn(x, inp_list3)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, fullgraph=True)
+
+        opt_ret1 = opt_fn(x, inp_list1)
+        opt_ret2 = opt_fn(x, inp_list2)
+        opt_ret3 = opt_fn(x, inp_list3)
+        self.assertEqual(ref1.sharding_contexts, opt_ret1.sharding_contexts)
+        self.assertEqual(ref2.sharding_contexts, opt_ret2.sharding_contexts)
+        self.assertEqual(ref3.sharding_contexts, opt_ret3.sharding_contexts)
+
     def test_list_index(self):
         for i, list_type in enumerate(
             (
@@ -4635,7 +4665,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
     getitem_2 = l_x_[0]
     sum_1 = getitem_2.sum();  getitem_2 = None
     gt_1 = sum_1 > 0;  sum_1 = None
-    _assert_async = torch._assert_async(gt_1, 'assertion error');  gt_1 = None
+    _assert_async = torch._assert_async(gt_1, 'assertion error');  gt_1 = _assert_async = None
     cos = l_x_.cos();  l_x_ = None
     return (cos,)""",
         )
@@ -5347,6 +5377,48 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         inps = gen_inps(3, 5)
         self.assertEqual(g(*inps), opt_g(*inps))
+
+    def test_guard_with_tuple_mutation(self):
+        class Foo:
+            def __init__(self):
+                self.x = 10
+
+        foo = Foo()
+        d = {
+            "a": 2,
+            "b": (foo,),
+        }
+
+        def fn(x, d):
+            return x * d["a"] * d["b"][0].x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(inp, d), opt_fn(inp, d))
+        d["b"][0].x = 12
+        self.assertEqual(fn(inp, d), opt_fn(inp, d))
+
+    def test_changing_stride(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x, y):
+            return x * y
+
+        for i in range(1, 4):
+            x = torch.randn(4, i)
+
+            # create a view for i > 1
+            if i == 1:
+                x1 = x
+            else:
+                x1 = x[:, 0:1]
+
+            y = torch.randn(4, 1)
+            print(x1.shape, y.shape)
+            fn(x1, y)
+
+        self.assertTrue(cnt.frame_count <= 2)
 
 
 instantiate_parametrized_tests(ReproTests)
