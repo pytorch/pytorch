@@ -4278,7 +4278,7 @@ class TestNestedTensorSubclass(TestCase):
 
             self.assertTrue(
                 out_actual.is_nested,
-                f"softmax(): the result of reducing a nested tensor along the ragged dimension is a nested tensor",
+                "softmax(): the result of reducing a nested tensor along the ragged dimension is a nested tensor",
             )  # output is a nested tensor
             self.assertTrue(torch.allclose(out_actual.values(), out_expected))
 
