@@ -1,9 +1,8 @@
 # mypy: allow-untyped-defs, disable-error-code="attr-defined, valid-type"
 import copy
-from dataclasses import asdict, dataclass
 import logging
 import random
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import sympy
 
@@ -159,9 +158,7 @@ class CKGemmTemplate(CKTemplate):
 
         Returns None if the op is not suitable, otherwise returns the op to be used.
         """
-        metas = [
-            T.get_layout() for T in [*self.input_nodes, self.output_node]
-        ]
+        metas = [T.get_layout() for T in [*self.input_nodes, self.output_node]]
         X_meta = metas[0]
         W_meta = metas[1]
         Y_meta = metas[-1]
@@ -256,7 +253,7 @@ class CKGemmTemplate(CKTemplate):
         template_params = []
         for field_name, field_value in op.dict_items():
             if isinstance(field_value, tuple):
-                tuple_elements = ', '.join(map(str, iter(field_value)))
+                tuple_elements = ", ".join(map(str, iter(field_value)))
                 if "ds" in field_name:  # element type and layout for bias
                     arg = f"/* {field_name} */ Tuple<{tuple_elements}>"
                 else:  # tile shape
@@ -290,7 +287,9 @@ class CKGemmTemplate(CKTemplate):
             op.ds_element_dtypes = ((self._TORCH_DTYPE_TO_CK[Bias.get_layout().dtype]),)
             op.c_elementwise_op = "ScaledAdd"
 
-        op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,) * (2 if Bias else 1)
+        op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
+            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,
+        ) * (2 if Bias else 1)
 
         instance_definition, instance_type = self.emit_ck_instance(op)
 
@@ -323,16 +322,21 @@ class CKGemmTemplate(CKTemplate):
             a_element_dtype=op.a_element_dtype,
             b_element_dtype=op.b_element_dtype,
             c_element_dtype=op.c_element_dtype,
-            bias_element_dtype=op.ds_element_dtypes[0] if Bias is not None else '',
+            bias_element_dtype=op.ds_element_dtypes[0] if Bias is not None else "",
             a_stride=kernel.contiguous_stride(X),
             b_stride=kernel.contiguous_stride(W),
             c_stride=kernel.contiguous_stride(Y),
             d_stride=kernel.contiguous_stride(Bias),
             alpha=self.alpha,
             beta=self.beta,
-            epilogue=f"ScaledAdd {{ {self.alpha}, {self.beta} }}" if Bias is not None else "PassThrough {}",
+            epilogue=f"ScaledAdd {{ {self.alpha}, {self.beta} }}"
+            if Bias is not None
+            else "PassThrough {}",
             has_bias=Bias is not None,
-            null_checks="".join(kernel.check_not_null(node) for node in (X, W, Y) + ((Bias,) if Bias is not None else ())),
+            null_checks="".join(
+                kernel.check_not_null(node)
+                for node in (X, W, Y) + ((Bias,) if Bias is not None else ())
+            ),
             version_comment=version_comment,
         )
 
