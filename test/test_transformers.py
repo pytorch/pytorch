@@ -17,7 +17,7 @@ import math
 import itertools
 import torch.optim as optim
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, onlyCPU
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -87,37 +87,79 @@ isSM90Device = torch.cuda.is_available() and torch.cuda.get_device_capability() 
 isSM5xDevice = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 5
 isLessThanSM80Device = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8
 
-def get_rtol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
-    deviation = true_value - computed_value
-    deviation = torch.abs(deviation / true_value)
-    # Fill in the nans with the default rtol
-    torch.nan_to_num_(deviation, nan=default_rtol[computed_value.dtype])
-    return deviation.max().item()
+
+def _check_equal(
+    golden: torch.Tensor,
+    reference: torch.Tensor,
+    test: torch.Tensor,
+    fudge_factor: float,
+    tensor_name: Optional[str] = None
+) -> None:
+    """
+    Compare test tensor against golden and reference tensors.
+    Raises ValueError if compiled error exceeds threshold.
+    """
+    test_error = (golden - test).abs().mean()
+    ref_error = (golden - reference).abs().mean()
+
+    if torch.isnan(test_error).any() and not torch.isnan(ref_error).any():
+        raise ValueError("Output/Grad with NaN")
+
+    if test_error > ref_error * fudge_factor:
+        name = tensor_name or ""
+        msg = f"{name} Test error {test_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
+        raise ValueError(msg)
 
 
-def get_atol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
-    deviation = true_value - computed_value
-    atol = torch.abs(deviation).max().item()
-    return atol
+def check_out_and_grad(
+    out_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    query_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    key_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    value_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    attn_mask_tuple: Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = None,
+    fudge_factors: Optional[Dict[str, float]] = None
+) -> None:
+    """
+    Check output and gradients of attention mechanism tensors.
+    Compares compiled results against reference and low-precision reference tensors.
 
+    :param out_tuple: Tuple of (ref, lp_ref, compiled) for output tensor
+    :param query_tuple: Tuple of (ref, lp_ref, compiled) for query tensor
+    :param key_tuple: Tuple of (ref, lp_ref, compiled) for key tensor
+    :param value_tuple: Tuple of (ref, lp_ref, compiled) for value tensor
+    :param attn_mask_tuple: Optional tuple of (ref, lp_ref, compiled) for attention mask tensor
+    :param fudge_factors: Dictionary of fudge factors for each tensor type (default uses 5.0 for all)
+    """
+    default_fudge_factor = 5.0
+    if fudge_factors is None:
+        fudge_factors = {}
 
-def get_tolerances(
-    true_value: torch.Tensor,
-    computed_value: torch.Tensor,
-    fudge_factor: Optional[float] = None,
-) -> Tuple[float, float]:
-    """Returns the absolute and relative tolerances for comparing two tensors."""
-    fudge_factor = fudge_factor if fudge_factor is not None else 1.0
-    atol = get_atol(true_value, computed_value)
-    rtol = get_rtol(true_value, computed_value)
+    out_ref, out_lp_ref, out = out_tuple
+    query_ref, query_ref_lp, query = query_tuple
+    key_ref, key_ref_lp, key = key_tuple
+    value_ref, value_ref_lp, value = value_tuple
 
-    atol = fudge_factor * max(atol, default_atol[computed_value.dtype])
-    rtol = fudge_factor * max(rtol, default_rtol[computed_value.dtype])
-    # torch.isclose() has weird behavior around see:
-    # https://github.com/pytorch/pytorch/issues/102400
-    if rtol > 1e30:
-        rtol = default_rtol[computed_value.dtype]
-    return atol, rtol
+    with torch.no_grad():
+        _check_equal(out_ref, out_lp_ref, out, fudge_factors.get('out', default_fudge_factor), "Out")
+
+        grad_checks = [
+            (query_ref.grad, query_ref_lp.grad, query.grad, "Grad_Query"),
+            (key_ref.grad, key_ref_lp.grad, key.grad, "Grad_Key"),
+            (value_ref.grad, value_ref_lp.grad, value.grad, "Grad_Value")
+        ]
+
+        for ref_grad, lp_ref_grad, comp_grad, name in grad_checks:
+            _check_equal(ref_grad, lp_ref_grad, comp_grad, fudge_factors.get(name.lower(), default_fudge_factor), name)
+
+        if attn_mask_tuple:
+            attn_mask_ref, attn_mask_ref_lp, attn_mask = attn_mask_tuple
+            _check_equal(
+                attn_mask_ref.grad,
+                attn_mask_ref_lp.grad,
+                attn_mask.grad,
+                fudge_factors.get("grad_attn_mask", default_fudge_factor),
+                "Grad_Attn_Mask",
+            )
 
 
 def query_key_value_clones(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, dtype: torch.dtype = None):
@@ -182,14 +224,6 @@ def rand_sdpa_tensor(shape: SdpaShape, device: str, dtype: torch.dtype, type: st
         size = (batch, seq_len, num_heads, head_dim) if not packed else (batch, seq_len, 3 * num_heads * head_dim)
         return torch.randn(size, device=device, dtype=dtype, requires_grad=requires_grad)
 
-def calculate_nt_tolerances(nt_ref_hp, nt_ref_lp, default_dtype, fudge_factor=1):
-    # TODO use NT ops when we have implemented Max for NestedTensor instead of unrolling
-    ref_atol = default_atol[default_dtype]
-    ref_rtol = default_rtol[default_dtype]
-    for tensor_component_ref, tensor_component_ref_lp in zip(nt_ref_hp.unbind(), nt_ref_lp.unbind()):
-        ref_atol = max((fudge_factor * torch.abs(tensor_component_ref - tensor_component_ref_lp)).max().item(), ref_atol)
-        ref_rtol = max(get_rtol(tensor_component_ref, tensor_component_ref_lp), ref_rtol)
-    return ref_atol, ref_rtol
 
 class TestTransformers(NNTestCase):
     _do_cuda_memory_leak_check = True
@@ -2730,7 +2764,7 @@ class TestSDPACudaOnly(NNTestCase):
         # Run the math kernel on low precision references
         query_ref_lp, key_ref_lp, value_ref_lp = query_key_value_clones(query, key, value, dtype=dtype)
 
-        higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
+        higher_precision_dtype = torch.float64
         query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
 
         # Create real output
@@ -2767,37 +2801,19 @@ class TestSDPACudaOnly(NNTestCase):
         out_ref.backward(upstream_grad.to(out_ref.dtype))
         out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
-        # [Note] Fused Tolerances
-        # Establish the numerical error between the "true" high precision math output
-        # and the low precision math reference. We use this reference for the atol
-        # And we use the default rtol for the low precision type.
-        # We then provide a fudge factor for gradients respectively to account
-        # for the use of the fused kernel rather than the eager implemntation.
-        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
-
-        # Fudge Factor when dropout is enabled
         dropout_fudge_factor = 1.5 if dropout_p == 0.0 else 2.0
-
-        query_fudge_factor = dropout_fudge_factor
-        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
-
-        # TODO: Investigate why grad_k needs larger tolerances
-        key_fudge_factor = 8 * dropout_fudge_factor
-        grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad, key_fudge_factor)
-
-        value_fudge_factor = 7 if not SM80OrLater and dtype == torch.float16 else 1.0
-        if TEST_WITH_ROCM:
-            value_fudge_factor = max(2.0, value_fudge_factor)
-        grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
-
-        self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
-        self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
-                         atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
-        self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
-                         atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
-        self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
-                         atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
-
+        check_out_and_grad(
+            (out_ref, out_lp_ref, out),
+            (query_ref, query_ref_lp, query),
+            (key_ref, key_ref_lp, key),
+            (value_ref, value_ref_lp, value),
+            fudge_factors={
+                'out': 7.0 * dropout_fudge_factor,
+                'grad_query': 12.0 * dropout_fudge_factor,
+                'grad_key': 25.0 * dropout_fudge_factor,
+                'grad_value': 5.0 * dropout_fudge_factor,
+            }
+        )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA")
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
@@ -2888,44 +2904,21 @@ class TestSDPACudaOnly(NNTestCase):
         out_ref.backward(upstream_grad.to(out_ref.dtype))
         out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
-        # [Note] Fused Tolerances
-        # Establish the numerical error between the "true" high precision math output
-        # and the low precision math reference. We use this reference for the atol
-        # And we use the default rtol for the low precision type.
-        # We then provide a fudge factor for gradients respectively to account
-        # for the use of the fused kernel rather than the eager implemntation.
-        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
-
-        # Fudge Factor when dropout is enabled
-        dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.75
-        mask_fudge_factor = 1.0 if attn_mask is None else 1.5
-        query_fudge_factor = 2.0
-
-        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
-
-        # TODO: Investigate why grad_k needs larger tolerances
-        key_fudge_factor = 8 * dropout_fudge_factor * mask_fudge_factor
-        grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad, key_fudge_factor)
-
-        value_fudge_factor = 7 if not SM80OrLater and dtype == torch.float16 else 1.0
-        if TEST_WITH_ROCM:
-            value_fudge_factor = max(2.0, value_fudge_factor)
-        grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
-
-        mask_fudge_factor = 12 if attn_mask.numel() > 512 else 22
-        grad_attn_mask_atol, grad_attn_mask_rtol = get_tolerances(
-            attn_mask_ref.grad, attn_mask_ref_lp.grad, mask_fudge_factor)
-
-        self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
-        self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
-                         atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
-        self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
-                         atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
-        self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
-                         atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
-
-        self.assertEqual(attn_mask.grad, attn_mask_ref.grad.to(attn_mask.grad.dtype),
-                         atol=grad_attn_mask_atol, rtol=grad_attn_mask_rtol)
+        dropout_fudge_factor = 1.5 if dropout_p == 0.0 else 2.0
+        check_out_and_grad(
+            (out_ref, out_lp_ref, out),
+            (query_ref, query_ref_lp, query),
+            (key_ref, key_ref_lp, key),
+            (value_ref, value_ref_lp, value),
+            (attn_mask_ref, attn_mask_ref_lp, attn_mask),
+            fudge_factors={
+                "out": 7.0 * dropout_fudge_factor,
+                "grad_query": 12.0 * dropout_fudge_factor,
+                "grad_key": 25.0 * dropout_fudge_factor,
+                "grad_value": 5.0 * dropout_fudge_factor,
+                "grad_attn_mask": 5.0 * dropout_fudge_factor,
+            },
+        )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
@@ -2998,11 +2991,6 @@ class TestSDPACudaOnly(NNTestCase):
                 dbug_mask, seq_len_q, seq_len_k, query_padding_mask, key_padding_mask,
                 causal=is_causal)[:, :, :seq_len_q, :seq_len_k]
             dropout_mask = softmax_mask >= 0
-            # attn_unnorm = softmax_mask.abs()
-            # attn = self.normalize_flash_attn_S(attn_unnorm, q_padded,
-            #                                    k_padded, v_padded, query_padding_mask,
-            #                                    key_padding_mask, None, True, is_causal, scale=scale)
-
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, scale=scale, dropout_mask=dropout_mask)[0]
@@ -3021,27 +3009,19 @@ class TestSDPACudaOnly(NNTestCase):
         out_ref.backward(upstream_grad.to(out_ref.dtype))
         out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
-        # See [Note] Fused Tolerances above
-        output_fudge_factor = 3 if head_dim % 8 != 0 or TEST_WITH_ROCM else 1
-        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref, output_fudge_factor)
-
-        # TODO: Investigate why grad_q needs larger tolerances
-        query_fudge_factor = 4
-        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
-
-        key_fudge_factor = 2
-        grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad, key_fudge_factor)
-
-        value_fudge_factor = 2
-        grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
-
-        self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
-        self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
-                         atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
-        self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
-                         atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
-        self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
-                         atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
+        dropout_fudge_factor = 1.5 if dropout_p == 0.0 else 2.0
+        check_out_and_grad(
+            (out_ref, out_lp_ref, out),
+            (query_ref, query_ref_lp, query),
+            (key_ref, key_ref_lp, key),
+            (value_ref, value_ref_lp, value),
+            fudge_factors={
+                'out': 7.0 * dropout_fudge_factor,
+                'grad_query': 12.0 * dropout_fudge_factor,
+                'grad_key': 25.0 * dropout_fudge_factor,
+                'grad_value': 5.0 * dropout_fudge_factor,
+            }
+        )
 
     @skipIfRocm  # FIXME: "capturing stream has unjoined work"
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
@@ -3177,7 +3157,6 @@ class TestSDPACudaOnly(NNTestCase):
                     query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
                     dropout_mask=dropout_mask)[0]
 
-
         g1 = torch.cuda.CUDAGraph()
         with torch.cuda.graph(g1):
             out.backward(upstream_grad)
@@ -3186,34 +3165,19 @@ class TestSDPACudaOnly(NNTestCase):
             out_ref.backward(upstream_grad.to(out_ref.dtype))
             out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
-            # [Note] Fused Tolerances
-            # Establish the numerical error between the "true" high precision math output
-            # and the low precision math reference. We use this reference for the atol
-            # And we use the default rtol for the low precision type.
-            # We then provide a fudge factor for gradients respectively to account
-            # for the use of the fused kernel rather than the eager implemntation.
-            output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
-
-            # Fudge Factor when dropout is enabled
-            dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
-
-            query_fudge_factor = dropout_fudge_factor
-            grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
-
-            # TODO: Investigate why grad_k needs larger tolerances
-            key_fudge_factor = 8 * dropout_fudge_factor
-            grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad, key_fudge_factor)
-
-            value_fudge_factor = 7 if not SM80OrLater and dtype == torch.float16 else 1.0
-            grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
-
-            self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
-            self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
-                             atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
-            self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
-                             atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
-            self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
-                             atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
+            dropout_fudge_factor = 1.5 if dropout_p == 0.0 else 2.0
+            check_out_and_grad(
+                (out_ref, out_lp_ref, out),
+                (query_ref, query_ref_lp, query),
+                (key_ref, key_ref_lp, key),
+                (value_ref, value_ref_lp, value),
+                fudge_factors={
+                    'out': 7.0 * dropout_fudge_factor,
+                    'grad_query': 12.0 * dropout_fudge_factor,
+                    'grad_key': 25.0 * dropout_fudge_factor,
+                    'grad_value': 5.0 * dropout_fudge_factor,
+                }
+            )
 
     @skipIfRocm  # Nested Tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
@@ -3248,7 +3212,6 @@ class TestSDPACudaOnly(NNTestCase):
                 attn_mask=None, dropout_p=0.0, is_causal=False)
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(torch.float16), atol=1e-3, rtol=1e-2)
-
 
     @skipIfRocm  # Nested tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
@@ -3474,20 +3437,20 @@ class TestSDPACudaOnly(NNTestCase):
         out_ref.backward(upstream_grad.to(out_ref.dtype))
         out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
-        # See [Note] Fused Tolerances above
-        output_ref_atol, output_ref_rtol = calculate_nt_tolerances(out_ref, out_lp_ref, out.dtype)
-        grad_q_ref_atol, grad_q_ref_rtol = calculate_nt_tolerances(query_ref.grad, query_ref_lp.grad,
-                                                                   query.grad.dtype, fudge_factor=4)
-        grad_k_ref_atol, grad_k_ref_rtol = calculate_nt_tolerances(key_ref.grad, key_ref_lp.grad, key.grad.dtype)
-        grad_v_ref_atol, grad_v_ref_rtol = calculate_nt_tolerances(value_ref.grad, value_ref_lp.grad, value.grad.dtype)
+        dropout_fudge_factor = 1.5 if dropout_p == 0.0 else 2.0
+        check_out_and_grad(
+            (out_ref, out_lp_ref, out),
+            (query_ref, query_ref_lp, query),
+            (key_ref, key_ref_lp, key),
+            (value_ref, value_ref_lp, value),
+            fudge_factors={
+                'out': 7.0 * dropout_fudge_factor,
+                'grad_query': 12.0 * dropout_fudge_factor,
+                'grad_key': 25.0 * dropout_fudge_factor,
+                'grad_value': 5.0 * dropout_fudge_factor,
+            }
+        )
 
-        self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
-        self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
-                         atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
-        self.assertEqual(key.grad.contiguous(), key_ref.grad.contiguous().to(key.grad.dtype),
-                         atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
-        self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
-                         atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
 class TestAttnBias(NNTestCase):
 
