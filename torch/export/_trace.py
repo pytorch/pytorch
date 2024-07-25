@@ -627,11 +627,22 @@ def _export_to_aten_ir(
             pre_dispatch=pre_dispatch,
             kwargs=fake_kwargs,
         )
-    # TODO unfortunately preserving graph-level metadata is not
-    # working well with aot_export. So we manually copy it.
+
+    def _maybe_fixup_gm_and_output_node_meta(old_gm, new_gm):
+        if isinstance(old_gm, torch.fx.GraphModule):
+            if hasattr(old_gm, "meta"):
+                new_gm.meta.update(old_gm.meta)
+            old_output_node = list(old_gm.graph.nodes)[-1]
+            new_output_node = list(new_gm.graph.nodes)[-1]
+            assert old_output_node.op == "output" and new_output_node.op == "output"
+            # make sure we don't override any meta
+            assert len(new_output_node.meta) == 0
+            new_output_node.meta.update(old_output_node.meta)
+
+    # TODO unfortunately preserving graph-level metadata and output node's meta
+    # is not working well with aot_export. So we manually copy it.
     # (The node-level meta is addressed above.)
-    if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
-        gm.meta.update(mod.meta)
+    _maybe_fixup_gm_and_output_node_meta(mod, gm)
 
     from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
     from torch._guards import detect_fake_mode
