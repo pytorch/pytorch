@@ -6,7 +6,10 @@ import itertools
 import operator
 import sys
 
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, TYPE_CHECKING, Union
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 from .. import polyfill, variables
 from ..bytecode_transformation import create_instruction
@@ -19,7 +22,6 @@ from ..exc import (
 
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
-from .lists import TupleVariable
 
 
 class ItertoolsVariable(VariableTracker):
@@ -37,7 +39,10 @@ class ItertoolsVariable(VariableTracker):
         return self.value
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if (
             self.value is itertools.product
@@ -360,7 +365,7 @@ class ZipVariable(IteratorVariable):
                 iterables.append(it.unpack_var_sequence(tx))
         kwargs = {"strict": self.strict} if self.strict else {}
         zipped = zip(*iterables, **kwargs)
-        return [TupleVariable(list(var)) for var in zipped]
+        return [variables.TupleVariable(list(var)) for var in zipped]
 
     def next_variable(self, tx):
         assert self.mutable_local
@@ -400,7 +405,7 @@ class ZipVariable(IteratorVariable):
 
         tx.output.side_effects.mutation(self)
         self.index += 1
-        return TupleVariable(args)
+        return variables.TupleVariable(args)
 
     def reconstruct_items(self, codegen):
         for it in self.iterables:
