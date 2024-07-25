@@ -73,11 +73,12 @@ class TestPythonRegistration(TestCase):
         with _scoped_library("_", "IMPL") as my_lib:
             orig_args = ((2, 2),)
             orig_kwargs = {"device": torch.device("fpga"), "dtype": torch.float64}
+
             def my_fallback(op, *args, **kwargs):
                 self.assertIs(op, torch.ops.aten.empty.memory_format)
                 self.assertEqual(args, orig_args)
                 # Why pin_memory was added?
-                self.assertEqual(kwargs, orig_kwargs | {"pin_memory": False})
+                self.assertEqual(kwargs, {**orig_kwargs, "pin_memory": False})
                 # Any return is fine here
                 return torch.empty(*args)
 
@@ -86,8 +87,6 @@ class TestPythonRegistration(TestCase):
             my_lib.fallback(my_fallback, "FPGA")
 
             torch.empty(*orig_args, **orig_kwargs)
-
-
 
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])

@@ -969,7 +969,7 @@ py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
   });
 }
 
-} // torch::csrc
+} // namespace torch::csrc
 
 c10::impl::PyInterpreter* getPyInterpreter() {
   return torch::csrc::self_interpreter.get();
