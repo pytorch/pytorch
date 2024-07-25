@@ -1594,7 +1594,6 @@ def _register_quantization_lowerings():
 
 
 def _register_woq_lowerings():
-    print("enter _register_woq_lowerings")
     _register_woq_mm_int8_pattern1()
     _register_woq_mm_int8_pattern2()
     _register_woq_mm_int8_pattern3()
