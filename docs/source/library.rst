@@ -73,3 +73,5 @@ A tutorial that walks you through some examples on how to use this API is availa
 .. autofunction:: define
 
 .. autofunction:: impl
+
+.. autofunction:: fallback

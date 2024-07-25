@@ -195,14 +195,18 @@ class PythonKernelHolder : public c10::OperatorKernel {
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
     auto func =
         py::reinterpret_borrow<py::object>(func_.ptr(getPyInterpreter()));
-    auto obj = with_op_ ?
-      with_keyset_
-        ? func(keyset, torch::csrc::getTorchApiFunction(op), *args_kwargs.first, **args_kwargs.second)
-        : func(torch::csrc::getTorchApiFunction(op), *args_kwargs.first, **args_kwargs.second)
-      :
-      with_keyset_
-        ? func(keyset, *args_kwargs.first, **args_kwargs.second)
-        : func(*args_kwargs.first, **args_kwargs.second);
+    auto obj = with_op_ ? with_keyset_
+            ? func(
+                  keyset,
+                  torch::csrc::getTorchApiFunction(op),
+                  *args_kwargs.first,
+                  **args_kwargs.second)
+            : func(
+                  torch::csrc::getTorchApiFunction(op),
+                  *args_kwargs.first,
+                  **args_kwargs.second)
+        : with_keyset_ ? func(keyset, *args_kwargs.first, **args_kwargs.second)
+                        : func(*args_kwargs.first, **args_kwargs.second);
     if (!obj) {
       throw python_error();
     }
@@ -475,9 +479,9 @@ void initDispatchBindings(PyObject* module) {
           py::arg("dispatch") = "")
       .def(
           "fallback",
-          [](py::object self, 
+          [](const py::object& self,
              c10::DispatchKey dispatch,
-             py::object func,
+             const py::object& func,
              bool with_keyset) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
@@ -485,14 +489,13 @@ void initDispatchBindings(PyObject* module) {
             if (func.is(py::module::import("torch.library")
                             .attr("fallthrough_kernel"))) {
               lib.fallback(
-                torch::dispatch(dispatch, CppFunction::makeFallthrough()));
+                  torch::dispatch(dispatch, CppFunction::makeFallthrough()));
             } else {
-              lib.fallback(
-                  torch::dispatch(
-                      dispatch,
-                      CppFunction::makeFromBoxedFunctor(
-                          std::make_unique<PythonKernelHolder>(
-                              func, dispatch, with_keyset, /*with_op*/ true))));
+              lib.fallback(torch::dispatch(
+                  dispatch,
+                  CppFunction::makeFromBoxedFunctor(
+                      std::make_unique<PythonKernelHolder>(
+                          func, dispatch, with_keyset, /*with_op*/ true))));
             }
             END_HANDLE_TH_ERRORS_PYBIND
           },
@@ -1002,14 +1005,17 @@ void python_op_registration_trampoline_impl(
   auto* pyobj = func->ptr(getPyInterpreter());
   TORCH_INTERNAL_ASSERT(pyobj != nullptr);
   auto callable = py::reinterpret_borrow<py::object>(pyobj);
-  auto obj = with_op ?
-      with_keyset
-          ? callable(keyset, torch::csrc::getTorchApiFunction(op), *args_kwargs.first, **args_kwargs.second)
-          : callable(torch::csrc::getTorchApiFunction(op), *args_kwargs.first, **args_kwargs.second)
-      :
-      with_keyset
-          ? callable(keyset, *args_kwargs.first, **args_kwargs.second)
-          : callable(*args_kwargs.first, **args_kwargs.second);
+  auto obj = with_op ? with_keyset ? callable(
+                                         keyset,
+                                         torch::csrc::getTorchApiFunction(op),
+                                         *args_kwargs.first,
+                                         **args_kwargs.second)
+                                   : callable(
+                                         torch::csrc::getTorchApiFunction(op),
+                                         *args_kwargs.first,
+                                         **args_kwargs.second)
+      : with_keyset ? callable(keyset, *args_kwargs.first, **args_kwargs.second)
+                    : callable(*args_kwargs.first, **args_kwargs.second);
   if (!obj) {
     throw python_error();
   }
