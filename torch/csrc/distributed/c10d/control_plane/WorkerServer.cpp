@@ -77,15 +77,18 @@ std::string jsonStrEscape(const std::string& str) {
 } // namespace
 
 WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
-  server_.Get("/", [](const httplib::Request& req, httplib::Response& res) {
-    res.set_content(
-        R"BODY(<h1>torch.distributed.WorkerServer</h1>
+  server_.Get(
+      "/",
+      [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
+        res.set_content(
+            R"BODY(<h1>torch.distributed.WorkerServer</h1>
 <a href="/handler/">Handler names</a>
 )BODY",
-        "text/html");
-  });
+            "text/html");
+      });
   server_.Get(
-      "/handler/", [](const httplib::Request& req, httplib::Response& res) {
+      "/handler/",
+      [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
         std::ostringstream body;
         body << "[";
         bool first = true;
