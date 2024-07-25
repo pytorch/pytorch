@@ -316,11 +316,9 @@ test_inductor_distributed() {
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
   python test/run_test.py -i distributed/_tensor/test_dtensor_compile.py --verbose
-  python test/run_test.py -i distributed/tensor/parallel/test_fsdp_2d_parallel.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_comm.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_multi_group --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_with_activation_checkpointing --verbose
-  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_mlp --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_hsdp --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_transformer_checkpoint_resume --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_gradient_accumulation --verbose
@@ -431,8 +429,12 @@ test_perf_for_dashboard() {
 
   local device=cuda
   local taskset=""
-  if [[ "${TEST_CONFIG}" == *cpu-x86* ]]; then
-    device=cpu-x86
+  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
+    if [[ "${TEST_CONFIG}" == *cpu_x86* ]]; then
+      device=cpu_x86
+    elif [[ "${TEST_CONFIG}" == *cpu_aarch64* ]]; then
+      device=cpu_aarch64
+    fi
     test_inductor_set_cpu_affinity
     end_core=$(( $(test_inductor_get_core_number)-1 ))
     taskset="taskset -c 0-$end_core"

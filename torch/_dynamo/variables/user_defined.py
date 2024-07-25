@@ -143,7 +143,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if source is not None:
                 return VariableBuilder(tx, source)(func)
             else:
-                return SourcelessBuilder(tx)(func)
+                return SourcelessBuilder.create(tx, func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source:
