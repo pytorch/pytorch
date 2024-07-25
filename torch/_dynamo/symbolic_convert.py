@@ -1454,7 +1454,19 @@ class InstructionTranslatorBase(
     def check_if_exc_matches(self):
         assert len(self.stack) >= 2
         expected_exc_types = self.pop()
-        exc_instance = self.stack[-1]
+        if sys.version_info >= (3, 11):
+            # CHECK_EXC_MATCH (which is used from 3.11 onwards) does not pop.
+            # This is the description from the disassembly doc
+            #
+            # Performs exception matching for ``except``. Tests whether the ``STACK[-2]``
+            # is an exception matching ``STACK[-1]``. Pops ``STACK[-1]`` and pushes the boolean
+            # result of the test.
+            exc_instance = self.stack[-1]
+        else:
+            # This is used prior to 3.11 via opcode JUMP_IF_NOT_EXC_MATCH
+            # There is no documentation but here is the code pointer that does 2 pops
+            # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L3650-L3665
+            exc_instance = self.stack.pop()
 
         # Users can check exception in 2 ways
         # 1) except NotImplementedError --> BuilinVariable
