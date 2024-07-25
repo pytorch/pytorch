@@ -145,6 +145,10 @@ class ConstantHandle {
     return handle_;
   }
 
+  AtenTensorHandle get() const {
+    return handle_;
+  }
+
   void* data_ptr() const {
     return data_;
   }
