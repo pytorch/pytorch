@@ -59,7 +59,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import SymT
-from torch.utils.ordered_set import OrderedSet
+from torch.utils._ordered_set import OrderedSet
 
 from . import config, dependencies
 from .codegen.common import BackendFeature, index_prevent_reordering

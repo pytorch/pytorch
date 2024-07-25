@@ -37,7 +37,7 @@ from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._sympy.symbol import free_symbol_is_type, SymT
 from torch.utils._triton import has_triton
-from torch.utils.ordered_set import OrderedSet
+from torch.utils._ordered_set import OrderedSet
 
 from . import comms, config, dependencies, ir, metrics
 from .codecache import write_text

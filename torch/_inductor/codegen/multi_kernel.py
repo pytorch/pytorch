@@ -11,6 +11,7 @@ from ..runtime.runtime_utils import do_bench_gpu
 from ..utils import cache_on_self
 from ..virtualized import V
 from .common import TensorArg
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -246,11 +247,11 @@ class MultiKernel:
 
     @property
     def removed_buffers(self):
-        return set.intersection(*[k.removed_buffers for k in self.kernels])
+        return OrderedSet.intersection(*[k.removed_buffers for k in self.kernels])
 
     @property
     def inplaced_to_remove(self):
-        return set.intersection(*[k.inplaced_to_remove for k in self.kernels])
+        return OrderedSet.intersection(*[k.inplaced_to_remove for k in self.kernels])
 
     @property
     @cache_on_self

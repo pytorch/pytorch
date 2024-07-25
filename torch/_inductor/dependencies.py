@@ -13,7 +13,7 @@ import sympy
 
 import torch
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
-from torch.utils.ordered_set import OrderedSet
+from torch.utils._ordered_set import OrderedSet
 
 from .codegen.common import index_prevent_reordering
 from .utils import (

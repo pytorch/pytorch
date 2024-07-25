@@ -14,7 +14,7 @@ import weakref
 from test import support
 
 from torch.testing._internal.common_utils import TestCase
-from torch.utils.ordered_set import OrderedSet
+from torch.utils._ordered_set import OrderedSet
 
 
 class PassThru(Exception):
@@ -52,8 +52,10 @@ class HashCountingInt(int):
         return int.__hash__(self)
 
 
-class TestJointOps:
+class TestJointOps(TestCase):
     # Tests common to both OrderedSet and frozenset
+    thetype = OrderedSet
+    basetype = OrderedSet
 
     def setUp(self):
         self.word = word = "simsalabim"
@@ -736,7 +738,7 @@ empty_set = OrderedSet()
 # ==============================================================================
 
 
-class TestBasicOps:
+class TestBasicOps(TestCase):
     @unittest.skip("Different repr")
     def test_repr(self):
         if self.repr is not None:
@@ -955,6 +957,7 @@ class TestBasicOpsMixedStringBytes(TestBasicOps, TestCase):
         self.check_repr_against_values()
 
 
+del TestBasicOps
 # ==============================================================================
 
 
@@ -1250,7 +1253,7 @@ class TestMutate(TestCase):
 # ==============================================================================
 
 
-class TestSubsets:
+class TestSubsets(TestCase):
     case2method = {
         "<=": "issubset",
         ">=": "issuperset",
@@ -1266,6 +1269,8 @@ class TestSubsets:
     }
 
     def test_issubset(self):
+        if type(self) is TestSubsets:
+            raise unittest.SkipTest("Only meant to be run as subclass")
         x = self.left
         y = self.right
         for case in "!=", "==", "<", "<=", ">", ">=":
@@ -1342,7 +1347,7 @@ class TestSubsetNonOverlap(TestSubsets, TestCase):
 # ==============================================================================
 
 
-class TestOnlySetsInBinaryOps:
+class TestOnlySetsInBinaryOps(TestCase):
     def test_eq_ne(self):
         # Unlike the others, this is testing that == and != *are* allowed.
         self.assertEqual(self.other == self.OrderedSet, False)
@@ -1521,6 +1526,7 @@ class TestOnlySetsGenerator(TestOnlySetsInBinaryOps, TestCase):
         self.otherIsIterable = True
 
 
+del TestOnlySetsInBinaryOps
 # ==============================================================================
 
 
@@ -1582,6 +1588,8 @@ class TestCopyingNested(TestCopying, TestCase):
     def setUp(self):
         self.OrderedSet = OrderedSet([((1, 2), (3, 4))])
 
+
+del TestCopying
 
 # ==============================================================================
 

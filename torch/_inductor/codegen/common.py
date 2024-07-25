@@ -32,7 +32,7 @@ from torch.utils import _pytree as pytree
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
-from torch.utils.ordered_set import OrderedSet
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config, metrics
 from ..utils import (
