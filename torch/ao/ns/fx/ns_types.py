@@ -1,19 +1,20 @@
 import enum
-from typing import NamedTuple
+from typing import Any, Callable, Dict, List, NamedTuple, Union
 
 from torch.fx.graph import Node
 
-from typing import Dict, Any, List, Union, Callable
 
 class NSSingleResultValuesType(str, enum.Enum):
-    WEIGHT = 'weight'
-    NODE_OUTPUT = 'node_output'
-    NODE_INPUT = 'node_input'
+    WEIGHT = "weight"
+    NODE_OUTPUT = "node_output"
+    NODE_INPUT = "node_input"
+
 
 class NSSubgraph(NamedTuple):
     start_node: Node
     end_node: Node
     base_op_node: Node
+
 
 # TODO(future PR): see if we can use typing_extensions's TypedDict instead
 # to properly type the various keys

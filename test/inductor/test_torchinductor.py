@@ -11069,7 +11069,7 @@ class CommonTemplate:
         s0 = 16777472
         s1 = 8
         compiled_fn = torch._dynamo.optimize()(fn)
-        actual = compiled_fn(torch.ones(s0, s1))
+        actual = compiled_fn(torch.ones(s0, s1, device=self.device))
         self.assertTrue((actual == 1).all())
 
     @skip_if_gpu_halide

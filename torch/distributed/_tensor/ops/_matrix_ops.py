@@ -9,7 +9,7 @@ from torch.distributed._tensor._op_schema import (
     PlacementList,
     PlacementStrategy,
 )
-from torch.distributed._tensor.ops.basic_strategy import gen_einsum_strategies
+from torch.distributed._tensor.ops._einsum_strategy import gen_einsum_strategies
 from torch.distributed._tensor.ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
