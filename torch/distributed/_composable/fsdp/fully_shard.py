@@ -184,6 +184,7 @@ class FSDPModule:
         if ca.compiled_autograd_enabled and hasattr(module, "_initialize_hook"):
             # Under compile, always do the dry-run initialization in eager mode
             state = self._get_fsdp_state()
+            # Dry-run only if module is not initialized yet
             if state._is_root is None:
                 with torch.random.fork_rng(range(torch.cuda.device_count())):
                     module(*args, **kwargs)
