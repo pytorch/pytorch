@@ -2,6 +2,7 @@
 import copy
 import io
 import math
+import weakref
 from typing import (
     Any,
     Callable,
@@ -21,7 +22,6 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-
 
 if dist.is_available() or TYPE_CHECKING:
     from torch.distributed import distributed_c10d
@@ -90,7 +90,7 @@ def _iterate_state_dict(
     device: Optional[torch.device] = None,
     cpu_offload: bool = False,
     companion_obj: Any = None,
-    ranks_only: Tuple[int, ...] = tuple(),
+    ranks_only: Tuple[int, ...] = (),
     type_check: bool = True,
     non_blocking: bool = True,
 ) -> Dict[str, Any]:
@@ -207,7 +207,7 @@ def _gather_state_dict(
     pg: Optional[dist.ProcessGroup] = None,
     device: Optional[torch.device] = None,
     cpu_offload: bool = False,
-    ranks_only: Tuple[int, ...] = tuple(),
+    ranks_only: Tuple[int, ...] = (),
     type_check: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -292,7 +292,7 @@ def _gather_state_dict(
 def _offload_state_dict_to_cpu(
     state_dict: Dict[str, Any],
     *,
-    ranks_only: Tuple[int, ...] = tuple(),
+    ranks_only: Tuple[int, ...] = (),
     type_check: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -371,7 +371,7 @@ def _copy_state_dict(
         pg=None,
         device=None,
         cpu_offload=False,
-        ranks_only=tuple(),
+        ranks_only=(),
         companion_obj=copy_state_dict,
         type_check=type_check,
         non_blocking=non_blocking,
@@ -406,8 +406,17 @@ def _create_cpu_state_dict(
             return torch.tensor(0, dtype=obj.dtype)
 
         if share_memory:
-            t = torch.empty(*tuple(obj.size()), dtype=obj.dtype).share_memory_()
+            t = torch.empty(*tuple(obj.size()), dtype=obj.dtype)
+            t = t.share_memory_()
             if pin_memory:
+
+                def unpin_memory(t):
+                    succ = torch.cuda.cudart().cudaHostUnregister(t.data_ptr())
+                    assert (
+                        succ == 0
+                    ), f"Unpinning shared memory failed with error-code: {succ}"
+
+                weakref.finalize(t, unpin_memory, t)
                 succ = torch.cuda.cudart().cudaHostRegister(
                     t.data_ptr(),
                     t.numel() * t.element_size(),
@@ -430,7 +439,7 @@ def _create_cpu_state_dict(
         pg=None,
         device=None,
         cpu_offload=False,
-        ranks_only=tuple(),
+        ranks_only=(),
         type_check=False,
     )
     return ret
@@ -468,7 +477,7 @@ def _check_state_dict_similarity(
             pg=None,
             device=None,
             cpu_offload=False,
-            ranks_only=tuple(),
+            ranks_only=(),
             companion_obj=compared_state_dict,
             type_check=False,
         )

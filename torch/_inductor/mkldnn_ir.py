@@ -4,7 +4,6 @@ from typing import Any, List, Optional, Set
 import sympy
 
 import torch
-
 from torch._prims_common import make_channels_last_strides_for
 
 from .ir import (
@@ -22,9 +21,7 @@ from .ir import (
     NoneLayout,
     TensorBox,
 )
-
 from .utils import convert_shape_to_inductor, pad_listlike
-
 from .virtualized import V
 
 
@@ -113,7 +110,7 @@ def _prepare_convolution_fusion_create(
         else:
             assert 0 < len(output_padding) <= dims
             output_padding = pad_listlike(output_padding, dims)
-        assert isinstance(groups, int)
+        assert isinstance(groups, (int, sympy.core.numbers.Integer))
         if transposed:
             # When transposed, the size of the prepacked oneDNN weight is different
             # from the PyTorch weight. We're not able to run aten conv with such
@@ -729,8 +726,8 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             algorithm,
         ]
 
-        if output_dtype is not None:
-            assert output_dtype in [torch.float32, torch.bfloat16]
+        assert output_dtype is not None
+        if output_dtype in [torch.float32, torch.bfloat16]:
             # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set output_dtype is not None, the output buf should be output_dtype instead of uint8.
             kernel_layout.dtype = output_dtype
@@ -1309,8 +1306,8 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             post_op_algorithm,
         ]
 
-        if output_dtype is not None:
-            assert output_dtype in [torch.float32, torch.bfloat16]
+        assert output_dtype is not None
+        if output_dtype in [torch.float32, torch.bfloat16]:
             # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
             kernel_layout.dtype = output_dtype
@@ -1374,11 +1371,11 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
                 at::Tensor weight,
                 at::Tensor weight_scales,
                 at::Tensor weight_zero_points,
+                c10::optional<at::Tensor> other,
                 c10::optional<at::Tensor> bias,
                 double inv_output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
-                c10::optional<at::Tensor> other,
                 double other_scale,
                 int64_t other_zero_point,
                 c10::string_view binary_post_op,
@@ -1436,11 +1433,11 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             packed_weight,
             w_scale,
             w_zp,
+            other,
             bias,
             o_scale,
             o_zp,
             output_dtype,
-            other,
             other_scale,
             other_zp,
             binary_attr,
@@ -1470,11 +1467,11 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         qw: "TensorBox",  # packed_weight
         w_scale: "TensorBox",
         w_zero_point: "TensorBox",
+        other: "TensorBox",
         bias: "TensorBox",
         output_scale: float,
         output_zero_point: int,
         output_dtype,
-        other: "TensorBox",
         other_scale,
         other_zp,
         binary_post_op,
@@ -1535,8 +1532,8 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             # Return other since it has been inplace changed.
             return packed.inputs[-1]
 
-        if output_dtype is not None:
-            assert output_dtype in [torch.float32, torch.bfloat16]
+        assert output_dtype is not None
+        if output_dtype in [torch.float32, torch.bfloat16]:
             # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
             kernel_layout.dtype = output_dtype

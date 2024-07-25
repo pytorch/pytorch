@@ -1,4 +1,6 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+r"""Implementation for the NAdam algorithm."""
 from typing import cast, List, Optional, Tuple, Union
 
 import torch
@@ -24,11 +26,11 @@ from .optimizer import (
 __all__ = ["NAdam", "nadam"]
 
 
-class NAdam(Optimizer):
+class NAdam(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
-        lr: float = 2e-3,
+        lr: Union[float, Tensor] = 2e-3,
         betas: Tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0,
@@ -39,7 +41,9 @@ class NAdam(Optimizer):
         maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
-    ):
+    ):  # noqa: D107
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -66,7 +70,7 @@ class NAdam(Optimizer):
         )
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("maximize", False)
@@ -148,7 +152,7 @@ class NAdam(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -248,7 +252,7 @@ NAdam.__doc__ = (
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float, optional): learning rate (default: 2e-3)
+        lr (float, Tensor, optional): learning rate (default: 2e-3)
         betas (Tuple[float, float], optional): coefficients used for computing
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
@@ -594,7 +598,6 @@ def nadam(
 
     See :class:`~torch.optim.NAdam` for details.
     """
-
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"

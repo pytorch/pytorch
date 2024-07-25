@@ -220,7 +220,7 @@ std::optional<IValue> tryCalculateDefaultParam(
       return toIValue(def_value, arg.type());
     }
   } catch (...) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 }
 
@@ -280,7 +280,7 @@ void checkMutableFunctionDefault(
 FunctionSchema getSchemaWithNameAndDefaults(
     const SourceRange& range,
     const FunctionSchema& schema,
-    const at::optional<std::string>& new_name,
+    const std::optional<std::string>& new_name,
     const FunctionDefaults& default_args) {
   std::vector<Argument> new_args;
   for (auto& arg : schema.arguments()) {
@@ -702,13 +702,13 @@ void pyCompilationUnitDefine(
     const ResolutionCallback* rcb,
     const uint32_t _frames_up) {
   if (rcb && *rcb) {
-    cu.define(c10::nullopt, src, pythonResolver(*rcb), nullptr);
+    cu.define(std::nullopt, src, pythonResolver(*rcb), nullptr);
   } else {
     py::object py_default_rcb =
         py::module::import("torch._jit_internal")
             .attr("createResolutionCallbackFromFrame")(_frames_up);
     auto default_rcb = py_default_rcb.cast<ResolutionCallback>();
-    cu.define(c10::nullopt, src, pythonResolver(default_rcb), nullptr);
+    cu.define(std::nullopt, src, pythonResolver(default_rcb), nullptr);
   }
 }
 
@@ -1315,7 +1315,7 @@ void initJitScriptBindings(PyObject* module) {
           "find_method",
           [](mobile::Module& m, const std::string& method_name) {
             auto method = m.find_method(method_name);
-            return method != c10::nullopt;
+            return method != std::nullopt;
           },
           py::arg("method_name"))
       .def(
@@ -1372,7 +1372,7 @@ void initJitScriptBindings(PyObject* module) {
               return std::optional<StrongFunctionPtr>(
                   StrongFunctionPtr(std::move(self), fn));
             } else {
-              return std::optional<StrongFunctionPtr>(c10::nullopt);
+              return std::optional<StrongFunctionPtr>(std::nullopt);
             }
           })
       .def(
@@ -1796,7 +1796,7 @@ void initJitScriptBindings(PyObject* module) {
           method.setSchema(getSchemaWithNameAndDefaults(
               defs_it->range(),
               method.getSchema(),
-              at::nullopt,
+              std::nullopt,
               default_it->second));
           ++defs_it;
         }
@@ -2124,7 +2124,7 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_get_graph_executor_optimize",
-      [](std::optional<bool> new_setting = c10::nullopt) {
+      [](std::optional<bool> new_setting = std::nullopt) {
         bool old_value = getGraphExecutorOptimize();
         if (new_setting) {
           setGraphExecutorOptimize(*new_setting);
@@ -2277,7 +2277,7 @@ void initJitScriptBindings(PyObject* module) {
               method.setSchema(getSchemaWithNameAndDefaults(
                   defs_it->range(),
                   method.getSchema(),
-                  at::nullopt,
+                  std::nullopt,
                   *defaults_it));
               ++defs_it;
               ++defaults_it;

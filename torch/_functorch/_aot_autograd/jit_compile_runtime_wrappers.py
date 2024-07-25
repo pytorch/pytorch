@@ -10,6 +10,7 @@ An aot_dispatch_* function:
 """
 
 import logging
+import traceback
 from contextlib import nullcontext
 
 from typing import Any, Callable, List, Optional, Sequence, Tuple
@@ -574,7 +575,18 @@ def aot_dispatch_autograd(
                         compiled_bw_func = aot_config.bw_compiler(
                             bw_module, placeholder_list
                         )
-                    except Exception:
+                    except Exception as e:
+                        exc = e
+                        trace_structured(
+                            "artifact",
+                            metadata_fn=lambda: {
+                                "name": "eager_compile_backwards_failure",
+                                "encoding": "string",
+                            },
+                            payload_fn=lambda: "\n".join(
+                                traceback.format_exception(exc)
+                            ),
+                        )
                         log.warning(
                             "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
                             exc_info=True,
@@ -593,7 +605,7 @@ def aot_dispatch_autograd(
             # becomes the lazy version again. One example is when dynamic shape is enabled
             # upfront, the bw_compiler will be called above which can cause extra
             # graph module recompilation on bw_module.
-            if torch._dynamo.compiled_autograd.compiled_autograd_enabled_count:
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
                 from torch.fx._lazy_graph_module import _LazyGraphModule
 
                 _LazyGraphModule.force_recompile(bw_module)
