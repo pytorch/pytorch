@@ -708,10 +708,10 @@ def determine_local_world_size(nproc_per_node: str):
             ) from e
 
         logger.info(
-            "Using nproc_per_node=%s," " setting to %s since the instance " "has %s %s",
+            "Using nproc_per_node=%s, setting nproc_per_node to %s since the instance has %s %s",
             nproc_per_node,
             num_proc,
-            os.cpu_count(),
+            num_proc,
             device_type,
         )
         return num_proc
