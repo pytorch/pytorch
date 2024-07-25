@@ -852,6 +852,12 @@ bool is_immutable_object(py::handle example_value) {
       PyUnicode_Check(example_value.ptr()) ||
       THPVariable_Check(example_value.ptr());
 }
+
+bool is_parameter(py::handle tensor) {
+  py::object parameter = py::module::import("torch.nn").attr("Parameter");
+  return py::isinstance(tensor, parameter);
+}
+
 /**
  * Stores relevant guard debug information, e.g., failure str for a LeafGuard
  * failure. The data structure is also accessible in Python.
@@ -2551,6 +2557,12 @@ class TENSOR_MATCH : public LeafGuard {
         _tensor_name);
 
     if (!fail_reason.empty()) {
+      if (is_parameter(py::handle(value))) {
+        fail_reason += ". Guard failed on a parameter, consider using ";
+        fail_reason +=
+            "torch._dynamo.config.force_parameter_static_shapes = False ";
+        fail_reason += "to allow dynamism on parameters.";
+      }
       return GuardDebugInfo(false, fail_reason, 0);
     }
     return GuardDebugInfo(true, 1);
