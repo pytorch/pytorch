@@ -60,6 +60,9 @@ class _ComputationType(Enum):
     RECV_B = 9
     SEND_F_RECV_B = 10
     SEND_B_RECV_F = 11
+    # TODO- probably want to reconsider naming backward_input 'B' and having 'FULL_BACKWARD'.
+    # instead, B = full backward, Bx, Bw are the partials?
+    FULL_BACKWARD = 12
 
     def __str__(self):
         str_map = {
@@ -74,6 +77,7 @@ class _ComputationType(Enum):
             _ComputationType.RECV_B: "RECV_B",
             _ComputationType.SEND_F_RECV_B: "SEND_F_RECV_B",
             _ComputationType.SEND_B_RECV_F: "SEND_B_RECV_F",
+            _ComputationType.FULL_BACKWARD: "BW",
         }
         return str_map[self]
 
@@ -101,6 +105,8 @@ class _ComputationType(Enum):
             return _ComputationType.SEND_F_RECV_B
         elif action == "SEND_B_RECV_F":
             return _ComputationType.SEND_B_RECV_F
+        elif action == "BW":
+            return _ComputationType.FULL_BACKWARD
         else:
             raise RuntimeError(f"Invalid computation type {action}")
 
@@ -116,15 +122,17 @@ SEND_B = _ComputationType.SEND_B
 RECV_B = _ComputationType.RECV_B
 SEND_F_RECV_B = _ComputationType.SEND_F_RECV_B
 SEND_B_RECV_F = _ComputationType.SEND_B_RECV_F
+FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 
 # Convenience shorthand for compute actions only since they are used in 'simple schedule format'
 F = FORWARD
 B = BACKWARD
 W = WEIGHT
+BW = FULL_BACKWARD
 
 # Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
 _action_regex = re.compile(
-    r"(\d+)([F,B,W]|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B{0,1})(\d*)"
+    r"(\d+)(F|B|W|BW|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B{0,1})(\d*)"
 )
 
 
@@ -916,6 +924,38 @@ def _add_unshard_reshard(
     return unshard_actions
 
 
+def _merge_bw(
+    compute_actions: List[Optional[_Action]],
+) -> List[_Action]:
+    """Given a basic schedule involving only compute actions (F,B,W), merge adjacent B and W ops into BW ops.
+
+    BW refers to running the whole backward (not separating grad_input and grad_weight), which can be more efficient
+    in some cases.
+    """
+    merged_actions = []
+    while compute_actions:
+        action = compute_actions.pop(0)
+        if action is None:
+            continue
+
+        while len(compute_actions) and (next_action := compute_actions[0]) is None:
+            # remove any None actions between 'action' and 'next_action'
+            compute_actions.pop(0)
+
+        if (
+            action.computation_type == B
+            and next_action.computation_type == W
+            and action.stage_index == next_action.stage_index
+            and action.microbatch_index == next_action.microbatch_index
+        ):
+            merged_actions.append(
+                _Action(action.stage_index, BW, action.microbatch_index)
+            )
+            compute_actions.pop(0)
+        else:
+            merged_actions.append(action)
+    return merged_actions
+
 def _batch_send_recv(ops, peer_ops):
     # we intentionally mutate ops, peer_ops so the caller knows we consumed them.  maybe i should revsit that.
     new_ops = []
@@ -1089,8 +1129,8 @@ def _add_send_recv(
             progress = True
 
         if not progress:
-            print(f"WIP comms schedule:\n", _format_pipeline_order(comm_actions))
-            print(f"remaining compute actions:\n", compute_actions)
+            print("WIP comms schedule:\n", _format_pipeline_order(comm_actions))
+            print("remaining compute actions:\n", compute_actions)
         assert progress, "Malformed compute schedule, can't schedule sends/recvs"
 
         # comm batching needs to be done carefully to avoid reordering comms and causing a hang
@@ -1284,7 +1324,7 @@ def _simulate_comms_compute(
                 del pipeline_order[i]
 
         if not progress:
-            print(f"WIP comms schedule:\n", _format_pipeline_order(schedule))
+            print("WIP comms schedule:\n", _format_pipeline_order(schedule))
             for rank in pipeline_order:
                 print(f"{rank=} next action= {pipeline_order[rank][0]}")
             breakpoint()
@@ -1292,23 +1332,28 @@ def _simulate_comms_compute(
 
     return schedule
 
-def _dump_chrometrace(schedule, filename):
 
+def _dump_chrometrace(schedule, filename):
     events = []
     for rank in sorted(schedule):
         for timestep, action in enumerate(schedule[rank]):
             if action is None:
                 continue
-            events.append({
-                "name": str(action),
-                "cat": "computation" if action.computation_type in (F, B, W) else "communication",
-                "ph": "X",
-                "pid": rank,
-                "tid": rank,
-                "ts": timestep,
-                "dur": 1
-            })
+            events.append(
+                {
+                    "name": str(action),
+                    "cat": "computation"
+                    if action.computation_type in (F, B, W)
+                    else "communication",
+                    "ph": "X",
+                    "pid": rank,
+                    "tid": rank,
+                    "ts": timestep,
+                    "dur": 1,
+                }
+            )
     import json
+
     with open(filename, "w") as f:
         json.dump({"traceEvents": events}, f)
 
