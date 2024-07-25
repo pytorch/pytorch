@@ -1,8 +1,8 @@
 import random
 
-from ..benchmark_base import Benchmark
-
 import torch
+
+from ..benchmark_base import Benchmark
 
 
 class P0(Benchmark):
