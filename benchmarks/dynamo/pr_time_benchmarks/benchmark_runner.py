@@ -16,7 +16,7 @@ def main(output_file_name):
                 print("running benchmark:", filename)
                 # Run the Python program and capture the output
                 output = subprocess.check_output(
-                    ["python", os.path.join(folder_path, filename)]
+                    ["sudo", "python3", os.path.join(folder_path, filename)]
                 )
                 # Write the output to the output file
                 output_file.write(f"{filename}:\n{output.decode()}\n")
