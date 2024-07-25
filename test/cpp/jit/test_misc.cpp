@@ -1937,7 +1937,7 @@ TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   ASSERT_NE(guard, nodes.end());
   ASSERT_EQ(
       guard->input()->type()->expectRef<TensorType>().sizes().size(),
-      c10::nullopt);
+      std::nullopt);
   checkShape(*guard, {2, 3}, false);
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
   int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
@@ -2907,7 +2907,7 @@ TEST(TestConstant, TensorGrad) {
   auto graph = std::make_shared<Graph>();
   IValue ten = torch::randn({3, 5}).requires_grad_(true);
   auto con = tryInsertConstant(*graph, ten);
-  ASSERT_TRUE(con == c10::nullopt);
+  ASSERT_TRUE(con == std::nullopt);
 }
 
 TEST(TestMutation, Basic) {

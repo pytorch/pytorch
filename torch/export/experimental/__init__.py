@@ -31,7 +31,10 @@ def _export_forward_backward(
     from torch._decomp import core_aten_decompositions
 
     ep = _decompose_exported_program(
-        ep, decomp_table=core_aten_decompositions(), joint_loss_index=joint_loss_index
+        ep,
+        decomp_table=core_aten_decompositions(),
+        _preserve_ops=(),  # type: ignore[arg-type]
+        joint_loss_index=joint_loss_index,
     )
     gm = copy.deepcopy(ep.graph_module)
     new_graph_signature = copy.deepcopy(ep.graph_signature)

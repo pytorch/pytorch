@@ -14,7 +14,13 @@ aten = torch.ops.aten
 
 
 @register_op_strategy(
-    [aten.normal_.default, aten.uniform_.default, aten.native_dropout.default]
+    [
+        aten.normal_.default,
+        aten.uniform_.default,
+        aten.native_dropout.default,
+        aten.bernoulli_.float,
+        aten.bernoulli.default,
+    ]
 )
 def random_op_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     self_strategy = op_schema.args_schema[0]

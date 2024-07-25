@@ -3,9 +3,9 @@
 #include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <cstdint>
+#include <optional>
 #include <ostream>
 #include <utility>
 
@@ -68,7 +68,7 @@ class C10_API SymBool {
 
   std::optional<bool> maybe_as_bool() const {
     if (!is_heap_allocated()) {
-      return c10::make_optional(data_);
+      return std::make_optional(data_);
     }
     return toSymNodeImplUnowned()->constant_bool();
   }

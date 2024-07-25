@@ -440,7 +440,7 @@ inline at::Tensor newLikeFlat(
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   strides.insert(strides.end(), t.strides().begin(), t.strides().end());
   return at::empty_strided(
-      sizes, strides, t.options().memory_format(c10::nullopt));
+      sizes, strides, t.options().memory_format(std::nullopt));
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
@@ -647,7 +647,7 @@ void sendBytes(
     SYSCHECK_ERR_RETURN_NEG1(
         bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
-      C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
+      C10_THROW_ERROR(DistNetworkError, "failed to send, sent 0 bytes");
     }
 
     bytesToSend -= bytesSent;
@@ -669,7 +669,7 @@ void recvBytes(int socket, T* buffer, size_t length) {
     SYSCHECK_ERR_RETURN_NEG1(
         bytesReceived = recv(socket, currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
-      C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
+      C10_THROW_ERROR(DistNetworkError, "failed to recv, got 0 bytes");
     }
 
     bytesToReceive -= bytesReceived;

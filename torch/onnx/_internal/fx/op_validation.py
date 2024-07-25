@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import logging
-
 from typing import Any, Callable, Dict, List, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
@@ -12,7 +11,6 @@ from onnxscript import evaluator  # type: ignore[import]
 
 import torch
 import torch.fx
-
 from torch.fx.experimental import symbolic_shapes
 from torch.onnx import _constants, _type_utils as jit_type_utils
 from torch.onnx._internal import _beartype
@@ -364,8 +362,10 @@ def _convert_torch_args_to_onnxfunction_args(
 def _convert_tensor_to_numpy(input: fx_type_utils.Argument) -> Any:
     try:
         import numpy as np
-    except ImportError as exc:
-        raise ImportError(f"{__name__} needs numpy, but it's not installed.") from exc
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            f"{__name__} needs numpy, but it's not installed."
+        ) from exc
 
     if isinstance(input, torch.Tensor):
         if torch.is_complex(input):
