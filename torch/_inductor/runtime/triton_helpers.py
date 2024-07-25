@@ -488,7 +488,7 @@ def _bitonic_merge_with_index(
 def sort_with_index(
     x,  # value
     idxs,  # index
-    rnumel, # number of elements
+    rnumel,  # number of elements
     dim: tl.constexpr = None,
     stable: tl.constexpr = tl.constexpr(False),
     descending: tl.constexpr = tl.constexpr(False),
