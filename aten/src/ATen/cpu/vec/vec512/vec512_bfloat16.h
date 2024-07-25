@@ -1374,9 +1374,8 @@ inline void transpose_mxn<BFloat16, 32, 32>(
   }
 }
 
-template <typename T, int M, int N,
-          typename std::enable_if_t<std::is_same<T, BFloat16>::value && ((M < 32 && M != 16) || (N < 32 && N != 16)), int> = 0>
-inline void transpose_mxn(const BFloat16* src, int64_t ld_src, BFloat16* dst, int64_t ld_dst) {
+template<>
+inline void transpose_mxn<BFloat16>(const BFloat16* src, int64_t ld_src, BFloat16* dst, int64_t ld_dst, int M, int N) {
   // load from src
   __mmask32 src_mask = (1 << N) - 1;
   __m512i r[32];
@@ -1396,6 +1395,12 @@ inline void transpose_mxn(const BFloat16* src, int64_t ld_src, BFloat16* dst, in
   for (i = 0; i < N; ++i) {
     _mm512_mask_storeu_epi16(&dst[i * ld_dst], dst_mask, d[i]);
   }
+}
+
+template <typename T, int64_t M, int64_t N,
+          typename std::enable_if_t<std::is_same<T, BFloat16>::value && ((M < 32 && M != 16) || (N < 32 && N != 16)), int> = 0>
+inline void transpose_mxn(const BFloat16* src, int64_t ld_src, BFloat16* dst, int64_t ld_dst) {
+  transpose_mxn<BFloat16>(src, ld_src, dst, ld_dst, M, N);
 }
 
 template<>
@@ -1425,9 +1430,8 @@ inline void transpose_mxn<Half, 32, 32>(
   }
 }
 
-template <typename T, int M, int N,
-          typename std::enable_if_t<std::is_same<T, Half>::value && ((M < 32 && M != 16) || (N < 32 && N != 16)), int> = 0>
-inline void transpose_mxn(const Half* src, int64_t ld_src, Half* dst, int64_t ld_dst) {
+template<>
+inline void transpose_mxn<Half>(const Half* src, int64_t ld_src, Half* dst, int64_t ld_dst, int M, int N) {
   // load from src
   __mmask32 src_mask = (1 << N) - 1;
   __m512i r[32];
@@ -1447,6 +1451,12 @@ inline void transpose_mxn(const Half* src, int64_t ld_src, Half* dst, int64_t ld
   for (i = 0; i < N; ++i) {
     _mm512_mask_storeu_epi16(&dst[i * ld_dst], dst_mask, d[i]);
   }
+}
+
+template <typename T, int M, int N,
+          typename std::enable_if_t<std::is_same<T, Half>::value && ((M < 32 && M != 16) || (N < 32 && N != 16)), int> = 0>
+inline void transpose_mxn(const Half* src, int64_t ld_src, Half* dst, int64_t ld_dst) {
+  transpose_mxn<Half>(src, ld_src, dst, ld_dst, M, N);
 }
 
 template <>
