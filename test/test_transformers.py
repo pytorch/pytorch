@@ -121,10 +121,10 @@ def _check_equal(
 
 def check_out_and_grad(
     out_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    query_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    key_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    value_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    attn_mask_tuple: Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = None,
+    grad_query_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_key_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_value_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_attn_mask_tuple: Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = None,
     fudge_factors: Optional[Dict[str, float]] = None
 ) -> None:
     """
@@ -132,10 +132,10 @@ def check_out_and_grad(
     Compares compiled results against reference and low-precision reference tensors.
 
     :param out_tuple: Tuple of (ref, lp_ref, compiled) for output tensor
-    :param query_tuple: Tuple of (ref, lp_ref, compiled) for query tensor
-    :param key_tuple: Tuple of (ref, lp_ref, compiled) for key tensor
-    :param value_tuple: Tuple of (ref, lp_ref, compiled) for value tensor
-    :param attn_mask_tuple: Optional tuple of (ref, lp_ref, compiled) for attention mask tensor
+    :param grad_query_tuple: Tuple of (ref, lp_ref, compiled) for query gradient
+    :param grad_key_tuple: Tuple of (ref, lp_ref, compiled) for key gradient
+    :param grad_value_tuple: Tuple of (ref, lp_ref, compiled) for value gradient
+    :param grad_attn_mask_tuple: Optional tuple of (ref, lp_ref, compiled) for attention mask gradient
     :param fudge_factors: Dictionary of fudge factors for each tensor type (default uses 5.0 for all)
     """
     default_fudge_factor = 5.0
@@ -143,28 +143,26 @@ def check_out_and_grad(
         fudge_factors = {}
 
     out_ref, out_lp_ref, out = out_tuple
-    query_ref, query_ref_lp, query = query_tuple
-    key_ref, key_ref_lp, key = key_tuple
-    value_ref, value_ref_lp, value = value_tuple
 
     with torch.no_grad():
         _check_equal(out_ref, out_lp_ref, out, fudge_factors.get('out', default_fudge_factor), "Out")
 
         grad_checks = [
-            (query_ref.grad, query_ref_lp.grad, query.grad, "Grad_Query"),
-            (key_ref.grad, key_ref_lp.grad, key.grad, "Grad_Key"),
-            (value_ref.grad, value_ref_lp.grad, value.grad, "Grad_Value")
+            (grad_query_tuple, "Grad_Query"),
+            (grad_key_tuple, "Grad_Key"),
+            (grad_value_tuple, "Grad_Value")
         ]
 
-        for ref_grad, lp_ref_grad, comp_grad, name in grad_checks:
+        for grad_tuple, name in grad_checks:
+            ref_grad, lp_ref_grad, comp_grad = grad_tuple
             _check_equal(ref_grad, lp_ref_grad, comp_grad, fudge_factors.get(name.lower(), default_fudge_factor), name)
 
-        if attn_mask_tuple:
-            attn_mask_ref, attn_mask_ref_lp, attn_mask = attn_mask_tuple
+        if grad_attn_mask_tuple:
+            attn_mask_ref_grad, attn_mask_ref_lp_grad, attn_mask_grad = grad_attn_mask_tuple
             _check_equal(
-                attn_mask_ref.grad,
-                attn_mask_ref_lp.grad,
-                attn_mask.grad,
+                attn_mask_ref_grad,
+                attn_mask_ref_lp_grad,
+                attn_mask_grad,
                 fudge_factors.get("grad_attn_mask", default_fudge_factor),
                 "Grad_Attn_Mask",
             )
@@ -2769,9 +2767,6 @@ class TestSDPACudaOnly(NNTestCase):
         value = torch.rand(batch_size, n_heads, seq_len_k, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
 
-        # Run the math kernel on low precision references
-        query_ref_lp, key_ref_lp, value_ref_lp = query_key_value_clones(query, key, value, dtype=dtype)
-
         higher_precision_dtype = torch.float64
         query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
 
@@ -2787,7 +2782,7 @@ class TestSDPACudaOnly(NNTestCase):
                 out_ref = F.scaled_dot_product_attention(query_ref, key_ref, value_ref,
                                                          dropout_p=dropout_p, is_causal=is_causal, scale=scale)
                 # Low Precision Math Reference
-                out_lp_ref = F.scaled_dot_product_attention(query_ref_lp, key_ref_lp, value_ref_lp,
+                out_lp_ref = F.scaled_dot_product_attention(query, key, value,
                                                             dropout_p=dropout_p, is_causal=is_causal, scale=scale)
         else:
             if seq_len_q > 1024:
@@ -2800,21 +2795,19 @@ class TestSDPACudaOnly(NNTestCase):
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, scale=scale, dropout_mask=dropout_mask)[0]
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
+                query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
                 dropout_mask=dropout_mask)[0]
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
-        out.backward(upstream_grad)
-        out_ref.backward(upstream_grad.to(out_ref.dtype))
-        out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
+        grads = torch.autograd.grad(out, (query, key, value), upstream_grad)
+        grads_ref_lp = torch.autograd.grad(out_lp_ref, (query, key, value), upstream_grad)
+        grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref), upstream_grad)
 
         dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
-            (query_ref, query_ref_lp, query),
-            (key_ref, key_ref_lp, key),
-            (value_ref, value_ref_lp, value),
+            *zip(grads_ref, grads_ref_lp, grads),
             fudge_factors={
                 'out': 1.5 * dropout_fudge_factor,
                 'grad_query': 18.0 * dropout_fudge_factor,
@@ -2866,9 +2859,6 @@ class TestSDPACudaOnly(NNTestCase):
 
         attn_mask = torch.rand(seq_len_q, seq_len_k, device=device, dtype=dtype, requires_grad=True)
 
-        # Run the math kernel on low precision references
-        query_ref_lp, key_ref_lp, value_ref_lp = query_key_value_clones(query, key, value, dtype=dtype)
-        attn_mask_ref_lp = attn_mask.detach().to(dtype).requires_grad_(True)
 
         higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
         query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
@@ -2887,7 +2877,7 @@ class TestSDPACudaOnly(NNTestCase):
                 out_ref = F.scaled_dot_product_attention(query_ref, key_ref, value_ref, attn_mask_ref,
                                                          dropout_p=dropout_p, is_causal=is_causal, scale=scale)
                 # Low Precision Math Reference
-                out_lp_ref = F.scaled_dot_product_attention(query_ref_lp, key_ref_lp, value_ref_lp, attn_mask_ref_lp,
+                out_lp_ref = F.scaled_dot_product_attention(query, key, value, attn_mask,
                                                             dropout_p=dropout_p, is_causal=is_causal, scale=scale)
         else:
             if seq_len_q > 1024:
@@ -2902,23 +2892,20 @@ class TestSDPACudaOnly(NNTestCase):
                 scale=scale, dropout_mask=dropout_mask)[0]
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query_ref_lp, key_ref_lp, value_ref_lp, attn_mask_ref_lp,
+                query, key, value, attn_mask,
                 dropout_p=dropout_p, is_causal=is_causal, scale=scale,
                 dropout_mask=dropout_mask)[0]
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
-        out.backward(upstream_grad)
-        out_ref.backward(upstream_grad.to(out_ref.dtype))
-        out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
+        grads = torch.autograd.grad(out, (query, key, value, attn_mask), upstream_grad)
+        grads_ref_lp = torch.autograd.grad(out_lp_ref, (query, key, value, attn_mask), upstream_grad)
+        grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref, attn_mask_ref), upstream_grad)
 
         dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
-            (query_ref, query_ref_lp, query),
-            (key_ref, key_ref_lp, key),
-            (value_ref, value_ref_lp, value),
-            (attn_mask_ref, attn_mask_ref_lp, attn_mask),
+            *zip(grads_ref, grads_ref_lp, grads),
             fudge_factors={
                 "out": 1.5 * dropout_fudge_factor,
                 "grad_query": 18.0 * dropout_fudge_factor,
@@ -2957,9 +2944,6 @@ class TestSDPACudaOnly(NNTestCase):
         value = torch.rand(batch_size, n_heads, seq_len_k, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
 
-        # Run the math kernel on low precision references
-        query_ref_lp, key_ref_lp, value_ref_lp = query_key_value_clones(query, key, value, dtype=dtype)
-
         higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
         query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
 
@@ -2974,7 +2958,7 @@ class TestSDPACudaOnly(NNTestCase):
                     query_ref, key_ref, value_ref, is_causal=is_causal, scale=scale)
                 # Low Precision Math Reference
                 out_lp_ref = F.scaled_dot_product_attention(
-                    query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal, scale=scale)
+                    query, key, value, is_causal=is_causal, scale=scale)
         else:
             # Problem: We pad sizes in the composite region of the top level SDPA. But we need the
             # Debug mask when have dropout. So I am going to manualy pad up here when testing dropout
@@ -3004,7 +2988,7 @@ class TestSDPACudaOnly(NNTestCase):
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, scale=scale, dropout_mask=dropout_mask)[0]
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
+                query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
                 dropout_mask=dropout_mask)[0]
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
@@ -3013,16 +2997,15 @@ class TestSDPACudaOnly(NNTestCase):
         if isSM8XDevice and head_dim in range(193, 256):
             self.assertRaises(RuntimeError, lambda: out.backward(upstream_grad))
             return
-        out.backward(upstream_grad)
-        out_ref.backward(upstream_grad.to(out_ref.dtype))
-        out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
+        grads = torch.autograd.grad(out, (query, key, value), upstream_grad)
+        grads_ref_lp = torch.autograd.grad(out_lp_ref, (query, key, value), upstream_grad)
+        grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref), upstream_grad)
         dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
+
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
-            (query_ref, query_ref_lp, query),
-            (key_ref, key_ref_lp, key),
-            (value_ref, value_ref_lp, value),
+            *zip(grads_ref, grads_ref_lp, grads),
             fudge_factors={
                 'out': 1.5 * dropout_fudge_factor,
                 'grad_query': 12.0 * dropout_fudge_factor,
@@ -3092,8 +3075,6 @@ class TestSDPACudaOnly(NNTestCase):
         fused_op = (torch.ops.aten._scaled_dot_product_efficient_attention
                     if fused_kernel == SDPBackend.EFFICIENT_ATTENTION else torch.ops.aten._scaled_dot_product_flash_attention
                     if fused_kernel == SDPBackend.FLASH_ATTENTION else torch.ops.aten._scaled_dot_product_cudnn_attention)
-        # Run the math kernel on low precision references
-        query_ref_lp, key_ref_lp, value_ref_lp = query_key_value_clones(query, key, value, dtype=dtype)
 
         higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
         query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
@@ -3149,7 +3130,7 @@ class TestSDPACudaOnly(NNTestCase):
                 out_ref = F.scaled_dot_product_attention(query_ref, key_ref, value_ref,
                                                          dropout_p=dropout_p, is_causal=is_causal, scale=scale)
                 # Low Precision Math Reference
-                out_lp_ref = F.scaled_dot_product_attention(query_ref_lp, key_ref_lp, value_ref_lp,
+                out_lp_ref = F.scaled_dot_product_attention(query, key, value,
                                                             dropout_p=dropout_p, is_causal=is_causal, scale=scale)
             # cuDNN attention doesn't support returning dropout mask
             elif fused_kernel != SDPBackend.CUDNN_ATTENTION:
@@ -3162,27 +3143,25 @@ class TestSDPACudaOnly(NNTestCase):
                     scale=scale, dropout_mask=dropout_mask)[0]
                 # Low Precision Math Reference
                 out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                    query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
+                    query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
                     dropout_mask=dropout_mask)[0]
 
         g1 = torch.cuda.CUDAGraph()
         with torch.cuda.graph(g1):
-            out.backward(upstream_grad)
+            grads = torch.autograd.grad(out, (query, key, value), upstream_grad)
         g1.replay()
         if fused_kernel != SDPBackend.CUDNN_ATTENTION or dropout_p == 0.0:
-            out_ref.backward(upstream_grad.to(out_ref.dtype))
-            out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
+            grads_ref_lp = torch.autograd.grad(out_lp_ref, (query, key, value), upstream_grad)
+            grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref), upstream_grad)
 
             dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
             check_out_and_grad(
                 (out_ref, out_lp_ref, out),
-                (query_ref, query_ref_lp, query),
-                (key_ref, key_ref_lp, key),
-                (value_ref, value_ref_lp, value),
+                *zip(grads_ref, grads_ref_lp, grads),
                 fudge_factors={
                     'out': 1.5 * dropout_fudge_factor,
                     'grad_query': 12.0 * dropout_fudge_factor,
-                    'grad_key': 20 * dropout_fudge_factor,
+                    'grad_key': 2.0 * dropout_fudge_factor,
                     'grad_value': 1.5 * dropout_fudge_factor,
                 }
             )
