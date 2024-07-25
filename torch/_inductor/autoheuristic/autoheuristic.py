@@ -1,5 +1,6 @@
 import json
 import os
+from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
@@ -253,35 +254,48 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
             precondition,
         )
 
-        if self.satisfies_precondition():
+        if (
+            torch._inductor.config.collect_autoheuristic(self.name)
+            and self.satisfies_precondition()
+        ):
             self.register_global_feedback(input_nodes, choices)
 
     def register_global_feedback(
         self, input_nodes: List[Any], choices: List[ChoiceCaller]
     ) -> None:
         """
-        This function registers a callback in select_algorithm's autoheuristic_registry. The key is the precompile_key
-        computed from self.name, inputs_key and choices. When select_algorithm finds a precompile_key in the
-        autoheuristic_registry, it will call the callback with a list of (choice, time) tuples. Autoheuristic will
-        then store save the feedback to a file.
+        Registers a callback in select_algorithm, which is called with the timing of each choice.
         """
 
         from torch._inductor.select_algorithm import (
-            autoheuristic_registry,
+            add_feedback_saver,
             create_inputs_key,
             create_precompile_key,
         )
 
-        inputs_key = create_inputs_key(input_nodes)
-        precompile_key = create_precompile_key(self.name, inputs_key, choices)
-
         def store_global_feedback(
-            ah_feedback: List[Tuple[ChoiceCaller, float]]
+            ah_inputs_key: str,
+            ah_precompile_key: str,
+            timings: Dict[ChoiceCaller, float],
+            name: str,
+            input_nodes: List[Any],
+            choices: List[ChoiceCaller],
         ) -> None:
-            for choice, time in ah_feedback:
+            current_inputs_key = create_inputs_key(input_nodes)
+            if current_inputs_key != ah_inputs_key:
+                return
+            current_precompile_key = create_precompile_key(
+                name, current_inputs_key, choices
+            )
+            if current_precompile_key != ah_precompile_key:
+                return
+            for choice, time in timings.items():
                 self.save_data(choice.autoheuristic_id(), time)
 
-        autoheuristic_registry[precompile_key] = store_global_feedback
+        inputs_key = create_inputs_key(input_nodes)
+        precompile_key = create_precompile_key(self.name, inputs_key, choices)
+        feedback_saver = partial(store_global_feedback, inputs_key, precompile_key)
+        add_feedback_saver(feedback_saver)
 
     def get_choice_caller(self) -> Optional[ChoiceCaller]:
         choice = self.get_choice()
