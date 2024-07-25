@@ -446,8 +446,9 @@ def make_pointwise(
                 other.get_size()
             ), f"ndim mismatch {fn} {ranges} {other.get_size()}"
 
-        emulate_precision_casts = V.graph.current_node.meta.get(
-            "low_precision_pointwise_barrier", False
+        emulate_precision_casts = (
+            V.graph.current_node.meta is not None
+            and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
         )
 
         def inner_fn(index):
