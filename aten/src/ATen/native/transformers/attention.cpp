@@ -616,6 +616,7 @@ Tensor _safe_softmax(
     const Tensor& mask,
     int64_t dim,
     const c10::optional<ScalarType> dtype) {
+  TORCH_CHECK(self.is_floating_point(), "Expected softmax matrix to be floating point, but got ", self.dtype());
   const auto attn_mask_float = convert_boolean_attn_mask(self, self.dtype());
   TORCH_INTERNAL_ASSERT(attn_mask_float.has_value(), "Execpted attn_mask to return a tensor!");
   auto out = at::softmax(self + attn_mask_float.value(), dim);
