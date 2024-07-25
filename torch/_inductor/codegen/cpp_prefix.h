@@ -49,7 +49,10 @@ template <typename T>
 struct Welford {
   T mean = T(0);
   T m2 = T(0);
-  int64_t index = 0;
+  // Use weight for tail cases since the index of each element in the vec may be
+  // different. A single index can not express masked welford reduction.
+  T weight = T(0);
+  uint64_t index = 0;
 };
 
 
@@ -64,9 +67,8 @@ struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
 template <typename T>
 struct WeightRecp {
   using scalar_t = typename T::value_type;
-  int64_t N;
   std::vector<scalar_t> weight_recps;
-  WeightRecp(int64_t N) : N(N) {
+  WeightRecp(uint64_t N) {
     weight_recps.reserve(N);
     for (const auto i : c10::irange(N)) {
       weight_recps.push_back(
@@ -76,7 +78,7 @@ struct WeightRecp {
 };
 
 template <typename T>
-Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
+Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_index=false) {
   if (a.index == 0) {
     return b;
   }
@@ -84,38 +86,92 @@ Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
     return a;
   }
   auto delta = b.mean - a.mean;
+  auto a_weight = use_index ? T(a.index) : a.weight;
+  auto b_weight = use_index ? T(b.index) : b.weight;
+  auto new_weight = a_weight + b_weight;
   auto new_index = a.index + b.index;
-  auto wb_over_w = T(b.index) / T(new_index);
+  auto wb_over_w = b_weight / new_weight;
+  if constexpr (IsVecType<T>::value) {
+    // Guard against division by zero
+    wb_over_w = T::blendv(wb_over_w, T(0), new_weight == T(0));
+  }
   auto result = Welford<T>{
     a.mean + delta * wb_over_w,
-    a.m2 + b.m2 + delta * delta * T(a.index) * wb_over_w,
-    new_index,
+    a.m2 + b.m2 + delta * delta * a_weight * wb_over_w,
+    new_weight,
+    new_index
   };
   return result;
 }
 
 template <typename T>
-Welford<T> welford_combine(const Welford<T> &acc, T data, const WeightRecp<T>* w=nullptr) {
+Welford<T> welford_combine(const Welford<T>& acc, const T& data, const WeightRecp<T>* w=nullptr) {
   // Add a single data point
-  int64_t index = acc.index + 1;
+  uint64_t new_index = acc.index + 1;
+  auto new_weight = acc.weight + T(1);
   auto delta = data - acc.mean;
   T new_mean;
   if constexpr (!IsVecType<T>::value) {
-    new_mean = acc.mean + delta / T(index);
+    new_mean = acc.mean + delta / new_weight;
   } else {
+    // use new_index to fecth 1 / new_weight to avoid divisions
     new_mean = acc.mean +
       ((w == nullptr || acc.index >= w->weight_recps.size())
-            ? delta / T(index)
+            ? delta / new_weight
             : delta * T(w->weight_recps[acc.index]));
   }
   auto new_delta = data - new_mean;
   auto result = Welford<T>{
     new_mean,
     acc.m2 + delta * new_delta,
-    index
+    new_weight,
+    new_index
   };
   return result;
 }
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+Welford<T> welford_combine(const Welford<T>& acc, const T& data, const int64_t tail_size, const WeightRecp<T>* w=nullptr) {
+  auto out = welford_combine(acc, data, w);
+  return Welford<T>{
+    T::set(acc.mean, out.mean, tail_size),
+    T::set(acc.m2, out.m2, tail_size),
+    T::set(acc.weight, out.weight, tail_size),
+    out.index
+  };
+}
+
+template <typename T>
+T max_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+  auto out = at::vec::maximum(a, b);
+  return T::set(a, out, tail_size);
+}
+
+template <typename T>
+T min_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+  auto out = at::vec::minimum(a, b);
+  return T::set(a, out, tail_size);
+}
+
+template <typename T>
+T sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+  auto out = a + b;
+  return T::set(a, out, tail_size);
+}
+
+template <typename T>
+T prod_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+  auto out = a * b;
+  return T::set(a, out, tail_size);
+}
+
+template <typename T>
+T xor_sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+  auto out = a ^ b;
+  return T::set(a, out, tail_size);
+}
+#endif
 
 // Refer to https://github.com/pytorch/pytorch/blob/b5b36cf0c4e1958f1ff25120f5d4beeef3288187/
 // aten/src/ATen/native/SharedReduceOps.h#L419-L445
@@ -196,17 +252,22 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
 template <typename scalar_t>
 Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc) {
   using Vec = at::vec::Vectorized<scalar_t>;
+  Welford<scalar_t> result;
+  if (acc.index == 0) {
+    return result;
+  }
+  // if all values of acc.weight are same as index,
+  // use index to reduce to save the overhead of vec_shuffle_down for acc.weight
+  bool use_index = (acc.weight - Vec(acc.index)).zero_mask() == static_cast<int>((1 << Vec::size()) - 1);
   for (size_t n = 1; n < Vec::size(); n *= 2) {
-    auto index = acc.index;
     auto shuffled = Welford<Vec>{
       vec_shuffle_down(acc.mean, n),
       vec_shuffle_down(acc.m2, n),
-      index,
-    };
-    acc = welford_combine(acc, shuffled);
+      use_index ? Vec(0) : vec_shuffle_down(acc.weight, n),
+      acc.index};
+    acc = welford_combine(acc, shuffled, use_index);
   }
 
-  Welford<scalar_t> result;
   alignas(alignof(Vec)) scalar_t array[Vec::size()];
   acc.mean.store(array);
   result.mean = array[0];
@@ -214,7 +275,9 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
   acc.m2.store(array);
   result.m2 = array[0];
 
-  result.index = acc.index;
+  acc.weight.store(array);
+  result.weight = array[0];
+  result.index = result.weight;
 
   return result;
 }
