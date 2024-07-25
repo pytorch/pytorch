@@ -4,6 +4,23 @@ This package implements abstractions found in ``torch.cuda``
 to facilitate writing device-agnostic code.
 """
 
+__all__ = [
+    # submodules
+    "amp",
+    # Classes
+    "Event",
+    "Stream",
+    "StreamContext",
+    # Functions
+    "current_device",
+    "current_stream",
+    "device_count",
+    "is_available",
+    "set_device",
+    "stream",
+    "synchronize",
+]
+
 from contextlib import AbstractContextManager
 from typing import Any, Optional, Union
 
@@ -11,20 +28,6 @@ import torch
 
 from .. import device as _device
 from . import amp
-
-
-__all__ = [
-    "is_available",
-    "synchronize",
-    "current_device",
-    "current_stream",
-    "stream",
-    "set_device",
-    "device_count",
-    "Stream",
-    "StreamContext",
-    "Event",
-]
 
 _device_t = Union[_device, str, int, None]
 

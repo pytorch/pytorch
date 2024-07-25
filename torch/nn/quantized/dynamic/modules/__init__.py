@@ -8,6 +8,21 @@ appropriate file under the `torch/ao/nn/quantized/dynamic`,
 while adding an import statement here.
 """
 
+__all__ = [
+    "Linear",
+    "LSTM",
+    "GRU",
+    "LSTMCell",
+    "RNNCell",
+    "GRUCell",
+    "Conv1d",
+    "Conv2d",
+    "Conv3d",
+    "ConvTranspose1d",
+    "ConvTranspose2d",
+    "ConvTranspose3d",
+]
+
 from torch.ao.nn.quantized.dynamic.modules import conv, linear, rnn
 from torch.ao.nn.quantized.dynamic.modules.conv import (
     Conv1d,
@@ -25,19 +40,3 @@ from torch.ao.nn.quantized.dynamic.modules.rnn import (
     LSTMCell,
     RNNCell,
 )
-
-
-__all__ = [
-    "Linear",
-    "LSTM",
-    "GRU",
-    "LSTMCell",
-    "RNNCell",
-    "GRUCell",
-    "Conv1d",
-    "Conv2d",
-    "Conv3d",
-    "ConvTranspose1d",
-    "ConvTranspose2d",
-    "ConvTranspose3d",
-]

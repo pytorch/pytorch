@@ -5,6 +5,16 @@ optimizer locally on the workers where the parameters live.  The distributed
 optimizer can use any of the local optimizer :ref:`optimizer-algorithms` to
 apply the gradients on each worker.
 """
+
+__all__ = [
+    # Classes
+    "DistributedOptimizer",
+    "PostLocalSGDOptimizer",
+    "ZeroRedundancyOptimizer",
+    # Functions
+    "as_functional_optim",
+]
+
 import warnings
 
 import torch
@@ -43,11 +53,3 @@ if hasattr(torch._C, "_rpc_init"):
 
 from .post_localSGD_optimizer import PostLocalSGDOptimizer
 from .zero_redundancy_optimizer import ZeroRedundancyOptimizer
-
-
-__all__ = [
-    "as_functional_optim",
-    "DistributedOptimizer",
-    "PostLocalSGDOptimizer",
-    "ZeroRedundancyOptimizer",
-]

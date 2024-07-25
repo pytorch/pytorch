@@ -128,6 +128,22 @@ of the following implementations that come with PyTorch:
      )
 """
 
+__all__ = [
+    "RendezvousClosedError",
+    "RendezvousConnectionError",
+    "RendezvousError",
+    "RendezvousGracefulExitError",
+    "RendezvousHandler",
+    "RendezvousHandlerCreator",
+    "RendezvousHandlerRegistry",
+    "RendezvousInfo",
+    "RendezvousParameters",
+    "RendezvousStateError",
+    "RendezvousStoreInfo",
+    "RendezvousTimeoutError",
+    "rendezvous_handler_registry",
+]
+
 from .api import (
     rendezvous_handler_registry,
     RendezvousClosedError,
@@ -145,22 +161,4 @@ from .api import (
 )
 from .registry import _register_default_handlers
 
-
 _register_default_handlers()
-
-
-__all__ = [
-    "RendezvousClosedError",
-    "RendezvousConnectionError",
-    "RendezvousError",
-    "RendezvousGracefulExitError",
-    "RendezvousHandler",
-    "RendezvousHandlerCreator",
-    "RendezvousHandlerRegistry",
-    "RendezvousInfo",
-    "RendezvousParameters",
-    "RendezvousStateError",
-    "RendezvousStoreInfo",
-    "RendezvousTimeoutError",
-    "rendezvous_handler_registry",
-]

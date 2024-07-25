@@ -1,3 +1,10 @@
+__all__ = [
+    "MaskedTensor",
+    "as_masked_tensor",
+    "is_masked_tensor",
+    "masked_tensor",
+]
+
 from torch.masked._ops import (
     _canonical_dim,
     _combine_input_and_mask,
@@ -28,11 +35,3 @@ from torch.masked._ops import (
 )
 from torch.masked.maskedtensor.core import is_masked_tensor, MaskedTensor
 from torch.masked.maskedtensor.creation import as_masked_tensor, masked_tensor
-
-
-__all__ = [
-    "as_masked_tensor",
-    "is_masked_tensor",
-    "masked_tensor",
-    "MaskedTensor",
-]

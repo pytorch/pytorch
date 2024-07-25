@@ -1,13 +1,15 @@
 # mypy: allow-untyped-defs
+__all__ = [
+    "bench_all",
+    "bench_loop",
+]
+
 from typing import Any, Callable, cast, List, Optional, Union
 
 import torch
 import torch._dynamo
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch.utils.benchmark import Timer
-
-
-__all__ = ["bench_all", "benchmark_compile"]
 
 
 _warned_tensor_cores = False

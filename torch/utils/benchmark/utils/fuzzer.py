@@ -1,4 +1,11 @@
 # mypy: allow-untyped-defs
+__all__ = [
+    "FuzzedParameter",
+    "FuzzedTensor",
+    "Fuzzer",
+    "ParameterAlias",
+]
+
 import functools
 import itertools as it
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -6,11 +13,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 
 
-__all__ = [
-    "Fuzzer",
-    "FuzzedParameter", "ParameterAlias",
-    "FuzzedTensor",
-]
 
 
 _DISTRIBUTIONS = (

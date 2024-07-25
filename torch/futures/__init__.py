@@ -1,11 +1,15 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+__all__ = [
+    "Future",
+    "collect_all",
+    "wait_all",
+]
+
 from typing import cast, Callable, Generic, List, Optional, Type, TypeVar, Union
 
 import torch
-
-__all__ = ['Future', 'collect_all', 'wait_all']
 
 T = TypeVar("T")
 S = TypeVar("S")

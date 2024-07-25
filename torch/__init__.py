@@ -9,62 +9,6 @@ on an NVIDIA GPU with compute capability >= 3.0.
 """
 
 # mypy: allow-untyped-defs
-
-import builtins
-import ctypes
-import glob
-import importlib
-import inspect
-import math
-import os
-import platform
-import sys
-import textwrap
-import threading
-from typing import (
-    Any as _Any,
-    Callable as _Callable,
-    Dict as _Dict,
-    Optional as _Optional,
-    overload as _overload,
-    Set as _Set,
-    Tuple as _Tuple,
-    Type as _Type,
-    TYPE_CHECKING,
-    TypeVar as _TypeVar,
-    Union as _Union,
-)
-from typing_extensions import ParamSpec as _ParamSpec, TypeGuard as _TypeGuard
-
-if TYPE_CHECKING:
-    from .types import IntLikeType
-
-
-# multipy/deploy is setting this import before importing torch, this is the most
-# reliable way we have to detect if we're running within deploy.
-# https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137
-def _running_with_deploy() -> builtins.bool:
-    return sys.modules.get("torch._meta_registrations", None) is object
-
-
-from torch._utils import (
-    _functionalize_sync as _sync,
-    _import_dotted_name,
-    classproperty,
-)
-from torch._utils_internal import (
-    get_file_path,
-    prepare_multiprocessing_environment,
-    USE_GLOBAL_DEPS,
-    USE_RTLD_GLOBAL_WITH_LIBTORCH,
-)
-
-# TODO(torch_deploy) figure out how to freeze version.py in fbcode build
-if _running_with_deploy():
-    __version__ = "torch-deploy-1.8"
-else:
-    from torch.torch_version import __version__ as __version__
-
 __all__ = [
     "BoolStorage",
     "BoolTensor",
@@ -136,6 +80,61 @@ __all__ = [
     "use_deterministic_algorithms",
     "vmap",
 ]
+
+import builtins
+import ctypes
+import glob
+import importlib
+import inspect
+import math
+import os
+import platform
+import sys
+import textwrap
+import threading
+from typing import (
+    Any as _Any,
+    Callable as _Callable,
+    Dict as _Dict,
+    Optional as _Optional,
+    overload as _overload,
+    Set as _Set,
+    Tuple as _Tuple,
+    Type as _Type,
+    TYPE_CHECKING,
+    TypeVar as _TypeVar,
+    Union as _Union,
+)
+from typing_extensions import ParamSpec as _ParamSpec, TypeGuard as _TypeGuard
+
+if TYPE_CHECKING:
+    from .types import IntLikeType
+
+
+# multipy/deploy is setting this import before importing torch, this is the most
+# reliable way we have to detect if we're running within deploy.
+# https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137
+def _running_with_deploy() -> builtins.bool:
+    return sys.modules.get("torch._meta_registrations", None) is object
+
+
+from torch._utils import (
+    _functionalize_sync as _sync,
+    _import_dotted_name,
+    classproperty,
+)
+from torch._utils_internal import (
+    get_file_path,
+    prepare_multiprocessing_environment,
+    USE_GLOBAL_DEPS,
+    USE_RTLD_GLOBAL_WITH_LIBTORCH,
+)
+
+# TODO(torch_deploy) figure out how to freeze version.py in fbcode build
+if _running_with_deploy():
+    __version__ = "torch-deploy-1.8"
+else:
+    from torch.torch_version import __version__ as __version__
 
 # Please keep this list sorted
 assert __all__ == sorted(__all__)

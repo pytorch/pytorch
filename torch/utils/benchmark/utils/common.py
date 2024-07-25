@@ -1,5 +1,15 @@
 """Base shared classes and utilities."""
 
+__all__ = [
+    "Measurement",
+    "TaskSpec",
+    "ordered_unique",
+    "select_unit",
+    "set_torch_threads",
+    "trim_sigfig",
+    "unit_to_english",
+]
+
 import collections
 import contextlib
 import dataclasses
@@ -12,9 +22,6 @@ from typing import cast, Any, DefaultDict, Dict, Iterable, Iterator, List, Optio
 import uuid
 
 import torch
-
-
-__all__ = ["TaskSpec", "Measurement", "select_unit", "unit_to_english", "trim_sigfig", "ordered_unique", "set_torch_threads"]
 
 
 _MAX_SIGNIFICANT_FIGURES = 4

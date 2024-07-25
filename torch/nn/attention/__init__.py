@@ -1,5 +1,16 @@
 # mypy: allow-untyped-defs
 """ This module contains functions and classes that alter the behavior of torch.nn.functional.scaled_dot_product_attention """
+
+__all__ = [
+    # Constants
+    "WARN_FOR_UNFUSED_KERNELS",
+    # Classes
+    "SDPBackend",
+    # Functions
+    "sdpa_kernel",
+]
+
+
 import contextlib
 from typing import List, Union
 from warnings import warn
@@ -19,8 +30,6 @@ from torch.backends.cuda import (
     SDPAParams,
 )
 
-
-__all__: List[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
 
 # Note: [SDPA warnings]
 # TODO: Consider using this for sdpa regardless of subclasses

@@ -4,9 +4,6 @@ r"""QAT Dynamic Modules.
 This package is in the process of being deprecated.
 Please, use `torch.ao.nn.qat.dynamic` instead.
 """
-from torch.nn.qat import dynamic, modules  # noqa: F403
-from torch.nn.qat.modules import *  # noqa: F403
-
 
 __all__ = [
     "Linear",
@@ -16,3 +13,6 @@ __all__ = [
     "Embedding",
     "EmbeddingBag",
 ]
+
+from torch.nn.qat import dynamic, modules  # noqa: F403
+from torch.nn.qat.modules import *  # noqa: F403

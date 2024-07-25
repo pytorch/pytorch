@@ -1,5 +1,13 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+__all__ = [
+    # Classes
+    "PassManager",
+    # Functions
+    "pass_result_wrapper",
+    "this_before_that_pass_constraint",
+]
+
 import inspect
 import logging
 from queue import Queue
@@ -14,7 +22,6 @@ from torch.fx.passes.infra.pass_base import PassResult
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
-__all__ = ['pass_result_wrapper', 'this_before_that_pass_constraint', 'PassManager']
 
 @compatibility(is_backward_compatible=False)
 def pass_result_wrapper(fn: Callable) -> Callable:

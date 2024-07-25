@@ -1,3 +1,22 @@
+__all__ = [
+    "Constraint",
+    "Dim",
+    "ExportBackwardSignature",
+    "ExportGraphSignature",
+    "ExportedProgram",
+    "ModuleCallEntry",
+    "ModuleCallSignature",
+    "dims",
+    "dynamic_dim",
+    "export",
+    "load",
+    "register_dataclass",
+    "save",
+    "unflatten",
+    "FlatArgsAdapter",
+    "UnflattenedModule",
+]
+
 import builtins
 import copy
 import dataclasses
@@ -40,27 +59,6 @@ if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # Do not import unconditionally, as they import sympy and importing sympy is very slow
     from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
-
-
-__all__ = [
-    "Constraint",
-    "Dim",
-    "ExportBackwardSignature",
-    "ExportGraphSignature",
-    "ExportedProgram",
-    "ModuleCallEntry",
-    "ModuleCallSignature",
-    "dims",
-    "dynamic_dim",
-    "export",
-    "load",
-    "register_dataclass",
-    "save",
-    "unflatten",
-    "FlatArgsAdapter",
-    "UnflattenedModule",
-]
-
 
 from .dynamic_shapes import Constraint, Dim, dims, dynamic_dim, ShapesCollection
 from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature

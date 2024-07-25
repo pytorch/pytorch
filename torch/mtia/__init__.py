@@ -3,6 +3,23 @@ r"""
 This package enables an interface for accessing MTIA backend in python
 """
 
+__all__ = [
+    "init",
+    "is_available",
+    "is_initialized",
+    "synchronize",
+    "device_count",
+    "current_device",
+    "current_stream",
+    "default_stream",
+    "set_device",
+    "set_stream",
+    "stream",
+    "device",
+    "set_rng_state",
+    "get_rng_state",
+]
+
 import threading
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -293,21 +310,3 @@ def set_rng_state(
         stacklevel=2,
     )
     pass
-
-
-__all__ = [
-    "init",
-    "is_available",
-    "is_initialized",
-    "synchronize",
-    "device_count",
-    "current_device",
-    "current_stream",
-    "default_stream",
-    "set_device",
-    "set_stream",
-    "stream",
-    "device",
-    "set_rng_state",
-    "get_rng_state",
-]

@@ -1,4 +1,36 @@
 # mypy: allow-untyped-defs
+__all__ = [
+    # Classes
+    "Attribute",
+    "CompilationUnit",
+    "Error",
+    "Future",
+    "ScriptFunction",
+    "ScriptModule",
+    # Functions
+    "annotate",
+    "enable_onednn_fusion",
+    "export",
+    "export_opnames",
+    "fork",
+    "freeze",
+    "interface",
+    "ignore",
+    "isinstance",
+    "load",
+    "onednn_fusion_enabled",
+    "optimize_for_inference",
+    "save",
+    "script",
+    "script_if_tracing",
+    "set_fusion_strategy",
+    "strict_fusion",
+    "trace",
+    "trace_module",
+    "unused",
+    "wait",
+]
+
 import warnings
 
 from contextlib import contextmanager
@@ -68,36 +100,6 @@ from torch.jit._trace import (
 )
 
 from torch.utils import set_module
-
-__all__ = [
-    "Attribute",
-    "CompilationUnit",
-    "Error",
-    "Future",
-    "ScriptFunction",
-    "ScriptModule",
-    "annotate",
-    "enable_onednn_fusion",
-    "export",
-    "export_opnames",
-    "fork",
-    "freeze",
-    "interface",
-    "ignore",
-    "isinstance",
-    "load",
-    "onednn_fusion_enabled",
-    "optimize_for_inference",
-    "save",
-    "script",
-    "script_if_tracing",
-    "set_fusion_strategy",
-    "strict_fusion",
-    "trace",
-    "trace_module",
-    "unused",
-    "wait",
-]
 
 # For backwards compatibility
 _fork = fork

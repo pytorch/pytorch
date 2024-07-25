@@ -1,4 +1,8 @@
 # mypy: allow-untyped-defs
+__all__ = [
+    "XNNPACKEngine",
+]
+
 import sys
 import types
 

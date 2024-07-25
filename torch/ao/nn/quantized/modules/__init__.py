@@ -1,4 +1,39 @@
 # mypy: allow-untyped-defs
+__all__ = [
+    "BatchNorm2d",
+    "BatchNorm3d",
+    "Conv1d",
+    "Conv2d",
+    "Conv3d",
+    "ConvTranspose1d",
+    "ConvTranspose2d",
+    "ConvTranspose3d",
+    "DeQuantize",
+    "ELU",
+    "Embedding",
+    "EmbeddingBag",
+    "GroupNorm",
+    "Hardswish",
+    "InstanceNorm1d",
+    "InstanceNorm2d",
+    "InstanceNorm3d",
+    "LayerNorm",
+    "LeakyReLU",
+    "Linear",
+    "LSTM",
+    "MultiheadAttention",
+    "Quantize",
+    "ReLU6",
+    "Sigmoid",
+    "Softmax",
+    "Dropout",
+    "PReLU",
+    # Wrapper modules
+    "FloatFunctional",
+    "FXFloatFunctional",
+    "QFunctional",
+]
+
 import torch
 
 # The quantized modules use `torch.nn` and `torch.ao.nn.quantizable`
@@ -40,42 +75,6 @@ from .normalization import (
     LayerNorm,
 )
 from .rnn import LSTM
-
-
-__all__ = [
-    "BatchNorm2d",
-    "BatchNorm3d",
-    "Conv1d",
-    "Conv2d",
-    "Conv3d",
-    "ConvTranspose1d",
-    "ConvTranspose2d",
-    "ConvTranspose3d",
-    "DeQuantize",
-    "ELU",
-    "Embedding",
-    "EmbeddingBag",
-    "GroupNorm",
-    "Hardswish",
-    "InstanceNorm1d",
-    "InstanceNorm2d",
-    "InstanceNorm3d",
-    "LayerNorm",
-    "LeakyReLU",
-    "Linear",
-    "LSTM",
-    "MultiheadAttention",
-    "Quantize",
-    "ReLU6",
-    "Sigmoid",
-    "Softmax",
-    "Dropout",
-    "PReLU",
-    # Wrapper modules
-    "FloatFunctional",
-    "FXFloatFunctional",
-    "QFunctional",
-]
 
 
 class Quantize(torch.nn.Module):

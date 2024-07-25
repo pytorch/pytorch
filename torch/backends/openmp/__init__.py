@@ -1,4 +1,8 @@
 # mypy: allow-untyped-defs
+__all__ = [
+    "is_available",
+]
+
 import torch
 
 

@@ -4,9 +4,6 @@
 # the cyclic imports, thus implementing lazy version
 # as per https://peps.python.org/pep-0562/
 
-import importlib
-
-
 __all__ = [
     "intrinsic",
     "qat",
@@ -14,6 +11,8 @@ __all__ = [
     "quantized",
     "sparse",
 ]
+
+import importlib
 
 
 def __getattr__(name):

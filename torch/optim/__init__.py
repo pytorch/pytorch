@@ -6,6 +6,26 @@ enough, so that more sophisticated ones can also be easily integrated in the
 future.
 """
 
+__all__ = [
+    "ASGD",
+    "Adadelta",
+    "Adafactor",
+    "Adagrad",
+    "Adam",
+    "AdamW",
+    "Adamax",
+    "LBFGS",
+    "NAdam",
+    "Optimizer",
+    "RAdam",
+    "RMSprop",
+    "Rprop",
+    "SGD",
+    "SparseAdam",
+    "lr_scheduler",
+    "swa_utils",
+]
+
 from torch.optim import lr_scheduler, swa_utils
 from torch.optim._adafactor import Adafactor
 from torch.optim.adadelta import Adadelta

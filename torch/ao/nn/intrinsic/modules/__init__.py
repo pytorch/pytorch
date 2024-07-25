@@ -1,3 +1,23 @@
+__all__ = [
+    "BNReLU2d",
+    "BNReLU3d",
+    "ConvAdd2d",
+    "ConvAddReLU2d",
+    "ConvBn1d",
+    "ConvBn2d",
+    "ConvBn3d",
+    "ConvBnReLU1d",
+    "ConvBnReLU2d",
+    "ConvBnReLU3d",
+    "ConvReLU1d",
+    "ConvReLU2d",
+    "ConvReLU3d",
+    "LinearBn1d",
+    "LinearLeakyReLU",
+    "LinearReLU",
+    "LinearTanh",
+]
+
 from .fused import (  # noqa: F401
     _FusedModule,
     BNReLU2d,
@@ -18,24 +38,3 @@ from .fused import (  # noqa: F401
     LinearReLU,
     LinearTanh,
 )
-
-
-__all__ = [
-    "ConvBn1d",
-    "ConvBn2d",
-    "ConvBn3d",
-    "ConvBnReLU1d",
-    "ConvBnReLU2d",
-    "ConvBnReLU3d",
-    "ConvReLU1d",
-    "ConvReLU2d",
-    "ConvReLU3d",
-    "LinearReLU",
-    "BNReLU2d",
-    "BNReLU3d",
-    "LinearBn1d",
-    "LinearLeakyReLU",
-    "LinearTanh",
-    "ConvAdd2d",
-    "ConvAddReLU2d",
-]

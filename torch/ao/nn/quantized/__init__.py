@@ -1,8 +1,3 @@
-from . import functional
-from .modules import *  # noqa: F403
-from .modules import MaxPool2d
-
-
 __all__ = [
     "BatchNorm2d",
     "BatchNorm3d",
@@ -37,3 +32,7 @@ __all__ = [
     "FXFloatFunctional",
     "QFunctional",
 ]
+
+from . import functional
+from .modules import *  # noqa: F403
+from .modules import MaxPool2d

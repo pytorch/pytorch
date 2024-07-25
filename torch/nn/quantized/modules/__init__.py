@@ -9,6 +9,41 @@ Note::
 # to import the files directly,
 # s.a. `from torch.nn.quantized.modules.conv import ...`.
 # No need to add them to the `__all__`.
+__all__ = [
+    "BatchNorm2d",
+    "BatchNorm3d",
+    "Conv1d",
+    "Conv2d",
+    "Conv3d",
+    "ConvTranspose1d",
+    "ConvTranspose2d",
+    "ConvTranspose3d",
+    "DeQuantize",
+    "Dropout",
+    "ELU",
+    "Embedding",
+    "EmbeddingBag",
+    "GroupNorm",
+    "Hardswish",
+    "InstanceNorm1d",
+    "InstanceNorm2d",
+    "InstanceNorm3d",
+    "LSTM",
+    "LayerNorm",
+    "LeakyReLU",
+    "Linear",
+    "MultiheadAttention",
+    "PReLU",
+    "Quantize",
+    "ReLU6",
+    "Sigmoid",
+    "Softmax",
+    # Wrapper modules
+    "FXFloatFunctional",
+    "FloatFunctional",
+    "QFunctional",
+]
+
 from torch.ao.nn.quantized.modules import (
     activation,
     batchnorm,
@@ -59,39 +94,3 @@ from torch.ao.nn.quantized.modules.normalization import (
     LayerNorm,
 )
 from torch.ao.nn.quantized.modules.rnn import LSTM
-
-
-__all__ = [
-    "BatchNorm2d",
-    "BatchNorm3d",
-    "Conv1d",
-    "Conv2d",
-    "Conv3d",
-    "ConvTranspose1d",
-    "ConvTranspose2d",
-    "ConvTranspose3d",
-    "DeQuantize",
-    "ELU",
-    "Embedding",
-    "EmbeddingBag",
-    "GroupNorm",
-    "Hardswish",
-    "InstanceNorm1d",
-    "InstanceNorm2d",
-    "InstanceNorm3d",
-    "LayerNorm",
-    "LeakyReLU",
-    "Linear",
-    "LSTM",
-    "MultiheadAttention",
-    "Quantize",
-    "ReLU6",
-    "Sigmoid",
-    "Softmax",
-    "Dropout",
-    "PReLU",
-    # Wrapper modules
-    "FloatFunctional",
-    "FXFloatFunctional",
-    "QFunctional",
-]

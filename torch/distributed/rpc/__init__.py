@@ -1,4 +1,8 @@
 # mypy: allow-untyped-defs
+__all__ = [
+    "is_available",
+]
+
 import logging
 import os
 import threading
@@ -9,9 +13,6 @@ from urllib.parse import urlparse
 
 import torch
 import torch.distributed as dist
-
-
-__all__ = ["is_available"]
 
 
 logger = logging.getLogger(__name__)

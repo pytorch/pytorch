@@ -6,6 +6,42 @@ Intel GPU optimization.
 This package is lazily initialized, so you can always import it, and use
 :func:`is_available()` to determine if your system supports XPU.
 """
+
+__all__ = [
+    "Event",
+    "Stream",
+    "StreamContext",
+    "current_device",
+    "current_stream",
+    "default_generators",
+    "device",
+    "device_of",
+    "device_count",
+    "empty_cache",
+    "get_device_capability",
+    "get_device_name",
+    "get_device_properties",
+    "get_rng_state",
+    "get_rng_state_all",
+    "get_stream",
+    "init",
+    "initial_seed",
+    "is_available",
+    "is_bf16_supported",
+    "is_initialized",
+    "manual_seed",
+    "manual_seed_all",
+    "seed",
+    "seed_all",
+    "set_device",
+    "set_rng_state",
+    "set_rng_state_all",
+    "set_stream",
+    "stream",
+    "streams",
+    "synchronize",
+]
+
 import threading
 import traceback
 from functools import lru_cache
@@ -447,39 +483,3 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "xpu") -> int:
 
 
 from .random import *  # noqa: F403
-
-
-__all__ = [
-    "Event",
-    "Stream",
-    "StreamContext",
-    "current_device",
-    "current_stream",
-    "default_generators",
-    "device",
-    "device_of",
-    "device_count",
-    "empty_cache",
-    "get_device_capability",
-    "get_device_name",
-    "get_device_properties",
-    "get_rng_state",
-    "get_rng_state_all",
-    "get_stream",
-    "init",
-    "initial_seed",
-    "is_available",
-    "is_bf16_supported",
-    "is_initialized",
-    "manual_seed",
-    "manual_seed_all",
-    "seed",
-    "seed_all",
-    "set_device",
-    "set_rng_state",
-    "set_rng_state_all",
-    "set_stream",
-    "stream",
-    "streams",
-    "synchronize",
-]

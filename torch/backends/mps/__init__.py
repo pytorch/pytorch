@@ -1,12 +1,17 @@
 # mypy: allow-untyped-defs
+__all__ = [
+    "is_available",
+    "is_built",
+    "is_macos13_or_newer",
+    "is_macos_or_newer",
+]
+
 from functools import lru_cache as _lru_cache
 
 from typing import Optional
 
 import torch
 from ...library import Library as _Library
-
-__all__ = ["is_built", "is_available", "is_macos13_or_newer", "is_macos_or_newer"]
 
 
 def is_built() -> bool:

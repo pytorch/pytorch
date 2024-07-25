@@ -1,4 +1,8 @@
 # mypy: allow-untyped-defs
+__all__ = [
+    "FuzzedSparseTensor",
+]
+
 from typing import Optional, Tuple, Union
 from numbers import Number
 import torch

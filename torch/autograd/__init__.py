@@ -7,6 +7,28 @@ for which gradients should be computed with the ``requires_grad=True`` keyword.
 As of now, we only support autograd for floating point :class:`Tensor` types (
 half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdouble).
 """
+
+__all__ = [
+    # Classes
+    "Function",
+    "NestedIOFunction",
+    "Variable",
+    # Functions
+    "backward",
+    "detect_anomaly",
+    "enable_grad",
+    "grad",
+    "grad_mode",
+    "gradcheck",
+    "gradgradcheck",
+    "inference_mode",
+    "no_grad",
+    "set_detect_anomaly",
+    "set_grad_enabled",
+    "set_multithreading_enabled",
+    "variable",
+]
+
 import warnings
 from typing import Any, Callable, cast, List, Optional, Sequence, Tuple, Union
 
@@ -31,25 +53,6 @@ from .gradcheck import gradcheck, gradgradcheck
 from .graph import _engine_run_backward
 
 from .variable import Variable
-
-__all__ = [
-    "Variable",
-    "Function",
-    "backward",
-    "grad_mode",
-    "NestedIOFunction",
-    "detect_anomaly",
-    "enable_grad",
-    "grad",
-    "gradcheck",
-    "gradgradcheck",
-    "inference_mode",
-    "no_grad",
-    "set_detect_anomaly",
-    "set_grad_enabled",
-    "set_multithreading_enabled",
-    "variable",
-]
 
 _OptionalTensor = Optional[torch.Tensor]
 _ShapeorNestedShape = Union[_size, Sequence[_size], torch.Tensor]

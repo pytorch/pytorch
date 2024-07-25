@@ -1,4 +1,57 @@
 # mypy: allow-untyped-defs
+__all__ = [
+    # Modules
+    "symbolic_helper",
+    "utils",
+    "errors",
+    # All opsets
+    "symbolic_caffe2",
+    "symbolic_opset7",
+    "symbolic_opset8",
+    "symbolic_opset9",
+    "symbolic_opset10",
+    "symbolic_opset11",
+    "symbolic_opset12",
+    "symbolic_opset13",
+    "symbolic_opset14",
+    "symbolic_opset15",
+    "symbolic_opset16",
+    "symbolic_opset17",
+    "symbolic_opset18",
+    "symbolic_opset19",
+    "symbolic_opset20",
+    # Enums
+    "ExportTypes",
+    "OperatorExportTypes",
+    "TrainingMode",
+    "TensorProtoDataType",
+    "JitScalarType",
+    # Public functions
+    "export",
+    "export_to_pretty_string",
+    "is_in_onnx_export",
+    "select_model_mode_for_export",
+    "register_custom_op_symbolic",
+    "unregister_custom_op_symbolic",
+    "disable_log",
+    "enable_log",
+    # Errors
+    "CheckerError",  # Backwards compatibility
+    # Dynamo Exporter
+    "DiagnosticOptions",
+    "ExportOptions",
+    "ONNXProgram",
+    "ONNXProgramSerializer",
+    "ONNXRuntimeOptions",
+    "InvalidExportOptionsError",
+    "OnnxExporterError",
+    "OnnxRegistry",
+    "dynamo_export",
+    "enable_fake_mode",
+    # DORT / torch.compile
+    "is_onnxrt_backend_supported",
+]
+
 from torch import _C
 from torch._C import _onnx as _C_onnx
 from torch._C._onnx import OperatorExportTypes, TensorProtoDataType, TrainingMode
@@ -60,59 +113,6 @@ from ._internal.onnxruntime import (
     OrtBackendOptions as _OrtBackendOptions,
     OrtExecutionProvider as _OrtExecutionProvider,
 )
-
-__all__ = [
-    # Modules
-    "symbolic_helper",
-    "utils",
-    "errors",
-    # All opsets
-    "symbolic_caffe2",
-    "symbolic_opset7",
-    "symbolic_opset8",
-    "symbolic_opset9",
-    "symbolic_opset10",
-    "symbolic_opset11",
-    "symbolic_opset12",
-    "symbolic_opset13",
-    "symbolic_opset14",
-    "symbolic_opset15",
-    "symbolic_opset16",
-    "symbolic_opset17",
-    "symbolic_opset18",
-    "symbolic_opset19",
-    "symbolic_opset20",
-    # Enums
-    "ExportTypes",
-    "OperatorExportTypes",
-    "TrainingMode",
-    "TensorProtoDataType",
-    "JitScalarType",
-    # Public functions
-    "export",
-    "export_to_pretty_string",
-    "is_in_onnx_export",
-    "select_model_mode_for_export",
-    "register_custom_op_symbolic",
-    "unregister_custom_op_symbolic",
-    "disable_log",
-    "enable_log",
-    # Errors
-    "CheckerError",  # Backwards compatibility
-    # Dynamo Exporter
-    "DiagnosticOptions",
-    "ExportOptions",
-    "ONNXProgram",
-    "ONNXProgramSerializer",
-    "ONNXRuntimeOptions",
-    "InvalidExportOptionsError",
-    "OnnxExporterError",
-    "OnnxRegistry",
-    "dynamo_export",
-    "enable_fake_mode",
-    # DORT / torch.compile
-    "is_onnxrt_backend_supported",
-]
 
 # Set namespace for exposed private names
 ExportTypes.__module__ = "torch.onnx"

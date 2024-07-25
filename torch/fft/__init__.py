@@ -1,13 +1,38 @@
+__all__ = [
+    # 1D FFT
+    "fft",
+    "ifft",
+    # 2D FFT
+    "fft2",
+    "ifft2",
+    # N-D FFT
+    "fftn",
+    "ifftn",
+    # 1D Real FFT
+    "rfft",
+    "irfft",
+    # 2D Real FFT
+    "rfft2",
+    "irfft2",
+    # N-D Real FFT
+    "rfftn",
+    "irfftn",
+    # hermitian FFT
+    "hfft",
+    "ihfft",
+    # other
+    "fftfreq",
+    "rfftfreq",
+    "fftshift",
+    "ifftshift",
+]
+
 import sys
 
 import torch
 from torch._C import _add_docstr, _fft  # type: ignore[attr-defined]
 from torch._torch_docs import factory_common_args, common_args
 
-__all__ = ['fft', 'ifft', 'fft2', 'ifft2', 'fftn', 'ifftn',
-           'rfft', 'irfft', 'rfft2', 'irfft2', 'rfftn', 'irfftn',
-           'hfft', 'ihfft', 'fftfreq', 'rfftfreq', 'fftshift', 'ifftshift',
-           'Tensor']
 
 Tensor = torch.Tensor
 

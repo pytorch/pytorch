@@ -1,19 +1,20 @@
 # mypy: allow-untyped-defs
+__all__ = [
+    "allow_in_graph",
+    "assume_constant_result",
+    "compile",
+    "cudagraph_mark_step_begin",
+    "disable",
+    "is_compiling",
+    "is_dynamo_compiling",
+    "list_backends",
+    "reset",
+    "wrap_numpy",
+]
+
 import torch
 from typing import List
 
-__all__ = [
-    "compile",
-    "assume_constant_result",
-    "reset",
-    "allow_in_graph",
-    "list_backends",
-    "disable",
-    "cudagraph_mark_step_begin",
-    "wrap_numpy",
-    "is_compiling",
-    "is_dynamo_compiling",
-]
 
 def compile(*args, **kwargs):
     """

@@ -5,6 +5,25 @@ Metal is Apple's API for programming metal GPU (graphics processor unit). Using 
 performance can be achieved, by running work on the metal GPU(s).
 See https://developer.apple.com/documentation/metalperformanceshaders for more details.
 """
+__all__ = [
+    # submodules
+    "profiler",
+    # Classes
+    "Event",
+    # Functions
+    "current_allocated_memory",
+    "device_count",
+    "driver_allocated_memory",
+    "empty_cache",
+    "get_rng_state",
+    "manual_seed",
+    "recommended_max_memory",
+    "seed",
+    "set_per_process_memory_fraction",
+    "set_rng_state",
+    "synchronize",
+]
+
 from typing import Union
 
 import torch
@@ -141,19 +160,3 @@ def recommended_max_memory() -> int:
 
 from . import profiler
 from .event import Event
-
-__all__ = [
-    "device_count",
-    "get_rng_state",
-    "manual_seed",
-    "seed",
-    "set_rng_state",
-    "synchronize",
-    "empty_cache",
-    "set_per_process_memory_fraction",
-    "current_allocated_memory",
-    "driver_allocated_memory",
-    "Event",
-    "profiler",
-    "recommended_max_memory",
-]

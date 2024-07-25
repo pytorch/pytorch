@@ -80,6 +80,31 @@ Several example transformations can be found at the
 repository.
 '''
 
+__all__ = [
+    # graph_module
+    "GraphModule",
+    # symbolic_trace
+    "symbolic_trace",
+    "Tracer",
+    "wrap",
+    "PH",
+    "ProxyableClassMeta",
+    # graph
+    "Graph",
+    "CodeGen",
+    # node
+    "Node",
+    "map_arg",
+    "has_side_effect",
+    # proxy
+    "Proxy",
+    # interpreter
+    "Interpreter",
+    "Transformer",
+    # subgraph_rewriter
+    "replace_pattern",
+]
+
 from .graph_module import GraphModule
 from ._symbolic_trace import symbolic_trace, Tracer, wrap, PH, ProxyableClassMeta
 from .graph import Graph, CodeGen

@@ -1,4 +1,11 @@
 """Timer class based on the timeit.Timer class, but torch aware."""
+
+__all__ = [
+    "Language",
+    "Timer",
+    "timer",
+]
+
 import enum
 import timeit
 import textwrap
@@ -8,9 +15,6 @@ import torch
 from torch.utils.benchmark.utils import common, cpp_jit
 from torch.utils.benchmark.utils._stubs import TimerClass, TimeitModuleType
 from torch.utils.benchmark.utils.valgrind_wrapper import timer_interface as valgrind_timer_interface
-
-
-__all__ = ["Timer", "timer", "Language"]
 
 
 if torch.backends.cuda.is_built() and torch.cuda.is_available():  # type: ignore[no-untyped-call]

@@ -8,12 +8,32 @@ examine their input shapes and stack traces, study device kernel activity and vi
     An earlier version of the API in :mod:`torch.autograd` module is considered legacy and will be deprecated.
 
 """
+
+__all__ = [
+    # submodules
+    "itt",
+    # Classes
+    "DeviceType",
+    "ExecutionTraceObserver",
+    "ProfilerAction",
+    "ProfilerActivity",
+    # Functions
+    "kineto_available",
+    "profile",
+    "record_function",
+    "schedule",
+    "supported_activities",
+    "tensorboard_trace_handler",
+]
+
 import os
 
 from torch._C._autograd import _supported_activities, DeviceType, kineto_available
 from torch._C._profiler import _ExperimentalConfig, ProfilerActivity, RecordScope
 from torch.autograd.profiler import KinetoStepTracker, record_function
 from torch.optim.optimizer import register_optimizer_step_post_hook
+
+from . import itt
 
 from .profiler import (
     _KinetoProfile,
@@ -24,21 +44,6 @@ from .profiler import (
     supported_activities,
     tensorboard_trace_handler,
 )
-
-__all__ = [
-    "profile",
-    "schedule",
-    "supported_activities",
-    "tensorboard_trace_handler",
-    "ProfilerAction",
-    "ProfilerActivity",
-    "kineto_available",
-    "DeviceType",
-    "record_function",
-    "ExecutionTraceObserver",
-]
-
-from . import itt
 
 
 def _optimizer_post_hook(optimizer, args, kwargs):

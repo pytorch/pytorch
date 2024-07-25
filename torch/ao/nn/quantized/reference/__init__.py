@@ -1,6 +1,3 @@
-from .modules import *  # noqa: F403
-
-
 __all__ = [
     "Linear",
     "Conv1d",
@@ -17,3 +14,5 @@ __all__ = [
     "Embedding",
     "EmbeddingBag",
 ]
+
+from .modules import *  # noqa: F403

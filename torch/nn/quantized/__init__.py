@@ -1,8 +1,3 @@
-from torch.nn.quantized import dynamic, functional, modules  # noqa: F403
-from torch.nn.quantized.modules import *  # noqa: F403
-from torch.nn.quantized.modules import MaxPool2d
-
-
 __all__ = [
     "BatchNorm2d",
     "BatchNorm3d",
@@ -22,10 +17,10 @@ __all__ = [
     "InstanceNorm1d",
     "InstanceNorm2d",
     "InstanceNorm3d",
+    "LSTM",
     "LayerNorm",
     "LeakyReLU",
     "Linear",
-    "LSTM",
     "MultiheadAttention",
     "PReLU",
     "Quantize",
@@ -37,3 +32,7 @@ __all__ = [
     "FXFloatFunctional",
     "QFunctional",
 ]
+
+from torch.nn.quantized import dynamic, functional, modules  # noqa: F403
+from torch.nn.quantized.modules import *  # noqa: F403
+from torch.nn.quantized.modules import MaxPool2d

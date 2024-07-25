@@ -1,4 +1,17 @@
 # mypy: allow-untyped-defs
+__all__ = [
+    # Classes
+    "OptEinsumModule",
+    # Functions
+    "flags",
+    "get_opt_einsum",
+    "is_available",
+    "set_flags",
+    # Options
+    "enabled",
+    "strategy",
+]
+
 import sys
 import warnings
 from contextlib import contextmanager

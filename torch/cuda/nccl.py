@@ -1,12 +1,17 @@
 # mypy: allow-untyped-defs
+__all__ = [
+    "all_gather",
+    "all_reduce",
+    "broadcast",
+    "reduce",
+    "reduce_scatter",
+]
+
 import collections
 import warnings
 from typing import Optional, Sequence, Union
 
 import torch.cuda
-
-
-__all__ = ["all_reduce", "reduce", "broadcast", "all_gather", "reduce_scatter"]
 
 SUM = 0  # ncclRedOp_t
 

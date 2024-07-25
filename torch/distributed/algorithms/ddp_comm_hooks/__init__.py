@@ -1,4 +1,10 @@
 # mypy: allow-untyped-defs
+__all__ = [
+    "DDPCommHookType",
+    "register_ddp_comm_hook",
+]
+
+
 from enum import Enum
 from functools import partial
 
@@ -11,9 +17,6 @@ from . import (
     powerSGD_hook as powerSGD,
     quantization_hooks as quantization,
 )
-
-
-__all__ = ["DDPCommHookType", "register_ddp_comm_hook"]
 
 
 def _ddp_comm_hook_wrapper(comm_hook, model, state):
