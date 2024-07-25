@@ -1711,23 +1711,9 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
           result_dtype == at::kHalf,
       "dtype is not supported");
 
-  std::tuple<Tensor, Tensor, Tensor> results;
-  if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (use_dynamic) {
-      results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
-    } else {
-      results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
-    }
-  } else {
-    results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
+  auto results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
         input, params, hx[0], hx[1], num_layers,
         dropout_p, train, bidirectional);
-  }
 
   if (batch_first) {
     std::get<0>(results) = std::get<0>(results).transpose(0, 1);
@@ -1759,8 +1745,8 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
 static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
     const Tensor& data,
     const Tensor& batch_sizes,
-    c10::List<at::Tensor> hx_,
-    c10::List<c10::intrusive_ptr<CellParamsBase>> _params_,
+    const c10::List<at::Tensor>& hx_,
+    const c10::List<c10::intrusive_ptr<CellParamsBase>>& _params_,
     bool has_biases,
     int64_t num_layers,
     double dropout_p,
@@ -1777,26 +1763,10 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   TORCH_CHECK(hx[0].size(2) == hx[1].size(2), "quantized LSTM with projections is not supported");
 
-  auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
-
   PackedSequence input { data, batch_sizes };
-  std::tuple<PackedSequence, Tensor, Tensor> results;
-  if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (use_dynamic) {
-      results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
-    } else {
-      results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
-    }
-  } else {
-    results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
+  auto results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
         input, params, hx[0], hx[1], num_layers,
         dropout_p, train, bidirectional);
-  }
   auto & packed_output = std::get<0>(results);
   return std::make_tuple(std::move(packed_output.data),
                          std::move(std::get<1>(results)),

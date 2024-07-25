@@ -3699,8 +3699,8 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
   // https://github.com/pytorch/pytorch/pull/69828#issuecomment-1015143819
   // We can revisit this decision later and remove upper completely
   // also from low level functions or add it to the public API.
-  bool upper = false;
-  if (upper) {
+  constexpr bool upper = false;
+  if constexpr (upper) {
     at::triu_out(const_cast<Tensor&>(LD), self);
   } else {
     at::tril_out(const_cast<Tensor&>(LD), self);
