@@ -1155,7 +1155,7 @@ void igamma_kernel(TensorIteratorBase& iter) {
         cpu_kernel_vec(
             iter,
             [=](scalar_t a, scalar_t b) -> scalar_t {
-              return calc_igamma<scalar_t, /*is_cuda=*/false>(a, b);
+              return calc_igamma(a, b);
             },
             [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
               return a.igamma(b);
@@ -1169,7 +1169,7 @@ void igammac_kernel(TensorIteratorBase& iter) {
         cpu_kernel_vec(
             iter,
             [=](scalar_t a, scalar_t b) -> scalar_t {
-              return calc_igammac<scalar_t, /*is_cuda=*/false>(a, b);
+              return calc_igammac(a, b);
             },
             [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
               return a.igammac(b);
@@ -1181,7 +1181,7 @@ void igamma_self_backward_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
     kHalf, kBFloat16, iter.dtype(), "igamma_self_backward_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t x) -> scalar_t {
-        return calc_igamma_grada<scalar_t, /*is_cuda=*/false>(a, x);
+        return calc_igamma_grada(a, x);
       });
   });
 }
@@ -1190,7 +1190,7 @@ void igammac_self_backward_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
     kHalf, kBFloat16, iter.dtype(), "igammac_self_backward_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t x) -> scalar_t {
-        return calc_igammac_grada<scalar_t, /*is_cuda=*/false>(a, x);
+        return calc_igammac_grada(a, x);
       });
   });
 }
