@@ -331,9 +331,6 @@ CREATE_BINARY_META_FUNC(hypot);
 CREATE_BINARY_META_FUNC(igamma);
 CREATE_BINARY_META_FUNC(igammac);
 CREATE_BINARY_META_FUNC(nextafter);
-
-// TODO: should these be ternary, not binary?
-// signature: const Tensor& grad_output, const Tensor& self, const Tensor& other
 CREATE_BINARY_META_FUNC(igamma_self_backward);
 CREATE_BINARY_META_FUNC(igammac_self_backward);
 
