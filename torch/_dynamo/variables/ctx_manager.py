@@ -3,7 +3,7 @@ import dataclasses
 import inspect
 import sys
 import warnings
-from typing import Callable, Dict, List, Optional, Union, TYPE_CHECKING
+from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch._C
 
