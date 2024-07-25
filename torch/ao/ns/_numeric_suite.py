@@ -182,7 +182,10 @@ class Logger(nn.Module):
         self.dtype = torch.quint8
 
     def forward(self, x):
-        """ """  # blank docblock to make autodoc happy
+        # fmt: off
+        """
+        """  # blank docblock to make autodoc happy
+        # fmt: on
         pass
 
 
@@ -197,7 +200,10 @@ class ShadowLogger(Logger):
         self.stats["quantized"] = []
 
     def forward(self, x, y):
-        """ """  # blank docblock to make autodoc happy
+        # fmt: off
+        """
+        """  # blank docblock to make autodoc happy
+        # fmt: on
         if len(x) > 1:
             x = x[0]
         if len(y) > 1:
@@ -214,7 +220,10 @@ class OutputLogger(Logger):
         self.stats["tensor_val"] = []
 
     def forward(self, x):
-        """ """  # blank docblock to make autodoc happy
+        # fmt: off
+        """
+        """  # blank docblock to make autodoc happy
+        # fmt: on
         self.stats["tensor_val"].append(x)
         return x
 
@@ -253,7 +262,10 @@ class Shadow(nn.Module):
         self.logger = logger_cls()
 
     def forward(self, *x) -> torch.Tensor:
-        """ """  # blank docblock to make autodoc happy
+        # fmt: off
+        """
+        """  # blank docblock to make autodoc happy
+        # fmt: on
         xl = _convert_tuple_to_list(x)
         output = self.orig_module(*xl)
         xl_float = _dequantize_tensor_list(xl)
@@ -262,7 +274,10 @@ class Shadow(nn.Module):
         return output
 
     def add(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """ """  # blank docblock to make autodoc happy
+        # fmt: off
+        """
+        """  # blank docblock to make autodoc happy
+        # fmt: on
         output = self.orig_module.add(x, y)
         x = x.dequantize()
         y = y.dequantize()
@@ -271,7 +286,10 @@ class Shadow(nn.Module):
         return output
 
     def add_scalar(self, x: torch.Tensor, y: float) -> torch.Tensor:
-        """ """  # blank docblock to make autodoc happy
+        # fmt: off
+        """
+        """  # blank docblock to make autodoc happy
+        # fmt: on
         output = self.orig_module.add_scalar(x, y)
         x = x.dequantize()
         shadow_output = self.shadow_module.add_scalar(x, y)
@@ -279,7 +297,10 @@ class Shadow(nn.Module):
         return output
 
     def mul(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """ """  # blank docblock to make autodoc happy
+        # fmt: off
+        """
+        """  # blank docblock to make autodoc happy
+        # fmt: on
         output = self.orig_module.mul(x, y)
         x = x.dequantize()
         y = y.dequantize()
@@ -288,7 +309,10 @@ class Shadow(nn.Module):
         return output
 
     def mul_scalar(self, x: torch.Tensor, y: float) -> torch.Tensor:
-        """ """  # blank docblock to make autodoc happy
+        # fmt: off
+        """
+        """  # blank docblock to make autodoc happy
+        # fmt: on
         output = self.orig_module.mul_scalar(x, y)
         x = x.dequantize()
         shadow_output = self.shadow_module.mul_scalar(x, y)
@@ -296,7 +320,10 @@ class Shadow(nn.Module):
         return output
 
     def cat(self, x: List[torch.Tensor], dim: int = 0) -> torch.Tensor:
-        """ """  # blank docblock to make autodoc happy
+        # fmt: off
+        """
+        """  # blank docblock to make autodoc happy
+        # fmt: on
         output = self.orig_module.cat(x, dim)
         x = [y.dequantize() for y in x]
         shadow_output = self.shadow_module.cat(x, dim)
@@ -304,7 +331,10 @@ class Shadow(nn.Module):
         return output
 
     def add_relu(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """ """  # blank docblock to make autodoc happy
+        # fmt: off
+        """
+        """  # blank docblock to make autodoc happy
+        # fmt: on
         output = self.orig_module.add_relu(x, y)
         x = x.dequantize()
         y = y.dequantize()

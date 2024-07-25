@@ -217,7 +217,10 @@ class OutputLogger(nn.Module):
     # Note: cannot annotate the type of x because TorchScript does not support
     #   the Union type.
     def forward(self, x):
-        """ """  # blank docblock to make autodoc happy
+        # fmt: off
+        """
+        """  # blank docblock to make autodoc happy
+        # fmt: on
         # TODO(future PR): consider designing this better, as the difference
         # between these two flags is subtle and not obvious.
         if not self.enabled:
@@ -259,7 +262,10 @@ class OutputComparisonLogger(OutputLogger):
         # precalculated comparisons function
 
     def forward(self, x, x_ref):
-        """ """  # blank docblock to make autodoc happy
+        # fmt: off
+        """
+        """  # blank docblock to make autodoc happy
+        # fmt: on
         if not self.enabled:
             return x
         assert isinstance(x, torch.Tensor), "non-tensor inputs not yet supported"
@@ -287,7 +293,10 @@ class NSTracer(quantize_fx.QuantizationTracer):
     """
 
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
-        """ """  # blank docblock to make autodoc happy
+        # fmt: off
+        """
+        """  # blank docblock to make autodoc happy
+        # fmt: on
         if isinstance(m, torch.ao.quantization.ObserverBase):
             return True
         elif isinstance(m, torch.ao.quantization.FakeQuantizeBase):
