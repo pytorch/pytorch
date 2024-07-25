@@ -74,10 +74,8 @@ from torch.testing._internal.common_dtype import all_types, get_all_dtypes
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     instantiate_parametrized_tests,
-    IS_CI,
     IS_FBCODE,
     IS_MACOS,
-    IS_WINDOWS,
     IS_X86,
     parametrize,
     serialTest,
@@ -96,14 +94,6 @@ from torch.utils.weak import WeakTensorKeyDictionary
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
-
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 importlib.import_module("functorch")
 importlib.import_module("filelock")
