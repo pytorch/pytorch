@@ -25,9 +25,12 @@ class TestOpenReg(TestCase):
                 thread_name = file.read().strip()
             all_thread_names.add(thread_name)
 
-        print(all_thread_names)
-        for i in range(pytorch_openreg.NUM_DEVICES):
+        for i in range(pytorch_openreg._device_daemon.NUM_DEVICES):
             self.assertIn(f"pt_autograd_{i}", all_thread_names)
+
+    def test_factory(self):
+        a = torch.empty(50, device="openreg")
+        self.assertEqual(a.device.type, "openreg")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,5 @@
 import torch
-
-# Global properties of our device
-NUM_DEVICES = 7
+from ._device_daemon import daemon
 
 # Create our python implementation dict so that the C++ module
 # can access it during its initialization
@@ -17,7 +15,7 @@ def register(fn):
 
 @register
 def _deviceCount():
-    return NUM_DEVICES
+    return daemon.exec("deviceCount")
 
 # Module used for our backend
 class _OpenRegMod():
