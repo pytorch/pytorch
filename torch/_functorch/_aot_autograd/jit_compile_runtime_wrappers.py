@@ -706,7 +706,7 @@ def aot_dispatch_autograd(
     try_save_cache_entry: Optional[Callable] = None
     if config.enable_autograd_cache:
 
-        def try_save_cache_entry(compiled_bw_func):  # noqa: F811
+        def try_save_cache_entry(compiled_bw_func, _fw_metadata):  # noqa: F811
             fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
             bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
             if aot_config.cache_key and fw_key and bw_key:
@@ -715,7 +715,7 @@ def aot_dispatch_autograd(
                     CompiledBackward(
                         bw_key, backward_state_indices, num_symints_saved_for_bw
                     ),
-                    fw_metadata,
+                    _fw_metadata,
                     wrappers,
                     maybe_subclass_meta,
                     num_fw_outs_saved_for_bw,
@@ -725,7 +725,7 @@ def aot_dispatch_autograd(
 
         if compiled_bw_func is not None:
             # If we already compiled it we can just run it right now without waiting
-            try_save_cache_entry(compiled_bw_func)
+            try_save_cache_entry(compiled_bw_func, fw_metadata)
             try_save_cache_entry = None
 
     compiled_fn = AOTDispatchAutograd.post_compile(
