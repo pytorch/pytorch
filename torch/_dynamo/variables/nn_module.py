@@ -47,7 +47,7 @@ from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
 
 
-def initialize_lazy_module(tx, mod, args, kwargs):
+def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
     """
     Fairly coupled helper used by NNModuleVariable and UnspecializedNNModuleVariable.
 
