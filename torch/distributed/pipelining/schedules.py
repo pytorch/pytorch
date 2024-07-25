@@ -132,7 +132,7 @@ BW = FULL_BACKWARD
 
 # Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
 _action_regex = re.compile(
-    r"(\d+)(F|B|W|BW|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B{0,1})(\d*)"
+    r"(\d+)(F|B|W|BW|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B){0,1}(\d*)(_(\d*)(RECV_B|RECV_F)(\d)){0,1}"
 )
 
 
@@ -157,7 +157,7 @@ class _Action(NamedTuple):
                 self.other_microbatch_index is not None
             ), "SEND_B_RECV_F requires other_microbatch_index"
             repr += str(SEND_B) + str(self.microbatch_index)
-            repr += "-" + str(self.other_stage_index)
+            repr += "_" + str(self.other_stage_index)
             repr += str(RECV_F) + str(self.other_microbatch_index)
         elif self.computation_type == SEND_F_RECV_B:
             assert (
@@ -170,7 +170,7 @@ class _Action(NamedTuple):
                 self.other_microbatch_index is not None
             ), "SEND_F_RECV_B requires other_microbatch_index"
             repr += str(SEND_F) + str(self.microbatch_index)
-            repr += "-" + str(self.other_stage_index)
+            repr += "_" + str(self.other_stage_index)
             repr += str(RECV_B) + str(self.other_microbatch_index)
         else:
             repr += str(self.computation_type)
@@ -187,9 +187,29 @@ class _Action(NamedTuple):
             e.g. `2F0`, `1UNSHARD`, `3SEND_F1`
         """
         if match := _action_regex.match(str):
-            stage_index, computation_type, microbatch_index = match.groups()
-            # TODO regex needs update
-            # stage_index, computation_type, microbatch_index, other_computation_type, other_microbatch_index = match.groups()
+            # the _ is for the combined group that captures the whole second action
+            (
+                stage_index,
+                computation_type,
+                microbatch_index,
+                _,
+                other_stage_index,
+                other_computation_type,
+                other_microbatch_index,
+            ) = match.groups()
+            if other_computation_type is not None:
+                assert (
+                    other_stage_index is not None and other_microbatch_index is not None
+                )
+                return _Action(
+                    int(stage_index),
+                    _ComputationType.from_str(
+                        f"{computation_type}_{other_computation_type}"
+                    ),
+                    int(microbatch_index) if len(microbatch_index) else None,
+                    int(other_stage_index),
+                    int(other_microbatch_index),
+                )
             return _Action(
                 int(stage_index),
                 _ComputationType.from_str(computation_type),
@@ -197,6 +217,7 @@ class _Action(NamedTuple):
             )
         elif str == "" or str.isspace():
             return None
+        breakpoint()
         raise RuntimeError(
             f"Invalid action string: {str}, should be formatted as [stage][action type][(microbatch)] e.g. 2F0"
         )
