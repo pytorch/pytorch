@@ -63,7 +63,9 @@ class TestCKBackend(TestCase):
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("autotune_in_subproc", (True, False))
-    def test_max_autotune_precompile_matmul(self, max_autotune_gemm_backends, autotune_in_subproc):
+    def test_max_autotune_precompile_matmul(
+        self, max_autotune_gemm_backends, autotune_in_subproc
+    ):
         """
         Make sure autotuning mm doesn't crash.
         """
@@ -174,7 +176,7 @@ class TestCKBackend(TestCase):
     def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape):
 
         m, k, n = 4096, 25728, 2048
-        alpha, beta = 2., .4
+        alpha, beta = 2.0, 0.4
 
         tensor_options = {"device": "cuda", "dtype": torch.float16}
         x = torch.randn(x_shape, **tensor_options)
