@@ -195,6 +195,7 @@ class TestCKBackend(TestCase):
                 "rocm.n_max_profiling_configs": 2,
             }
         ):
+
             @torch.compile(dynamic=False)
             def addmm(x, a, b, alpha, beta):
                 return torch.addmm(x, a, b, alpha=alpha, beta=beta)
@@ -203,6 +204,7 @@ class TestCKBackend(TestCase):
             Y_eager = torch.addmm(x, a, b, alpha=alpha, beta=beta)
 
             torch.testing.assert_close(Y_compiled, Y_eager)
+
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
