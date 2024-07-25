@@ -70,7 +70,7 @@ prefix_str = {
     SymT.TEMPLATE_INDEX: "idx",
     SymT.XBLOCK: "x",
     SymT.YBLOCK: "y",
-    SymT.INDIRECT: "ndirect",  # rename to avoid false aliasing
+    SymT.INDIRECT: "indirect", # false aliasing?
     SymT.VIEW: "view",
     SymT.HALIDE: "h",
 }
