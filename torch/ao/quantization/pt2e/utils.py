@@ -308,6 +308,7 @@ def fold_bn_weights_into_conv_node(
     if len(bn_node.users) == 0:
         m.graph.erase_node(bn_node)
 
+
 # fuse conv bn weights, inplace modification of the graph_module and graph
 def _fuse_conv_bn_(m: GraphModule) -> None:
     has_bn = any(_is_bn_node(n) for n in m.graph.nodes)
