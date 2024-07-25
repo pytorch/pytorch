@@ -184,6 +184,7 @@ class FSDPModule:
     def _infer_parameters(self, module, args, kwargs=None):
         """
         [Note: FSDP2 dry-run initialization for torch.compile]
+
         It's difficult for torch.compile to trace through the init logic of FSDP2,
         hence we want to do a dry-run initialization of FSDP2 in eager mode
         before torch.compile tracing.
@@ -191,6 +192,10 @@ class FSDPModule:
         Under compile, if an nn.Module is inherited from `LazyModuleMixin`
         and its `_initialize_hook` attribute is defined, then its `_infer_parameters()`
         is guaranteed to be run in the module pre-forward in eager mode.
+
+        Q: Why can't we do the same dry-run initialization for pure eager FSDP2 (no compile)?
+        A: Fundamentally this is running one extra forward pass in eager mode
+        at the beginning of model training, which might not be desired for pure eager FSDP2.
         """
         if ca.compiled_autograd_enabled and hasattr(module, "_initialize_hook"):
             # Under compile, always do the dry-run initialization in eager mode
