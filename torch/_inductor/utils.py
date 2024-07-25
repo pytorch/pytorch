@@ -799,6 +799,38 @@ class LineContext(NamedTuple):
     context: Any
 
 
+class PlaceHolderLine:
+    """A line that can be 'rewritten' by changing the placehoder"""
+
+    def __init__(self, place_holder, line_fn, _prefix=""):
+        self.place_holder = place_holder
+        self.line_fn = line_fn
+        self._prefix = _prefix
+
+    def __call__(self):
+        return f"{self._prefix}{self.line_fn(self.place_holder)}"
+
+    def with_prefix(self, prefix):
+        return PlaceHolderLine(self.place_holder, self.line_fn, prefix + self._prefix)
+
+    def lstrip(self):
+        return PlaceHolderLine(self.place_holder, self.line_fn, self._prefix.lstrip())
+
+    def __getitem__(self, index):
+        raise NotImplementedError
+
+    def __len__(self):
+        return len(self())
+
+    def __bool__(self):
+        return bool(self.place_holder)
+
+    def start_from(self, index):
+        assert index <= len(self._prefix)
+        new_prefix = "" if index == len(self._prefix) else self._prefix[index:]
+        return PlaceHolderLine(self.place_holder, self.line_fn, new_prefix)
+
+
 class IndentedBuffer:
     tabwidth = 4
 
@@ -811,7 +843,7 @@ class IndentedBuffer:
         p = 1
         linemap = []
         for line in self._lines:
-            if isinstance(line, DeferredLineBase):
+            if isinstance(line, (DeferredLineBase, PlaceHolderLine)):
                 line = line()
                 if line is None:
                     continue
@@ -831,7 +863,7 @@ class IndentedBuffer:
     def getrawvalue(self) -> str:
         buf = StringIO()
         for line in self._lines:
-            if isinstance(line, DeferredLineBase):
+            if isinstance(line, (DeferredLineBase, PlaceHolderLine)):
                 line = line()
                 if line is None:
                     continue
@@ -861,7 +893,7 @@ class IndentedBuffer:
     def writeline(self, line):
         if isinstance(line, LineContext):
             self._lines.append(line)
-        elif isinstance(line, DeferredLineBase):
+        elif isinstance(line, (DeferredLineBase, PlaceHolderLine)):
             self._lines.append(line.with_prefix(self.prefix()))
         elif line.strip():
             self._lines.append(f"{self.prefix()}{line}")
@@ -900,6 +932,9 @@ class IndentedBuffer:
             for line in other_code._lines:
                 if isinstance(line, LineContext):
                     self._lines.append(line)
+                elif isinstance(line, (DeferredLineBase, PlaceHolderLine)):
+                    new = line.start_from(int(dedent))
+                    IndentedBuffer.writeline(self, new)
                 else:
                     IndentedBuffer.writeline(self, line[int(dedent) :])
         else:
@@ -956,7 +991,7 @@ class DeferredLineBase:
     """A line that can be 'unwritten' at a later time"""
 
     def __init__(self, line):
-        if not line.strip():
+        if not isinstance(line, PlaceHolderLine) and not line.strip():
             line = ""
         self.line = line
 
@@ -964,17 +999,23 @@ class DeferredLineBase:
         """Returns either self.line or None to indicate the line has been 'unwritten'"""
         raise NotImplementedError
 
-    def _new_line(self, line: str) -> DeferredLineBase:
+    def _new_line(self, line: Union[str, PlaceHolderLine]) -> DeferredLineBase:
         """Returns a new deferred line with the same condition"""
         raise NotImplementedError
 
     def with_prefix(self, prefix):
+        if isinstance(self.line, PlaceHolderLine):
+            return self._new_line(self.line.with_prefix(prefix))
         return self._new_line(f"{prefix}{self.line}")
 
     def lstrip(self):
+        if isinstance(self.line, PlaceHolderLine):
+            return self._new_line(self.line.lstrip())
         return self._new_line(self.line.lstrip())
 
     def __getitem__(self, index):
+        if isinstance(self.line, PlaceHolderLine):
+            return self._new_line(self.line[index])
         return self._new_line(self.line[index])
 
     def __bool__(self):
@@ -982,6 +1023,11 @@ class DeferredLineBase:
 
     def __len__(self):
         return len(self.line)
+
+    def start_from(self, index):
+        if isinstance(self.line, PlaceHolderLine):
+            return self._new_line(self.line.start_from(index))
+        return self._new_line(self.line[index:])
 
 
 @functools.lru_cache(None)

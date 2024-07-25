@@ -3544,13 +3544,13 @@ class CPUReproTests(TestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(39, 1, kernel_size=(1, 17), stride=(2, 2))
+                self.conv = torch.nn.Conv2d(39, 1, kernel_size=(1, 20), stride=(2, 2))
 
             def forward(self, x):
                 return self.conv(x.max(3).values)
 
         m = M()
-        x = torch.randn(1, 39, 1, 18, 17)
+        x = torch.randn(1, 39, 1, 18, 20)
         self.common(m, (x,))
 
     def test_embedding_vec(self):
