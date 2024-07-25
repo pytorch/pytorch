@@ -18,6 +18,7 @@ import torch._dynamo as torchdynamo
 import torch.nn.functional as F
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
+from torch._decomp import get_decompositions
 from torch._dynamo.test_case import TestCase
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.utils import (
@@ -27,6 +28,7 @@ from torch._export.utils import (
     is_param,
     register_dataclass_as_pytree_node,
 )
+from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
 from torch.export import Dim, dynamic_dim, export, unflatten
 from torch.export._trace import (
@@ -1189,15 +1191,6 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             ).run_decompositions({}, _preserve_ops=(torch.ops.aten.chunk.default,))
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "aten.add.Tensor is not CompositeImplicitAutograd op, so we will preserve it as",
-        ):
-            _ = torch.export.export(
-                Foo(),
-                (torch.randn(3, 3),),
-            ).run_decompositions({}, _preserve_ops=(torch.ops.aten.add.Tensor,))
-
-        with self.assertRaisesRegex(
             RuntimeError, "aten.sym_size.default is a metadata query function"
         ):
             _ = torch.export.export(
@@ -1388,6 +1381,20 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )
+
+    @testing.expectedFailureRetraceability  # Unexpected type in sourceless builder torch._higher_order_ops.wrap.WrapWithSetGradEnabled
+    @testing.expectedFailureTrainingIRToRunDecomp  # Encountered autograd state manager op
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_set_grad_empty(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                with torch.no_grad():
+                    x = x + 1
+                    return x, None
+
+        ep = export(M(), (torch.ones(3, 3),))
+        inp = torch.randn(3, 3)
+        self.assertTrue(torch.allclose(ep.module()(inp)[0], inp + 1))
 
     def test_derived_dim_out_of_order_simplified(self):
         _dimz = torch.export.Dim("_dimz", min=6, max=8)
@@ -6236,6 +6243,49 @@ def forward(self, x, y):
         ):
             ep.module()(torch.ones(10), torch.ones(4))
 
+    def test_split_const_gm_with_lifted_constants(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4)
+                self.b = torch.randn(4)
+
+            def forward(self, x):
+                w_transpose = torch.transpose(self.w_pre, 0, 1)
+                w_relu = torch.nn.functional.relu(w_transpose)
+                w = w_relu + self.b
+                return torch.matmul(x, w)
+
+        example_inputs = (torch.randn(4, 4),)
+        mod = Model()
+        ep = torch.export.export(mod, example_inputs)
+        new_gm = copy.deepcopy(ep.graph_module)
+        new_sig = copy.deepcopy(ep.graph_signature)
+        placeholder_nodes = [
+            node for node in new_gm.graph.nodes if node.op == "placeholder"
+        ]
+        constants = {**ep.state_dict, **ep.constants}
+        lifted_constants = {
+            n.name: constants[spec.target]
+            for n, spec in zip(placeholder_nodes, new_sig.input_specs)
+            if spec.target is not None
+        }
+        const_gm, _ = split_const_gm(new_gm, lifted_constants)
+        counter = 0
+        for node in const_gm.graph.nodes:
+            if node.op == "call_function":
+                counter += 1
+        self.assertTrue(counter > 0)
+        test_input = torch.randn(4, 4)
+        expected = new_gm(None, None, test_input)[0]
+        actual = mod(test_input)
+        self.assertEqual(actual, expected)
+        const_gm, _ = split_const_gm(ep.graph_module, lifted_constants, lambda x: True)
+        counter = 0
+        for node in const_gm.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(False)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
@@ -6702,7 +6752,25 @@ class TestExportCustomClass(TorchTestCase):
 
         ep = torch.export.export(M(), (torch.ones(3),), strict=False)
 
-    def test_preserve_bilinear(self):
+    def test_preserve_non_cia_op(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.elu(x)
+
+        ep = export(M(), (torch.randn(2, 3, 4, 5),))
+        FileCheck().check_count("torch.ops.aten.elu.default", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+
+        ep = ep.run_decompositions(
+            decomp_table=get_decompositions([torch.ops.aten.elu.default]),
+            _preserve_ops=[torch.ops.aten.elu.default],
+        )
+        FileCheck().check_count("torch.ops.aten.elu.default", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+
+    def test_preserve_cia_op(self):
         class StaticResizeBilinear2dModule(torch.nn.Module):
             def forward(self, x):
                 a = torch.nn.functional.interpolate(
@@ -6719,9 +6787,12 @@ class TestExportCustomClass(TorchTestCase):
             "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True
         ).run(ep.graph_module.code)
 
+        decomp_table = get_decompositions([torch.ops.aten.upsample_bilinear2d.vec])
         ep = ep.run_decompositions(
-            decomp_table=None, _preserve_ops=[torch.ops.aten.upsample_bilinear2d.vec]
+            decomp_table=decomp_table,
+            _preserve_ops=[torch.ops.aten.upsample_bilinear2d.vec],
         )
+        assert torch.ops.aten.upsample_bilinear2d.vec in decomp_table
         FileCheck().check_count(
             "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True
         ).run(ep.graph_module.code)
