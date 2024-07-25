@@ -228,6 +228,7 @@ class TestSparseProp(TestCase):
             else:
                 self.assertEqual(meta, None)
 
+
 instantiate_parametrized_tests(TestSparseProp)
 
 if __name__ == "__main__":
