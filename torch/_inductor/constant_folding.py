@@ -222,7 +222,7 @@ class ConstantFolder(torch.fx.Interpreter):
     def add_node_replacement(self, node: torch.fx.Node, tensor: torch.Tensor) -> None:
         self.node_replacements[node] = tensor
 
-    def run(self) -> Any:
+    def run(self) -> Any:  # type: ignore[override]
         env: Dict[torch.fx.Node, Any] = {}
         self.insert_placerholder_values(env)
         return super().run(initial_env=env)
