@@ -4,7 +4,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch::csrc {
+namespace torch::detail {
 TORCH_PYTHON_API py::handle getTorchApiFunction(const c10::OperatorHandle& op);
 }
 
