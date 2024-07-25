@@ -146,8 +146,6 @@ def _math_attention_inner(
     mask_mod_in_dim_buffers = (None,) * len(mask_mod_other_buffers)
     mask_mod = _vmap_for_bhqkv(mask_mod, prefix=(), suffix=mask_mod_in_dim_buffers)
 
-    # todo: We wouldn't need these overrides in this file if Dynamo always did the
-    # rewriting.
     with TransformGetItemToIndex():
         scores = (scores * scale).to(working_precision)
         post_mod_scores = torch.where(
