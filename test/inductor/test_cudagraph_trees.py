@@ -2233,7 +2233,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
-        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_limit", 1)
+        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
         def test_skip_if_dynamic_shape_limit_reached1(self):
             class Mod(torch.nn.Module):
                 def __init__(self):
@@ -2255,13 +2255,17 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     iter(batch_size, mod)
 
             FileCheck().check(
-                "CUDAGraph supports dynamic shapes by recording a new graph "
-                "for each distinct input size. We have observed 2 distinct "
-                "sizes, including [20, 30]. Consider padding inputs to a few "
-                "fixed number of shapes for better performance."
+                "CUDAGraph supports dynamic shapes by recording a new graph for each "
+                "distinct input size. Recording too many CUDAGraphs may lead to "
+                "extra overhead. We have observed 2 distinct sizes. "
+                "Please consider the following options for better performance: "
+                "a) padding inputs to a few fixed number of shapes; or b) set "
+                "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
+                "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
+                "to silence this warning."
             ).run("\n".join(captured_output))
 
-        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_limit", 1)
+        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
         def test_skip_if_dynamic_shape_limit_reached2(self):
             class Mod(torch.nn.Module):
                 def __init__(self):
@@ -2291,11 +2295,14 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             print(captured_output)
             FileCheck().check(
-                "CUDAGraph supports dynamic shapes by recording a new graph "
-                "for each distinct input size. We have observed 2 distinct "
-                "sizes, including [(20, 10, 20), (20, 20, 20)]. Consider "
-                "padding inputs to a few fixed number of shapes for better "
-                "performance."
+                "CUDAGraph supports dynamic shapes by recording a new graph for each "
+                "distinct input size. Recording too many CUDAGraphs may lead to "
+                "extra overhead. We have observed 2 distinct sizes. "
+                "Please consider the following options for better performance: "
+                "a) padding inputs to a few fixed number of shapes; or b) set "
+                "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
+                "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
+                "to silence this warning."
             ).run(captured_output[0])
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
