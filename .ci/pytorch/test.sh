@@ -702,6 +702,14 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     cat "$output_name"
     # The threshold value needs to be actively maintained to make this check useful.
     python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target"
+
+    # Add a few ABI-compatible accuracy tests for CPU. These can be removed once we turn on ABI-compatible as default.
+    TORCHINDUCTOR_ABI_COMPATIBLE=1 python benchmarks/dynamo/timm.py --device cpu --accuracy \
+      --bfloat16 --inference --export-aot-inductor --disable-cudagraphs --only adv_inception_v3 \
+      --output "$TEST_REPORTS_DIR/aot_inductor_smoke_test.csv"
+    python benchmarks/dynamo/check_accuracy.py \
+      --actual "$TEST_REPORTS_DIR/aot_inductor_smoke_test.csv" \
+      --expected "benchmarks/dynamo/ci_expected_accuracy/aot_inductor_timm_inference.csv"
   done
 }
 
