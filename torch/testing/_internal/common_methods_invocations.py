@@ -11655,7 +11655,9 @@ def reference_flatten(input, start_dim=0, end_dim=-1):
     in_rank = len(in_shape)
     for d in start_dim, end_dim:
         if not ((in_rank == 0 and d in (-1, 0)) or -in_rank <= d < in_rank):
-            raise IndexError(f"Dimension out of range (expected to be in range of [{-in_rank}, {in_rank-1}], but got {d}")
+            raise IndexError(
+                f"Dimension out of range (expected to be in range of [{-in_rank}, {in_rank - 1}], but got {d}"
+            )
     end_dim = end_dim if end_dim >= 0 else in_rank + end_dim
     start_dim = start_dim if start_dim >= 0 else in_rank + start_dim
     if in_rank == 0:
@@ -16641,12 +16643,31 @@ op_db: List[OpInfo] = [
         supports_rhs_python_scalar=False,
         supports_inplace_autograd=False,
         supports_gradgrad=False,
+        supports_forward_ad=True,
         skips=(
             # FIXME: incorrectly tries to pass a rhs scalar
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestJit",
-                "test_jit_alias_remapping"
+                "test_jit_alias_remapping",
+            ),
+            # Trying to use forward AD ... that does not support it.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestOperators",
+                "test_vjpvmap",
+            ),
+            # Trying to use forward AD ... that does not support it.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestOperators",
+                "test_vmapjvpvjp",
+            ),
+            # TensorIterator does not support symbolic shapes.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestEagerFusionOpInfo",
+                "test_aot_autograd_symbolic_exhaustive",
             ),
         ),
     ),
@@ -16660,12 +16681,31 @@ op_db: List[OpInfo] = [
         supports_rhs_python_scalar=False,
         supports_inplace_autograd=False,
         supports_gradgrad=False,
+        supports_forward_ad=True,
         skips=(
             # FIXME: incorrectly tries to pass a rhs scalar
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestJit",
-                "test_jit_alias_remapping"
+                "test_jit_alias_remapping",
+            ),
+            # Trying to use forward AD ... that does not support it.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestOperators",
+                "test_vjpvmap",
+            ),
+            # Trying to use forward AD ... that does not support it.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestOperators",
+                "test_vmapjvpvjp",
+            ),
+            # TensorIterator does not support symbolic shapes.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestEagerFusionOpInfo",
+                "test_aot_autograd_symbolic_exhaustive",
             ),
         ),
     ),
