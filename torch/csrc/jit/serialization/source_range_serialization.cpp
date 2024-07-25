@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <algorithm>
+#include <memory>
 
 namespace torch::jit {
 
@@ -68,7 +69,7 @@ std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
     const auto& textIndex = tup_elems[0].toIntList();
     int64_t fnameIndex = tup_elems[1].toInt();
     int64_t starting_line_no_ = tup_elems[2].toInt();
-    std::optional<std::string> filename = c10::nullopt;
+    std::optional<std::string> filename = std::nullopt;
 
     TORCH_CHECK(
         (uint64_t)fnameIndex < text_table_.size(),
@@ -210,15 +211,15 @@ void ConcreteSourceRangeUnpickler::unpickle() {
 
   const auto& ivalues = ivaluesTuple->elements();
   TORCH_CHECK(
-      ivalues.size(), "Invalid unpickle operation: empty ivalues tuple");
+      !ivalues.empty(), "Invalid unpickle operation: empty ivalues tuple");
   unpickled_records = std::make_shared<SourceRangeRecords>();
   IValue lines;
   if (ivalues[0].isString() &&
       kFormatWithStringTable == ivalues[0].toStringRef()) {
-    deserializer.reset(new SourceRangeDeserializer(ivalues[1]));
+    deserializer = std::make_shared<SourceRangeDeserializer>(ivalues[1]);
     lines = ivalues[2];
   } else {
-    deserializer.reset(new SourceRangeDeserializer());
+    deserializer = std::make_shared<SourceRangeDeserializer>();
     lines = ivaluesTuple;
   }
   for (auto& val : lines.toTuple()->elements()) {
@@ -248,7 +249,7 @@ std::optional<SourceRange> ConcreteSourceRangeUnpickler::
     return (entry - 1)->range;
   }
 
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 TORCH_API void setShouldUseFormatWithStringTable(

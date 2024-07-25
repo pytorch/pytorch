@@ -31,7 +31,7 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
     return torch::jit::tryToInferType(py_obj_);
   }
 
-  IValue toIValue(const TypePtr& type, std::optional<int32_t> N = c10::nullopt)
+  IValue toIValue(const TypePtr& type, std::optional<int32_t> N = std::nullopt)
       override {
     pybind11::gil_scoped_acquire ag;
     return torch::jit::toIValue(py_obj_, type, N);
@@ -49,8 +49,15 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
     // when using C++. The reason is unclear.
     try {
       pybind11::gil_scoped_acquire ag;
-      static py::object& extractorFn = *new py::object(
-          py::module::import("torch._jit_internal").attr("_extract_tensors"));
+      PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object>
+          storage;
+      auto& extractorFn =
+          storage
+              .call_once_and_store_result([]() -> py::object {
+                return py::module_::import("torch._jit_internal")
+                    .attr("_extract_tensors");
+              })
+              .get_stored();
       return extractorFn(py_obj_).cast<std::vector<at::Tensor>>();
     } catch (py::error_already_set& e) {
       auto err = std::runtime_error(

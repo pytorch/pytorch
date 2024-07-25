@@ -14,7 +14,6 @@ namespace tensorexpr {
 
 class TORCH_API Tensor {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Tensor(BufPtr buf, const std::vector<VarPtr>& args, ExprPtr body)
       : buf_(std::move(buf)) {
     stmt_ = constructStmt(args, std::move(body), {}, {});
@@ -22,7 +21,6 @@ class TORCH_API Tensor {
   Tensor(BufHandle buf, const std::vector<VarHandle>& args, ExprHandle body)
       : Tensor(buf.node(), VarHandleVectorToVarVector(args), body.node()) {}
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Tensor(
       BufPtr buf,
       const std::vector<VarPtr>& args,
@@ -161,7 +159,7 @@ Tensor Reduce(
   if (reduce_vars.empty()) {
     ExprHandle body = Reducer::getReduceBody(body_func, vars);
     BufHandle func_result = Buf::make(
-        func_name, dims, body.dtype(), c10::nullopt, std::move(strides));
+        func_name, dims, body.dtype(), std::nullopt, std::move(strides));
     return Tensor(std::move(func_result), vars, std::move(body));
   }
 
@@ -206,7 +204,7 @@ Tensor Reduce(
   return Reduce<InitFunc, BodyFunc>(
       func_name,
       dims,
-      c10::nullopt,
+      std::nullopt,
       reducer,
       init_func,
       body_func,
@@ -226,7 +224,9 @@ Tensor Reduce(
       dims,
       strides,
       reducer,
-      [&](ParameterList p) { return ExprHandle(reducer.initializer()); },
+      [&](ParameterList p [[maybe_unused]]) {
+        return ExprHandle(reducer.initializer());
+      },
       body_func,
       reduce_dims);
 }
@@ -238,7 +238,7 @@ Tensor Reduce(
     const BodyFunc& body_func,
     const std::vector<ExprHandle>& reduce_dims) {
   return Reduce<BodyFunc>(
-      func_name, dims, c10::nullopt, reducer, body_func, reduce_dims);
+      func_name, dims, std::nullopt, reducer, body_func, reduce_dims);
 }
 
 // Overload which allows inline lambda functions for the body_func.
@@ -259,7 +259,7 @@ Tensor Reduce(
     const Reducer& reducer,
     const BodyFunc&& body_func,
     const std::vector<ExprHandle>& reduce_dims) {
-  return Reduce(func_name, dims, c10::nullopt, reducer, body_func, reduce_dims);
+  return Reduce(func_name, dims, std::nullopt, reducer, body_func, reduce_dims);
 }
 
 TORCH_API Tensor Reduce(

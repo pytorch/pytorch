@@ -16,6 +16,7 @@
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/profiler_python.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -184,6 +185,23 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("NO_GRAD_MODE", CreationMeta::NO_GRAD_MODE)
       .value("INFERENCE_MODE", CreationMeta::INFERENCE_MODE);
 
+  py::class_<torch::autograd::InputMetadata>(m, "_InputMetadata")
+      .def_property_readonly(
+          "dtype",
+          [](const torch::autograd::InputMetadata& m) {
+            PyObject* raw_obj =
+                (PyObject*)torch::getTHPDtype(m.dtype().toScalarType());
+            return py::reinterpret_borrow<py::object>(raw_obj);
+          })
+      .def_property_readonly("device", &torch::autograd::InputMetadata::device)
+      .def_property_readonly(
+          "shape", &torch::autograd::InputMetadata::shape_as_dim_vector)
+      .def_property_readonly(
+          "is_nested_tensor", &torch::autograd::InputMetadata::is_nested_tensor)
+      .def_property_readonly(
+          "is_cpp_nested_tensor",
+          &torch::autograd::InputMetadata::is_cpp_nested_tensor);
+
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
       .def("name", [](const KinetoEvent& e) { return e.name(); })
@@ -203,6 +221,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("sequence_nr", [](const KinetoEvent& e) { return e.sequenceNr(); })
       // absolute start time (since unix epoch) in ns
       .def("start_ns", [](const KinetoEvent& e) { return e.startNs(); })
+      // absolute end time (since unix epoch) in ns
+      .def("end_ns", [](const KinetoEvent& e) { return e.endNs(); })
       // duration in ns
       .def("duration_ns", [](const KinetoEvent& e) { return e.durationNs(); })
       // used for correlation between high-level PyTorch events
@@ -225,6 +245,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
                   return torch::jit::toPyObject(val);
                 });
             return as_pyobj;
+          })
+      .def(
+          "kwinputs",
+          [](const KinetoEvent& e) {
+            std::unordered_map<std::string, py::object> inputs;
+            for (const auto& [key, value] : e.kwinputs()) {
+              inputs[key] = torch::jit::toPyObject(value);
+            }
+            return inputs;
           })
       // stack traces of the PyTorch CPU events
       .def("stack", [](const KinetoEvent& e) { return e.stack().vec(); })
@@ -249,6 +278,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("is_async", [](const KinetoEvent& e) { return e.isAsync(); })
       .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs)
       .def("privateuse1_elapsed_us", &KinetoEvent::privateuse1ElapsedUs)
+      .def(
+          "is_user_annotation",
+          [](const KinetoEvent& e) {
+            return e.activityType() ==
+                (uint8_t)libkineto::ActivityType::USER_ANNOTATION ||
+                e.activityType() ==
+                (uint8_t)libkineto::ActivityType::GPU_USER_ANNOTATION;
+          })
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
@@ -322,6 +359,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         torch::profiler::impl::ActivityType::CPU};
 #if defined(USE_KINETO) && \
     (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
+    if (at::hasMTIA()) {
+      activities.insert(torch::profiler::impl::ActivityType::MTIA);
+    }
     if (at::getNumGPUs() > 0) {
       activities.insert(torch::profiler::impl::ActivityType::CUDA);
     }
@@ -1084,7 +1124,7 @@ static PyObject* push_on_torch_dispatch_stack(
     using c10::impl::TorchDispatchModeKey;
     // When we push a mode onto the mode stack, we need to
     // check if it's an "infra" mode, by checking its _mode_key attribute.
-    std::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+    std::optional<c10::impl::TorchDispatchModeKey> mode_key = std::nullopt;
     py::object maybe_mode_key_obj =
         PyObject_FastGetAttrString(arg, "_mode_key");
     if (maybe_mode_key_obj) {
@@ -1108,7 +1148,7 @@ static PyObject* pop_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* maybe_mode_key) {
   HANDLE_TH_ERRORS
-  std::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+  std::optional<c10::impl::TorchDispatchModeKey> mode_key = std::nullopt;
   PyObject* r = nullptr;
   if (maybe_mode_key != Py_None) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
@@ -1174,7 +1214,7 @@ static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(mode_key);
-  if (maybe_mode == c10::nullopt) {
+  if (maybe_mode == std::nullopt) {
     Py_RETURN_NONE;
   }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -1190,7 +1230,7 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   const auto maybe_mode = c10::impl::TorchDispatchModeTLS::unset_mode(mode_key);
-  if (maybe_mode == c10::nullopt) {
+  if (maybe_mode == std::nullopt) {
     Py_RETURN_NONE;
   }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)

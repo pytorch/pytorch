@@ -452,6 +452,6 @@ at::Tensor _qconv_prepack_onednn(
     torch::List<int64_t> padding,
     torch::List<int64_t> dilation,
     int64_t groups,
-    std::optional<torch::List<int64_t>> input_shape=c10::nullopt);
+    std::optional<torch::List<int64_t>> input_shape=std::nullopt);
 
 #endif // #if AT_MKLDNN_ENABLED()

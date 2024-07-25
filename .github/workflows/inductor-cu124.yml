@@ -9,6 +9,7 @@ on:
     # Run every 4 hours during the week and every 12 hours on the weekend
     - cron: 45 0,4,8,12,16,20 * * 1-5
     - cron: 45 4,12 * * 0,6
+    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -28,7 +29,8 @@ jobs:
       cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
           { config: "inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
@@ -95,7 +97,8 @@ jobs:
       cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
   linux-focal-cuda12_4-py3_12-gcc9-inductor-test:

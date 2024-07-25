@@ -340,9 +340,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
   }
 }
 
-std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(const c10::optional<Tensor>& grad_y_opt,
-                                                                               const c10::optional<Tensor>& grad_hy_opt,
-                                                                               const c10::optional<Tensor>& grad_cy_opt,
+std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(const std::optional<Tensor>& grad_y_opt,
+                                                                               const std::optional<Tensor>& grad_hy_opt,
+                                                                               const std::optional<Tensor>& grad_cy_opt,
                                                                                const Tensor& z_state,
                                                                                const Tensor& cell_state_fwd,
                                                                                const Tensor& input,
@@ -356,6 +356,8 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                                                bool bidirectional,
                                                                                bool batch_first) {
   using namespace mps;
+  bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
+
   const Tensor& grad_y_r = c10::value_or_else(grad_y_opt, [] { return Tensor(); });
   const Tensor& grad_hy_r = c10::value_or_else(grad_hy_opt, [] { return Tensor(); });
   const Tensor& grad_cy_r = c10::value_or_else(grad_cy_opt, [] { return Tensor(); });
@@ -529,6 +531,10 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                   start:i - num_layers
                                                  length:1
                                                    name:nil];
+          if (is_macos_14_4_or_newer) {
+            // Prevents shape optimization bug in kernel when num_layers > 2
+            iterationInputTensor_ = [mpsGraph identityWithTensor:iterationInputTensor_ name:nil];
+          }
           iterationInputTensor_ = [mpsGraph squeezeTensor:iterationInputTensor_ axis:0 name:nil];
         }
 

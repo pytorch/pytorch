@@ -1,7 +1,6 @@
 # Owner(s): ["module: unknown"]
 
 import torch
-
 from torch.testing._internal.common_utils import run_tests, TemporaryFileName, TestCase
 from torch.utils import ThroughputBenchmark
 

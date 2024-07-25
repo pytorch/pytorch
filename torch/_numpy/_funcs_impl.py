@@ -748,7 +748,7 @@ def indices(dimensions, dtype: Optional[DTypeLike] = int, sparse=False):
     N = len(dimensions)
     shape = (1,) * N
     if sparse:
-        res = tuple()
+        res = ()
     else:
         res = torch.empty((N,) + dimensions, dtype=dtype)
     for i, dim in enumerate(dimensions):

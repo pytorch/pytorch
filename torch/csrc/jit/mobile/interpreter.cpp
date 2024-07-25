@@ -358,8 +358,7 @@ bool InterpreterState::run(Stack& stack) {
           // when STRIP_ERROR_MESSAGES is defined (which happens for production
           // mobile builds). This will cause the stack to be in an inconsistent
           // state. It has previously resulted in a SEV (S22350).
-          const auto& sref = stack.back().toStringRef();
-          TORCH_WARN(sref);
+          TORCH_WARN(stack.back().toStringRef());
           stack.pop_back();
           frame.step();
         } break;

@@ -6,8 +6,11 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
+
 from .. import config as inductor_config
+from ..codegen.common import BackendFeature
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
+from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.wrapper import WrapperCodeGen
 from ..ir import FlexibleLayout
 from ..lowering import register_lowering
@@ -20,6 +23,7 @@ from ..select_algorithm import (
 from ..utils import (
     get_gpu_shared_memory,
     use_aten_gemm_kernels,
+    use_ck_template,
     use_cpp_packed_gemm_template,
     use_cutlass_template,
     use_max_autotune,
@@ -35,6 +39,7 @@ from .mm_common import (
     mm_options,
     triton_config,
 )
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -161,6 +166,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+
+    if use_ck_template(layout, m, n, k):
+        CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
     if use_cpp_packed_gemm_template(layout, mat1, mat2):
         CppPackedGemmTemplate.add_choices(
@@ -460,6 +468,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
         )
         or _is_sm7x_or_older_gpu(layout.device.index)
         or inductor_config.mixed_mm_choice == "aten"
+        or not V.graph.has_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
 
     if inductor_config.mixed_mm_choice == "triton":
@@ -467,7 +476,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
 
     if not skip_triton:
         b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
-        if inductor_config.mixed_mm_choice == "heuristic":
+        if static_shape and inductor_config.mixed_mm_choice == "heuristic":
             choices = []
             config = try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout)
             if config is not None:
