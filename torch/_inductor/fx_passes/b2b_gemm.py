@@ -35,23 +35,6 @@ from ..select_algorithm import (
 from ..utils import ceildiv
 
 
-def graph_to_str(G: torch.fx.Graph) -> str:
-    """
-    for debugging
-    """
-    ret = f"### BEGIN GRAPH (node -> users)\n"
-    GR = {}
-    for node in G.nodes:
-        if node not in GR:
-            GR[node] = []
-        for u, _ in node.users.items():
-            GR[node].append(u)
-    for n, u in GR.items():
-        ret += f"{n}:{n.op}:{n.target} -> {u}\n"
-    ret += f"### END GRAPH"
-    return ret
-
-
 B2B_GEMM_PASS = PatternMatcherPass(
     pass_name="b2b_gemm_pass",
 )
@@ -239,12 +222,8 @@ def load_ratio_left(M: int, N: int, O: int, P: int, m: int, n: int, o: int, p: i
     | store | M * O + M * P                 | M * P
     b2bgemm is always better on stores, but for loads we need to find out beneficial cases using this function
     """
-
-    def cdiv(x: int, y: int):
-        return x // y + (1 if x % y != 0 else 0)
-
     base = M * N + N * O + M * O + O * P
-    gemm = cdiv(M, m) * cdiv(P, p) * cdiv(O, o) * (o * p + cdiv(N, n) * (m * n + n * o))
+    gemm = ceildiv(M, m) * ceildiv(P, p) * ceildiv(O, o) * (o * p + ceildiv(N, n) * (m * n + n * o))
     return base / gemm
 
 
@@ -258,73 +237,29 @@ def load_ratio_right(M: int, N: int, O: int, P: int, m: int, n: int, o: int, p: 
     | store | N * P + M * P                 | M * P
     b2bgemm is always better on stores, but for loads we need to find out beneficial cases using this function
     """
-
-    def cdiv(x: int, y: int):
-        return x // y + (1 if x % y != 0 else 0)
-
     base = N * O + O * P + M * N + N * P
-    gemm = cdiv(M, m) * cdiv(P, p) * cdiv(N, n) * (m * n + cdiv(O, o) * (n * o + o * p))
+    gemm = ceildiv(M, m) * ceildiv(P, p) * ceildiv(N, n) * (m * n + ceildiv(O, o) * (n * o + o * p))
     return base / gemm
 
 
 # the block sizes are limited by hardware (the shared memory)
+# in theory all numbers are independent; e.g. BLOCK_SIZE_M is not necessarily equal to BLOCK_SIZE_O
 b2b_gemm_configs = [
     {
-        "BLOCK_SIZE_M": 64,
-        "BLOCK_SIZE_N": 32,
-        "BLOCK_SIZE_O": 64,
-        "BLOCK_SIZE_P": 32,
-        "num_stages": 4,
-        "num_warps": 8,
-    },
-    {
-        "BLOCK_SIZE_M": 64,
-        "BLOCK_SIZE_N": 64,
-        "BLOCK_SIZE_O": 64,
-        "BLOCK_SIZE_P": 64,
-        "num_stages": 4,
-        "num_warps": 8,
-    },
-    {
-        "BLOCK_SIZE_M": 128,
-        "BLOCK_SIZE_N": 32,
-        "BLOCK_SIZE_O": 128,
-        "BLOCK_SIZE_P": 32,
-        "num_stages": 2,
-        "num_warps": 4,
-    },
-    {
-        "BLOCK_SIZE_M": 128,
-        "BLOCK_SIZE_N": 64,
-        "BLOCK_SIZE_O": 128,
-        "BLOCK_SIZE_P": 64,
-        "num_stages": 2,
-        "num_warps": 4,
-    },
-    {
-        "BLOCK_SIZE_M": 32,
-        "BLOCK_SIZE_N": 64,
-        "BLOCK_SIZE_O": 32,
-        "BLOCK_SIZE_P": 64,
-        "num_stages": 4,
-        "num_warps": 8,
-    },
-    {
-        "BLOCK_SIZE_M": 32,
-        "BLOCK_SIZE_N": 128,
-        "BLOCK_SIZE_O": 32,
-        "BLOCK_SIZE_P": 128,
-        "num_stages": 2,
-        "num_warps": 4,
-    },
-    {
-        "BLOCK_SIZE_M": 64,
-        "BLOCK_SIZE_N": 128,
-        "BLOCK_SIZE_O": 64,
-        "BLOCK_SIZE_P": 128,
-        "num_stages": 2,
-        "num_warps": 4,
-    },
+        "BLOCK_SIZE_M": m,
+        "BLOCK_SIZE_N": n,
+        "BLOCK_SIZE_O": m,
+        "BLOCK_SIZE_P": n,
+        "num_stages": s,
+        "num_warps": 2 * s,
+    }
+    for (m, n, s) in set(  # deduplicate
+        (m, n, s)
+        for m in [16, 32, 64, 128]
+            for n in [16, 32, 64, 128]
+                for s in ([2] if (m == 128 or n == 128) else [2, 4])  # don't be too large
+                    if not (m == n == 128)  # don't be too large
+    )
 ]
 
 
@@ -382,7 +317,7 @@ def is_b2b_gemm_good_on(
     for r in ratios[:3]:  # top 3 choices
         average_ratio *= r
     average_ratio = average_ratio ** (1 / 3)
-    return average_ratio > 1
+    return average_ratio > 1  # even if average_ratio is close to 1, the number of stores is always better
 
 
 def unoptimized_b2b_gemm(
@@ -455,7 +390,7 @@ def tuned_b2b_gemm(
     CallFunction(torch.ops.aten.mm, Arg(), Arg()),
     pass_dict=B2B_GEMM_PASS,
 )
-def b2b_gemm(
+def b2b_gemm_handler(
     match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node
 ) -> None:
     # match.args: list[torch.fx.Node]
@@ -468,15 +403,12 @@ def b2b_gemm(
         )
     
     def is_mm(node: torch.fx.Node) -> bool:
-        return (
-            node.op == "call_function" and
-            node.target == torch.ops.aten.mm.default
-        )
+        return node.target == torch.ops.aten.mm.default
 
     # the inner MM
     inner_mm = match.nodes[-1]
 
-    # find the (candidate) outer MM
+    # find the (candidate) outer MM, which will be re-checked below to ensure every path reaches it
     # In a real (A @ f(B @ C)), every path starting from (B @ C) must reach (A @ _).
     outer_mm = None
     node = inner_mm
@@ -518,8 +450,9 @@ def b2b_gemm(
             elif (node is src) or check_intermediate(node):
                 ret = True
                 for next_node in get_next(node):
-                    val = dfs(next_node)
-                    ret = ret and val
+                    if not dfs(next_node):
+                        ret = False
+                        break
             else:
                 ret = False
             visited[node] = ret
