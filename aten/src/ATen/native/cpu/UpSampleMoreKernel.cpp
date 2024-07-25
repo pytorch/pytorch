@@ -246,8 +246,8 @@ void cpu_upsample_nearest_backward_channels_last(
   int64_t channels =  input_sizes[1];
   int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
   int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
-  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
-  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
+  int64_t input_height = input_sizes[ndim - 2];
+  int64_t output_height = output_sizes[ndim - 2];
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
   int64_t input_slice_size = input_depth * input_height * input_width * channels;
@@ -617,8 +617,8 @@ void cpu_upsample_linear_backward_channels_last(
   int64_t channels =  input_sizes[1];
   int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
   int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
-  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
-  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
+  int64_t input_height = input_sizes[ndim - 2];
+  int64_t output_height = output_sizes[ndim - 2];
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
   int64_t input_slice_size = input_depth * input_height * input_width * channels;
