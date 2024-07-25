@@ -62,8 +62,8 @@ def create_attention(score_mod, block_mask, enable_gqa=False):
 def create_block_mask_test(score_mod, query, key):
     block_mask = create_block_mask(
         score_mod,
-        None,
-        None,
+        1,
+        1,
         query.shape[-2],
         key.shape[-2],
         query.device,
@@ -1164,6 +1164,29 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention)
+
+    @supported_platform
+    def test_GQA_causal_mask(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S // 8, S // 8)
+        attention = functools.partial(
+            flex_attention, block_mask=block_mask, enable_gqa=True
+        )
+
+        self.run_test_with_call(
+            attention,
+            torch.float16,
+            B,
+            H * 4,  # Hq = 4*Hkv.
+            S // 8,
+            D,
+            B,
+            H,
+            S // 8,
+            D,
+        )
 
     @supported_platform
     def test_custom_block_mask_generator(self):
