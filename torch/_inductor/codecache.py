@@ -1493,7 +1493,7 @@ def get_include_and_linking_paths(
     return ipaths, lpaths_str, libs_str, macros, build_arch_flags
 
 
-def cpp_compile_command(
+def deprecated_cpp_compile_command(
     input: Union[str, List[str]],
     output: str,
     warning_all: bool = True,
@@ -1507,6 +1507,13 @@ def cpp_compile_command(
     use_mmap_weights: bool = False,
     extra_flags: Sequence[str] = (),
 ) -> str:
+    """
+    Please don't use this function in new development code.
+    It was planed to remove after we switched to new cpp_builder, but I can't access to Meta
+    internal environment to fix AotCodeCompiler fb_code.
+    TODO: need some Meta employee help on fix AotCodeCompiler fb_code, and then delete this
+    deprecated function.
+    """
     ipaths, lpaths, libs, macros, build_arch_flags = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
     )
@@ -1559,6 +1566,19 @@ def cpp_compile_command(
             -o {out_name}
         """,
     ).strip()
+
+
+# TODO: Will remove the temp code after switch to new cpp_builder
+def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
+    new_diff: List[str] = [x for x in new_cmd if x not in old_cmd]
+    old_diff: List[str] = [y for y in old_cmd if y not in new_cmd]
+
+    if new_diff or old_diff:
+        print("!!! new_cmd: ", new_cmd)
+        print("!!! old_cmd: ", old_cmd)
+        print("!!! new_diff: ", new_diff)
+        print("!!! old_diff: ", old_diff)
+        raise RuntimeError("Error in new and old command different.")
 
 
 def run_command_and_check(cmd: str):
@@ -1846,8 +1866,8 @@ class AotCodeCompiler:
                 object_build_options.save_flags_to_file(compile_flags)
             else:
                 if config.is_fbcode():
-                    # TODO: replace this with using the CppBuilder above
-                    compile_cmd = cpp_compile_command(
+                    # TODO: enable AotCodeCompiler fb_code, and remove deprecated_cpp_compile_command.
+                    compile_cmd_old = deprecated_cpp_compile_command(
                         input=input_path,
                         output=output_o,
                         vec_isa=picked_vec_isa,
@@ -1857,6 +1877,13 @@ class AotCodeCompiler:
                         use_absolute_path=use_absolute_path,
                         use_mmap_weights=use_mmap_weights,
                     )
+                    # TODO: Enable below code to debug in fb_code.
+                    """
+                    _temp_validate_new_and_old_command(
+                        compile_cmd.split(" "), compile_cmd_old.split(" ")
+                    )
+                    """
+                    compile_cmd = compile_cmd_old
 
                 log.debug("aot compilation command: %s", compile_cmd)
                 if fbcode_aot_cpu_re:
@@ -1952,8 +1979,8 @@ class AotCodeCompiler:
                 return archive_path
             else:
                 if config.is_fbcode():
-                    # TODO: replace this with using the CppBuilder above
-                    link_cmd = cpp_compile_command(
+                    # TODO: enable AotCodeCompiler fb_code, and remove deprecated_cpp_compile_command.
+                    link_cmd_old = deprecated_cpp_compile_command(
                         input=[output_o, consts_o],
                         output=output_so,
                         vec_isa=picked_vec_isa,
@@ -1961,6 +1988,13 @@ class AotCodeCompiler:
                         aot_mode=graph.aot_mode,
                         use_absolute_path=use_absolute_path,
                     )
+                    # TODO: Enable below code to debug in fb_code.
+                    """
+                    _temp_validate_new_and_old_command(
+                        link_cmd.split(" "), link_cmd_old.split(" ")
+                    )
+                    """
+                    link_cmd = link_cmd_old
 
                 log.debug("aot linkage command: %s", link_cmd)
                 if fbcode_aot_cpu_re:
@@ -2111,7 +2145,7 @@ def custom_op_wrapper(op: str, *args):
 class CppCodeCache:
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
-    cpp_compile_command_flags: Dict[str, Any] = {}
+    deprecated_cpp_compile_command_flags: Dict[str, Any] = {}
 
     @staticmethod
     def _load_library_inner(path: str, key: str) -> Union[CDLL, ModuleType]:
@@ -2143,7 +2177,7 @@ class CppCodeCache:
     @classmethod
     def load_async(cls, source_code: str, cuda=False, submit_fn=None, extra_flags=()):
         compile_command = {
-            **cls.cpp_compile_command_flags,
+            **cls.deprecated_cpp_compile_command_flags,
             "cuda": cuda,
             "vec_isa": pick_vec_isa(),
             "extra_flags": extra_flags,
@@ -2250,7 +2284,7 @@ def _worker_compile_cpp(
 class CppPythonBindingsCodeCache(CppCodeCache):
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
-    cpp_compile_command_flags = {
+    deprecated_cpp_compile_command_flags = {
         # kernels have no dependency on libtorch
         "include_pytorch": False,
         "shared": True,
@@ -2416,7 +2450,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
-    cpp_compile_command_flags = {
+    deprecated_cpp_compile_command_flags = {
         "include_pytorch": True,
         "shared": True,
     }
@@ -2475,19 +2509,6 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     )
 
 
-# TODO: Will remove the temp code after switch to new cpp_builder
-def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
-    new_diff: List[str] = [x for x in new_cmd if x not in old_cmd]
-    old_diff: List[str] = [y for y in old_cmd if y not in new_cmd]
-
-    if new_diff or old_diff:
-        print("!!! new_cmd: ", new_cmd)
-        print("!!! old_cmd: ", old_cmd)
-        print("!!! new_diff: ", new_diff)
-        print("!!! old_diff: ", old_diff)
-        raise RuntimeError("Error in new and old command different.")
-
-
 def _do_validate_cpp_commands(
     include_pytorch: bool,
     cuda: bool,
@@ -2516,7 +2537,7 @@ def _do_validate_cpp_commands(
     if sys.platform != "linux":
         aot_mode = False
 
-    old_cmd = cpp_compile_command(
+    old_cmd = deprecated_cpp_compile_command(
         input=input_path,
         output=output_path,
         include_pytorch=include_pytorch,
