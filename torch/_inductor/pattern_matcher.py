@@ -235,7 +235,7 @@ class Match:
             if trace_fn is None:
                 trace_fn = functools.partial(fwd_only, run_dce=run_dce)
             replacement = trace_fn(
-                replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+                replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])  # type: ignore[arg-type]
             )
             ReplacementPatternEntry.replace_with_graph(
                 self,
@@ -606,7 +606,7 @@ class _TargetArgsExpr(_TargetExpr):
             from torch.fx.operator_schemas import normalize_function
 
             normalized_args_and_kwargs = normalize_function(
-                node.target, node.args, node.kwargs
+                node.target, node.args, node.kwargs  # type: ignore[arg-type]
             )
 
             if normalized_args_and_kwargs is None:
@@ -1035,7 +1035,7 @@ class ReplacementPatternEntry(PatternEntry):
                 if node.op == "call_function":
                     target = node.target
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
-                    result = graph.call_function(target, args, kwargs)
+                    result = graph.call_function(target, args, kwargs)  # type: ignore[arg-type]
                     if "val" in node.meta and "val" not in result.meta:
                         result.meta["val"] = node.meta["val"]
                         if isinstance(node.meta["val"], torch.Tensor):
@@ -1079,7 +1079,7 @@ class ReplacementPatternEntry(PatternEntry):
                     queue.extend(arg.all_input_nodes)
 
         with graph.inserting_before(last_node):
-            replacement = Replacer(replacement_graph).run(*args)
+            replacement = Replacer(replacement_graph).run(*args)  # type: ignore[arg-type]
             if isinstance(replacement, torch.fx.Node):
                 replacement = [replacement]
 
@@ -1100,7 +1100,7 @@ class ReplacementPatternEntry(PatternEntry):
                     return
                 assert isinstance(old, torch.fx.Node)
                 if new is None:
-                    old.replace_all_uses_with(None)
+                    old.replace_all_uses_with(None)  # type: ignore[arg-type]
                     graph.erase_node(old)
                     return
                 if isinstance(new, torch.fx.Node):
@@ -1123,7 +1123,7 @@ class ReplacementPatternEntry(PatternEntry):
                     graph.erase_node(old)
                     return
 
-                new = typing.cast(Sequence[torch.fx.Node], new)
+                new = typing.cast(Sequence[torch.fx.Node], new)  # type: ignore[redundant-cast]
                 # `new` is not a node: it's a list of nodes.
                 #
                 # This happens when we want to replace a node that has a single
@@ -1232,7 +1232,7 @@ def register_replacement(
                 )
 
         args = list(
-            torch.fx.map_arg(
+            torch.fx.map_arg(  # type: ignore[arg-type]
                 [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
             )
         )
@@ -1665,8 +1665,8 @@ class PatternMatcherPass:
             raise RuntimeError(
                 f"The input to PatternMatcherPass must be a GraphModule or a Graph, but got {type(gm)}"
             )
-        if should_compute_mutation_region_ids(graph):
-            compute_mutation_region_ids(graph)
+        if should_compute_mutation_region_ids(graph):  # type: ignore[arg-type]
+            compute_mutation_region_ids(graph)  # type: ignore[arg-type]
         get_mutation_region_id_partial = functools.partial(
             get_mutation_region_id, graph
         )
@@ -1757,7 +1757,7 @@ def fx_to_pattern(
         get_attr = _not_implemented
 
         def placeholder(
-            self, target: str, args: Sequence[Any], kwargs: Mapping[str, Any]
+            self, target: str, args: Sequence[Any], kwargs: Mapping[str, Any]  # type: ignore[override]
         ) -> Union[ExclusiveKeywordArg, KeywordArg]:
             n = next(argnum)
             if n < len(argnames):
@@ -1774,7 +1774,7 @@ def fx_to_pattern(
                 return KeywordArg(name)
 
         def call_function(
-            self, target: str, args: Sequence[Any], kwargs: Mapping[str, Any]
+            self, target: str, args: Sequence[Any], kwargs: Mapping[str, Any]  # type: ignore[override]
         ) -> PatternExpr:
             args, kwargs = pytree.tree_map(process_arg, (args, kwargs))
             if list in ignore_types:
@@ -1793,7 +1793,7 @@ def fx_to_pattern(
                 rv.users = len(n.users)
             return rv
 
-    pattern = Converter(gm).run()
+    pattern = Converter(gm).run()  # type: ignore[arg-type]
     if not isinstance(pattern, PatternExpr):
         return MultiOutputPattern(pytree.tree_leaves(pattern))
     return pattern
