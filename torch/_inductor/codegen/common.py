@@ -69,13 +69,18 @@ class TensorArg:
     name: str
     buffer: str
     dtype: torch.dtype
-    offset: sympy.Expr = sympy.Integer(0)
+    offset: sympy.Expr = sympy.Integer(0)  # c++ only
+    alias_of: Optional[str] = None  # halide only
 
 
 @dataclasses.dataclass
 class SizeArg:
     name: str
     expr: sympy.Expr
+
+    @property
+    def alias_of(self):
+        return None
 
 
 @dataclasses.dataclass
@@ -145,8 +150,11 @@ class BackendFeature(Enum):
     INPLACE_BUFFERS = auto()
     MASKED_SCATTER_WITH_INDEX = auto()
     SCAN = auto()
+    SORT = auto()
     TUPLE_REDUCTION = auto()
     PREFER_STORE_LOOP_ORDER = auto()
+    TRITON_TEMPLATES = auto()
+    REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
 def get_backend_features(device: Union[torch.device, str]):
@@ -189,28 +197,52 @@ def init_backend_registration():
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_cuda import CppWrapperCuda
     from .cuda_combined_scheduling import CUDACombinedScheduling
+    from .halide import HalideScheduling
     from .triton import TritonScheduling
     from .wrapper import WrapperCodeGen
 
     if get_scheduling_for_device("cpu") is None:
+        cpu_backends = {"cpp": CppScheduling, "halide": HalideScheduling}
         register_backend_for_device(
             "cpu",
-            CppScheduling,
+            lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
             WrapperCodeGen,
             CppWrapperCpu,
         )
 
     if get_scheduling_for_device("cuda") is None:
         # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
+        cuda_backends = {"triton": CUDACombinedScheduling, "halide": HalideScheduling}
         register_backend_for_device(
             "cuda",
-            CUDACombinedScheduling,
+            lambda *args, **kwargs: cuda_backends[config.cuda_backend](*args, **kwargs),
             WrapperCodeGen,
             CppWrapperCuda,
         )
 
     if get_scheduling_for_device("xpu") is None:
         register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
+
+    private_backend = torch._C._get_privateuse1_backend_name()
+    if (
+        private_backend != "privateuseone"
+        and get_scheduling_for_device(private_backend) is None
+    ):
+        from torch.utils.backend_registration import _get_custom_mod_func
+
+        try:
+            device_scheduling = _get_custom_mod_func("Scheduling")
+            wrapper_codegen = _get_custom_mod_func("WrapperCodeGen")
+            cpp_wrapper_codegen = _get_custom_mod_func("CppWrapperCodeGen")
+            if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:
+                register_backend_for_device(
+                    private_backend,
+                    device_scheduling,
+                    wrapper_codegen,
+                    cpp_wrapper_codegen,
+                )
+        except RuntimeError:
+            pass
 
 
 def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
@@ -240,7 +272,6 @@ def boolean_ops():
     return (
         "is_inf",
         "is_nan",
-        "bitwise_xor",
         "logical_not",
         "signbit",
         "le",
@@ -421,8 +452,8 @@ class ExprPrinter(Printer):
 
         if (
             isinstance(string, CSEVariable)
-            or re.match(r"^[a-z0-9_.]+$", string, re.I)
-            or re.match(r"^\([^)]*\)$", string, re.I)
+            or re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
+            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
             or string == ""
         ):
             return string
@@ -1153,10 +1184,10 @@ class KernelArgs:
         return odict[name]
 
     def __init__(self, sizevars=None):
-        self.input_buffers = dict()
-        self.output_buffers = dict()
-        self.inplace_buffers = dict()
-        self.sizevars = sizevars or dict()
+        self.input_buffers = {}
+        self.output_buffers = {}
+        self.inplace_buffers = {}
+        self.sizevars = sizevars or {}
         self.workspace_arg = None
 
     def __repr__(self):
@@ -1333,7 +1364,6 @@ class KernelArgs:
             arg_defs.append("ws_ptr")
             call_args.append("workspace")
             precompile_args.append(self.workspace_arg)
-
         return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):
@@ -1585,7 +1615,7 @@ class Kernel(CodeGen):
         # key: the buffer to write
         # value: the buffer to read and whose memory can be reused for
         #   the buffer specified by key
-        self.inplace_update_buffers = dict()
+        self.inplace_update_buffers = {}
         # Set minimum number of elements processed per thread.
         self.min_elem_per_thread = 1
         self.kernel_name = None
@@ -1667,6 +1697,15 @@ class Kernel(CodeGen):
     ) -> Tuple[CSEVariable, ...]:
         raise NotImplementedError
 
+    def sort(
+        self,
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[CSEVariable, ...],
+        stable: bool,
+        descending: bool,
+    ) -> Tuple[CSEVariable, ...]:
+        raise NotImplementedError
+
     def var_ranges(self):
         raise NotImplementedError
 
@@ -1739,7 +1778,9 @@ class Kernel(CodeGen):
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
 
                     def do_cse(v):
-                        csevar = self.cse.generate(self.compute, v, bounds=bounds)
+                        csevar = V.kernel.cse.generate(
+                            V.kernel.compute, v, bounds=bounds
+                        )
                         csevar.update_on_args(name, args, kwargs)
                         return csevar
 
@@ -1907,6 +1948,15 @@ class Kernel(CodeGen):
                 return self.scan(dtypes, combine_fn, values)
 
             @staticmethod
+            def sort(
+                dtypes: Tuple[torch.dtype, ...],
+                values: Tuple[CSEVariable, ...],
+                stable: bool,
+                descending: bool,
+            ) -> Tuple[CSEVariable, ...]:
+                return self.sort(dtypes, values, stable, descending)
+
+            @staticmethod
             def bucketize(
                 values: CSEVariable,
                 offsets_name: str,
@@ -2018,7 +2068,44 @@ class KernelTemplate:
         env = jinja2_env()
         if env is not None:
             env.filters["indent_except_first"] = KernelTemplate.indent_except_first
-            return env.from_string(source)
+            from jinja2 import TemplateSyntaxError
+
+            class DetailedTemplateSyntaxError(TemplateSyntaxError):
+                def __init__(self, original_error):
+                    super().__init__(
+                        original_error.message,
+                        original_error.lineno,
+                        original_error.name,
+                        original_error.filename,
+                    )
+                    self.original_error = original_error
+
+                def __str__(self):
+                    error_info = f"Error in template at line {self.lineno}\n"
+                    error_info += f"Error message: {self.message}\n"
+                    if hasattr(self.original_error, "source"):
+                        lines = self.original_error.source.split("\n")
+                        error_info += "Context:\n"
+                        start = max(0, self.lineno - 2)
+                        end = min(len(lines), self.lineno + 2)
+                        for i in range(start, end):
+                            if i == self.lineno - 1:
+                                error_info += f"{i+1}: --> {lines[i]}\n"
+                                if hasattr(self.original_error, "column"):
+                                    error_info += (
+                                        "     "
+                                        + " " * (self.original_error.column - 1)
+                                        + "^\n"
+                                    )
+                            else:
+                                error_info += f"{i+1}:     {lines[i]}\n"
+                    return error_info
+
+            try:
+                return env.from_string(source)
+            except TemplateSyntaxError as e:
+                raise DetailedTemplateSyntaxError(e) from e
+
         return None
 
     @staticmethod
@@ -2045,7 +2132,7 @@ class KernelTemplate:
 
         try:
             choices.append(self.generate(**kwargs))
-        except NotImplementedError:
+        except NotImplementedError as e:
             pass
 
     def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":

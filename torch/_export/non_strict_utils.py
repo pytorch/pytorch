@@ -83,6 +83,7 @@ def fakify(
         constraint_sizes=[None] * n_dims,
     )
     t_id = id(t)
+    assert mode.shape_env is not None
     if t_id in t_constraints:
         for i, constraint in t_constraints[t_id].items():
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
@@ -117,7 +118,7 @@ def make_fake_inputs(
     kwargs,
     dynamic_shapes,
     _is_torch_jit_trace=False,
-    _allow_complex_guards_as_runtime_asserts=False,
+    allow_complex_guards_as_runtime_asserts=False,
 ):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
@@ -165,8 +166,8 @@ def make_fake_inputs(
             shape_env=ShapeEnv(
                 tracked_fakes=[],
                 co_fields=co_fields,
-                prefer_deferred_runtime_asserts_over_guards=_allow_complex_guards_as_runtime_asserts,
-                _allow_complex_guards_as_runtime_asserts=_allow_complex_guards_as_runtime_asserts,
+                prefer_deferred_runtime_asserts_over_guards=allow_complex_guards_as_runtime_asserts,
+                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
             ),
             allow_non_fake_inputs=True,
             export=True,
@@ -175,8 +176,8 @@ def make_fake_inputs(
         fake_mode = FakeTensorMode(
             shape_env=ShapeEnv(
                 tracked_fakes=[],
-                prefer_deferred_runtime_asserts_over_guards=_allow_complex_guards_as_runtime_asserts,
-                _allow_complex_guards_as_runtime_asserts=_allow_complex_guards_as_runtime_asserts,
+                prefer_deferred_runtime_asserts_over_guards=allow_complex_guards_as_runtime_asserts,
+                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
             ),
             allow_non_fake_inputs=True,
         )
@@ -256,6 +257,7 @@ def produce_guards_and_solve_constraints(
         _disable_forced_specializations: if True, avoids forced specializations
     """
     shape_env = fake_mode.shape_env
+    assert shape_env is not None
     assert shape_env.tracked_fakes is not None
 
     placeholders = [tf.fake for tf in shape_env.tracked_fakes]
@@ -322,6 +324,7 @@ def make_constraints(
     """
 
     shape_env = fake_mode.shape_env
+    assert shape_env is not None
     inline_constraints = gm.meta.get("inline_constraints", [])
     range_constraints = {
         symbol: inline_constraints[symbol] for symbol in inline_constraints
@@ -445,7 +448,7 @@ def _fakify_script_objects(
     fake_to_real = {}
 
     def _maybe_fakify_obj(obj):
-        fake_obj = torch._library.fake_class_registry.to_fake_obj(fake_mode, obj)
+        fake_obj = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, obj)
         fake_to_real[fake_obj] = obj
         return fake_obj
 

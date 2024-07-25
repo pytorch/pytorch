@@ -81,6 +81,7 @@ class SymNode:
         self._expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
+
         # What's the difference between hint and constant?
         #
         # - A constant is known to be invariant across invocations of the model;
@@ -107,11 +108,30 @@ class SymNode:
         # unbacked symint that a hint was now possible, but as we added more
         # potential refinements to unbacked symints this got harder to keep
         # in sync, so we've deleted it for now.)
+
+        def compute_hint():
+            # This occasionally gets exercised by, e.g.,
+            # convert_shape_to_symint.  It's just a nicety so you don't HAVE
+            # to have a correct hint on hand when making a SymNode.
+            hint = self.shape_env._maybe_evaluate_static(self.expr, compute_hint=True)
+            if hint is not None:
+                hint = self.pytype(hint) if not isinstance(hint, SymTypes) else hint
+            return hint
+
         if hint is not None:
             assert type(hint) is pytype or type(hint) is _to_symtype(pytype), (
                 "Cannot create SymNode of type "
                 f"{pytype} with incompatible hint of type {type(hint)}"
             )
+            if self.shape_env._translation_validation_enabled:
+                # This is technically not TV, but this assert is expensive so
+                # let's only do it when we're already doing expensive things
+                computed_hint = compute_hint()
+                assert (
+                    hint == computed_hint
+                ), f"{hint} != {computed_hint} (for {self.expr})"
+        else:
+            hint = compute_hint()
         self._hint = hint
         self.constant: Optional[Union[int, float, bool]] = constant
 
@@ -131,27 +151,14 @@ class SymNode:
     def expr(self):
         return self.shape_env.replace(self._expr)
 
-    # Recompute the hint and see if we've got it now
-    # Precondition: self._hint is None
-    def _update_hint(self):
-        r = self.shape_env._maybe_evaluate_static(self.expr, compute_hint=True)
-        if r is not None:
-            self._hint = self.pytype(r) if not isinstance(r, SymTypes) else r
-
     @property
     def hint(self):
-        if self._hint is None:
-            self._update_hint()
         return self._hint
 
     def has_hint(self):
-        if self._hint is None:
-            self._update_hint()
         return self._hint is not None
 
     def require_hint(self, fallback=None):
-        if self._hint is None:
-            self._update_hint()
         if self._hint is None:
             if fallback is not None:
                 return fallback
@@ -240,6 +247,19 @@ class SymNode:
         return self.str()
 
     def __repr__(self):
+        rep = [
+            f"SymNode({self.expr}, shape_env={self.shape_env}, pytype={self.pytype}",
+        ]
+        if self._hint is not None:
+            rep.append(f"hint={self._hint}")
+        if self.constant is not None:
+            rep.append(f"constant={self.constant}")
+        if self.fx_node is not None:
+            rep.append(f"fx_node={self.fx_node}")
+        return ", ".join(rep) + ")"
+
+    def _graph_repr(self) -> builtins.str:
+        # Representation used by GraphModule to create a pythonic version of a graph
         return self.str()
 
     # These methods call the metaprogrammed methods, they're hand written
@@ -1055,7 +1075,7 @@ def _make_node_magic(method, func):
             log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
         out = safe_expand(out)
-        sym_node_log.debug("%s %s %s -> %s", func, self.expr, other.expr, out)
+        sym_node_log.debug("%s %s %s -> %s", method, self.expr, other.expr, out)
         pytype: Type
         # This is not strictly correct. In Python, a**b may return complex when
         # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This

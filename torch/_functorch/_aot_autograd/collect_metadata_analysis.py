@@ -86,7 +86,7 @@ def coerce_tangent(x):
     if is_traceable_wrapper_subclass(out) and hasattr(
         out, "__coerce_tangent_metadata__"
     ):
-        out = out.__coerce_tangent_metadata__()
+        out = out.__coerce_tangent_metadata__()  # type: ignore[attr-defined]
     # It's possible to have a subclass that advertises as contiguous,
     # but has noncontiguous inner tensors.
     # Force these to be conntiguous too
@@ -167,6 +167,7 @@ def run_functionalized_fw_and_collect_metadata(
             if (fake_mode := detect_fake_mode()) and (shape_env := fake_mode.shape_env):
                 shape_env.pending_fresh_unbacked_symbols.clear()
                 fake_mode.epoch += 1
+                fake_mode.reset_nt_tensor_id_counter()
 
         if prior_autocast_states != _get_autocast_states():
             raise RuntimeError(

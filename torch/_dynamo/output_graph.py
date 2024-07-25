@@ -294,7 +294,7 @@ class OutputGraph:
             allow_scalar_outputs=config.capture_scalar_outputs,
             allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
             prefer_deferred_runtime_asserts_over_guards=config.prefer_deferred_runtime_asserts_over_guards,
-            _allow_complex_guards_as_runtime_asserts=config._allow_complex_guards_as_runtime_asserts,
+            allow_complex_guards_as_runtime_asserts=config.allow_complex_guards_as_runtime_asserts,
             co_fields=self.co_fields,
         )
 
@@ -321,7 +321,7 @@ class OutputGraph:
             int, List[Source]
         ] = collections.defaultdict(list)
         # Stores the full fqn of a param or buffer to the relevant source.
-        self.param_name_to_source: Optional[Dict[str, Source]] = dict()
+        self.param_name_to_source: Optional[Dict[str, Source]] = {}
         self.side_effects = SideEffects()
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
@@ -795,7 +795,7 @@ class OutputGraph:
 
                 vt = wrap_fx_proxy(
                     self.root_tx,
-                    tracer.create_proxy("get_attr", module_key, tuple(), {}),
+                    tracer.create_proxy("get_attr", module_key, (), {}),
                     example_value=target,
                     **options,
                 )
@@ -833,7 +833,7 @@ class OutputGraph:
             def wrap_name(module_key):
                 return SymNodeVariable.create(
                     self,
-                    self.create_proxy("get_attr", module_key, tuple(), {}),
+                    self.create_proxy("get_attr", module_key, (), {}),
                     sym_num=target,
                     **options,
                 )
@@ -1030,7 +1030,7 @@ class OutputGraph:
         restore_vars = []
         val_to_names: Dict[VariableTracker, List[str]] = {}
         if stack_values:
-            val_to_names[stack_values[-1]] = list()
+            val_to_names[stack_values[-1]] = []
         # NB: Typically (i.e., for graph compile from RETURN_VALUE),
         # symbolic_locals will be empty at this point, as prune_dead_locals
         # will clear out all of symbolic_locals because RETURN_VALUE is the
@@ -1053,7 +1053,7 @@ class OutputGraph:
                 # A variable should never be NULL in < 3.12
                 assert not type.__instancecheck__(NullVariable, v)
             if v not in val_to_names:
-                val_to_names[v] = list()
+                val_to_names[v] = []
             val_to_names[v].append(k)
         for v in val_to_names.keys():
             restore_vars.extend(val_to_names[v])
@@ -1577,14 +1577,19 @@ class OutputGraph:
                     if isinstance(node.meta["grapharg"].example, torch.ScriptObject):
                         real_script_obj = node.meta["grapharg"].example
                         fake_script_obj = node.meta["grapharg"].example_strong_ref
-                        flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
-                        for attr in flat_dict.keys():
-                            fake_attr_val = getattr(fake_script_obj.wrapped_obj, attr)
-                            pytree.tree_map_only(
-                                (torch.SymInt, torch.Tensor),
-                                lambda t: update_used_symbols(used_symbols, t),
-                                fake_attr_val,
-                            )
+                        if not torch._library.fake_class_registry.tracing_with_real(
+                            real_script_obj
+                        ):
+                            flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
+                            for attr in flat_dict.keys():
+                                fake_attr_val = getattr(
+                                    fake_script_obj.wrapped_obj, attr
+                                )
+                                pytree.tree_map_only(
+                                    (torch.SymInt, torch.Tensor),
+                                    lambda t: update_used_symbols(used_symbols, t),
+                                    fake_attr_val,
+                                )
                         continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
@@ -2060,13 +2065,8 @@ class SubgraphTracer(fx.Tracer):
                     TracingContext.extract_stack()
                 )
 
-        # unique
-        if name in self.input_name_to_proxy:
-            for i in itertools.count():
-                candidate_name = f"{name}_{i}"
-                if candidate_name not in self.input_name_to_proxy:
-                    name = candidate_name
-                    break
+        # Use graph_namespace to create unique name.
+        name = self.graph._graph_namespace.create_name(name, obj=None)
 
         if self.input_name_to_proxy:
             prev_name = next(reversed(self.input_name_to_proxy))

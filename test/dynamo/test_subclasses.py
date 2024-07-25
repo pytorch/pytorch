@@ -258,6 +258,61 @@ class ScaledTensor(torch.Tensor):
         return f"{self._data.__repr__()}\n{self._scale.__repr__()}"
 
 
+class OptionalScaledTensor(torch.Tensor):
+    def __new__(
+        cls,
+        data,
+        scale,
+        *,
+        constant: int = 0,
+    ):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            data.size(),
+            strides=data.stride(),
+            storage_offset=data.storage_offset(),
+            dtype=data.dtype,
+            layout=data.layout,
+            requires_grad=data.requires_grad,
+            device=data.device,
+        )
+
+    def __init__(self, data: torch.Tensor, scale, constant: int = 0):
+        self._data = data
+        self._scale = scale
+        self._constant = constant
+
+    def __tensor_flatten__(self):
+        ctx = {"_constant": self._constant}
+        if self._scale is not None:
+            return ["_data", "_scale"], ctx
+        else:
+            return ["_data"], ctx
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+        return OptionalScaledTensor(
+            inner_tensors["_data"],
+            inner_tensors["_scale"] if "_scale" in inner_tensors else None,
+            constant=metadata["_constant"],
+        )
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        scaled_tensor = args[0]
+        out = func(scaled_tensor._data, *args[1:], **kwargs)
+        if scaled_tensor._scale is not None:
+            out = out * scaled_tensor._scale
+        return OptionalScaledTensor(
+            out, scaled_tensor._scale, constant=scaled_tensor._constant
+        )
+
+    def __repr__(self):
+        return (
+            f"OptionalScaledTensor({self._data.__repr__()}\n{self._scale.__repr__()})"
+        )
+
+
 def func(a):
     return a.sin()
 
@@ -964,7 +1019,9 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3, 4]"):
-            add_: "f32[3, 4]" = l_x_.add_(1.0);  l_x_ = None
+            l_x__1 = l_x_
+
+            add_: "f32[3, 4]" = l_x__1.add_(1.0);  l_x__1 = None
             return (add_,)
 """,
         )
@@ -988,7 +1045,9 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
-            add_ = l_x_.add_(1.0);  l_x_ = None
+            l_x__1 = l_x_
+
+            add_ = l_x__1.add_(1.0);  l_x__1 = None
             return (add_,)
 """,
         )
@@ -1018,7 +1077,9 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
-            add_ = l_x_.add_(1.0);  l_x_ = None
+            l_x__1 = l_x_
+
+            add_ = l_x__1.add_(1.0);  l_x__1 = None
             return (add_,)
 """,
         )
@@ -1135,7 +1196,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend=backend)
         def fn(x):
-            if x.shape[0] < 10:
+            if x.shape[0] < 13:
                 return torch.mul(x, x)
             else:
                 return torch.div(x, x)
@@ -1161,7 +1222,7 @@ class GraphModule(torch.nn.Module):
             "\n".join(guards),
             """\
 Eq(2*s1, s0)
-2*s1 < 10
+2*s1 < 13
 s1 > 3""",
         )
 
@@ -1197,6 +1258,26 @@ s1 > 3""",
         torch._dynamo.mark_dynamic(sub1, 1)
         sub2 = ScaledTensor(torch.randn(2, 4), torch.randn(5))
         self.assertTrue(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
+
+    def test_recompiles_with_optional_inner_tensor(self):
+        def f(x):
+            return x + 1
+
+        # sub1 does not have the optional tensor specified while sub2 does
+        sub1 = OptionalScaledTensor(torch.randn(2, 4), None)
+        sub2 = OptionalScaledTensor(torch.randn(2, 4), torch.randn(2, 4))
+
+        # sanity check; don't recompile for same input
+        self.assertFalse(_recompiles_for_inputs(f, (sub1,), (sub1,), dynamic=True))
+        self.assertFalse(_recompiles_for_inputs(f, (sub2,), (sub2,), dynamic=True))
+
+        # these should recompile; optional tensor changes between specified and unspecified
+        self.assertTrue(_recompiles_for_inputs(f, (sub1,), (sub2,), dynamic=True))
+        self.assertTrue(_recompiles_for_inputs(f, (sub2,), (sub1,), dynamic=True))
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+        self.assertEqual(f(sub1)._data, f_compiled(sub1)._data)
+        self.assertEqual(f(sub2)._data, f_compiled(sub2)._data)
 
     def test_torch_dispatch_subclass_guard_recompile(self):
         x = torch.ones(2, 2)
@@ -1288,6 +1369,9 @@ s1 > 3""",
         s = SubTensor(torch.randn(3, 10))
         f(s)
 
+    # Guard validation upsets the guard
+    # https://github.com/pytorch/pytorch/issues/129936
+    @unittest.expectedFailure
     def test_recompile_with_symbool_inputs(self):
         def f(pred: bool):
             if pred:
@@ -1507,7 +1591,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
         self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
 
-    def test_construct_from_jagged_with_offsets_from_inputs(self):
+    def test_construct_from_jagged_with_offsets_from_inputs_single(self):
         #
         # Basic case
         #
@@ -1528,6 +1612,11 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         ref_grad, = torch.autograd.grad(ref_out, inputs=(values,), grad_outputs=(torch.ones_like(ref_out),))
         self.assertEqual(out, ref_out)
         self.assertEqual(grad, ref_grad)
+
+    def test_construct_from_jagged_with_offsets_from_inputs_binary(self):
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        values = nt.values().requires_grad_(True)
 
         #
         # Binary op guarding
@@ -1562,13 +1651,21 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         self.assertEqual(out, ref_out)
         self.assertEqual(grad, ref_grad)
 
+    def test_construct_from_jagged_with_intermediate_offsets(self):
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        values = nt.values().requires_grad_(True)
+
         #
         # Offsets which is an intermediate
         #
+        prev = torch.nested._internal.nested_tensor._tensor_id_counter
         def fn(values, offsets):
             return torch.nested.nested_tensor_from_jagged(values * 2, offsets.clone()) * 2
 
         out = torch.compile(fn, fullgraph=True, backend="aot_eager")(values, nt.offsets())
+        self.assertEqual(str(out.shape[1]), f"j{prev}")
+        self.assertEqual(torch.nested._internal.nested_tensor._tensor_id_counter, prev + 1)
 
         # Should not recompile when different offset is used
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
@@ -1583,17 +1680,89 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         self.assertEqual(out, ref_out)
         self.assertEqual(grad, ref_grad)
 
-        #
-        # Mixed case (This case still fails!)
-        #
-        # values = nt.values().detach() # requires_grad_(False)
-        # torch._dynamo.mark_dynamic(values, 0)
+    @unittest.expectedFailure
+    def test_return_shape(self):
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
 
-        # def fn(nt, values, offsets):
-        #     nt2 = torch.nested.nested_tensor_from_jagged(values, offsets)
-        #     return nt * nt2
+        def fn(nt):
+            return (nt * 2).shape
 
-        # out = torch.compile(fn, fullgraph=True, backend="aot_eager")(nt, values, nt.offsets())
+        compiled = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled(nt)
+
+    def test_construct_from_jagged_with_intermediate_offsets_mixed_case(self):
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        values = nt.values().requires_grad_(True)
+
+        # Why do we need to set this?
+        torch._dynamo.mark_dynamic(values, 0)
+
+        # This test is set up so that:
+        #
+        # 1) `offsets` has already been used in a NJT
+        # 2) `offsets` is fakified before `nt`
+        #
+        # This means that anytime we fakify any tensor, we need to check whether
+        # it has been used in a NJT before. If so, we eagerly create a symbolic
+        # nested int for it in the case it will be constructed.
+        def fn(nt, values, offsets):
+            # nt.clone()
+            nt2 = torch.nested.nested_tensor_from_jagged(values, offsets)
+            # Wait a sec, if I have one that is ephemeral?
+            # I do have one that is ephemeral
+            # Neither should be ephemeral.
+            return nt * nt2
+
+        out = torch.compile(fn, fullgraph=True, backend="aot_eager")(nt, values, nt.offsets())
+
+    def test_construct_from_jagged_with_intermediate_offsets_mixed_case_2(self):
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        values = nt.values().requires_grad_(True)
+
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        values = nt.values().requires_grad_(True)
+
+        # Why do we need to set this?
+        torch._dynamo.mark_dynamic(values, 0)
+
+        # This test is set up so that:
+        #
+        # 1) `offsets` has already been used in a NJT
+        # 2) `offsets` is fakified before `nt`
+        #
+        # This means that anytime we fakify any tensor, we need to check whether
+        # it has been used in a NJT before. If so, we eagerly create a symbolic
+        # nested int for it in the case it will be constructed.
+        def fn(nt, values, offsets, nt2):
+            intermediate_nt = torch.nested.nested_tensor_from_jagged(values, offsets.clone())
+            if nt2.shape[1] != intermediate_nt.shape[1]:
+                # We should always go here.
+                nt = nt * 2
+            return nt
+
+        compiled_f = torch.compile(fn, fullgraph=True, backend="aot_eager", dynamic=True)
+        compiled_f(nt, values, nt.offsets(), nt2)
+
+        # compiled_f(nt, values, nt.offsets(), nt)
+
+        # Why doesn't Ephemeral source error, when we add a guard?
+        # Add a check that this guard exists:
+        # - L['offsets'] is L['nt']._offsets
+
+        # Check if it has a guard:
+        # - its not possible for there to be a guard here actually
+        #   because, we didn't actually add the logic.
+
+        # We do NOT need to rely on dynamic shapes at all yet!
+
+        # TODO: I want a test that case that requires the two tensors
+        # to actually be the same.
+        # some kind of ephemeral tensor case?
+        # if its passed in as a NJT, then
+
+
+
 
 
     # TODO: cannot parametrize this test class with device for some reason
@@ -1759,7 +1928,7 @@ Eq(s10, s8)""",
                     guard_str,
                     """\
 Eq(s3 - 1, s0)
-Eq(zf1, zf6)""",
+Eq(s1, s6)""",
                 )
             else:
                 self.assertExpectedInline(

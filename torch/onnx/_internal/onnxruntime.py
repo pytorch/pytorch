@@ -804,7 +804,7 @@ class OrtBackend:
     def _select_eps(
         self, graph_module: torch.fx.GraphModule, *args
     ) -> Sequence[Tuple[str, Mapping[str, Any]]]:
-        inferred_eps: Tuple[str, ...] = tuple()
+        inferred_eps: Tuple[str, ...] = ()
         if self._options.infer_execution_providers:
             if eps_from_args := _infer_ep_from_device(*args):
                 # If user feeds CUDA tensor as input argument,

@@ -46,6 +46,9 @@ class MockStore:
         self.ops.append(("add", key, val))
         return 3
 
+    def wait(self, keys: List[str]) -> None:
+        self.ops.append(("wait", keys))
+
 
 class StoreUtilTest(TestCase):
     def test_get_all_rank_0(self):
@@ -61,7 +64,7 @@ class StoreUtilTest(TestCase):
                 ("multi_get", ["test/store0", "test/store1", "test/store2"]),
                 ("add", "test/store/finished/num_members", 1),
                 ("set", "test/store/finished/last_member", "<val_ignored>"),
-                ("get", "test/store/finished/last_member"),
+                ("wait", ["test/store/finished/last_member"]),
             ],
         )
 
@@ -94,7 +97,7 @@ class StoreUtilTest(TestCase):
                 ("multi_get", ["test/store0", "test/store1", "test/store2"]),
                 ("add", "test/store/finished/num_members", 1),
                 ("set", "test/store/finished/last_member", "<val_ignored>"),
-                ("get", "test/store/finished/last_member"),
+                ("wait", ["test/store/finished/last_member"]),
                 ("set_timeout", datetime.timedelta(seconds=1234)),
             ],
         )
@@ -126,7 +129,7 @@ class StoreUtilTest(TestCase):
                 ("set_timeout", datetime.timedelta(seconds=300)),
                 ("add", "test/store/num_members", 1),
                 ("set", "test/store/last_member", "<val_ignored>"),
-                ("get", "test/store/last_member"),
+                ("wait", ["test/store/last_member"]),
                 ("set_timeout", datetime.timedelta(seconds=1234)),
             ],
         )
