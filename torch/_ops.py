@@ -336,10 +336,10 @@ class HigherOrderOperator(OperatorBase):
                         # TODO(rzou): we should support torch_dispatch calling convention too.
                         result = handler(mode, *args, **kwargs)
                 else:
-                    with _pop_mode_temporarily() as mode:
-                        result = curr_mode.__torch_dispatch__(
-                            self_, overloaded_types, args, kwargs
-                        )
+                    raise NotImplementedError(
+                        "There was no rule registered for HOP {self._name} and mode {curr_mode}. "
+                        "We recommend filing an issue."
+                    )
                 if result is not NotImplemented:
                     return result
 
@@ -357,8 +357,9 @@ class HigherOrderOperator(OperatorBase):
                     # TODO(rzou): we should support torch_dispatch calling convention too.
                     result = handler(*args, **kwargs)
                 else:
-                    result = subclass_type.__torch_dispatch__(
-                        self_, overloaded_types, args, kwargs
+                    raise NotImplementedError(
+                        "There was no rule registered for HOP {self._name} and subclass {subclass_type}. "
+                        "We recommend filing an issue."
                     )
                 if result is not NotImplemented:
                     return result

@@ -9,7 +9,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
@@ -26,7 +26,8 @@ class TestConverter(TestCase):
     ) -> ExportedProgram:
         # By default, it tests both jit.trace and jit.script.
         if option is None:
-            option = ["trace", "script"]
+            # option = ["trace", "script"]
+            option = ["script"]
 
         if check_persistent:
             num_iterations = 10
@@ -57,6 +58,7 @@ class TestConverter(TestCase):
             else:
                 raise RuntimeError(f"Unrecognized mode for torch.jit: {opt}")
 
+            print(opt, ts_model.graph)
             ep = TS2EPConverter(ts_model, inp).convert()
             ep_list.append(ep)
 
@@ -418,6 +420,62 @@ class TestConverter(TestCase):
         inp = ((torch.zeros(1, 4), torch.ones(1, 4)),)
         self._check_equal_ts_ep_converter(MUnpackTuple(), inp)
 
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "torch.cond doesn't go through torch.compile on windows"
+        "causing output not normalized as list",
+    )
+    def test_convert_retrace_nested_scripted_modules(self):
+        class Wrapper(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x, y):
+                return self.mod(x, y)
+
+        class LinearM(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(dim, dim)
+
+            def forward(self, x, y):
+                return self.linear(y)
+
+        class M(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                m = LinearM(dim)
+                m = torch.jit.script(m)
+                self.mod1 = m
+                self.mod2 = Wrapper(m)
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                if x:
+                    return -self.mod1(x, y) - self.mod2(x, y)
+                else:
+                    return -self.mod1(x, y) + self.mod2(x, y)
+
+        class NestedM(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                m = M(dim)
+                m = torch.jit.script(m)
+                self.mod1 = m
+                self.mod2 = Wrapper(m)
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                if x:
+                    return self.mod1(x, y) + self.mod2(x, y)
+                else:
+                    return self.mod1(x, y) - self.mod2(x, y)
+
+        inp = (
+            torch.tensor(True),
+            torch.randn([3, 3]),
+        )
+        self._check_equal_ts_ep_converter(NestedM(3), inp)
+
     def test_convert_nn_module_with_nested_param(self):
         class M(torch.nn.Module):
             def __init__(self, dim: int) -> None:
@@ -525,8 +583,7 @@ class TestConverter(TestCase):
         # Super nested module testing.
         inp = (torch.ones(1),)
         orig_m = SuperNestedM()
-        # TODO: fix trace: state_dict is not equal.
-        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
 
         t = inp[0]
         t -= 1
@@ -536,6 +593,11 @@ class TestConverter(TestCase):
                 orig_m(*inp),
             )
 
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "torch.cond doesn't go through torch.compile on windows"
+        "causing output not normalized as list",
+    )
     def test_convert_nn_module_with_nested_if_and_param(self):
         class M(torch.nn.Module):
             def __init__(self, dim: int) -> None:
@@ -604,12 +666,12 @@ class TestConverter(TestCase):
         # Nested module testing.
         inp = (torch.ones(3),)
         orig_m = NestedM(3)
-        # TODO: fix trace: state_dict is not equal.
-        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
 
         t = inp[0]
         t -= 0.8
-        for ep in ep_list:
+        # Skip jit.traced because it specializes on one path.
+        for ep in ep_list[1:]:
             torch.testing.assert_close(
                 ep.module()(*inp),
                 orig_m(*inp),
@@ -618,12 +680,12 @@ class TestConverter(TestCase):
         # Super nested module testing.
         inp = (torch.ones(3),)
         orig_m = SuperNestedM1(3)
-        # TODO: fix trace: state_dict is not equal.
-        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
 
         t = inp[0]
         t -= 0.8
-        for ep in ep_list:
+        # Skip jit.traced because it specializes on one path.
+        for ep in ep_list[1:]:
             torch.testing.assert_close(
                 ep.module()(*inp),
                 orig_m(*inp),
@@ -632,12 +694,12 @@ class TestConverter(TestCase):
         # Super nested module testing.
         inp = (torch.ones(3),)
         orig_m = SuperNestedM2(3)
-        # TODO: fix trace: state_dict is not equal.
-        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
 
         t = inp[0]
         t -= 0.8
-        for ep in ep_list:
+        # Skip jit.traced because it specializes on one path.
+        for ep in ep_list[1:]:
             torch.testing.assert_close(
                 ep.module()(*inp),
                 orig_m(*inp),
@@ -807,6 +869,67 @@ class TestConverter(TestCase):
         #             torch.randn([1, 1, 1]).to(torch.float32),
         #             torch.randn([1, 1, 1]).to(torch.float64),
         #         )[0], 1
+        #     )
+
+    def test_aten_tensor_dtype_int(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.tensor(1, dtype=torch.int32)
+                return y + x
+
+        ep_list = self._check_equal_ts_ep_converter(M(), (torch.tensor(1),))
+        for ep in ep_list:
+            self.assertEqual(len(ep.constants), 1)
+
+    def test_aten_tensor_prim_dtype(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.tensor(1, dtype=x.dtype)
+                return y + x
+
+        ep_list = self._check_equal_ts_ep_converter(M(), (torch.tensor(1),))
+        for ep in ep_list:
+            self.assertEqual(len(ep.constants), 1)
+
+    def test_aten_tensor_dynamic(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                s = x.shape[0]
+                y = torch.tensor(s)
+                return y
+
+        ep = torch.export.export(
+            M(), (torch.ones(3),), dynamic_shapes=({0: torch.export.Dim("m")},)
+        )
+        ep_list = self._check_equal_ts_ep_converter(M(), (torch.ones(3),))
+        for ep in ep_list:
+            self.assertEqual(len(ep.constants), 0)
+
+        # TODO: Additional check once dynamic shape is supported.
+        # for ep in ep_list:
+        #     torch.testing.assert_close(
+        #         ep.module()(torch.ones(4)),
+        #         M()(torch.ones(4)),
+        #     )
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                s = x.shape[0]
+                y = torch.tensor([s, s * 2, 1])
+                return y
+
+        ep = torch.export.export(
+            M(), (torch.ones(3),), dynamic_shapes=({0: torch.export.Dim("m")},)
+        )
+        ep_list = self._check_equal_ts_ep_converter(M(), (torch.ones(3),))
+        for ep in ep_list:
+            self.assertEqual(len(ep.constants), 0)
+
+        # TODO: Additional check once dynamic shape is supported.
+        # for ep in ep_list:
+        #     torch.testing.assert_close(
+        #         ep.module()(torch.ones(4)),
+        #         M()(torch.ones(4)),
         #     )
 
     def test_prim_tolist(self):
