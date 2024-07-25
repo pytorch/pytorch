@@ -192,7 +192,11 @@ def user_defined_kernel_grid_fn_code(
 
     def writeline(line: str, example_grid: Optional[str] = None):
         output.writeline(line)
-        if wrapper and config.triton.autotune_at_compile_time:
+        if (
+            wrapper
+            and config.triton.autotune_at_compile_time
+            and name not in wrapper.kernel_autotune_names
+        ):
             wrapper.kernel_autotune_calls.writeline(example_grid or line)
 
     fn_name = f"grid_wrapper_for_{name}"
@@ -466,7 +470,7 @@ class WrapperCodeGen(CodeGen):
         self.wrapper_call = IndentedBuffer()
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
-        self.kernel_autotun_names: Set[str] = set()
+        self.kernel_autotune_names: Set[str] = set()
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: Dict[str, str] = {}
@@ -721,6 +725,8 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_device_guard_exit(self) -> None:
         self.writeline(ExitDeviceContextManagerLine())
+        if config.triton.autotune_at_compile_time:
+            self.kernel_autotune_calls.do_unindent()
 
     def generate_return(self, output_refs: List[str]) -> None:
         if output_refs:
@@ -1554,11 +1560,7 @@ class WrapperCodeGen(CodeGen):
             return buf_name
         elif issubclass(arg_type, sympy.Basic) or isinstance(arg, SymbolicCallArg):
             # arg is a symbol or symbolic expression
-            if isinstance(arg, str):
-                if arg in self._meta_vars:
-                    return arg
-                if raw_arg is None:
-                    return "None"
+            if raw_arg is not None:
                 arg = raw_arg
             if isinstance(arg, SymbolicCallArg):
                 arg = arg.inner_expr
@@ -1571,6 +1573,10 @@ class WrapperCodeGen(CodeGen):
                 )
             )
         elif isinstance(arg, (str, int, float, bool)):
+            if arg in self._meta_vars:
+                return arg
+            if raw_arg is None:
+                return "None"
             return str(arg)
         else:
             breakpoint()
@@ -1616,7 +1622,7 @@ class WrapperCodeGen(CodeGen):
                 )
                 if (
                     config.triton.autotune_at_compile_time
-                    and kernel_name not in self.kernel_autotun_names
+                    and kernel_name not in self.kernel_autotune_names
                 ):
                     # Create example args for autotune in a separate epilogue
                     assert arg_types is not None and len(call_args) == len(
@@ -1669,7 +1675,7 @@ class WrapperCodeGen(CodeGen):
                     self.kernel_autotune_calls.writeline(
                         f"del {', '.join(arg for arg in tensor_args.values())}\n",
                     )
-                    self.kernel_autotun_names.add(kernel_name)
+                    self.kernel_autotune_names.add(kernel_name)
             else:
                 stream_ptr = f"c_void_p({stream_name})"
                 self.writeline(
