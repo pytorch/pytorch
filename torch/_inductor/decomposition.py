@@ -804,12 +804,6 @@ def max_pool2d_with_indices(
 
 @register_decomposition(associative_scan_op)
 def associative_scan_op_decomp(combine_fn, leaves, dim, lifted_args):
-    
-    # def wrap_combine_fn(fct):
-    #     return functools.partial(
-    #         wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
-    #     )
-    
     # This will handle the fallback to eager in case any
     # of the leaves is on a non-CUDA device
     if not all([l.device.type == "cuda" for l in leaves]):

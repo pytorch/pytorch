@@ -992,9 +992,9 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder, wrap_fx_proxy
         
-        def slice_along_axis(size, dim=0):
+        def slice_along_axis(size, d=0):
             li = list(size)
-            li[dim] = 1
+            li[d] = 1
             return tuple(li)
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
@@ -1016,8 +1016,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             leaf.call_method(
                 tx, 
                 "new_empty", 
-                # args=(SourcelessBuilder.create(tx, leaf.size if leaf.size is not None else ()),), 
-                args=(SourcelessBuilder.create(tx, slice_along_axis(leaf.size) if leaf.size is not None else ()),), 
+                args=(SourcelessBuilder.create(tx, slice_along_axis(leaf.size, dim.as_proxy()) if leaf.size is not None else ()),), 
                 kwargs={"requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad)})
             for leaf in itertools.chain(input.items, input.items)
         ]
@@ -1035,10 +1034,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
         )
 
-        # if combine_lifted_freevars:
-        #     unimplemented(
-        #         f"Combine fn had unexpected freevars: {combine_lifted_freevars}"
-        #     )
         lifted_args = tuple(arg for arg in combine_lifted_freevars.keys())
 
         if combine_result.python_type() != list:
@@ -1061,11 +1056,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     f"Expected combine_fn to return a tensor of {inp_meta.dtype} but "
                     + f"got {combine_result_meta.dtype}"
                 )
-
-            # if combine_result_meta.shape != ():
-            #     unimplemented(
-            #         f"Expected combine_fn to return a tensor with shape () but got {combine_result_meta.shape}"
-            #     )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = add_subgraph(tx, "scan_combine", combine_gm)

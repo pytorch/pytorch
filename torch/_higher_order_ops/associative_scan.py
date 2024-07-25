@@ -195,6 +195,7 @@ def generic_associative_scan(operator, elems_flat, dim=0, lifted_args=()):
         reduced_elems = operator(
             *[elem[slice_along_axis(0, -1, stride=2, dim=dim)] for elem in elems],
             *[elem[slice_along_axis(1, None, stride=2, dim=dim)] for elem in elems],
+            *lifted_args
         )
 
         # Recursively compute scan for partially reduced tensors.
@@ -204,11 +205,13 @@ def generic_associative_scan(operator, elems_flat, dim=0, lifted_args=()):
             even_elems = operator(
                 *[e[slice_along_axis(0, -1, dim=dim)] for e in odd_elems],
                 *[e[slice_along_axis(2, None, stride=2, dim=dim)] for e in elems],
+                *lifted_args
             )
         else:
             even_elems = operator(
                 *odd_elems,
                 *[e[slice_along_axis(2, None, stride=2, dim=dim)] for e in elems],
+                *lifted_args
             )
 
         # The first element of a scan is the same as the first element
@@ -243,13 +246,10 @@ def trace_associative_scan(
 
     with disable_proxy_modes_tracing():
         sample_inputs = [
-            # torch.full((), False, dtype=x.dtype, device=x.device)
-            # torch.empty_like(x, dtype=x.dtype, device=x.device)
-            # torch.empty_like(x[slice_along_axis(0, 1, stride=None, dim=dim)], dtype=x.dtype, device=x.device)
             torch.empty_like(x[slice_along_axis(0, 1, stride=None, dim=dim)], dtype=x.dtype, device=x.device, requires_grad=x.requires_grad)
             for x in itertools.chain(input, input)
         ]
-        combine_graph = reenter_make_fx(combine_fn)(*sample_inputs)
+        combine_graph = reenter_make_fx(combine_fn)(*sample_inputs, *lifted_args)
 
     outputs = None
     for node in combine_graph.graph.nodes:
@@ -267,11 +267,7 @@ def trace_associative_scan(
         o_meta = o.meta["tensor_meta"]
         assert o_meta.dtype == i.dtype, (
             f"combine_fn output type mismatch, expected {i.dtype} "
-            + f"but got {o_meta.dtype}"
-        )
-        # assert (
-        #     o_meta.shape == ()
-        # ), f"combine_fn must return a scalar tensor but got shape {o_meta.shape}"
+            + f"but got {o_meta.dtype}")
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 
@@ -328,8 +324,9 @@ def assoiciative_scan_fake_tensor_mode(mode, combine_fn, input, dim, lifted_args
 @associative_scan_op.py_functionalize_impl
 def associative_scan_functionalize(ctx, combine_fn, input, dim, lifted_args):
     unwrapped_input = ctx.unwrap_tensors(input)
+    unwrapped_lifted_args = ctx.unwrap_tensors(lifted_args)
     with ctx.redispatch_to_next() as m:
-        ret = associative_scan_op(combine_fn, unwrapped_input, dim, lifted_args)
+        ret = associative_scan_op(combine_fn, unwrapped_input, dim, unwrapped_lifted_args)
     return ctx.wrap_tensors(ret)
 
 
