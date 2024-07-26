@@ -1162,8 +1162,13 @@ class AlgorithmSelectorCache(PersistentCache):
             append_to_log(mm_file_name, {"invoke": str((M, K, N))})
 
         if len(choices) == 0:
+            backend_config = (
+                "max_autotune_gemm_backends"
+                if name != "convolution"
+                else "max_autotune_conv_backends"
+            )
             raise NoValidChoicesError(
-                "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
+                f"No choices to select, please consider adding ATEN into {backend_config} "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
         log.debug("Max autotune selects from %s choices.", str(len(choices)))

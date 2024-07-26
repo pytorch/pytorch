@@ -678,6 +678,20 @@ class TestMaxAutotune(TestCase):
             actual = torch.compile(fn)(image, filt)
             torch.testing.assert_close(actual, expected, atol=6e-5, rtol=0.001)
 
+    @config.patch(
+        max_autotune=True, max_autotune_conv_backends="", layout_optimization=False
+    )
+    def test_conv_backend(self):
+        m = torch.nn.Sequential(
+            torch.nn.Conv2d(3, 3, 1, 1),
+        ).cuda()
+        inp = torch.randn([2, 3, 16, 16]).cuda()
+
+        with self.assertRaises(BackendCompilerFailed) as context:
+            torch.compile(m)(inp)
+
+        self.assertIn("NoValidChoicesError", str(context.exception))
+
     def test_non_contiguous_input_mm(self):
         """
         Make sure the triton template can work with non-contiguous inputs without crash.

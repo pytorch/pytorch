@@ -1018,6 +1018,12 @@ def _use_autotune_backend(backend: str) -> bool:
     ]
 
 
+def _use_conv_autotune_backend(backend: str) -> bool:
+    return backend.upper() in [
+        x.strip() for x in config.max_autotune_conv_backends.upper().split(",")
+    ]
+
+
 def use_triton_template(layout, *, enable_int32=False):
     from .codegen.common import BackendFeature, has_backend_feature
 
