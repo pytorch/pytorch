@@ -23,7 +23,6 @@ from torch import sub
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
-    expectedFailureDynamic,
     normalize_gm,
 )
 from torch._dynamo.utils import ifdynstaticdefault, same
@@ -572,6 +571,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         d[3] = x + 1
         d[4] = x + 2
         return len(values)
+
+    def test_dict_id_guard(self):
+        d1 = collections.OrderedDict({"a": 2})
+        d2 = d1
+
+        def fn(x):
+            # Iteration forces DictGuardManager
+            for k in d1:
+                x = x * d1[k] * d2[k]
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
     @make_test
     def test_callable_lambda(x):
@@ -1576,8 +1589,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if tmp.startswith("1.23"):
             return a + b
 
-    # https://github.com/pytorch/pytorch/issues/103602
-    @expectedFailureDynamic
     @make_test
     def test_fstrings2(x):
         tmp = f"{x.shape[0]} bar"
@@ -1588,6 +1599,24 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_fstrings3(x):
         tmp = f"{x.__class__.__name__} foo"
         if tmp.startswith("Tensor"):
+            return x + 1
+
+    @make_test
+    def test_fstrings4(x):
+        tmp = f"{x.shape[0]} bar"
+        if "10" in tmp:
+            return x + 1
+
+    @make_test
+    def test_fstrings5(x):
+        tmp = f"{x.shape[0]} bar"
+        if "10" in (tmp + "haha"):
+            return x + 1
+
+    @make_test
+    def test_fstrings6(x):
+        tmp = f"{x.shape[0] + x.shape[1]}"
+        if "20" in tmp:
             return x + 1
 
     @make_test
