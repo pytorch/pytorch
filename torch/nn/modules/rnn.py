@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
 import numbers
@@ -1010,9 +1009,9 @@ class LSTM(RNNBase):
         )
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
-    def permute_hidden(
+    def permute_hidden(  # type: ignore[override]
         self,
-        hx: Tuple[Tensor, Tensor],  # type: ignore[override]
+        hx: Tuple[Tensor, Tensor],
         permutation: Optional[Tensor],
     ) -> Tuple[Tensor, Tensor]:
         if permutation is None:
