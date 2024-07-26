@@ -277,7 +277,7 @@ static void fill__Tensor_batch_rule(
     self.fill_(other);
     return;
   }
-  if (!self_bdim && other_bdim) {
+  if (!self_bdim) {
     vmapIncompatibleInplaceError("fill_");
   }
   auto self_and_other = _binary_pointwise_helper(
