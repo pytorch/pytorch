@@ -45,13 +45,13 @@ class CKGemmTemplate(CKTemplate):
         auto gemm = {{instance_type}} {};
         auto invoker = gemm.MakeInvoker();
 
-        constexpr auto M = {{M}};
-        constexpr auto N = {{N}};
-        constexpr auto K = {{K}};
-        constexpr auto StrideA = {{a_stride}};
-        constexpr auto StrideB = {{b_stride}};
-        constexpr auto StrideC = {{c_stride}};
-        constexpr auto StrideD = {{d_stride}};
+        const ck::index_t M = {{M}};
+        const ck::index_t N = {{N}};
+        const ck::index_t K = {{K}};
+        const ck::index_t StrideA = {{a_stride}};
+        const ck::index_t StrideB = {{b_stride}};
+        const ck::index_t StrideC = {{c_stride}};
+        constexpr auto StrideD = ck::Number<{{d_stride}}>{};
 
         auto argument = gemm.MakeArgument(
             reinterpret_cast<const {{a_element_dtype}}*>(X),
