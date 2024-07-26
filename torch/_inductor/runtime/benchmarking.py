@@ -4,7 +4,8 @@ import time
 from functools import cached_property
 from importlib import import_module
 from statistics import median
-from typing import Any, Callable, Dict, List, Optional, Self, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing_extensions import Self
 
 import torch
 from torch._dynamo.utils import counters
