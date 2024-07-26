@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 from .. import polyfill, variables
-from ..bytecode_transformation import create_instruction
+from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import (
     handle_observed_user_stop_iteration,
     ObservedUserStopIteration,
@@ -240,6 +240,18 @@ class RepeatIteratorVariable(IteratorVariable):
     def next_variable(self, tx):
         return self.item
 
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(itertools),
+                    codegen.create_load_attr("repeat"),
+                ]
+            )
+        )
+        codegen(self.item)
+        codegen.extend_output(create_call_function(1, False))
+
 
 class CountIteratorVariable(IteratorVariable):
     def __init__(self, item: int = 0, step: int = 1, **kwargs):
@@ -253,10 +265,23 @@ class CountIteratorVariable(IteratorVariable):
 
     def next_variable(self, tx):
         assert self.mutable_local
+        old_item = self.item
         tx.output.side_effects.mutation(self)
-        next_item = self.item.call_method(tx, "__add__", [self.step], {})
-        self.item = next_item
-        return self.item
+        self.item = self.item.call_method(tx, "__add__", [self.step], {})
+        return old_item
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(itertools),
+                    codegen.create_load_attr("count"),
+                ]
+            )
+        )
+        codegen(self.item)
+        codegen(self.step)
+        codegen.extend_output(create_call_function(2, False))
 
 
 class CycleIteratorVariable(IteratorVariable):
@@ -455,3 +480,23 @@ class MapVariable(ZipVariable):
                 create_instruction("CALL_FUNCTION_EX", arg=0),
             ]
         )
+
+
+class EnumerateVariable(ZipVariable):
+    def __init__(
+        self,
+        iterable: Union[List[VariableTracker], VariableTracker],
+        start: int = 0,
+        **kwargs,
+    ):
+        super().__init__(
+            [CountIteratorVariable(start, mutable_local=MutableLocal()), iterable],
+            **kwargs,
+        )
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "enumerate"))
+        codegen(self.iterables[1])
+        assert isinstance(self.iterables[0], CountIteratorVariable)
+        codegen(self.iterables[0].item)
+        codegen.extend_output(codegen.create_call_function_kw(2, ("start",), False))

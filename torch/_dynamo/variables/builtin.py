@@ -1419,22 +1419,29 @@ class BuiltinVariable(VariableTracker):
         ]
         return variables.ZipVariable(args, strict=strict, mutable_local=MutableLocal())
 
-    def call_enumerate(self, tx: "InstructionTranslator", *args):
-        if len(args) == 1:
+    _call_enumerate_polyfill = _polyfill_call_impl("enumerate")
+
+    def call_enumerate(self, tx: "InstructionTranslator", iterable, start=_SENTINEL):
+        if start is self._SENTINEL:
             start = 0
         else:
-            assert len(args) == 2
-            assert isinstance(args[1], variables.ConstantVariable)
-            start = args[1].as_python_constant()
-        if args[0].has_unpack_var_sequence(tx):
-            items = [
-                variables.TupleVariable(
-                    [variables.ConstantVariable.create(idx), var],
-                )
-                for idx, var in enumerate(args[0].unpack_var_sequence(tx), start)
-            ]
-            return variables.TupleVariable(items)
-        # could have an iterable version
+            assert isinstance(start, variables.ConstantVariable)
+            start = start.as_python_constant()
+
+        if iterable.has_unpack_var_sequence(tx):
+            return variables.EnumerateVariable(
+                iterable.unpack_var_sequence(tx),
+                start,
+                mutable_local=MutableLocal(),
+            )
+        elif isinstance(iterable, variables.IteratorVariable):
+            return variables.EnumerateVariable(
+                iterable, start, mutable_local=MutableLocal()
+            )
+
+        return self._call_enumerate_polyfill(
+            tx, iterable, variables.ConstantVariable.create(start)
+        )
 
     def call_len(self, tx: "InstructionTranslator", *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)

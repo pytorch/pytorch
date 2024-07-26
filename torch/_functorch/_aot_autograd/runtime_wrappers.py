@@ -1496,6 +1496,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # (*tokens, *mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
                 # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
                 #   of the original view, and not the synthetic base
+                # - Note that donated buffer logic requires (*saved_tensors, *saved_symints) showing up last
+                #   in the fw output order.
                 fw_outs = call_func_at_runtime_with_args(
                     CompiledFunction.compiled_fw,
                     args,
@@ -1710,6 +1712,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     # Add the seed and offset to args
                     rng_args = CUDARngStateHelper.get_torch_state_as_tuple()
 
+                # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors) showing up first
+                #   in the bw output order.
                 all_args = [
                     *ctx.symints,
                     *ctx.saved_tensors,
@@ -1878,8 +1882,31 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         not backward_state_indices
                     ), "BackwardState requires CompiledAutograd"
                     ctx.maybe_clear_saved_tensors()
+
+                    saved_tensors_use_once = (
+                        not torch._C._autograd._get_current_graph_task_keep_graph()
+                    )
+
                     if CompiledFunction.compiled_bw is None:
                         assert lazy_backward_info is not None
+
+                        if not saved_tensors_use_once:
+                            fw_metadata.bw_donated_idxs = []
+                            # Update bw_donated_idxs if using lazy_backward_info from `aot_dispatch_autograd`
+                            if (
+                                hasattr(lazy_backward_info, "saved_context")
+                                and hasattr(
+                                    lazy_backward_info.saved_context, "fw_metadata"
+                                )
+                                and hasattr(
+                                    lazy_backward_info.saved_context.fw_metadata,  # type: ignore[union-attr]
+                                    "bw_donated_idxs",
+                                )
+                            ):
+                                lazy_backward_info.saved_context.fw_metadata.bw_donated_idxs = (  # type: ignore[union-attr]
+                                    []
+                                )
+
                         bw_module = lazy_backward_info.bw_module
                         placeholder_list = lazy_backward_info.placeholder_list
                         saved_context = lazy_backward_info.saved_context
@@ -1896,7 +1923,26 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             )
                             # Maybe save cache entry
                             if try_save_cache_entry is not None:
-                                try_save_cache_entry(CompiledFunction.compiled_bw)
+                                try_save_cache_entry(
+                                    CompiledFunction.compiled_bw, fw_metadata
+                                )
+
+                    if (
+                        torch._functorch.config.donated_buffer
+                        and not saved_tensors_use_once
+                        and fw_metadata.bw_donated_idxs != []
+                    ):
+                        torch._check(
+                            False,
+                            lambda: (
+                                "This backward function was compiled with non-empty donated "
+                                "buffers which requires create_graph=False and retain_graph=False. "
+                                "Please keep backward(create_graph=False, retain_graph=False) "
+                                "across all backward() function calls, or set "
+                                "torch._functorch.config.donated_buffer=False to disable "
+                                "donated buffer."
+                            ),
+                        )
 
                     out = call_func_at_runtime_with_args(
                         CompiledFunction.compiled_bw,
