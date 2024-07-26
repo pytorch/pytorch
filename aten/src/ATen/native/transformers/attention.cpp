@@ -70,6 +70,7 @@
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/_safe_softmax.h>
+#include <ATen/ops/_safe_softmax_native.h>
 #endif
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
