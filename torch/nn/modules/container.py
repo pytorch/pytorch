@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import operator
 from collections import abc as container_abcs, OrderedDict

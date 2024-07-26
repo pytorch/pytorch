@@ -181,7 +181,9 @@ def user_defined_kernel_grid_fn_code(
         return (
             wrapper.codegen_shape_tuple(sympy_grid),
             wrapper.codegen_shape_tuple(
-                tuple(wrapper.generate_example_arg_value(g) for g in sympy_grid)
+                tuple(
+                    wrapper.generate_example_arg_value(g, type(g)) for g in sympy_grid
+                )
             )
             if config.triton.autotune_at_compile_time
             else None,
@@ -189,7 +191,11 @@ def user_defined_kernel_grid_fn_code(
 
     def writeline(line: str, example_grid: Optional[str] = None):
         output.writeline(line)
-        if wrapper and config.triton.autotune_at_compile_time:
+        if (
+            wrapper
+            and config.triton.autotune_at_compile_time
+            and name not in wrapper.kernel_autotune_names
+        ):
             wrapper.kernel_autotune_calls.writeline(example_grid or line)
 
     fn_name = f"grid_wrapper_for_{name}"
@@ -463,7 +469,7 @@ class WrapperCodeGen(CodeGen):
         self.wrapper_call = IndentedBuffer()
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
-        self.kernel_autotun_names: Set[str] = set()
+        self.kernel_autotune_names: Set[str] = set()
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: Dict[str, str] = {}
@@ -718,6 +724,8 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_device_guard_exit(self) -> None:
         self.writeline(ExitDeviceContextManagerLine())
+        if config.triton.autotune_at_compile_time:
+            self.kernel_autotune_calls.do_unindent()
 
     def generate_return(self, output_refs: List[str]) -> None:
         if output_refs:
@@ -1544,7 +1552,7 @@ class WrapperCodeGen(CodeGen):
 
         return device_index, call_args
 
-    def generate_example_arg_value(self, arg, arg_type=None, raw_arg=None, index=None):
+    def generate_example_arg_value(self, arg, arg_type, raw_arg=None, index=None):
         if isinstance(arg_type, torch_dtype):
             if V.graph.try_get_buffer(arg) is not None:
                 buf_name = arg
@@ -1573,9 +1581,7 @@ class WrapperCodeGen(CodeGen):
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
             return buf_name
-        elif isinstance(arg, (int, float, bool)):
-            return str(arg)
-        else:
+        elif issubclass(arg_type, sympy.Basic) or isinstance(arg, SymbolicCallArg):
             # arg is a symbol or symbolic expression
             if isinstance(arg, str):
                 if arg in self._meta_vars:
@@ -1593,6 +1599,11 @@ class WrapperCodeGen(CodeGen):
                     fallback=config.unbacked_symint_fallback,
                 )
             )
+        elif isinstance(arg, (str, int, float, bool)):
+            return str(arg)
+        else:
+            breakpoint()
+            raise NotImplementedError(f"Unsupported type {type(arg)}")
 
     def generate_kernel_call(
         self,
@@ -1637,7 +1648,7 @@ class WrapperCodeGen(CodeGen):
                 )
                 if (
                     config.triton.autotune_at_compile_time
-                    and kernel_name not in self.kernel_autotun_names
+                    and kernel_name not in self.kernel_autotune_names
                 ):
                     # Create example args for autotune in a separate epilogue
                     assert arg_types is not None and len(call_args) == len(
@@ -1680,7 +1691,7 @@ class WrapperCodeGen(CodeGen):
                         grid_str = grid_fn
                     else:
                         grid_str = ", ".join(
-                            self.generate_example_arg_value(g) for g in grid
+                            self.generate_example_arg_value(g, type(g)) for g in grid
                         )
                         grid_str = f"{grid_fn}({grid_str})"
 
@@ -1690,7 +1701,7 @@ class WrapperCodeGen(CodeGen):
                     self.kernel_autotune_calls.writeline(
                         f"del {', '.join(arg for arg in tensor_args.values())}\n",
                     )
-                    self.kernel_autotun_names.add(kernel_name)
+                    self.kernel_autotune_names.add(kernel_name)
             else:
                 stream_ptr = f"c_void_p({stream_name})"
                 self.writeline(
