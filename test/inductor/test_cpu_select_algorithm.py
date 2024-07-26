@@ -516,19 +516,22 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             return w_int8pack, w_scales
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, w):
                 super().__init__()
+                self.linear_weight = torch.nn.Parameter(w, requires_grad=False)
 
-            @torch.compile
-            def forward(self, x, w, scale):
-                return torch._weight_int8pack_mm(x, w, scale)
+            def forward(self, x, scale):
+                return (
+                    torch.nn.functional.linear(x, self.linear_weight.to(x.dtype))
+                    * scale
+                )
 
         counters.clear()
-        mod = M().eval()
-        x = torch.rand((batch_size, in_features), dtype=torch.bfloat16)
+        x = torch.rand((2, batch_size, in_features), dtype=torch.bfloat16)
         w = torch.rand((out_features, in_features), dtype=torch.bfloat16)
         w_int8pack, w_scales = _convert_weight_to_int8pack(w)
-        self.common(mod, (x, w_int8pack, w_scales))
+        mod = M(w_int8pack).eval()
+        self.common(mod, (x, w_scales))
         # TODO(jgong5): support transposed input
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 

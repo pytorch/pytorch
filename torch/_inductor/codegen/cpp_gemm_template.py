@@ -1032,7 +1032,7 @@ class CppPackedWoQGemmTemplate(CppTemplate):
                 new_input_nodes = [input_nodes[idx] for idx in input_indices]
 
                 W_node = new_input_nodes[1]
-                V.graph.constants[W_node.get_name()] = W_node
+                assert W_node.get_name() in V.graph.constants
                 W = V.graph.constants[W_node.get_name()]
                 new_input_nodes[1] = W
                 new_input_nodes, _ = pack_weight(
