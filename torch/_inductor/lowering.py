@@ -451,7 +451,7 @@ def make_pointwise(
         # during decompositions are not annotated.
         emulate_precision_casts = (
             V.graph is not None
-            and V.graph.current_node is not None
+            and getattr(V.graph, "current_node", None) is not None
             and V.graph.current_node.meta is not None
             and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
         )
