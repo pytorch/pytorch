@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import functools
 import importlib
 import logging
 import os
@@ -9,13 +8,23 @@ import subprocess
 import sys
 import warnings
 
-import yaml
-
 
 try:
-    from .common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+    from .common import (
+        BenchmarkRunner,
+        download_retry_decorator,
+        load_yaml_file,
+        main,
+        reset_rng_state,
+    )
 except ImportError:
-    from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+    from common import (
+        BenchmarkRunner,
+        download_retry_decorator,
+        load_yaml_file,
+        main,
+        reset_rng_state,
+    )
 
 import torch
 from torch._dynamo.testing import collect_results
@@ -106,38 +115,6 @@ with open(MODELS_FILENAME, "r") as fh:
         batch_size = int(batch_size)
         BATCH_SIZE_KNOWN_MODELS[model_name] = batch_size
 assert len(BATCH_SIZE_KNOWN_MODELS)
-
-
-# TODO(kit1980): deduplicate with the same in torchbench.py
-@functools.lru_cache(maxsize=1)
-def load_yaml_file():
-    filename = "huggingface.yaml"
-    filepath = os.path.join(os.path.dirname(__file__), filename)
-
-    with open(filepath) as f:
-        data = yaml.safe_load(f)
-
-    internal_file_path = os.path.join(os.path.dirname(__file__), "fb", filename)
-    if os.path.exists(internal_file_path):
-        with open(internal_file_path) as f:
-            internal_data = yaml.safe_load(f)
-            data.update(internal_data)
-
-    def flatten(lst):
-        for item in lst:
-            if isinstance(item, list):
-                yield from flatten(item)
-            else:
-                yield item
-
-    def maybe_list_to_set(obj):
-        if isinstance(obj, dict):
-            return {k: maybe_list_to_set(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return set(flatten(obj))
-        return obj
-
-    return maybe_list_to_set(data)
 
 
 def get_module_cls_by_model_name(model_cls_name):
@@ -361,7 +338,7 @@ class HuggingfaceRunner(BenchmarkRunner):
 
     @property
     def _config(self):
-        return load_yaml_file()
+        return load_yaml_file("huggingface.yaml")
 
     @property
     def _skip(self):
