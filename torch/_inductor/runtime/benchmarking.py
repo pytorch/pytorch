@@ -343,6 +343,7 @@ class Benchmarker:
         _callable: Callable[[], Any],
         warmup_iters: int = 5,
         benchmark_iters: int = 20,
+        **kwargs: Any,
     ) -> float:
         # duplicate of original implementation from runtime_utils
         timings_ms = []
@@ -384,6 +385,7 @@ class Benchmarker:
         callables: List[Callable[[], Any]],
         warmup_iters: int = 5,
         benchmark_iters: int = 20,
+        **kwargs: Any,
     ) -> List[float]:
         # implement this to maintain consistency between cpu/gpu benchmarking functionality
         return [
@@ -679,7 +681,7 @@ class Benchmarker:
                         break
                     if timing_ms <= target_timing_ms:
                         callables_to_benchmark.append(_callable)
-                counters["inductor"]["benchmarking_pruned"] += len(callables) - len(
+                counters["inductor"]["benchmarking_earling_pruning"] += len(callables) - len(
                     callables_to_benchmark
                 )
                 log.debug(
