@@ -754,6 +754,23 @@ AOTITorchError aoti_torch_mm_out(
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__mm_plus_mm_out(
+    AtenTensorHandle out,
+    AtenTensorHandle a,
+    AtenTensorHandle b,
+    AtenTensorHandle c,
+    AtenTensorHandle d) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* out_tensor = tensor_handle_to_tensor_pointer(out);
+    at::Tensor* a_tensor = tensor_handle_to_tensor_pointer(a);
+    at::Tensor* b_tensor = tensor_handle_to_tensor_pointer(b);
+    at::Tensor* c_tensor = tensor_handle_to_tensor_pointer(c);
+    at::Tensor* d_tensor = tensor_handle_to_tensor_pointer(d);
+    torch::inductor::_mm_plus_mm_out(
+        *out_tensor, *a_tensor, *b_tensor, *c_tensor, *d_tensor);
+  });
+}
+
 AOTITorchError aoti_torch_cpu_wrapped_fbgemm_pack_gemm_matrix_fp16(
     AtenTensorHandle weight,
     AtenTensorHandle* out) {
