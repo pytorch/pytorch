@@ -1443,14 +1443,16 @@ class OpInfo:
         return dtype in self.supported_dtypes(device_type)
 
     @property
+    def full_name(self):
+        """Returns a full name that helps to uniquely identify this OpInfo."""
+        variant = "." + self.variant_test_name if self.variant_test_name else ""
+        # example: "normal.in_place" where "normal" is the name and "in_place" is the variant
+        return f"{self.name}{variant}"
+
+    @property
     def formatted_name(self):
         """Returns a formatted full name for this OpInfo that can be used in test names."""
-        variant = (
-            "_" + self.variant_test_name.replace(".", "_")
-            if self.variant_test_name
-            else ""
-        )
-        return f"{self.name.replace('.', '_')}{variant}"
+        return self.full_name.replace(".", "_")
 
 
 def _generate_reduction_inputs(device, dtype, requires_grad, **kwargs):

@@ -6187,115 +6187,113 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 FORWARD_FAILURES = {
     # === BEGIN NotImplementedError SECTION ===
     # unary
-    ("nn.functional.celu", ""),
-    ("nn.functional.elu", ""),
-    ("nn.functional.hardshrink", ""),
-    ("nn.functional.hardsigmoid", ""),
-    ("nn.functional.hardtanh", ""),
-    ("nn.functional.logsigmoid", ""),
-    ("nn.functional.mish", ""),
-    ("nn.functional.relu6", ""),
-    ("nn.functional.rrelu", ""),
-    ("nn.functional.selu", ""),
-    ("nn.functional.softplus", ""),
-    ("nn.functional.softshrink", ""),
-    ("nn.functional.threshold", ""),
-    ("rad2deg", ""),
+    "nn.functional.celu",
+    "nn.functional.elu",
+    "nn.functional.hardshrink",
+    "nn.functional.hardsigmoid",
+    "nn.functional.hardtanh",
+    "nn.functional.logsigmoid",
+    "nn.functional.mish",
+    "nn.functional.relu6",
+    "nn.functional.rrelu",
+    "nn.functional.selu",
+    "nn.functional.softplus",
+    "nn.functional.softshrink",
+    "nn.functional.threshold",
+    "rad2deg",
     # binary
-    ("__rsub__", ""),
-    ("complex", ""),
-    ("floor_divide", ""),
-    ("polar", ""),
-    ("rsub", ""),
+    "__rsub__",
+    "complex",
+    "floor_divide",
+    "polar",
+    "rsub",
     # reduction
-    ("all", ""),
-    ("amax", ""),
-    ("amin", ""),
-    ("any", ""),
-    ("argmax", ""),
-    ("argmin", ""),
-    ("count_nonzero", ""),
-    ("linalg.vector_norm", ""),
-    ("nansum", ""),
-    ("std", ""),
-    ("std", "unbiased"),
-    ("var", ""),
-    ("var", "unbiased"),
+    "all",
+    "amax",
+    "amin",
+    "any",
+    "argmax",
+    "argmin",
+    "count_nonzero",
+    "linalg.vector_norm",
+    "nansum",
+    "std",
+    "std.unbiased",
+    "var",
+    "var.unbiased",
     # === BEGIN UNSUPPORTED SECTION ===
     # RuntimeError: mean(): not supported for NestedTensor on dim=1
-    ("mean", ""),
+    "mean",
     # ValueError: expects strided tensor (got torch.jagged tensor)
-    ("masked.amax", ""),
-    ("masked.amin", ""),
-    ("masked.argmax", ""),
-    ("masked.argmin", ""),
-    ("masked.logsumexp", ""),
-    ("masked.mean", ""),
-    ("masked.norm", ""),
-    ("masked.prod", ""),
-    ("masked.std", ""),
-    ("masked.sum", ""),
-    ("masked.var", ""),
+    "masked.amax",
+    "masked.amin",
+    "masked.argmax",
+    "masked.argmin",
+    "masked.logsumexp",
+    "masked.mean",
+    "masked.norm",
+    "masked.prod",
+    "masked.std",
+    "masked.sum",
+    "masked.var",
     # === BEGIN BUG SECTION ===
     # NJT arg is second for these signatures; need to support this
-    *(("polygamma", f"polygamma_n_{n}") for n in range(5)),
-    ("special.polygamma", "special_polygamma_n_0"),
-    ("ldexp", ""),
+    *(f"polygamma.polygamma_n_{n}" for n in range(5)),
+    "special.polygamma.special_polygamma_n_0",
+    "ldexp",
     # Returns a tuple of Tensors so it doesn't work with NJT's unary pointwise logic
-    ("frexp", ""),
+    "frexp",
     # Need to adjust sample input func to pass the right thing
-    ("nn.functional.prelu", ""),
+    "nn.functional.prelu",
     # TypeError: fill() received an invalid combination of arguments
     # got (NestedTensor), but expected one of:
     # * (Tensor input, Tensor value)
     # * (Tensor input, Number value)
-    ("fill", ""),
+    "fill",
     # RuntimeError: unsupported tensor layout: Jagged
-    ("jiterator_binary", ""),
-    ("jiterator_binary_return_by_ref", ""),
-    ("jiterator_unary", ""),
+    "jiterator_binary",
+    "jiterator_binary_return_by_ref",
+    "jiterator_unary",
     # Bug found: sum() with keepdim=True returns invalid shape
-    ("sum", ""),
+    "sum",
     # RuntimeError: prod(): keepdim=True must be set for NestedTensor
-    ("prod", ""),
+    "prod",
     # RuntimeError: "jagged_to_padded_dense" not implemented for 'Bool'
-    ("nanmean", ""),
+    "nanmean",
 }
 
 BACKWARD_FAILURES = {
     *FORWARD_FAILURES,
     # TODO: sort these
-    ("__rpow__", ""),
-    ("atanh", ""),
-    ("cdouble", ""),
-    ("cfloat", ""),
-    ("chalf", ""),
-    ("clamp_max", ""),
-    ("clamp_min", ""),
-    ("copysign", ""),
-    ("digamma", ""),
-    ("float_power", ""),
-    ("max", "binary"),
-    ("maximum", ""),
-    ("min", "binary"),
-    ("minimum", ""),
-    ("pow", ""),
-    ("sgn", ""),
-    ("sinc", ""),
-    ("special.i1", ""),
-    ("special.i1e", ""),
+    "__rpow__",
+    "atanh",
+    "cdouble",
+    "cfloat",
+    "chalf",
+    "clamp_max",
+    "clamp_min",
+    "copysign",
+    "digamma",
+    "float_power",
+    "max.binary",
+    "maximum",
+    "min.binary",
+    "minimum",
+    "pow",
+    "sgn",
+    "sinc",
+    "special.i1",
+    "special.i1e",
 }
 
 forwardFailureDec = decorateIf(
     unittest.expectedFailure,
-    lambda params: (params["op"].name, params["op"].variant_test_name)
-    in FORWARD_FAILURES,
+    lambda params: params["op"].full_name in FORWARD_FAILURES,
 )
 
 backwardFailureDec = decorateIf(
     unittest.expectedFailure,
-    lambda params: (params["op"].name, params["op"].variant_test_name)
-    in BACKWARD_FAILURES,
+    lambda params: params["op"].full_name in BACKWARD_FAILURES,
 )
 
 
@@ -6314,7 +6312,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
     def test_forward(self, device, dtype, op):
         for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=False):
-            # compare to reference, but don't require exact nested ints
+            # compare to reference, but expect different nested int
             out = op.op(sample.input, *sample.args, **sample.kwargs)
             out_ref = op.ref(op, sample)
             self.assertEqualIgnoringNestedInts(out, out_ref)
@@ -6326,7 +6324,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     )
     def test_backward(self, device, dtype, op):
         for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=True):
-            # compare to reference, but don't require exact nested ints
+            # compare to reference, but expect different nested int
             out = op.op(sample.input, *sample.args, **sample.kwargs)
             out_ref = op.ref(op, sample)
             self.assertEqualIgnoringNestedInts(out, out_ref)

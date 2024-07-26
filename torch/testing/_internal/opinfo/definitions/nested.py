@@ -168,7 +168,7 @@ def sample_inputs_elementwise_njt_binary(
         yield SampleInput(njt1, args=(njt2,), kwargs=dict(op_kwargs))
 
 
-def sample_inputs_elementwise_njt_reduction(
+def sample_inputs_njt_reduction(
     op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
 ):
     if not op_kwargs:
@@ -195,6 +195,16 @@ def unsupported_sample_inputs_func(op_name):
         raise RuntimeError(
             f"OpInfo for {op_name} does not support NJT. Support can be added by modifying "
             "torch/testing/_internal/opinfo/definitions/nested.py."
+        )
+
+    return _f
+
+
+def unsupported_reference(op_name):
+    def _f(op, sample):
+        raise RuntimeError(
+            f"OpInfo for {op_name} does not define a ref() function. Support can be added by "
+            "modifying torch/testing/_internal/opinfo/definitions/nested.py."
         )
 
     return _f
@@ -238,12 +248,8 @@ def translate_opinfo(op):
     new_op = copy(op)
     new_op.supports_njt = True
 
-    op_full_name = (
-        f"{op.name}{'.' + op.variant_test_name if op.variant_test_name else ''}"
-    )
-
-    if op_full_name in njt_sample_inputs:
-        new_op.sample_inputs_func = njt_sample_inputs[op_full_name]
+    if op.full_name in njt_sample_inputs:
+        new_op.sample_inputs_func = njt_sample_inputs[op.full_name]
         # TODO: make the reference customizeable
         new_op.ref = unbind_reference
     elif isinstance(op, UnaryUfuncInfo):
@@ -257,13 +263,12 @@ def translate_opinfo(op):
         )
         new_op.ref = unbind_reference
     elif isinstance(op, ReductionOpInfo):
-        new_op.sample_inputs_func = partial(
-            sample_inputs_elementwise_njt_reduction, op_kwargs=None
-        )
+        new_op.sample_inputs_func = partial(sample_inputs_njt_reduction, op_kwargs=None)
         new_op.ref = reduction_reference
     # TODO: Translate the rest of the OpInfos
     else:
-        new_op.sample_inputs_func = unsupported_sample_inputs_func(op_full_name)
+        new_op.sample_inputs_func = unsupported_sample_inputs_func(op.full_name)
+        new_op.ref = unsupported_reference(op.full_name)
         new_op.supports_njt = False
 
     return new_op
