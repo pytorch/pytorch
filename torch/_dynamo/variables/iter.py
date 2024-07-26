@@ -5,10 +5,18 @@ MAX_CYCLE = 3000
 import itertools
 import operator
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 from .. import polyfill, variables
-from ..exc import unimplemented
+from ..exc import (
+    handle_observed_user_stop_iteration,
+    ObservedUserStopIteration,
+    raise_observed_user_stop_iteration,
+    unimplemented,
+)
 
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
@@ -29,7 +37,10 @@ class ItertoolsVariable(VariableTracker):
         return self.value
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if (
             self.value is itertools.product
@@ -255,7 +266,8 @@ class CycleIteratorVariable(IteratorVariable):
                 if self.item is None:
                     return self.next_variable(tx)
                 return self.item
-            except StopIteration:
+            except ObservedUserStopIteration:
+                handle_observed_user_stop_iteration(tx)
                 self.iterator = None
                 return self.next_variable(tx)
         elif len(self.saved) > 0:
@@ -263,4 +275,4 @@ class CycleIteratorVariable(IteratorVariable):
             self.saved_index = (self.saved_index + 1) % len(self.saved)
             return self.item
         else:
-            raise StopIteration
+            raise_observed_user_stop_iteration(self, tx)

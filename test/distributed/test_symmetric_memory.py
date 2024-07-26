@@ -117,8 +117,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         alloc_args = (shape, stride, dtype, device, group_name)
 
         t = torch.empty(shape, dtype=dtype, device=device)
-        with self.assertRaises(RuntimeError):
-            _SymmetricMemory.rendezvous(t)
+        self.assertIsNone(_SymmetricMemory.rendezvous(t))
 
         t = _SymmetricMemory.empty_strided_p2p(*alloc_args)
         symm_mem = _SymmetricMemory.rendezvous(t)
@@ -294,6 +293,69 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         x = restride_A_for_fused_matmul_reduce_scatter(t, dim)
         self.assertTrue(x.movedim(dim, 0).is_contiguous())
         self.assertTrue(torch.allclose(x, t))
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("symm_mem_input", [True, False])
+    def test_low_contention_all_gather(self, symm_mem_input: bool) -> None:
+        self._init_process()
+
+        if symm_mem_input:
+            t = _SymmetricMemory.empty_strided_p2p(
+                size=(64, 64),
+                stride=(64, 1),
+                dtype=torch.float32,
+                device=self.device,
+                group_name="0",
+            ).fill_(self.rank)
+        else:
+            t = torch.full((64, 64), self.rank, dtype=torch.float32, device=self.device)
+
+        res = torch.ops.symm_mem._low_contention_all_gather(t, "0")
+        res = torch.ops._c10d_functional.wait_tensor(res)
+        self.assertEqual(res.shape, (64 * self.world_size, 64))
+
+        chunks = res.chunk(self.world_size)
+        for r in range(self.world_size):
+            self.assertTrue(chunks[r].eq(r).all())
+
+        dist.destroy_process_group()
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("reduce_op", ["sum", "avg"])
+    @parametrize("symm_mem_input", [True, False])
+    def test_low_contention_reduce_scatter(
+        self, reduce_op: str, symm_mem_input: bool
+    ) -> None:
+        self._init_process()
+
+        if symm_mem_input:
+            t = _SymmetricMemory.empty_strided_p2p(
+                size=(64, 64),
+                stride=(64, 1),
+                dtype=torch.float32,
+                device=self.device,
+                group_name="0",
+            )
+        else:
+            t = torch.empty((64, 64), dtype=torch.float32, device=self.device)
+
+        chunks = t.chunk(self.world_size)
+        for r in range(self.world_size):
+            chunks[r].fill_(r)
+
+        res = torch.ops.symm_mem._low_contention_reduce_scatter(t, reduce_op, "0")
+        res = torch.ops._c10d_functional.wait_tensor(res)
+        self.assertEqual(res.shape, (64 // self.world_size, 64))
+
+        if reduce_op == "sum":
+            expect = self.rank * self.world_size
+        elif reduce_op == "avg":
+            expect = self.rank
+        else:
+            raise AssertionError(f"Unexpected reduce_op: {reduce_op}")
+        self.assertTrue(res.eq(expect).all())
+
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
