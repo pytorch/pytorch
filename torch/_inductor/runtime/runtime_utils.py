@@ -4,6 +4,7 @@ from __future__ import annotations
 import functools
 import getpass
 import inspect
+import math
 import operator
 import os
 import re
@@ -118,10 +119,29 @@ def do_bench_gpu(*args, **kwargs):
     return triton_do_bench(*args, **kwargs)[0]
 
 
-def do_bench_cpu(fn, warmup=5, times=20):
+def do_bench_cpu(fn, warmup=5, times=20, min_duration=0.1):
+    """
+    Benchmark a function on the CPU.
+
+    Parameters:
+    - fn: The function to be benchmarked.
+    - warmup: The number of warmup iterations to run before benchmarking.
+    - times: The number of benchmark iterations to run.
+    - min_duration: The minimum duration (in seconds) for the benchmark.
+
+    Returns:
+    - The median time (in milliseconds) taken by the function.
+
+    """
+    assert warmup > 0
     assert times > 0
+    warmup_start = time.perf_counter()
     for _ in range(warmup):
         fn()
+    warmup_end = time.perf_counter()
+    estimated_duration = (warmup_end - warmup_start) / warmup * times
+    if estimated_duration < min_duration:
+        times = math.ceil(min_duration / estimated_duration * times)
     durations = []
     for _ in range(times):
         t0 = time.perf_counter()
