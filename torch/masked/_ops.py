@@ -1,7 +1,7 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import warnings
-from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 from torch import sym_float, Tensor
@@ -22,13 +22,16 @@ else:
 
 __all__: List[str] = []
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 # All masked reduction/normalization operations have the same
 # signatures. Here we introduce docstring templates that are applied
 # to docstrings of reduction/normalization functions via
 # _apply_docstring_templates decorator.
 
 
-def _apply_docstring_templates(func):
+def _apply_docstring_templates(func: Callable[_P, _T]) -> Callable[_P, _T]:
     """Decorator that applies docstring templates to function docstring
     and returns the function instance.
     """
