@@ -1373,6 +1373,86 @@ class TestAutograd(TestCase):
         # so that would be ((1 - 2) / 5 + 0.5) * 10 = 3
         self.assertEqual(torch.tensor([3.0, 3.0, 3.0]), tensor.grad)
 
+    def test_register_multi_post_accumulate_grad_hook_requires_grad_false(self):
+        t1 = torch.rand(3, requires_grad=True)
+        t2 = torch.rand(3, requires_grad=False)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "cannot register a hook on a tensor that doesn't require gradient",
+        ):
+            torch.autograd.graph.register_multi_post_accumulate_grad_hook(
+                [t1, t2], lambda _: None
+            )
+
+    def test_register_multi_post_accumulate_grad_hook_non_leaf(self):
+        t1 = torch.rand(3, requires_grad=True)
+        t2 = t1 * 2
+        t3 = torch.rand(3, requires_grad=True)
+
+        with self.assertRaisesRegex(
+            ValueError, "requires all tensors to be leaf tensors"
+        ):
+            torch.autograd.graph.register_multi_post_accumulate_grad_hook(
+                [t2, t3], lambda _: None
+            )
+
+    def test_register_multi_post_accumulate_grad_hook_ordering(self):
+        hook_order: List[int] = []
+        hook_count = 0
+
+        def hook(hook_id: int, *unused):
+            nonlocal hook_count
+            nonlocal hook_order
+            hook_count += 1
+            hook_order.append(hook_id)
+
+        module = torch.nn.Sequential(torch.nn.Linear(3, 3), torch.nn.Linear(3, 3))
+
+        module[0].weight.register_post_accumulate_grad_hook(partial(hook, 0))
+        module[0].bias.register_post_accumulate_grad_hook(partial(hook, 1))
+        handle_0 = torch.autograd.graph.register_multi_post_accumulate_grad_hook(
+            [module[0].weight, module[0].bias], partial(hook, 2)
+        )
+        module[1].weight.register_post_accumulate_grad_hook(partial(hook, 3))
+        module[1].bias.register_post_accumulate_grad_hook(partial(hook, 4))
+        handle_1 = torch.autograd.graph.register_multi_post_accumulate_grad_hook(
+            [module[1].weight, module[1].bias], partial(hook, 5)
+        )
+
+        inp = torch.randn((1, 3))
+        module(inp).sum().backward()
+
+        # Check that the multi-post-accumulate grad hook runs after the
+        # individual post-accumulate grad hooks
+        self.assertEqual(hook_count, 6)
+        # Module 1 runs backward before module 0, and bias accumulates before
+        # weight accumulates
+        self.assertEqual(hook_order, [4, 3, 5, 1, 0, 2])
+
+        hook_order.clear()
+        hook_count = 0
+        handle_0.remove()
+        handle_1.remove()
+        module(inp).sum().backward()
+
+        # Check that the multi-post-accumulate grad hooks do not run if removed
+        self.assertEqual(hook_count, 4)
+        self.assertEqual(hook_order, [4, 3, 1, 0])
+
+        hook_order.clear()
+        hook_count = 0
+        handle = torch.autograd.graph.register_multi_post_accumulate_grad_hook(
+            [module[0].weight, module[0].bias, module[1].weight, module[1].bias],
+            partial(hook, 6),
+        )
+        module[0](inp).sum().backward()
+
+        # Check that the multi-post-accumulate grad hook ignores `module[1]`
+        # parameters since they are not part of this backward
+        self.assertEqual(hook_count, 3)
+        self.assertEqual(hook_order, [1, 0, 6])
+
     def test_hook_with_no_name(self):
         # Create a hook that do not have a __name__ attribute
         class MyHookClass:
