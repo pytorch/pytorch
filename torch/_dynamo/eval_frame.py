@@ -566,6 +566,15 @@ class OptimizeContext(_TorchDynamoContext):
             self.enter_exit_hooks.append(call_compiled_autograd)
 
     def __call__(self, fn):
+        # Optimize the forward method of torch.nn.Module object
+        if isinstance(fn, torch.nn.Module):
+            mod = fn
+            new_mod = OptimizedModule(mod, self)
+            # Save the function pointer to find the original callable while nesting
+            # of decorators.
+            new_mod._torchdynamo_orig_callable = mod.forward
+            return new_mod
+
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             if (
