@@ -3433,7 +3433,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
         name = self.get_buffer().get_name()
         V.graph.mark_buffer_mutated(name)
 
-    @Layout.stride.getter  # type: ignore[attr-defined]
+    @Layout.stride.getter  # type: ignore[attr-defined, misc]
     def stride(self) -> Sequence[_IntLike]:
         return self.real_layout().stride
 
