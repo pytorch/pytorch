@@ -4378,6 +4378,132 @@ class TestNestedTensorSubclass(TestCase):
                 self.assertTrue(torch.allclose(out_actual.values(), out_expected))
 
     @dtypes(torch.float32)
+    @parametrize(
+        "transpose_offset", [1, 2]
+    )  # [transpose consecutive dimensions, transpose nonconsecutive dimensions]
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_layer_norm_reduce_ragged_idx_greater_than_1(
+        self, device, dtype, requires_grad, components_require_grad, transpose_offset
+    ):
+        """
+        Layer normalization on NestedTensor passes when trying to normalize across ragged dimension, where ragged_idx > 1.
+        """
+
+        if (
+            torch._dynamo.is_compiling() and not requires_grad
+        ):  # requires_grad = False does not work with dynamo
+            return
+
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False,
+            include_requires_grad=components_require_grad,
+            include_inner_dim_size_1=True,  # (B, *, 1)
+        )
+
+        for tensor_list in tensor_lists:
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            if nt.dim() > nt._ragged_idx + transpose_offset + 1:
+                nt_transposed = nt.transpose(
+                    nt._ragged_idx, nt._ragged_idx + transpose_offset
+                )
+
+                normalized_shape = (
+                    -1,
+                    *nt_transposed.shape[nt_transposed._ragged_idx + 1 :],
+                )  # pass in -1 for ragged shape (ragged shape value itself is never used in layer_norm())
+
+                out_actual = torch.nn.functional.layer_norm(
+                    nt_transposed, normalized_shape=normalized_shape
+                )
+                self.assertTrue(
+                    out_actual.is_nested,
+                    f"layer_norm(): the result of reducing a nested tensor along the ragged dimension is a nested tensor",
+                )  # output is a nested tensor
+                self.assertEqual(out_actual.shape, nt_transposed.shape)
+
+                nt_transposed_unbind = nt_transposed.unbind()
+                out_actual_unbind = out_actual.unbind()
+                for i in range(len(nt_transposed_unbind)):
+                    transposed_t = nt_transposed_unbind[i]
+                    out_expected = torch.nn.functional.layer_norm(
+                        transposed_t, normalized_shape=transposed_t.shape
+                    )  # e.g. in 3D tensor (B, *, M), performs layer normalization on B 2D tensors (*, M)
+
+                    out_actual = out_actual_unbind[i]
+
+                    self.assertEqual(out_expected.shape, out_actual.shape)
+                    self.assertTrue(torch.allclose(out_expected, out_actual))
+
+    @dtypes(torch.float32)
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_layer_norm_reduce_ragged_idx_transpose_non_ragged_dims(
+        self,
+        device,
+        dtype,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Layer normalization on NestedTensor passes when trying to normalize across ragged dimension, where the nested tensor is transposed along non-ragged dimensions.
+        """
+
+        if (
+            torch._dynamo.is_compiling() and not requires_grad
+        ):  # requires_grad = False does not work with dynamo
+            return
+
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False,
+            include_requires_grad=components_require_grad,
+            include_inner_dim_size_1=True,  # (B, *, 1)
+        )
+
+        for tensor_list in tensor_lists:
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            if nt.dim() > 3:
+                nt_transposed = nt.transpose(-1, -2)
+
+                normalized_shape = nt_transposed.shape[nt_transposed._ragged_idx + 1 :]
+
+                out_actual = torch.nn.functional.layer_norm(
+                    nt_transposed, normalized_shape=normalized_shape
+                )
+                self.assertTrue(
+                    out_actual.is_nested,
+                    f"layer_norm(): the result of reducing a nested tensor along the ragged dimension is a nested tensor",
+                )  # output is a nested tensor
+                self.assertEqual(out_actual.shape, nt_transposed.shape)
+
+                nt_transposed_unbind = nt_transposed.unbind()
+                out_actual_unbind = out_actual.unbind()
+                for i in range(len(nt_transposed_unbind)):
+                    transposed_t = nt_transposed_unbind[i]
+                    out_expected = torch.nn.functional.layer_norm(
+                        transposed_t, normalized_shape=normalized_shape
+                    )  # e.g. in 3D tensor (B, *, M), performs layer normalization on B 2D tensors (*, M)
+
+                    out_actual = out_actual_unbind[i]
+
+                    self.assertEqual(out_expected.shape, out_actual.shape)
+                    self.assertTrue(torch.allclose(out_expected, out_actual))
+
+    @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
     def test_layer_norm_2d_input(
@@ -4410,6 +4536,42 @@ class TestNestedTensorSubclass(TestCase):
                 with self.assertRaisesRegex(
                     RuntimeError,
                     "not supported for NestedTensor objects with 2 or fewer dimensions",
+                ):
+                    out = torch.nn.functional.layer_norm(nt, normalized_shape=(-1,))
+
+    @dtypes(torch.float32)
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_layer_norm_2d_normalized_shape(
+        self,
+        device,
+        dtype,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Layer normalization fails when passing in a normalized shape of less than 2 dimensions
+        """
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False,
+            include_requires_grad=components_require_grad,
+            include_inner_dim_size_1=True,  # (B, *, 1)
+            include_2d_tensor=True,  # (B, *)
+        )
+
+        for tensor_list in tensor_lists:
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            if nt.dim() > 2:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "not supported for a normalized shape of length less than 2",
                 ):
                     out = torch.nn.functional.layer_norm(nt, normalized_shape=(-1,))
 
