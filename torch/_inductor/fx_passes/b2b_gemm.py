@@ -1,24 +1,11 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-)
+from typing import Dict, List
 
 import torch
 from ..._dynamo.utils import counters
-from ..ir import (
-    ComputedBuffer,
-    FixedLayout,
-    Subgraph,
-)
-from ..kernel.flex_attention import (
-    build_subgraph_buffer,
-    create_placeholder,
-)
+from ..ir import FixedLayout, Subgraph
+from ..kernel.flex_attention import build_subgraph_buffer, create_placeholder
 from ..pattern_matcher import (
     Arg,
     CallFunction,
@@ -212,7 +199,9 @@ b2b_gemm_right_template = TritonTemplate(
 # in the trivial subgraph case; i.e. (A @ (B @ C)) or ((A @ B) @ C)
 
 
-def load_ratio_left(M: int, N: int, O: int, P: int, m: int, n: int, o: int, p: int) -> float:
+def load_ratio_left(
+    M: int, N: int, O: int, P: int, m: int, n: int, o: int, p: int
+) -> float:
     """
     compute the ratio of estimated numbers of loads in baseline and b2bgemm
     M, N, O, P are matrix sizes
@@ -223,11 +212,18 @@ def load_ratio_left(M: int, N: int, O: int, P: int, m: int, n: int, o: int, p: i
     b2bgemm is always better on stores, but for loads we need to find out beneficial cases using this function
     """
     base = M * N + N * O + M * O + O * P
-    gemm = ceildiv(M, m) * ceildiv(P, p) * ceildiv(O, o) * (o * p + ceildiv(N, n) * (m * n + n * o))
+    gemm = (
+        ceildiv(M, m)
+        * ceildiv(P, p)
+        * ceildiv(O, o)
+        * (o * p + ceildiv(N, n) * (m * n + n * o))
+    )
     return base / gemm
 
 
-def load_ratio_right(M: int, N: int, O: int, P: int, m: int, n: int, o: int, p: int) -> float:
+def load_ratio_right(
+    M: int, N: int, O: int, P: int, m: int, n: int, o: int, p: int
+) -> float:
     """
     compute the ratio of estimated numbers of loads in baseline and b2bgemm
     M, N, O, P are matrix sizes
@@ -238,7 +234,12 @@ def load_ratio_right(M: int, N: int, O: int, P: int, m: int, n: int, o: int, p: 
     b2bgemm is always better on stores, but for loads we need to find out beneficial cases using this function
     """
     base = N * O + O * P + M * N + N * P
-    gemm = ceildiv(M, m) * ceildiv(P, p) * ceildiv(N, n) * (m * n + ceildiv(O, o) * (n * o + o * p))
+    gemm = (
+        ceildiv(M, m)
+        * ceildiv(P, p)
+        * ceildiv(N, n)
+        * (m * n + ceildiv(O, o) * (n * o + o * p))
+    )
     return base / gemm
 
 
@@ -253,13 +254,13 @@ b2b_gemm_configs = [
         "num_stages": s,
         "num_warps": 2 * s,
     }
-    for (m, n, s) in set(  # deduplicate
+    for (m, n, s) in {  # deduplicate
         (m, n, s)
         for m in [16, 32, 64, 128]
-            for n in [16, 32, 64, 128]
-                for s in ([2] if (m == 128 or n == 128) else [2, 4])  # don't be too large
-                    if not (m == n == 128)  # don't be too large
-    )
+        for n in [16, 32, 64, 128]
+        for s in ([2] if (m == 128 or n == 128) else [2, 4])  # don't be too large
+        if not (m == n == 128)  # don't be too large
+    }
 ]
 
 
@@ -275,7 +276,11 @@ def is_b2b_gemm_good_on(
     # basic checks
     if not all(["val" in A_node.meta, "val" in B_node.meta, "val" in C_node.meta]):
         return False
-    A, B, C = A_node.meta["val"], B_node.meta["val"], C_node.meta["val"]  # torch._subclasses.fake_tensor.FakeTensor
+    A, B, C = (
+        A_node.meta["val"],
+        B_node.meta["val"],
+        C_node.meta["val"],
+    )  # torch._subclasses.fake_tensor.FakeTensor
     if not all([A.is_cuda, B.is_cuda, C.is_cuda]):
         return False
     if not all([len(A.shape) == 2, len(B.shape) == 2, len(C.shape) == 2]):
@@ -317,7 +322,9 @@ def is_b2b_gemm_good_on(
     for r in ratios[:3]:  # top 3 choices
         average_ratio *= r
     average_ratio = average_ratio ** (1 / 3)
-    return average_ratio > 1  # even if average_ratio is close to 1, the number of stores is always better
+    return (
+        average_ratio > 1
+    )  # even if average_ratio is close to 1, the number of stores is always better
 
 
 def unoptimized_b2b_gemm(
@@ -352,9 +359,7 @@ def tuned_b2b_gemm(
     A.realize()
     B.realize()
     C.realize()
-    layout = FixedLayout(
-        A.get_device(), A.get_dtype(), [A.shape[0], C.shape[1]]
-    )
+    layout = FixedLayout(A.get_device(), A.get_dtype(), [A.shape[0], C.shape[1]])
     subgraph_buffer = build_subgraph_buffer(
         [create_placeholder("inner_mm", A.get_dtype(), A.get_device())],
         subgraph,
@@ -379,7 +384,9 @@ def tuned_b2b_gemm(
             )
     # add the unoptimized choice to mitigate performance degradation
     choices.append(
-        unoptimized_choice.bind((A, B, C), layout, is_left_assoc=is_left_assoc, subgraph=subgraph)
+        unoptimized_choice.bind(
+            (A, B, C), layout, is_left_assoc=is_left_assoc, subgraph=subgraph
+        )
     )
     # autotune
     return autotune_select_algorithm("b2b_gemm", choices, [A, B, C], layout)
@@ -390,18 +397,16 @@ def tuned_b2b_gemm(
     CallFunction(torch.ops.aten.mm, Arg(), Arg()),
     pass_dict=B2B_GEMM_PASS,
 )
-def b2b_gemm_handler(
-    match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node
-) -> None:
+def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> None:
     # match.args: list[torch.fx.Node]
 
     def is_pointwise_node(node: torch.fx.Node) -> bool:
         return (
-            node.op == "call_function" and
-            isinstance(node.target, torch._ops.OpOverload) and
-            (torch.Tag.pointwise in node.target.tags)
+            node.op == "call_function"
+            and isinstance(node.target, torch._ops.OpOverload)
+            and (torch.Tag.pointwise in node.target.tags)
         )
-    
+
     def is_mm(node: torch.fx.Node) -> bool:
         return node.target == torch.ops.aten.mm.default
 
@@ -428,44 +433,52 @@ def b2b_gemm_handler(
     # we call it the "f_node"
     # when the pattern is simply (A @ (B @ C)), f_node is just inner_mm
     f_node = inner_mm
-    while not (next(iter(f_node.users)) is outer_mm):
+    while next(iter(f_node.users)) is not outer_mm:
         f_node = next(iter(f_node.users))
 
-    def all_reach_via(
+    def all_reach_via_pointwise_with_no_other_inputs(
         src: torch.fx.Node,
         dst: torch.fx.Node,
-        check_intermediate: Callable[[torch.fx.Node], bool],
-        get_next: Callable[[torch.fx.Node], Iterable[torch.fx.Node]],
     ) -> bool:
-        '''
-        checks whether every path from src reaches dst via check_intermediate nodes
-        where the direction is specified by get_next
-        '''
-        visited: Dict[torch.fx.Node, bool] = {}
-        def dfs(node: torch.fx.Node) -> bool:
-            if node in visited:
-                return visited[node]
+        """
+        check whether every user path from src reaches dst via pointwise nodes,
+        with no other input nodes for the intermediates and dst
+        """
+        if src == dst:  # trivial subgraph
+            return True
+
+        reachable: Dict[torch.fx.Node, bool] = {}
+        input_counter: Dict[torch.fx.Node, int] = {}
+
+        def reach(node: torch.fx.Node) -> bool:
+            if node in reachable:
+                return reachable[node]
             if node is dst:
+                reachable[node] = True
+                return True
+            # for nodes other than dst, bookkeep their users' input counts
+            for user in node.users.keys():
+                if user not in input_counter:
+                    input_counter[user] = len(user.all_input_nodes)
+                input_counter[user] -= 1
+            # continue checking reachability
+            if (node is src) or is_pointwise_node(node):
                 ret = True
-            elif (node is src) or check_intermediate(node):
-                ret = True
-                for next_node in get_next(node):
-                    if not dfs(next_node):
+                for user in node.users.keys():
+                    if not reach(user):
                         ret = False
                         break
             else:
                 ret = False
-            visited[node] = ret
+            reachable[node] = ret
             return ret
-        
-        return dfs(src)
 
-    # checker inner_mm and f_node are connected by pointwise nodes with no outside input_nodes / users
-    if not all_reach_via(inner_mm, f_node, is_pointwise_node, lambda node: iter(node.users)):
+        return reach(src) and all(count == 0 for count in input_counter.values())
+
+    # check inner_mm reaches f_node on every user path via pointwise nodes with no outside input_nodes
+    if not all_reach_via_pointwise_with_no_other_inputs(inner_mm, f_node):
         return
-    if not all_reach_via(f_node, inner_mm, is_pointwise_node, lambda node: node.all_input_nodes):
-        return
-    
+
     # check inner_mm's inputs and f_node's outputs
     if not (len(inner_mm.all_input_nodes) == 2 and len(f_node.users) == 1):
         return
@@ -483,7 +496,7 @@ def b2b_gemm_handler(
         if node is outer_mm:
             return
         subgraph_node_set.add(node)
-        for user, _ in node.users.items():
+        for user in node.users.keys():
             dfs(user)
 
     dfs(inner_mm)
@@ -492,21 +505,27 @@ def b2b_gemm_handler(
     graph, module = inner_mm.graph, inner_mm.graph.owning_module
 
     # construct the new (sub)graph
-    subgraph_node_list = []  # ordered list of nodes used for node removal later
-    new_graph = torch.fx.Graph()
+    subgraph_node_list: List[
+        torch.fx.Node
+    ] = []  # ordered list of nodes used for node removal later
+    new_graph: torch.fx.Graph = torch.fx.Graph()
     node_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
-    new_input_anchor = None  # inner_mm, to be changed to an input node
-    new_output_anchor = None  # f_node, to be used to construct an output node
+    new_input_anchor: torch.fx.Node  # inner_mm, to be changed to an input node
+    new_output_anchor: torch.fx.Node  # f_node, to be used to construct an output node
+    new_input_node: torch.fx.Node
+    new_output_node: torch.fx.Node
     for node in graph.nodes:  # preserve the order of nodes
         if node in subgraph_node_set:
             subgraph_node_list.append(node)
-            new_node = new_graph.node_copy(node, lambda x: node_remapping[x] if x in node_remapping else x)
+            new_node = new_graph.node_copy(
+                node, lambda x: node_remapping[x] if x in node_remapping else x
+            )
             node_remapping[node] = new_node
             if node is inner_mm:
                 new_input_anchor = new_node
             if node is f_node:
                 new_output_anchor = new_node
-    if not (new_input_anchor is new_output_anchor):  # subgraph is non-trivial
+    if new_input_anchor is not new_output_anchor:  # subgraph is non-trivial
         # update the input node
         with new_graph.inserting_before(new_input_anchor):
             new_input_node = new_graph.placeholder(name="subgraph_input")
@@ -529,22 +548,27 @@ def b2b_gemm_handler(
     new_graph.lint()
 
     # construct the subgraph
-    subgraph = Subgraph(name="subgraph", graph_module=torch.fx.GraphModule(module, new_graph))
+    subgraph = Subgraph(
+        name="subgraph", graph_module=torch.fx.GraphModule(module, new_graph)
+    )
 
     # two cases
     # (1) (subgraph(A @ B) @ C), called "left_assoc"
     # (2) (A @ subgraph(B @ C)), called "right_assoc"
-    is_left_assoc = (outer_mm.args[0] is f_node)
+    is_left_assoc = outer_mm.args[0] is f_node
 
     # find the nodes A, B, C and check the sizes
+    A: torch.fx.Node
+    B: torch.fx.Node
+    C: torch.fx.Node
     if is_left_assoc:
-        A = inner_mm.args[0]
-        B = inner_mm.args[1]
-        C = outer_mm.args[1]
+        A = inner_mm.args[0]  # type: ignore[assignment]
+        B = inner_mm.args[1]  # type: ignore[assignment]
+        C = outer_mm.args[1]  # type: ignore[assignment]
     else:
-        A = outer_mm.args[0]
-        B = inner_mm.args[0]
-        C = inner_mm.args[1]
+        A = outer_mm.args[0]  # type: ignore[assignment]
+        B = inner_mm.args[0]  # type: ignore[assignment]
+        C = inner_mm.args[1]  # type: ignore[assignment]
     if not is_b2b_gemm_good_on(is_left_assoc, A, B, C):
         return
 
@@ -553,11 +577,11 @@ def b2b_gemm_handler(
     graph = match.graph
     with graph.inserting_before(outer_mm):
         function = functools.partial(tuned_b2b_gemm, is_left_assoc, subgraph)
-        function.__name__ = tuned_b2b_gemm.__name__
+        function.__name__ = tuned_b2b_gemm.__name__  # type: ignore[attr-defined]
         function._inductor_lowering_function = True  # type: ignore[attr-defined]
-        replacement = graph.call_function(
+        replacement: torch.fx.Node = graph.call_function(
             function,
-            tuple([A, B, C]),
+            (A, B, C),
             match.kwargs,
         )
         replacement.meta.update(outer_mm.meta)

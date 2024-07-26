@@ -30,7 +30,6 @@ class B2BGEMMTest(TestCase):
         self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.2, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" in code)
 
-
     @torch._dynamo.config.patch(cache_size_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_right_assoc_good_shape(self):
@@ -51,7 +50,6 @@ class B2BGEMMTest(TestCase):
         self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.2, rtol=0.01))
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" in code)
 
-
     @torch._dynamo.config.patch(cache_size_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_trivial_left_assoc_good_shape(self):
@@ -71,7 +69,6 @@ class B2BGEMMTest(TestCase):
         self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.2, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" in code)
 
-
     @torch._dynamo.config.patch(cache_size_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_trivial_right_assoc_good_shape(self):
@@ -90,7 +87,6 @@ class B2BGEMMTest(TestCase):
         res, (code,) = run_and_get_code(f_opt, A, B, C)
         self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.2, rtol=0.01))
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" in code)
-
 
     @torch._dynamo.config.patch(cache_size_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
@@ -113,7 +109,6 @@ class B2BGEMMTest(TestCase):
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
 
-
     @torch._dynamo.config.patch(cache_size_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_good_pattern_bad_shape(self):
@@ -132,7 +127,6 @@ class B2BGEMMTest(TestCase):
         self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.2, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
-
 
     @unittest.skipIf(
         not (os.environ.get("DO_PERF_TEST") == "1"), "Perf test not enabled"
@@ -188,7 +182,6 @@ class B2BGEMMTest(TestCase):
 
         # flaky test assertion: disabled
         # self.assertTrue(average_speedup > 1)
-
 
     @unittest.skipIf(
         not (os.environ.get("DO_PERF_TEST") == "1"), "Perf test not enabled"
