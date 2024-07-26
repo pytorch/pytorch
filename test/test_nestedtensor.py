@@ -6505,19 +6505,11 @@ FORWARD_FAILURES = {
 BACKWARD_FAILURES = {
     *FORWARD_FAILURES,
     # TODO: categorize these
+    "__rpow__",
+    "atanh",
     "cdouble",
     "cfloat",
     "chalf",
-}
-
-COMPILE_BACKWARD_FAILURES = {
-    *BACKWARD_FAILURES,
-    # mvlgamma_backward calls arange() passing self.options() and layout=torch.jagged
-    # is not supported for the arange() decomp. Backward function should be fixed
-    *(f"mvlgamma.mvlgamma_p_{p}" for p in [1, 3, 5]),
-    # TODO: categorize these
-    "__rpow__",
-    "atanh",
     "clamp_max",
     "clamp_min",
     "copysign",
@@ -6532,6 +6524,13 @@ COMPILE_BACKWARD_FAILURES = {
     "sinc",
     "special.i1",
     "special.i1e",
+}
+
+COMPILE_BACKWARD_FAILURES = {
+    *BACKWARD_FAILURES,
+    # mvlgamma_backward calls arange() passing self.options() and layout=torch.jagged
+    # is not supported for the arange() decomp. Backward function should be fixed
+    *(f"mvlgamma.mvlgamma_p_{p}" for p in [1, 3, 5]),
 }
 
 
@@ -6574,9 +6573,10 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             out_ref = op.ref(op, sample)
             self.assertEqualIgnoringNestedInts(out, out_ref)
 
+            inps, _ = tree_flatten((sample.input, sample.args, sample.kwargs))
             g_inps = [
                 inp
-                for inp in tree_flatten((sample.input, sample.args, sample.kwargs))
+                for inp in inps
                 if isinstance(inp, torch.Tensor) and inp.requires_grad
             ]
             if len(g_inps) > 0:
@@ -6635,9 +6635,10 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
             self.assertEqual(out_compile, out_ref)
 
+            inps, _ = tree_flatten((sample.input, sample.args, sample.kwargs))
             g_inps = [
                 inp
-                for inp in tree_flatten((sample.input, sample.args, sample.kwargs))
+                for inp in inps
                 if isinstance(inp, torch.Tensor) and inp.requires_grad
             ]
             if len(g_inps) > 0:
