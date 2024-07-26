@@ -69,7 +69,7 @@ def generate_faked_module():
 
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
-@unittest.skipIf(TEST_XPU, "XPU does not support this currently")
+@unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionOpenRgistration(common.TestCase):
     """Tests Open Device Registration with C++ extensions."""
