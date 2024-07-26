@@ -3764,6 +3764,35 @@ class CommonTemplate:
             (torch.randn([2, 2, 10]),),
         )
 
+    def test_low_memory_max_pool(self):
+        prims = torch.ops.prims
+
+        def fn(x):
+            kernel_size = [3, 3]
+            stride = [2, 2]
+            padding = [1, 1]
+            dilation = [1, 1]
+            ceil_mode = False
+
+            vals, offsets = prims._low_memory_max_pool2d_with_offsets(
+                x,
+                kernel_size,
+                stride,
+                padding,
+                dilation,
+                ceil_mode,
+            )
+            indices = prims._low_memory_max_pool2d_offsets_to_indices(
+                offsets,
+                kernel_size[1],
+                x.size(-1),
+                stride,
+                padding,
+            )
+            return vals, indices, offsets
+
+        self.common(fn, (torch.randn(1, 3, 10, 10),))
+
     def test_to_dtype(self):
         def fn(a, b):
             return (
@@ -4373,8 +4402,13 @@ class CommonTemplate:
         out_test = compiled_f(inp_test.clone())
 
         eager_version_counters_after = [
-            buffer._version for _, buffer in model_for_eager.named_buffers()
+            # TODO: remove the + 1 after https://github.com/pytorch/pytorch/issues/120622 is fixed
+            buffer._version + 1
+            if k in ["m.running_mean", "m.running_var"]
+            else buffer._version
+            for k, buffer in model_for_eager.named_buffers()
         ]
+
         compile_version_counters_after = [
             buffer._version for _, buffer in model_for_compile.named_buffers()
         ]
@@ -7120,11 +7154,6 @@ class CommonTemplate:
             )
 
         self.common(fn, [torch.randn(64, 64)])
-
-    def test_new_cpp_build_logical(self):
-        from torch._inductor.codecache import validate_new_cpp_commands
-
-        validate_new_cpp_commands()
 
     def test_as_strided(self):
         def fn(x):
@@ -11069,7 +11098,7 @@ class CommonTemplate:
         s0 = 16777472
         s1 = 8
         compiled_fn = torch._dynamo.optimize()(fn)
-        actual = compiled_fn(torch.ones(s0, s1))
+        actual = compiled_fn(torch.ones(s0, s1, device=self.device))
         self.assertTrue((actual == 1).all())
 
     @skip_if_gpu_halide
