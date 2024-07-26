@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 from .. import polyfill, variables
 from ..bytecode_transformation import create_instruction
 from ..exc import (
+    handle_observed_user_stop_iteration,
     ObservedUserStopIteration,
     raise_observed_user_stop_iteration,
     unimplemented,
@@ -216,6 +217,7 @@ class IteratorVariable(VariableTracker):
             try:
                 result.append(self.next_variable(tx))
             except ObservedUserStopIteration:
+                handle_observed_user_stop_iteration(tx)
                 break
         return result
 
@@ -287,6 +289,7 @@ class CycleIteratorVariable(IteratorVariable):
                     return self.next_variable(tx)
                 return self.item
             except ObservedUserStopIteration:
+                handle_observed_user_stop_iteration(tx)
                 self.iterator = None
                 return self.next_variable(tx)
         elif len(self.saved) > 0:
@@ -366,12 +369,14 @@ class ZipVariable(IteratorVariable):
                         try:
                             get_item(it)
                         except ObservedUserStopIteration:
+                            handle_observed_user_stop_iteration(tx)
                             continue
                         # no ObservedUserStopIteration - fall through to UserError
                         break
                     else:
                         # all iterables exhausted, raise original error
                         raise
+                handle_observed_user_stop_iteration(tx)
                 raise UserError(
                     ValueError,
                     "zip() has one argument of len differing from others",

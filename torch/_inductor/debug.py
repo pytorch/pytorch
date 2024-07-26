@@ -141,12 +141,16 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         kwargs = {}
         if hasattr(snode, "get_device"):
             kwargs = {"device": snode.get_device()}
-        fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)
+        fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)  # type: ignore[arg-type]
 
         def in_output(snode):
             if isinstance(snode, FusedSchedulerNode):
                 return any(in_output(x) for x in snode.snodes)
-            return any(isinstance(user.node, OutputNode) for user in snode.users)
+            return any(
+                isinstance(user.node, OutputNode)
+                for buf in snode.get_outputs()
+                for user in buf.users
+            )
 
         if in_output(snode):
             outputs.append(fx_node)
