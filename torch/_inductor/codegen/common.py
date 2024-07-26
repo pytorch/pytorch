@@ -1267,8 +1267,10 @@ class KernelArgs:
         if str(name) == "seed":
             self.sizevars["seed"] = "seed"
             return "seed"
+        # symbol name from torch/utils/_sympy/symbol.py
         for prefix in ["zuf", "zf"]:
             if str(name).startswith(prefix):
+                # Have to rename it to ks to avoid reindexing issue
                 return self._lookup("ks", self.sizevars, name)
         return self._lookup("ks", self.sizevars, name)
 
