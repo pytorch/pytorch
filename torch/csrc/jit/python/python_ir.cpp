@@ -922,7 +922,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "with_device",
           [](Type& t, py::object device) -> py::object {
-            at::Device c_device = python::detail::py_object_to_device(device);
+            at::Device c_device =
+                python::detail::py_object_to_device(std::move(device));
             if (auto ptt = t.expect<TensorType>()) {
               return py::cast(ptt->withDevice(c_device));
             }
@@ -944,7 +945,7 @@ void initPythonIRBindings(PyObject* module_) {
           "with_dtype",
           [](Type& t, py::object dtype) -> py::object {
             at::ScalarType scalar_type =
-                python::detail::py_object_to_dtype(dtype);
+                python::detail::py_object_to_dtype(std::move(dtype));
 
             if (auto ptt = t.expect<TensorType>()) {
               // auto scalar_type = dtype->scalar_type;
@@ -1048,8 +1049,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("getKeyType", &DictType::getKeyType)
       .def("getValueType", &DictType::getValueType);
   py::class_<OptionalType, Type, OptionalTypePtr>(m, "OptionalType")
-      .def(py::init(
-          [](TypePtr a) { return OptionalType::create(std::move(a)); }))
+      .def(py::init([](TypePtr a) { return OptionalType::create(a); }))
       .def_static("ofTensor", &OptionalType::ofTensor)
       .def("getElementType", &OptionalType::getElementType);
   py::class_<RRefType, Type, RRefTypePtr>(m, "RRefType")
