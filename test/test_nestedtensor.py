@@ -4148,7 +4148,6 @@ class TestNestedTensorSubclass(TestCase):
 
         # verify correctness of shapes (assuming that ragged_idx == 1)
         reduce_dims = (
-            (0, 0),
             (2, 1),
             (3, 2),
         )  # (reduction dimension, effective reduction dimension for baseline)
@@ -4281,6 +4280,37 @@ class TestNestedTensorSubclass(TestCase):
                 "softmax(): the result of reducing a nested tensor along the ragged dimension is a nested tensor",
             )  # output is a nested tensor
             self.assertTrue(torch.allclose(out_actual.values(), out_expected))
+
+    @dtypes(torch.float32)
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_softmax_reduce_batch_dim(
+        self, device, dtype, requires_grad, components_require_grad
+    ):
+        """
+        Softmax on NestedTensor fails when trying to reduce across batch dimension.
+        """
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False,
+            include_requires_grad=components_require_grad,
+            include_inner_dim_size_1=True,  # (B, *, 1)
+        )
+        reduce_dim = 0  # batch
+
+        for tensor_list in tensor_lists:
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "not supported when reducing across the batch dimension for NestedTensor",
+            ):
+                out = torch.nn.functional.softmax(nt, dim=reduce_dim)
 
     @dtypes(torch.float32)
     @parametrize(
@@ -4484,7 +4514,6 @@ class TestNestedTensorSubclass(TestCase):
         """
         # verify correctness of shapes (assuming that ragged_idx == 1)
         reduce_dims = (
-            (0, 0),
             (2, 1),
             (3, 2),
         )  # (reduction dimension, effective reduction dimension for baseline)
@@ -4712,7 +4741,6 @@ class TestNestedTensorSubclass(TestCase):
         i.e. a nested tensor with holes, if reducing on the ragged dimension.
         """
         reduce_dims = (
-            0,
             1,
             2,
             3,
