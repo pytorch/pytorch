@@ -37,7 +37,6 @@ ISORT_SKIPLIST = re.compile(
                     # torchgen/**
                     # test/**
                     # test/[a-c]*/**
-                    "test/[a-c]*/**",
                     # test/d*/**
                     # test/dy*/**
                     # test/[e-h]*/**
@@ -46,7 +45,6 @@ ISORT_SKIPLIST = re.compile(
                     "test/j*/**",
                     # test/[k-p]*/**
                     # test/[q-z]*/**
-                    "test/[q-z]*/**",
                     # torch/**
                     # torch/_[a-c]*/**
                     # torch/_d*/**
