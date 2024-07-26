@@ -236,7 +236,10 @@ class StarDep(Dep):
 # materialize that buffer
 @dataclasses.dataclass(frozen=True)
 class WeakDep(Dep):
+    # Fake dependency on unused buffer
     name: str
+    # Buffer that is doing the mutation
+    mutating_buf: str
 
     @property
     def index(self):
@@ -247,7 +250,7 @@ class WeakDep(Dep):
 
     def rename(self, renames: Dict[str, str]) -> "WeakDep":
         if self.name in renames:
-            return WeakDep(renames[self.name])
+            return WeakDep(renames[self.name], self.mutating_buf)
         return self
 
     def numbytes_hint(self):
@@ -596,7 +599,9 @@ class FreeUnbackedSymbolsOpsHandler:
 
         return inner
 
-    def indirect_indexing(self, index_var, size, check=True) -> sympy.Symbol:
+    def indirect_indexing(
+        self, index_var, size, check=True, wrap_neg=True
+    ) -> sympy.Symbol:
         assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
         self.symbols |= free_unbacked_symbols(size)
         return sympy_index_symbol(f"({str(index_var)})")

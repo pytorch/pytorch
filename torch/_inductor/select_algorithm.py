@@ -384,7 +384,7 @@ class TritonTemplateKernel(TritonKernel):
 
                     return f"({fixed_inputs[name]})"
 
-                def indirect_indexing(self, index_var, size, check):
+                def indirect_indexing(self, index_var, size, check, wrap_neg=True):
                     return sympy_index_symbol(str(index_var))
 
             with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
