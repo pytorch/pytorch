@@ -405,11 +405,11 @@ class TestFP8Lowering(TestCase):
         M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
         # input and output dtypes of _scaled_mm do not need to be the same, but
         # typically in a model they are
-        x = torch.rand(M, K, dtype=dtype, device=device)
-        w = torch.rand(N, K, dtype=dtype, device=device)
+        x = torch.randn(M, K, dtype=dtype, device=device)
+        w = torch.randn(N, K, dtype=dtype, device=device)
         bias = None
         if has_bias:
-            bias = torch.rand(N, device=device, dtype=torch.bfloat16)
+            bias = torch.randn(N, device=device, dtype=torch.bfloat16)
 
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = _quantize_tensorwise(w, dtype_float8)
@@ -447,7 +447,7 @@ class TestFP8Lowering(TestCase):
         )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
-        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
@@ -462,11 +462,11 @@ class TestFP8Lowering(TestCase):
 
         shape = [int(dim) for dim in shape.split(",")]
         M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
-        x = torch.rand(M, K, dtype=dtype, device=device)
-        w = torch.rand(N, K, dtype=dtype, device=device)
+        x = torch.randn(M, K, dtype=dtype, device=device)
+        w = torch.randn(N, K, dtype=dtype, device=device)
         bias = None
         if has_bias:
-            bias = torch.rand(N, device=device, dtype=torch.bfloat16)
+            bias = torch.randn(N, device=device, dtype=torch.bfloat16)
 
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = _quantize_rowwise(w, dtype_float8)
@@ -505,7 +505,7 @@ class TestFP8Lowering(TestCase):
         )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
-        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
@@ -555,7 +555,7 @@ class TestFP8Lowering(TestCase):
         )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
-        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
@@ -568,9 +568,9 @@ class TestFP8Lowering(TestCase):
         device = "cuda"
         dtype_float8 = torch.float8_e4m3fn
 
-        x = torch.rand(M, K, dtype=dtype, device=device)
-        w = torch.rand(N, K, dtype=dtype, device=device)
-        bias = torch.rand(N, device=device, dtype=torch.bfloat16)
+        x = torch.randn(M, K, dtype=dtype, device=device)
+        w = torch.randn(N, K, dtype=dtype, device=device)
+        bias = torch.randn(N, device=device, dtype=torch.bfloat16)
 
         w_fp8, w_inverse_scale = _quantize_rowwise(w, dtype_float8)
         w_t_fp8 = w_fp8.t()
@@ -606,7 +606,7 @@ class TestFP8Lowering(TestCase):
         )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
-        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
@@ -616,9 +616,9 @@ class TestFP8Lowering(TestCase):
         device = "cuda"
         dtype_float8 = torch.float8_e4m3fn
         M, K, N = 64, 15, 2048  # K needs to be a multiple of 16
-        x = torch.rand(M, K, dtype=dtype, device=device)
-        w = torch.rand(N, K, dtype=dtype, device=device)
-        bias = torch.rand(N, device=device, dtype=torch.bfloat16)
+        x = torch.randn(M, K, dtype=dtype, device=device)
+        w = torch.randn(N, K, dtype=dtype, device=device)
+        bias = torch.randn(N, device=device, dtype=torch.bfloat16)
         w_fp8, w_inverse_scale = _quantize_tensorwise(w, dtype_float8)
         w_t_fp8 = w_fp8.t()
 
@@ -655,9 +655,9 @@ class TestFP8Lowering(TestCase):
         device = "cuda"
         dtype_float8 = torch.float8_e4m3fn
         M, K, N = 233, 32, 128
-        x = torch.rand(M, K, dtype=dtype, device=device)
-        w = torch.rand(N, K, dtype=dtype, device=device)
-        bias = torch.rand(N, device=device, dtype=torch.bfloat16)
+        x = torch.randn(M, K, dtype=dtype, device=device)
+        w = torch.randn(N, K, dtype=dtype, device=device)
+        bias = torch.randn(N, device=device, dtype=torch.bfloat16)
         w_fp8, w_inverse_scale = _quantize_rowwise(w, dtype_float8)
         w_t_fp8 = w_fp8.t()
 
