@@ -1084,9 +1084,15 @@ class OpOverloadPacket:
             # This is ok since we are guaranteed that an overload name for an aten op can't be 'default'
             use_key = "" if key == "default" else key
             # TODO: disallow access to overloads registered by JIT
-            op_, op_dk_, tags = torch._C._get_operation_overload(
+            op_dk_tags = torch._C._get_operation_overload(
                 self._qualified_op_name, use_key
             )
+            if op_dk_tags is None:
+                raise AttributeError(
+                    f"The underlying op of '{str(self)}' has no overload name '{key}'"
+                )
+
+            op_, op_dk_, tags = op_dk_tags
             schema = torch._C._get_schema(self._qualified_op_name, use_key)
             overload = (
                 OpOverload(self, op_, op_dk_, schema, tags)
