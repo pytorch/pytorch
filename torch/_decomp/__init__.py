@@ -3,7 +3,8 @@ import inspect
 from collections import defaultdict
 from functools import wraps
 from itertools import chain
-from typing import Callable, Dict, List, Sequence, Union
+from typing import Callable, Dict, List, Sequence, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch.library
@@ -20,6 +21,8 @@ __all__ = [
     "core_aten_decompositions",
 ]
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 # TODO: relax key type here; torch registrations should be possible to; but
 # right now this type is accurate
@@ -145,7 +148,7 @@ def _convert_out_params(f):
 
 def register_decomposition(
     aten_op, registry=None, *, type="post_autograd", unsafe=False
-):
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     A decorator to register a function as a decomposition to the Python
     decomposition table.  Use it like this::
@@ -171,7 +174,7 @@ def register_decomposition(
 
     assert type in {"post_autograd", "pre_autograd", "meta"}
 
-    def decomposition_decorator(fn: Callable) -> Callable:
+    def decomposition_decorator(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         orig_fn = fn
         if not unsafe:
             fn = _convert_out_params(fn)
