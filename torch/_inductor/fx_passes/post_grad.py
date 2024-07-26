@@ -65,7 +65,7 @@ from .split_cat import POST_GRAD_PATTERNS
 
 
 if TYPE_CHECKING:
-    from sympy import Expr
+    from sympy import Integer
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
@@ -514,7 +514,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
     assert dim in (0, 1)
     notdim = 1 - dim
 
-    new_size: Optional[Union[List[Expr], List[int]]] = None
+    new_size: Optional[Union[List[Integer], List[int]]] = None
     offsets_start = []
     offsets_end = []
 
@@ -548,11 +548,11 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
         dst = ir.SliceView.create(kernel_tensor, dim, offsets_start[i], offsets_end[i])
         src = op(*inputs[i], layout=dst.get_layout()).data.data
         assert isinstance(src, (ir.ExternKernelOut, ir.TemplateBuffer))
-        src.layout = ir.NonOwningLayout(dst)  # type: ignore[arg-type] # next PR
+        src.layout = ir.NonOwningLayout(dst)  # type: ignore[arg-type]
         kernel.inputs.append(src)
 
     kernel.name = V.graph.register_buffer(kernel)
-    kernel.inputs = ir.ConcatKernel.unwrap_storage(kernel.inputs)  # type: ignore[assignment] # next PR
+    kernel.inputs = ir.ConcatKernel.unwrap_storage(kernel.inputs)  # type: ignore[assignment]
     V.graph.register_operation(kernel)
     return kernel_tensor
 

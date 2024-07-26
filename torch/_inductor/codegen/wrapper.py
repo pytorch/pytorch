@@ -19,6 +19,7 @@ from typing import (
     Iterator,
     List,
     Optional,
+    Sequence,
     Set,
     Tuple,
     TYPE_CHECKING,
@@ -76,7 +77,7 @@ def buffer_reuse_key(node: ir.Buffer) -> ReuseKey:
         # NB: this is symbolic so that we don't try to reuse a buffer
         # for s0 for s1, just because they happen to share the same
         # size hint
-        sympy_str(V.graph.sizevars.simplify(node.layout.storage_size())),  # type: ignore[union-attr, arg-type] # next PR
+        sympy_str(V.graph.sizevars.simplify(node.layout.storage_size())),  # type: ignore[union-attr]
     )
 
 
@@ -633,7 +634,7 @@ class WrapperCodeGen(CodeGen):
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
             if sympy_product(buf.get_size()) == 0:
                 continue
-            size = self.codegen_shape_tuple(buf.get_size())  # type: ignore[arg-type] # next PR
+            size = self.codegen_shape_tuple(buf.get_size())
             stride = self.codegen_shape_tuple(buf.get_stride())
             self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
 
@@ -1017,21 +1018,21 @@ class WrapperCodeGen(CodeGen):
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_size()
-            for dim, shape in enumerate(shapes):  # type: ignore[assignment] # next PR
-                if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
+            for dim, shape_ in enumerate(shapes):
+                if isinstance(shape_, sympy.Symbol) and shape_ not in bound_vars:
                     code.writeline(
-                        f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
+                        f"{self.declare}{shape_} = {sizeof(name)}[{dim}]{self.ending}"
                     )
-                    bound_vars.add(shape)
+                    bound_vars.add(shape_)
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_stride()
-            for dim, shape in enumerate(shapes):  # type: ignore[assignment] # next PR
-                if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
+            for dim, shape_ in enumerate(shapes):
+                if isinstance(shape_, sympy.Symbol) and shape_ not in bound_vars:
                     code.writeline(
-                        f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
+                        f"{self.declare}{shape_} = {strideof(name)}[{dim}]{self.ending}"
                     )
-                    bound_vars.add(shape)
+                    bound_vars.add(shape_)
 
     def ensure_size_computed(self, sym: sympy.Symbol):
         if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
@@ -1046,6 +1047,9 @@ class WrapperCodeGen(CodeGen):
     def finalize_prefix(self):
         pass
 
+    def codegen_python_rel(self, x: sympy.Rel, *, simplify: bool = True) -> str:
+        return pexpr(x, simplify=simplify)
+
     def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
         return pexpr(x, simplify=simplify)
 
@@ -1055,7 +1059,7 @@ class WrapperCodeGen(CodeGen):
     def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
         return f"{basename}[{index}]"
 
-    def codegen_python_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+    def codegen_python_shape_tuple(self, shape: Sequence[Expr]) -> str:
         parts = list(map(self.codegen_python_sizevar, shape))
         if len(parts) == 0:
             return "()"
@@ -1063,8 +1067,8 @@ class WrapperCodeGen(CodeGen):
             return f"({parts[0]}, )"
         return f"({', '.join(parts)})"
 
-    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
-        return self.codegen_python_shape_tuple(shape)
+    def codegen_shape_tuple(self, shape: Sequence[Union[int, Expr]]) -> str:
+        return self.codegen_python_shape_tuple(shape)  # type: ignore[arg-type]
 
     def codegen_alloc_from_pool(self, name, offset, dtype, shape, stride) -> str:
         return "alloc_from_pool({})".format(
@@ -1274,7 +1278,7 @@ class WrapperCodeGen(CodeGen):
                             name=key,
                             buffer=arg.data.get_name(),
                             dtype=arg.get_dtype(),
-                            offset=arg.layout.offset,  # type: ignore[arg-type] # next PR
+                            offset=arg.layout.offset,  # type: ignore[arg-type]
                         )
                     )
                 else:
@@ -1565,17 +1569,17 @@ class WrapperCodeGen(CodeGen):
                 buf = raw_arg
 
             size = V.graph.sizevars.size_hints(
-                buf.get_size(),  # type: ignore[arg-type] # next PR
+                buf.get_size(),
                 fallback=config.unbacked_symint_fallback,
             )
             stride = V.graph.sizevars.size_hints(
-                buf.get_stride(),  # type: ignore[arg-type] # next PR
+                buf.get_stride(),
                 fallback=config.unbacked_symint_fallback,
             )
             device = buf.get_device()
             dtype = buf.get_dtype()
             offset = V.graph.sizevars.size_hint(
-                buf.layout.offset,  # type: ignore[union-attr] # next PR
+                buf.layout.offset,  # type: ignore[union-attr]
                 fallback=config.unbacked_symint_fallback,
             )
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset})"

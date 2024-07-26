@@ -344,7 +344,7 @@ class SIMDKernel(Kernel):
         def simplify_indexing(index: sympy.Expr):
             index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
             for tree in self.range_trees:
-                index = self.combine_contiguous_dims(index, tree)
+                index = self.combine_contiguous_dims(index, tree)  # type: ignore[arg-type]
 
             return self.combine_modular_indexing_pairs(index)
 
@@ -718,7 +718,7 @@ class SIMDKernel(Kernel):
 
     def codegen_indexing(self, expr: sympy.Expr):
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
-        for sym in sorted(expr.free_symbols, key=str):
+        for sym in sorted(expr.free_symbols, key=str):  # type: ignore[union-attr]
             if sym in self.range_tree_nodes:
                 # if indexing expression is complicated, we precompute it on the host side
                 # and send the result as a kernel argument
@@ -867,11 +867,11 @@ class SIMDKernel(Kernel):
         uniform_stride_order = None
         for arg_name in call_args:
             buf = V.graph.try_get_buffer(arg_name)
-            if buf and len(buf.layout.size) == 4:  # type: ignore[union-attr] # next PR
+            if buf and len(buf.layout.size) == 4:  # type: ignore[union-attr]
                 # ignore the tensor if only 1 dimension is non-zero
-                if len([x for x in buf.layout.size if x == 1]) == 3:  # type: ignore[union-attr] # next PR
+                if len([x for x in buf.layout.size if x == 1]) == 3:  # type: ignore[union-attr]
                     continue
-                stride_order = ir.get_stride_order(buf.layout.stride)  # type: ignore[union-attr] # next PR
+                stride_order = ir.get_stride_order(buf.layout.stride)  # type: ignore[union-attr]
                 if uniform_stride_order is None:
                     uniform_stride_order = stride_order
                 elif uniform_stride_order != stride_order:
@@ -1203,7 +1203,7 @@ class SIMDScheduling(BaseScheduling):
         # Any use of a MultiOutputLayout will create a buffer with a
         # Layout whose sizes are accounted for
         buf_sizes = [
-            buf.get_layout().storage_size()  # type: ignore[union-attr] # next PR
+            buf.get_layout().storage_size()  # type: ignore[union-attr]
             for buf in buffers
             if not isinstance(buf.get_layout(), ir.MultiOutputLayout)
         ]

@@ -168,7 +168,7 @@ def _prepare_convolution_fusion_create(
         x.get_device(),
         x.get_dtype(),
         convert_shape_to_inductor(output_size),
-        convert_shape_to_inductor(output_stride),  # type: ignore[arg-type] # next PR
+        convert_shape_to_inductor(output_stride),  # type: ignore[arg-type]
     )
     constant_args = [padding, stride, dilation, groups]
     if transposed:
@@ -620,8 +620,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
     def codegen(self, wrapper):
         # Parser the inputs and constant
         args = [x.codegen_reference() for x in self.inputs]
-        const_args = []  # type: ignore[var-annotated] # next PR
-        const_args.extend(self.codegen_const_args())
+        const_args = list(self.codegen_const_args())
 
         x = args[0]
         packed_weight = args[1]
@@ -798,8 +797,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
     def codegen(self, wrapper):
         # Parser the inputs and constant
         args = [x.codegen_reference() for x in self.inputs]
-        const_args = []  # type: ignore[var-annotated] # next PR
-        const_args.extend(self.codegen_const_args())
+        const_args = list(self.codegen_const_args())
 
         x = args[0]
         packed_weight = args[1]
@@ -1204,8 +1202,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
     def codegen(self, wrapper):
         # Parser the inputs and constant
         args = [x.codegen_reference() for x in self.inputs]
-        const_args = []  # type: ignore[var-annotated] # next PR
-        const_args.extend(self.codegen_const_args())
+        const_args = list(self.codegen_const_args())
 
         x = args[0]
         packed_weight = args[1]
@@ -1388,8 +1385,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
     def codegen(self, wrapper):
         # Parser the inputs and constant
         args = [x.codegen_reference() for x in self.inputs]
-        const_args = []  # type: ignore[var-annotated] # next PR
-        const_args.extend(self.codegen_const_args())
+        const_args = list(self.codegen_const_args())
 
         x = args[0]
         packed_weight = args[1]
@@ -1475,7 +1471,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         qw: "TensorBox",  # packed_weight
         w_scale: "TensorBox",
         w_zero_point: "TensorBox",
-        other: "TensorBox",
+        other: "IRNode",
         bias: "TensorBox",
         output_scale: float,
         output_zero_point: int,
@@ -1513,7 +1509,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         w_zero_point.realize()
         inputs = inputs + [w_scale, w_zero_point]
         if binary_post_op == "sum":
-            other = cls.require_stride_order(other, req_stride_order)  # type: ignore[assignment] # next PR
+            other = cls.require_stride_order(other, req_stride_order)
         inputs.append(other)
         constant_args = constant_args + [
             output_scale,
@@ -1594,15 +1590,15 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         x = cls.require_stride1(cls.realize_input(x))
         # If batch_first, x has been permuted in lstm before entering the mkldnn_rnn_layer.
         # Make sure x is contiguous in batch_first case.
-        x.freeze_layout()  # type: ignore[attr-defined] # next PR
+        x.freeze_layout()  # type: ignore[attr-defined]
         w0 = cls.require_stride1(cls.realize_input(w0))
         w1 = cls.require_stride1(cls.realize_input(w1))
         w2 = cls.require_stride1(cls.realize_input(w2))
         w3 = cls.require_stride1(cls.realize_input(w3))
         hx = cls.require_stride1(cls.realize_input(hx))
-        hx.freeze_layout()  # type: ignore[attr-defined] # next PR
+        hx.freeze_layout()  # type: ignore[attr-defined]
         cx = cls.require_stride1(cls.realize_input(cx))
-        cx.freeze_layout()  # type: ignore[attr-defined] # next PR
+        cx.freeze_layout()  # type: ignore[attr-defined]
 
         input_size = x.get_size()
         assert len(input_size) == 3, "Expect lstm input to be 3D"

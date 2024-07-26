@@ -315,7 +315,7 @@ def register_onednn_fusion_ops():
                 # GEMM template needs 2D input, normalize input shape here
                 x = view(x, [-1, x_size[-1]])
             if b is not None:
-                b = ir.ExternKernel.realize_input(b)  # type: ignore[assignment] # next PR
+                b = ir.ExternKernel.realize_input(b)  # type: ignore[assignment]
             choices: List[ChoiceCaller] = []
             if use_max_autotune():
                 transposed_w = permute(w, [1, 0])
@@ -378,7 +378,7 @@ def register_onednn_fusion_ops():
             if len(y_size) > 2:
                 y = view(y, [-1, y_size[-1]])
             if b is not None:
-                b = ir.ExternKernel.realize_input(b)  # type: ignore[assignment] # next PR
+                b = ir.ExternKernel.realize_input(b)  # type: ignore[assignment]
             choices: List[ChoiceCaller] = []
             if use_max_autotune():
                 transposed_w = permute(w, [1, 0])

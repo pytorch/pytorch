@@ -892,7 +892,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
     def output_node(self):
         return ir.TensorBox.create(
             ir.TritonTemplateBuffer(
-                layout=self.layout,  # type: ignore[arg-type] # next PR
+                layout=self.layout,  # type: ignore[arg-type]
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
                 debug_extra=self.debug_extra,
@@ -1529,7 +1529,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     map(
                         str,
                         V.graph.sizevars.size_hints(
-                            n.get_size(), fallback=config.unbacked_symint_fallback  # type: ignore[arg-type] # next PR
+                            n.get_size(), fallback=config.unbacked_symint_fallback
                         ),
                     )
                 )

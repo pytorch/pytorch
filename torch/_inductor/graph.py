@@ -26,7 +26,7 @@ from typing import (
 )
 
 import sympy
-from sympy import Expr
+from sympy import Expr, Integer
 
 import torch
 import torch._logging
@@ -127,29 +127,34 @@ else:
         pass
 
 
-def supported_dtype_of_cpp_wrapper(dtype: torch.device, cuda: bool) -> bool:
-    supported_dtype = {
-        torch.float32,
-        torch.float64,
-        torch.int64,
-        torch.int32,
-        torch.int16,
-        torch.int8,
-        torch.uint8,
-        torch.bool,
-        torch.bfloat16,
-        torch.complex32,
-        torch.complex64,
-        torch.complex128,
-        torch.float16,
-    }
-    if cuda:
-        supported_dtype.add(torch.float8_e4m3fn)
-        supported_dtype.add(torch.float8_e5m2)
-        supported_dtype.add(torch.float8_e4m3fnuz)
-        supported_dtype.add(torch.float8_e5m2fnuz)
+_supported_dtype = {
+    torch.float32,
+    torch.float64,
+    torch.int64,
+    torch.int32,
+    torch.int16,
+    torch.int8,
+    torch.uint8,
+    torch.bool,
+    torch.bfloat16,
+    torch.complex32,
+    torch.complex64,
+    torch.complex128,
+    torch.float16,
+}
 
-    return dtype in supported_dtype
+_supported_dtype_cuda = {
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
+    torch.float8_e4m3fnuz,
+    torch.float8_e5m2fnuz,
+}
+
+
+def supported_dtype_of_cpp_wrapper(dtype: torch.dtype, cuda: bool) -> bool:
+    if cuda and dtype in _supported_dtype_cuda:
+        return True
+    return dtype in _supported_dtype
 
 
 def may_get_constant_buffer_dtype(constant_buffer: sympy.Expr) -> Optional[torch.dtype]:
@@ -254,7 +259,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def symbolic_sizes_strides(
         self, ex: torch.Tensor
-    ) -> Tuple[Union[List[int], List[Expr]], Union[List[int], List[Expr]]]:
+    ) -> Tuple[Union[List[int], List[Integer]], Union[List[int], List[Integer]]]:
         """
         Support dynamic shapes and dynamic strides by assigning variables
         to each dimension.  We duck-shape tensors, so if two tensors
@@ -291,7 +296,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def static_sizes_strides(
         self, ex: torch.Tensor
-    ) -> Tuple[List[sympy.Expr], List[sympy.Expr]]:
+    ) -> Tuple[List[sympy.Integer], List[sympy.Integer]]:
         """
         Primarily used to weights
         """
@@ -943,7 +948,7 @@ class GraphLowering(torch.fx.Interpreter):
             )
         )
         self.graph_inputs[target] = tensor
-        self.graph_inputs_original[target] = tensor.data.data  # type: ignore[attr-defined] # next PR
+        self.graph_inputs_original[target] = tensor.data.data  # type: ignore[attr-defined]
         self.add_device_info(example.device)
 
         # Note: [Input Alignment handling in Inductor]
@@ -1489,8 +1494,8 @@ class GraphLowering(torch.fx.Interpreter):
             # This is all doable, it just hasn't been done yet.
             shape_env = V.graph.sizevars.shape_env
 
-            def make_assert(expr: Expr, msg: str) -> None:
-                assert_op = ir.AssertScalar(expr, msg)  # type: ignore[arg-type] # next PR
+            def make_assert(expr: sympy.Rel, msg: str) -> None:
+                assert_op = ir.AssertScalar(expr, msg)
                 self.register_buffer(assert_op, set_name=True)
                 self.register_operation(assert_op)
 
@@ -1570,7 +1575,7 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 dtype = may_get_constant_buffer_dtype(value)
 
-            if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):  # type: ignore[arg-type] # next PR
+            if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
                 raise CppWrapperCodeGenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(self) -> None:

@@ -7,7 +7,18 @@ import operator
 import os
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -469,9 +480,10 @@ def make_pointwise(
                 device = inputs[0].get_device()
 
         device = override_device or device
+        assert device is not None
 
         return Pointwise.create(
-            device=device,  # type: ignore[arg-type] # next PR
+            device=device,
             dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
@@ -676,10 +688,10 @@ def register_frexp():
     frexp = ops_wrapper("frexp")
 
     def frexp0(*args, **kwargs):
-        return frexp(*args, **kwargs)[0]  # type: ignore[index] # next PR
+        return frexp(*args, **kwargs)[0]  # type: ignore[index]
 
     def frexp1(*args, **kwargs):
-        return frexp(*args, **kwargs)[1]  # type: ignore[index] # next PR
+        return frexp(*args, **kwargs)[1]  # type: ignore[index]
 
     pw_fns = [
         make_pointwise(frexp0),
@@ -953,7 +965,7 @@ def repeat(x, repeats):
 def view(x, sizes):
     assert isinstance(x, TensorBox)
     assert isinstance(sizes, (list, tuple))
-    return TensorBox(View.create(x.data, sizes))  # type: ignore[arg-type] # next PR
+    return TensorBox(View.create(x.data, sizes))  # type: ignore[arg-type]
 
 
 @register_lowering(aten.permute, type_promotion_kind=None)
@@ -967,7 +979,7 @@ def permute(x, dims):
 def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
-    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))  # type: ignore[arg-type] # next PR
+    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))  # type: ignore[arg-type]
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
@@ -1914,7 +1926,9 @@ def inductor_lookup_seed(seeds, index):
 
 
 @register_lowering(inductor_prims.random, type_promotion_kind=None)
-def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int = 0):
+def inductor_random(
+    size: List[sympy.Integer], seed: TensorBox, mode: str, *, offset: int = 0
+):
     assert not config.fallback_random
     assert mode in ("rand", "randn")
     size = [*size]
@@ -1943,7 +1957,7 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
 
 @register_lowering(inductor_prims.randint, type_promotion_kind=None)
 def inductor_randint(
-    low: int, high: int, size: List[int], seed: TensorBox, *, offset: int = 0
+    low: int, high: int, size: List[sympy.Integer], seed: TensorBox, *, offset: int = 0
 ):
     assert not config.fallback_random
     size = [*size]
@@ -2100,7 +2114,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             arg.get_stride()
             if is_aligned_realized_tensor(arg):
                 return V.graph.try_match_insignificant_strides(
-                    ir.ExternKernel.realize_input(arg), meta_stride  # type: ignore[arg-type] # next PR
+                    ir.ExternKernel.realize_input(arg), meta_stride  # type: ignore[arg-type]
                 )
         except AttributeError:
             pass
@@ -2112,7 +2126,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             if not is_aligned(arg):
                 if is_aligned(arg.unwrap_view()):
                     return V.graph.try_match_insignificant_strides(
-                        ir.ExternKernel.realize_input(arg), meta_stride  # type: ignore[arg-type] # next PR
+                        ir.ExternKernel.realize_input(arg), meta_stride  # type: ignore[arg-type]
                     )
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
@@ -2506,7 +2520,7 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     else:
         dtype = dtype or torch.get_default_dtype()
 
-    ranges: List[sympy.Expr] = []
+    ranges: List[sympy.Integer] = []
 
     if isinstance(data, sympy.Basic):
 
@@ -2832,7 +2846,7 @@ def gather(x, dim, index, sparse_grad=False):
         return new_empty(x, index.get_size())
 
     assert index.get_dtype() == torch.int64
-    size = x.get_size()
+    size: Sequence[Union[sympy.Integer, int]] = x.get_size()  # type: ignore[assignment]
     offset = len(size) == 0
     dim = _validate_dim(x, dim, offset)
 
@@ -3086,7 +3100,7 @@ def index_put_fallback(self, indices, values, accumulate):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)  # type: ignore[arg-type] # next PR
+    ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)  # type: ignore[arg-type]
     return self
 
 
@@ -5042,7 +5056,7 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
         )
         result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
         if isinstance(
-            result.data.data, Reduction  # type: ignore[attr-defined] # next PR
+            result.data.data, Reduction  # type: ignore[attr-defined]
         ):  # Only realize if reduction isn't unrolled
             result.realize()
         return result
@@ -5570,7 +5584,7 @@ def cummax(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type] # next PR
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type]
     if values is None:
         return fallback_cummax(x, dim=axis)
     return values, indices
@@ -5600,7 +5614,7 @@ def cummin(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type] # next PR
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type]
     if values is None:
         return fallback_cummin(x, dim=axis)
     return values, indices

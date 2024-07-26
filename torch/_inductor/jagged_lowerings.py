@@ -25,7 +25,7 @@ def dense_idx_to_jagged_idx(batch_idx, seq_idx, offsets_loader, jagged_len):
 
 def get_inverse_offsets(
     offsets: TensorBox,
-    jagged_len: Union[int, sympy.Expr],
+    jagged_len: sympy.Integer,
     realize: bool = True,
 ) -> TensorBox:
     """
@@ -43,7 +43,7 @@ def get_inverse_offsets(
     if hasattr(offsets, "inverse_offsets"):
         # inverse_offsets are already computed
         # for these offsets: can reuse
-        return offsets.inverse_offsets  # type: ignore[return-value] # next PR
+        return offsets.inverse_offsets  # type: ignore[return-value]
 
     # ops.bucketize takes offsets.get_name() which doesn't exist on Pointwise
     # kernels, i.e. we need to realize it before using. In other words, we need
@@ -180,7 +180,7 @@ def register_jagged_ops():
         fallback_op,  # pyre-ignore[2]
         dense: TensorBox,
         jagged_offsets: List[TensorBox],
-        jagged_len: Optional[int] = None,
+        jagged_len: Optional[sympy.Integer] = None,
     ) -> TensorBox:
         device = dense.get_device()
         dtype = dense.get_dtype()
@@ -253,7 +253,7 @@ def register_jagged_ops():
     def _dense_to_jagged_forward(
         dense: TensorBox,
         jagged_offsets: List[TensorBox],
-        jagged_len: Optional[int] = None,
+        jagged_len: Optional[sympy.Integer] = None,
     ) -> TensorBox:
         return _dense_to_jagged_forward_impl(
             fallback_op=torch.ops.aten._padded_dense_to_jagged_forward.default,

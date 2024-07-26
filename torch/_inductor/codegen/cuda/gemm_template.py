@@ -256,7 +256,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         self.beta = beta
         assert len(input_nodes) == 2 or len(input_nodes) == 3
         assert self._are_inputs_layout_compatible(
-            [node.get_layout() for node in input_nodes]  # type: ignore[misc] # next PR
+            [node.get_layout() for node in input_nodes]  # type: ignore[misc]
         )
 
     def _are_inputs_layout_compatible(self, layouts: List[Layout]) -> bool:
@@ -599,7 +599,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
         d_layout = copy.deepcopy(Y.get_layout())
         match_list = [
-            CUTLASSGemmTemplate.layout_match(buf.get_layout(), op_layout)  # type: ignore[arg-type] # next PR
+            CUTLASSGemmTemplate.layout_match(buf.get_layout(), op_layout)  # type: ignore[arg-type]
             for buf, op_layout in zip(
                 (X, W, Bias, Y),
                 (op.A.layout, op.B.layout, op.C.layout, op.D.layout),
@@ -615,14 +615,14 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         new_op = copy.deepcopy(op)
 
         if a_layout is not None:
-            new_op.A.layout = CUTLASSGemmTemplate.cutlass_layout(a_layout)  # type: ignore[arg-type] # next PR
+            new_op.A.layout = CUTLASSGemmTemplate.cutlass_layout(a_layout)  # type: ignore[arg-type]
         if b_layout is not None:
-            new_op.B.layout = CUTLASSGemmTemplate.cutlass_layout(b_layout)  # type: ignore[arg-type] # next PR
+            new_op.B.layout = CUTLASSGemmTemplate.cutlass_layout(b_layout)  # type: ignore[arg-type]
         if c_layout is not None:
-            new_op.C.layout = CUTLASSGemmTemplate.cutlass_layout(c_layout)  # type: ignore[arg-type] # next PR
+            new_op.C.layout = CUTLASSGemmTemplate.cutlass_layout(c_layout)  # type: ignore[arg-type]
             new_op.C.element = cutlass_utils.torch_dtype_to_cutlass_type(c_layout.dtype)
         if d_layout is not None:
-            new_op.D.layout = CUTLASSGemmTemplate.cutlass_layout(d_layout)  # type: ignore[arg-type] # next PR
+            new_op.D.layout = CUTLASSGemmTemplate.cutlass_layout(d_layout)  # type: ignore[arg-type]
         return new_op
 
     def filter_op(
@@ -677,8 +677,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
         # Filter ops by input layouts.
         if not (
-            self.layout_match(X.get_layout(), op.A.layout)  # type: ignore[arg-type] # next PR
-            and self.layout_match(W.get_layout(), op.B.layout)  # type: ignore[arg-type] # next PR
+            self.layout_match(X.get_layout(), op.A.layout)  # type: ignore[arg-type]
+            and self.layout_match(W.get_layout(), op.B.layout)  # type: ignore[arg-type]
         ):
             return None
 
@@ -686,7 +686,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         op = copy.deepcopy(op)
 
         # Set output layout.
-        op.D.layout = CUTLASSGemmTemplate.cutlass_layout(self.output_node.get_layout())  # type: ignore[arg-type] # next PR
+        op.D.layout = CUTLASSGemmTemplate.cutlass_layout(self.output_node.get_layout())  # type: ignore[arg-type]
 
         # Filter ops by alignments and set alignments.
         if not (
@@ -712,7 +712,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         # Set bias layout and alignment.
         if len(self.input_nodes) >= 3 and self.input_nodes[2] is not None:
             Bias = self.input_nodes[2]
-            bias_layout = CUTLASSGemmTemplate.cutlass_layout(Bias.get_layout())  # type: ignore[arg-type] # next PR
+            bias_layout = CUTLASSGemmTemplate.cutlass_layout(Bias.get_layout())  # type: ignore[arg-type]
             if op.gemm_kind != cutlass_lib.GemmKind.Universal3x:
                 if bias_layout != op.D.layout:
                     # For cutlass2, bias and output layout must match
@@ -831,14 +831,14 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             # Swap
             def clone_with_transposed_stride(node: IRNode) -> IRNode:
                 old_layout = node.get_layout()
-                new_stride = list(old_layout.stride)  # type: ignore[union-attr] # next PR
+                new_stride = list(old_layout.stride)  # type: ignore[union-attr]
                 new_stride[-2], new_stride[-1] = new_stride[-1], new_stride[-2]
                 new_layout = FixedLayout(
                     old_layout.device,
                     old_layout.dtype,
-                    list(old_layout.size),  # type: ignore[union-attr] # next PR
+                    list(old_layout.size),  # type: ignore[union-attr]
                     new_stride,
-                    old_layout.offset,  # type: ignore[union-attr] # next PR
+                    old_layout.offset,  # type: ignore[union-attr]
                 )
                 return Buffer(node.get_name(), new_layout)
 

@@ -86,7 +86,7 @@ def is_unaligned_buffer(arg: TensorArg):
             assert buf_name == V.kernel.output_node.name
             layout = V.kernel.output_node.layout
         else:
-            layout = buffer.get_layout()  # type: ignore[assignment] # next PR
+            layout = buffer.get_layout()  # type: ignore[assignment]
 
     if isinstance(layout, torch._inductor.ir.NonOwningLayout):
         return not layout.maybe_guard_aligned()

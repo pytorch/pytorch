@@ -1,4 +1,4 @@
-# mypy: allow-untyped-defs
+# mypy: allow-untyped-decorators
 from __future__ import annotations
 
 import contextlib
@@ -99,7 +99,6 @@ from .utils import (
 )
 from .virtualized import ops, OpsValue, V
 
-
 if TYPE_CHECKING:
     from triton import Config, JITFunction
 
@@ -116,6 +115,7 @@ if TYPE_CHECKING:
 else:
     CUDATemplate: TypeAlias = object
     CppTemplate: TypeAlias = object
+
 
 _T = TypeVar("_T")
 _U = TypeVar("_U")
@@ -170,7 +170,6 @@ It is also possible to have an InputBuffer for which there is no corresponding O
 e.g. it may be a graph input or compile time constant.
 
 """
-
 
 _NodeOrNodes: TypeAlias = Union[
     int,
@@ -625,13 +624,13 @@ class Loops(IRNode):
             if self.get_reduction_type():
                 return extract_read_writes(
                     self.make_loader(),
-                    self.get_size(),  # type: ignore[arg-type] # next PR
-                    self.get_reduction_size(),  # type: ignore[arg-type] # next PR
+                    self.get_size(),
+                    self.get_reduction_size(),
                 ).reads
             else:
                 return extract_read_writes(
                     self.make_loader(),
-                    self.get_size(),  # type: ignore[arg-type] # next PR
+                    self.get_size(),
                 ).reads
 
     def get_read_names(self) -> Set[str]:
@@ -1076,7 +1075,7 @@ class Reduction(Loops):
             return ReductionHint.DEFAULT, 1
 
         (_, reduction_vars), ranges1 = dependencies.index_vars_squeeze(
-            r.get_size(), r.get_reduction_size()  # type: ignore[arg-type] # next PR
+            r.get_size(), r.get_reduction_size()
         )
         num_outer = 0
         num_inner = 0
@@ -1249,8 +1248,8 @@ class Reduction(Loops):
                 inner_fn,
                 ranges,
                 reduction_ranges,
-                new_ranges,  # type: ignore[arg-type] # next PR
-                new_reduction_ranges,  # type: ignore[arg-type] # next PR
+                new_ranges,
+                new_reduction_ranges,
                 reduction_type,
                 reduction_hint,
             )
@@ -2307,7 +2306,7 @@ class BaseView(IRNode):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
                 self.make_loader(),
-                self.get_size(),  # type: ignore[arg-type] # next PR
+                self.get_size(),
             ).reads
 
     def unwrap_view(self) -> IRNode:
@@ -2543,7 +2542,7 @@ class View(GenericView):
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
         # Skip pointless views
-        if V.graph.sizevars.statically_known_list_equals(old_size, new_size):  # type: ignore[arg-type] # next PR
+        if V.graph.sizevars.statically_known_list_equals(old_size, new_size):
             return x  # type: ignore[return-value]
 
         unbacked_symbols_in_sizes = False
@@ -2585,8 +2584,8 @@ class View(GenericView):
     def resolve_negative_size(
         old_size: Sequence[_IntLike], new_size: Sequence[_IntLike]
     ) -> Tuple[List[_IntLike], List[_IntLike]]:
-        new_size = [V.graph.sizevars.simplify(x) for x in new_size]  # type: ignore[arg-type] # next PR
-        old_size = [V.graph.sizevars.simplify(x) for x in old_size]  # type: ignore[arg-type] # next PR
+        new_size = [V.graph.sizevars.simplify(x) for x in new_size]
+        old_size = [V.graph.sizevars.simplify(x) for x in old_size]
 
         new_size = list(new_size)
         for i in range(len(new_size)):
@@ -2640,14 +2639,14 @@ class View(GenericView):
                 stack_old.append(size_old)  # re-add
             elif size_hint(size_new) == size_hint(size_old):
                 view_expr.append(var)
-                V.graph.sizevars.guard_equals(size_new, size_old)  # type: ignore[arg-type] # next PR
+                V.graph.sizevars.guard_equals(size_new, size_old)
             elif size_hint(size_new) < size_hint(size_old):
                 while size_hint(size_new) < size_hint(size_old):
                     var2, size_new2 = stack_new.pop()
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
-                V.graph.sizevars.guard_equals(size_new, size_old)  # type: ignore[arg-type] # next PR
+                V.graph.sizevars.guard_equals(size_new, size_old)
             elif size_hint(size_new) > size_hint(size_old):
                 divisor = Integer(1)
                 modulus = size_old
@@ -2658,18 +2657,18 @@ class View(GenericView):
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
                     size_old = size_old * modulus
-                V.graph.sizevars.guard_equals(size_new, size_old)  # type: ignore[arg-type] # next PR
+                V.graph.sizevars.guard_equals(size_new, size_old)
             else:
                 raise AssertionError
 
         while stack_old:
             size_old = stack_old.pop()
-            V.graph.sizevars.guard_equals(size_old, 1)  # type: ignore[arg-type] # next PR
+            V.graph.sizevars.guard_equals(size_old, 1)
             view_expr.append(Integer(0))
 
         while stack_new:
             var, size_new = stack_new.pop()
-            V.graph.sizevars.guard_equals(size_new, 1)  # type: ignore[arg-type] # next PR
+            V.graph.sizevars.guard_equals(size_new, 1)
 
         view_expr.reverse()
         assert len(view_expr) == len(old_size)
@@ -2828,7 +2827,7 @@ class SliceView(View):
         else:
 
             def clamp(x: _IntLike, lower: _IntLike, upper: _IntLike) -> _IntLike:
-                return sizevars.evaluate_min(sizevars.evaluate_max(x, lower), upper)  # type: ignore[arg-type] # next PR
+                return sizevars.evaluate_min(sizevars.evaluate_max(x, lower), upper)
 
         def clamp_wrap(
             val: _IntLike, lower: _IntLike, upper: _IntLike, default: _IntLike
@@ -3435,7 +3434,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
         name = self.get_buffer().get_name()
         V.graph.mark_buffer_mutated(name)
 
-    @Layout.stride.getter  # type: ignore[attr-defined, misc] # next PR
+    @Layout.stride.getter  # type: ignore[attr-defined]
     def stride(self) -> Sequence[_IntLike]:
         return self.real_layout().stride
 
@@ -3716,13 +3715,13 @@ class ComputedBuffer(OperationBuffer):
             if self.data.get_reduction_type():
                 return extract_read_writes(
                     self.get_store_function(),
-                    self.data.get_pointwise_size(),  # type: ignore[arg-type] # next PR
-                    self.data.get_reduction_size(),  # type: ignore[arg-type] # next PR
+                    self.data.get_pointwise_size(),
+                    self.data.get_reduction_size(),
                 )
             else:
                 return extract_read_writes(
                     self.get_store_function(),
-                    self.data.get_size(),  # type: ignore[arg-type] # next PR
+                    self.data.get_size(),
                 )
 
     def get_unbacked_symbol_uses(self) -> Set[Symbol]:
@@ -3780,7 +3779,7 @@ class ComputedBuffer(OperationBuffer):
         """
         if isinstance(self.layout, FlexibleLayout):
             (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
-                self.data.get_pointwise_size(), self.data.get_reduction_size()  # type: ignore[arg-type] # next PR
+                self.data.get_pointwise_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
             reads_bufs = [
@@ -3807,11 +3806,11 @@ class ComputedBuffer(OperationBuffer):
                 else:
                     indices = index_vars
                 stride_lengths = [
-                    V.graph.sizevars.stride_hints(expr, indices) for expr in reads  # type: ignore[arg-type] # next PR
+                    V.graph.sizevars.stride_hints(expr, indices) for expr in reads
                 ]
                 from .scheduler import pick_loop_order
 
-                return pick_loop_order(stride_lengths, self.get_size())  # type: ignore[arg-type] # next PR
+                return pick_loop_order(stride_lengths, self.get_size())
 
         return None
 
@@ -3832,7 +3831,7 @@ class ComputedBuffer(OperationBuffer):
         Tuple[Sequence[_IntLike], Sequence[_IntLike]],
     ]:
         args, var_ranges = dependencies.index_vars_squeeze(
-            self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"  # type: ignore[arg-type] # next PR
+            self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"
         )
         with patch.object(ConstantBuffer, "override_device", self.get_device()):
             body = LoopBody(
@@ -3942,7 +3941,7 @@ class ComputedBuffer(OperationBuffer):
 
         # retrace the loop body with simplification and reordering applied
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
-            iter_ranges, reduce_ranges, prefix="z"  # type: ignore[arg-type] # next PR
+            iter_ranges, reduce_ranges, prefix="z"
         )
         body = LoopBody(
             body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
@@ -3971,13 +3970,13 @@ class ComputedBuffer(OperationBuffer):
 
         try:
             strides = [
-                V.graph.sizevars.stride_hints(expr, index_vars, support_vars)  # type: ignore[arg-type] # next PR
+                V.graph.sizevars.stride_hints(expr, index_vars, support_vars)
                 for expr in memory_addrs
             ]
             assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
                 index_vars
             )
-            order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))  # type: ignore[arg-type] # next PR
+            order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
         except Exception:
             if config.debug:
                 log.warning(
@@ -4036,7 +4035,7 @@ class TemplateBuffer(OperationBuffer):
             return ops.store(name, indexer(index), "fake")
 
         deps = dependencies.extract_read_writes(
-            dummy, self.get_size(), (), normalize=True  # type: ignore[arg-type] # next PR
+            dummy, self.get_size(), (), normalize=True
         )
         deps.reads = {dependencies.StarDep(x.get_name()) for x in self.inputs}
         return deps
@@ -4232,7 +4231,7 @@ class CppTemplateBuffer(TemplateBuffer):
         layout: FixedLayout,
         inputs: Sequence[Union[TensorBox, IRNode]],
         make_kernel_render: Callable[[], None],
-        template: CppTemplate,  # type: ignore[name-defined] # next PR
+        template: CppTemplate,
         choice: int,
     ) -> None:
         super().__init__(layout, inputs, make_kernel_render)
@@ -4349,7 +4348,7 @@ class ConcatKernel(NopKernel):
                     new_size[j] = new_size[j] + input_size[j]
                 else:
                     new_size[j] = V.graph.sizevars.guard_equals(
-                        new_size[j], input_size[j]  # type: ignore[arg-type] # next PR
+                        new_size[j], input_size[j]
                     )
             offsets_end.append(new_size[dim])
 
@@ -4458,7 +4457,7 @@ class ConcatKernel(NopKernel):
             dtype=src.get_dtype(),
             inner_fn=src.make_loader(),
             ranges=[
-                V.graph.sizevars.guard_equals(a, b)  # type: ignore[arg-type] # next PR
+                V.graph.sizevars.guard_equals(a, b)
                 for a, b in zip(src.get_size(), dst.get_size())
             ],
         )
@@ -4785,12 +4784,12 @@ class ExternKernel(InputsKernel):
             x_unwrap_view.freeze_layout()  # type: ignore[attr-defined]
 
         index_args, var_ranges = dependencies.index_vars_squeeze(
-            x.get_size(), prefix="r"  # type: ignore[arg-type] # next PR
+            x.get_size(), prefix="r"
         )
         range_vars = index_args[0]
         index = x.make_indexer()(range_vars)
 
-        index = V.graph.sizevars.simplify_with_ranges(index, var_ranges)  # type: ignore[arg-type] # next PR
+        index = V.graph.sizevars.simplify_with_ranges(index, var_ranges)
         strides = V.graph.sizevars.stride_vars(index, range_vars)
         offset = V.graph.sizevars.offset_var(index, range_vars)
         expected = sympy_dot(range_vars, strides) + offset
@@ -4888,7 +4887,7 @@ class ExternKernel(InputsKernel):
                     want_contiguous=False,
                     stride_order=get_stride_order(
                         V.graph.sizevars.size_hints(
-                            typing.cast(FlexibleLayout, x.get_layout()).stride  # type: ignore[arg-type] # next PR
+                            typing.cast(FlexibleLayout, x.get_layout()).stride
                         )
                     )
                     if is_stride_order_storage_and_layout(x, order)
@@ -5030,8 +5029,8 @@ class ExternKernel(InputsKernel):
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
             if sympy_product(self.get_size()) == 0:
                 return
-            size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())  # type: ignore[arg-type] # next PR
-            stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())  # type: ignore[arg-type] # next PR
+            size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
+            stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
             wrapper.writeline(
                 f"assert_size_stride({self.get_name()}, {size}, {stride})"
             )
@@ -5076,7 +5075,7 @@ class ExternKernel(InputsKernel):
         replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
 
         index = sympy_subs(sympy.expand(index), replacement)  # type: ignore[arg-type]
-        return index, tuple(new_sizes)  # type: ignore[return-value] # next PR
+        return index, tuple(new_sizes)
 
     def get_unbacked_symbol_uses(self) -> Set[Symbol]:
         # NB: It's not necessary to check regular inputs as we automatically
@@ -5726,7 +5725,7 @@ class AssertScalar(ExternKernel):
             # true).  But we're code generating the actual runtime assert
             # here!!
             wrapper.writeline(
-                f"if not {V.graph.wrapper_code.codegen_python_rel(self.scalar, simplify=False)}:"  # type: ignore[attr-defined] # next PR
+                f"if not {V.graph.wrapper_code.codegen_python_rel(self.scalar, simplify=False)}:"
             )
             wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
             # No one should ever use this buffer, but for uniformity

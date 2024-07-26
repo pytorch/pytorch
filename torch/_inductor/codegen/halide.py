@@ -855,7 +855,7 @@ class HalideKernel(SIMDKernel):
                         stride *= size
                     self.index_replacements[
                         node.symbol()
-                    ] = V.graph.sizevars.simplify_with_ranges(
+                    ] = V.graph.sizevars.simplify_with_ranges(  # type: ignore[assignment]
                         ModularIndexing(full_index, node.divisor, node.length),
                         self.halide_vars,  # type: ignore[arg-type]
                     )
@@ -1033,7 +1033,7 @@ class HalideKernel(SIMDKernel):
             if old.stride != new.stride:
                 return False
             if old.size != new.size or old.expr != new.expr:
-                old.size = V.graph.sizevars.evaluate_max(old.size, new.size)
+                old.size = V.graph.sizevars.evaluate_max(old.size, new.size)  # type: ignore[assignment]
                 old.expr = None
         return True
 
@@ -1362,7 +1362,7 @@ class HalideKernel(SIMDKernel):
         supports.  If there are gaps in the underlying layout the numel we pass to Halide includes the gaps while
         PyTorch's numel excludes them.
         """
-        return V.graph.get_buffer(name).get_layout().storage_size()  # type: ignore[union-attr] # next PR
+        return V.graph.get_buffer(name).get_layout().storage_size()  # type: ignore[union-attr]
 
     def halide_argdefs(self):
         """

@@ -6,7 +6,18 @@ import itertools
 import logging
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 from unittest.mock import patch
 
 import sympy
@@ -90,7 +101,7 @@ class MemoryDep(Dep):
         sizes = self.size
         var_names = self.var_names
 
-        new_reordered_sizes = stride_reorder(sizes)
+        new_reordered_sizes: List[sympy.Expr] = stride_reorder(sizes)  # type: ignore[assignment]
         new_reordered_var_names = stride_reorder(var_names)
 
         new_simplified_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
@@ -103,13 +114,13 @@ class MemoryDep(Dep):
 
         # now let's create new symbols with the passed in prefix
         var_ranges, add_var = var_builder(prefix)
-        replacement = dict(
+        replacement: Mapping[sympy.Expr, Any] = dict(
             zip(
                 new_reordered_var_names,
                 reindex([add_var(x) for x in new_simplified_sizes]),
             )
         )
-        new_index = sympy_subs(sympy.expand(self.index), replacement)  # type: ignore[arg-type] # next PR
+        new_index = sympy_subs(sympy.expand(self.index), replacement)
 
         out = MemoryDep(self.name, new_index, tuple(var_ranges.keys()), tuple(var_ranges.values()))  # type: ignore[arg-type]
         return out
@@ -470,15 +481,15 @@ def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Sy
     return var_ranges, add_var
 
 
-def index_vars_no_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str):
+def index_vars_no_squeeze(*argsizes: Sequence[Union[int, sympy.Expr]], prefix: str):
     var_ranges, add_var = var_builder(prefix)
     args: List[List[sympy.Symbol]] = []
     for size in argsizes:
-        args.append(list(map(add_var, size)))
+        args.append(list(map(add_var, size)))  # type: ignore[arg-type]
     return args, var_ranges
 
 
-def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
+def index_vars_squeeze(*argsizes: Sequence[Union[int, sympy.Expr]], prefix: str = "d"):
     from .ir import SqueezeView
 
     var_ranges, add_var = var_builder(prefix)
@@ -486,14 +497,14 @@ def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
     new_sizes: List[List[sympy.Expr]] = []
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
-        new_sizes.append(new_size)  # type: ignore[arg-type] # next PR
-        args.append(reindex(list(map(add_var, new_size))))  # type: ignore[arg-type] # next PR
+        new_sizes.append(new_size)  # type: ignore[arg-type]
+        args.append(reindex(list(map(add_var, new_size))))  # type: ignore[arg-type]
     return args, var_ranges
 
 
 def extract_read_writes(
     fn: Callable[..., Any],
-    *argsizes: Tuple[sympy.Expr, ...],
+    *argsizes: Sequence[Union[int, sympy.Expr]],
     normalize: bool = False,
     prefix: str = "d",
 ):
@@ -520,7 +531,7 @@ def extract_read_writes(
 
 def extract_input_node_reduction_ranges(
     input_node: "torch._inductor.ir.TensorBox",
-) -> Tuple[Optional[List[sympy.Expr]], Optional[List[sympy.Expr]]]:
+) -> Tuple[Optional[List[sympy.Integer]], Optional[List[sympy.Integer]]]:
     """
     Returns the size and reduction size of all inputs, if the sizes and reduction_sizes (if exist) are all the same.
     It's possible that a node has multiple inputs, some are Reduction nodes and others are Pointwise nodes.
@@ -532,10 +543,10 @@ def extract_input_node_reduction_ranges(
 
     if isinstance(input_node.data, ComputedBuffer):
         # Input node has already been realized. Return its size and reduction_size.
-        size = input_node.get_size()
+        size_ = input_node.get_size()
         reduction_size = input_node.get_reduction_size()
-        if len(reduction_size) > 0:  # type: ignore[arg-type] # next PR
-            return (size, reduction_size)  # type: ignore[return-value] # next PR
+        if len(reduction_size) > 0:  # type: ignore[arg-type]
+            return (size_, reduction_size)  # type: ignore[return-value]
         else:
             return (None, None)
 
@@ -548,10 +559,10 @@ def extract_input_node_reduction_ranges(
     # Is there a way to check whether there are permutations inbetween?
     reads = input_node.get_reads()
     reduction_size = None
-    size = None  # type: ignore[assignment] # next PR
+    size = None
     while reduction_size is None and len(reads) > 0:
         seen = set()
-        new_reads = []  # type: ignore[var-annotated] # next PR
+        new_reads: List[Dep] = []
         for read in reads:
             if not isinstance(read, MemoryDep):
                 continue
@@ -574,10 +585,10 @@ def extract_input_node_reduction_ranges(
             else:
                 new_reads.extend(op.get_reads())
         if reads == new_reads:
-            return (size, reduction_size)  # type: ignore[return-value] # next PR
+            return (size, reduction_size)  # type: ignore[return-value]
         else:
             reads = new_reads
-    return (size, reduction_size)  # type: ignore[return-value] # next PR
+    return (size, reduction_size)  # type: ignore[return-value]
 
 
 def canonicalization_prefix():
@@ -632,7 +643,9 @@ def _typecheck_FreeUnbackedSymbolsOpsHandler(
     return h
 
 
-def extract_free_unbacked_symbols(fn: Callable[..., Any], index, rindex=None):
+def extract_free_unbacked_symbols(
+    fn: Callable[..., Any], index, rindex=None
+) -> Set[sympy.Symbol]:
     from .ir import FlexibleLayout
 
     args = [index, rindex] if rindex is not None else [index]

@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import sympy
 from sympy import Expr
@@ -990,7 +990,7 @@ class CppWrapperCpu(WrapperCodeGen):
             output_buffer = V.graph.graph_outputs[idx]
             if isinstance(output_buffer, ir.BaseView):
                 output_storage = output_buffer.unwrap_view()
-                if isinstance(output_storage.data, ir.ConstantBuffer):  # type: ignore[attr-defined] # next PR
+                if isinstance(output_storage.data, ir.ConstantBuffer):  # type: ignore[attr-defined]
                     is_constant_buffer = True
 
             if config.abi_compatible:
@@ -1388,7 +1388,7 @@ class CppWrapperCpu(WrapperCodeGen):
         else:
             return f"std::get<{index}>({basename})"
 
-    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+    def codegen_shape_tuple(self, shape: Sequence[Expr]) -> str:  # type: ignore[override]
         parts = list(map(self.codegen_sizevar, shape))
         if len(parts) == 0:
             return "{}"
