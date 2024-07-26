@@ -18,6 +18,7 @@
 #include <c10/util/Logging.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
+#include <torch/autograd.h>
 
 #include <type_traits>
 #include <limits>
@@ -609,6 +610,78 @@ bool should_compute_logsumexp(const Tensor& query, const Tensor& key, const Tens
 }
 
 } // namespace
+
+class SafeSoftmax : public torch::autograd::Function<SafeSoftmax> {
+public:
+    static Tensor forward(
+        torch::autograd::AutogradContext *ctx,
+        const Tensor& self,
+        const Tensor& mask,
+        int64_t dim,
+        c10::optional<c10::ScalarType> dtype) {
+
+        TORCH_CHECK(self.is_floating_point(), "Expected softmax matrix to be floating point, but got ", self.dtype());
+
+        auto attn_mask_float = convert_boolean_attn_mask(mask, mask.dtype());
+        TORCH_INTERNAL_ASSERT(attn_mask_float.has_value(), "Expected attn_mask to return a tensor!");
+
+        auto masked_input = self + attn_mask_float.value();
+        auto out = softmax(masked_input, dim);
+
+        auto scalar_options = TensorOptions().dtype(out.dtype()).device(out.device());
+        auto result = where(mask.logical_not(), scalar_tensor(0.0, scalar_options), out);
+
+        ctx->save_for_backward({result});
+        ctx->saved_data["dim"] = dim;
+
+        return result;
+    }
+
+    static torch::autograd::tensor_list backward(
+        torch::autograd::AutogradContext *ctx,
+        torch::autograd::tensor_list grad_outputs) {
+
+        auto saved = ctx->get_saved_variables();
+        auto result = saved[0];
+        int64_t dim = ctx->saved_data["dim"].toInt();
+
+        auto grad = grad_outputs[0];
+        auto grad_input = grad * result;
+        auto grad_sum = grad_input.sum(dim, /*keepdim=*/true);
+        grad_input -= result * grad_sum;
+
+        // Return gradients for input tensors. Use Tensor() for tensors that don't need gradients.
+        return {grad_input, Tensor(), Tensor(), Tensor()};
+    }
+};
+
+/**
+ * SafeSoftmax: A custom autograd function for masked softmax operations.
+ *
+ * Primary Purpose:
+ * The main reason for this implementation is to prevent returning 'nan' values
+ * for fully masked out rows in attention mechanisms. Standard softmax can produce
+ * 'nan' results when all values in a row are masked (set to negative infinity),
+ * which can break gradient computations and cause training instability.
+ *
+ * How it addresses the issue:
+ * 1. Masking: It applies the attention mask before the softmax operation.
+ * 2. Safe Output: For fully masked rows, it returns zeros instead of 'nan' values.
+ * 3. Gradient Handling: Ensures correct gradient computation even for masked values.
+ *
+ * This implementation is crucial for stable and correct operation of attention
+ * mechanisms, especially when dealing with variable-length sequences or partial
+ * attention patterns where some positions might be completely masked out.
+ */
+Tensor _safe_softmax_autograd(
+    const Tensor& self,
+    const Tensor& mask,
+    int64_t dim,
+    c10::optional<c10::ScalarType> dtype) {
+
+    return SafeSoftmax::apply(self, mask, dim, dtype);
+}
+
 
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability

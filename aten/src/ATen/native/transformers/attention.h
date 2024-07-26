@@ -49,6 +49,12 @@ TORCH_API Tensor qkv_projection(
     const int64_t embed_dim,
     const Tensor& qkv_weight);
 
+TORCH_API Tensor _safe_softmax_autograd(
+    const Tensor& self,
+    const Tensor& mask,
+    int64_t dim,
+    c10::optional<c10::ScalarType> dtype = c10::nullopt);
+
 using flash_attention_fn = void (*)(
     const Tensor& output, const Tensor& logsumexp,
     const Tensor& query, const Tensor& key, const Tensor& value,
