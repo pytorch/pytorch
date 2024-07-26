@@ -67,7 +67,6 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim);
 Tensor _safe_softmax_backward(
     const Tensor& grad,
     const Tensor& self,
-    const Tensor& mask,
     const Tensor& result,
     int64_t dim);
 Tensor restore_reduced_dims(

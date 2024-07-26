@@ -240,7 +240,6 @@ std::tuple<Tensor, Tensor> _euclidean_dist_backward(
 Tensor _safe_softmax_backward(
     const Tensor& grad,
     const Tensor& self,
-    const Tensor& mask,
     const Tensor& result,
     int64_t dim) {
   auto grad_input = grad * result;

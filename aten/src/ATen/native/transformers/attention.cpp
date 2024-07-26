@@ -614,12 +614,13 @@ Tensor _safe_softmax(
     const Tensor& self,
     const Tensor& mask,
     int64_t dim,
-    const c10::optional<ScalarType> dtype) {
+    const std::optional<ScalarType> dtype) {
   TORCH_CHECK(self.is_floating_point(), "Expected softmax matrix to be floating point, but got ", self.dtype());
-  const auto attn_mask_float = convert_boolean_attn_mask(self, self.dtype());
-  TORCH_INTERNAL_ASSERT(attn_mask_float.has_value(), "Execpted attn_mask to return a tensor!");
-  auto out = at::softmax(self + attn_mask_float.value(), dim);
-  return out.masked_fill(~mask, 0);
+  const auto attn_mask_float = convert_boolean_attn_mask(mask, mask.dtype());
+  TORCH_INTERNAL_ASSERT(attn_mask_float.has_value(), "Expected attn_mask to return a tensor!");
+  const auto out = at::softmax(self + attn_mask_float.value(), dim);
+  const auto scalar_options = at::TensorOptions().dtype(out.dtype()).device(out.device());
+  return at::where(mask.logical_not(), at::scalar_tensor(0.0, scalar_options), out);
 }
 
 // Computes scaled dot product attention on query, key and value tensors, using
