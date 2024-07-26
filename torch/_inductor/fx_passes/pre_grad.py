@@ -18,7 +18,7 @@ from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 
 from .. import config
-from ..fx_utils import matches_module_function_pattern
+from ..fx_utils import matches_module_function_pattern, matches_function_pattern
 from ..pattern_matcher import (
     init_once_fakemode,
     PatternMatcherPass,
@@ -298,6 +298,17 @@ def fetch_attr(target: str, mod):
     return attr_itr
 
 
+def set_attr(target: str, mod, value):
+    target_atoms = target.split(".")
+    attr_itr = mod
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(attr_itr, atom):
+            raise RuntimeError(
+                f"Node referenced nonexistant target {'.'.join(target_atoms[:i])}"
+            )
+        setattr(attr_itr, atom, value)
+
+
 def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
     Removes all identity layers from the module.
@@ -327,6 +338,11 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
         (torch.nn.Conv1d, F.batch_norm),
         (torch.nn.Conv2d, F.batch_norm),
         (torch.nn.Conv3d, F.batch_norm),
+    ]
+    function_patterns = [
+        (torch.conv1d, F.batch_norm),
+        (torch.conv2d, F.batch_norm),
+        (torch.conv3d, F.batch_norm),
     ]
     modules = dict(gm.named_modules())
 
@@ -493,6 +509,60 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                     replace_node_module(bn_node.args[0], modules, fused_conv)
                     bn_node.replace_all_uses_with(bn_node.args[0])
                     gm.graph.erase_node(bn_node)
+    gm.graph.lint()
+
+    for pattern in function_patterns:
+        for node in gm.graph.nodes:
+            if matches_function_pattern(pattern, node):
+                # TODO: support kwargs.
+                if len(node.args) != 8:
+                    continue
+                conv_node = node.args[0]
+                bn_training = node.args[5]
+                bn_eps = node.args[7]
+                if bn_training:
+                    continue
+                if type(bn_eps) is not float:
+                    continue
+
+                conv_args_is_constant = all(
+                    n.op == "get_attr"
+                    and len(n.users) == 1
+                    for n in conv_node.args[1:2]
+                )
+                bn_args_is_constant = all(
+                    n.op == "get_attr"
+                    and len(n.users) == 1
+                    for n in node.args[1:4]
+                )
+
+                if not conv_args_is_constant or not bn_args_is_constant:
+                    continue
+                bn_running_mean = fetch_attr(node.args[1].target, gm)
+                bn_running_var = fetch_attr(node.args[2].target, gm)
+                bn_weight = fetch_attr(node.args[3].target, gm)
+                bn_bias = fetch_attr(node.args[4].target, gm)
+                if bn_running_mean is None or bn_running_var is None:
+                    continue
+
+                if conv_node.args[2] is None:
+                    continue
+                conv_weight = fetch_attr(conv_node.args[1].target, gm)
+                conv_bias = fetch_attr(conv_node.args[2].target, gm)
+
+                conv_weight, conv_bias = fuse_conv_bn_weights(
+                    conv_weight,
+                    conv_bias,
+                    bn_running_mean,
+                    bn_running_var,
+                    bn_eps,
+                    bn_weight,
+                    bn_bias,
+                )
+                set_attr(conv_node.args[1].target, gm, conv_weight)
+                set_attr(conv_node.args[2].target, gm, conv_bias)
+                node.replace_all_uses_with(node.args[0])
+                node.graph.erase_node(node)
     gm.graph.lint()
     gm.recompile()
 
