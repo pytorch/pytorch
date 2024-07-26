@@ -480,7 +480,9 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
         return (ok, set(reachable.keys()))
 
     # check inner_mm reaches f_node on every user path via pointwise nodes with no outside input_nodes
-    ok, subgraph_node_set = all_reach_via_pointwise_with_no_other_inputs(inner_mm, f_node)
+    ok, subgraph_node_set = all_reach_via_pointwise_with_no_other_inputs(
+        inner_mm, f_node
+    )
     if not ok:
         return
 
