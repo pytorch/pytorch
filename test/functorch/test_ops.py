@@ -1676,8 +1676,8 @@ class TestOperators(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("as_strided", "partial_views"),
-                xfail("igamma"),  # Unexpected success?
-                xfail("igammac"),  # Unexpected success?
+                # xfail("igamma"),  # Unexpected success?
+                # xfail("igammac"),  # Unexpected success?
             }
         ),
     )
@@ -2068,6 +2068,8 @@ class TestOperators(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("native_dropout_backward"),
+                xfail("igamma"),
+                xfail("igammac"),
             }
         ),
     )
