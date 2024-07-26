@@ -225,6 +225,10 @@ class ROCmTemplateKernel(ROCmKernel):
         if node is None:
             return str(default_value)
 
+        # 1D bias case, i.e. the shape when initialized is (N,)
+        if node.get_stride() == [0, 1]:
+            return 0
+
         contiguous_stride = functools.reduce(
             lambda a, b: max(b, a), node.get_stride(), sympy.Integer(0)
         )
