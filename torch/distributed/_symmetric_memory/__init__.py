@@ -569,7 +569,7 @@ def _fused_all_gather_scaled_matmul(
     A_shard: torch.Tensor,
     Bs: List[torch.Tensor],
     A_scale: torch.Tensor,
-    B_scales: torch.Tensor,
+    B_scales: List[torch.Tensor],
     out_dtypes: List[Optional[torch.dtype]],
     gather_dim: int,
     group_name: str,
