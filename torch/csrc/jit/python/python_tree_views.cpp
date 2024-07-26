@@ -23,7 +23,7 @@ std::optional<std::string> maybeConvertToString(const py::object& obj) {
 
 struct SourceRangeFactory {
   SourceRangeFactory(
-      std::string text,
+      const std::string& text,
       const py::object& filename,
       size_t file_lineno,
       size_t leading_whitespace_chars)
