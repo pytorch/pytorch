@@ -3,13 +3,17 @@ from __future__ import annotations
 
 import dataclasses
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._dynamo.utils import counters
-
+from torch._inductor.utils import InputType
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+
+
+OutputType = List[Optional[Union[int, torch.Tensor]]]
+ModelType = Callable[[List[InputType]], OutputType]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -42,11 +46,11 @@ class WrappedFunction:
     """
 
     model: Callable[..., Any]
-    static_input_idxs: List[int]
+    static_input_idxs: Sequence[int]
     id: FunctionID
     constants: Tuple[torch.Tensor, ...]
-    placeholders: List[PlaceholderInfo]
-    mutated_input_idxs: List[int]
+    placeholders: Sequence[PlaceholderInfo]
+    mutated_input_idxs: Sequence[int]
 
 
 def get_mutating_use_stack_trace_from_node(
@@ -94,7 +98,7 @@ def format_default_skip_message(reason: str) -> str:
 
 
 def get_mutation_stack_trace(
-    placeholders: List[PlaceholderInfo], mutation_indices: List[int]
+    placeholders: Sequence[PlaceholderInfo], mutation_indices: Sequence[int]
 ) -> str:
     stack_trace: Optional[str] = ""
 
@@ -114,18 +118,18 @@ def get_mutation_stack_trace(
 
 def check_for_mutation(
     func: WrappedFunction,
-    inputs: List[torch.Tensor],
+    inputs: List[InputType],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
 ) -> Optional[str]:
     # doesnt work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
         # checking if mutation is only on parameters/static inputs
-        mutation_indices = [
+        mutation_indices: Sequence[int] = [
             idx
             for idx in func.mutated_input_idxs
             if not (
                 idx in func.static_input_idxs
-                or is_cuda_graph_recorded_tensor(inputs[idx])
+                or is_cuda_graph_recorded_tensor(inputs[idx])  # type: ignore[arg-type]
             )
         ]
     else:
@@ -247,10 +251,10 @@ class CheckInvariantStatus(Enum):
 
 
 def log_data_ptr_mismatch(
-    placeholders: List[PlaceholderInfo],
-    inputs: List[torch.Tensor],
-    recorded_data_ptr: List[Optional[int]],
-    target_idxs: List[int],
+    placeholders: Sequence[PlaceholderInfo],
+    inputs: List[InputType],
+    recorded_data_ptr: Sequence[Optional[int]],
+    target_idxs: Sequence[int],
     mismatch: CheckInvariantStatus,
 ) -> str:
     """
@@ -265,6 +269,7 @@ def log_data_ptr_mismatch(
     t_data_ptrs = [recorded_data_ptr[i] for i in target_idxs]
     error_msg = f"{mismatch}.\n"
     for i, (tensor, data_ptr) in enumerate(zip(t_tensors, t_data_ptrs)):
+        assert isinstance(tensor, torch.Tensor)
         index = target_idxs[i]
         if tensor.data_ptr() != data_ptr:
             placeholder = placeholders[index]
@@ -274,3 +279,29 @@ def log_data_ptr_mismatch(
                 f"input stack trace: {get_placeholder_stack_trace(placeholder)}\n"
             )
     return error_msg
+
+
+def maybe_warning_due_to_dynamic_shape(
+    fn_cache: Dict[Tuple[int, ...], Callable[..., Any]],
+    new_int_key: Any,
+):
+    num_cudagraphs = len(fn_cache.keys()) + 1
+
+    def warn_msg():
+        return (
+            "CUDAGraph supports dynamic shapes by recording a new graph for each "
+            "distinct input size. Recording too many CUDAGraphs may lead to "
+            f"extra overhead. We have observed {num_cudagraphs} distinct sizes. "
+            "Please consider the following options for better performance: "
+            "a) padding inputs to a few fixed number of shapes; or b) set "
+            "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
+            "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
+            "to silence this warning."
+        )
+
+    if (
+        torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit
+        and num_cudagraphs
+        > torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit
+    ):
+        perf_hint_log.warning(warn_msg())
