@@ -27,48 +27,29 @@ python test/run_test.py --cpp --verbose -i \
   cpp/legacy_vmap_test \
   cpp/operators_test
 
-if [[ -x ${CPP_TESTS_DIR}/tensor_interop_test ]]; then
-  python test/run_test.py --cpp --verbose -i cpp/tensor_interop_test
-fi
-if [[ -x ${CPP_TESTS_DIR}/cudnn_test ]]; then
-  python test/run_test.py --cpp --verbose -i cpp/cudnn_test
-fi
-if [[ -x ${CPP_TESTS_DIR}/cuda_generator_test ]]; then
-  python test/run_test.py --cpp --verbose -i cpp/cuda_generator_test
-fi
-if [[ -x ${CPP_TESTS_DIR}/apply_test ]]; then
-  python test/run_test.py --cpp --verbose -i cpp/apply_test
-fi
-if [[ -x ${CPP_TESTS_DIR}/stream_test ]]; then
-  python test/run_test.py --cpp --verbose -i cpp/stream_test
-fi
-if [[ -x ${CPP_TESTS_DIR}/cuda_half_test ]]; then
-  python test/run_test.py --cpp --verbose -i cpp/cuda_half_test
-fi
-if [[ -x ${CPP_TESTS_DIR}/cuda_vectorized_test ]]; then
-  python test/run_test.py --cpp --verbose -i cpp/cuda_vectorized_test
-fi
-if [[ -x ${CPP_TESTS_DIR}/cuda_distributions_test ]]; then
-  python test/run_test.py --cpp --verbose -i cpp/cuda_distributions_test
-fi
-if [[ -x ${CPP_TESTS_DIR}/cuda_optional_test ]]; then
-  python test/run_test.py --cpp --verbose -i cpp/cuda_optional_test
-fi
-if [[ -x ${CPP_TESTS_DIR}/cuda_tensor_interop_test ]]; then
-  python test/run_test.py --cpp --verbose -i cpp/cuda_tensor_interop_test
-fi
-if [[ -x ${CPP_TESTS_DIR}/cuda_complex_test ]]; then
-  python test/run_test.py --cpp --verbose -i cpp/cuda_complex_test
-fi
-if [[ -x ${CPP_TESTS_DIR}/cuda_complex_math_test ]]; then
-  python test/run_test.py --cpp --verbose -i cpp/cuda_complex_math_test
-fi
-if [[ -x ${CPP_TESTS_DIR}/cuda_cub_test ]]; then
-  python test/run_test.py --cpp --verbose -i cpp/cuda_cub_test
-fi
-if [[ -x ${CPP_TESTS_DIR}/cuda_atomic_ops_test ]]; then
-  python test/run_test.py --cpp --verbose -i cpp/cuda_atomic_ops_test
-fi
+run_if_exists() {
+  local test_name="$1"
+  if [[ -x "${CPP_TESTS_DIR}/${test_name}" ]]; then
+    python test/run_test.py --cpp --verbose -i "cpp/${test_name}"
+  else
+    echo "Warning: $test_name does not exist."
+  fi
+}
+
+run_if_exists tensor_interop_test
+run_if_exists cudnn_test
+run_if_exists cuda_generator_test
+run_if_exists apply_test
+run_if_exists stream_test
+run_if_exists cuda_half_test
+run_if_exists cuda_vectorized_test
+run_if_exists cuda_distributions_test
+run_if_exists cuda_optional_test
+run_if_exists cuda_tensor_interop_test
+run_if_exists cuda_complex_test
+run_if_exists cuda_complex_math_test
+run_if_exists cuda_cub_test
+run_if_exists cuda_atomic_ops_test
 
 if [ "$VALGRIND" == "ON" ]; then
   # NB: As these tests are invoked by valgrind, let's leave them for now as it's
