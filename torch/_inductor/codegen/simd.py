@@ -1665,6 +1665,25 @@ class SIMDScheduling(BaseScheduling):
         if len(ranked_tilings) > 1:
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
 
+        # Optionally, prefer tiling into as many dimensions as possible.
+        # This can simplify index expressions, and create more opportunities for block
+        # pointers.
+        prefer_tiling = True #TODO make this a config
+        if prefer_tiling:
+            # Get candidate tilings from the node ranges.
+            node_ranges = [node.get_ranges()[0] for node in scheduler_nodes]
+            new_tilings = set()
+            for range_ in node_ranges:
+                # Collapse leading dims, to fit in the maximum dimensionality.
+                extra_dims = max(0, len(node_ranges) - config.triton.max_tiles)
+                leading_dim = [sympy_product(range_[:extra_dims])] if extra_dims > 0 else []
+                tiling = leading_dim + range_[extra_dims:]
+                new_tilings.add(tuple(tiling))
+
+            # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
+            ranked_new_tilings = sorted(list(new_tilings), key=len)
+            ranked_tilings = ranked_new_tilings + ranked_tilings
+
         for tiled_groups in ranked_tilings:
             new_groups = (*tiled_groups, reduction_numel)
             if all(
