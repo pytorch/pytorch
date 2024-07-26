@@ -142,9 +142,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def visit(
         cls,
         fn: Callable[["VariableTracker"], None],
-        value: Any,
-        cache: Optional[Dict[int, Any]] = None,
-    ) -> None:
+        value,
+        cache=None,
+    ):
         """
         Walk value and call fn on all the VariableTracker instances
         """
