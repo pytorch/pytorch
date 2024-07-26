@@ -8,6 +8,7 @@ import itertools
 import warnings
 import math
 from math import inf, nan, isnan
+import re
 import random
 from random import randrange
 from itertools import product
@@ -4517,6 +4518,12 @@ class TestLinalg(TestCase):
         ordinal = torch.cuda.current_device()
         assert filename1 == f"tunableop_results{ordinal}.csv"
         assert len(torch.cuda.tunable.get_validators()) > 0
+        validators = {}
+        for key, value in torch.cuda.tunable.get_validators():
+            validators[key] = value
+        if torch.version.hip:
+            assert "HIPBLASLT_VERSION" in validators
+            assert re.match(r'^\d{3}-[a-z0-9]{8}$', validators["HIPBLASLT_VERSION"])
         assert len(torch.cuda.tunable.get_results()) > 0
 
         assert torch.cuda.tunable.write_file()  # use default filename

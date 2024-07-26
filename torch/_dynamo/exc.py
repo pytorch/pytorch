@@ -53,6 +53,10 @@ class UnspecializeRestartAnalysis(RestartAnalysis):
     pass
 
 
+class CompileCollectiveRestartAnalysis(RestartAnalysis):
+    pass
+
+
 class SkipFrame(TorchDynamoException):
     pass
 
