@@ -1,5 +1,6 @@
 #define PY_SSIZE_T_CLEAN
 #include <ATen/EmptyTensor.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
@@ -187,19 +188,25 @@ std::string TensorCheck::check_verbose(
     return fail_reason.str();
   }
   const auto& sizes = v.sym_sizes();
-  const auto& strides = v.sym_strides();
   for (auto i : c10::irange(ndim)) {
     auto known_size = sizes_[i];
-    auto known_stride = strides_[i];
     if (known_size.has_value() && (known_size.value() != sizes[i])) {
       fail_reason << "size mismatch at index " << i << ". expected "
                   << known_size.value() << ", actual " << sizes[i];
       return fail_reason.str();
     }
-    if (known_stride.has_value() && known_stride.value() != strides[i]) {
-      fail_reason << "stride mismatch at index " << i << ". expected "
-                  << known_stride.value() << ", actual " << strides[i];
-      return fail_reason.str();
+  }
+  const bool supports_stride =
+      !v.is_sparse() && !at::sparse_csr::is_sparse_compressed(v);
+  if (supports_stride) {
+    const auto& strides = v.sym_strides();
+    for (auto i : c10::irange(ndim)) {
+      auto known_stride = strides_[i];
+      if (known_stride.has_value() && known_stride.value() != strides[i]) {
+        fail_reason << "stride mismatch at index " << i << ". expected "
+                    << known_stride.value() << ", actual " << strides[i];
+        return fail_reason.str();
+      }
     }
   }
   return "";
