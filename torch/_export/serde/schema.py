@@ -28,6 +28,7 @@ class ScalarType(IntEnum):
     BOOL = 12
     BFLOAT16 = 13
     UINT16 = 28
+    FLOAT8_E4M3FN = 24
 
 
 class Layout(IntEnum):
