@@ -49,7 +49,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 
 from torch.utils._python_dispatch import (
     _disable_current_modes,
-    _len_torch_dispatch_stack,
+    is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import format_traceback_short
 
@@ -1137,8 +1137,10 @@ class CatchErrorsWrapper:
             has_started_execution
             or is_skipfile
             or config.disable
-            or _len_torch_dispatch_stack() > 0
-            and not getattr(self._torchdynamo_orig_callable, "_export", False)
+            or (
+                is_in_torch_dispatch_mode()
+                and not getattr(self._torchdynamo_orig_callable, "_export", False)
+            )
         ):
             if log.isEnabledFor(logging.DEBUG):
                 print(frame.f_lasti, first_real_inst_idx(frame.f_code))
@@ -1147,7 +1149,7 @@ class CatchErrorsWrapper:
                     skip_reason = "traced frame already"
                 elif trace_rules.check(frame.f_code):
                     skip_reason = "in skipfiles"
-                elif _len_torch_dispatch_stack() > 0:
+                elif is_in_torch_dispatch_mode():
                     skip_reason = "torch dispatch mode present, this is not supported today in torch.compile"
                 else:
                     skip_reason = "dynamo tracing is disabled"
