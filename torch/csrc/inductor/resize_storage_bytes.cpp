@@ -27,7 +27,7 @@ static void resize_storage_bytes_(const Tensor& variable, SymInt new_size) {
 
 static void resize_storage_bytes__functionalize(
     const Tensor& variable,
-    SymInt new_size) {
+    const SymInt& new_size) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("inductor::resize_storage_bytes_", "")
                        .typed<void(const Tensor&, SymInt)>();
