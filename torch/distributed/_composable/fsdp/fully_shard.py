@@ -4,7 +4,7 @@ from typing import Any, cast, Iterable, List, NoReturn, Optional, Union
 
 import torch
 import torch.nn as nn
-from torch.distributed._composable import contract
+from torch.distributed._composable.contract import contract
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed.utils import _get_root_modules
 
@@ -24,7 +24,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 # The decorator adds a state object to `module` that can be accessed via
 # `fully_shard.state(module)`. The state object and module are 1:1.
-@contract(state_cls=FSDPState)  # type: ignore[operator]
+@contract(state_cls=FSDPState)
 def fully_shard(
     module: Union[nn.Module, List[nn.Module]],
     *,
