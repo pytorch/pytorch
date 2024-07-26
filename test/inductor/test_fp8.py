@@ -447,6 +447,10 @@ class TestFP8Lowering(TestCase):
         )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
+        # depending on the kernel config (BLOCK_M size, etc) selected during Inductor
+        # autotuning for the compiled case, the results can be different because of
+        # the way blocks of results are accumulated (float addition not associative), so
+        # setting a small absolute tolerance in these tests
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")

@@ -1,13 +1,16 @@
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import sympy
 
 import torch
+from .. import config as inductor_config
 from ..ir import ChoiceCaller, Layout, StorageBox, TensorBox
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
+    NoValidChoicesError,
     realize_inputs,
     TritonTemplate,
 )
@@ -15,6 +18,7 @@ from ..utils import use_aten_gemm_kernels, use_triton_template
 from .mm import _is_static_problem  # TODO(yangsiyu) move to mm_common
 from .mm_common import mm_args, mm_grid, scaled_mm_configs
 
+log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
@@ -238,6 +242,7 @@ def tuned_scaled_mm(
     scale_a, scale_b = realize_inputs(scale_a, scale_b)
 
     input_nodes: Tuple[Any, ...]
+    # workaround for Inductor not supporting optional tensor input arguments
     if bias is None:
         input_nodes = (mat_a, mat_b, scale_a, scale_b)
         triton_template = scaled_mm_template
@@ -246,13 +251,13 @@ def tuned_scaled_mm(
         input_nodes = (mat_a, mat_b, scale_a, scale_b, bias)
         triton_template = scaled_mm_bias_template
 
+    aten_choice = aten__fp8_mm.bind(
+        input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum
+    )
+
     choices: List[ChoiceCaller] = []
     if use_aten_gemm_kernels():
-        choices.append(
-            aten__fp8_mm.bind(
-                input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum
-            )
-        )
+        choices.append(aten_choice)
 
     static_shape, is_nonzero = _is_static_problem([mat_a, mat_b], layout)
     if is_nonzero and use_triton_template(layout, enable_float8=True):
@@ -270,5 +275,20 @@ def tuned_scaled_mm(
                 **kwargs,
             )
 
-    output = autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
-    return output
+    if (
+        len(choices) == 0
+        and not use_aten_gemm_kernels()
+        and inductor_config.autotune_fallback_to_aten
+    ):
+        log.warning("No choices for scaled_mm, using ATen backend as fallback")
+        return aten_choice.output_node()
+
+    try:
+        return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
+    except NoValidChoicesError:
+        if not inductor_config.autotune_fallback_to_aten:
+            raise
+        log.warning(
+            "All choices for scaled_mm were invalid, using ATen backend as fallback"
+        )
+        return aten_choice.output_node()
