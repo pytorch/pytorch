@@ -775,6 +775,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(fn(x), opt_fn(x)))
 
     def test_aot_sequence_nr(self):
+        print(self.maxDiff)
+        s = " ".join([f"{x}" for x in range(3000)])
+        self.assertExpectedInline(s, "b")
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
