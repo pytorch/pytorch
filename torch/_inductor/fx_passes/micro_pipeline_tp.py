@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
 import operator
+from collections import defaultdict
 from dataclasses import dataclass
-from typing import cast, List, Set, Tuple, Union
+from typing import cast, Dict, List, Set, Tuple, Union
 
 import torch
-
-from .. import inductor_prims
+from .. import config, inductor_prims
 from ..pattern_matcher import (
     CallFunction,
     Ignored,
@@ -531,11 +531,107 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     graph.eliminate_dead_code()
 
 
+def _get_node_to_ancestors(
+    graph: torch.fx.Graph,
+) -> Dict[torch.fx.Node, Set[torch.fx.Node]]:
+    """
+    Compute the ancestors for all nodes in a graph.
+    """
+    node_to_ancestors = defaultdict(set)
+    for node in graph.nodes:
+        node_to_ancestors[node] = set(node.all_input_nodes)
+        for dep in node.all_input_nodes:
+            node_to_ancestors[node] |= node_to_ancestors[dep]
+
+    return node_to_ancestors
+
+
+def _get_collective_to_overlappable_nodes(
+    graph: torch.fx.Graph,
+) -> Dict[torch.fx.Node, List[torch.fx.Node]]:
+    """
+    For each collective in the graph, find nodes that are neither ancestors nor
+    descendants of the collective.
+    """
+
+    def is_collective(node) -> bool:
+        # Only consider all-gather and reduce-scatter in the context of
+        # micro-pipeline TP.
+        return node.target in [
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        ]
+
+    node_to_ancestors = _get_node_to_ancestors(graph)
+    collective_to_overlappable_nodes = defaultdict(list)
+    for node in graph.nodes:
+        if not is_collective(node):
+            continue
+        for x in graph.nodes:
+            if (
+                node not in node_to_ancestors[x]
+                and x not in node_to_ancestors[node]
+                and x.op == "call_function"
+            ):
+                collective_to_overlappable_nodes[node].append(x)
+
+    return collective_to_overlappable_nodes
+
+
+def _get_unexposed_collectives(graph: torch.fx.Graph) -> List[torch.fx.Node]:
+    """
+    Find all unexposed collectives in the graph.
+
+    Because we don't have the runtime estimate, this function is a rough
+    estimation using the following strong/hand-wavy assumptions:
+
+    - Only a predefined set of "compute intensive" operation can hide a collective.
+    - Any "compute intensive" operation can hide exactly one collective.
+    """
+
+    def _is_compute_intensive(node: torch.fx.Node) -> bool:
+        return node.target in [torch.ops.aten.mm.default]
+
+    collective_to_overlapping_candidates = defaultdict(list)
+    available_nodes = set()
+    collective_to_overlappable_nodes = _get_collective_to_overlappable_nodes(graph)
+    for collective, overlappable_nodes in collective_to_overlappable_nodes.items():
+        candidates = [x for x in overlappable_nodes if _is_compute_intensive(x)]
+        collective_to_overlapping_candidates[collective] = candidates
+        available_nodes |= set(candidates)
+
+    unexposed_collectives = []
+    for (
+        collective,
+        overlapping_candidates,
+    ) in collective_to_overlapping_candidates.items():
+        # Each collective consumes exactly one overlapping candidate
+        for x in overlapping_candidates:
+            if x in available_nodes:
+                unexposed_collectives.append(collective)
+                available_nodes.remove(x)
+                break
+    return unexposed_collectives
+
+
 def micro_pipeline_tp_pass(graph: torch.fx.Graph):
     all_gathers = find_all_gather_patterns(graph)
+    reduce_scatters = find_reduce_scatter_patterns(graph)
+
+    # When a collective can be hidden through either simple overlapping or
+    # micro-pipeline TP, we prefer simple overlapping to avoid the overhead
+    # associated with decomposition. If reorder_for_compute_comm_overlap is
+    # enabled, we identify collectives that can be hidden through simple
+    # overlapping and exclude them from micro-pipeline TP candidates.
+    if config.reorder_for_compute_comm_overlap:
+        unexposed_collectives = _get_unexposed_collectives(graph)
+        all_gathers = [x for x in all_gathers if x.ag_node not in unexposed_collectives]
+        reduce_scatters = [
+            x for x in reduce_scatters if x.rs_node not in unexposed_collectives
+        ]
+
     for all_gather in all_gathers:
         fuse_all_gather_matmul(all_gather)
 
-    reduce_scatters = find_reduce_scatter_patterns(graph)
     for reduce_scatter in reduce_scatters:
         fuse_matmul_reduce_scatter(reduce_scatter)
