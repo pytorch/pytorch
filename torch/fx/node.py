@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # Nodes represent a definition of a value in our graph of operators.
 from typing import TYPE_CHECKING, Union, Callable, Any, Tuple, List, Optional, Dict, Set
 from ._compatibility import compatibility
@@ -769,7 +768,7 @@ def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
     if isinstance(a, tuple):
         t = tuple(map_aggregate(elem, fn) for elem in a)
         # Support NamedTuple (if it has `_fields`) by repacking into original type.
-        return t if not hasattr(a, '_fields') else type(a)(*t)
+        return t if not hasattr(a, '_fields') else type(a)(*t)  # type: ignore[arg-type]
     elif isinstance(a, list):
         return immutable_list(map_aggregate(elem, fn) for elem in a)
     elif isinstance(a, dict):
