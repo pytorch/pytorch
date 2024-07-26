@@ -2012,7 +2012,8 @@ class Module:
         """
         if getattr(hook, "_from_public_api", False):
             raise RuntimeError(
-                "Cannot register a state dict post hook previously registered via register_state_dict_post_hook"
+                "Cannot register the same function as the state dict post hook that was "
+                "previously registered via register_state_dict_post_hook"
             )
         handle = RemovableHandle(self._state_dict_hooks)
         self._state_dict_hooks[handle.id] = hook
@@ -2026,6 +2027,17 @@ class Module:
 
         The registered hooks can modify the ``state_dict`` inplace.
         """
+        # In _register_state_dict_hook there was a bug described in
+        # https://github.com/pytorch/pytorch/issues/117437 where the return value
+        # was only respected for the root module but not child submodules.
+        # We fix this in this public version by only allowing inplace modifications on
+        # the state_dict by the hook. However, since hooks registered via both these
+        # APIs will be added to `_state_dict_hooks` and the type of `_state_dict_hooks`
+        # cannot be changed due to many dependencies on it, we mark a hook
+        # as being registered via the public API by setting `_from_public_api` on it.
+        # In the implementation of `state_dict`, if the callable does not have this
+        # flag, the old behavior of respecting the return value will be preserved
+        # for the root module, otherwise, we ensure that the hook returns None.
         hook._from_public_api = True
         handle = RemovableHandle(self._state_dict_hooks)
         self._state_dict_hooks[handle.id] = hook
