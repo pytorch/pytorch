@@ -11,8 +11,8 @@ from test_cuda import (  # noqa: F401
 )
 
 import torch
-from torch.testing._internal.common_cuda import IS_JETSON
-from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_ROCM
+from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
