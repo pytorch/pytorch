@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 
 import functools
-import itertools
 import time
 
 import torch
@@ -11,7 +10,6 @@ from torch._inductor.runtime.benchmarking import Benchmarker, LazyBenchmark
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_GPU,
     requires_gpu,
 )
 
@@ -170,7 +168,7 @@ class TestBenchmarking(TestCase):
     def setUpClass(cls):
         return super().setUpClass()
 
-    def get_various_kernels(self, device):
+    def get_various_kernels_by_device(self, device):
         def make_sum(size):
             fn, args, kwargs = torch.sum, [torch.randn(size, device=device)], {}
             _callable = lambda: fn(*args, **kwargs)
@@ -237,7 +235,7 @@ class TestBenchmarkingCPU(TestBenchmarking):
         return super().setUpClass()
 
     def get_various_kernels(self):
-        return super(TestBenchmarking, self).get_various_kernels(device="cpu")
+        return self.get_various_kernels_by_device(device="cpu")
 
     def sanity_check(self, _callable, timing_ms):
         start_time_s = time.perf_counter()
@@ -305,7 +303,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
         return super().setUpClass()
 
     def get_various_kernels(self):
-        return super(TestBenchmarking, self).get_various_kernels(device=GPU_TYPE)
+        return self.get_various_kernels_by_device(device=GPU_TYPE)
     
     def sanity_check(self, _callable, timing_ms):
         start_event = torch.cuda.Event(enable_timing=True)
