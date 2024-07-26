@@ -462,7 +462,9 @@ class MetaTensorDesc:
     is_gradtrackingtensor: bool = False
     is_view: bool = False
     is_nested: bool = False
-    # associated nested int for e.g. offsets / lengths metadata
+    # We eagerly symbolicize the associated nested int for e.g. offsets / lengths
+    # metadata if that offsets is already associated with a nested int.
+    # See test_construct_from_jagged_with_input_offsets_mixed_case.
     nested_int: Optional[int] = None
     is_traceable_wrapper_subclass: bool = False
     is_functional: bool = False

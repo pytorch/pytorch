@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
+import contextlib
 from typing import Tuple
 
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
-from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
 
@@ -16,7 +16,7 @@ def get_tensor_symint(tensor, *, coeff=1):
     from torch._subclasses.fake_tensor import FakeTensor
     from torch._subclasses.functional_tensor import FunctionalTensor
 
-    if isinstance(tensor, FunctionalTensor) or isinstance(tensor, FakeTensor):
+    if isinstance(tensor, (FakeTensor, FunctionalTensor)):
         return tensor.get_nested_int(coeff=coeff)
 
     global _tensor_id_counter
@@ -27,6 +27,21 @@ def get_tensor_symint(tensor, *, coeff=1):
         _tensor_id_counter += 1
         _tensor_symint_registry[tensor] = tensor_symint
     return tensor_symint
+
+
+# Utility for testing
+@contextlib.contextmanager
+def branch_nested_state():
+    # Copy the global state for now since we imagine the registry to be small
+    global _tensor_id_counter, _tensor_symint_registry
+    original_tensor_symint_registry = _tensor_symint_registry
+    _tensor_symint_registry = _tensor_symint_registry.copy()
+    original_tensor_id_counter = _tensor_id_counter
+    try:
+        yield
+    finally:
+        _tensor_id_counter = original_tensor_id_counter
+        _tensor_symint_registry = original_tensor_symint_registry
 
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash

@@ -453,7 +453,15 @@ def to_copy_default(func, *args, **kwargs):
 
     new_values = func(inp._values, **new_kwargs)
     new_offsets = inp._offsets.to(device=new_values.device)
-    _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
+
+    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    if isinstance(new_offsets, FunctionalTensor) or isinstance(new_offsets, FakeTensor):
+        # Temporary hack until we have the union find
+        return new_offsets.set_nested_int(inp._offsets.get_nested_int())
+    else:
+        _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
     inp_kwargs = extract_kwargs(inp)
     inp_kwargs["offsets"] = new_offsets
 

@@ -878,8 +878,6 @@ class FakeTensor(Tensor):
         self._nested_int_memo = val
         self._nested_int_memo_vc = self._version
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
     # We must handle tolist in a special way for FakeTensors here in the case
     # where tolist is called from torch dispatch for tensor subclasses.
     # Ordinarily, if a program calls .tolist compiling still works because there is
@@ -1037,10 +1035,13 @@ class FakeTensorMode(TorchDispatchMode):
     _stack: Optional[str]
     allow_meta: bool
 
-    # This is the fake version of the tensor_id_counter used for nested ints.
-    # We have a fake version so that during tracing, we avoid mutating eager
-    # state. Upon entering FakeMode  If we trace multiple times, make
-    # sure the counter is properly reset.
+    # NestedTensor uses a tensor_id_counter to uniquely identify offsets.
+    # This counter is incremented when an offsets is used to create an NJT
+    # for the first time. To avoid mutating eager state if we construct NJT
+    # during tracing, we maintain a separate counter on the FakeTensorMode.
+    # The initial count is set to the current eager tensor_id_counter value
+    # upon initialization, and every time you retrace using the same fake tensor
+    # mode, you should reset the counter to the initial count.
     nt_tensor_id_counter: int = -1
     nt_tensor_id_initial_count: int = -1
 
@@ -2063,6 +2064,7 @@ class FakeTensorMode(TorchDispatchMode):
             hint = torch._C._get_nested_int(self.nt_tensor_id_counter, 1)
             self.incr_nt_tensor_id_counter()
 
+        # Why is it okay to use EphemeralSource?
         src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
 
         ret = self.shape_env.create_symintnode(
