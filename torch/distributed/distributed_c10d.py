@@ -1405,7 +1405,8 @@ def init_process_group(
             options we support is ``ProcessGroupNCCL.Options`` for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
             the nccl backend can pick up high priority cuda streams when
-            there're compute kernels waiting.
+            there're compute kernels waiting. For other availble options to config nccl,
+            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
         device_id (torch.device, optional): a single, specific device
             to "bind" this process to, allowing for backend-specific
             optimizations.  Currently this has two effects, only under
@@ -4340,6 +4341,8 @@ def split_group(
             specifying what additional options need to be passed in during
             the construction of specific process groups. i.e.``is_high_priority_stream``
             can be specified so that process group can pick up high priority cuda streams.
+            For other availble options to config nccl,
+            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
         group_desc (str, optional): a string to describe the process group.
 
     Returns:
@@ -4538,7 +4541,8 @@ def new_group(
             specifying what additional options need to be passed in during
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
-            process group can pick up high priority cuda streams.
+            process group can pick up high priority cuda streams. For other availble options to config nccl,
+            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
         use_local_synchronization (bool, optional): perform a group-local
             barrier at the end of the process group creation. This is different
             in that non-member ranks don't need to call into API and don't

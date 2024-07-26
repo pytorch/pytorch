@@ -159,7 +159,9 @@ def _sequential_split_and_maybe_inline_subgraphs(
         for arg_node, out_spec in zip(
             new_gm_out_node.args[0], new_signature.output_specs
         ):
-            if out_spec.arg.name != arg_node.name:
+            if arg_node is None:
+                assert out_spec.arg.value is None
+            elif out_spec.arg.name != arg_node.name:
                 out_spec.arg.name = arg_node.name
 
         replace_ctx = new_gm._set_replace_hook(new_signature.get_replace_hook())  # type: ignore[assignment]
