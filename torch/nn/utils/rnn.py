@@ -343,7 +343,7 @@ def pack_padded_sequence(
 def pad_packed_sequence(
     sequence: PackedSequence,
     batch_first: bool = False,
-    padding_value: float = 0.0,
+    padding_value: Union[int, float, bool] = 0.0,
     total_length: Optional[int] = None,
 ) -> Tuple[Tensor, Tensor]:
     r"""Pad a packed batch of variable length sequences.
@@ -381,7 +381,7 @@ def pad_packed_sequence(
         sequence (PackedSequence): batch to pad
         batch_first (bool, optional): if ``True``, the output will be in ``B x T x *``
             format, ``T x B x *`` otherwise.
-        padding_value (float, optional): values for padded elements.
+        padding_value (int or float or bool, optional): values for padded elements.
         total_length (int, optional): if not ``None``, the output will be padded to
             have length :attr:`total_length`. This method will throw :class:`ValueError`
             if :attr:`total_length` is less than the max sequence length in
@@ -419,7 +419,7 @@ def pad_packed_sequence(
 def pad_sequence(
     sequences: Union[Tensor, List[Tensor], Tuple[Tensor, ...]],
     batch_first: bool = False,
-    padding_value: float = 0.0,
+    padding_value: Union[int, float, bool] = 0.0,
 ) -> Tensor:
     r"""Pad a list or tuple of variable length Tensors with :attr:`padding_value`.
 
@@ -449,7 +449,8 @@ def pad_sequence(
             tuple of variable length sequences.
         batch_first (bool, optional): if ``True``, the output will be in ``B x T x *``
             format, ``T x B x *`` otherwise.
-        padding_value (float, optional): value for padded elements. Default: 0.
+        padding_value (int or float or bool, optional): value for padded elements.
+            Default: 0.
 
     Returns:
         Tensor of size ``T x B x *`` if :attr:`batch_first` is ``False``.
