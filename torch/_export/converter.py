@@ -1333,10 +1333,10 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         # Because during conversion, we set tensor constants as GetAttr,
         # retracing cannot recognize them as tensor constants but instead
         # treat them as buffers. We need to set them again here.
-        ep._constants = {
+        ep._constants.update({
             k: v for k, v in name_to_constant.items()
             if isinstance(v, (torch.Tensor, torch.ScriptObject))
-        }
+        })
         for k in name_to_constant:
             ep.state_dict.pop(k, None)
 
