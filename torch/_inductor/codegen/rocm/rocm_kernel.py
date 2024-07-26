@@ -230,7 +230,7 @@ class ROCmTemplateKernel(ROCmKernel):
             return "0L"
 
         # This is supposed to work for the broadcasted bias case, i.e. (M, 1)
-        # But it doesn't?
+        # But it doesn't? There is numerical mismatch.
         if node.get_stride() == [1, 0]:
             return "0L"
 
