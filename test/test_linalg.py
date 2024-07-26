@@ -6146,6 +6146,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyNativeDeviceTypes
     def test__convert_weight_to_int4pack(self, device):
+        # TODO: Fix https://github.com/pytorch/pytorch/issues/131425 and use OpInfo instead
         test_list = [((64, 32), 2), ((64, 48), 2), ((64, 64), 2), ((256, 128), 4), ((256, 128), 8)]
         if self.device_type == 'cuda' and not SM80OrLater:
             self.skipTest("requires SM80 or later")
