@@ -12,6 +12,6 @@ class UserInputMutation(torch.nn.Module):
         return x.cos()
 
 
-example_inputs = (torch.randn(3, 2),)
+example_args = (torch.randn(3, 2),)
 tags = {"torch.mutation"}
 model = UserInputMutation()

@@ -13,7 +13,7 @@ class TorchSymMin(torch.nn.Module):
         return x.sum() + torch.sym_min(x.size(0), 100)
 
 
-example_inputs = (torch.randn(3, 2),)
+example_args = (torch.randn(3, 2),)
 tags = {"torch.operator"}
 support_level = SupportLevel.NOT_SUPPORTED_YET
 model = TorchSymMin()

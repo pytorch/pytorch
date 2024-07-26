@@ -54,9 +54,7 @@ def ordered_set(*items):
 # This function indicates if the backend device
 # supports non-contiguous tensors
 def is_noncontiguous_supported(device):
-    if device.type == "hpu":
-        return False
-    return True
+    return device.type != "hpu"
 
 
 _like_tensor_constructors = ordered_set(
@@ -608,7 +606,6 @@ def index_put_impl(fake_mode, func, *args, **kwargs):
 @register_op_impl(aten._nested_tensor_from_tensor_list.out)
 @register_op_impl(aten._nested_view_from_buffer.default)
 @register_op_impl(aten._nested_view_from_buffer_copy.default)
-@register_op_impl(aten._nested_strided_to_jagged.default)
 def nested_tensors_unsupported(fake_mode, func, *args, **kwargs):
     raise UnsupportedOperatorException(
         "torch.compile does not support strided NestedTensor"

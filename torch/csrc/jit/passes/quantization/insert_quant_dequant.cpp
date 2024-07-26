@@ -234,7 +234,7 @@ std::optional<std::string> findObserverName(Value* v) {
       return module_instance->node()->s(attr::name);
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool isPlaceholderObserver(Value* observer) {
@@ -268,7 +268,7 @@ std::optional<std::string> getEmbeddingBagObsName(
     auto op_name = observer_module.attr("custom_op").toStringRef();
     return isPlaceholderObserver(observer) ? std::move(op_name) : "";
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool isEmbeddingBagOp(
@@ -792,7 +792,7 @@ class InsertQuantDeQuantHelper {
       const std::vector<Value*>& inputs,
       bool is_scalar = false,
       const std::optional<std::tuple<c10::QScheme, QParamVector>>& qparams_opt =
-          c10::nullopt);
+          std::nullopt);
 
   bool isQuantized(Value* v) {
     return quantized_values_.count(v) != 0;
@@ -1269,7 +1269,7 @@ std::optional<std::vector<Value*>> getDequantizedInputs(Value* output) {
       return inputs;
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {

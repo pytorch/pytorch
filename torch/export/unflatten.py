@@ -21,7 +21,6 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.fx._symbolic_trace import is_fx_tracing
-from torch.fx.experimental.proxy_tensor import py_sym_types
 from torch.utils._pytree import GetAttrKey, SequenceKey
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
@@ -800,7 +799,6 @@ class _ModuleFrame:
         # To avoid this we copy these call_function nodes with sym_type results.
         # This should however only be done for sym_type nodes - call_function nodes on tensors
         # should not be deduplicated in the first place.
-        assert isinstance(x.meta["val"], py_sym_types)
         args = tuple(
             self.remap_input(_x) if isinstance(_x, torch.fx.Node) else _x
             for _x in x.args

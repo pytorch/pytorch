@@ -21,7 +21,7 @@ class ModelAttrMutation(torch.nn.Module):
         return x.sum() + self.attr_list[0].sum()
 
 
-example_inputs = (torch.randn(3, 2),)
+example_args = (torch.randn(3, 2),)
 tags = {"python.object-model"}
 support_level = SupportLevel.NOT_SUPPORTED_YET
 model = ModelAttrMutation()
