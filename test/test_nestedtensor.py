@@ -6490,8 +6490,6 @@ FORWARD_FAILURES = {
     "jiterator_binary",
     "jiterator_binary_return_by_ref",
     "jiterator_unary",
-    # Bug found: sum() with keepdim=True returns invalid shape
-    "sum",
     # RuntimeError: prod(): keepdim=True must be set for NestedTensor
     "prod",
     # RuntimeError: "jagged_to_padded_dense" not implemented for 'Bool'
@@ -6520,6 +6518,8 @@ BACKWARD_FAILURES = {
     "sinc",
     "special.i1",
     "special.i1e",
+    # NotImplementedError: aten._nested_sum_backward.default. Need to fix the backward pass.
+    "sum",
 }
 
 COMPILE_BACKWARD_FAILURES = {
