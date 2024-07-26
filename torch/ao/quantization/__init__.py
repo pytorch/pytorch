@@ -34,10 +34,10 @@ from .stubs import *  # noqa: F403
 ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
 ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
 for _f in [
-        compare_results,
-        extract_results_from_loggers,
-        generate_numeric_debug_handle,
-        prepare_for_propagation_comparison,
+    compare_results,
+    extract_results_from_loggers,
+    generate_numeric_debug_handle,
+    prepare_for_propagation_comparison,
 ]:
     _f.__module__ = "torch.ao.quantization"
 
