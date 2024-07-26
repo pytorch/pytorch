@@ -1,0 +1,55 @@
+name: Rebase PR
+
+on:
+  repository_dispatch:
+    types: [try-rebase]
+
+jobs:
+  do_rebase:
+    runs-on: ubuntu-20.04
+    environment: mergebot
+    env:
+        GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Checkout repo
+        id: checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.MERGEBOT_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          architecture: x64
+          check-latest: false
+          cache: pip
+      - run: pip install pyyaml==6.0
+
+      - name: Setup committer id
+        run: |
+          git config --global user.email "pytorchmergebot@users.noreply.github.com"
+          git config --global user.name "PyTorch MergeBot"
+
+      - name: Rebase
+        env:
+          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+          PR_NUM: ${{ github.event.client_payload.pr_num }}
+          BRANCH: ${{ github.event.client_payload.branch }}
+        run: |
+          set -x
+          if [ -n "${BRANCH}" ]; then
+            python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${BRANCH}"
+          else
+            python3 .github/scripts/tryrebase.py "${PR_NUM}"
+          fi
+      - name: Comment on Canceled
+        if: ${{ cancelled() && steps.checkout.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+          PR_NUM: ${{ github.event.client_payload.pr_num }}
+        run: |
+          set -ex
+          python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "rebase"

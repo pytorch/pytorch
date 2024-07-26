@@ -1,0 +1,72 @@
+# @generated DO NOT EDIT MANUALLY
+
+# Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
+# Generation script: .github/scripts/generate_ci_workflows.py
+name: linux-binary-libtorch-cxx11-abi
+
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'ciflow/trunk/*'
+  workflow_dispatch:
+
+env:
+  # Needed for conda builds
+  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+  ANACONDA_USER: pytorch
+  AWS_DEFAULT_REGION: us-east-1
+  BINARY_ENV_FILE: /tmp/env
+  BUILD_ENVIRONMENT: linux-binary-libtorch-cxx11-abi
+  BUILDER_ROOT: /builder
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  PYTORCH_FINAL_PACKAGE_DIR: /artifacts
+  PYTORCH_ROOT: /pytorch
+  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  SKIP_ALL_TESTS: 0
+concurrency:
+  group: linux-binary-libtorch-cxx11-abi-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  libtorch-cpu-shared-with-deps-cxx11-abi-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cpu-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  libtorch-cpu-shared-with-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cpu-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
+      runs_on: linux.4xlarge
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
