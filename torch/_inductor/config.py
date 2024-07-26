@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -943,7 +943,8 @@ class rocm:
 
     # Enable for CDNA3 only for now
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    supported_arch: Set[str] = {"gfx940", "gfx941", "gfx942"}
+    # Keep it ordered, unordered set can cause spurious inductor cache misses
+    supported_arch: List[str] = ["gfx940", "gfx941", "gfx942"]
 
     # Optimization level, use to balance compilation speed and runtime performance
     compile_opt_level = "-O2"
