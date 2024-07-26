@@ -1021,23 +1021,21 @@ class TestOperators(TestCase):
     )
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
-    @opsToleranceOverride(
-        "TestOperators",
-        "test_vmapvjpvjp",
-        (
-            tol1("linalg.svd", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
-            tol1("linalg.lu_factor", {torch.float32: tol(atol=2e-03, rtol=2e-02)}),
-            tol1("svd", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
-            tol1("matrix_exp", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
-        ),
-    )
-    @skipOps(
-        "TestOperators",
-        "test_vmapvjpvjp",
-        {
-            xfail("as_strided", "partial_views"),
-        },
-    )
+    @opsToleranceOverride('TestOperators', 'test_vmapvjpvjp', (
+        tol1('linalg.svd',
+             {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
+        tol1('linalg.lu_factor',
+             {torch.float32: tol(atol=2e-03, rtol=2e-02)}),
+        tol1('svd',
+             {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
+        tol1('linalg.householder_product',
+             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+        tol1('matrix_exp',
+             {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
+    ))
+    @skipOps('TestOperators', 'test_vmapvjpvjp', {
+        xfail('as_strided', 'partial_views'),
+    })
     def test_vmapvjpvjp(self, device, dtype, op):
         # Since, we test `vjpvjp` independently,
         # for this test, we just verify that vmap

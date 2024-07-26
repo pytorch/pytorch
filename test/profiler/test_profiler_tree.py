@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_WINDOWS,
     run_tests,
+    skipIfRocm,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TestCase,
@@ -258,6 +259,7 @@ class TestProfilerTree(TestCase):
                     raise
 
     # TODO: Add logic for CUDA version of test
+    @skipIfRocm
     @ProfilerTree.test
     @unittest.skipIf(torch.cuda.is_available(), "Test not working for CUDA")
     def test_profiler_experimental_tree(self):
@@ -363,6 +365,7 @@ class TestProfilerTree(TestCase):
         )
 
     # TODO: Add logic for CUDA version of test
+    @skipIfRocm
     @ProfilerTree.test
     @unittest.skipIf(torch.cuda.is_available(), "Test not working for CUDA")
     def test_profiler_experimental_tree_with_memory(self):
