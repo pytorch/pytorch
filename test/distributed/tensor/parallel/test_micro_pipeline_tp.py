@@ -311,6 +311,51 @@ class MicroPipelineTPTest(TestCase):
         self.assertNotIn("reduce_scatter_tensor", code)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @parametrize("A_dims", [2, 3])
+    @parametrize("scatter_dim", [0, 1, 2])
+    @fresh_inductor_cache()
+    def test_fuse_scaled_matmul_reduce_scatter(self, A_dims, scatter_dim):
+        if scatter_dim >= A_dims:
+            return
+
+        group = dist.group.WORLD
+
+        def func(
+            A: torch.Tensor,
+            B: torch.Tensor,
+            A_scale: torch.Tensor,
+            B_scale: torch.Tensor,
+            out_dtype: torch.dtype,
+        ) -> torch.Tensor:
+            if len(A.shape) > 2:
+                C = torch._scaled_mm(
+                    A.flatten(0, -2), B, A_scale, B_scale, out_dtype=out_dtype
+                )
+                C = C.view(*A.shape[:-1], B.shape[1])
+            else:
+                C = torch._scaled_mm(A, B, A_scale, B_scale, out_dtype=out_dtype)
+            return reduce_scatter_tensor(C, "avg", scatter_dim, group)
+
+        if A_dims == 2:
+            A = torch.rand(64, 32, device="cuda").to(torch.float8_e4m3fn)
+        elif A_dims == 3:
+            A = torch.rand(2, 64, 32, device="cuda").to(torch.float8_e4m3fn)
+        else:
+            raise AssertionError(f"Invalid A_dims: {A_dims}")
+        B = torch.rand(16, 32, device="cuda").to(torch.float8_e4m3fn).T
+        A_scale = torch.tensor(0.1, device="cuda")
+        B_scale = torch.tensor(0.1, device="cuda")
+
+        with _test_mode():
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(
+                compiled, A, B, A_scale, B_scale, torch.bfloat16
+            )
+
+        self.assertIn("fused_scaled_matmul_reduce_scatter", code)
+        self.assertNotIn("reduce_scatter_tensor", code)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("shard_dim", [0, 1])
     @fresh_inductor_cache()
     def test_dtensor_seq_par(self, shard_dim: int):
