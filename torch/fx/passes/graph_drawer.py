@@ -251,8 +251,8 @@ if HAS_PYDOT:
                 label += f"|target={self._typename(node.target)}" + r"\n"
                 if self.normalize_args:
                     try:
-                        args, kwargs = normalize_function(
-                            node.target, node.args, node.kwargs, normalize_to_only_use_kwargs=True
+                        args, kwargs = normalize_function(  # type: ignore[misc]
+                            node.target, node.args, node.kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
                         )
                     except Exception:
                         # Fallback to not normalizing if there's an exception.

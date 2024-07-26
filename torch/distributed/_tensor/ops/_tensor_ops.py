@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from typing import cast, List, Optional, Sequence, Tuple
@@ -15,8 +14,8 @@ from torch.distributed._tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
-from torch.distributed._tensor.ops.common_rules import pointwise_rule
-from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
+from torch.distributed._tensor.ops._common_rules import pointwise_rule
+from torch.distributed._tensor.ops._embedding_ops import _MaskPartial
 from torch.distributed._tensor.ops.utils import (
     expand_to_full_mesh_op_strategy,
     is_tensor_dim_sharded,
@@ -595,7 +594,7 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
             args_schema=(
                 schema_suggestion.args_schema[0],
                 dim,
-                schema_suggestion.args_schema[1][dim],
+                schema_suggestion.args_schema[1][dim],  # type: ignore[index]
             ),
             kwargs_schema=op_schema.kwargs_schema,
         )

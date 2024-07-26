@@ -904,6 +904,7 @@ _flash_attention_forward(
   std::optional<Tensor> out = std::nullopt;
 
   std::optional<Tensor> seqused_k = _seqused_k;
+  c10::optional<at::Tensor> block_table = std::nullopt;  // we are not using the block table yet
   std::optional<Tensor> alibi_slopes = _alibi_slopes;
 
   const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
@@ -936,6 +937,7 @@ _flash_attention_forward(
             cumulative_sequence_length_q.value(),
             cumulative_sequence_length_k.value(),
             seqused_k, /*seqused_k*/
+            block_table, /*block_table*/
             alibi_slopes, /*alibi_slopes*/
             max_seqlen_batch_q,
             max_seqlen_batch_k,
