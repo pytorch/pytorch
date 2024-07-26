@@ -215,8 +215,9 @@ def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
 
     for i in range(1, len(comm_nodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
+        mutating_buf = next(iter(comm_nodes[i].get_buffer_names()))
         for buf in comm_nodes[i - 1].get_buffer_names():
-            comm_nodes[i].add_fake_dep(WeakDep(buf))
+            comm_nodes[i].add_fake_dep(WeakDep(buf, mutating_buf=mutating_buf))
 
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
