@@ -918,6 +918,8 @@ class GraphLowering(torch.fx.Interpreter):
             expr = sympy.sympify(example)
             self.graph_inputs[target] = expr
             return expr
+        elif example is None:
+            return None
         if isinstance(example, BackwardState):
             # Ignored arg, must be unused
             # Alternately we could filter this out in AotAutograd
@@ -1622,7 +1624,9 @@ class GraphLowering(torch.fx.Interpreter):
                 def materialize(
                     x: Union[torch.SymInt, torch.SymFloat, torch.Tensor]
                 ) -> Union[int, float, torch.Tensor]:
-                    if isinstance(x, (torch.SymInt, torch.SymFloat)):
+                    if x is None:
+                        return None
+                    elif isinstance(x, (torch.SymInt, torch.SymFloat)):
                         # Need concrete value to run dynamic shapes and tune the result
                         return x.node.hint
                     elif isinstance(x, FakeTensor):
