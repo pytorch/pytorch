@@ -374,21 +374,24 @@ class TestFP8MatmulCuda(TestCase):
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def test_float8_basics(self, device) -> None:
         self._test_tautological_mm(device, e4m3_type, e4m3_type, size=16)
-        # hipblaslt does not yet support mixed e4m3_type input
         if torch.version.hip is None:
-            self._test_tautological_mm(device, e4m3_type, e5m2_type, size=32)
-            self._test_tautological_mm(device, e5m2_type, e4m3_type, size=48)
-        # According to https://docs.nvidia.com/cuda/cublas/#id99 8F_E5M2 MM is unsupported
-        with self.assertRaises(RuntimeError):
+            # According to https://docs.nvidia.com/cuda/cublas/#id99 8F_E5M2 MM is unsupported
+            with self.assertRaises(RuntimeError):
+                self._test_tautological_mm(device, e5m2_type, e5m2_type)
+        else:
             self._test_tautological_mm(device, e5m2_type, e5m2_type)
+
+
+        self._test_tautological_mm(device, e4m3_type, e5m2_type, size=32)
+        self._test_tautological_mm(device, e5m2_type, e4m3_type, size=48)
 
         self._test_tautological_mm(device, size=64, out_dtype=torch.float16)
         self._test_tautological_mm(device, size=96, out_dtype=torch.float32)
-        # hipblaslt does not yet support bfloat16 output
+        self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
+
         if torch.version.hip is None:
-            self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
-        with self.assertRaises(RuntimeError):
-            self._test_tautological_mm(device, out_dtype=e5m2_type)
+            with self.assertRaises(RuntimeError):
+                self._test_tautological_mm(device, out_dtype=e5m2_type)
 
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def test_float8_scale(self, device) -> None:

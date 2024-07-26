@@ -109,7 +109,6 @@ class TestSelectAlgorithm(TestCase):
         )
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    # FIXME: Investigate why _int_mm_out_cuda is not compiled on ROCm
     @skipIfRocm
     @patches
     def test__int_mm(self):
