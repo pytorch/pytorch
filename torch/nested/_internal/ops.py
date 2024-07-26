@@ -537,16 +537,16 @@ def _softmax_default(func, *args, **kwargs):
         (new_kwargs["dim"],),
         "softmax",
         inp._ragged_idx,
-        allow_batch_dim=True,
     )
 
-    new_kwargs["dim"] = new_kwargs["dim"][
-        0
-    ]  # torch.softmax takes in the reduction dimension as an integer
+    if reduce_on_batch:
+        raise RuntimeError(
+            "softmax(): not supported when reducing across the batch dimension for NestedTensor"
+        )
 
     if reduce_on_ragged and inp._ragged_idx > 1:
         raise RuntimeError(
-            "not supported when reducing along the ragged dimension for ragged_idx > 1 for NestedTensor"
+            "softmax(): not supported when reducing along the ragged dimension for ragged_idx > 1 for NestedTensor"
         )
 
     if reduce_on_ragged and inp._lengths is not None:
@@ -554,6 +554,10 @@ def _softmax_default(func, *args, **kwargs):
             "softmax(): not supported where lengths is not None "
             + "if reducing across the ragged dimension for NestedTensor"
         )
+
+    new_kwargs["dim"] = new_kwargs["dim"][
+        0
+    ]  # torch.softmax takes in the reduction dimension as an integer
 
     if reduce_on_ragged:
         padded_softmax_values = torch.nn.functional.softmax(
@@ -1139,12 +1143,12 @@ def native_layer_norm_default(func, *args, **kwargs):
         -1 in normalized_shape
     ):  # special handling for normalizing over the ragged dimension
         padded_input = torch.ops.aten._jagged_to_padded_dense_forward(
-            inp._values,
+            inp._values.flatten(
+                start_dim=inp._ragged_idx
+            ),  # _jagged_to_padded_dense_forward requires values to be a 2D tensor
             [inp._offsets],
             max_lengths=[inp._max_seqlen],  # max length of ragged dimension
-        ).flatten(
-            start_dim=inp._ragged_idx + 1
-        )  # create a 2D layer by flattening all dimensions after the ragged dimension into 1 dimension; e.g. (B, *, W, H) --> (B, *, WH)
+        )
 
         padded_mask = torch.ops.aten._jagged_to_padded_dense_forward(
             torch.ones((inp._values.shape[0], 1), device=inp.device, dtype=inp.dtype),
@@ -1184,14 +1188,14 @@ def native_layer_norm_default(func, *args, **kwargs):
         padded_layer_norm = padded_normalized / std
 
         jagged_layer_norm_values = torch.ops.aten._padded_dense_to_jagged_forward(
-            padded_layer_norm.unflatten(
-                -1, inp.shape[inp._ragged_idx + 1 :]
-            ),  # unflatten last dimension back into original nested tensor shape, e.g. (B, *, WH) --> (B, *, W, H)
+            padded_layer_norm,
             [inp._offsets],
             total_L=inp._values.shape[
                 0
             ],  # providing this parameter helps avoid a GPU/CPU sync
-        )
+        ).unflatten(
+            -1, inp.shape[inp._ragged_idx + 1 :]
+        )  # unflatten last dimension back into original nested tensor shape, e.g. (B, *, WH) --> (B, *, W, H)
 
         return (
             NestedTensor(jagged_layer_norm_values, **extract_kwargs(inp)),
