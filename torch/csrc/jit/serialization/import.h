@@ -18,19 +18,19 @@ class DeserializationStorageContext;
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& filename,
-    std::optional<c10::Device> device = c10::nullopt,
+    std::optional<c10::Device> device = std::nullopt,
     bool load_debug_files = true);
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::istream& in,
-    std::optional<c10::Device> device = c10::nullopt,
+    std::optional<c10::Device> device = std::nullopt,
     bool load_debug_files = true);
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::unique_ptr<caffe2::serialize::ReadAdapterInterface> rai,
-    std::optional<c10::Device> device = c10::nullopt,
+    std::optional<c10::Device> device = std::nullopt,
     bool load_debug_files = true);
 
 TORCH_API Module import_ir_module(
@@ -77,7 +77,7 @@ TORCH_API Module import_ir_module(
 /// `torch::jit::ExportModule` in C++.
 TORCH_API Module load(
     std::istream& in,
-    std::optional<c10::Device> device = c10::nullopt,
+    std::optional<c10::Device> device = std::nullopt,
     bool load_debug_files = true);
 
 TORCH_API Module load(
@@ -93,7 +93,7 @@ TORCH_API Module load(
 /// Python or `torch::jit::ExportModule` in C++.
 TORCH_API Module load(
     const std::string& filename,
-    std::optional<c10::Device> device = c10::nullopt,
+    std::optional<c10::Device> device = std::nullopt,
     bool load_debug_files = true);
 
 TORCH_API Module load(
@@ -109,7 +109,7 @@ TORCH_API Module load(
 /// Python or `torch::jit::ExportModule` in C++.
 TORCH_API Module load(
     std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai,
-    std::optional<c10::Device> device = c10::nullopt,
+    std::optional<c10::Device> device = std::nullopt,
     bool load_debug_files = true);
 
 TORCH_API Module load(
@@ -128,17 +128,17 @@ TORCH_API Module parse_and_initialize_jit_module(
     const std::shared_ptr<char>& data,
     size_t size,
     ExtraFilesMap& extra_files,
-    std::optional<at::Device> device = c10::nullopt);
+    std::optional<at::Device> device = std::nullopt);
 
 TORCH_API Module load_jit_module_from_file(
     const std::string& filename,
     ExtraFilesMap& extra_files,
-    std::optional<at::Device> device = c10::nullopt);
+    std::optional<at::Device> device = std::nullopt);
 
 TORCH_API Module load_jit_module_from_stream(
     std::istream& in,
     ExtraFilesMap& extra_files,
-    std::optional<at::Device> device = c10::nullopt);
+    std::optional<at::Device> device = std::nullopt);
 
 TORCH_API Module parse_and_initialize_jit_module(
     const std::shared_ptr<char>& data,

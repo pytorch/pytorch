@@ -229,6 +229,15 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(obj), opt_fn(obj))
 
     @maybe_skip
+    def test_mo_reconstruct_bytecode(self):
+        def fn(inp):
+            return BaseModelOutput(attentions=inp + 1)
+
+        inp = torch.randn(3, 3)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertEqual(fn(inp).attentions, opt_fn(inp).attentions)
+
+    @maybe_skip
     def test_HF_bert_model_output(self):
         class BertPooler(torch.nn.Module):
             def __init__(self):

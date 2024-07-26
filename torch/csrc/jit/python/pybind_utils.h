@@ -36,8 +36,8 @@
 #include <c10/cuda/CUDAStream.h>
 #endif
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <optional>
 
 #include <algorithm>
 #include <cstddef>
@@ -62,7 +62,7 @@ void clear_registered_instances(void* ptr);
 TORCH_PYTHON_API IValue toIValue(
     py::handle obj,
     const TypePtr& type,
-    std::optional<int32_t> N = c10::nullopt);
+    std::optional<int32_t> N = std::nullopt);
 
 TORCH_PYTHON_API py::object toPyObject(IValue ivalue);
 
@@ -111,7 +111,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 
   explicit PythonFutureWrapper(
       c10::intrusive_ptr<c10::ivalue::Future> fut,
-      std::optional<UnwrapFunc> unwrap_func = c10::nullopt)
+      std::optional<UnwrapFunc> unwrap_func = std::nullopt)
       : fut(std::move(fut)), unwrap_func(std::move(unwrap_func)) {}
 
   explicit PythonFutureWrapper(const PythonFutureWrapper&) = delete;
@@ -1205,7 +1205,7 @@ inline std::optional<py::object> maybeTorchFunctionDispatch(
             /*module_name=*/qualname.prefix().c_str()));
   }
 
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 inline py::object invokeScriptFunctionFromPython(
@@ -1219,7 +1219,7 @@ inline py::object invokeScriptFunctionFromPython(
       callee,
       args,
       kwargs,
-      /*self=*/c10::nullopt,
+      /*self=*/std::nullopt,
       [&](Graph& graph, const MatchedSchema& match) {
         return graph.insertFunctionCall(&callee, match);
       });
@@ -1255,7 +1255,7 @@ TORCH_PYTHON_API py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     const py::kwargs& kwargs,
-    std::optional<c10::DispatchKey> dk = c10::nullopt);
+    std::optional<c10::DispatchKey> dk = std::nullopt);
 
 TORCH_PYTHON_API std::optional<py::object> _maybe_handle_torch_function(
     const std::string& ns,
@@ -1276,6 +1276,6 @@ TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     py::args args,
     const py::kwargs& kwargs,
     bool is_overload,
-    std::optional<c10::DispatchKey> dk = c10::nullopt);
+    std::optional<c10::DispatchKey> dk = std::nullopt);
 
 } // namespace torch::jit

@@ -31,6 +31,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensorMode,
     unset_fake_temporarily,
     UnsupportedOperatorException,
+    _CacheKeyState
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
@@ -1036,7 +1037,7 @@ class FakeTensorConstHandling(TestCase):
 make_propagate_real_tensors_cls(FakeTensorConstHandling)
 
 
-def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
+def contains_type(type: torch.Type, maybe_contained_type: torch.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
         contains_type(e, maybe_contained_type) for e in type.containedTypes()
     )
@@ -1611,9 +1612,10 @@ class FakeTensorDispatchCache(TestCase):
         cache keys for inputs x and y are the same, but z is different.
         """
         func = aten.add.Tensor
-        key_x = fm._cache_key(func, [x], {})
-        key_y = fm._cache_key(func, [y], {})
-        key_z = fm._cache_key(func, [z], {})
+        state = _CacheKeyState()
+        key_x = fm._cache_key(state, func, [x], {})
+        key_y = fm._cache_key(state, func, [y], {})
+        key_z = fm._cache_key(state, func, [z], {})
 
         self.assertEqual(key_x, key_y)
         self.assertNotEqual(key_x, key_z)

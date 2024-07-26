@@ -5,7 +5,6 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 #include <caffe2/serialize/in_memory_adapter.h>
@@ -23,6 +22,7 @@
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -267,7 +267,7 @@ void BytecodeDeserializer::parseFunctionSchema(
         args.emplace_back(
             name,
             std::move(type),
-            c10::nullopt /*N*/,
+            std::nullopt /*N*/,
             std::move(default_value));
       }
       tryRegisterMethod(args, *function);
@@ -704,7 +704,7 @@ void _load_extra_only_for_mobile(
       // TODO: the current flatbuffers implementation will always load the
       // whole module including the extra files. Ideally it should be
       // possible to just get the extra files given data
-      load_mobile_module_from_file(filename, c10::nullopt, &extra_files);
+      load_mobile_module_from_file(filename, std::nullopt, &extra_files);
       break;
     }
     default: {

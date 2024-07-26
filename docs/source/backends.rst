@@ -92,6 +92,8 @@ torch.backends.cuda
 
 .. autofunction:: torch.backends.cuda.can_use_efficient_attention
 
+.. autofunction:: torch.backends.cuda.can_use_cudnn_attention
+
 .. autofunction:: torch.backends.cuda.sdp_kernel
 
 torch.backends.cudnn

@@ -5,9 +5,7 @@ import torch._export
 import torch._inductor
 import torch.export._trace
 import torch.fx._pytree as fx_pytree
-
 from torch.testing._internal.common_utils import IS_FBCODE
-
 from torch.utils import _pytree as pytree
 
 
@@ -49,6 +47,15 @@ class AOTIRunnerUtil:
                 restore_fqn=False,
             )
 
+        if IS_FBCODE:
+            from deeplearning.aot_inductor.extern_node_thrift_serializer import (
+                thrift_serializer,
+            )
+
+            if options is None:
+                options = {}
+            options["extern_node_serializer"] = thrift_serializer
+
         with torch.no_grad():
             so_path = torch._inductor.aot_compile(gm, example_inputs, options=options)  # type: ignore[arg-type]
 
@@ -80,6 +87,7 @@ class AOTIRunnerUtil:
                 in_spec = pytree.treespec_loads(call_spec[0])
                 out_spec = pytree.treespec_loads(call_spec[1])
                 flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
+                flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
                 flat_outputs = runner.run(flat_inputs)
                 return pytree.tree_unflatten(flat_outputs, out_spec)
 

@@ -11,6 +11,7 @@ import pandas as pd
 flaky_models = {
     "yolov3",
     "gluon_inception_v3",
+    "XGLMForCausalLM",  # discovered in https://github.com/pytorch/pytorch/pull/128148
 }
 
 
