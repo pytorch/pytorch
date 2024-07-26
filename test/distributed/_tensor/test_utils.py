@@ -130,15 +130,16 @@ class UtilTest(DTensorTestBase):
     @with_comms
     def test_compute_padded_and_unpadded_local_shape(self):
         """
-        Tests 3 scenarios under 2D with (Shard(0), Shard(0)) placements:
+        Tests 3 scenarios with 2D DeviceMesh with (Shard(0), Shard(0)) placements:
             1) even sharding case, 2) uneven sharding dim_size < number of shards,
             3) uneven sharding dim_size > number of shards.
 
-        TODO: make this test more generic once distributed_tensor switches to static padding.
-        Then we can test `compute_padded_and_unpadded_local_shape` with distribute_tensor result.
+        Test 1 scenarios with 2D DeviceMesh with (Shard(0), Shard(1)) placements:
+            1) uneven sharding on both placements
         """
         device_mesh = init_device_mesh(self.device_type, (2, 4))
 
+        # 1) even sharding case
         global_tensor = torch.randn(8, 8)
         (
             local_padded_shape,
@@ -149,6 +150,7 @@ class UtilTest(DTensorTestBase):
         # For even sharding case, the padded and unpadded local shape should be the same on all ranks.
         self.assertEqual(local_padded_shape, local_unpadded_shape)
 
+        #  2) uneven sharding dim_size < number of shards
         global_tensor = torch.randn(6, 8)
         tensor_list = torch.chunk(global_tensor, 8, dim=0)
         (
@@ -157,7 +159,6 @@ class UtilTest(DTensorTestBase):
         ) = compute_padded_and_unpadded_local_shape(
             global_tensor.shape, device_mesh, (Shard(0), Shard(0))
         )
-        print(f"{self.rank=}, {local_padded_shape=}, {local_unpadded_shape=}")
         if self.rank < 6:
             self.assertEqual(local_padded_shape, local_unpadded_shape)
             self.assertEqual(local_padded_shape, list(tensor_list[self.rank].shape))
@@ -165,6 +166,7 @@ class UtilTest(DTensorTestBase):
             self.assertEqual(local_padded_shape, list(tensor_list[0].shape))
             self.assertEqual(local_unpadded_shape, [0, 8])
 
+        # 3) uneven sharding dim_size > number of shards
         global_tensor = torch.randn(13, 8)
         tensor_list = torch.chunk(global_tensor, 8, dim=0)
         (
@@ -182,7 +184,7 @@ class UtilTest(DTensorTestBase):
         else:
             self.assertEqual(local_padded_shape, list(tensor_list[0].shape))
             self.assertEqual(local_unpadded_shape, [0, 8])
-
+            
 
 class Test2DStridedLocalShard(DTensorTestBase):
     @property
