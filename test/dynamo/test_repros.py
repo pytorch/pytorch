@@ -5439,6 +5439,21 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         d["b"][0].x = 12
         self.assertEqual(fn(inp, d), opt_fn(inp, d))
 
+    def test_compile_complex_conj(self):
+        def f(x):
+            return torch.mul(x, 2j)
+
+        x_ref = torch.randn(4, 2, requires_grad=True)
+        x_test = x_ref.clone().detach().requires_grad_(True)
+
+        out_ref = f(torch.view_as_complex(x_ref))
+        out_test = torch.compile(f, backend="aot_eager")(torch.view_as_complex(x_test))
+        self.assertEqual(out_ref, out_test)
+
+        torch.view_as_real(out_ref).sum().backward()
+        torch.view_as_real(out_test).sum().backward()
+        self.assertEqual(x_ref.grad, x_test.grad)
+
     def test_changing_stride(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
