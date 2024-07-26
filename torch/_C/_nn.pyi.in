@@ -59,7 +59,7 @@ def _parse_to(
     memory_format: memory_format,
 ) -> Tuple[_device, _dtype, _bool, memory_format]: ...
 
-# aten/src/ATen/native/PackedSequence.cpp
+# Defined in aten/src/ATen/native/PackedSequence.cpp
 def pad_sequence(
     sequences: Union[List[Tensor], Tuple[Tensor, ...]],
     batch_first: bool = False,
