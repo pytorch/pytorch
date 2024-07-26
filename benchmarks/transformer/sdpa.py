@@ -118,7 +118,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
         # To compare enable gqa with repeat_interleave case
         kv_repeat_time = 0
         if config.tensor_repeat_interleave:
-            kv_repeat_time = 2 * benchmark_torch_function_in_microseconds_(
+            kv_repeat_time = benchmark_torch_function_in_microseconds_(
                 torch.repeat_interleave,
                 k,
                 config.q_num_heads // config.kv_num_heads,
