@@ -832,6 +832,9 @@ class TensorLikePair(Pair):
             torch.sparse_bsc,
         }:
             compare_fn = self._compare_sparse_compressed_values
+        elif actual.layout == torch.jagged:
+            actual, expected = actual.values(), expected.values()
+            compare_fn = self._compare_regular_values_close
         else:
             compare_fn = self._compare_regular_values_close
 
