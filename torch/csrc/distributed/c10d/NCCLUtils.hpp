@@ -872,8 +872,7 @@ struct NCCLTraceBuffer {
         auto sizes = new_list();
         for (auto dim : dims) {
           auto arg_sizes = new_list();
-          for (auto i : c10::irange(dim)) {
-            (void)i;
+          for (C10_UNUSED auto i : c10::irange(dim)) {
             arg_sizes.push_back(*it++);
           }
           sizes.push_back(arg_sizes);
