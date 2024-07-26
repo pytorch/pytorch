@@ -4,7 +4,6 @@
 import torch
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor._op_schema import OpSchema
-
 from torch.distributed._tensor.ops.common_rules import einop_rule, pointwise_rule
 from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 from torch.testing._internal.common_utils import run_tests
@@ -12,6 +11,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+
 
 aten = torch.ops.aten
 

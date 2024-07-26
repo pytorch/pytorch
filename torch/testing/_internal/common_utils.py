@@ -1360,6 +1360,21 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (  # noqa: F821
     (torch.version.hip and float(".".join(torch.version.hip.split(".")[0:2])) >= 5.3)
 )
 
+def allocator_option_enabled_fn(allocator_config, _, option):
+    if allocator_config is None:
+        return False
+    allocator_config = allocator_config.split(',') if ',' in allocator_config else [allocator_config]
+    mapping = dict([var.split(':') for var in allocator_config])
+
+    if option in mapping and mapping[option] == 'True':
+        return True
+    else:
+        return False
+
+TestEnvironment.def_flag("EXPANDABLE_SEGMENTS",
+                         env_var="PYTORCH_CUDA_ALLOC_CONF",
+                         enabled_fn=functools.partial(allocator_option_enabled_fn, option='expandable_segments'))
+
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
     gb_available = torch.cuda.mem_get_info()[1] / 2 ** 30
@@ -1393,7 +1408,7 @@ TestEnvironment.def_flag("TEST_WITH_TORCHDYNAMO", env_var="PYTORCH_TEST_WITH_DYN
 if TEST_WITH_TORCHDYNAMO:  # noqa: F821
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
-    torch._dynamo.config.accumulated_cache_size_limit = 8
+    torch._dynamo.config.accumulated_cache_size_limit = 64
     # Do not log compilation metrics from unit tests
     torch._dynamo.config.log_compilation_metrics = False
     if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
@@ -5090,7 +5105,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
 
         return m.group(0)
 
-    s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n    .+\n( +[~^]+ *\n)?', repl_frame, s)
+    s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n(    .+\n( +[~^]+ *\n)?)+', repl_frame, s)
     s = re.sub(r"line \d+", "line N", s)
     s = re.sub(r".py:\d+", ".py:N", s)
     s = re.sub(file, os.path.basename(file), s)

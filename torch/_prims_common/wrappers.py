@@ -2,7 +2,6 @@
 import inspect
 import warnings
 from functools import wraps
-from itertools import chain
 
 from typing import Callable, NamedTuple, Optional, overload, Sequence, Tuple
 
@@ -214,7 +213,7 @@ def out_wrapper(
     *out_names: str,
     exact_dtype: bool = False,
     pass_is_out: bool = False,
-    preserve_memory_format=False,
+    preserve_memory_format: bool = False,
 ):
     # The wrapped function needs to convert the output parameters to ensure
     # compatibility between the Python API (which always uses "out" as the
@@ -320,12 +319,18 @@ def out_wrapper(
             sig.empty,
             out_type,
         )
-        params = chain(sig.parameters.values(), (out_param,))
+        params = *sig.parameters.values(), out_param
+
+        # If there's a Parameter.VAR_KEYWORD parameter (like **kwds), it must appear
+        # after the out= parameter, which is Parameter.KEYWORD_ONLY. Sorting by
+        # Parameter.kind guarantees that all the parameters are in legal order.
+        params = sorted(params, key=lambda p: p.kind)
+
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
             parameters=params, return_annotation=return_type  # type: ignore[arg-type]
         )
 
-        _fn.__annotations__ = fn.__annotations__
+        _fn.__annotations__ = dict(getattr(fn, "__annotations__", {}))
         _fn.__annotations__["out"] = out_type
         _fn.__annotations__["return"] = return_type
 

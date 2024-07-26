@@ -53,6 +53,7 @@ from .schemas import (
 )
 from .subclass_utils import (
     create_subclass_meta,
+    remap_unwrapped_subclass_arg_indices,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
@@ -702,6 +703,9 @@ def aot_dispatch_subclass(
     args_unwrapped = unwrap_tensor_subclasses(
         args, is_joint_structure=is_joint_structure
     )
+    remapped_static_indices = remap_unwrapped_subclass_arg_indices(
+        args, meta.static_input_indices
+    )
 
     if is_joint_structure:
         primals_unwrapped = args_unwrapped[0]
@@ -729,6 +733,7 @@ def aot_dispatch_subclass(
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
     meta_updated = run_functionalized_fw_and_collect_metadata(
         metadata_fn,
+        static_input_indices=remapped_static_indices,
         keep_input_mutations=meta.keep_input_mutations,
         is_train=meta.is_train,
     )(*primals_unwrapped)

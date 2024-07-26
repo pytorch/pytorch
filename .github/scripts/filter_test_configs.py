@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 
 import yaml
 
+
 REENABLE_TEST_REGEX = "(?i)(Close(d|s)?|Resolve(d|s)?|Fix(ed|es)?) (#|https://github.com/pytorch/pytorch/issues/)([0-9]+)"
 
 PREFIX = "test-config/"

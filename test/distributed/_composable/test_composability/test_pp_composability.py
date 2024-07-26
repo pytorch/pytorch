@@ -1,11 +1,8 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import copy
 import os
 import sys
 import tempfile
-
-from model_registry import MLPModule
 
 import torch
 import torch.distributed as dist
@@ -26,7 +23,6 @@ from torch.distributed.pipelining.schedules import (
     ScheduleLoopedBFS,
 )
 from torch.nn.parallel import DistributedDataParallel as DDP
-
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
@@ -37,6 +33,21 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skip_but_pass_in_sandcastle_if,
 )
+
+
+# MLP Layer
+class MLPModule(torch.nn.Module):
+    def __init__(self, d_hid: int):
+        super().__init__()
+        self.net1 = torch.nn.Linear(d_hid, d_hid)
+        self.relu = torch.nn.ReLU()
+        self.net2 = torch.nn.Linear(d_hid, d_hid)
+
+    def forward(self, x):
+        x = self.net1(x)
+        x = self.relu(x)
+        x = self.net2(x)
+        return x
 
 
 class ComposabilityTest(MultiProcContinousTest):
