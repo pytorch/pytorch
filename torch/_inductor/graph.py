@@ -1570,7 +1570,7 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 dtype = may_get_constant_buffer_dtype(value)
 
-            if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
+            if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):  # type: ignore[arg-type] # next PR
                 raise CppWrapperCodeGenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(self) -> None:

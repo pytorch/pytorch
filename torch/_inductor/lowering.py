@@ -471,7 +471,7 @@ def make_pointwise(
         device = override_device or device
 
         return Pointwise.create(
-            device=device,
+            device=device,  # type: ignore[arg-type] # next PR
             dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
@@ -5042,7 +5042,7 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
         )
         result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
         if isinstance(
-            result.data.data, Reduction
+            result.data.data, Reduction  # type: ignore[attr-defined] # next PR
         ):  # Only realize if reduction isn't unrolled
             result.realize()
         return result

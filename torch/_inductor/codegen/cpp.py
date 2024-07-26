@@ -3724,7 +3724,7 @@ class CppScheduling(BaseScheduling):
         else:
             assert isinstance(ref_node, SchedulerNode)
             assert isinstance(ref_node.node, ir.ComputedBuffer)
-            ranges1 = ref_node.node.data.get_size()
+            ranges1 = ref_node.node.data.get_size()  # type: ignore[assignment] # next PR
 
         if ranges1 != ranges2:
             return False

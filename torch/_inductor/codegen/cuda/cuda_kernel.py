@@ -220,7 +220,7 @@ class CUDATemplateKernel(CUDAKernel):
 
         if node is None:
             return "0"
-        return str(node.get_layout().offset)
+        return str(node.get_layout().offset)  # type: ignore[union-attr] # next PR
 
     def ptr(self, node: IRNode) -> str:
         """
