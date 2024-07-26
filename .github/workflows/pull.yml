@@ -80,6 +80,7 @@ jobs:
     uses: ./.github/workflows/_docs.yml
     needs: linux-jammy-py3_8-gcc11-build
     with:
+      runner_prefix: amz2023.
       build-environment: linux-jammy-py3.8-gcc11
       docker-image: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
 
