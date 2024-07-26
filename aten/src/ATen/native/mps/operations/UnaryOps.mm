@@ -11,6 +11,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_copy_from_and_resize.h>
+#include <ATen/ops/_logcumsumexp_native.h>
 #include <ATen/ops/abs_native.h>
 #include <ATen/ops/acos_native.h>
 #include <ATen/ops/acosh_native.h>
@@ -24,7 +25,6 @@
 #include <ATen/ops/cosh_native.h>
 #include <ATen/ops/cumprod_native.h>
 #include <ATen/ops/cumsum_native.h>
-#include <ATen/ops/_logcumsumexp_native.h>
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/exp2_native.h>
 #include <ATen/ops/expm1_native.h>
@@ -484,7 +484,7 @@ static void cumulative_op_impl(const Tensor& self,
           rc = [mpsGraph cumulativeProductWithTensor:inputTensor axis:dim name:nil];
         } else if (cumulativeOpType == MPSCumulativeOpType::LOGCUMSUMEXP) {
           MPSGraphTensor* expTensor = [mpsGraph exponentWithTensor:inputTensor name:nil];
-          MPSGraphTensor* sumTensor =  [mpsGraph cumulativeSumWithTensor:expTensor axis:dim name:nil];
+          MPSGraphTensor* sumTensor = [mpsGraph cumulativeSumWithTensor:expTensor axis:dim name:nil];
           rc = [mpsGraph logarithmWithTensor:sumTensor name:nil];
         }
         if ((mps::getMPSDataType(result) != [rc dataType]) || castInputData) {
