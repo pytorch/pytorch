@@ -167,7 +167,7 @@ class TestEmbeddingOp(DTensorTestBase):
         self._run_embedding_op_test(mesh, 0, [6, 7, 6], 13, 22)
         self._run_embedding_op_test(mesh, 0, [34], 15, 14, padding_idx=10)
 
-        from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
+        from torch.distributed._tensor.ops._embedding_ops import _MaskPartial
 
         # test collectives
         embedding_mod = torch.nn.Embedding(10, 20, device=self.device_type)

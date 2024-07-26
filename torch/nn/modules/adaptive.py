@@ -172,7 +172,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
     def reset_parameters(self) -> None:
         self.head.reset_parameters()
-        for i2h, h2o in self.tail:
+        for i2h, h2o in self.tail:  # type: ignore[attr-defined]
             i2h.reset_parameters()
             h2o.reset_parameters()
 
