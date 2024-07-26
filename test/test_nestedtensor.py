@@ -6286,15 +6286,19 @@ BACKWARD_FAILURES = {
     "special.i1e",
 }
 
-forwardFailureDec = decorateIf(
-    unittest.expectedFailure,
-    lambda params: params["op"].full_name in FORWARD_FAILURES,
-)
+COMPILE_BACKWARD_FAILURES = {
+    *BACKWARD_FAILURES,
+    # mvlgamma_backward calls arange() passing self.options() and layout=torch.jagged
+    # is not supported for the arange() decomp. Backward function should be fixed
+    *(f"mvlgamma.mvlgamma_p_{p}" for p in [1, 3, 5]),
+}
 
-backwardFailureDec = decorateIf(
-    unittest.expectedFailure,
-    lambda params: params["op"].full_name in BACKWARD_FAILURES,
-)
+
+def withXFails(failure_list):
+    return decorateIf(
+        unittest.expectedFailure,
+        lambda params: params["op"].full_name in failure_list,
+    )
 
 
 # OpInfo-based NJT tests. These tests utilize an NJT-specific op_db generated from the standard
@@ -6308,7 +6312,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         else:
             return (torch.ones_like(out_val),)
 
-    @forwardFailureDec
+    @withXFails(FORWARD_FAILURES)
     @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
     def test_forward(self, device, dtype, op):
         for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=False):
@@ -6317,7 +6321,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             out_ref = op.ref(op, sample)
             self.assertEqualIgnoringNestedInts(out, out_ref)
 
-    @backwardFailureDec
+    @withXFails(BACKWARD_FAILURES)
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
         allowed_dtypes=(torch.float32,),
@@ -6329,10 +6333,9 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             out_ref = op.ref(op, sample)
             self.assertEqualIgnoringNestedInts(out, out_ref)
 
-            inps, _ = tree_flatten((sample.input, sample.args, sample.kwargs))
             g_inps = [
                 inp
-                for inp in inps
+                for inp in tree_flatten((sample.input, sample.args, sample.kwargs))
                 if isinstance(inp, torch.Tensor) and inp.requires_grad
             ]
             if len(g_inps) > 0:
@@ -6348,33 +6351,16 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                 self.assertEqual(grads, grads_ref)
 
-    @forwardFailureDec
+    @withXFails(FORWARD_FAILURES)
     @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
     def test_compile_forward(self, device, dtype, op):
         for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=False):
             torch.compiler.reset()
 
-            def f(*args, op=op, **kwargs):
-                return op.op(*args, **kwargs)
-
-            compiled_f = torch.compile(f, fullgraph=True)
-
-            out_ref = f(sample.input, *sample.args, **sample.kwargs)
-            out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
-
-            self.assertEqual(out_compile, out_ref)
-
-    @backwardFailureDec
-    @ops(
-        [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
-        allowed_dtypes=(torch.float32,),
-    )
-    def test_compile_backward(self, device, dtype, op):
-        for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=True):
-            torch.compiler.reset()
+            op_fn = op.op
 
             def f(*args, **kwargs):
-                return op.op(*args, **kwargs)
+                return op_fn(*args, **kwargs)
 
             compiled_f = torch.compile(
                 f, fullgraph=True, backend="aot_eager_decomp_partition"
@@ -6385,8 +6371,34 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
             self.assertEqual(out_compile, out_ref)
 
-            inps, _ = tree_flatten((sample.input, sample.args, sample.kwargs))
-            g_inps = [inp for inp in inps if inp.requires_grad]
+    @withXFails(COMPILE_BACKWARD_FAILURES)
+    @ops(
+        [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
+        allowed_dtypes=(torch.float32,),
+    )
+    def test_compile_backward(self, device, dtype, op):
+        for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=True):
+            torch.compiler.reset()
+
+            op_fn = op.op
+
+            def f(*args, **kwargs):
+                return op_fn(*args, **kwargs)
+
+            compiled_f = torch.compile(
+                f, fullgraph=True, backend="aot_eager_decomp_partition"
+            )
+
+            out_ref = f(sample.input, *sample.args, **sample.kwargs)
+            out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
+
+            self.assertEqual(out_compile, out_ref)
+
+            g_inps = [
+                inp
+                for inp in tree_flatten((sample.input, sample.args, sample.kwargs))
+                if isinstance(inp, torch.Tensor) and inp.requires_grad
+            ]
             if len(g_inps) > 0:
                 grads_compile = torch.autograd.grad(
                     out_compile,
