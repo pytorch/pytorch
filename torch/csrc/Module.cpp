@@ -1802,6 +1802,30 @@ Call this whenever a new thread is created in order to propagate values from
     return at::caching::is_cached_tensor(t);
   });
 
+  py_module.def(
+      "_set_storage_access_error_msg", [](const at::Tensor& t, std::string s) {
+        t.unsafeGetTensorImpl()
+            ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
+      });
+  py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    return c10::raw::weak_intrusive_ptr::use_count(storage_impl);
+  });
+  py_module.def(
+      "_tensors_data_ptrs_at_indices_equal",
+      [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
+        for (size_t i = 0, end = indices.size(); i < end; ++i) {
+          auto index = indices[i].cast<int64_t>();
+          auto t = tensors[index].cast<at::Tensor>();
+          auto data_ptr = data_ptrs[index].cast<int64_t>();
+          if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
+            return false;
+          }  
+        }
+        return true;
+      });
+
   ASSERT_TRUE(
       set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
