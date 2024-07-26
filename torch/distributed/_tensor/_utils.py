@@ -268,7 +268,8 @@ def compute_padded_and_unpadded_local_shape(
             # mesh dimension. When we move to global padding, we need to know the index of the shard on the tensor
             # dimension, because the ith tensor dimension could be sharded multiple times on different mesh dimension.
             # TODO: we would need a `get_coordinate_on_tensor_dim()` API to calculate this.
-            # `get_rank()` would only work for 1D and 2D scenario.
+            # `get_rank()` would only work for 1D and 2D scenario [Shard(0), Shard(0)].
+            # `get_coordinate()` would only when all the placements are on different tensor dimension.
             cur_chunk = mesh.get_rank()
 
             # If the index of cur chunk is smaller than num_full_chunks,
@@ -301,7 +302,8 @@ def compute_padding_size(
     padding_size[i] is the length of padding needed on the i-th tensor dimension.
     """
     assert len(padded_size) == len(unpadded_size)
-    padding_size = []
-    for padded_size_on_dim, unpadded_size_on_dim in zip(padded_size, unpadded_size):
-        padding_size.append(padded_size_on_dim - unpadded_size_on_dim)
+    padding_size = [
+        padded_size_on_dim - unpadded_size_on_dim
+        for padded_size_on_dim, unpadded_size_on_dim in zip(padded_size, unpadded_size)
+    ]
     return tuple(padding_size)
