@@ -67,19 +67,20 @@ runs:
             echo "$msg"
             exit 1
         fi
-        configs=$(echo "$test_matrix" | jq -c '.include[]')
-        echo "$configs" | while IFS= read -r config; do
-          test=$(echo "$config" | jq -r '.config')
-          if [[ "${test}""  != "default" ]]; then
-            if [[ $ngpu -eq 1 ]]; then
-                echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
-                echo "$msg"
-                exit 1
-            fi
+        echo $test_matrix |
+        python -c "import sys, json; [print(configs['config']) for configs in json.load(sys.stdin)['include']]" |
+        while IFS= read -r config; do
+        if [[ "${config}"  != "default" ]]; then
+          if [[ $ngpu -eq 1 ]]; then
+              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
+              echo "$msg"
+              exit 1
           fi
-        done
+        fi
+      done
       env:
         test_matrix: ${{ inputs.test-matrix }}
+
     - name: Runner diskspace health check
       uses: ./.github/actions/diskspace-cleanup
       if: always()
