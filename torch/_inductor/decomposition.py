@@ -954,8 +954,13 @@ def max_pool2d_with_indices(
     return vals, indices
 
 
-@register_decomposition(associative_scan_op)
-def associative_scan_op_decomp(combine_fn, leaves, dim, lifted_args):
+@register_decomposition([associative_scan_op])
+def associative_scan_op_decomp(
+    combine_fn: torch.fx.GraphModule,
+    leaves: List[torch.Tensor],
+    dim: int,
+    lifted_args: Tuple[torch.Tensor],
+) -> List[torch.Tensor]:
     # This will handle the fallback to eager in case any
     # of the leaves is on a non-CUDA device
     if not all([l.device.type == "cuda" for l in leaves]):

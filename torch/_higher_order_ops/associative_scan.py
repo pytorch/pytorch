@@ -63,8 +63,8 @@ def check_args(combine_fn, leaves, tree, dim):
             raise ValueError("All input tensors must have the same shape")
 
     out = combine_fn(
-        pytree.tree_unflatten([e for e in leaves], tree),
-        pytree.tree_unflatten([e for e in leaves], tree),
+        pytree.tree_unflatten(leaves, tree),
+        pytree.tree_unflatten(leaves, tree),
     )
 
     out_leaves, tree_out = pytree.tree_flatten(out)
@@ -149,8 +149,11 @@ def associative_scan(
             On the other hand, ``generic_scan=False`` should be more efficient than ``generic_scan=True``,
             whenever it can be used.
             Note: This argument is automatically computed internally, but ``generic_scan=True`` can be enforced
-            Note: In case the output of `torch.associative_scan` is part of backward(), i.e., gradients need to propagate through `torch.associative_scan`, then ``generic_scan=True`` is required
-        lifted_args (Tuple of tensors): A tuple of lifted parameters from the global scope. This parameter will be populated internally
+            Note: In case the output of `torch.associative_scan` is part of backward(),
+            i.e., gradients need to propagate through `torch.associative_scan`,
+            then ``generic_scan=True`` is required
+        lifted_args (Tuple of tensors): A tuple of lifted parameters from the global scope.
+            This parameter will be populated internally.
 
     Example::
 
@@ -246,7 +249,7 @@ def trace_associative_scan(
     combine_fn: Callable,
     input: List[torch.Tensor],
     dim: int,
-    lifted_args: Tuple,
+    lifted_args: Tuple[torch.Tensor],
 ):
     from torch.fx.experimental.proxy_tensor import maybe_handle_decomp
 

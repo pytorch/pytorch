@@ -51,7 +51,7 @@ from weakref import WeakKeyDictionary
 if TYPE_CHECKING:
     import types
 
-    from torch._ops import OpOverload
+    from torch._ops import OperatorBase, OpOverload
     from torch.fx._symbolic_trace import PHBase
     from torch.types import IntLikeType
 
@@ -68,7 +68,7 @@ prim = torch.ops.prim
 log = logging.getLogger(__name__)
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
-CURRENT_DECOMPOSITION_TABLE: Mapping[OpOverload, Callable] = {}
+CURRENT_DECOMPOSITION_TABLE: Mapping[OperatorBase | OpOverload, Callable] = {}
 
 CONSTANT_NUMEL_LIMIT = 1
 
@@ -95,7 +95,7 @@ def fake_signature(fn: Callable[_P, R], nargs: int) -> Callable[_P, R]:
     return eval(f"lambda {argnames}: fn({argnames})", {"fn": fn})
 
 @contextmanager
-def decompose(decomposition_table: Optional[Mapping[OpOverload, Callable]]) -> Generator[Mapping[OpOverload, Callable], None, None]:
+def decompose(decomposition_table: Optional[Mapping[OperatorBase | OpOverload, Callable]]) -> Generator[Mapping[OperatorBase | OpOverload, Callable], None, None]:
     global CURRENT_DECOMPOSITION_TABLE
     old_decomposition_table = CURRENT_DECOMPOSITION_TABLE
     CURRENT_DECOMPOSITION_TABLE = decomposition_table or {}
@@ -1146,7 +1146,7 @@ class DecompositionInterpreter(fx.Interpreter):
             self,
             module: fx.GraphModule,
             new_graph: fx.Graph,
-            decomposition_table: Optional[Mapping[OpOverload, Callable]] = None,
+            decomposition_table: Optional[Mapping[OperatorBase | OpOverload, Callable]] = None,
             **kwargs: object
     ) -> None:
         super().__init__(module, **kwargs)  # type: ignore[arg-type]
@@ -1483,7 +1483,7 @@ class _ModuleStackTracer(PythonKeyTracer):
 class _MakefxTracer:
     def __init__(
         self,
-        decomposition_table: Optional[Mapping[OpOverload, Callable]],
+        decomposition_table: Optional[Mapping[OperatorBase | OpOverload, Callable]],
         tracing_mode: str,
         _allow_non_fake_inputs: bool,
         pre_dispatch: bool,
@@ -1493,7 +1493,7 @@ class _MakefxTracer:
     ) -> None:
         # Configurations that are used to initialize the context managers and their states.
         # Should not modify them during tracing.
-        self.decomposition_table: Dict[OpOverload, Callable] = dict(decomposition_table or {})
+        self.decomposition_table: Dict[OperatorBase | OpOverload, Callable] = dict(decomposition_table or {})
         self.decomposition_table.setdefault(torch.ops.aten.sym_numel.default, torch._decomp.decompositions.sym_numel)
         self.tracing_mode: str = tracing_mode
         self._allow_non_fake_inputs: bool = _allow_non_fake_inputs
@@ -1742,7 +1742,7 @@ def _set_make_fx_tracer(tracer: _MakefxTracer) -> Generator[None, None, None]:
 
 def make_fx(
         f: Callable,
-        decomposition_table: Optional[Mapping[OpOverload, Callable]] = None,
+        decomposition_table: Optional[Mapping[OperatorBase | OpOverload, Callable]] = None,
         tracing_mode: str = "real",
         _allow_non_fake_inputs: bool = False,
         *,
@@ -1785,7 +1785,7 @@ def disable_proxy_modes_tracing() -> Generator[ProxyTorchDispatchMode, None, Non
 
 def maybe_handle_decomp(
         proxy_mode: ProxyTorchDispatchMode,
-        op: OpOverload,
+        op: OperatorBase | OpOverload,
         args: Tuple[object, ...],
         kwargs: Dict[str, object]
 ) -> object:

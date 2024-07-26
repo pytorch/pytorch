@@ -1299,7 +1299,7 @@ def forward(self, pred_1, x_1):
         x = torch.randn(3, 2, 2, requires_grad=True)
         gm = make_fx(lambda x, y, z: f(x, y, z, False, False))(add, x, 0)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.print_readable(print_output=False).strip().replace('\n        \n', '\n\n'),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, x_1, y_1: "f32[3, 2, 2]", z_1):
@@ -1314,7 +1314,7 @@ class <lambda>(torch.nn.Module):
         detach_2: "f32[3, 2, 2]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
         detach_3: "f32[3, 2, 2]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
         return detach_3
-        
+
     class <lambda>(torch.nn.Module):
         def forward(self, arg0_1: "f32[1, 2, 2]", arg1_1: "f32[1, 2, 2]"):
             # No stacktrace found for following nodes
@@ -1352,7 +1352,7 @@ class <lambda>(torch.nn.Module):
         )
         gm = make_fx(lambda x, y, z: f(x, y, z, True, False))(add, x, 0)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.print_readable(print_output=False).strip().replace('\n        \n', '\n\n'),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, x_1, y_1: "f32[3, 2, 2]", z_1):
@@ -1369,7 +1369,7 @@ class <lambda>(torch.nn.Module):
         detach_3: "f32[3, 2, 2]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
         flip_1: "f32[3, 2, 2]" = torch.ops.aten.flip.default(detach_3, [0]);  detach_3 = None
         return flip_1
-        
+
     class <lambda>(torch.nn.Module):
         def forward(self, arg0_1: "f32[1, 2, 2]", arg1_1: "f32[1, 2, 2]"):
             # No stacktrace found for following nodes
@@ -1514,7 +1514,7 @@ class <lambda>(torch.nn.Module):
     def test_generic_associative_scan_CUDA_flip(self):
         def fct(x: torch.Tensor, y: torch.Tensor):
             return x + y
-        
+
         # This specific length was failing in the past
         n = 9
         x = torch.arange(n, device=torch.device("cuda"))
@@ -1522,7 +1522,7 @@ class <lambda>(torch.nn.Module):
         with torch._dynamo.utils.disable_cache_limit():
             associative_scan1 = torch.compile(associative_scan, fullgraph=True)
             associative_scan2 = associative_scan
-                
+
         # Flip only non-compiled and compare with compiled reverse=True
         result1 = associative_scan1(fct, x, 0, True, True)
         result2 = torch.flip(
@@ -1556,12 +1556,8 @@ class <lambda>(torch.nn.Module):
             )
             result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
 
-            try:
-                self.assertEqual(result1, result2)
-                self.assertEqual(result1, result3)
-            except:
-                fails_for.append(n)
-                continue
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
 
             # Flip only compiled and compare with non-compiled reverse=True
             result1 = torch.flip(
@@ -1592,7 +1588,7 @@ class <lambda>(torch.nn.Module):
 
             self.assertEqual(result1, result2)
             self.assertEqual(result1, result3)
-        
+
         print(fails_for)
 
     def test_generic_associative_scan_generic_scan_fallback_CPU(self):
@@ -1783,7 +1779,7 @@ class <lambda>(torch.nn.Module):
             },
         )(fct_non_pointwise, x, 0, False, False)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.print_readable(print_output=False).strip().replace('\n        \n', '\n\n'),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1, arg1_1: "f32[6, 6]", arg2_1, arg3_1, arg4_1):
@@ -1798,7 +1794,7 @@ class <lambda>(torch.nn.Module):
   scan_combine_graph_0 = arg1_1 = None
         getitem: "f32[6, 6]" = associative_scan[0];  associative_scan = None
         return getitem
-        
+
     class <lambda>(torch.nn.Module):
         def forward(self, arg0_1: "f32[1, 6]", arg1_1: "f32[1, 6]"):
             # No stacktrace found for following nodes
@@ -1846,7 +1842,7 @@ class <lambda>(torch.nn.Module):
             },
         )(fct, x, 0, False, False)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.print_readable(print_output=False).strip().replace('\n        \n', '\n\n'),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1, arg1_1: "f32[6]", arg2_1, arg3_1, arg4_1):
@@ -1857,7 +1853,7 @@ class <lambda>(torch.nn.Module):
   scan_combine_graph_0 = arg1_1 = None
         getitem: "f32[6]" = associative_scan[0];  associative_scan = None
         return getitem
-        
+
     class <lambda>(torch.nn.Module):
         def forward(self, arg0_1: "f32[1]", arg1_1: "f32[1]"):
             # No stacktrace found for following nodes
@@ -1992,7 +1988,7 @@ class <lambda>(torch.nn.Module):
             },
         )(fct_non_pointwise, x, 0, False, False)
         self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
+            gm.print_readable(print_output=False).strip().replace('\n        \n', '\n\n'),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1, arg1_1: "f32[6, 6]", arg2_1, arg3_1, arg4_1):
@@ -2007,7 +2003,7 @@ class <lambda>(torch.nn.Module):
  [arg1_1], 0, ());  scan_combine_graph_0 = arg1_1 = None
         getitem: "f32[6, 6]" = associative_scan[0];  associative_scan = None
         return getitem
-        
+
     class <lambda>(torch.nn.Module):
         def forward(self, arg0_1: "f32[1, 6]", arg1_1: "f32[1, 6]"):
             # No stacktrace found for following nodes
