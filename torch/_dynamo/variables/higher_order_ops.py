@@ -55,7 +55,7 @@ def raise_hard_error_if_graph_break(reason):
 
 
 @contextlib.contextmanager
-def dynamo_enable_grad(tx, enable=True):
+def dynamo_enable_grad(tx: "InstructionTranslator", enable=True):
     from . import GradModeVariable
 
     org_value = torch.is_grad_enabled()
@@ -83,7 +83,7 @@ def only_consist_of(var, types, allow_none=False):
 # A more read-able syntax sugar for creating a UserFunctionVariable for f
 # and run call_function on it. Make it return a function to preserve the calling
 # convention of the original f.
-def _make_inlined(tx, f):
+def _make_inlined(tx: "InstructionTranslator", f):
     assert callable(f), "Expect f to be a python callable."
 
     def inline_call(*args, **kwargs):
@@ -131,7 +131,9 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     ), "inputs to function body cannot alias outputs"
 
 
-def _check_supported_callable_arg(tx, func_var: VariableTracker, arg_name):
+def _check_supported_callable_arg(
+    tx: "InstructionTranslator", func_var: VariableTracker, arg_name
+):
     is_callable = (
         BuiltinVariable(callable).call_function(tx, [func_var], {}).as_python_constant()
     )
@@ -526,7 +528,7 @@ def speculate_subgraph(
         raise ex
 
 
-def make_attr(tx, name):
+def make_attr(tx: "InstructionTranslator", name):
     node = tx.output.create_proxy(
         "get_attr",
         name,
@@ -536,7 +538,7 @@ def make_attr(tx, name):
     return node
 
 
-def add_subgraph(tx, name, gm):
+def add_subgraph(tx: "InstructionTranslator", name, gm):
     next_name = None
     i = 0
     while not next_name:

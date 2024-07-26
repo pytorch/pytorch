@@ -321,7 +321,9 @@ class TensorVariable(VariableTracker):
             return ConstantVariable.create(self.is_sparse)
 
     def method_attr_data(self, tx):
-        return self.call_method(tx, "detach", [], {})
+        return variables.TorchInGraphFunctionVariable(
+            torch._C._autograd._get_data_attr
+        ).call_function(tx, [self], {})
 
     def method_attr_grad_fn(self, tx):
         if self.has_grad_fn:
@@ -1103,7 +1105,7 @@ class NumpyNdarrayVariable(TensorVariable):
     """
 
     @staticmethod
-    def create(tx, proxy, **options):
+    def create(tx: "InstructionTranslator", proxy, **options):
         from .builder import wrap_fx_proxy_cls
 
         return wrap_fx_proxy_cls(
