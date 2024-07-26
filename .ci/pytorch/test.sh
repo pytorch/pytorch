@@ -438,6 +438,8 @@ test_perf_for_dashboard() {
     test_inductor_set_cpu_affinity
     end_core=$(( $(test_inductor_get_core_number)-1 ))
     taskset="taskset -c 0-$end_core"
+  elif [[ "${TEST_CONFIG}" == *cuda_a10g* ]]; then
+    device=cuda_a10g
   fi
 
   for mode in "${modes[@]}"; do
