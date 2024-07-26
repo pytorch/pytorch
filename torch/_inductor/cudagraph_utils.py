@@ -51,7 +51,6 @@ class WrappedFunction:
     constants: Tuple[torch.Tensor, ...]
     placeholders: Sequence[PlaceholderInfo]
     mutated_input_idxs: Sequence[int]
-    placeholders: List[PlaceholderInfo]
 
 
 def get_mutating_use_stack_trace_from_node(

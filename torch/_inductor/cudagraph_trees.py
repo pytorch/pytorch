@@ -2182,7 +2182,7 @@ class CUDAGraphTreeManager:
         stack_traces: Optional[StackTraces],
         mode: CompilationMode,
         constants: Tuple[torch.Tensor, ...],
-        placeholders: Tuple[torch.fx.Node, ...],
+        placeholders: Tuple[PlaceholderInfo, ...],
         mutated_input_idxs: Tuple[int, ...],
     ) -> Tuple[ModelType, OutputType,]:
         id = self.new_func_id()
