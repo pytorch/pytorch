@@ -1,10 +1,22 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
+from typing_extensions import ParamSpec
 
 import torch
 import torch._inductor as inductor
@@ -37,6 +49,7 @@ from ..pattern_matcher import (
     ListOf,
     Match,
     MULTIPLE,
+    PatternExpr,
     PatternMatcherPass,
     register_graph_pattern,
     stable_topological_sort,
@@ -46,7 +59,7 @@ from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
-from .micro_pipeline_tp import patterns as micro_pipeline_tp_patterns
+from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
@@ -55,6 +68,8 @@ from .split_cat import POST_GRAD_PATTERNS
 if TYPE_CHECKING:
     from sympy import Expr
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -114,7 +129,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
     if config._micro_pipeline_tp:
-        micro_pipeline_tp_patterns.apply(gm)
+        micro_pipeline_tp_pass(gm.graph)
 
     if config._fuse_ddp_communication:
         fuse_ddp_communication(
@@ -188,7 +203,11 @@ def reorder_for_locality(graph: torch.fx.Graph):
         torch.fx.map_arg((node.args, node.kwargs), visit)
 
 
-def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
+def register_lowering_pattern(
+    pattern: PatternExpr,
+    extra_check: Callable[[Match], bool] = _return_true,
+    pass_number: int = 1,
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Register an aten to inductor IR replacement pattern
     """
@@ -656,7 +675,7 @@ noop_registry: Dict[Any, Any] = {}
 def register_noop_decomp(targets, nop_arg=0):
     def register_fun(cond):
         register_decomposition(targets, registry=noop_registry, unsafe=True)(
-            (cond, nop_arg)
+            (cond, nop_arg)  # type: ignore[arg-type]
         )
         return cond
 
@@ -1032,7 +1051,7 @@ def is_index_put_and_requires_h2d_sync_for_cuda_value(node):
     # if the value we are putting is a cpu scalar.
     # Therefore, when inductor sees an index_put_ with byte tensor indices,
     # it should *not* convert the cpu scalar value into a cuda tensor.
-    args_, kwargs_ = normalize_function(node.target, node.args, node.kwargs)
+    args_, kwargs_ = normalize_function(node.target, node.args, node.kwargs)  # type: ignore[syntax, misc]
     any_byte_bool_indices = False
     indices = args_[1]
     for i in indices:
