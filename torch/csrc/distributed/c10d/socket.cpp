@@ -7,6 +7,7 @@
 #include <torch/csrc/distributed/c10d/socket.h>
 
 #include <cstring>
+#include <optional>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -31,13 +32,13 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <fmt/chrono.h>
 C10_DIAGNOSTIC_POP()
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <torch/csrc/distributed/c10d/error.h>
 #include <torch/csrc/distributed/c10d/exception.h>
 #include <torch/csrc/distributed/c10d/logging.h>
 
 #include <c10/util/CallOnce.h>
-#include <c10/util/Optional.h>
 
 namespace c10d::detail {
 namespace {
@@ -97,12 +98,14 @@ inline void setSocketError(int val) noexcept {
 #endif
 
 // Suspends the current thread for the specified duration.
-void delay(std::chrono::seconds d) {
+void delay(std::chrono::milliseconds d) {
 #ifdef _WIN32
   std::this_thread::sleep_for(d);
 #else
   ::timespec req{};
-  req.tv_sec = d.count();
+  auto ms = d.count();
+  req.tv_sec = ms / 1000;
+  req.tv_nsec = (ms % 1000) * 1000000;
 
   // The C++ Standard does not specify whether `sleep_for()` should be signal-
   // aware; therefore, we use the `nanosleep()` syscall.
@@ -140,7 +143,7 @@ class SocketImpl {
 
   explicit SocketImpl(
       Handle hnd,
-      c10::optional<::addrinfo> remote = c10::nullopt) noexcept
+      std::optional<::addrinfo> remote = std::nullopt) noexcept
       : hnd_{hnd}, remote_(remote) {}
 
   SocketImpl(const SocketImpl& other) = delete;
@@ -179,7 +182,7 @@ class SocketImpl {
     return hnd_;
   }
 
-  const c10::optional<::addrinfo>& remote() const noexcept {
+  const std::optional<::addrinfo>& remote() const noexcept {
     return remote_;
   }
 
@@ -189,7 +192,7 @@ class SocketImpl {
   bool setSocketFlag(int level, int optname, bool value) noexcept;
 
   Handle hnd_;
-  const c10::optional<::addrinfo> remote_;
+  const std::optional<::addrinfo> remote_;
 };
 } // namespace c10d::detail
 
@@ -720,8 +723,6 @@ class SocketConnectOp {
   using Duration = std::chrono::steady_clock::duration;
   using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
 
-  static const std::chrono::seconds delay_duration_;
-
   enum class ConnectResult : uint8_t { Success, Error, Retry };
 
  public:
@@ -758,8 +759,6 @@ class SocketConnectOp {
   std::vector<std::string> errors_{};
   std::unique_ptr<SocketImpl> socket_{};
 };
-
-const std::chrono::seconds SocketConnectOp::delay_duration_{1};
 
 SocketConnectOp::SocketConnectOp(
     const std::string& host,
@@ -816,8 +815,6 @@ bool SocketConnectOp::tryConnect(int family) {
 
   deadline_ = Clock::now() + opts_->connect_timeout();
 
-  std::size_t retry_attempt = 1;
-
   bool retry; // NOLINT(cppcoreguidelines-init-variables)
   do {
     retry = false;
@@ -859,21 +856,24 @@ bool SocketConnectOp::tryConnect(int family) {
     }
 
     if (retry) {
-      if (Clock::now() < deadline_ - delay_duration_) {
+      auto connectBackoff = opts_->connect_backoff();
+      auto delayDuration = connectBackoff->nextBackoff();
+
+      if (Clock::now() < deadline_ - delayDuration) {
         // Prevent our log output to be too noisy, warn only every 30 seconds.
-        if (retry_attempt == 30) {
+        static auto lastLog = std::chrono::steady_clock::now();
+        auto now = std::chrono::steady_clock::now();
+        if ((now - lastLog) >= std::chrono::seconds(30)) {
           C10D_INFO(
               "No socket on ({}, {}) is listening yet, will retry.",
               host_,
               port_);
 
-          retry_attempt = 0;
+          lastLog = now;
         }
 
-        // Wait one second to avoid choking the server.
-        delay(delay_duration_);
-
-        retry_attempt++;
+        // Wait to avoid choking the server.
+        delay(delayDuration);
       } else {
         throwTimeoutError();
       }

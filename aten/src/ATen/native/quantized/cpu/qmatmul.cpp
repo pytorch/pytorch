@@ -84,7 +84,7 @@ Tensor qmatmul(
           .memory_format(qa.suggest_memory_format()),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      std::nullopt);
 
   const Tensor& qa_contig = qa.contiguous();
   const Tensor& qb_contig = qb.contiguous();

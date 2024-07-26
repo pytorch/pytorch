@@ -4,7 +4,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type_base.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 
 namespace torch::jit {
@@ -160,7 +160,7 @@ struct TORCH_API ClassType : public NamedType {
       }
       slot++;
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
   size_t getAttributeSlot(const std::string& name) const {
     if (auto r = findAttributeSlot(name)) {

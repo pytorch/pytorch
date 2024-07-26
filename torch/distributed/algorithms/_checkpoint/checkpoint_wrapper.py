@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
+from abc import ABC, abstractmethod
 from enum import auto, Enum
 from functools import partial
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
@@ -20,7 +21,7 @@ class CheckpointImpl(Enum):
     NO_REENTRANT = auto()
 
 
-class ActivationWrapper(torch.nn.Module):
+class ActivationWrapper(torch.nn.Module, ABC):
     """
     Base class for Activation Checkpoint and Activation Offload.
 
@@ -39,6 +40,7 @@ class ActivationWrapper(torch.nn.Module):
             self._pre_load_state_dict_hook, with_module=True
         )
 
+    @abstractmethod
     def forward(self, *args, **kwargs):
         raise ValueError("Subclasses should implement forward().")
 

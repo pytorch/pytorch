@@ -265,10 +265,9 @@ class CheckSplitsCompiler:
 # other important thing is patching _active_ddp_module, which is what actually
 # triggers DDP optimization
 class FakeDDP(nn.Module):
-    def __init__(self, module):
+    def __init__(self, module, bucket_cap_mb=25):
         super().__init__()
         self.module = module
-        bucket_cap_mb = 25
         self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
 
     @contextmanager
@@ -350,6 +349,98 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 
         opt_model = torch.compile(dynamic=True)(model)
         opt_model(torch.randn(20, 512))
+
+    @config.patch(optimize_ddp=True, capture_scalar_outputs=True)
+    def test_unbacked_symbol_splitting_direct(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight1 = nn.Parameter(torch.randn(512, 512))
+                self.weight2 = nn.Parameter(torch.randn(512, 512))
+
+            def forward(self, x, y):
+                u0, u1 = y.tolist()
+                x = torch.cat([x, x])
+                y = x @ self.weight1
+                z = (x + y @ self.weight2) * u0
+                return z
+
+        model = Model()
+        model = FakeDDP(model)
+
+        opt_model = torch.compile(dynamic=True)(model)
+        opt_model(torch.randn(20, 512), torch.tensor([12, 13]))
+
+    @config.patch(optimize_ddp=True, capture_scalar_outputs=True)
+    def test_unbacked_symbol_splitting_indirect(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight1 = nn.Parameter(torch.randn(512, 512))
+                self.weight2 = nn.Parameter(torch.randn(512, 512))
+
+            def forward(self, x, y):
+                u0, u1 = y.tolist()
+                a = torch.ones(u0)
+                x = torch.cat([x, x])
+                y = x @ self.weight1
+                z = (x + y @ self.weight2) * a.sum()
+                return z
+
+        model = Model()
+        model = FakeDDP(model)
+
+        opt_model = torch.compile(dynamic=True)(model)
+        opt_model(torch.randn(20, 512), torch.tensor([12, 13]))
+
+    @config.patch(optimize_ddp=True, capture_scalar_outputs=True)
+    def test_unbacked_symbol_splitting_torture_multi(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight1 = nn.Parameter(torch.randn(512, 512))
+                self.weight2 = nn.Parameter(torch.randn(512, 512))
+                self.weight3 = nn.Parameter(torch.randn(512, 512))
+
+            def forward(self, x, y):
+                # partition one (contains the u0 def)
+                u0, u1 = y.tolist()
+                x = torch.cat([x, x])
+                y1 = x @ self.weight1
+                # partition two (contains the variable)
+                y2 = y1 @ self.weight2
+                a = torch.ones(u0)
+                # partition three
+                z = (x + y2 @ self.weight3) * a.sum()
+                return z
+
+        model = Model()
+        model = FakeDDP(model, bucket_cap_mb=1)
+
+        opt_model = torch.compile(dynamic=True)(model)
+        opt_model(torch.randn(20, 512), torch.tensor([12, 13]))
+
+    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/130534"
+    @config.patch(optimize_ddp=True, capture_dynamic_output_shape_ops=True)
+    def test_unbacked_symbol_splitting_no_binding(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight1 = nn.Parameter(torch.randn(512, 512))
+                self.weight2 = nn.Parameter(torch.randn(512, 512))
+
+            def forward(self, x, y):
+                nz = y.nonzero()
+                x = torch.cat([x, x])
+                y = x @ self.weight1
+                z = (x + y @ self.weight2) * (nz + 1).sum()
+                return z
+
+        model = Model()
+        model = FakeDDP(model)
+
+        opt_model = torch.compile(dynamic=True)(model)
+        opt_model(torch.randn(20, 512), torch.tensor([0.0, 12.0, 0.0, 11.0]))
 
     @patch.object(config, "optimize_ddp", True)
     def test_call_method_forward(self):

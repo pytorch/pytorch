@@ -12598,7 +12598,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         model_export = M()
         model_onnx = io.BytesIO()
-        test_inputs = tuple()
+        test_inputs = ()
         torch.onnx.export(
             model_export, test_inputs, model_onnx, opset_version=self.opset_version
         )

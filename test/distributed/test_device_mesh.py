@@ -12,7 +12,6 @@ from torch.distributed._tensor._collective_utils import (
 )
 from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
-
 from torch.distributed.distributed_c10d import (
     _get_default_group,
     _world,

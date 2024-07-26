@@ -80,7 +80,7 @@ static void unary_op_noresize(const Tensor& self, const Tensor& output_, std::st
   auto output = output_;
   bool needsCopyToOutput = false;
   if (needsGather(output)) {
-    output = at::empty(output.sizes(), output.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+    output = at::empty(output.sizes(), output.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
     needsCopyToOutput = true;
   }
 
@@ -328,7 +328,7 @@ TORCH_IMPL_FUNC(expm1_out_mps)(const Tensor& self, const Tensor& output) {
   });
 }
 
-static void logit_mps_impl(const Tensor& self, c10::optional<double> eps, Tensor& output, const std::string op_name) {
+static void logit_mps_impl(const Tensor& self, std::optional<double> eps, Tensor& output, const std::string op_name) {
   std::string key = op_name + ":[" + (eps.has_value() ? std::to_string(eps.value()) : "NULL") + "]";
 
   mps::unary_op(self, output, key, ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
@@ -356,19 +356,19 @@ static void logit_mps_impl(const Tensor& self, c10::optional<double> eps, Tensor
   });
 }
 
-Tensor& logit_out_mps(const Tensor& self, c10::optional<double> eps, Tensor& result) {
+Tensor& logit_out_mps(const Tensor& self, std::optional<double> eps, Tensor& result) {
   logit_mps_impl(self, eps, result, "logit_out_mps");
   return result;
 }
 
-Tensor logit_mps(const Tensor& self, c10::optional<double> eps) {
-  Tensor result = at::empty(self.sizes(), ScalarType::Float, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+Tensor logit_mps(const Tensor& self, std::optional<double> eps) {
+  Tensor result = at::empty(self.sizes(), ScalarType::Float, std::nullopt, kMPS, std::nullopt, std::nullopt);
   logit_mps_impl(self, eps, result, "logit_mps");
   return result;
 }
 
 TORCH_IMPL_FUNC(logit_backward_out_mps)
-(const Tensor& grad_output, const Tensor& input, c10::optional<double> eps, const Tensor& grad_input) {
+(const Tensor& grad_output, const Tensor& input, std::optional<double> eps, const Tensor& grad_input) {
   using namespace mps;
   using CachedGraph = MPSUnaryGradCachedGraph;
 
@@ -429,7 +429,7 @@ TORCH_IMPL_FUNC(logit_backward_out_mps)
 
 static void cumulative_op_impl(const Tensor& self,
                                int64_t dim,
-                               c10::optional<ScalarType> dtype,
+                               std::optional<ScalarType> dtype,
                                const Tensor& result,
                                MPSCumulativeOpType cumulativeOpType,
                                const std::string& op_name) {
@@ -487,12 +487,12 @@ static void cumulative_op_impl(const Tensor& self,
 }
 
 TORCH_IMPL_FUNC(cumsum_out_mps)
-(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, const Tensor& result) {
+(const Tensor& self, int64_t dim, std::optional<ScalarType> dtype, const Tensor& result) {
   return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::CUMSUM, "cumsum_out_mps");
 }
 
 TORCH_IMPL_FUNC(cumprod_out_mps)
-(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, const Tensor& result) {
+(const Tensor& self, int64_t dim, std::optional<ScalarType> dtype, const Tensor& result) {
   return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::CUMPROD, "cumprod_out_mps");
 }
 

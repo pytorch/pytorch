@@ -11,7 +11,7 @@
 namespace c10d {
 
 // callback function will be given arguments (optional<string> oldValue,
-// optional<string> newValue)
+// std::optional<string> newValue)
 using WatchKeyCallback =
     std::function<void(std::optional<std::string>, std::optional<std::string>)>;
 

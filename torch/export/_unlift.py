@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import _check_input_constraints_for_graph
-from torch.export.unflatten import _assign_attr, _AttrKind
+from torch.export.unflatten import _assign_attr, _AttrKind, _recursive_getattr
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from ._remove_effect_tokens_pass import _remove_effect_tokens
 
@@ -184,7 +184,6 @@ def _unlift(
     )
     gm.graph._codegen = _get_codegen(in_spec, out_spec, forward_arg_names)
     gm.graph.lint()
-    gm.graph.eliminate_dead_code()
     gm.recompile()
     return gm
 
@@ -264,12 +263,26 @@ def _create_stateful_graph_module(
         plain_graph_module.graph,
         range_constraints=range_constraints,
     )
+
     stateful_gm.register_forward_pre_hook(
         _check_input_constraints_pre_hook, with_kwargs=True
     )
 
     if graph_signature is None:
         return stateful_gm
+
+    # Fix up lifted tensor constants.
+    # fx.GraphModule() constructor silently turns a constant attribute of plain_graph_module
+    # into a buffer in stateful_gm and creates an inconsistency with graph_signature.
+    # We fix this by de-registering these buffers in lifted_tensor_constants
+    # and call _assign_attr(attr_kind=CONSTANT) to register them as constants.
+    for constant_fqn in graph_signature.lifted_tensor_constants:
+        buffer = stateful_gm.get_buffer(constant_fqn)
+        *prefix, field = constant_fqn.rsplit(".")
+        submod = _recursive_getattr(stateful_gm, prefix)
+        delattr(submod, field)
+        _assign_attr(buffer, stateful_gm, constant_fqn, attr_kind=_AttrKind.CONSTANT)
+
     # Fix up non-persistent buffers. torch.fx does not distinguish between
     # persistent and non-persistent buffers, so we must restore that distinction
     # here.

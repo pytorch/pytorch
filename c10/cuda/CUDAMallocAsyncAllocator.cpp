@@ -609,6 +609,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
   }
 
+  ShareableHandle shareIpcHandle(void* handle) override {
+    TORCH_CHECK(
+        false,
+        "cudaMallocAsync does not yet support shareIpcHandle. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
   std::shared_ptr<void> getIpcDevPtr(std::string handle) override {
     TORCH_CHECK(
         false,

@@ -6,9 +6,9 @@ import hashlib
 @functools.lru_cache(None)
 def has_triton_package() -> bool:
     try:
-        import triton
+        from triton.compiler.compiler import triton_key
 
-        return triton is not None
+        return triton_key is not None
     except ImportError:
         return False
 

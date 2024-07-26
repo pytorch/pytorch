@@ -5,6 +5,7 @@ import os
 import torch
 import torch.distributed as c10d
 
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )

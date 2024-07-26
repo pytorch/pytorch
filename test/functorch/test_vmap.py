@@ -36,7 +36,6 @@ from common_utils import (
 from functorch_additional_op_db import additional_op_db
 
 import functorch
-
 import torch
 import torch.nn.functional as F
 from functorch import grad, grad_and_value, jacfwd, jvp, vjp, vmap
@@ -49,6 +48,7 @@ from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyCUDA,
     OpDTypes,
     ops,
     tol,
@@ -69,6 +69,7 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 from torch.utils import _pytree as pytree
+
 
 FALLBACK_REGEX = "There is a performance drop"
 
@@ -211,6 +212,29 @@ class TestVmapAPI(TestCase):
         y = torch.randn(5)
         output = vmap(lambda x: vmap(lambda y: x)(y))(x)
         self.assertEqual(output, x.view(3, 1).expand(3, 5))
+
+    def test_checkpoint(self):
+        A = torch.randn((3, 8, 8), dtype=torch.float64, requires_grad=True)
+
+        def get_grad(checkpoint):
+            A.grad = None
+
+            def get_loss(A):
+                ortho_A, _ = torch.func.vmap(torch.linalg.qr)(A)
+                return torch.sum(ortho_A)
+
+            if checkpoint:
+                loss = torch.utils.checkpoint.checkpoint(
+                    get_loss, A, use_reentrant=False
+                )
+            else:
+                loss = get_loss(A)
+            loss.backward()
+            return A.grad
+
+        expected = get_grad(checkpoint=False)
+        result = get_grad(checkpoint=True)
+        self.assertEqual(result, expected)
 
     def test_unsupported_op_err_msg(self):
         # Unsupported view op
@@ -4382,9 +4406,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 # but found at least two devices, cuda:0 and cpu!
                 xfail("ge", device_type="cuda"),
                 xfail(
-                    "argsort"
-                ),  # aten::argsort.stable hit the vmap fallback which is currently disabled
-                xfail(
                     "searchsorted"
                 ),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
             }
@@ -4795,6 +4816,21 @@ class TestVmapOperatorsOpInfo(TestCase):
             return index_put
 
         self.vmap_outplace_test(f, (x, gy), {}, in_dims=(None, 0))
+
+    @onlyCUDA
+    @parametrize("inplace", [True, False])
+    def test_0d_tensor_index_put(self, device, inplace):
+        def f(t, idx, v):
+            fn = torch.index_put_ if inplace else torch.index_put
+            return fn(t, idx, v)
+
+        N = 2
+        t = torch.zeros((N, 5), device="cuda")
+        idx = torch.tensor([1, 3])
+        v = torch.tensor(1, dtype=t.dtype, device="cpu")
+
+        expected = torch.tensor([[0, 1, 0, 1, 0], [0, 1, 0, 1, 0]], dtype=t.dtype)
+        self.assertEqual(expected, vmap(f, in_dims=(0, None, None))(t, (idx,), v))
 
     @parametrize("training", [True, False])
     @parametrize("track_running_stats", [True, False])

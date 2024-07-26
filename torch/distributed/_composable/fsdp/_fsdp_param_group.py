@@ -1,15 +1,14 @@
 # mypy: allow-untyped-defs
 import contextlib
-import functools
 import logging
 
-from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
 import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
-from torch.autograd.graph import _get_grad_fn_or_grad_acc, _MultiHandle
+from torch.autograd.graph import register_multi_post_accumulate_grad_hook
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_unflatten
@@ -57,7 +56,6 @@ class FSDPCommContext:
         # copy-in with the current all-gather in forward; copy-in overlaps with
         # reduce-scatter in backward without the separate copy-in stream
         self.all_gather_copy_in_stream = torch.cuda.Stream(priority=high_priority)
-        self.all_gather_state: Optional[AllGatherState] = None
         # All-gather stream allows overlapping next all-gather with current
         # forward compute
         self.all_gather_stream = torch.cuda.Stream(priority=high_priority)
@@ -68,6 +66,11 @@ class FSDPCommContext:
         # since collectives use different network resources and can overlap
         # in the typical intra-node sharding / inter-node replication case
         self.all_reduce_stream = torch.cuda.Stream()
+        # All-gather/reduce-scatter states keep references to collective
+        # tensors produced in one stream and used in another and accompanying
+        # CUDA events for synchronization
+        self.all_gather_state: Optional[AllGatherState] = None
+        self.reduce_scatter_state: Optional[ReduceScatterState] = None
         # Post-forward order for explicit backward prefetching
         self.post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
 
@@ -87,6 +90,11 @@ class AllGatherState(NamedTuple):
     event: torch.cuda.Event  # all-gather copy-out
 
 
+class ReduceScatterState(NamedTuple):
+    reduce_scatter_input: torch.Tensor
+    event: torch.cuda.Event  # reduce-scatter event
+
+
 class FSDPParamGroup:
     """This class represents a parameter group to communicate together."""
 
@@ -96,15 +104,15 @@ class FSDPParamGroup:
     def __init__(
         self,
         params: List[nn.Parameter],
-        module: nn.Module,
+        modules: Tuple[nn.Module, ...],
         mesh_info: FSDPMeshInfo,
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
-        self.module = module  # permit ref cycle because 1:1 lifetime
-        param_module_infos = _get_param_module_infos(params, module)
+        self.modules = modules  # permit ref cycle because 1:1 lifetime
+        param_module_infos = _get_param_module_infos(params, modules)
         self.fsdp_params = [
             FSDPParam(
                 param,
@@ -167,6 +175,22 @@ class FSDPParamGroup:
         # Only for HSDP, if accumulating gradients without all-reduce, save the
         # partial reduce output (only reduce-scattered but not all-reduced)
         self._partial_reduce_output: Optional[torch.Tensor] = None
+
+        # TODO: remove this hook and hook register once 2D state dict is supported.
+        def _raise_not_implemented_if_2d(*args: Any, **kwargs: Any) -> None:
+            raise NotImplementedError(
+                "2D state_dict is under development. Please check "
+                "https://github.com/pytorch/pytorch/issues/129627 for more details."
+            )
+
+        modules_with_2d_params: Set[nn.Module] = set()
+        for fsdp_param in self.fsdp_params:
+            module = fsdp_param._module_info.module
+            if len(fsdp_param._spmd_placements) > 1:
+                modules_with_2d_params.add(module)
+        for module in modules_with_2d_params:
+            module.register_state_dict_pre_hook(_raise_not_implemented_if_2d)
+            module._register_load_state_dict_pre_hook(_raise_not_implemented_if_2d)
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
@@ -354,7 +378,17 @@ class FSDPParamGroup:
         if len(fsdp_params_with_grad) == 0:
             return
         with record_function(self._with_fqn("FSDP::post_backward_reduce")):
-            self._post_reduce_event, self._partial_reduce_output = foreach_reduce(
+            if self.comm_ctx.reduce_scatter_state is not None:
+                torch.cuda.current_stream().wait_event(
+                    self.comm_ctx.reduce_scatter_state.event
+                )
+                self.comm_ctx.reduce_scatter_state = None
+            (
+                reduce_scatter_input,
+                reduce_scatter_event,
+                self._post_reduce_event,
+                self._partial_reduce_output,
+            ) = foreach_reduce(
                 fsdp_params_with_grad,
                 unsharded_grads,
                 self._reduce_scatter_process_group,
@@ -366,6 +400,9 @@ class FSDPParamGroup:
                 self.comm_ctx.all_reduce_stream,
                 self.all_reduce_grads,
                 self._partial_reduce_output,
+            )
+            self.comm_ctx.reduce_scatter_state = ReduceScatterState(
+                reduce_scatter_input, reduce_scatter_event
             )
 
     def _multi_grad_post_backward(self, *args: Any, **kwargs: Any):
@@ -481,7 +518,7 @@ class FSDPParamGroup:
                 tensors = [
                     fsdp_param.unsharded_param for fsdp_param in self.fsdp_params
                 ]
-                self._multi_grad_hook_handle = _register_multi_post_acc_grad_hook(
+                self._multi_grad_hook_handle = register_multi_post_accumulate_grad_hook(
                     tensors, self._multi_grad_post_backward
                 )
             return args, kwargs  # no tensors that require gradients
@@ -561,7 +598,7 @@ class FSDPParamGroup:
 
 
 def _get_param_module_infos(
-    params: List[nn.Parameter], module: nn.Module
+    params: List[nn.Parameter], modules: Tuple[nn.Module, ...]
 ) -> List[ParamModuleInfo]:
     """
     Shared parameter: lin1.weight = lin2.weight
@@ -571,16 +608,21 @@ def _get_param_module_infos(
     """
     params_set = set(params)
     param_to_module_info: Dict[nn.Parameter, ParamModuleInfo] = {}
-    for _, submodule in module.named_modules(remove_duplicate=False):
-        for param_name, param in _named_parameters_with_duplicates(
-            submodule, recurse=False
-        ):
-            if param in params_set:
-                if param not in param_to_module_info:
-                    param_to_module_info[param] = ParamModuleInfo(submodule, param_name)
-                else:
-                    param_to_module_info[param].shared_modules.append(submodule)
-                    param_to_module_info[param].shared_param_names.append(param_name)
+    for module in modules:
+        for _, submodule in module.named_modules(remove_duplicate=False):
+            for param_name, param in _named_parameters_with_duplicates(
+                submodule, recurse=False
+            ):
+                if param in params_set:
+                    if param not in param_to_module_info:
+                        param_to_module_info[param] = ParamModuleInfo(
+                            submodule, param_name
+                        )
+                    else:
+                        param_to_module_info[param].shared_modules.append(submodule)
+                        param_to_module_info[param].shared_param_names.append(
+                            param_name
+                        )
     if len(param_to_module_info) != len(params):
         raise AssertionError(f"Some parameters are not in the module tree of {module}")
     return [param_to_module_info[param] for param in params]
@@ -597,35 +639,3 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
     def backward(ctx, *grads: torch.Tensor):
         ctx.param_group.post_backward()
         return (None,) + grads
-
-
-def _register_multi_post_acc_grad_hook(
-    tensors: List[nn.Parameter], fn: Callable
-) -> RemovableHandle:
-    tensors = [t for t in tensors if t.requires_grad]
-    if not all(t.is_leaf for t in tensors):
-        raise ValueError("Requires all tensors to be leaf tensors")
-    if len(tensors) == 0:
-        return _MultiHandle(tuple())
-
-    acc_grads = [_get_grad_fn_or_grad_acc(t) for t in tensors]
-    count: Dict[int, int] = dict()
-    nb_calls = None
-
-    @functools.wraps(fn)
-    def wrapped_fn(tensor: torch.Tensor) -> None:
-        nonlocal count, nb_calls
-        id = torch._C._current_graph_task_id()
-        assert id != -1, "expected this hook to be called inside a backward call"
-        count[id] = count.get(id, 0)
-        if count[id] == 0:
-            nb_calls = sum(
-                torch._C._will_engine_execute_node(n) for n in acc_grads  # type: ignore[attr-defined]
-            )
-        count[id] += 1
-        if count[id] == nb_calls:
-            fn(tensors)
-            del count[id]
-
-    handles = tuple(t.register_post_accumulate_grad_hook(wrapped_fn) for t in tensors)
-    return _MultiHandle(handles)

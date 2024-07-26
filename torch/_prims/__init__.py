@@ -329,6 +329,21 @@ def _make_prim(
     _prim = _prim_packet.default
     if tags:
         _prim._tags = tags
+    elif aten_packet := getattr(torch.ops.aten, name, None):
+        overload_tags = [
+            getattr(aten_packet, overload).tags for overload in aten_packet.overloads()
+        ]
+        tags_intersection = set(overload_tags[0])
+        tags_intersection.intersection_update(*overload_tags[1:])
+
+        # dont inadvertently add to prim ops
+        tags_intersection.discard(torch.Tag.core)
+        # causes errors with python ref executor tests, none of the
+        # data dependent pytorch ops actually decompose to prims
+        tags_intersection.discard(torch.Tag.data_dependent_output)
+
+        # iter over first tags for determinism
+        _prim._tags = tuple(t for t in overload_tags[0] if t in tags_intersection)
 
     from torch._subclasses.fake_tensor import contains_tensor_types
 

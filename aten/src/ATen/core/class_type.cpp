@@ -631,7 +631,7 @@ std::optional<IValue> ClassType::findConstant(const std::string& name) const {
   }
 
   if (pos >= constantNames_.size()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return constantValues_[pos];
 }
@@ -659,7 +659,7 @@ std::optional<ClassType::Property> ClassType::getProperty(const std::string& nam
     }
   }
 
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 void ClassType::addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter) {
@@ -676,7 +676,7 @@ std::optional<size_t> ClassType::findConstantSlot(const std::string& name) const
     }
     slot++;
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 const std::string& ClassType::getConstantName(size_t slot) const {

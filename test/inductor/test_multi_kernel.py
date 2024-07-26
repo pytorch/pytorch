@@ -7,7 +7,6 @@ import unittest
 import torch
 from torch import nn
 from torch._dynamo.testing import reset_rng_state
-
 from torch._inductor import config, test_operators
 from torch._inductor.codegen.multi_kernel import MultiKernelCall
 from torch._inductor.test_case import TestCase

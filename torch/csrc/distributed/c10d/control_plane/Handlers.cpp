@@ -16,7 +16,7 @@ class HandlerRegistry {
     std::unique_lock<std::shared_mutex> lock(handlersMutex_);
 
     if (handlers_.find(name) != handlers_.end()) {
-      throw std::runtime_error(
+      throw std::invalid_argument(
           fmt::format("Handler {} already registered", name));
     }
 
@@ -28,7 +28,8 @@ class HandlerRegistry {
 
     auto it = handlers_.find(name);
     if (it == handlers_.end()) {
-      throw std::runtime_error(fmt::format("Failed to find handler {}", name));
+      throw std::invalid_argument(
+          fmt::format("Failed to find handler {}", name));
     }
     return handlers_[name];
   }
@@ -55,6 +56,7 @@ HandlerRegistry& getHandlerRegistry() {
 
 RegisterHandler pingHandler{"ping", [](const Request&, Response& res) {
                               res.setContent("pong", "text/plain");
+                              res.setStatus(200);
                             }};
 
 } // namespace

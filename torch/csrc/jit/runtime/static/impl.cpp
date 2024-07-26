@@ -55,12 +55,13 @@ C10_DEFINE_bool(
 namespace torch::jit {
 
 namespace {
-
+#ifndef STRIP_ERROR_MESSAGES
 std::string iValueToString(const c10::IValue& val) {
   std::ostringstream oss;
   oss << val;
   return oss.str();
 }
+#endif
 
 bool allArgsAreTensors(const Node* node) {
   const auto& inputs = node->inputs();
@@ -320,7 +321,7 @@ std::pair<std::shared_ptr<Graph>, std::optional<Module>> PrepareForStaticModule(
     const StaticModuleOptions& opts,
     std::vector<IValue> sample_inputs) {
   PrepareGraphForStaticModule(graph, opts, std::move(sample_inputs));
-  return std::make_pair(graph, c10::nullopt);
+  return std::make_pair(graph, std::nullopt);
 }
 
 } // namespace
@@ -573,7 +574,7 @@ StaticModule::StaticModule(
     const auto num_schema_args = schema_->arguments().size();
     DCHECK(num_schema_args > 0);
     if (removeSelfFromGraphInput(graph_)) {
-      module_ = c10::nullopt;
+      module_ = std::nullopt;
       num_inputs_ = num_schema_args - 1;
     }
   }
@@ -1251,7 +1252,7 @@ bool BlockRunner::fast_check_and_correct_overlap_with(
   auto& tensor = tensor_ival.toTensor();
   if (planner_->overlapWithInternalBuffer(tensor.data_ptr())) {
     DLOG(INFO) << "Detected alias for node: " << PrintNode(n.node());
-    tensor_ival = at::native::clone(tensor, c10::nullopt);
+    tensor_ival = at::native::clone(tensor, std::nullopt);
     n.set_outputs_memory_overlap_detected();
     return true;
   }
@@ -2218,7 +2219,7 @@ bool ProcessedNode::check_and_correct_overlap_with(
   auto& tensor = output_ival.toTensor();
   if (!checkNoMemoryOverlap(input, tensor)) {
     DLOG(INFO) << "Detected alias for node: " << PrintNode(node());
-    output_ival = at::native::clone(tensor, c10::nullopt);
+    output_ival = at::native::clone(tensor, std::nullopt);
     set_outputs_memory_overlap_detected();
     return true;
   }

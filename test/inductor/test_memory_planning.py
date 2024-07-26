@@ -1,11 +1,11 @@
 # Owner(s): ["module: inductor"]
 
 import sys
-
 import unittest
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -81,7 +81,10 @@ class TestMemoryPlanning(TestCase):
 
     @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
     def test_abi_compatible(self):
-        from test_aot_inductor import AOTIRunnerUtil
+        try:
+            from .test_aot_inductor import AOTIRunnerUtil
+        except ImportError:
+            from test_aot_inductor import AOTIRunnerUtil
 
         f, args = self._generate(device="cuda")
         dim0_x = Dim("dim0_x", min=1, max=2048)

@@ -645,7 +645,7 @@ class DistributedDataParallel(Module, Joinable):
     ):
         super().__init__()
         Joinable.__init__(self)
-        self.logger = None
+        self.logger: Optional[dist.Logger] = None
         if bool(delay_all_reduce_named_params is not None) != bool(
             param_to_hook_all_reduce is not None
         ):
@@ -1207,9 +1207,11 @@ class DistributedDataParallel(Module, Joinable):
             param_to_name_mapping,
             # User can set dist._DEFAULT_FIRST_BUCKET_BYTES to tune DDP first
             # bucket.
-            dist._DEFAULT_FIRST_BUCKET_BYTES
-            if self.bucket_bytes_cap_default
-            else self.bucket_bytes_cap,
+            (
+                dist._DEFAULT_FIRST_BUCKET_BYTES
+                if self.bucket_bytes_cap_default
+                else self.bucket_bytes_cap
+            ),
         )
 
         self.logger = dist.Logger(self.reducer)

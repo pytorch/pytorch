@@ -5,6 +5,7 @@ from copy import copy
 import torch
 from torch.distributed._tools.mod_tracker import ModTracker
 from torch.testing._internal.common_utils import run_tests, TestCase, xfailIfTorchDynamo
+from torch.utils.checkpoint import checkpoint
 
 
 class TestModTracker(TestCase):
@@ -132,6 +133,65 @@ class TestModTracker(TestCase):
             ("pre_bw", None, False, True),
             ("post_bw", None, False, True),
             ("post_bw", None, False, True),
+        ]
+        self.assertEqual(test_op, expected_op)
+
+    @xfailIfTorchDynamo
+    def test_ac(self):
+        class Foo(torch.nn.Module):
+            def __init__(self, n_layers: int, dim: int, use_ac: bool = False):
+                super().__init__()
+                self.linears = torch.nn.ModuleList()
+                self.use_ac = use_ac
+                for _ in range(n_layers):
+                    self.linears.append(torch.nn.Linear(dim, dim))
+
+            def forward(self, x):
+                for i, block in enumerate(self.linears):
+                    if i >= 1 and self.use_ac:
+                        x = checkpoint(
+                            block, x, preserve_rng_state=True, use_reentrant=False
+                        )
+                    else:
+                        x = block(x)
+                    assert x is not None
+                    x = torch.nn.functional.relu(x)
+                return x
+
+        bsz = 2
+        dim = 8
+        n_layers = 2
+        test_op = []
+
+        def hook(mod, mt, hook_name):
+            mfqn = mt.get_known_fqn(mod) if mod is not None else None
+            test_op.append((hook_name, mfqn, mfqn in mt.parents, mt.is_bw))
+
+        mt = ModTracker()
+        mt.register_user_hooks(
+            lambda m, i: hook(m, mt, "pre_fw"),
+            lambda m, i, o: hook(m, mt, "post_fw"),
+            lambda m, go: hook(m, mt, "pre_bw"),
+            lambda m, gi: hook(m, mt, "post_bw"),
+        )
+        model = Foo(n_layers, dim, True)
+        x = torch.randn(bsz, dim)
+        with mt:
+            model(x).sum().backward()
+
+        expected_op = [
+            ("pre_fw", "Foo", True, False),
+            ("pre_fw", "Foo.linears.0", True, False),
+            ("post_fw", "Foo.linears.0", True, False),
+            ("pre_fw", "Foo.linears.1", True, False),
+            ("post_fw", "Foo.linears.1", True, False),
+            ("post_fw", "Foo", True, False),
+            ("pre_bw", "Foo", True, True),
+            ("pre_bw", "Foo.linears.1", True, True),
+            ("pre_fw", "Foo.linears.1", True, True),
+            ("post_fw", "Foo.linears.1", True, True),
+            ("post_bw", "Foo.linears.1", True, True),
+            ("pre_bw", "Foo.linears.0", True, True),
         ]
         self.assertEqual(test_op, expected_op)
 

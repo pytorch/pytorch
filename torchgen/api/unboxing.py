@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from __future__ import annotations
 
 from torchgen.api import cpp
 from torchgen.api.types import Binding, CppSignatureGroup, CType
@@ -103,7 +103,7 @@ def name(f: NativeFunction) -> str:
 
 
 # Convert all the arguments in a NativeFunction to C++ code
-def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
+def convert_arguments(f: NativeFunction) -> tuple[list[Binding], list[str]]:
     # we need the 'self' argument so method needs to be False
     args = (
         CppSignatureGroup.from_native_function(f, method=False)
@@ -138,7 +138,7 @@ def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
 # (2) A Binding corresponding to the newly created unboxed variable, including variable name and its CType
 def argumenttype_ivalue_convert(
     t: Type, arg_name: str, *, mutable: bool = False
-) -> Tuple[str, CType, List[str], List[str]]:
+) -> tuple[str, CType, list[str], list[str]]:
     # Unboxing is for mobile, which doesn't care about SymInts
     ctype = cpp.argumenttype_type(
         t=t, mutable=mutable, binds=arg_name, symint=False
@@ -172,7 +172,7 @@ def argumenttype_ivalue_convert(
 
 def _gen_code_base_type(
     arg_name: str, out_name: str, ctype: CType
-) -> Tuple[List[str], List[str]]:
+) -> tuple[list[str], list[str]]:
     return [
         f"{ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.to<{ctype.cpp_type(strip_ref=True)}>();"
     ], []
@@ -180,7 +180,7 @@ def _gen_code_base_type(
 
 def _gen_code_optional_type(
     arg_name: str, out_name: str, t: OptionalType, ctype: CType
-) -> Tuple[List[str], List[str]]:
+) -> tuple[list[str], list[str]]:
     in_name = f"{arg_name}_opt_in"
     res_name, _, res_code, decl = argumenttype_ivalue_convert(t.elem, in_name)
     return (
@@ -203,7 +203,7 @@ if ({arg_name}_opt.has_value()) {{
 
 def _gen_code_list_type(
     arg_name: str, out_name: str, t: ListType, ctype: CType
-) -> Tuple[List[str], List[str]]:
+) -> tuple[list[str], list[str]]:
     in_name = f"{arg_name}_list_in"
     elem_name = f"{arg_name}_elem"
     code = [f"const c10::List<c10::IValue> {in_name} = {arg_name}.toList();"]

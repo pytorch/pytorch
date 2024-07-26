@@ -17,6 +17,7 @@ from torch.fx.immutable_collections import immutable_dict
 from torch.fx.passes.reinplace import _is_view_op
 from torch.utils import _pytree as pytree
 
+
 aten = torch.ops.aten
 
 
@@ -382,6 +383,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     """
 
     copy_args_to_copy_nodes = {}
+    # maps argument to the first copy_ node that mutates it.
+    copy_nodes = {}
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
     node_order: Dict[Any, int] = {}
@@ -407,10 +410,11 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 src = src.args[0]
 
             copy_args_to_copy_nodes[(dst, src)] = node
+            copy_nodes[dst] = node
 
             mutated_inputs.add(node.args[0])
 
-    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
+    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node, mutated_arg):
         node_loc = node_order[node]
         copy_node_loc = node_order[copy_node] if copy_node is not None else None
 
@@ -432,6 +436,16 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 # Reinplacing does not change shape metadata
                 if is_meta_only_user(user):
                     continue
+                # If our graph looks like:
+                # foo(mutated_arg)
+                # mutated_arg.copy_(other)
+                # then it's safe for us to reinplace foo because mutated_arg
+                # will get overwritten anyways.
+                if (
+                    user.target is torch.ops.aten.copy_.default
+                    and mutated_arg is user.args[0]
+                ):
+                    continue
                 return True
         return False
 
@@ -443,13 +457,15 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
         if mutated_arg.op in ("placeholder", "get_attr"):
-            if not (
-                copy_node := copy_args_to_copy_nodes.get((mutated_arg, node), False)
-            ):
+            # Get the first copy_ node that mutates the mutated_arg.
+            copy_node = copy_nodes.get(mutated_arg, None)
+            if copy_node is None:
+                # There is no copy_ back to the candidate mutated_arg (which is a graph input).
+                # Therefore the semantics of the program are that it does not mutate
+                # mutated_arg, so we cannot re-inplace it.
                 return False
-
             if any_use_of_views_after_node(
-                node, shared_view_nodes, copy_node=copy_node
+                node, shared_view_nodes, copy_node=copy_node, mutated_arg=mutated_arg
             ):
                 return False
 
@@ -461,7 +477,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             return False
         else:
             return not any_use_of_views_after_node(
-                node, shared_view_nodes, copy_node=None
+                node, shared_view_nodes, copy_node=None, mutated_arg=mutated_arg
             )
 
     replace_dict: Dict[torch.fx.Node, torch.fx.Node] = {}
