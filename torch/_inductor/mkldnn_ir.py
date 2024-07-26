@@ -620,7 +620,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
     def codegen(self, wrapper):
         # Parser the inputs and constant
         args = [x.codegen_reference() for x in self.inputs]
-        const_args = []
+        const_args = []  # type: ignore[var-annotated] # next PR
         const_args.extend(self.codegen_const_args())
 
         x = args[0]
@@ -798,7 +798,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
     def codegen(self, wrapper):
         # Parser the inputs and constant
         args = [x.codegen_reference() for x in self.inputs]
-        const_args = []
+        const_args = []  # type: ignore[var-annotated] # next PR
         const_args.extend(self.codegen_const_args())
 
         x = args[0]
@@ -1204,7 +1204,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
     def codegen(self, wrapper):
         # Parser the inputs and constant
         args = [x.codegen_reference() for x in self.inputs]
-        const_args = []
+        const_args = []  # type: ignore[var-annotated] # next PR
         const_args.extend(self.codegen_const_args())
 
         x = args[0]
@@ -1388,7 +1388,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
     def codegen(self, wrapper):
         # Parser the inputs and constant
         args = [x.codegen_reference() for x in self.inputs]
-        const_args = []
+        const_args = []  # type: ignore[var-annotated] # next PR
         const_args.extend(self.codegen_const_args())
 
         x = args[0]
@@ -1513,7 +1513,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         w_zero_point.realize()
         inputs = inputs + [w_scale, w_zero_point]
         if binary_post_op == "sum":
-            other = cls.require_stride_order(other, req_stride_order)
+            other = cls.require_stride_order(other, req_stride_order)  # type: ignore[assignment] # next PR
         inputs.append(other)
         constant_args = constant_args + [
             output_scale,
@@ -1594,15 +1594,15 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         x = cls.require_stride1(cls.realize_input(x))
         # If batch_first, x has been permuted in lstm before entering the mkldnn_rnn_layer.
         # Make sure x is contiguous in batch_first case.
-        x.freeze_layout()
+        x.freeze_layout()  # type: ignore[attr-defined] # next PR
         w0 = cls.require_stride1(cls.realize_input(w0))
         w1 = cls.require_stride1(cls.realize_input(w1))
         w2 = cls.require_stride1(cls.realize_input(w2))
         w3 = cls.require_stride1(cls.realize_input(w3))
         hx = cls.require_stride1(cls.realize_input(hx))
-        hx.freeze_layout()
+        hx.freeze_layout()  # type: ignore[attr-defined] # next PR
         cx = cls.require_stride1(cls.realize_input(cx))
-        cx.freeze_layout()
+        cx.freeze_layout()  # type: ignore[attr-defined] # next PR
 
         input_size = x.get_size()
         assert len(input_size) == 3, "Expect lstm input to be 3D"

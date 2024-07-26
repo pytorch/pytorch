@@ -626,7 +626,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 )
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
-                template_buffer.inputs[1] = ir.InputsKernel.unwrap_storage_for_input(
+                template_buffer.inputs[1] = ir.InputsKernel.unwrap_storage_for_input(  # type: ignore[index] # next PR
                     W_packed_constant
                 )
             return output

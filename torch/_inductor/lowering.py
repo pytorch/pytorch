@@ -2100,7 +2100,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             arg.get_stride()
             if is_aligned_realized_tensor(arg):
                 return V.graph.try_match_insignificant_strides(
-                    ir.ExternKernel.realize_input(arg), meta_stride
+                    ir.ExternKernel.realize_input(arg), meta_stride  # type: ignore[arg-type] # next PR
                 )
         except AttributeError:
             pass
@@ -2112,7 +2112,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             if not is_aligned(arg):
                 if is_aligned(arg.unwrap_view()):
                     return V.graph.try_match_insignificant_strides(
-                        ir.ExternKernel.realize_input(arg), meta_stride
+                        ir.ExternKernel.realize_input(arg), meta_stride  # type: ignore[arg-type] # next PR
                     )
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
