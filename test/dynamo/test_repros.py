@@ -5357,6 +5357,23 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         tensor = torch.randn([2, 3])
         res = random_op(tensor, params)
 
+    def test_data_attr_mutation_after_saved_for_bw(self):
+        def f(x):
+            out = x.sin()
+            x.data.mul_(2)
+            return out
+
+        x = torch.randn(4, requires_grad=True)
+        x_test = x.clone().detach().requires_grad_(True)
+
+        out = f(x)
+        out_test = torch.compile(f, backend="aot_eager")(x_test)
+        self.assertEqual(out, out_test)
+
+        out.sum().backward()
+        out_test.sum().backward()
+        self.assertEqual(x.grad, x_test.grad)
+
     # https://github.com/pytorch/pytorch/issues/128072
     def test_map_with_multiple_args(self):
         def f(a, b):
