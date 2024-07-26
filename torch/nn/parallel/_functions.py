@@ -4,8 +4,7 @@ from typing import List, Optional
 import torch
 from torch._utils import _get_device_index
 from torch.autograd import Function
-
-from . import comm
+from torch.nn.parallel import comm
 
 
 class Broadcast(Function):
