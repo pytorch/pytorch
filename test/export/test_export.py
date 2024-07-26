@@ -1382,6 +1382,20 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
+    @testing.expectedFailureRetraceability  # Unexpected type in sourceless builder torch._higher_order_ops.wrap.WrapWithSetGradEnabled
+    @testing.expectedFailureTrainingIRToRunDecomp  # Encountered autograd state manager op
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_set_grad_empty(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                with torch.no_grad():
+                    x = x + 1
+                    return x, None
+
+        ep = export(M(), (torch.ones(3, 3),))
+        inp = torch.randn(3, 3)
+        self.assertTrue(torch.allclose(ep.module()(inp)[0], inp + 1))
+
     def test_derived_dim_out_of_order_simplified(self):
         _dimz = torch.export.Dim("_dimz", min=6, max=8)
         dimy = _dimz - 1
