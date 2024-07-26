@@ -363,29 +363,46 @@ compiled_autograd_enabled = False
 in_compiled_autograd_region = False
 
 
-@contextlib.contextmanager
-def enable(compiler_fn):
-    if not hasattr(enable, "warmup_count"):
-        enable.warmup_count = 0  # type: ignore[attr-defined]
-    if enable.warmup_count < torch._dynamo.config.warmup_runs:  # type: ignore[attr-defined]
-        enable.warmup_count += 1  # type: ignore[attr-defined]
-        verbose_log.debug("compiled autograd warmup run done: %s", enable.warmup_count)  # type: ignore[attr-defined]
-        yield
-    else:
-        prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-            functools.partial(AutogradCompilerInstance, compiler_fn)
-        )
-        if snapshot_verbose_logging_enabled():
-            torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
-        global compiled_autograd_enabled
-        compiled_autograd_enabled = True
-        try:
-            with torch.autograd.set_multithreading_enabled(False):
-                yield
-        finally:
-            if not prior:
+class _EnableContext:
+    def __init__(self, compiler_fn):
+        self.compiler_fn = compiler_fn
+        self.warmup_count = 0
+        self.prior = None
+        self.set_multithreading_enabled_ctx_mgr = None
+
+    def __enter__(self):
+        if self.warmup_count >= torch._dynamo.config.warmup_runs:
+            self.prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+                functools.partial(AutogradCompilerInstance, self.compiler_fn)
+            )
+            if snapshot_verbose_logging_enabled():
+                torch._C._dynamo.compiled_autograd.set_verbose_logger(
+                    cpp_verbose_log_fn
+                )
+            global compiled_autograd_enabled
+            compiled_autograd_enabled = True
+            self.set_multithreading_enabled_ctx_mgr = (
+                torch.autograd.set_multithreading_enabled(False)
+            )
+            self.set_multithreading_enabled_ctx_mgr.__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.warmup_count < torch._dynamo.config.warmup_runs:  # type: ignore[attr-defined]
+            self.warmup_count += 1  # type: ignore[attr-defined]
+            verbose_log.debug("compiled autograd warmup run done: %s", self.warmup_count)  # type: ignore[attr-defined]
+        else:
+            if self.set_multithreading_enabled_ctx_mgr:
+                self.set_multithreading_enabled_ctx_mgr.__exit__(
+                    exc_type, exc_val, exc_tb
+                )
+                self.set_multithreading_enabled_ctx_mgr = None
+            if not self.prior:
                 compiled_autograd_enabled = False
-            torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+            torch._C._dynamo.compiled_autograd.set_autograd_compiler(self.prior)
+            self.prior = None
+
+
+enable = _EnableContext
 
 
 @contextlib.contextmanager

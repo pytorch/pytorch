@@ -581,6 +581,9 @@ class OptimizeContext(_TorchDynamoContext):
             else:
                 return super(OptimizeContext, self).__call__(fn)(*args, **kwargs)
 
+        # Save the function pointer to find the original callable while nesting
+        # of decorators.
+        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
         return _fn
 
     def __reduce__(self):
