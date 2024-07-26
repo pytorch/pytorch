@@ -58,8 +58,8 @@ from torch.distributed.fsdp.api import (
 from torch.distributed.fsdp.wrap import _Policy
 from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.utils import _sync_params_and_buffers
-
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
@@ -476,11 +476,11 @@ def _init_core_state(
     state._unshard_event = None
     # Mapping from fully sharded module to the handles it is responsible to
     # unshard and reshard (see [Note: Fully Sharded Module])
-    _fully_sharded_module_to_handle: Dict[nn.Module, FlatParamHandle] = dict()
+    _fully_sharded_module_to_handle: Dict[nn.Module, FlatParamHandle] = {}
     state._fully_sharded_module_to_handle = _fully_sharded_module_to_handle
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handle`
-    _handle: FlatParamHandle = None
+    _handle: Optional[FlatParamHandle] = None
     state._handle = _handle
     params: List[FlatParameter] = []
     state.params = params
@@ -874,6 +874,7 @@ def _materialize_meta_module(
         torch.cuda.current_device()
     )
     modules_to_materialize = _get_modules_to_materialize(root_module, ignored_modules)
+    module = None
     try:
         # Assume that each module's `reset_parameters()` only initializes its
         # own parameters and not those of its children

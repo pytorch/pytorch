@@ -4,6 +4,8 @@ namespace {
 
 using namespace c10d::symmetric_memory;
 
+static bool is_finalizing_ = false;
+
 class AllocatorMap {
  public:
   static AllocatorMap& get() {
@@ -28,9 +30,7 @@ class AllocatorMap {
   }
 
   ~AllocatorMap() {
-    for (auto& it : map_) {
-      it.second.release();
-    }
+    is_finalizing_ = true;
   }
 
  private:
@@ -107,6 +107,10 @@ static at::Tensor empty_strided_p2p_persistent(
 
 namespace c10d {
 namespace symmetric_memory {
+
+bool is_finalizing() {
+  return is_finalizing_;
+}
 
 void register_allocator(
     c10::DeviceType device_type,

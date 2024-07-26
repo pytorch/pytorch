@@ -380,6 +380,17 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm(
     AtenTensorHandle* ret0,
     AtenTensorHandle* ret1);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm_v2(
+    AtenTensorHandle self,
+    AtenTensorHandle mat2,
+    AtenTensorHandle scale_a,
+    AtenTensorHandle scale_b,
+    AtenTensorHandle bias,
+    AtenTensorHandle scale_result,
+    int32_t* out_dtype,
+    int8_t use_fast_accum,
+    AtenTensorHandle* ret0);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
     AtenTensorHandle input,
     AtenTensorHandle weight,
@@ -448,6 +459,13 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
     AtenTensorHandle mat2);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__mm_plus_mm_out(
+    AtenTensorHandle out,
+    AtenTensorHandle a,
+    AtenTensorHandle b,
+    AtenTensorHandle c,
+    AtenTensorHandle d);
 
 // This will soon be deprecated after ao_quantization is complete.
 // Please refrain from using this or increasing callsites.

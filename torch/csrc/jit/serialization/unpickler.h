@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using TypeResolver =
     std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
@@ -199,5 +198,4 @@ class TORCH_API Unpickler {
 
 void restoreAccurateTypeTags(const IValue& root, const c10::TypePtr& type_tag);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -458,7 +458,7 @@ void initPythonBindings(PyObject* module) {
                       [&](const c10::IValue& v) {
                         out.append(torch::jit::toPyObject(v));
                       },
-                      [&](const c10::nullopt_t&) { out.append(py::none()); },
+                      [&](const std::nullopt_t&) { out.append(py::none()); },
                       [&](const auto& v) { out.append(py::cast(v)); }),
                   input);
             }

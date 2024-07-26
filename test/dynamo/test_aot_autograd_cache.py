@@ -2,12 +2,14 @@
 
 import os
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
 
 import torch._functorch._aot_autograd
+from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import (
@@ -140,6 +142,51 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 2)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @dynamo_config.patch("compiled_autograd", True)
+    def test_compiled_autograd_bypass(self):
+        def fn(a, b):
+            out = a.cos() + b
+            loss = out.sum()
+            ga, gb = torch.autograd.grad(loss, inputs=[a, b])
+
+        a = torch.randn(25, requires_grad=True)
+        b = torch.randn(25, requires_grad=True)
+        a2 = a.detach().clone().requires_grad_(True)
+        b2 = b.detach().clone().requires_grad_(True)
+        compiled_fn = torch.compile(fn, backend="inductor")
+        self.assertEqual(fn(a, b), compiled_fn(a2, b2))
+        self.assertEqual(
+            counters["aot_autograd"]["autograd_cache_miss"], 1
+        )  # from compiled forward
+        self.assertEqual(
+            counters["aot_autograd"]["autograd_cache_bypass"], 1
+        )  # from compiled autograd
+
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @dynamo_config.patch("compiled_autograd", True)
+    def test_inference_graph_cache_hit_with_compiled_autograd_enabled(self):
+        def fn(a, b):
+            out = a.cos() + b
+            return out.sum()
+
+        a = torch.randn(25)
+        b = torch.randn(25)
+        compiled_fn = torch.compile(fn, backend="inductor")
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        # Clear dynamo and run again. Should be a cache hit.
+        counters.clear()
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
     @inductor_config.patch({"fx_graph_cache": True})
@@ -331,6 +378,45 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
                 res2[0].sum().backward()
                 self.assertEqual(a.grad, a2.grad)
 
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_nn_module_with_params_global_constant(self):
+        class MyMod(torch.nn.Module):
+            CONSTANT = torch.tensor([[2, 2], [2, 2]])
+
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn([2, 2]))
+
+            def forward(self, x):
+                return x.sin() + self.param + MyMod.CONSTANT
+
+        with torch.no_grad():
+            compiled_fn = torch.compile(MyMod(), backend="inductor", fullgraph=True)
+            res1 = compiled_fn(torch.ones([2, 2]))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            self._clear_dynamo_and_codecache()
+            res2 = compiled_fn(torch.ones([2, 2]))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            self.assertEqual(res1, res2)
+            # Edit the "constant". We'll get a cache hit,
+            # but it should result in a different result when run
+            # because MyMod.CONSTANT is an input to the graph
+            MyMod.CONSTANT = torch.tensor([[3, 3], [3, 3]])
+            self._clear_dynamo_and_codecache()
+            res3 = compiled_fn(torch.ones([2, 2]))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+            self.assertNotEqual(res1, res3)
+            self.assertEqual(res1, res3.sub(torch.ones(2, 2)))
+
 
 @inductor_config.patch("fx_graph_cache", True)
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
@@ -486,6 +572,52 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(
             BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
         )
+
+    def test_private_namespace(self):
+        # TODO: anyone who monkeypatches a **public** function into torch namespace with @allow_in_graph
+        # could still break our sanity check and cache something bad. But that's an edge case we'll take the risk on.
+        # Monkeypatch some random private function into torch, see that it fails
+        @torch._dynamo.allow_in_graph
+        def my_private_fun(x):
+            return x.sin()
+
+        with patch("torch._my_priv", new=my_private_fun, create=True):
+
+            def fn(x):
+                return torch._my_priv(x)
+
+            config = self.default_config()
+            self.assertRaises(
+                BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
+            )
+
+    def test_private_builtin(self):
+        # _foreach_add is a private torch function, but
+        # it's also a builtin_function_or_method, so it should be allowed to be cached
+        # since dynamo allows it in the graph
+        def fn(x, b):
+            y = (x, x)
+            return torch._foreach_add(y, b)
+
+        config = self.default_config()
+        r1 = self.gen_cache_key(fn, config, inputs=[torch.ones(3), 1])
+        r2 = self.gen_cache_key(fn, config, inputs=[torch.ones(3), 2])
+        self.assertNotEqual(r1, r2)
+
+    def test_nn_module_with_params(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.seq = torch.nn.Parameter(torch.ones((3, 3)))
+
+            def forward(self, x):
+                return self.seq + x
+
+        config = self.default_config()
+        # Different inputs and parameters, but all the same size
+        c1 = self.gen_cache_key(MyMod(), config, inputs=[torch.ones((3, 3))])
+        c2 = self.gen_cache_key(MyMod(), config, inputs=[torch.ones((3, 3))])
+        self.assertEqual(c1, c2)
 
     def test_normal_torch_function(self):
         @torch._dynamo.allow_in_graph

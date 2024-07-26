@@ -4,19 +4,14 @@ from typing import List, Tuple
 
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import (
-    ProcessGroup,
-)
 import torch.distributed._shard.sharding_spec as shard_spec
-from torch.distributed._shard.sharding_spec._internals import (
-    get_split_size,
-    get_chunked_dim_size,
-)
-from torch.distributed.nn.functional import (
-    all_to_all,
-    all_to_all_single,
-)
+from torch._C._distributed_c10d import ProcessGroup
 from torch.distributed._shard.metadata import ShardMetadata
+from torch.distributed._shard.sharding_spec._internals import (
+    get_chunked_dim_size,
+    get_split_size,
+)
+from torch.distributed.nn.functional import all_to_all, all_to_all_single
 
 from .shard import Shard
 
@@ -42,7 +37,7 @@ def get_idx_from_placements(placements, current_rank) -> int:
     for idx, placement in enumerate(placements):  # type: ignore[attr-defined]
         if current_rank == placement.rank():  # type: ignore[union-attr]
             return idx
-    raise RuntimeError('current_rank not in the placement.')
+    raise RuntimeError("current_rank not in the placement.")
 
 
 def build_reshard_metadata(
@@ -138,7 +133,9 @@ def reshuffle_local_shard(
     local_shard = local_shard.transpose(0, reshard_dim).contiguous()
     gathered_input_size = list(local_shard.size())
     gathered_input_size[0] = sharded_dim_size
-    gathered_input = torch.empty(gathered_input_size, device=local_shard.device, dtype=local_shard.dtype)
+    gathered_input = torch.empty(
+        gathered_input_size, device=local_shard.device, dtype=local_shard.dtype
+    )
     # all2all.
     local_shard = all_to_all_single(
         gathered_input,

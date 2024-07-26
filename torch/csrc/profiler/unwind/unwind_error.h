@@ -1,6 +1,6 @@
 #pragma once
-#include <c10/util/Optional.h>
 #include <fmt/format.h>
+#include <optional>
 #include <stdexcept>
 
 namespace torch::unwind {

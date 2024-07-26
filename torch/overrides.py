@@ -1041,18 +1041,18 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
             lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1  # noqa: B950
         ),
         torch.quantized_max_pool1d: (
-            lambda input, kernel_size, stride=tuple(), padding=(0,), dilation=(
+            lambda input, kernel_size, stride=(), padding=(0,), dilation=(
                 1,
             ), ceil_mode=False: -1
         ),
         torch.quantized_max_pool2d: (
-            lambda input, kernel_size, stride=tuple(), padding=(0, 0), dilation=(
+            lambda input, kernel_size, stride=(), padding=(0, 0), dilation=(
                 1,
                 1,
             ), ceil_mode=False: -1
         ),
         torch.quantized_max_pool3d: (
-            lambda input, kernel_size, stride=tuple(), padding=(0, 0, 0), dilation=(
+            lambda input, kernel_size, stride=(), padding=(0, 0, 0), dilation=(
                 1,
                 1,
                 1,
@@ -1404,6 +1404,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.copy_: lambda self, src, non_blocking=False: -1,
         Tensor.cpu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.cuda: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.mtia: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.xpu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.ipu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.data_ptr: lambda self: -1,
@@ -1800,7 +1801,7 @@ has_torch_function_variadic = _add_docstr(
 
 @functools.lru_cache(None)
 def _get_overridable_functions() -> (
-    Tuple[Dict[Any, List[Callable]], Dict[Callable, str]],
+    Tuple[Dict[Any, List[Callable]], Dict[Callable, str]]
 ):
     overridable_funcs = collections.defaultdict(list)
     index = {}

@@ -345,7 +345,7 @@ static void autogradNotImplementedFallbackImpl(
       [&](size_t idx, size_t _, const at::Tensor& t) {
         storage_saved.push_back(
             t.has_storage() ? std::optional<c10::Storage>(t.storage())
-                            : c10::nullopt);
+                            : std::nullopt);
         impl_saved.push_back(t.getIntrusivePtr());
       },
       &stack_args_copy,
@@ -364,11 +364,14 @@ static void autogradNotImplementedFallbackImpl(
 #ifndef NDEBUG
   _foreach_tensor(
       [&](size_t idx_tensor, size_t _, const at::Tensor& t) {
-        if (storage_saved.at(idx_tensor).has_value())
+        // Skip next two for chunk_cat, see
+        // https://github.com/pytorch/pytorch/issues/130073
+        if (storage_saved.at(idx_tensor).has_value() &&
+            op_name != "aten::_chunk_cat")
           TORCH_INTERNAL_ASSERT(
               storage_saved.at(idx_tensor).value().is_alias_of(t.storage()),
               op_name);
-        if (impl_saved.at(idx_tensor))
+        if (impl_saved.at(idx_tensor) && op_name != "aten::_chunk_cat")
           TORCH_INTERNAL_ASSERT(
               impl_saved.at(idx_tensor) == t.getIntrusivePtr(), op_name);
       },
@@ -379,8 +382,15 @@ static void autogradNotImplementedFallbackImpl(
       [&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
         if (at::impl::tensor_has_dispatch(t) ||
             at::impl::dispatch_mode_enabled() ||
-            // NJT offsets are expected to be reused; skip use_count() check
-            op_name == "aten::_nested_get_offsets")
+            // NJT components are expected to be reused; skip use_count() check
+            op_name.rfind("aten::_nested_get", 0) == 0)
+          return;
+        // Skip test_parallel_materialize
+        // For details see https://github.com/pytorch/pytorch/issues/130073
+        if (op_name == "aten::_test_parallel_materialize" ||
+            op_name == "aten::_test_optional_intlist" ||
+            op_name == "aten::_test_optional_filled_intlist" ||
+            op_name == "aten::_test_optional_floatlist")
           return;
         if (!is_inplace_output[idx_ret])
           TORCH_INTERNAL_ASSERT(
@@ -392,8 +402,12 @@ static void autogradNotImplementedFallbackImpl(
         // where each element represents the norm of corresponding input Tensor,
         // here I want to return the same number of Tensors as the input
         // TensorList, see https://github.com/pytorch/pytorch/issues/93940
+        // Skip native_channel_shuffle as well as transformer_encoder
+        // For details see https://github.com/pytorch/pytorch/issues/130073
         if (!is_aliased_output[idx_ret] && t.has_storage() &&
-            op_name != "aten::_foreach_norm")
+            op_name != "aten::_foreach_norm" &&
+            op_name != "aten::_transformer_encoder_layer_fwd" &&
+            op_name != "aten::native_channel_shuffle")
           TORCH_INTERNAL_ASSERT(t.storage().use_count() == 1);
       },
       stack,

@@ -116,14 +116,14 @@ struct OptionalCUDAGuard {
 
   /// Returns the device that was set immediately prior to initialization of the
   /// guard, or nullopt if the guard is uninitialized.
-  optional<Device> original_device() const {
+  std::optional<Device> original_device() const {
     return guard_.original_device();
   }
 
   /// Returns the most recent device that was set using this device guard,
   /// either from construction, or via set_device, if the guard is initialized,
   /// or nullopt if the guard is uninitialized.
-  optional<Device> current_device() const {
+  std::optional<Device> current_device() const {
     return guard_.current_device();
   }
 
@@ -239,10 +239,10 @@ struct OptionalCUDAStreamGuard {
 
   /// Returns the CUDA stream that was set at the time the guard was most
   /// recently initialized, or nullopt if the guard is uninitialized.
-  optional<CUDAStream> original_stream() const {
+  std::optional<CUDAStream> original_stream() const {
     auto r = guard_.original_stream();
     if (r.has_value()) {
-      return make_optional(CUDAStream(CUDAStream::UNCHECKED, r.value()));
+      return std::make_optional(CUDAStream(CUDAStream::UNCHECKED, r.value()));
     } else {
       return nullopt;
     }
@@ -251,10 +251,10 @@ struct OptionalCUDAStreamGuard {
   /// Returns the most recent CUDA stream that was set using this stream guard,
   /// either from construction, or via reset_stream, if the guard is
   /// initialized, or nullopt if the guard is uninitialized.
-  optional<CUDAStream> current_stream() const {
+  std::optional<CUDAStream> current_stream() const {
     auto r = guard_.current_stream();
     if (r.has_value()) {
-      return make_optional(CUDAStream(CUDAStream::UNCHECKED, r.value()));
+      return std::make_optional(CUDAStream(CUDAStream::UNCHECKED, r.value()));
     } else {
       return nullopt;
     }

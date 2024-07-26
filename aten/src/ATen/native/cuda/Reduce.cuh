@@ -313,7 +313,7 @@ struct ReduceJitOp {
       OutputCalculator output_calc,
       const void* src,
       char* dst0,
-      optional<char*> dst1,
+      std::optional<char*> dst1,
       void* acc_buf,
       void* cta_buf,
       int* semaphores,
@@ -376,7 +376,7 @@ struct ReduceOp {
       OutputCalculator output_calc,
       const void* src,
       char* dst0,
-      optional<char*> dst1,
+      std::optional<char*> dst1,
       void* acc_buf,
       void* cta_buf,
       int* semaphores,
@@ -1190,7 +1190,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
   char* out_data = (char*)iter.data_ptr(0);
   const auto noutputs = iter.noutputs();
-  optional<char*> out_data_extra;
+  std::optional<char*> out_data_extra;
   if (noutputs > 1) {
     out_data_extra = (char*)iter.data_ptr(1);
   } else {
@@ -1299,7 +1299,7 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
   char* out_data = (char*)iter.data_ptr(0);
   const auto noutputs = iter.noutputs();
-  optional<char*> out_data_extra;
+  std::optional<char*> out_data_extra;
   if (noutputs > 1) {
     out_data_extra = (char*)iter.data_ptr(1);
   } else {

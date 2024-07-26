@@ -274,7 +274,7 @@ class Guard:
 
     def set_export_info(self, guard_type, guarded_class, code_list, obj_weakref):
         if not self.guard_types:
-            self.guard_types = list()
+            self.guard_types = []
 
         self.guard_types.append(guard_type)
 
@@ -637,7 +637,7 @@ class TracingContext:
         # careful not to accidentally induce guards on the SymInt if
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
-        self.output_strides: Optional[List[Optional[List[int]]]] = None
+        self.output_strides: Optional[List[Optional[Tuple[int, ...]]]] = None
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of

@@ -10,19 +10,17 @@ import sympy
 from sympy import Expr
 
 import torch
-
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
-from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey
+from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
+
 from .. import config, ir
-from ..codecache import CudaKernelParamCache
 from ..utils import _align, ALIGN_BYTES, cache_on_self, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
 from .cpp_utils import (
     cexpr,
-    CppPrinter,
     DEVICE_TO_ATEN,
     DTYPE_TO_ATEN,
     DTYPE_TO_CPP,
@@ -71,20 +69,6 @@ class CppWrapperCpu(WrapperCodeGen):
         self.custom_op_wrapper_loaded = False
         self.expr_printer = cexpr
 
-        # CppPrinter sometimes calls at::native functions which causes problems in
-        # the ABI-compatible mode. Currently we are hitting this problem when codegen
-        # Grid computation expressions, but we my need to fix other size computation
-        # as well.
-        class GridExprCppPrinter(CppPrinter):
-            def _print_FloorDiv(self, expr):
-                x, div = expr.args
-                x = self.paren(self.doprint(x))
-                div = self.paren(self.doprint(div))
-                assert expr.is_integer, "Expect integers in GridExprPrinter"
-                return f"({x}/{div})"
-
-        self.grid_expr_printer = GridExprCppPrinter().doprint
-
     def generate_kernel_call(
         self,
         name,
@@ -94,8 +78,10 @@ class CppWrapperCpu(WrapperCodeGen):
         cuda=True,
         triton=True,
         arg_types=None,
+        raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        grid_extra_kwargs="",
     ):
         """
         Generates kernel call code.
@@ -254,7 +240,7 @@ class CppWrapperCpu(WrapperCodeGen):
         # mark output type to unwrap tensor back to python scalar
         from ..ir import ShapeAsConstantBuffer
 
-        output_is_tensor = dict()
+        output_is_tensor = {}
         for idx, x in enumerate(V.graph.graph_outputs):
             if isinstance(x, ShapeAsConstantBuffer):
                 output_is_tensor[idx] = False
@@ -328,12 +314,9 @@ class CppWrapperCpu(WrapperCodeGen):
                         """
                     )
                 else:
-                    assert isinstance(
-                        d, sympy.Symbol
-                    ), f"dimention at {dim_idx=} for tensor {name=} must be a sympy.Symbol"
-                    sym_range = V.graph.sizevars.shape_env.var_to_range.get(d, None)
-                    if sym_range is None:
-                        continue
+                    from torch.utils._sympy.value_ranges import bound_sympy
+
+                    sym_range = bound_sympy(d, V.graph.sizevars.shape_env.var_to_range)
                     if not math.isinf(sym_range.lower):
                         self.prefix.splice(
                             f"""
@@ -397,7 +380,6 @@ class CppWrapperCpu(WrapperCodeGen):
                     f"{CppWrapperCpu.get_input_cpp_type(x)}"
                     for x in V.graph.graph_inputs.values()
                 )
-
                 output_arrayref_types = ", ".join(
                     f"ArrayRefTensor<{DTYPE_TO_CPP[x.get_dtype()]}>"
                     for x in V.graph.graph_outputs
@@ -557,7 +539,7 @@ class CppWrapperCpu(WrapperCodeGen):
                         from ..graph import may_get_constant_buffer_dtype
 
                         dtype = may_get_constant_buffer_dtype(
-                            V.graph.graph_inputs[input_key]
+                            V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
                         )
                         assert (
                             dtype is not None
@@ -943,6 +925,10 @@ class CppWrapperCpu(WrapperCodeGen):
         dtype_str = str(dtype).split(".")[-1]
         writer = indented_buffer or self
         writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
+
+        # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
+        tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+
         writer.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
         )
@@ -1190,6 +1176,8 @@ class CppWrapperCpu(WrapperCodeGen):
             # FIXME: no need to do this after we switch to the torchgen-ed C shim
             if kernel_suffix == "_scaled_dot_product_flash_attention":
                 shim_fn = "aoti_torch__scaled_dot_product_flash_attention_v2"
+            elif kernel_suffix == "_scaled_mm":
+                shim_fn = "aoti_torch__scaled_mm_v2"
             elif kernel_suffix.startswith("wrapped_fbgemm"):
                 assert self.device == "cpu", "Using wrapped_fbgemm out of CPU!"
                 shim_fn = f"aoti_torch_cpu_{kernel_suffix}"
@@ -1298,34 +1286,6 @@ class CppWrapperCpu(WrapperCodeGen):
             self.generate_c_shim_extern_kernel_call(kernel, args)
         else:
             self.writeline(self.wrap_kernel_call(kernel, args))
-
-    def generate_user_defined_triton_kernel(
-        self, kernel_name, grid, configs, args, triton_meta, arg_types=None
-    ):
-        assert len(grid) != 0
-        if len(grid) == 1:
-            grid_decision = grid[0]
-        else:
-            meta = CudaKernelParamCache.get(kernel_name)
-            assert meta is not None
-            grid_decision = None
-            for i, c in enumerate(configs):
-                if all(arg == meta["meta"][key] for key, arg in c.kwargs.items()):
-                    grid_decision = grid[i]
-                    break
-            assert grid_decision is not None
-
-        current_device = V.graph.scheduler.get_current_device_or_throw()
-        self.generate_kernel_call(
-            kernel_name,
-            args,
-            arg_types=arg_types,
-            grid=grid_decision,
-            device_index=current_device.index,
-            cuda=True,
-            triton=True,
-            triton_meta=triton_meta,
-        )
 
     def generate_scatter_fallback(
         self,
@@ -1690,53 +1650,105 @@ class CppWrapperCpu(WrapperCodeGen):
         )
 
     def codegen_reinterpret_view(
-        self, data, size_list, stride_list, offset, writer
+        self, data, size_list, stride_list, offset, writer, dtype=None
     ) -> str:
         dim = str(len(size_list))
+        original_offset = offset
         size = self.codegen_shape_tuple(size_list)
         stride = self.codegen_shape_tuple(stride_list)
         offset = self.codegen_sizevar(offset)
-
+        call_strs = []
         if config.abi_compatible:
-            tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
+            final_tmp_name = None
+            final_tmp_name_is_RAIIAtenTensorHandle = False
+
+            def create_reinterpret_call():
+                tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
+                args = [
+                    f"{data.get_name()}",
+                    dim,
+                    self.codegen_int_array_var(
+                        size,
+                        writer,
+                        known_statically=self.is_statically_known_list_of_ints(
+                            size_list
+                        ),
+                        graph=self.get_codegened_graph(),
+                    ),
+                    self.codegen_int_array_var(
+                        stride,
+                        writer,
+                        known_statically=self.is_statically_known_list_of_ints(
+                            stride_list
+                        ),
+                        graph=self.get_codegened_graph(),
+                    ),
+                    offset,
+                ]
+                call_str = (
+                    f"auto {tmp_name} = reinterpret_tensor_wrapper({', '.join(args)});"
+                )
+                return tmp_name, call_str
+
+            def create_dtypeview_call(reinterpret_call):
+                tmp_AtenTensorHandle = (
+                    f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
+                )
+                call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
+                dtype_name = str(dtype).split(".")[-1]
+                device_name = "cuda" if data.layout.device.type == "cuda" else "cpu"
+                get_dtype_function = f"aoti_torch_dtype_{dtype_name}"
+                dtypeview_function = f"aoti_torch_{device_name}_view_dtype"
+                call_strs.append(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK({dtypeview_function}"
+                    f"({reinterpret_call}, {get_dtype_function}(), &{tmp_AtenTensorHandle}));"
+                )
+                tmp_RAIIAtenTensorHandle = (
+                    f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}_handle"
+                )
+                call_strs.append(
+                    f"RAIIAtenTensorHandle {tmp_RAIIAtenTensorHandle}({tmp_AtenTensorHandle});"
+                )
+                return tmp_RAIIAtenTensorHandle, call_strs
+
+            if (
+                size_list == data.layout.size
+                and stride_list == data.layout.stride
+                and original_offset == data.layout.offset
+            ):
+                # pure dtypeview
+                if dtype is not None and dtype != data.dtype:
+                    tmp_output_name, tmp_call_strs = create_dtypeview_call(
+                        data.get_name()
+                    )
+                    call_strs.extend(tmp_call_strs)
+                    final_tmp_name = tmp_output_name
+                    final_tmp_name_is_RAIIAtenTensorHandle = True
+                else:
+                    return f"{data.get_name()}"
+            else:
+                # firstly create reinterpretview
+                final_tmp_name, reinterpret_call = create_reinterpret_call()
+                call_strs.append(reinterpret_call)
+
+                if dtype is not None and dtype != data.dtype:
+                    # wrap it with dtypeview
+                    final_tmp_name, tmp_call_strs = create_dtypeview_call(
+                        reinterpret_call
+                    )
+                    call_strs.extend(tmp_call_strs)
             # Because the memory planning is done in two passes (see the implementation
             # of self.generate), the writeline behavior is different in the two passes.
             if writer is None:
                 writer = self
-
-            args = [
-                f"{data.get_name()}",
-                dim,
-                self.codegen_int_array_var(
-                    size,
-                    writer,
-                    known_statically=self.is_statically_known_list_of_ints(size_list),
-                    graph=self.get_codegened_graph(),
-                ),
-                self.codegen_int_array_var(
-                    stride,
-                    writer,
-                    known_statically=self.is_statically_known_list_of_ints(stride_list),
-                    graph=self.get_codegened_graph(),
-                ),
-                offset,
-            ]
-
-            def gen_reinterpret_call(writer, args):
-                writer.writeline(
-                    f"auto {tmp_name} = reinterpret_tensor_wrapper({', '.join(args)});"
-                )
-
+            writer.writelines(call_strs)
             if (
                 self.can_stack_allocate_buffer(data)
                 and self.is_statically_known_list_of_ints(size_list)
                 and self.is_statically_known_list_of_ints(stride_list)
                 and ir.is_contiguous_strides_for_shape(stride_list, size_list)
             ):
-                gen_reinterpret_call(writer, args)
-                return tmp_name
-
-            gen_reinterpret_call(writer, args)
+                return final_tmp_name
 
             # NB, the return handle here represents a temporary tensor, which will be automatically
             # released.
@@ -1767,7 +1779,10 @@ class CppWrapperCpu(WrapperCodeGen):
             #     }.data()
             # );
             # ```
-            return f"wrap_with_raii_handle_if_needed({tmp_name})"
+            if not final_tmp_name_is_RAIIAtenTensorHandle:
+                return f"wrap_with_raii_handle_if_needed({final_tmp_name})"
+            else:
+                return final_tmp_name
         else:
             args = [data.get_name(), size, stride, offset]
             return f"reinterpret_tensor({', '.join(args)})"
@@ -2096,19 +2111,19 @@ class CppWrapperCpu(WrapperCodeGen):
             if isinstance(output_args, str):
                 output_args = [output_args]
 
-        if config.is_fbcode():
+        if V.graph.aot_mode and config.abi_compatible:
             assert op_overload is not None
             assert raw_args is not None
             assert outputs is not None
 
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
+            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
                 cpp_kernel_key,
                 op_overload,
                 raw_args,
                 output_args,
             )
         else:
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_oss(
+            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
                 buf_name,
                 python_kernel_name,
                 cpp_kernel_name,
@@ -2192,7 +2207,7 @@ if (custom_op_wrapper.get() == NULL) {
             lines += f"PyTuple_SetItem({py_args_var}, {idx}, {generate_py_arg_inner(raw_arg, arg_type)});\n"
         return lines
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_oss(
+    def generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
         self,
         buf_name: str,
         python_kernel_name: str,
@@ -2205,7 +2220,7 @@ if (custom_op_wrapper.get() == NULL) {
         raw_args=None,
         output_args: Optional[List[str]] = None,
     ):
-        if V.graph.aot_mode or not config.abi_compatible:
+        if not config.abi_compatible:
             # Will update this to use an OSS version ProxyExecutor
             if cpp_kernel_key not in self.extern_call_ops:
                 self.writeline(
@@ -2273,7 +2288,7 @@ if (py_{buf_name}.get() == NULL) {{
             )
             self.writelines(scope_gil_acquire)
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
+    def generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
         self,
         cpp_kernel_key,
         op_overload,
@@ -2356,6 +2371,10 @@ if (py_{buf_name}.get() == NULL) {{
         elif isinstance(val, (list, tuple)):
             # FIXME: This happens because type_ is not always properly set to torch.ListType
             return f"{{{', '.join(self.val_to_arg_str(x, None) for x in val)}}}"
+        elif isinstance(val, SymTypes):
+            return self.expr_printer(val.node.expr)
+        elif isinstance(val, sympy.Expr):
+            return self.expr_printer(val)
         else:
             return repr(val)
 

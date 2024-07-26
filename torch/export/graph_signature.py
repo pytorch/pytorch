@@ -108,8 +108,15 @@ class OutputSpec:
 
     def __post_init__(self):
         assert isinstance(
-            self.arg, (TensorArgument, SymIntArgument, ConstantArgument, TokenArgument)
-        )
+            self.arg,
+            (
+                TensorArgument,
+                SymIntArgument,
+                ConstantArgument,
+                TokenArgument,
+                CustomObjArgument,
+            ),
+        ), self.arg
 
 
 def _sig_to_specs(
@@ -127,6 +134,7 @@ def _sig_to_specs(
     outputs: List[ArgumentSpec],
     input_tokens: List[str],
     output_tokens: List[str],
+    non_persistent_buffers: Set[str],
 ) -> Tuple[List[InputSpec], List[OutputSpec]]:
     def to_input_spec(inp: ArgumentSpec) -> InputSpec:
         if isinstance(inp, TokenArgument):
@@ -148,11 +156,7 @@ def _sig_to_specs(
                 kind=InputKind.BUFFER,
                 arg=inp,
                 target=inputs_to_buffers[name],
-                # Mark as True for now; we will fix this up to distinguish
-                # persistent from non-persistent later in tracing.
-                # See: rewrite_non_persistent_buffers()
-                # TODO(suo): this is horrible.
-                persistent=True,
+                persistent=(inputs_to_buffers[name] not in non_persistent_buffers),
             )
         else:
             raise AssertionError(f"Unknown tensor input kind: {name}")
@@ -369,6 +373,8 @@ class ExportGraphSignature:
                 user_outputs.append(s.arg.name)
             elif isinstance(s.arg, ConstantArgument):
                 user_outputs.append(s.arg.value)
+            elif isinstance(s.arg, CustomObjArgument):
+                user_outputs.append(s.arg.name)
             else:
                 raise RuntimeError(f"{s.arg} is not a valid user output")
         return tuple(user_outputs)
@@ -510,7 +516,7 @@ class ExportGraphSignature:
         """
         assert isinstance(old, str)
         assert isinstance(new, str)
-        arg_types = (TensorArgument, SymIntArgument, CustomObjArgument)
+        arg_types = (TensorArgument, SymIntArgument, CustomObjArgument, TokenArgument)
         for o in self.output_specs:
             if isinstance(o.arg, arg_types):
                 if o.arg.name == old:

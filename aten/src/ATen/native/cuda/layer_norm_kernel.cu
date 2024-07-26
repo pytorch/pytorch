@@ -1354,10 +1354,10 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
 
   Tensor Y = at::native::empty_like(
       *X,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
+      std::nullopt /* dtype */,
+      std::nullopt /* layout */,
+      std::nullopt /* device */,
+      std::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
   Tensor mean = at::empty({M}, X->options().dtype(acc_type));
@@ -1414,42 +1414,42 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
   if (grad_input_mask[0]) {
     dX = at::native::empty_like(
         *X,
-        c10::nullopt /* dtype */,
-        c10::nullopt /* layout */,
-        c10::nullopt /* device */,
-        c10::nullopt /* pin_memory */,
+        std::nullopt /* dtype */,
+        std::nullopt /* layout */,
+        std::nullopt /* device */,
+        std::nullopt /* pin_memory */,
         LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[1]) {
     dgamma = M > 0 ? at::native::empty_like(
                          *gamma,
-                         c10::nullopt /* dtype */,
-                         c10::nullopt /* layout */,
-                         c10::nullopt /* device */,
-                         c10::nullopt /* pin_memory */,
+                         std::nullopt /* dtype */,
+                         std::nullopt /* layout */,
+                         std::nullopt /* device */,
+                         std::nullopt /* pin_memory */,
                          LEGACY_CONTIGUOUS_MEMORY_FORMAT)
                    : at::native::zeros_like(
                          *gamma,
-                         c10::nullopt /* dtype */,
-                         c10::nullopt /* layout */,
-                         c10::nullopt /* device */,
-                         c10::nullopt /* pin_memory */,
+                         std::nullopt /* dtype */,
+                         std::nullopt /* layout */,
+                         std::nullopt /* device */,
+                         std::nullopt /* pin_memory */,
                          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[2]) {
     dbeta = M > 0 ? at::native::empty_like(
                         *beta,
-                        c10::nullopt /* dtype */,
-                        c10::nullopt /* layout */,
-                        c10::nullopt /* device */,
-                        c10::nullopt /* pin_memory */,
+                        std::nullopt /* dtype */,
+                        std::nullopt /* layout */,
+                        std::nullopt /* device */,
+                        std::nullopt /* pin_memory */,
                         LEGACY_CONTIGUOUS_MEMORY_FORMAT)
                   : at::native::zeros_like(
                         *beta,
-                        c10::nullopt /* dtype */,
-                        c10::nullopt /* layout */,
-                        c10::nullopt /* device */,
-                        c10::nullopt /* pin_memory */,
+                        std::nullopt /* dtype */,
+                        std::nullopt /* layout */,
+                        std::nullopt /* device */,
+                        std::nullopt /* pin_memory */,
                         LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (M > 0 && N > 0) {

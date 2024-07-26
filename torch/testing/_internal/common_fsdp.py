@@ -999,6 +999,19 @@ def patch_unshard(new_unshard: Callable):
 
 @no_type_check
 @contextlib.contextmanager
+def patch_reshard(new_reshard: Callable):
+    orig_reshard = FSDPParamGroup.reshard
+    dist.barrier()
+    FSDPParamGroup.reshard = new_reshard
+    try:
+        yield
+    finally:
+        dist.barrier()
+        FSDPParamGroup.reshard = orig_reshard
+
+
+@no_type_check
+@contextlib.contextmanager
 def patch_post_backward(new_post_backward: Callable):
     orig_post_backward = FSDPParamGroup.post_backward
     dist.barrier()

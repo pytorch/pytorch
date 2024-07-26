@@ -9,10 +9,10 @@
 
 #include <ATen/record_function.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/Optional.h>
 #include <c10/util/hash.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
+#include <optional>
 
 // TODO: replace with pytorch/rfcs#43 when it is ready.
 #define SOFT_ASSERT(cond, ...)                         \
@@ -92,6 +92,7 @@ TORCH_API std::string shapesToStr(
 TORCH_API std::string strListToStr(const std::vector<std::string>& types);
 TORCH_API std::string inputOpIdsToStr(
     const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids);
+TORCH_API std::string ivalueToStr(const c10::IValue& val);
 TORCH_API std::string ivalueListToStr(const std::vector<c10::IValue>& list);
 TORCH_API std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
@@ -168,6 +169,9 @@ constexpr auto kGroupSize = "Group size";
 constexpr auto kProcessGroupName = "Process Group Name";
 constexpr auto kProcessGroupDesc = "Process Group Description";
 constexpr auto kGroupRanks = "Process Group Ranks";
+constexpr auto kRank = "Rank";
+constexpr auto kP2pSrc = "Src Rank";
+constexpr auto kP2pDst = "Dst Rank";
 #endif // USE_DISTRIBUTED
 
 } // namespace torch::profiler::impl

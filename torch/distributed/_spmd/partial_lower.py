@@ -7,11 +7,10 @@ import operator
 from typing import Callable, List, Optional, Set, Tuple
 
 import torch
-
 from functorch import make_fx
-
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.decomposition import select_decomp_table
+
 
 MIN_ATEN_OPS_TO_LOWER = 10
 
@@ -46,7 +45,7 @@ def _is_container_node(node: torch.fx.Node) -> bool:
             "Malformed graph: a container node is used as input for non-getitem nodes."
             "\nNode: {fmt_node}\nUsers: {fmt_users}".format(
                 fmt_node=node.format_node(),
-                fmt_users="\n".join(u.format_node() for u in node.users),
+                fmt_users="\n".join(u.format_node() for u in node.users),  # type: ignore[misc]
             )
         )
         return True

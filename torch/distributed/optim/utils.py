@@ -2,6 +2,7 @@
 from typing import Type
 
 from torch import optim
+
 from .functional_adadelta import _FunctionalAdadelta
 from .functional_adagrad import _FunctionalAdagrad
 from .functional_adam import _FunctionalAdam
@@ -10,6 +11,7 @@ from .functional_adamw import _FunctionalAdamW
 from .functional_rmsprop import _FunctionalRMSprop
 from .functional_rprop import _FunctionalRprop
 from .functional_sgd import _FunctionalSGD
+
 
 # dict to map a user passed in optimizer_class to a functional
 # optimizer class if we have already defined inside the

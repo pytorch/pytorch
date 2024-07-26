@@ -85,8 +85,8 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.utils import _p_assert
-from ._flat_param import FlatParameter, FlatParamHandle
 
+from ._flat_param import FlatParameter, FlatParamHandle
 from ._optim_utils import (
     _flatten_optim_state_dict,
     _get_param_id_to_param_from_optim_input,
