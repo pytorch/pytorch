@@ -318,7 +318,7 @@ def rewrite_index_for_function(
     call_ranges = tuple(group) + tuple(reduction_group)
     indices_to_keep = [
         f"x{len(call_ranges) - (idx + 1)}"
-        for idx in range(len(local_buf.get_layout().size))
+        for idx in range(len(local_buf.get_layout().size))  # type: ignore[union-attr] # next PR
     ]
     sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
     replacements = {}
@@ -341,7 +341,7 @@ def rewrite_index_for_nodes(
     for i in range(len(local_buf.get_size())):
         var = sympy_index_symbol_with_prefix(SymT.INDEX, i)
         index_vars.append(var if var in used_vars else 0)
-    index = local_buf.layout.make_indexer()(index_vars)
+    index = local_buf.layout.make_indexer()(index_vars)  # type: ignore[arg-type] # next PR
     return index
 
 

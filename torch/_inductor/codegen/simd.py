@@ -867,11 +867,11 @@ class SIMDKernel(Kernel):
         uniform_stride_order = None
         for arg_name in call_args:
             buf = V.graph.try_get_buffer(arg_name)
-            if buf and len(buf.layout.size) == 4:
+            if buf and len(buf.layout.size) == 4:  # type: ignore[union-attr] # next PR
                 # ignore the tensor if only 1 dimension is non-zero
-                if len([x for x in buf.layout.size if x == 1]) == 3:
+                if len([x for x in buf.layout.size if x == 1]) == 3:  # type: ignore[union-attr] # next PR
                     continue
-                stride_order = ir.get_stride_order(buf.layout.stride)
+                stride_order = ir.get_stride_order(buf.layout.stride)  # type: ignore[union-attr] # next PR
                 if uniform_stride_order is None:
                     uniform_stride_order = stride_order
                 elif uniform_stride_order != stride_order:
@@ -1203,7 +1203,7 @@ class SIMDScheduling(BaseScheduling):
         # Any use of a MultiOutputLayout will create a buffer with a
         # Layout whose sizes are accounted for
         buf_sizes = [
-            buf.get_layout().storage_size()
+            buf.get_layout().storage_size()  # type: ignore[union-attr] # next PR
             for buf in buffers
             if not isinstance(buf.get_layout(), ir.MultiOutputLayout)
         ]

@@ -32,7 +32,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Never, TypeAlias
+from typing_extensions import Never, Self, TypeAlias
 from unittest.mock import patch
 
 import sympy
@@ -2358,7 +2358,7 @@ class ExpandView(BaseView):
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
-                list(new_size),  # type: ignore[arg-type] # next PR
+                list(new_size),
                 new_stride,
                 old_layout.offset,
             )
@@ -2564,7 +2564,7 @@ class View(GenericView):
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
-                new_size,  # type: ignore[arg-type] # next PR
+                new_size,
                 FlexibleLayout.contiguous_strides(new_size),
                 old_layout.offset,
             )
@@ -2892,25 +2892,25 @@ class BaseConstant(IRNode):
     dtype: torch.dtype
     device: torch.device
 
-    def get_size(self):
-        return ()
+    def get_size(self) -> Sequence[_IntLike]:
+        return []
 
-    def get_device(self):
+    def get_device(self) -> torch.device:
         return self.device
 
-    def get_origin_node(self):
+    def get_origin_node(self) -> Optional[Node]:
         return None
 
-    def mark_reuse(self, users):
+    def mark_reuse(self, users: int) -> None:
         pass
 
-    def has_exceeded_max_reads(self):
+    def has_exceeded_max_reads(self) -> bool:
         return False
 
-    def get_reads(self):
-        return ()
+    def get_reads(self) -> Set[Dep]:
+        return set()
 
-    def is_extern(self):
+    def is_extern(self) -> bool:
         return False
 
 
@@ -2920,16 +2920,16 @@ class Constant(BaseConstant):
     dtype: torch.dtype
     device: torch.device
 
-    def make_loader(self):
-        def loader(index):
+    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
+        def loader(index: Sequence[_IntLike]) -> OpsValue:
             return ops.constant(self.value, self.dtype)
 
         return loader
 
-    def realize(self):
+    def realize(self) -> Optional[str]:
         pass
 
-    def constant_to_device(self, device):
+    def constant_to_device(self, device: torch.device) -> IRNode:
         return Constant(self.value, self.dtype, device)
 
 
@@ -2939,13 +2939,13 @@ class IndexingConstant(BaseConstant):
     dtype: torch.dtype
     device: torch.device
 
-    def make_loader(self):
-        def loader(index):
+    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
+        def loader(index: Sequence[_IntLike]) -> OpsValue:
             return ops.index_expr(self.index, self.dtype)
 
         return loader
 
-    def constant_to_device(self, device):
+    def constant_to_device(self, device: torch.device) -> IRNode:
         return IndexingConstant(self.index, self.dtype, device)
 
 
@@ -2975,25 +2975,29 @@ class Layout(IRNode):
         self,
         device: torch.device,
         dtype: torch.dtype,
-        size: List[Expr],
-        stride: Optional[Sequence[Union[Expr, int]]],
-        offset: Expr = Integer(0),
-    ):
+        size: Sequence[_IntLike],
+        stride: Optional[Sequence[_IntLike]],
+        offset: _IntLike = Integer(0),
+    ) -> None:
         assert stride is None or len(size) == len(
             stride
         ), f"size={size}, stride={stride}"
         self.device = device
-        self.dtype = dtype  # type: ignore[misc] # next PR
+        self._dtype = dtype
         assert all(isinstance(s, (Expr, int)) for s in size)
         self.size = size
         self._stride = stride
         self.offset = offset
 
     @property
-    def stride(self):
-        return self._stride
+    def dtype(self) -> torch.dtype:
+        return self._dtype
 
-    def __str__(self):
+    @property
+    def stride(self) -> Sequence[_IntLike]:
+        return self._stride  # type: ignore[return-value]
+
+    def __str__(self) -> str:
         offset = ""
         if self.offset != 0:
             offset = f", offset={self.offset}"
@@ -3004,11 +3008,13 @@ class Layout(IRNode):
 
     __repr__ = __str__
 
-    def is_contiguous(self):
+    def is_contiguous(self) -> bool:
         return is_contiguous_strides_for_shape(self.stride, self.size)
 
     @staticmethod
-    def is_channels_last_contiguous(shape, strides):
+    def is_channels_last_contiguous(
+        shape: Sequence[_IntLike], strides: Sequence[_IntLike]
+    ) -> bool:
         ndim = len(shape)
         if ndim not in [4, 5] or shape[1] == 1:
             return False
@@ -3019,7 +3025,7 @@ class Layout(IRNode):
                 return False
         return True
 
-    def is_transposed(self):
+    def is_transposed(self) -> bool:
         for left, right, size in zip(
             self.stride,
             reversed(FlexibleLayout.contiguous_strides(list(reversed(self.size)))),
@@ -3029,7 +3035,7 @@ class Layout(IRNode):
                 return False
         return True
 
-    def is_stride_ordered(self, order):
+    def is_stride_ordered(self, order: Sequence[Union[int, Integer]]) -> bool:
         assert len(self.stride) == len(order)
 
         # ignore dimensions of size 1, they dont affect layout
@@ -3042,12 +3048,12 @@ class Layout(IRNode):
         stride = [self.stride[i] for i in non_1_indices]
         order = [order[i] for i in non_1_indices]
 
-        def sorted_indices(arr):
+        def sorted_indices(arr: Sequence[Union[int, Integer]]) -> Sequence[int]:
             sorted_arr = sorted(arr)
             return [sorted_arr.index(element) for element in arr]
 
         # since we may have removed dimensions, need to re-sort & re-index order
-        order = sorted_indices(order)
+        order = list(sorted_indices(order))
 
         # reorder the stride given order
         stride_ordered = [-1] * len(order)
@@ -3059,14 +3065,16 @@ class Layout(IRNode):
                 return False
         return True
 
-    def is_channels_last_stride_ordered(self):
+    def is_channels_last_stride_ordered(self) -> bool:
         # create channels_last order(NCHW, NCDHW, the C is the first order).
         order = [0] + list(reversed(range(1, len(self.stride) - 1)))
         order = [len(order)] + order
         return self.is_stride_ordered(order)
 
     @staticmethod
-    def _pad_strides(in_strides, size, dtype):
+    def _pad_strides(
+        in_strides: Sequence[_IntLike], size: Sequence[_IntLike], dtype: torch.dtype
+    ) -> Sequence[_IntLike]:
         """
         The padding does not change stride order but makes sure all strides larger
         than the threshold are multiple of align.
@@ -3092,8 +3100,7 @@ class Layout(IRNode):
         #
         # Skip padding the strides for dynamic shape for now.
         if not all(
-            isinstance(s, (int, sympy.Integer))
-            for s in itertools.chain(in_strides, size)
+            isinstance(s, (int, Integer)) for s in itertools.chain(in_strides, size)
         ):
             return in_strides
 
@@ -3125,7 +3132,7 @@ class Layout(IRNode):
         padded = False
         for rank, idx in enumerate(fill_order[1:], start=1):
             prev_idx = fill_order[rank - 1]
-            stride = new_strides[prev_idx] * size[prev_idx]
+            stride = new_strides[prev_idx] * size[prev_idx]  # type: ignore[index]
 
             if stride > align_stride_threshold and stride % align != 0:
                 stride = ceildiv(stride, align) * align
@@ -3141,15 +3148,15 @@ class Layout(IRNode):
         metrics.num_comprehensive_padding += 1
         return new_strides
 
-    def pad_strides(self):
+    def pad_strides(self) -> None:
         assert isinstance(self, FlexibleLayout)
         assert self._stride is not None
         self._stride = self._pad_strides(self._stride, self.size, self.dtype)
 
-    def should_pad_strides(self):
+    def should_pad_strides(self) -> bool:
         return config.comprehensive_padding and isinstance(self, FlexibleLayout)
 
-    def as_fixed(self):
+    def as_fixed(self) -> Layout:
         if isinstance(self, FixedLayout):
             return self
 
@@ -3163,13 +3170,15 @@ class Layout(IRNode):
             self.offset,
         )
 
-    def make_indexer(self):
+    def make_indexer(self) -> Callable[[Sequence[_IntLike]], _IntLike]:
         assert (
             FlexibleLayout.allow_indexing
         ), f"convert {type(self).__name__} to FixedLayout first"
         return self.as_fixed().make_indexer()
 
-    def __eq__(self, other) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Layout):
+            return False
         return (
             self.device == other.device
             and self.dtype == other.dtype
@@ -3178,8 +3187,8 @@ class Layout(IRNode):
             and self.offset == other.offset
         )
 
-    def storage_size(self) -> sympy.Expr:
-        return compute_required_storage_length(self.size, self.stride, self.offset)  # type: ignore[arg-type, return-value]
+    def storage_size(self) -> _IntLike:
+        return compute_required_storage_length(self.size, self.stride, self.offset)  # type: ignore[arg-type]
 
 
 class FixedLayout(Layout):
@@ -3189,24 +3198,24 @@ class FixedLayout(Layout):
         self,
         device: torch.device,
         dtype: torch.dtype,
-        size: Union[List[Expr], List[int]],
-        stride: Optional[Sequence[Union[Expr, int]]] = None,
-        offset: Union[Expr, int] = Integer(0),
-    ):
+        size: Sequence[_IntLike],
+        stride: Optional[Sequence[_IntLike]] = None,
+        offset: _IntLike = Integer(0),
+    ) -> None:
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
         super().__init__(
             device,
             dtype,
-            size,  # type: ignore[arg-type]
+            size,
             stride,
-            offset,  # type: ignore[arg-type]
+            offset,
         )
 
-    def make_indexer(self):
+    def make_indexer(self) -> Callable[[Sequence[_IntLike]], _IntLike]:
         """A closure containing math to read a given element"""
 
-        def indexer(index):
+        def indexer(index: Sequence[_IntLike]) -> _IntLike:
             assert len(index) == len(self.stride)
             assert len(index) == len(self.size)
             result = self.offset
@@ -3225,16 +3234,18 @@ class FlexibleLayout(Layout):
 
     # WARNING!  This doesn't handle zero size tensors correctly
     @staticmethod
-    def contiguous_strides(sizes):
+    def contiguous_strides(sizes: Sequence[_IntLike]) -> Sequence[_IntLike]:
         if len(sizes) == 0:
             return []
-        reversed_strides = [sympy.Integer(1)]
+        reversed_strides = [Integer(1)]
         for size in reversed(sizes[1:]):
             reversed_strides.append(size * reversed_strides[-1])
         return list(reversed(reversed_strides))
 
     @staticmethod
-    def fill_ordered(sizes, order):
+    def fill_ordered(
+        sizes: Sequence[_IntLike], order: Sequence[_IntLike]
+    ) -> Sequence[_IntLike]:
         """
         Create a stride based on the order the dimensions should be filled in.
 
@@ -3242,16 +3253,18 @@ class FlexibleLayout(Layout):
             [1, 3, 2, 0]
         """
         assert set(range(len(sizes))) == set(order), (sizes, order)
-        next_stride = sympy.Integer(1)
-        strides = [None] * len(order)
+        next_stride = Integer(1)
+        strides = [0] * len(order)
 
         for i in order:
-            strides[i] = next_stride
-            next_stride = next_stride * sizes[i]
+            strides[i] = next_stride  # type: ignore[index]
+            next_stride = next_stride * sizes[i]  # type: ignore[index]
         return strides
 
     @staticmethod
-    def stride_ordered(sizes, order):
+    def stride_ordered(
+        sizes: Sequence[_IntLike], order: Sequence[Union[int, Integer]]
+    ) -> Sequence[_IntLike]:
         """
         Create a stride based on the sorted order of a permuted range.
 
@@ -3263,7 +3276,7 @@ class FlexibleLayout(Layout):
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
     @staticmethod
-    def stride_ordered_for_memory_format(sizes, memory_format):
+    def stride_ordered_for_memory_format(sizes, memory_format):  # type: ignore[no-untyped-def] # no example
         """
         Create a stride based on a memory format.
 
@@ -3288,7 +3301,7 @@ class FlexibleLayout(Layout):
             raise NotImplementedError
 
     @staticmethod
-    def same_ordered(sizes, stride):
+    def same_ordered(sizes, stride):  # type: ignore[no-untyped-def] # no example
         """
         Create a stride that has the same stride order as given stride
 
@@ -3300,7 +3313,9 @@ class FlexibleLayout(Layout):
         fill_order = sorted(range(len(stride)), key=stride.__getitem__)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
-    def as_stride_order(self, order, allow_padding=False):
+    def as_stride_order(
+        self, order: Sequence[Union[int, Integer]], allow_padding: bool = False
+    ) -> FixedLayout:
         new_stride = self.stride_ordered(self.size, order)
         if self.should_pad_strides() and allow_padding:
             new_stride = self._pad_strides(new_stride, self.size, self.dtype)
@@ -3313,7 +3328,7 @@ class FlexibleLayout(Layout):
             self.offset,
         )
 
-    def as_fill_order(self, order):
+    def as_fill_order(self, order: Sequence[Union[int, Integer]]) -> FixedLayout:
         new_stride = self.fill_ordered(self.size, order)
         if self.should_pad_strides():
             new_stride = self._pad_strides(new_stride, self.size, self.dtype)
@@ -3325,7 +3340,7 @@ class FlexibleLayout(Layout):
             self.offset,
         )
 
-    def as_same_order(self, stride):
+    def as_same_order(self, stride):  # type: ignore[no-untyped-def] # no example
         new_stride = self.same_ordered(self.size, stride)
         if self.should_pad_strides():
             new_stride = self._pad_strides(new_stride, self.size, self.dtype)
@@ -3337,7 +3352,13 @@ class FlexibleLayout(Layout):
             self.offset,
         )
 
-    def __init__(self, device, dtype, size, stride_order=None):
+    def __init__(
+        self,
+        device: torch.device,
+        dtype: torch.dtype,
+        size: Sequence[_IntLike],
+        stride_order: Optional[Sequence[Integer]] = None,
+    ) -> None:
         if stride_order:
             strides = FlexibleLayout.fill_ordered(size, stride_order)
         else:
@@ -3348,21 +3369,24 @@ class FlexibleLayout(Layout):
 class NonOwningLayout(Layout):
     """Is a view into the storage of another tensor"""
 
-    def __init__(self, view: Union[BaseView, TensorBox]):
+    def __init__(self, view: Union[BaseView, TensorBox]) -> None:
         layout = view.get_layout()
+        assert isinstance(layout, Layout)
         super().__init__(
             layout.device,
             layout.dtype,
-            layout.size,  # type: ignore[union-attr, arg-type] # next PR
-            layout.stride,  # type: ignore[union-attr] # next PR
+            layout.size,
+            layout.stride,
         )
         self.view = view
 
-    def make_indexer(self):
+    def make_indexer(self) -> Callable[[Sequence[_IntLike]], _IntLike]:
         return self.as_fixed().make_indexer()
 
-    def maybe_guard_aligned(self):
-        offset = self.view.get_layout().offset  # type: ignore[union-attr] # next PR
+    def maybe_guard_aligned(self):  # type: ignore[no-untyped-def] # no example
+        layout = self.view.get_layout()
+        assert isinstance(layout, Layout)
+        offset = layout.offset
         if offset == 0:
             return True
         from .compile_fx import ALIGNMENT
@@ -3379,39 +3403,39 @@ class NoneLayout(IRNode):
     # If you have an ir.Node with NoneLayout, you probably need to setup
     # dependencies manually in scheduler
 
-    def __init__(self, device):
+    def __init__(self, device: torch.device) -> None:
         self.device = device
         self.size = [0]
         self.stride = [0]
 
-    def storage_size(self):
+    def storage_size(self) -> _IntLike:
         return 0
 
-    def as_fixed(self):
-        return self
+    def as_fixed(self) -> FixedLayout:
+        return self  # type: ignore[return-value] # BUG?
 
 
 class MutationLayoutSHOULDREMOVE(Layout):
-    def __init__(self, target: IRNode):
+    def __init__(self, target: IRNode) -> None:
         super().__init__(
             target.get_device(),
             target.get_dtype(),
-            target.get_size(),  # type: ignore[arg-type] # next PR
+            target.get_size(),
             None,
         )
         self.target = target
         name = self.get_buffer().get_name()
         V.graph.mark_buffer_mutated(name)
 
-    @Layout.stride.getter  # type: ignore[attr-defined]
-    def stride(self):
+    @Layout.stride.getter  # type: ignore[attr-defined, misc] # next PR
+    def stride(self) -> Sequence[_IntLike]:
         return self.real_layout().stride
 
-    def storage_size(self) -> sympy.Expr:
+    def storage_size(self) -> _IntLike:
         return self.real_layout().storage_size()
 
     def get_buffer(self) -> Buffer:
-        def unwrap_views(target):
+        def unwrap_views(target: IRNode) -> IRNode:
             if isinstance(target, MutationLayoutSHOULDREMOVE):
                 return unwrap_views(target.target)
             if isinstance(target, BaseView):
@@ -3426,11 +3450,13 @@ class MutationLayoutSHOULDREMOVE(Layout):
         ), "MutationLayoutSHOULDREMOVE must refer to a buffer"
         return result
 
-    def real_layout(self):
-        return self.get_buffer().layout
+    def real_layout(self) -> Layout:
+        layout = self.get_buffer().layout
+        assert isinstance(layout, Layout)
+        return layout
 
     @classmethod
-    def realize_into(cls, src, dst, unsafe_alias=False):
+    def realize_into(cls, src, dst, unsafe_alias=False):  # type: ignore[no-untyped-def] # no example
         dst.realize()
         # NOTE: We must realize users of `dst` before we realize `src`, since
         # realization order determines scheduling order. Otherwise, src's
@@ -3464,10 +3490,10 @@ class MutationLayoutSHOULDREMOVE(Layout):
         src.data.layout = MutationLayoutSHOULDREMOVE(dst)
         return src.data
 
-    def as_fixed(self):
+    def as_fixed(self) -> Self:
         return self
 
-    def make_indexer(self):
+    def make_indexer(self) -> Callable[[Sequence[_IntLike]], _IntLike]:
         return self.target.make_indexer()
 
 
@@ -3476,95 +3502,106 @@ class Buffer(IRNode):
     # Name is sometimes None; e.g., ForceInPlace, where there isn't
     # a meaningful name
     name: Optional[str]
-    layout: Layout
+    layout: _AnyLayout
 
     # Multi-output buffers will define 'outputs: List[Buffer]'. Confusingly,
     # MultiOutput does NOT define this!
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         super().__post_init__()
-        self.origin_node = None
+        self.origin_node: Optional[Node] = None
 
-    def make_indexer(self):
+    def make_indexer(self) -> Callable[[Sequence[_IntLike]], _IntLike]:
         return self.layout.make_indexer()
 
     def get_name(self) -> str:
         assert self.name, self
         return self.name
 
-    def get_device(self):
+    def get_device(self) -> torch.device:
         return self.layout.device
 
-    def get_origin_node(self):
+    def get_origin_node(self) -> Optional[Node]:
         return self.origin_node
 
     def get_defining_op(self) -> Optional[Operation]:
         return None
 
     @property
-    def dtype(self):
-        return getattr(self.layout, "dtype", None)
+    def dtype(self) -> torch.dtype:
+        return getattr(self.layout, "dtype", torch.float32)
 
-    def get_size(self):
-        return list(self.layout.size)
+    def get_size(self) -> Sequence[_IntLike]:
+        if isinstance(self.layout, (Layout, NoneLayout)):
+            return list(self.layout.size)
+        elif isinstance(self.layout, MultiOutputLayout):
+            return []
+        else:
+            raise NotImplementedError
 
-    def get_stride(self):
+    def get_stride(self) -> Sequence[_IntLike]:
+        assert isinstance(self.layout, Layout)
         return list(self.layout.stride)
 
-    def get_offset(self):
+    def get_offset(self) -> _IntLike:
+        assert isinstance(self.layout, Layout)
         return self.layout.offset
 
-    def get_layout(self):
+    def get_layout(self) -> _AnyLayout:
         return self.layout
 
-    def get_storage_numel(self):
+    def get_storage_numel(self) -> _IntLike:
         return self.get_numel()
 
-    def is_extern(self):
+    def is_extern(self) -> bool:
         return False
 
-    def freeze_layout(self):
+    def freeze_layout(self) -> None:
         if not isinstance(self.layout, (MultiOutputLayout, NonOwningLayout)):
             self.layout = self.layout.as_fixed()
 
-    def freeze_layout_with_stride_order(self, order, allow_padding=False):
+    def freeze_layout_with_stride_order(
+        self, order: Sequence[Union[int, Integer]], allow_padding: bool = False
+    ) -> None:
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_stride_order(order, allow_padding=allow_padding)
 
-    def freeze_layout_with_fill_order(self, order):
+    def freeze_layout_with_fill_order(
+        self, order: Sequence[Union[int, Integer]]
+    ) -> None:
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_fill_order(order)
 
-    def freeze_layout_with_same_order(self, stride):
+    def freeze_layout_with_same_order(self, stride):  # type: ignore[no-untyped-def] # no example
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_same_order(stride)
 
-    def is_zero_elements(self):
-        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))  # type: ignore[arg-type]
+    def is_zero_elements(self) -> bool:
+        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
 
-    def make_loader(self):
+    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
         # Loading from a zero-element buffer is a no-op
         if self.is_zero_elements():
             return partial(nop_loader_fn, dtype=self.get_dtype())
 
-        def loader(index):
+        def loader(index: Sequence[_IntLike]) -> OpsValue:
             indexer = self.layout.make_indexer()
             return ops.load(self.name, indexer(index))
 
         return loader
 
-    def codegen_reference(self, writer=None):
+    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         return self.get_name()
 
-    def decide_layout(self):
+    def decide_layout(self) -> None:
         pass
 
-    def get_inputs_that_alias_output(self):
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
         if isinstance(self.layout, NonOwningLayout):
             return [self.layout.view.get_name()]
         return ()
 
-    def get_mutation_names(self):
+    def get_mutation_names(self) -> Sequence[str]:
         if isinstance(self.layout, MutationLayoutSHOULDREMOVE):
             return [self.layout.target.get_name()]
         return ()
@@ -3572,16 +3609,16 @@ class Buffer(IRNode):
     def get_read_names(self) -> Set[str]:
         return {self.get_name()}
 
-    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[Symbol]:
         return set()
 
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+    def get_unbacked_symbol_defs(self) -> Set[Symbol]:
         return set()
 
-    def realize(self):
+    def realize(self) -> Optional[str]:
         pass
 
-    def should_allocate(self):
+    def should_allocate(self) -> bool:
         # Returns False by default.
         return False
 
@@ -3589,13 +3626,13 @@ class Buffer(IRNode):
 @dataclasses.dataclass
 class OperationBuffer(Buffer, Operation):
     # An operation that produces a single output buffer
-    def get_outputs(self) -> List[Buffer]:
+    def get_outputs(self) -> Sequence[Buffer]:
         return [self]
 
     def get_defining_op(self) -> Operation:
         return self
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         Buffer.__post_init__(self)
         Operation.__post_init__(self)
 
@@ -3607,8 +3644,8 @@ class InputBuffer(Buffer):
 class ConstantBuffer(InputBuffer):
     override_device: Optional[torch.device] = None
 
-    def make_loader(self):
-        def loader(index):
+    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
+        def loader(index: Sequence[_IntLike]) -> OpsValue:
             indexer = self.layout.make_indexer()
             return ops.load(
                 V.graph.constant_name(self.get_name(), self.override_device),
@@ -3617,41 +3654,41 @@ class ConstantBuffer(InputBuffer):
 
         return loader
 
-    def constant_to_device(self, device):
+    def constant_to_device(self, device: torch.device) -> IRNode:
         return ConstantBuffer(
             V.graph.constant_name(self.get_name(), device), self.layout
         )
 
 
 class NoneAsConstantBuffer(IRNode):
-    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[Symbol]:
         return set()
 
-    def codegen_reference(self, writer=None):
+    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         return V.graph.wrapper_code.none_str
 
 
 class ShapeAsConstantBuffer(IRNode):
-    def __init__(self, shape):
+    def __init__(self, shape: Union[_IntLike, sympy.Rel, Sequence[_IntLike]]) -> None:
         super().__init__()
         self._shape = shape
 
     @property
-    def shape(self):
+    def shape(self) -> Union[_IntLike, sympy.Rel, Sequence[_IntLike]]:
         return self._shape
 
-    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[Symbol]:
         return free_unbacked_symbols(self.shape)
 
-    def codegen_reference(self, writer=None):
-        return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
+    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+        return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))  # type: ignore[arg-type]
 
 
 @dataclasses.dataclass
 class ComputedBuffer(OperationBuffer):
     data: Loops
 
-    def get_computed_buffer_name(self):
+    def get_computed_buffer_name(self):  # type: ignore[no-untyped-def] # no example
         """
         Returns self.name if it exists, otherwise returns the name of the data node if that exists.
         If neither exist, returns None.
@@ -3663,10 +3700,10 @@ class ComputedBuffer(OperationBuffer):
         return None
 
     @cache_on_self
-    def num_reads(self):
+    def num_reads(self) -> int:
         return len(self.get_read_writes().reads)
 
-    def get_read_writes(self):
+    def get_read_writes(self) -> ReadWrites:
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.data.get_reduction_type():
                 return extract_read_writes(
@@ -3680,7 +3717,7 @@ class ComputedBuffer(OperationBuffer):
                     self.data.get_size(),  # type: ignore[arg-type] # next PR
                 )
 
-    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[Symbol]:
         # Ordinarily, we'd like to just peek at the arguments list,
         # but ComputedBuffers have no argument list.
         #
@@ -3705,7 +3742,7 @@ class ComputedBuffer(OperationBuffer):
             | self.data.get_unbacked_symbol_uses()
         )
 
-    def make_loader(self):
+    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
         # Inline constants and index_expressions
         if (
             hasattr(self.data, "make_loader")
@@ -3716,7 +3753,8 @@ class ComputedBuffer(OperationBuffer):
             return self.data.make_loader()
         return super().make_loader()
 
-    def get_store_function(self):
+    def get_store_function(self) -> Callable[[], OpsValue]:
+        assert isinstance(self.layout, Layout)
         indexer = self.layout.as_fixed().make_indexer()
         if isinstance(self.data, (Reduction, Scan, Sort)):
             return partial(self.data.store_reduction, self.name, indexer)
@@ -3724,7 +3762,7 @@ class ComputedBuffer(OperationBuffer):
             assert isinstance(self.data, Pointwise)
             return partial(self.data.store_output, self.name, indexer)
 
-    def get_fill_order(self):
+    def get_fill_order(self) -> Optional[Sequence[int]]:
         """
         If our layout is still flexible, try to determine the stride order based on stride orders of reads.
 
@@ -3750,9 +3788,7 @@ class ComputedBuffer(OperationBuffer):
                 for r in reads
             )
             reads = [
-                sympy_subs(
-                    r.index, {v: sympy.Integer(0) for v in reduction_vars if v != 0}
-                )
+                sympy_subs(r.index, {v: Integer(0) for v in reduction_vars if v != 0})
                 for r in reads
                 if isinstance(r, dependencies.MemoryDep)
             ]
@@ -3763,15 +3799,15 @@ class ComputedBuffer(OperationBuffer):
                 else:
                     indices = index_vars
                 stride_lengths = [
-                    V.graph.sizevars.stride_hints(expr, indices) for expr in reads  # type: ignore[arg-type]
+                    V.graph.sizevars.stride_hints(expr, indices) for expr in reads  # type: ignore[arg-type] # next PR
                 ]
                 from .scheduler import pick_loop_order
 
-                return pick_loop_order(stride_lengths, self.get_size())
+                return pick_loop_order(stride_lengths, self.get_size())  # type: ignore[arg-type] # next PR
 
         return None
 
-    def decide_layout(self):
+    def decide_layout(self) -> None:
         if isinstance(self.layout, FlexibleLayout):
             order = self.get_fill_order()
             if order:
@@ -3780,7 +3816,13 @@ class ComputedBuffer(OperationBuffer):
                 self.freeze_layout()
 
     @cache_on_self
-    def get_default_sizes_body(self):
+    def get_default_sizes_body(
+        self,
+    ) -> Tuple[
+        Tuple[Sequence[_IntLike], Sequence[_IntLike]],
+        LoopBody,
+        Tuple[Sequence[_IntLike], Sequence[_IntLike]],
+    ]:
         args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"  # type: ignore[arg-type] # next PR
         )
@@ -3808,7 +3850,7 @@ class ComputedBuffer(OperationBuffer):
     def simplify_and_reorder(
         self,
         extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
-    ):
+    ) -> Tuple[Tuple[Sequence[_IntLike], Sequence[_IntLike]], LoopBody]:
         """
         This is a main place where we do loop transformations in a
         backend-agnostic way.
@@ -3856,7 +3898,15 @@ class ComputedBuffer(OperationBuffer):
         if not V.graph.has_feature(self, BackendFeature.PREFER_STORE_LOOP_ORDER):
             memory_addrs.extend(body.reads_name2expr.values())
 
-        def simplify_and_reorder(x_vars, support_vars, sizes):
+        def simplify_and_reorder(
+            x_vars: Sequence[_IntLike],
+            support_vars: Sequence[_IntLike],
+            sizes: Sequence[_IntLike],
+        ) -> Tuple[
+            Sequence[_IntLike],
+            Callable[[Sequence[_IntLike]], Sequence[_IntLike]],
+            Callable[[Sequence[_IntLike]], Sequence[_IntLike]],
+        ]:
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
                 x_vars, support_vars, sizes, memory_addrs
             )
@@ -3867,10 +3917,12 @@ class ComputedBuffer(OperationBuffer):
                 sizes,
                 index_prevent_reordering(index_formulas, x_vars, sizes),
             )
-            reindex = fuse_reindexing(reindex1, reindex2)
+            reindex: Callable[
+                [Sequence[_IntLike]], Sequence[_IntLike]
+            ] = fuse_reindexing(reindex1, reindex2)
             return sizes, reindex, reindex1
 
-        support_vars = index_vars + reduce_vars
+        support_vars = index_vars + reduce_vars  # type: ignore[operator]
         iter_ranges, iter_reindex, _ = simplify_and_reorder(
             index_vars,
             support_vars,
@@ -3882,7 +3934,7 @@ class ComputedBuffer(OperationBuffer):
 
         # retrace the loop body with simplification and reordering applied
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
-            iter_ranges, reduce_ranges, prefix="z"
+            iter_ranges, reduce_ranges, prefix="z"  # type: ignore[arg-type] # next PR
         )
         body = LoopBody(
             body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
@@ -3891,12 +3943,16 @@ class ComputedBuffer(OperationBuffer):
 
     @staticmethod
     def _apply_loop_reordering(
-        index_vars,
-        support_vars,
-        sizes,
-        memory_addrs,
-        priority_idx=None,
-    ):
+        index_vars: Sequence[_IntLike],
+        support_vars: Sequence[_IntLike],
+        sizes: Sequence[_IntLike],
+        memory_addrs: Sequence[_IntLike],
+        priority_idx: Optional[Sequence[int]] = None,
+    ) -> Tuple[
+        Sequence[_IntLike],
+        Callable[[Sequence[_IntLike]], Sequence[_IntLike]],
+        Callable[[Sequence[_IntLike]], Sequence[_IntLike]],
+    ]:
         """
         Shuffle the order of loops around to hopefully improve performance.
         """
@@ -3907,13 +3963,13 @@ class ComputedBuffer(OperationBuffer):
 
         try:
             strides = [
-                V.graph.sizevars.stride_hints(expr, index_vars, support_vars)
+                V.graph.sizevars.stride_hints(expr, index_vars, support_vars)  # type: ignore[arg-type] # next PR
                 for expr in memory_addrs
             ]
             assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
                 index_vars
             )
-            order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
+            order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))  # type: ignore[arg-type] # next PR
         except Exception:
             if config.debug:
                 log.warning(
@@ -3925,19 +3981,19 @@ class ComputedBuffer(OperationBuffer):
         sizes = [sizes[i] for i in order]
         return sizes, same_reorder(order), inverse_reorder(order)
 
-    def get_reduction_size(self):
+    def get_reduction_size(self) -> Sequence[_IntLike]:
         return self.data.get_reduction_size()
 
-    def get_reduction_type(self):
+    def get_reduction_type(self) -> Optional[str]:
         return self.data.get_reduction_type()
 
-    def is_no_op(self):
+    def is_no_op(self) -> bool:
         return self.data.is_zero_elements()
 
-    def should_allocate(self):
+    def should_allocate(self) -> bool:
         return True
 
-    def constant_to_device(self, device):
+    def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
         return self.data.constant_to_device(device)
 
@@ -3948,46 +4004,51 @@ class TemplateBuffer(OperationBuffer):
     that we can fuse an epilogue onto.
     """
 
-    def __init__(self, layout, inputs, make_kernel_render):
+    def __init__(
+        self,
+        layout: FixedLayout,
+        inputs: Sequence[Union[TensorBox, IRNode]],
+        make_kernel_render: Optional[Callable[[], None]],
+    ) -> None:
         super().__init__(name=None, layout=layout)
         self.inputs = InputsKernel.unwrap_storage(inputs)
         self.make_kernel_render = make_kernel_render
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
-    def get_read_writes(self):
+    def get_read_writes(self) -> ReadWrites:
         return self.normalized_read_writes()
 
-    def normalized_read_writes(self):
+    def normalized_read_writes(self) -> ReadWrites:
         name = self.get_name()
         indexer = self.layout.make_indexer()
 
-        def dummy(index, rindex):
+        def dummy(index: Sequence[_IntLike], rindex: Sequence[_IntLike]) -> OpsValue:
             assert len(rindex) == 0
             return ops.store(name, indexer(index), "fake")
 
         deps = dependencies.extract_read_writes(
-            dummy, self.get_size(), (), normalize=True
+            dummy, self.get_size(), (), normalize=True  # type: ignore[arg-type] # next PR
         )
         deps.reads = {dependencies.StarDep(x.get_name()) for x in self.inputs}
         return deps
 
-    def get_reduction_size(self):
-        return 1
+    def get_reduction_size(self) -> Sequence[_IntLike]:
+        return 1  # type: ignore[return-value] # BUG?
 
-    def get_reduction_type(self):
+    def get_reduction_type(self) -> Optional[str]:
         return None
 
-    def is_no_op(self):
+    def is_no_op(self) -> bool:
         return False
 
-    def should_allocate(self):
+    def should_allocate(self) -> bool:
         return True
 
     def simplify_and_reorder(
         self,
         extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
-    ):
+    ) -> Tuple[Tuple[Sequence[_IntLike], Sequence[_IntLike]], None]:
         return (
             (
                 self.get_size(),
@@ -4000,12 +4061,12 @@ class TemplateBuffer(OperationBuffer):
 class TritonTemplateBuffer(TemplateBuffer):
     def __init__(
         self,
-        layout,
-        inputs,
-        make_kernel_render,
-        debug_extra=None,
+        layout: FixedLayout,
+        inputs: Sequence[Union[TensorBox, IRNode]],
+        make_kernel_render: Optional[Callable[[], None]],
+        debug_extra: Optional[str] = None,
         mutated_inputs: Optional[Iterable[IRNode]] = None,
-    ):
+    ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
         We want the ability for TritonTemplates to output multiple tensors. Triton
@@ -4037,7 +4098,7 @@ class TritonTemplateBuffer(TemplateBuffer):
     def get_outputs(self) -> List[Buffer]:
         return self.outputs
 
-    def __str__(self):
+    def __str__(self) -> str:
         out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
         return out
 
@@ -4101,7 +4162,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         inputs: List[IRNode],
         choice_timings: Callable[[], Dict[ChoiceCaller, float]],
     ):
-        super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
+        super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)  # type: ignore[arg-type] # next PR
         self._choice_timings_fn = choice_timings
         self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
         self.original_inputs = inputs
@@ -4126,8 +4187,8 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
 
     def finalize_as_triton_caller(self, caller: TritonTemplateCallerBase):
         assert isinstance(caller, torch._inductor.select_algorithm.TritonTemplateCaller)
-        assert self.layout.size == caller.layout.size
-        assert self.layout.stride == caller.layout.stride
+        assert self.layout.size == caller.layout.size  # type: ignore[union-attr] # next PR
+        assert self.layout.stride == caller.layout.stride  # type: ignore[union-attr] # next PR
         self.make_kernel_render = caller.get_make_kernel_render()
 
     def get_min_choice(self) -> Tuple[ChoiceCaller, float]:
@@ -4703,7 +4764,7 @@ class ExternKernel(InputsKernel):
             layout=FixedLayout(
                 device=x.get_device(),
                 dtype=x.get_dtype(),
-                size=x.get_size(),  # type: ignore[arg-type] # next PR
+                size=x.get_size(),
                 stride=strides,
                 offset=offset,
             ),
@@ -4714,7 +4775,7 @@ class ExternKernel(InputsKernel):
         if x is None:
             return NoneAsConstantBuffer()
         if isinstance(x, (sympy.Expr, sympy.logic.boolalg.Boolean, int)):
-            return ShapeAsConstantBuffer(x)
+            return ShapeAsConstantBuffer(x)  # type: ignore[arg-type] # next PR
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
                 torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
@@ -4797,7 +4858,7 @@ class ExternKernel(InputsKernel):
                     return x
 
         # TODO - Storage to InputBuffer
-        if isinstance(x, InputBuffer) and x.get_layout().is_stride_ordered(order):
+        if isinstance(x, InputBuffer) and x.get_layout().is_stride_ordered(order):  # type: ignore[union-attr] # next PR
             return x
         if (
             isinstance(x, TensorBox)
@@ -4919,8 +4980,8 @@ class ExternKernel(InputsKernel):
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
             if sympy_product(self.get_size()) == 0:
                 return
-            size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
-            stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
+            size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())  # type: ignore[arg-type] # next PR
+            stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())  # type: ignore[arg-type] # next PR
             wrapper.writeline(
                 f"assert_size_stride({self.get_name()}, {size}, {stride})"
             )

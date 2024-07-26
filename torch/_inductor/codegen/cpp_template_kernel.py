@@ -120,7 +120,7 @@ class CppTemplateKernel(CppKernel):
         return cexpr_index(self.rename_indexing(node.get_stride()[dim]))
 
     def index(self, node: ir.Buffer, indices: List[Any]) -> str:
-        indexer = node.layout.as_fixed().make_indexer()
+        indexer = node.layout.as_fixed().make_indexer()  # type: ignore[union-attr] # next PR
         index = indexer(parse_expr_with_index_symbols(indices))
         index = self.rename_indexing(index)
         outer_name = node.get_name()
@@ -211,7 +211,7 @@ class CppTemplateKernel(CppKernel):
         if not reindexers:
             reindexers = [None] * len(nodes)
         assert len(offsets) == len(var_sizes[0])
-        output_index = dst.get_layout().make_indexer()(var_ranges.keys())
+        output_index = dst.get_layout().make_indexer()(var_ranges.keys())  # type: ignore[arg-type] # next PR
         kernel_group = KernelGroup()
         kernel_group.args = self.args
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
@@ -231,7 +231,7 @@ class CppTemplateKernel(CppKernel):
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
                 V.ops.store(
                     output_name,
-                    output_index,
+                    output_index,  # type: ignore[arg-type] # next PR
                     node.make_loader()(new_args).value,
                 )
 

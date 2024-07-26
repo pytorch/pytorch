@@ -2015,7 +2015,7 @@ class CppKernel(Kernel):
                         local_buf_size = sympy_product(
                             [
                                 self.rename_indexing(size_val)
-                                for size_val in local_buffer.get_layout().size
+                                for size_val in local_buffer.get_layout().size  # type: ignore[union-attr] # next PR
                             ]
                         )
                         local_buf_dtype = DTYPE_TO_CPP[local_buffer.get_layout().dtype]
@@ -3927,7 +3927,7 @@ class CppScheduling(BaseScheduling):
                             )
 
                         if not (
-                            global_buffer_layout.is_contiguous()
+                            global_buffer_layout.is_contiguous()  # type: ignore[union-attr] # next PR
                             and is_all_write_read_contiguous()
                         ):
                             continue
@@ -3935,8 +3935,8 @@ class CppScheduling(BaseScheduling):
                         local_buffer_layout = ir.FixedLayout(
                             global_buffer_layout.device,
                             global_buffer_layout.dtype,
-                            global_buffer_layout.size[size_offset:],
-                            global_buffer_layout.stride[size_offset:],
+                            global_buffer_layout.size[size_offset:],  # type: ignore[union-attr] # next PR
+                            global_buffer_layout.stride[size_offset:],  # type: ignore[union-attr] # next PR
                         )
 
                         def try_share_local_buffer(local_buffer_layout, local_buffers):
@@ -4071,7 +4071,7 @@ class CppScheduling(BaseScheduling):
         assert all(
             isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
         ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
-        kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
+        kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)  # type: ignore[call-arg, misc] # next PR
         with kernel:
             for node in [template_node, *epilogue_nodes]:
                 node.mark_run()  # type: ignore[attr-defined]

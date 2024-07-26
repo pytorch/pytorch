@@ -147,7 +147,7 @@ class SchedulerBuffer:
 
     def get_mutations(self) -> List[str]:
         assert self.node is not None
-        return self.node.get_mutation_names()
+        return self.node.get_mutation_names()  # type: ignore[return-value] # next PR
 
 
 class BaseSchedulerNode:
@@ -810,19 +810,19 @@ class SchedulerNode(BaseSchedulerNode):
         extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
-        self._sizes, self._body = self.node.simplify_and_reorder(
+        self._sizes, self._body = self.node.simplify_and_reorder(  # type: ignore[var-annotated] # next PR
             extra_indexing_constraints=extra_indexing_constraints
         )
 
         group_fn = self.scheduler.get_backend(self.node.get_device()).group_fn
-        self.group = (self.node.get_device(), group_fn(self._sizes))
+        self.group = (self.node.get_device(), group_fn(self._sizes))  # type: ignore[arg-type] # next PR
 
         if isinstance(self.node, ir.TemplateBuffer):
             self.set_read_writes(self.node.normalized_read_writes())
         else:
             self.set_read_writes(
                 dependencies.extract_read_writes(
-                    self._body, *self._sizes, normalize=True
+                    self._body, *self._sizes, normalize=True  # type: ignore[arg-type] # next PR
                 )
             )
 
@@ -854,7 +854,7 @@ class SchedulerNode(BaseSchedulerNode):
         return "\n".join(lines)
 
     def get_ranges(self) -> Sequence[Sequence[sympy.Expr]]:
-        return self._sizes
+        return self._sizes  # type: ignore[return-value] # next PR
 
     def is_reduction(self) -> bool:
         assert isinstance(
@@ -892,7 +892,7 @@ class SchedulerNode(BaseSchedulerNode):
                 itertools.chain.from_iterable(sizes),
             )
         )
-        return var_ranges
+        return var_ranges  # type: ignore[return-value] # next PR
 
     def codegen(self, index_vars: Sequence[Sequence[sympy.Expr]]) -> None:
         var_ranges = self.ranges_from_index_vars(index_vars)
@@ -914,7 +914,7 @@ class SchedulerNode(BaseSchedulerNode):
         def fn(index: Sequence[sympy.Symbol]) -> str:
             return self._body(index, [sympy.Integer(0) for _ in reduction_sizes])
 
-        return dependencies.extract_read_writes(fn, sizes)
+        return dependencies.extract_read_writes(fn, sizes)  # type: ignore[arg-type] # next PR
 
     def can_inplace(self, read_dep: dependencies.Dep) -> bool:
         if self.is_template():
@@ -1351,7 +1351,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     def codegen(self) -> None:
         assert isinstance(self.node, ir.ComputedBuffer), f"{type(self.node)=}"
-        self.node.get_store_function()(self.node.make_loader()())
+        self.node.get_store_function()(self.node.make_loader()())  # type: ignore[call-arg] # next PR
 
     def is_foreach(self) -> bool:
         return True
@@ -2994,7 +2994,7 @@ class Scheduler:
     def get_buffer_layout(self, buf_name: str) -> ir.Layout:
         buf = self.name_to_buf[buf_name]
         assert buf.node is not None
-        return buf.node.get_layout()
+        return buf.node.get_layout()  # type: ignore[return-value] # next PR
 
 
 class BaseScheduling:

@@ -522,8 +522,8 @@ class DebugFormatter:
                     static_layout = FixedLayout(
                         layout.device,
                         dtype=layout.dtype,
-                        size=list(V.graph.sizevars.size_hints(layout.size)),
-                        stride=list(V.graph.sizevars.size_hints(layout.stride)),
+                        size=list(V.graph.sizevars.size_hints(layout.size)),  # type: ignore[arg-type] # next PR
+                        stride=list(V.graph.sizevars.size_hints(layout.stride)),  # type: ignore[arg-type] # next PR
                         offset=offset,
                     )
                     node_info["layout"] = str(static_layout)

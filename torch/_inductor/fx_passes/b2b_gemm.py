@@ -230,7 +230,7 @@ def tuned_b2b_gemm(
     mat2.realize()
     mat3.realize()
     layout = FixedLayout(
-        mat1.get_device(), mat1.get_dtype(), [mat1.shape[0], mat3.shape[1]]  # type: ignore[arg-type, index] # next PR
+        mat1.get_device(), mat1.get_dtype(), [mat1.shape[0], mat3.shape[1]]  # type: ignore[index] # next PR
     )
     choices: list[TritonTemplateCaller] = []
     for config in b2b_gemm_configs:

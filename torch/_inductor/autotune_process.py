@@ -442,15 +442,15 @@ class TensorMeta:
             device=node.get_device(),
             dtype=dtype,
             sizes=V.graph.sizevars.size_hints(
-                node.get_size(),
+                node.get_size(),  # type: ignore[arg-type] # next PR
                 fallback=config.unbacked_symint_fallback,
             ),
             strides=V.graph.sizevars.size_hints(
-                node.get_stride(),
+                node.get_stride(),  # type: ignore[arg-type] # next PR
                 fallback=config.unbacked_symint_fallback,
             ),
             offset=V.graph.sizevars.size_hint(
-                node.get_layout().offset,
+                node.get_layout().offset,  # type: ignore[union-attr] # next PR
                 fallback=config.unbacked_symint_fallback,
             ),
             name=node.get_name(),

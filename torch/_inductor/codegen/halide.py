@@ -1362,7 +1362,7 @@ class HalideKernel(SIMDKernel):
         supports.  If there are gaps in the underlying layout the numel we pass to Halide includes the gaps while
         PyTorch's numel excludes them.
         """
-        return V.graph.get_buffer(name).get_layout().storage_size()
+        return V.graph.get_buffer(name).get_layout().storage_size()  # type: ignore[union-attr] # next PR
 
     def halide_argdefs(self):
         """

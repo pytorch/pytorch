@@ -521,7 +521,7 @@ class BufferGroup:
         )
 
     def sym_nbytes(self):
-        return self.node.get_layout().storage_size() * self.node.get_dtype().itemsize
+        return self.node.get_layout().storage_size() * self.node.get_dtype().itemsize  # type: ignore[union-attr] # next PR
 
     def make_allocation(self):
         assert not self.allocation, "multiple allocations"

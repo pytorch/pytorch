@@ -168,7 +168,7 @@ def _prepare_convolution_fusion_create(
         x.get_device(),
         x.get_dtype(),
         convert_shape_to_inductor(output_size),
-        convert_shape_to_inductor(output_stride),
+        convert_shape_to_inductor(output_stride),  # type: ignore[arg-type] # next PR
     )
     constant_args = [padding, stride, dilation, groups]
     if transposed:

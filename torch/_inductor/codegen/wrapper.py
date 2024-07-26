@@ -76,7 +76,7 @@ def buffer_reuse_key(node: ir.Buffer) -> ReuseKey:
         # NB: this is symbolic so that we don't try to reuse a buffer
         # for s0 for s1, just because they happen to share the same
         # size hint
-        sympy_str(V.graph.sizevars.simplify(node.layout.storage_size())),
+        sympy_str(V.graph.sizevars.simplify(node.layout.storage_size())),  # type: ignore[union-attr, arg-type] # next PR
     )
 
 
@@ -1274,7 +1274,7 @@ class WrapperCodeGen(CodeGen):
                             name=key,
                             buffer=arg.data.get_name(),
                             dtype=arg.get_dtype(),
-                            offset=arg.layout.offset,
+                            offset=arg.layout.offset,  # type: ignore[arg-type] # next PR
                         )
                     )
                 else:
@@ -1565,17 +1565,17 @@ class WrapperCodeGen(CodeGen):
                 buf = raw_arg
 
             size = V.graph.sizevars.size_hints(
-                buf.get_size(),
+                buf.get_size(),  # type: ignore[arg-type] # next PR
                 fallback=config.unbacked_symint_fallback,
             )
             stride = V.graph.sizevars.size_hints(
-                buf.get_stride(),
+                buf.get_stride(),  # type: ignore[arg-type] # next PR
                 fallback=config.unbacked_symint_fallback,
             )
             device = buf.get_device()
             dtype = buf.get_dtype()
             offset = V.graph.sizevars.size_hint(
-                buf.layout.offset,
+                buf.layout.offset,  # type: ignore[union-attr] # next PR
                 fallback=config.unbacked_symint_fallback,
             )
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset})"

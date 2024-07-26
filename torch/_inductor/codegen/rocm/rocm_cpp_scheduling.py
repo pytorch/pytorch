@@ -86,7 +86,7 @@ class ROCmCPPScheduling(BaseScheduling):
         _, (numel, rnumel) = template_node.group
         assert rnumel == 1
         ctb: ROCmTemplateBuffer = cast(ROCmTemplateBuffer, template_node.node)
-        kernel, render = ctb.make_kernel_render(ctb)
+        kernel, render = ctb.make_kernel_render(ctb)  # type: ignore[call-arg, misc] # next PR
         with kernel:
             template_node.mark_run()
             src_code = render()

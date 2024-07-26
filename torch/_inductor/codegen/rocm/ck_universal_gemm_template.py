@@ -158,9 +158,9 @@ class CKGemmTemplate(CKTemplate):
         # try to avoid launching the instance with invalid problem size
         # see GridwiseGemm_xdl_cshuffle_v3::CheckValidity
 
-        M = X_meta.size[-2]
-        K = X_meta.size[-1]
-        N = W_meta.size[-1]
+        M = X_meta.size[-2]  # type: ignore[union-attr]
+        K = X_meta.size[-1]  # type: ignore[union-attr]
+        N = W_meta.size[-1]  # type: ignore[union-attr]
 
         if is_static_int(M):
             if not any(
@@ -257,11 +257,13 @@ class CKGemmTemplate(CKTemplate):
         Y = self.output_node
         Bias = None  # TBD support gemm_bias
 
+        Xsize = X.get_layout().size  # type: ignore[union-attr]
+        Wsize = W.get_layout().size  # type: ignore[union-attr]
         version_comment = rf"""/**
 * Generated code for CK inductor backend
 * See {type(self).__module__}.{type(self).__qualname__}
 *
-* Problem size M={X.get_layout().size[-2]} N={W.get_layout().size[-1]} K={X.get_layout().size[-1]}
+* Problem size M={Xsize[-2]} N={Wsize[-1]} K={Xsize[-1]}
 * Template instance {op}
 *
 * {torch.__version__=}

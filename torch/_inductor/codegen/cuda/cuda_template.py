@@ -124,7 +124,7 @@ class CUDATemplate(KernelTemplate):
             kernel_hash_name,
             self.name,
             self.input_nodes,
-            self.output_node.get_layout(),
+            self.output_node.get_layout(),  # type: ignore[arg-type] # next PR
             make_kernel_render,
             bmreq,
             self,
