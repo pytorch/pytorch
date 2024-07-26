@@ -150,14 +150,20 @@ def create_epilogue_with_attr(input_buffer, attr, **kwargs):
                 result = ops.to_dtype(result, dtype)
             return result
 
-    elif attr == "add" or attr == "sub":
+    elif attr in ["add", "sub", "mul"]:
         assert "other" in kwargs
         other = kwargs["other"]
+        num_input_dims = len(input_buffer.get_size())
+        num_other_dims = len(other.get_size())
+        dims_diff = num_input_dims - num_other_dims
         other_loader = other.make_loader()
 
         def inner_fn(index):
             op = getattr(ops, attr)
-            return op(input_loader(index), other_loader(index))
+            if dims_diff != 0:
+                return op(input_loader(index), other_loader(index[dims_diff:]))
+            else:
+                return op(input_loader(index), other_loader(index))
 
     else:
         raise ValueError(f"Unsupported epilogue attribute: {attr}")

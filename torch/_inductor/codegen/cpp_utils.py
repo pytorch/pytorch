@@ -535,8 +535,13 @@ def unify_mask_base_type(
     return new_vars
 
 
-def get_gemm_template_output_and_compute_dtype(input_dtype):
+def get_gemm_template_output_and_compute_dtype(input_dtype, input2_dtype=None):
     if input_dtype == torch.uint8:
         return (torch.int32, torch.int32)
     else:
+        if (
+            input_dtype in [torch.float, torch.bfloat16, torch.float16]
+            and input2_dtype == torch.int8
+        ):
+            return (input_dtype, torch.float)
         return (torch.float32, torch.float32)

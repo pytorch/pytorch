@@ -224,6 +224,7 @@ class CppPackedGemmTemplate(CppTemplate):
         alpha=1,
         has_bias=False,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+        is_woq_gemm=False,
     ):
         assert layout.dtype in [torch.float, torch.bfloat16, torch.half, torch.uint8]
         super().__init__(
@@ -444,6 +445,7 @@ class CppPackedGemmTemplate(CppTemplate):
         trans_w=False,
         input_indices=None,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+        is_woq_gemm=False,
     ):
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
@@ -507,9 +509,9 @@ class CppPackedGemmTemplate(CppTemplate):
         new_inputs, _ = normalize_shapes(
             *maybe_to_dense(*reorder_and_filter(input_nodes, layout))
         )
-        m, n, k, *_ = mm_args(new_inputs[0], new_inputs[1])
+        m, n, k, *_ = mm_args(new_inputs[0], new_inputs[1], is_woq_gemm=is_woq_gemm)
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
-            new_inputs[0].get_dtype()
+            new_inputs[0].get_dtype(), new_inputs[1].get_dtype()
         )
         micro_gemm = create_micro_gemm(
             "micro_gemm",
@@ -544,12 +546,20 @@ class CppPackedGemmTemplate(CppTemplate):
                     ),
                 )
             else:
-                blocked_w = (
-                    torch.nn.functional.pad(W, (0, padded_n - n))
-                    .reshape(k, padded_n // block_n, block_n)
-                    .transpose(0, 1)
-                    .contiguous()
-                )
+                if is_woq_gemm:
+                    blocked_w = (
+                        torch.nn.functional.pad(W, (0, padded_n - n))
+                        .reshape(padded_n // block_n, block_n, k)
+                        .transpose(1, 2)
+                        .contiguous()
+                    )
+                else:
+                    blocked_w = (
+                        torch.nn.functional.pad(W, (0, padded_n - n))
+                        .reshape(k, padded_n // block_n, block_n)
+                        .transpose(0, 1)
+                        .contiguous()
+                    )
                 if micro_gemm.get_b_layout() != LayoutType.NORMAL:
                     layout_str = (
                         "VNNI4"
@@ -786,7 +796,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 Y_2d = ir.ReinterpretView(storage, template_buffer.get_layout())
 
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
-            X.get_dtype()
+            X.get_dtype(), W.get_dtype()
         )
         micro_gemm = create_micro_gemm(
             f"{kernel.kernel_name}_micro_gemm",
@@ -805,6 +815,15 @@ class CppPackedGemmTemplate(CppTemplate):
         self.log_blockings()
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
+
+        def _get_acc_buf_dtype(input_dtype, input2_dtype):
+            if (
+                input_dtype in [torch.float, torch.bfloat16, torch.float16]
+                and input2_dtype == torch.int8
+            ):
+                return input_dtype
+            else:
+                return torch.float32
 
         options = dict(
             X=X,
@@ -832,7 +851,9 @@ class CppPackedGemmTemplate(CppTemplate):
             x_zp=x_zp,
             w_scale=w_scale,
             w_zp=w_zp,
-            acc_buf_dtype=torch.int32 if int8_gemm else torch.float,
+            acc_buf_dtype=torch.int32
+            if int8_gemm
+            else _get_acc_buf_dtype(X.get_dtype(), W.get_dtype()),
             DTYPE_TO_CPP=DTYPE_TO_CPP,
         )
         with contextlib.ExitStack() as stack:

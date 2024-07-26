@@ -80,6 +80,7 @@ inline void {{kernel_name}}(
             "torch": torch,
             "kernel_name": self.name,
             "input_dtype": self.input_dtype,
+            "input2_dtype": self.input2_dtype,
             "output_dtype": self.output_dtype,
             "compute_dtype": self.compute_dtype,
             "input_t": DTYPE_TO_CPP[self.input_dtype],
@@ -275,6 +276,22 @@ class CppMicroGemmRef(CppMicroGemm):
         output_dtype=torch.float,
     ),
     *generate_gemm_config(
+        VecAVX512,
+        [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
+        input_dtype=torch.half,
+        input2_dtype=torch.int8,
+        output_dtype=torch.half,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecAVX512,
+        [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.bfloat16,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
         VecAVX2,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.float,
@@ -290,6 +307,22 @@ class CppMicroGemmRef(CppMicroGemm):
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.half,
         output_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecAVX2,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.half,
+        input2_dtype=torch.int8,
+        output_dtype=torch.half,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecAVX2,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.bfloat16,
+        compute_dtype=torch.float,
     ),
 )
 class CppMicroGemmFP32Vec(CppMicroGemm):
@@ -344,7 +377,7 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
 template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
 inline void {{kernel_name}}_kernel(
     const {{input_t}}* __restrict__ A,
-    const {{input_t}}* __restrict__ B,
+    const {{input2_t}}* __restrict__ B,
     {{output_t}}* __restrict__ C,
     int64_t K,
     int64_t lda,
@@ -353,6 +386,7 @@ inline void {{kernel_name}}_kernel(
 ) {
     using Vectorized = at::vec::Vectorized<{{compute_t}}>;
     using VectorizedIn = at::vec::Vectorized<{{input_t}}>;
+    using VectorizedW = at::vec::Vectorized<{{input2_t}}>;
     constexpr auto VLEN = Vectorized::size();
     constexpr auto ROWS = BLOCK_M;
     constexpr auto COLS = BLOCK_N / VLEN;
@@ -365,7 +399,12 @@ inline void {{kernel_name}}_kernel(
         if constexpr (accum) {
             constexpr int row = i / COLS;
             constexpr int col = i % COLS;
-            vc[i] = Vectorized::loadu(C + row * ldc + col * VLEN);
+            {%- if (input_dtype == torch.bfloat16 or input_dtype == torch.float16) and input2_dtype == torch.int8 %}
+            auto c = VectorizedIn::loadu(C + row * ldc + col * VLEN, VLEN);
+            vc[i] = at::vec::convert<{{compute_t}}>(c);
+            {%- else %}
+            vc[i] = Vectorized::loadu(C + row * ldc + col * VLEN, VLEN);
+            {%- endif %}
         } else {
             vc[i] = Vectorized(0.0f);
         }
@@ -385,9 +424,12 @@ inline void {{kernel_name}}_kernel(
         }
 
         if constexpr (row == 0) {
-            {%- if input_dtype == torch.bfloat16 or input_dtype == torch.float16 %}
+            {%- if input2_dtype == torch.bfloat16 or input2_dtype == torch.float16 %}
             auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
             vb[col] = at::vec::convert<{{compute_t}}>(b);
+            {%- elif input2_dtype == torch.int8 %}
+            auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN);
+            vb[col] = at::vec::convert<float>(b32);
             {%- else %}
             vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN);
             {%- endif %}
@@ -406,7 +448,12 @@ inline void {{kernel_name}}_kernel(
     auto storec = [&](auto i) {
         constexpr int row = i / COLS;
         constexpr int col = i % COLS;
-        vc[i].store(C + row * ldc + col * VLEN);
+        {%- if output_dtype == torch.bfloat16 or output_dtype == torch.float16 %}
+        auto vc_lower_precision = at::vec::convert<{{input_t}}>(vc[i]);
+        vc_lower_precision.store(C + row * ldc + col * VLEN, VLEN);
+        {%- else %}
+        vc[i].store(C + row * ldc + col * VLEN, VLEN);
+        {%- endif %}
     };
     c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
