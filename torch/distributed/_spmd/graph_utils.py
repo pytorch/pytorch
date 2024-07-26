@@ -92,7 +92,7 @@ def clone_subgraph(
     with graph.inserting_before(target):
         for node in subgraph:
             cloned_node = graph.call_function(
-                node.target, node.args, node.kwargs, node.type
+                node.target, node.args, node.kwargs, node.type  # type: ignore[arg-type]
             )
             # TODO: there are many flatten/unflatten in IterGraph that
             # can be simplified with tree_map. Will simplify this in
