@@ -3911,6 +3911,9 @@ class ChoiceCaller:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {}
 
+    def autoheuristic_id(self) -> str:
+        return "unsupported_choice"
+
 
 class TritonTemplateCallerBase(ChoiceCaller):
     def get_make_kernel_render(self) -> Any:
@@ -4826,8 +4829,21 @@ class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs(skip_out=True)]
+        kernel_name = self.get_kernel_name()
+        if (
+            V.graph.cpp_wrapper
+            and self.cpp_kernel_name == "torch::inductor::_mm_plus_mm"
+        ):
+            # For https://github.com/pytorch/pytorch/issues/128474
+            kernel_name = (
+                "aoti_torch__mm_plus_mm_out"
+                if config.abi_compatible
+                else "torch::inductor::_mm_plus_mm_out"
+            )
+        else:
+            kernel_name = self.get_kernel_name()
         wrapper.generate_extern_kernel_out(
-            self.get_kernel_name(),
+            kernel_name,
             self.codegen_reference(),
             self.output_view.codegen_reference() if self.output_view else None,
             args,
@@ -5807,12 +5823,18 @@ class FallbackKernel(ExternKernelAlloc):
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
+                from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
                 if (
                     config.is_fbcode()
                     and kernel not in has_c_shim
                     # C shim v2 is torchgen-ed, which should cover all aten ops.
                     # If you do hit a missed op, please update gen_aoti_c_shim.py.
                     and config.c_shim_version == "1"
+                ) or (
+                    config.abi_compatible
+                    and config.c_shim_version == "2"
+                    and str(kernel) not in inductor_fallback_ops
                 ):
                     log.warning(
                         "%s is missing a c-shim implementation, using proxy executor as fallback",
@@ -5820,8 +5842,7 @@ class FallbackKernel(ExternKernelAlloc):
                     )
                     self.use_runtime_dispatch = True
                     self.set_cpp_kernel(kernel)
-            else:
-                self.python_kernel_name = str(kernel)
+            self.python_kernel_name = f"torch.ops.{kernel}"
         elif kernel.namespace == "_quantized":  # type: ignore[union-attr]
             # Internal Quantized Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
@@ -6567,7 +6588,7 @@ class InterpreterShim(torch.fx.Interpreter):
         self.graph = graph
         self.submodules = submodules
         self.extra_traceback = False
-        self.fetch_attr = submodules.__getitem__
+        self.fetch_attr = submodules.__getitem__  # type: ignore[method-assign]
         self.current_node = None
 
     def run_node(self, n: torch.fx.Node) -> Any:
