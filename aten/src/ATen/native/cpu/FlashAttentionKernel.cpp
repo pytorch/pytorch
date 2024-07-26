@@ -424,6 +424,7 @@ void cpu_flash_attention(
       }
       // We set fully masked out rows to 0, for this masked out rows the sum is 0, so we need to set it to 1
       for (const auto row : c10::irange(qBlockSize)){
+        qk_max_data[row] = qk_max_data[row] == -std::numeric_limits<accum_t>::infinity() ? 0 : qk_max_data[row];
         qk_sum_data[row] = qk_sum_data[row] == 0 ? 1 : qk_sum_data[row];
       }
 
