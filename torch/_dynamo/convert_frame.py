@@ -49,7 +49,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 
 from torch.utils._python_dispatch import (
     _disable_current_modes,
-    is_in_torch_dispatch_mode,
+    _len_torch_dispatch_stack,
 )
 from torch.utils._traceback import format_traceback_short
 
@@ -1137,7 +1137,7 @@ class CatchErrorsWrapper:
             has_started_execution
             or is_skipfile
             or config.disable
-            or is_in_torch_dispatch_mode()
+            or _len_torch_dispatch_stack() > 0
         ):
             if log.isEnabledFor(logging.DEBUG):
                 print(frame.f_lasti, first_real_inst_idx(frame.f_code))
