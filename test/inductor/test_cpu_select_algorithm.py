@@ -399,6 +399,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
@@ -465,6 +466,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
 
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
