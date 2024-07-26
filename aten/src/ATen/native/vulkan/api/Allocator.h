@@ -5,7 +5,6 @@
 // Always include this file (Allocator.h) instead.
 //
 
-#include <c10/macros/Macros.h>
 #include <ATen/native/vulkan/api/vk_api.h>
 
 #ifdef USE_VULKAN_API
@@ -42,13 +41,16 @@
 */
 #endif /* VULKAN_DEBUG */
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wnullability-completeness")
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-variable")
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
-    "-Winconsistent-missing-destructor-override")
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnullability-completeness"
+#pragma clang diagnostic ignored "-Wunused-variable"
+#endif /* __clang__ */
+
 #include <include/vk_mem_alloc.h>
-C10_DIAGNOSTIC_POP()
-C10_DIAGNOSTIC_POP()
-C10_DIAGNOSTIC_POP()
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif /* __clang__ */
 
 #endif /* USE_VULKAN_API */
