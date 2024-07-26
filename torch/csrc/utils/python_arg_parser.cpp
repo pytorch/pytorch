@@ -985,8 +985,10 @@ auto FunctionParameter::check(
     case ParameterType::QSCHEME:
       return THPQScheme_Check(obj);
     case ParameterType::DEVICE:
+      // Allow symint to be passed in as device, but we'll specialize and
+      // guard in this case.
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) ||
-          THPDevice_Check(obj);
+          THPDevice_Check(obj) || torch::is_symint(py::handle(obj));
     case ParameterType::STREAM:
       return THPStream_Check(obj);
     case ParameterType::STRING:
@@ -1526,7 +1528,16 @@ bool FunctionSignature::parse(
       }
       return false;
     } else if (param.check(obj, overloaded_args, i, &failed_idx)) {
-      dst[i++] = obj;
+      if (param.type_ == ParameterType::DEVICE &&
+          torch::is_symint(py::handle(obj))) {
+        // Cast to c10::SymInt first to guard_int with stack trace
+        // then cast it back to python.
+        auto guarded_int = py::cast<c10::SymInt>(py::handle(obj))
+                               .guard_int(__FILE__, __LINE__);
+        dst[i++] = py::cast(guarded_int).ptr();
+      } else {
+        dst[i++] = obj;
+      }
       // XXX: the Variable check is necessary because sizes become tensors when
       // tracer is enabled. This behavior easily leads to ambiguities, and we
       // should avoid having complex signatures that make use of it...
