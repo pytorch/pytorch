@@ -36,7 +36,7 @@ def _wrap_jagged_dim(
     return _outer_to_inner_dim(ndim, wrapped) if convert_to_inner_dim else wrapped
 
 
-def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1, allow_batch_dim=False):
+def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1):
     """
     For NestedTensor operators,
     wraps dimensions to non-negative values,
@@ -56,12 +56,9 @@ def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1, allow_batch_dim=False):
     operate_on_ragged = ragged_idx in wrapped_dims
     operate_on_non_batch = any(d != 0 and d != ragged_idx for d in wrapped_dims)
 
-    if allow_batch_dim:
-        outer_to_inner_dim = tuple(_outer_to_inner_dim(ndim, d) for d in wrapped_dims)
-    else:
-        outer_to_inner_dim = tuple(
-            _outer_to_inner_dim(ndim, d) for d in wrapped_dims if d != 0
-        )
+    outer_to_inner_dim = tuple(
+        _outer_to_inner_dim(ndim, d) for d in wrapped_dims if d != 0
+    )
 
     return outer_to_inner_dim, operate_on_batch, operate_on_ragged, operate_on_non_batch
 
@@ -509,7 +506,7 @@ def zero__default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten._softmax.default, "self: jt_all, dim: any?, half_to_float: any"
+    torch.ops.aten._softmax.default, "self: jt_all, dim: any, half_to_float: any"
 )
 def _softmax_default(func, *args, **kwargs):
     """
