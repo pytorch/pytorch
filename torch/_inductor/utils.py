@@ -69,8 +69,6 @@ log = logging.getLogger(__name__)
 _T = TypeVar("_T")
 _T_Expr = TypeVar("_T_Expr", bound="sympy.Expr")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
-InputType = Union[torch.Tensor, int]
-
 
 GPU_ALIGN_BYTES = 16
 
