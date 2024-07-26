@@ -366,10 +366,10 @@ in_compiled_autograd_region = False
 @contextlib.contextmanager
 def enable(compiler_fn):
     if not hasattr(enable, "warmup_count"):
-        enable.warmup_count = 0
-    if enable.warmup_count < torch._dynamo.config.warmup_runs:
-        enable.warmup_count += 1
-        verbose_log.debug("compiled autograd warmup run done: %s", enable.warmup_count)
+        enable.warmup_count = 0  # type: ignore[attr-defined]
+    if enable.warmup_count < torch._dynamo.config.warmup_runs:  # type: ignore[attr-defined]
+        enable.warmup_count += 1  # type: ignore[attr-defined]
+        verbose_log.debug("compiled autograd warmup run done: %s", enable.warmup_count)  # type: ignore[attr-defined]
         yield
     else:
         prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
