@@ -47,7 +47,7 @@ sym_node_log = torch._logging.getArtifactLogger(__name__, "sym_node")
 __all__ = ["SymNode", "method_to_operator", "magic_methods"]
 
 
-SymTypes = (SymInt, SymFloat, SymBool)
+from torch.types import py_sym_types as SymTypes
 
 
 def _to_symtype(t):
@@ -123,7 +123,7 @@ class SymNode:
                 "Cannot create SymNode of type "
                 f"{pytype} with incompatible hint of type {type(hint)}"
             )
-            if self.shape_env._translation_validation_enabled:
+            if self.shape_env and self.shape_env._translation_validation_enabled:
                 # This is technically not TV, but this assert is expensive so
                 # let's only do it when we're already doing expensive things
                 computed_hint = compute_hint()
@@ -138,14 +138,29 @@ class SymNode:
         # Record the FX node of the current node if we are doing translation
         # validation. They will be used for building the input assertions for
         # the translation validation problem.
-        self.fx_node = (
-            fx_node if self.shape_env._translation_validation_enabled else None
+        tx_validation_en = (
+            self.shape_env and self.shape_env._translation_validation_enabled
         )
+        self.fx_node = tx_validation_en and fx_node
 
     def with_shape_env(self, shape_env: "ShapeEnv") -> "SymNode":
         return SymNode(
             self._expr, shape_env, self.pytype, self._hint, self.constant, self.fx_node
         )
+
+    def _value_eq(self, other: "SymNode") -> bool:
+        # Purposely don't include the shape_env in the eq.
+        return (
+            self._expr == other._expr
+            and self.pytype == other.pytype
+            and self._hint == other._hint
+            and self.constant == other.constant
+            and self.fx_node == other.fx_node
+        )
+
+    def _value_hash(self) -> int:
+        # Purposely don't include the shape_env in the hash.
+        return hash((self._expr, self.pytype, self._hint, self.constant, self.fx_node))
 
     @property
     def expr(self):
@@ -248,7 +263,7 @@ class SymNode:
 
     def __repr__(self):
         rep = [
-            f"SymNode({self.expr}, shape_env={self.shape_env}, pytype={self.pytype}",
+            f"SymNode({self._expr}, shape_env={self.shape_env}, pytype={self.pytype}",
         ]
         if self._hint is not None:
             rep.append(f"hint={self._hint}")

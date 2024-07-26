@@ -1,6 +1,6 @@
 import functools
-
 from typing import Any, Callable, Dict, List, Tuple
+
 
 Feedback = float
 Choice = str
