@@ -322,8 +322,6 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
   ScaledGemmTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());
 
-    auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
-
 #if defined(USE_ROCM)
     for (auto&& [name, op] : GetHipBlasLtScaledGemmTypeStringAndOps<AT, BT, CT, ALayout, BLayout>()) {
       this->RegisterOp(std::move(name), std::move(op));
