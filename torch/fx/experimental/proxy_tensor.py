@@ -379,16 +379,9 @@ def track_tensor(tensor: Tensor, proxy: Proxy, *, constant: Optional[Tensor], tr
         tensor.numel(),
         lambda x: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_numel.default, (proxy,), {}), x)
     )
-<<<<<<< HEAD
-    try_set_proxy_slot(
-        tensor.storage_offset(),
-        lambda x: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_storage_offset.default, (proxy,)), x)
-=======
     if not is_sparse_any(tensor):
         try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(
-            tracer.create_proxy('call_function', torch.ops.aten.sym_storage_offset.default, (proxy,)), x)  # type: ignore[call-arg]
->>>>>>> bd66fc5f495 ([traced-graph][sparse] propagate sparsity in fx graph)
-    )
+            tracer.create_proxy('call_function', torch.ops.aten.sym_storage_offset.default, (proxy,)), x)
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 _NestedProxys = Union[Proxy, Sequence["_NestedProxys"], Mapping[object, "_NestedProxys"]]
