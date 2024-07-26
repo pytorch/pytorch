@@ -3,7 +3,6 @@ import sys
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
-from torch.utils._ordered_set import OrderedSet
 
 
 def is_fbcode() -> bool:
@@ -945,7 +944,7 @@ class rocm:
     # Enable for CDNA3 only for now
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
     # Keep it ordered, unordered set can cause spurious inductor cache misses
-    supported_arch: OrderedSet[str] = OrderedSet(["gfx940", "gfx941", "gfx942"])
+    supported_arch: List[str] = ["gfx940", "gfx941", "gfx942"]
 
     # Optimization level, use to balance compilation speed and runtime performance
     compile_opt_level = "-O2"
@@ -1095,8 +1094,6 @@ if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
-
-del OrderedSet
 
 
 # adds patch, save_config, etc
