@@ -29,6 +29,10 @@ class ScalarType(IntEnum):
     BFLOAT16 = 13
     UINT16 = 28
     FLOAT8_E4M3FN = 24
+    FLOAT_E5M2 = 14
+    FLOAT8_E4M3FN = 15
+    FLOAT8_E5M2FNUZ = 16
+    FLOAT8_E4M3FNUZ = 17
 
 
 class Layout(IntEnum):
