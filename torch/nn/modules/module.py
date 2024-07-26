@@ -49,7 +49,6 @@ _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
 # the type of the subclass, not the looser type of `Module`.
 T = TypeVar("T", bound="Module")
-OptimizerFactory = Callable[[int, Any], Optimizer]
 
 
 # Define a dictionary that maps short names to optimizer classes
@@ -2959,7 +2958,7 @@ class Module:
             train_loader: DataLoader,
             loss: str,
             loss_args: Optional[Dict[str, Any]] = None,
-            optimizer: Union[str, OptimizerFactory] = 'adam',
+            optimizer: Union[str, Optimizer] = 'adam',
             optimizer_args: Optional[Dict[str, Any]] = None,
             max_epochs: int = 10,
             log_interval: int = 100):
@@ -2970,14 +2969,7 @@ class Module:
         if optimizer_args is None:
             optimizer_args = {}
         if isinstance(optimizer, str):
-            optimizer_ = self._get_optimizer_by_name(optimizer, **optimizer_args)
-            
-            def default_optimizer_factory(batch_idx: int, batch) -> Optimizer:
-                return optimizer_
-
-            optimizer_factory = default_optimizer_factory
-        else:
-            optimizer_factory = optimizer
+            optimizer = self._get_optimizer_by_name(optimizer, **optimizer_args)
 
         training = self.training
 
@@ -2989,8 +2981,6 @@ class Module:
                 running_loss = 0.0
                 for i, data in enumerate(train_loader, 0):
                     inputs, labels = data
-
-                    optimizer = optimizer_factory(i, inputs)
 
                     optimizer.zero_grad()
 
