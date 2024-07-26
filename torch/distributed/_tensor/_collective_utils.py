@@ -238,8 +238,7 @@ def get_padded_tensor(
     # padding_size has the same length of tensor.shape with ith element represent the padding size on ith dimension.
     # pad actually pad the input from the last dimension and moving forward. Hence, we need to reverse the padding_size list.
     for padding_size_on_dim in reversed(padding_size):
-        pad_on_dim = [0, padding_size_on_dim]
-        pad.extend(pad_on_dim)
+        pad.extend([0, padding_size_on_dim])
     return torch.nn.functional.pad(tensor, pad)
 
 
