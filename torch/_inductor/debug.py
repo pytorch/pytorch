@@ -10,7 +10,19 @@ import pickle
 import pstats
 import shutil
 import subprocess
-from typing import Any, Callable, Dict, IO, Iterator, List, Optional, Type, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    IO,
+    Iterator,
+    List,
+    Optional,
+    Type,
+    TypeVar,
+    Union,
+)
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import torch
@@ -39,6 +51,9 @@ log = logging.getLogger(__name__)
 SchedulerNodeList = List[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 
 @functools.lru_cache(None)
@@ -144,12 +159,16 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         kwargs = {}
         if hasattr(snode, "get_device"):
             kwargs = {"device": snode.get_device()}
-        fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)
+        fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)  # type: ignore[arg-type]
 
         def in_output(snode: Union[BaseSchedulerNode, FusedSchedulerNode]) -> bool:
             if isinstance(snode, FusedSchedulerNode):
                 return any(in_output(x) for x in snode.snodes)
-            return any(isinstance(user.node, OutputNode) for user in snode.users)  # type: ignore[attr-defined]
+            return any(
+                isinstance(user.node, OutputNode)
+                for buf in snode.get_outputs()
+                for user in buf.users
+            )
 
         if in_output(snode):
             outputs.append(fx_node)
@@ -302,7 +321,9 @@ class DebugContext:
     _counter = itertools.count()
 
     @staticmethod
-    def wrap(fn: Callable[..., Any]) -> Callable[..., Any]:
+    def wrap(
+        fn: Callable[[Callable[_P, _T]], Callable[_P, _T]]
+    ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
         @functools.wraps(fn)
         def inner(*args: Any, **kwargs: Any) -> Any:
             with DebugContext():
