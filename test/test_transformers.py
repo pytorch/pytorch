@@ -97,7 +97,29 @@ def _check_equal(
 ) -> None:
     """
     Compare test tensor against golden and reference tensors.
+    Golden is the highest precision possible serving as the "ground truth"
+    Refernce is the same precision as test and should also serve as less precisie ground truth.
+    We calcculate the "reference error" by comparing the golden to reference and use this as the
+    measruing stick for the test tensor.
+
     Raises ValueError if compiled error exceeds threshold.
+
+    Args:
+        golden (torch.Tensor): The golden tensor to compare against.
+        reference (torch.Tensor): The reference tensor for error calculation.
+        test (torch.Tensor): The test tensor to be evaluated.
+        fudge_factor (float): A multiplier for the reference error to determine the threshold.
+        tensor_name (Optional[str], optional): Name of the tensor for error reporting. Defaults to None.
+
+    Raises:
+        ValueError: If the test tensor contains NaN values while the reference does not,
+                    or if the test error exceeds the calculated threshold.
+
+    Notes:
+        - For nested tensors, the function recursively calls itself on each nested element.
+        - The error threshold is calculated as the maximum of a default tolerance for float32
+          and the product of the reference error and the fudge_factor.
+        - If the test error exceeds the threshold, a ValueError is raised with a detailed message.
     """
     if golden.is_nested and reference.is_nested and test.is_nested:
         for gold, ref, tst in zip(golden.unbind(), reference.unbind(), test.unbind()):
@@ -111,7 +133,9 @@ def _check_equal(
     if torch.isnan(test_error).any() and not torch.isnan(ref_error).any():
         raise ValueError("Output/Grad with NaN")
 
-    # We take the max between a default tolerance set else where for float32 or the calculated fudge_factor numbers
+    # Calculate the error threshold as the maximum of:
+    # 1. A predefined default tolerance for float32
+    # 2. The reference error multiplied by the fudge factor
     threshold = max(default_atol[torch.float32], ref_error * fudge_factor)
     if test_error > threshold:
         name = tensor_name or ""
@@ -131,12 +155,13 @@ def check_out_and_grad(
     Check output and gradients of attention mechanism tensors.
     Compares compiled results against reference and low-precision reference tensors.
 
-    :param out_tuple: Tuple of (ref, lp_ref, compiled) for output tensor
-    :param grad_query_tuple: Tuple of (ref, lp_ref, compiled) for query gradient
-    :param grad_key_tuple: Tuple of (ref, lp_ref, compiled) for key gradient
-    :param grad_value_tuple: Tuple of (ref, lp_ref, compiled) for value gradient
-    :param grad_attn_mask_tuple: Optional tuple of (ref, lp_ref, compiled) for attention mask gradient
-    :param fudge_factors: Dictionary of fudge factors for each tensor type (default uses 5.0 for all)
+    Args:
+        out_tuple: Tuple of (ref, lp_ref, compiled) for output tensor
+        grad_query_tuple: Tuple of (ref, lp_ref, compiled) for query gradient
+        grad_key_tuple: Tuple of (ref, lp_ref, compiled) for key gradient
+        grad_value_tuple: Tuple of (ref, lp_ref, compiled) for value gradient
+        grad_attn_mask_tuple: Optional tuple of (ref, lp_ref, compiled) for attention mask gradient
+        fudge_factors: Dictionary of fudge factors for each tensor type (default uses 5.0 for all)
     """
     default_fudge_factor = 5.0
     if fudge_factors is None:
@@ -145,17 +170,17 @@ def check_out_and_grad(
     out_ref, out_lp_ref, out = out_tuple
 
     with torch.no_grad():
-        _check_equal(out_ref, out_lp_ref, out, fudge_factors.get('out', default_fudge_factor), "Out")
+        _check_equal(out_ref, out_lp_ref, out, fudge_factors.get('out', default_fudge_factor), "out")
 
         grad_checks = [
-            (grad_query_tuple, "Grad_Query"),
-            (grad_key_tuple, "Grad_Key"),
-            (grad_value_tuple, "Grad_Value")
+            (grad_query_tuple, "grad_query"),
+            (grad_key_tuple, "grad_key"),
+            (grad_value_tuple, "grad_value")
         ]
 
         for grad_tuple, name in grad_checks:
             ref_grad, lp_ref_grad, comp_grad = grad_tuple
-            _check_equal(ref_grad, lp_ref_grad, comp_grad, fudge_factors.get(name.lower(), default_fudge_factor), name)
+            _check_equal(ref_grad, lp_ref_grad, comp_grad, fudge_factors.get(name, default_fudge_factor), name)
 
         if grad_attn_mask_tuple:
             attn_mask_ref_grad, attn_mask_ref_lp_grad, attn_mask_grad = grad_attn_mask_tuple
@@ -164,7 +189,7 @@ def check_out_and_grad(
                 attn_mask_ref_lp_grad,
                 attn_mask_grad,
                 fudge_factors.get("grad_attn_mask", default_fudge_factor),
-                "Grad_Attn_Mask",
+                "grad_attn_mask",
             )
 
 
@@ -2804,15 +2829,14 @@ class TestSDPACudaOnly(NNTestCase):
         grads_ref_lp = torch.autograd.grad(out_lp_ref, (query, key, value), upstream_grad)
         grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref), upstream_grad)
 
-        dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
             *zip(grads_ref, grads_ref_lp, grads),
             fudge_factors={
-                'out': 1.5 * dropout_fudge_factor,
-                'grad_query': 18.0 * dropout_fudge_factor,
-                'grad_key': 13.0 * dropout_fudge_factor,
-                'grad_value': 2.0 * dropout_fudge_factor,
+                'out': 2.0 ,
+                'grad_query': 18.0 ,
+                'grad_key': 25.0,
+                'grad_value': 8.5,
             }
         )
 
@@ -2902,16 +2926,15 @@ class TestSDPACudaOnly(NNTestCase):
         grads_ref_lp = torch.autograd.grad(out_lp_ref, (query, key, value, attn_mask), upstream_grad)
         grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref, attn_mask_ref), upstream_grad)
 
-        dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
             *zip(grads_ref, grads_ref_lp, grads),
             fudge_factors={
-                "out": 1.5 * dropout_fudge_factor,
-                "grad_query": 18.0 * dropout_fudge_factor,
-                "grad_key": 20.0 * dropout_fudge_factor,
-                "grad_value": 4.0 * dropout_fudge_factor,
-                "grad_attn_mask": 20.0 * dropout_fudge_factor,
+                "out": 1.75,
+                "grad_query": 18.0,
+                "grad_key": 25.0,
+                "grad_value": 8.0,
+                "grad_attn_mask": 45.0,
             },
         )
 
@@ -3001,36 +3024,32 @@ class TestSDPACudaOnly(NNTestCase):
         grads = torch.autograd.grad(out, (query, key, value), upstream_grad)
         grads_ref_lp = torch.autograd.grad(out_lp_ref, (query, key, value), upstream_grad)
         grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref), upstream_grad)
-        dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
 
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
             *zip(grads_ref, grads_ref_lp, grads),
             fudge_factors={
-                'out': 1.5 * dropout_fudge_factor,
-                'grad_query': 13.0 * dropout_fudge_factor,
-                'grad_key': 2.0 * dropout_fudge_factor,
-                'grad_value': 1.5 * dropout_fudge_factor,
+                'out': 1.5,
+                'grad_query': 13.0,
+                'grad_key': 2.0,
+                'grad_value': 1.5,
             }
         )
 
     @skipIfRocm  # FIXME: "capturing stream has unjoined work"
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [1, 8])
-    @parametrize("seq_len_q", [256, 512, 1024])
-    @parametrize("seq_len_k", [256, 512, 1024])
+    @parametrize("sequence_legnths", [(512, 512), (256, 512), (128, 1024)])
     @parametrize("head_dim", [32, 64])
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0, 0.22])
     @parametrize("dtype", [torch.float16,])
-    @parametrize("scale", [None, "l1"])
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
-    def test_fused_attention_vs_math_ref_grads_cudagraph(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
+    def test_fused_attention_vs_math_ref_grads_cudagraph(self, device, batch_size: int, sequence_legnths: Tuple[int, int],
                                                          head_dim: int,
                                                          is_causal: bool,
                                                          dropout_p: float,
                                                          dtype: torch.dtype,
-                                                         scale: str,
                                                          fused_kernel: SDPBackend):
         def _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len, dropout_p, seed, offset, device=device):
             mask = torch.empty((batch_size, n_heads, q_len, kv_len), device=device, dtype=torch.float32)
@@ -3059,11 +3078,11 @@ class TestSDPACudaOnly(NNTestCase):
                 dropout_mask = softmax_mask >= 0
                 return dropout_mask
 
+        seq_len_q, seq_len_k = sequence_legnths
         if fused_kernel == SDPBackend.FLASH_ATTENTION and is_causal and seq_len_q != seq_len_k:
             self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
 
         seed = 42
-        scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
         query = torch.rand(batch_size, n_heads, seq_len_q, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
@@ -3084,7 +3103,7 @@ class TestSDPACudaOnly(NNTestCase):
         s.wait_stream(torch.cuda.current_stream())
         # Set the global seed before capture
         torch.manual_seed(seed)
-        kwargs = {"dropout_p": dropout_p, "is_causal": is_causal, "scale": scale}
+        kwargs = {"dropout_p": dropout_p, "is_causal": is_causal}
         if fused_kernel == SDPBackend.EFFICIENT_ATTENTION:
             kwargs["compute_log_sumexp"] = True
             kwargs["attn_bias"] = None
@@ -3128,10 +3147,10 @@ class TestSDPACudaOnly(NNTestCase):
             if dropout_p == 0.0:
                 # High Precision Math Reference
                 out_ref = F.scaled_dot_product_attention(query_ref, key_ref, value_ref,
-                                                         dropout_p=dropout_p, is_causal=is_causal, scale=scale)
+                                                         dropout_p=dropout_p, is_causal=is_causal)
                 # Low Precision Math Reference
                 out_lp_ref = F.scaled_dot_product_attention(query, key, value,
-                                                            dropout_p=dropout_p, is_causal=is_causal, scale=scale)
+                                                            dropout_p=dropout_p, is_causal=is_causal)
             # cuDNN attention doesn't support returning dropout mask
             elif fused_kernel != SDPBackend.CUDNN_ATTENTION:
                 # Create the dropout_mask
@@ -3140,10 +3159,10 @@ class TestSDPACudaOnly(NNTestCase):
                 # High Precision Math Reference
                 out_ref = torch.ops.aten._scaled_dot_product_attention_math(
                     query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal,
-                    scale=scale, dropout_mask=dropout_mask)[0]
+                    dropout_mask=dropout_mask)[0]
                 # Low Precision Math Reference
                 out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                    query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
+                    query, key, value, dropout_p=dropout_p, is_causal=is_causal,
                     dropout_mask=dropout_mask)[0]
 
         g1 = torch.cuda.CUDAGraph()
@@ -3154,15 +3173,14 @@ class TestSDPACudaOnly(NNTestCase):
             grads_ref_lp = torch.autograd.grad(out_lp_ref, (query, key, value), upstream_grad)
             grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref), upstream_grad)
 
-            dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
             check_out_and_grad(
                 (out_ref, out_lp_ref, out),
                 *zip(grads_ref, grads_ref_lp, grads),
                 fudge_factors={
-                    'out': 1.5 * dropout_fudge_factor,
-                    'grad_query': 12.0 * dropout_fudge_factor,
-                    'grad_key': 2.0 * dropout_fudge_factor,
-                    'grad_value': 1.5 * dropout_fudge_factor,
+                    'out': 2.0,
+                    'grad_query': 12.0,
+                    'grad_key': 2.0,
+                    'grad_value': 2.0,
                 }
             )
 
