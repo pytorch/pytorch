@@ -51,18 +51,6 @@ _grad_t = Union[Tuple[Tensor, ...], Tensor]
 T = TypeVar("T", bound="Module")
 
 
-# Define a dictionary that maps short names to optimizer classes
-optimizer_dict = {
-    'sgd': optim.SGD,
-    'adam': optim.Adam,
-    'adadelta': optim.Adadelta,
-    'adagrad': optim.Adagrad,
-    'adamw': optim.AdamW,
-    'adamax': optim.Adamax,
-    'rmsprop': optim.RMSprop,
-    'lbfgs': optim.LBFGS
-}
-
 # Define a dictionary that maps short names to loss classes
 loss_dict = {
     'mse': nn.MSELoss,
@@ -81,6 +69,18 @@ loss_dict = {
     'multi_margin': nn.MultiMarginLoss,
     'triplet_margin': nn.TripletMarginLoss,
     'ctc': nn.CTCLoss
+}
+
+# Define a dictionary that maps short names to optimizer classes
+optimizer_dict = {
+    'sgd': optim.SGD,
+    'adam': optim.Adam,
+    'adadelta': optim.Adadelta,
+    'adagrad': optim.Adagrad,
+    'adamw': optim.AdamW,
+    'adamax': optim.Adamax,
+    'rmsprop': optim.RMSprop,
+    'lbfgs': optim.LBFGS
 }
 
 
@@ -2943,17 +2943,17 @@ class Module:
         """
         self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
     
-    def _get_optimizer_by_name(self, name, **kwargs) -> Optimizer:
-        if name in optimizer_dict:
-            return optimizer_dict[name](self.parameters(), **kwargs)
-        else:
-            raise ValueError(f"Optimizer '{name}' is not supported")
-
     def _get_loss_by_name(self, name, **kwargs):
         if name in loss_dict:
             return loss_dict[name](**kwargs)
         else:
             raise ValueError(f"Loss '{name}' is not supported")
+    
+    def _get_optimizer_by_name(self, name, **kwargs) -> Optimizer:
+        if name in optimizer_dict:
+            return optimizer_dict[name](self.parameters(), **kwargs)
+        else:
+            raise ValueError(f"Optimizer '{name}' is not supported")
 
     def fit(self,
             train_loader: DataLoader,
