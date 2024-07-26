@@ -162,6 +162,7 @@ class OptimizedModule(torch.nn.Module):
         self._orig_mod = mod
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
+        self.training = self._orig_mod.training
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
@@ -196,6 +197,19 @@ class OptimizedModule(torch.nn.Module):
     def __setstate__(self, state):
         self.__dict__ = state
         self._initialize()
+
+    @property
+    def training(self):
+        return self._orig_mod.training
+
+    @training.setter
+    def training(self, value):
+        try:
+            super().__getattr__("_orig_mod")
+            self._orig_mod.training = value
+        except AttributeError:
+            # still initializing
+            pass
 
     def __getattr__(self, name):
         if name == "_orig_mod":
@@ -1498,7 +1512,7 @@ def export(
             # Running graph with interpreter is needed for propagating the stack_trace
             def graph_with_interpreter(*args):
                 with torch.fx.traceback.preserve_node_meta():
-                    return torch.fx.Interpreter(graph).run(*args)
+                    return torch.fx.Interpreter(graph).run(*args)  # type: ignore[arg-type]
 
             with maybe_disable_fake_tensor_mode(), enable_python_dispatcher(), (
                 fake_mode
@@ -1522,9 +1536,9 @@ def export(
 
             assert graph is not None
             for node in graph.graph.find_nodes(op="get_attr"):
-                if isinstance(getattr(graph, node.target), torch.Tensor):
+                if isinstance(getattr(graph, node.target), torch.Tensor):  # type: ignore[arg-type]
                     node.meta["val"] = fake_mode.from_tensor(
-                        getattr(graph, node.target), static_shapes=True
+                        getattr(graph, node.target), static_shapes=True  # type: ignore[arg-type]
                     )
 
         if same_signature:
