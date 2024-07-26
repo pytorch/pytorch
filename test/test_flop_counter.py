@@ -756,7 +756,7 @@ class TestFlopCounter(TestCase):
             return 9001
 
         x = torch.randn(3)
-        with FlopCounterMode() as mode:
+        with FlopCounterMode(display=False) as mode:
             y = foo(x)
 
         self.assertEqual(called, 1)
