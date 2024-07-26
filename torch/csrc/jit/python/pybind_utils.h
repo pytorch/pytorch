@@ -184,7 +184,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
               PyErr_Clear();
             }
 
-            throw err;
+            throw std::runtime_error(err);
           }
         },
         PyObjectType::get()));
