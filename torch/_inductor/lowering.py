@@ -35,6 +35,7 @@ from torch._prims_common import (
     is_integer_dtype,
     Number,
 )
+from torch._prims import _maximum_value_aten, _minimum_value_aten
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.utils._sympy.functions import (
     CeilDiv,
@@ -3730,12 +3731,7 @@ def _low_memory_max_pool2d_with_offsets(
     h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
     w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
 
-    dtype = x.dtype
-    min_value = (
-        False
-        if dtype is torch.bool
-        else (float("-inf") if dtype.is_floating_point else torch.iinfo(dtype).min)
-    )
+    min_value = _minimum_value_aten(x.dtype)
 
     new_size = list(batch) + [h_out, w_out]
     if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
@@ -5557,16 +5553,7 @@ def cummax(x, axis=None):
         "argmax", dtype=dtype, arg_break_ties_left=False
     )
 
-    min_value = (
-        False
-        if dtype is torch.bool
-        else (
-            torch.finfo(dtype).min
-            if dtype.is_floating_point
-            else torch.iinfo(dtype).min
-        )
-    )
-
+    min_value = _minimum_value_aten(dtype)
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
@@ -5587,16 +5574,7 @@ def cummin(x, axis=None):
         "argmin", dtype=dtype, arg_break_ties_left=False
     )
 
-    max_value = (
-        True
-        if dtype is torch.bool
-        else (
-            torch.finfo(dtype).max
-            if dtype.is_floating_point
-            else torch.iinfo(dtype).max
-        )
-    )
-
+    max_value = _maximum_value_aten(dtype)
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
