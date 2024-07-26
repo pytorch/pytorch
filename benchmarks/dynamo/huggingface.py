@@ -368,6 +368,10 @@ class HuggingfaceRunner(BenchmarkRunner):
         return self._config["skip"]
 
     @property
+    def _accuracy(self):
+        return self._config["accuracy"]
+
+    @property
     def skip_models(self):
         return self._skip["all"]
 
