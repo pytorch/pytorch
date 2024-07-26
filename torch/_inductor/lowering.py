@@ -7,7 +7,8 @@ import operator
 import os
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import sympy
@@ -47,6 +48,7 @@ from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
 from .ir import (
+    DtypeView,
     ExpandView,
     IndexingConstant,
     is_triton,
@@ -72,6 +74,8 @@ from .utils import (
 )
 from .virtualized import ops, V
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
 lowerings: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
@@ -334,7 +338,7 @@ def register_lowering(
     broadcast=False,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
-):
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Shim to support decorator syntax.
     """
@@ -597,16 +601,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     if src_bits != dst_bits:
         # fallback to aten eager implementation for differing bitwidths
         return fallback_handler(aten.view.dtype)(x, dtype)
-
-    def _to_dtype_bitcast(x):
-        # Because we may promote tensor type from float16 or bfloat16
-        # to float, we will need to pass the original src dtype (i.e. x_dtype),
-        # which is used for correctly constructing type conversion before bitcast,
-        # which requires the bitwidth of the input tensor type is the same as the
-        # target type.
-        return ops.to_dtype_bitcast(x, dtype, x_dtype)
-
-    return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
+    else:
+        return TensorBox(DtypeView.create(x, dtype))
 
 
 @register_lowering(aten.view.dtype, type_promotion_kind=None)
@@ -615,7 +611,7 @@ def _view_dtype(x: TensorBox, dtype: torch.dtype):
         return TensorBox.create(
             ir.ComplexView.create(torch.ops.aten.view.dtype, x, dtype)
         )
-    return to_dtype_bitcast(x, dtype, copy=True)
+    return to_dtype_bitcast(x, dtype)
 
 
 def to_device(x: TensorBox, device: torch.device, *, copy=False):
@@ -3374,7 +3370,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         ndim = len(shape)
         indirect_idx = list(idx)
         indirect_idx[dim] = ops.indirect_indexing(
-            index_loader(idx), 1 if ndim == 0 else shape[dim]
+            index_loader(idx), 1 if ndim == 0 else shape[dim], wrap_neg=False
         )
         return indirect_idx
 
@@ -6005,7 +6001,7 @@ def sym_numel(a):
 
 
 for method, func in magic_methods.items():
-    register_lowering(method_to_operator(method))(func)
+    register_lowering(method_to_operator(method))(func)  # type: ignore[arg-type]
 
 
 @register_lowering(aten._foobar)
@@ -6191,7 +6187,7 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
         for x in itertools.chain(input, input)
     ]
-    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
+    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
 
     def wrapped_combine_fn(lhs, rhs):
         return lowered_combine_fn(
