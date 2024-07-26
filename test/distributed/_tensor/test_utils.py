@@ -184,7 +184,7 @@ class UtilTest(DTensorTestBase):
         else:
             self.assertEqual(local_padded_shape, list(tensor_list[0].shape))
             self.assertEqual(local_unpadded_shape, [0, 8])
-            
+
 
 class Test2DStridedLocalShard(DTensorTestBase):
     @property
