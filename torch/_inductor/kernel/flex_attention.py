@@ -422,7 +422,7 @@ def forward_inner(
 flex_attention_template = TritonTemplate(
     name="flex_attention",
     grid=flex_attention_grid,
-    source= compute_flex_attention + compute_forward_block + compute_next_offset_func,
+    source=compute_flex_attention + compute_forward_block + compute_next_offset_func,
 )
 
 
