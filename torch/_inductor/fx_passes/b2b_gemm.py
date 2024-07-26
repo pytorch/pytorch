@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Dict, List
+from typing import Dict, List, Set, Tuple
 
 import torch
 from ..._dynamo.utils import counters
@@ -439,13 +439,16 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
     def all_reach_via_pointwise_with_no_other_inputs(
         src: torch.fx.Node,
         dst: torch.fx.Node,
-    ) -> bool:
+    ) -> Tuple[bool, Set[torch.fx.Node]]:
         """
         check whether every user path from src reaches dst via pointwise nodes,
-        with no other input nodes for the intermediates and dst
+        with no other input nodes for the intermediates and dst;
+        return
+        (1) the Boolean value
+        (2) the subgraph node set (which only makes sense when the Boolean value is True)
         """
         if src == dst:  # trivial subgraph
-            return True
+            return (True, {src})
 
         reachable: Dict[torch.fx.Node, bool] = {}
         input_counter: Dict[torch.fx.Node, int] = {}
@@ -473,10 +476,12 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
             reachable[node] = ret
             return ret
 
-        return reach(src) and all(count == 0 for count in input_counter.values())
+        ok = reach(src) and all(count == 0 for count in input_counter.values())
+        return (ok, set(reachable.keys()))
 
     # check inner_mm reaches f_node on every user path via pointwise nodes with no outside input_nodes
-    if not all_reach_via_pointwise_with_no_other_inputs(inner_mm, f_node):
+    ok, subgraph_node_set = all_reach_via_pointwise_with_no_other_inputs(inner_mm, f_node)
+    if not ok:
         return
 
     # check inner_mm's inputs and f_node's outputs
@@ -486,20 +491,6 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
     # at this point, the nodes between inner_mm and f_node (both included)
     # are all used internally inside (A @ subgraph(B @ C))
     # i.e. they neither have other users nor have other inputs
-
-    # find nodes in the subgraph (including inner_mm and f_node, excluding outer_mm)
-    subgraph_node_set = set()
-
-    def dfs(node: torch.fx.Node) -> None:
-        if node in subgraph_node_set:
-            return
-        if node is outer_mm:
-            return
-        subgraph_node_set.add(node)
-        for user in node.users.keys():
-            dfs(user)
-
-    dfs(inner_mm)
 
     # original graph and module
     graph, module = inner_mm.graph, inner_mm.graph.owning_module
