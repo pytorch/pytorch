@@ -48,11 +48,23 @@ class AHTrainDecisionTreeMM(AHTrainDecisionTree):
         df_torchbench = df_torchbench.loc[df_torchbench.index.repeat(3)].reset_index(
             drop=True
         )
+        df_timm_train = datasets["train_timm"]
+        df_timm_train = df_timm_train.loc[df_timm_train.index.repeat(3)].reset_index(
+            drop=True
+        )
+        df_hf_train = datasets["train_hf"]
+        df_hf_train = df_hf_train.loc[df_hf_train.index.repeat(3)].reset_index(
+            drop=True
+        )
         df_train = datasets["train"]
         df_train = pd.concat(
-            [df_train, df_hf, df_timm, df_torchbench], ignore_index=True
+            [df_train, df_hf, df_timm, df_torchbench, df_timm_train, df_hf_train],
+            ignore_index=True,
         )
         return df_train
+
+    def ranking_always_included_choices(self):
+        return ["extern_mm"]
 
     def ranking_num_choices(self):
         return 10
