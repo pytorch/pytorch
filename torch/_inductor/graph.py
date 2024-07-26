@@ -943,7 +943,7 @@ class GraphLowering(torch.fx.Interpreter):
             )
         )
         self.graph_inputs[target] = tensor
-        self.graph_inputs_original[target] = tensor.data.data
+        self.graph_inputs_original[target] = tensor.data.data  # type: ignore[attr-defined] # next PR
         self.add_device_info(example.device)
 
         # Note: [Input Alignment handling in Inductor]

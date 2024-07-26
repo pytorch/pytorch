@@ -98,8 +98,8 @@ def indexing_dtype_strength_reduction(loop_body: LoopBody):
         node
         for node in loop_body.get_nodes()
         if (
-            node.target == "to_dtype"
-            and node.args[2] == torch.int64
+            node.target == "to_dtype"  # type: ignore[attr-defined] # next PR
+            and node.args[2] == torch.int64  # type: ignore[attr-defined] # next PR
             and node not in bv.unbounded_vars
         )
     ]

@@ -43,7 +43,7 @@ def get_inverse_offsets(
     if hasattr(offsets, "inverse_offsets"):
         # inverse_offsets are already computed
         # for these offsets: can reuse
-        return offsets.inverse_offsets
+        return offsets.inverse_offsets  # type: ignore[return-value] # next PR
 
     # ops.bucketize takes offsets.get_name() which doesn't exist on Pointwise
     # kernels, i.e. we need to realize it before using. In other words, we need

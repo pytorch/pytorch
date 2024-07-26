@@ -912,7 +912,7 @@ class SchedulerNode(BaseSchedulerNode):
         sizes, reduction_sizes = self._sizes
 
         def fn(index: Sequence[sympy.Symbol]) -> str:
-            return self._body(index, [sympy.Integer(0) for _ in reduction_sizes])
+            return self._body(index, [sympy.Integer(0) for _ in reduction_sizes])  # type: ignore[return-value] # next PR
 
         return dependencies.extract_read_writes(fn, sizes)  # type: ignore[arg-type] # next PR
 
@@ -935,17 +935,17 @@ class SchedulerNode(BaseSchedulerNode):
         if isinstance(self._body, ir.LoopBody):
             for node in self._body.get_nodes():
                 if (
-                    node.op == "call_method"
-                    and node.target == "store"
+                    node.op == "call_method"  # type: ignore[attr-defined] # next PR
+                    and node.target == "store"  # type: ignore[attr-defined] # next PR
                     and (
-                        ("mode" in node.kwargs and node.kwargs["mode"] == "atomic_add")
-                        or (len(node.args) == 5 and node.args[4] == "atomic_add")
+                        ("mode" in node.kwargs and node.kwargs["mode"] == "atomic_add")  # type: ignore[attr-defined] # next PR
+                        or (len(node.args) == 5 and node.args[4] == "atomic_add")  # type: ignore[attr-defined] # next PR
                     )
                 ):
                     buffers_store_as_atomic_add.add(
-                        node.kwargs["name"]
-                        if "name" in node.kwargs
-                        else (node.args[1] if len(node.args) >= 2 else "")
+                        node.kwargs["name"]  # type: ignore[attr-defined] # next PR
+                        if "name" in node.kwargs  # type: ignore[attr-defined] # next PR
+                        else (node.args[1] if len(node.args) >= 2 else "")  # type: ignore[attr-defined] # next PR
                     )
         return buffers_store_as_atomic_add
 

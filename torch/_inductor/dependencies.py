@@ -534,8 +534,8 @@ def extract_input_node_reduction_ranges(
         # Input node has already been realized. Return its size and reduction_size.
         size = input_node.get_size()
         reduction_size = input_node.get_reduction_size()
-        if len(reduction_size) > 0:
-            return (size, reduction_size)
+        if len(reduction_size) > 0:  # type: ignore[arg-type] # next PR
+            return (size, reduction_size)  # type: ignore[return-value] # next PR
         else:
             return (None, None)
 
@@ -548,7 +548,7 @@ def extract_input_node_reduction_ranges(
     # Is there a way to check whether there are permutations inbetween?
     reads = input_node.get_reads()
     reduction_size = None
-    size = None
+    size = None  # type: ignore[assignment] # next PR
     while reduction_size is None and len(reads) > 0:
         seen = set()
         new_reads = []  # type: ignore[var-annotated] # next PR
@@ -574,10 +574,10 @@ def extract_input_node_reduction_ranges(
             else:
                 new_reads.extend(op.get_reads())
         if reads == new_reads:
-            return (size, reduction_size)
+            return (size, reduction_size)  # type: ignore[return-value] # next PR
         else:
             reads = new_reads
-    return (size, reduction_size)
+    return (size, reduction_size)  # type: ignore[return-value] # next PR
 
 
 def canonicalization_prefix():

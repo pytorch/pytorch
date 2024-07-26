@@ -633,7 +633,7 @@ class WrapperCodeGen(CodeGen):
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
             if sympy_product(buf.get_size()) == 0:
                 continue
-            size = self.codegen_shape_tuple(buf.get_size())
+            size = self.codegen_shape_tuple(buf.get_size())  # type: ignore[arg-type] # next PR
             stride = self.codegen_shape_tuple(buf.get_stride())
             self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
 
@@ -1017,7 +1017,7 @@ class WrapperCodeGen(CodeGen):
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_size()
-            for dim, shape in enumerate(shapes):
+            for dim, shape in enumerate(shapes):  # type: ignore[assignment] # next PR
                 if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
                     code.writeline(
                         f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
@@ -1026,7 +1026,7 @@ class WrapperCodeGen(CodeGen):
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_stride()
-            for dim, shape in enumerate(shapes):
+            for dim, shape in enumerate(shapes):  # type: ignore[assignment] # next PR
                 if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
