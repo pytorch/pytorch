@@ -196,6 +196,10 @@ class ItertoolsVariable(VariableTracker):
             return variables.UserFunctionVariable(polyfill.dropwhile).call_function(
                 tx, args, kwargs
             )
+        elif self.value is itertools.zip_longest:
+            return variables.UserFunctionVariable(polyfill.zip_longest).call_function(
+                tx, args, kwargs
+            )
         else:
             return super().call_function(tx, args, kwargs)
 
