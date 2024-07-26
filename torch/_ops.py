@@ -5,13 +5,17 @@ import importlib
 import inspect
 import sys
 import types
-from typing import Any, Callable, Dict, List, Set, Type, Union
+from typing import Any, Callable, Dict, List, Set, Type, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
 from torch import _utils_internal
 from torch._functorch.pyfunctorch import dispatch_functorch
 from torch.utils._python_dispatch import TorchDispatchMode
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 
 # Query `hasattr` only once.
@@ -97,8 +101,16 @@ class OperatorBase:
                 return True
         return False
 
-    def py_impl(self, k):
-        def inner(fn):
+    def py_impl(
+        self,
+        k: Union[
+            Type[TorchDispatchMode],
+            Type[torch.Tensor],
+            torch._C._functorch.TransformType,
+            torch._C.DispatchKey,
+        ],
+    ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+        def inner(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             if inspect.isclass(k) and (
                 issubclass(k, TorchDispatchMode) or issubclass(k, torch.Tensor)
             ):
@@ -278,7 +290,15 @@ class HigherOrderOperator(OperatorBase):
         # it to next key. This is only safe to do when PreDispatch key stack has no
         # active modes.
 
-    def py_impl(self, k):
+    def py_impl(
+        self,
+        k: Union[
+            Type[TorchDispatchMode],
+            Type[torch.Tensor],
+            torch._C._functorch.TransformType,
+            torch._C.DispatchKey,
+        ],
+    ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
         if isinstance(k, torch._C.DispatchKey) and not self.non_fallthrough_keys.has(k):
             self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
         return super().py_impl(k)

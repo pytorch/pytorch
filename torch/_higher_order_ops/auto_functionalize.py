@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import warnings
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -158,7 +157,7 @@ def auto_functionalized_fake(
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     with mode:
-        result = auto_functionalized_dense(_mutable_op, **kwargs)
+        result = auto_functionalized_dense(_mutable_op, **kwargs)  # type: ignore[arg-type]
         return result
 
 
