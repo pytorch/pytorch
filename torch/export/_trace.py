@@ -754,6 +754,7 @@ def _export_to_aten_ir(
         ],
         input_tokens=graph_signature.input_tokens,
         output_tokens=graph_signature.output_tokens,
+        non_persistent_buffers=_get_non_persistent_buffers(mod),
     )
     export_graph_signature = ExportGraphSignature(
         input_specs=input_specs, output_specs=output_specs
@@ -854,14 +855,25 @@ def _get_forward_arg_names(
     return names
 
 
+def _get_non_persistent_buffers(mod: torch.nn.Module) -> Set[str]:
+    """
+    Returns set of non-persistent buffers in a module and its submodules.
+    """
+    result = set()
+    for name, m in mod.named_modules():
+        for b in m._non_persistent_buffers_set:
+            result.add(f"{name}.{b}" if name else b)
+    return result
+
+
 def _rewrite_dynamo_tensor_constants(
     orig_mod_buffers: Set[torch.Tensor],
     traced_mod_buffers: Dict[str, torch.Tensor],
     graph_signature: ExportGraphSignature,
     constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
 ):
-    """Dynamo erroneously marks tensor attributes on modules as a buffers.
-
+    """
+    Dynamo erroneously marks tensor attributes on modules as buffers.
     Rewrite them to be tensor constants.
     """
     for spec in graph_signature.input_specs:
@@ -870,29 +882,25 @@ def _rewrite_dynamo_tensor_constants(
             value = traced_mod_buffers[spec.target]
             if value not in orig_mod_buffers:
                 # This was a tensor constant erroneously marked as a buffer.
-                # Convert it int oa constant in the graph signature, and add its
+                # Convert it into a constant in the graph signature, and add its
                 # value to the constants table.
                 spec.kind = InputKind.CONSTANT_TENSOR
                 constants[spec.target] = value  # type: ignore[arg-type]
 
 
-def _rewrite_non_persistent_buffers(
+def _move_non_persistent_buffers_to_tensor_constants(
     orig_mod: torch.nn.Module,
     graph_signature: ExportGraphSignature,
     constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
 ):
-    """Dynamo erroneously drops the persistent flag on buffers.
-
-    Rewrite non-persistent buffers to reflect the original module.
     """
-    state_dict = orig_mod.state_dict()
+    Moves non-persistent buffers to tensor constants.
+    """
     for spec in graph_signature.input_specs:
-        if spec.kind == InputKind.BUFFER:
+        if spec.kind == InputKind.BUFFER and not spec.persistent:
             assert spec.target is not None
-            if spec.target not in state_dict:
-                assert spec.target not in constants
-                spec.persistent = False
-                constants[spec.target] = orig_mod.get_buffer(spec.target)  # type: ignore[arg-type]
+            assert spec.target not in constants
+            constants[spec.target] = orig_mod.get_buffer(spec.target)  # type: ignore[arg-type]
 
 
 def _verify_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
@@ -1386,11 +1394,23 @@ def _strict_export_lower_to_aten_ir(
 
     _normalize_nn_module_stack(gm_torch_level, type(mod))
 
-    # NOTE: graph module expects only positional args
     constant_attrs = _gather_constant_attrs(mod)
+    param_buffer_table: Dict[str, str] = _get_param_buffer_mapping(mod, gm_torch_level)
+
+    # Dynamo does not track which buffers were registered as non-persistent. This info
+    # is available in the original module, so we transfer it to the traced module. Also,
+    # since we didn't restore original param/buffer names yet, we must use traced names.
+    non_persistent_buffers = _get_non_persistent_buffers(mod)
+    reverse_name_lookup = {orig: traced for traced, orig in param_buffer_table.items()}
+    gm_torch_level._non_persistent_buffers_set = {
+        reverse_name_lookup[name]
+        for name in non_persistent_buffers
+        if name in reverse_name_lookup
+    }
     with dynamo_fake_mode:
         aten_export_artifact = lower_to_aten_callback(
             gm_torch_level,
+            # NOTE: graph module expects only positional args
             _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
             {},
             fake_params_buffers,
@@ -1433,11 +1453,12 @@ def _strict_export_lower_to_aten_ir(
         constants=constants,
     )
     # 2. Restore FQN of param/buffers
-    param_buffer_table: Dict[str, str] = _get_param_buffer_mapping(mod, gm_torch_level)
     _replace_param_buffer_names(param_buffer_table, export_graph_signature)
 
-    # 3. Remove non-persistent buffers from the graph signature
-    _rewrite_non_persistent_buffers(mod, export_graph_signature, constants)
+    # 3. Move non-persistent buffers to tensor constants
+    _move_non_persistent_buffers_to_tensor_constants(
+        mod, export_graph_signature, constants
+    )
 
     # 4. Rewrite constants to have the same FQN as the original module.
     _remap_constants(constant_attrs, export_graph_signature, constants)
@@ -1613,6 +1634,7 @@ def _export_to_aten_ir_make_fx(
         ],
         input_tokens=[],
         output_tokens=[],
+        non_persistent_buffers=_get_non_persistent_buffers(mod),
     )
     export_graph_signature = ExportGraphSignature(
         input_specs=input_specs, output_specs=output_specs
@@ -1827,7 +1849,7 @@ def _non_strict_export(
                 for fqn, obj in aten_export_artifact.constants.items()
             }
 
-    _rewrite_non_persistent_buffers(
+    _move_non_persistent_buffers_to_tensor_constants(
         mod, aten_export_artifact.sig, aten_export_artifact.constants
     )
 
