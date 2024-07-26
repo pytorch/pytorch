@@ -36,13 +36,17 @@ def _wrap_jagged_dim(
     return _outer_to_inner_dim(ndim, wrapped) if convert_to_inner_dim else wrapped
 
 
-def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1):
+def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1, allow_batch_dim=False):
     """
-    For NestedTensor operators that support multiple dimensions,
+    For NestedTensor operators,
     wraps dimensions to non-negative values,
     and returns metadata related to reduction dimension(s).
     """
     from torch._prims_common import canonicalize_dims
+
+    assert isinstance(
+        dims, (tuple, list)
+    ), f"_wrap_jagged_dims(): cannot iterate over dimensions of type {type(dims)}"
 
     wrapped_dims = [
         canonicalize_dims(ndim, d) for d in dims
@@ -52,9 +56,12 @@ def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1):
     operate_on_ragged = ragged_idx in wrapped_dims
     operate_on_non_batch = any(d != 0 and d != ragged_idx for d in wrapped_dims)
 
-    outer_to_inner_dim = tuple(
-        _outer_to_inner_dim(ndim, d) for d in wrapped_dims if d != 0
-    )
+    if allow_batch_dim:
+        outer_to_inner_dim = tuple(_outer_to_inner_dim(ndim, d) for d in wrapped_dims)
+    else:
+        outer_to_inner_dim = tuple(
+            _outer_to_inner_dim(ndim, d) for d in wrapped_dims if d != 0
+        )
 
     return outer_to_inner_dim, operate_on_batch, operate_on_ragged, operate_on_non_batch
 
@@ -502,16 +509,80 @@ def zero__default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten._softmax.default, "self: jt, dim: any, half_to_float: any"
+    torch.ops.aten._softmax.default, "self: jt_all, dim: any?, half_to_float: any"
 )
 def _softmax_default(func, *args, **kwargs):
+    """
+    Performs a softmax along the provided tensor dimension.
+    Returns a tensor of the same type as the input.
+    """
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
+    if isinstance(new_kwargs["dim"], tuple):
+        raise RuntimeError(
+            "softmax(): not supported for dimensions of type 'tuple' for NestedTensor"
+        )
+
     inp = new_kwargs.pop("input")
-    dim = new_kwargs["dim"]
-    new_kwargs["dim"] = _wrap_jagged_dim(len(inp._size), dim, "softmax")
+
+    (
+        new_kwargs["dim"],
+        reduce_on_batch,
+        reduce_on_ragged,
+        reduce_on_non_batch,
+    ) = _wrap_jagged_dims(
+        inp.dim(),
+        (new_kwargs["dim"],),
+        "softmax",
+        inp._ragged_idx,
+    )
+
+    if reduce_on_batch:
+        raise RuntimeError(
+            "softmax(): not supported when reducing across the batch dimension for NestedTensor"
+        )
+
+    if reduce_on_ragged and inp._ragged_idx > 1:
+        raise RuntimeError(
+            "softmax(): not supported when reducing along the ragged dimension for ragged_idx > 1 for NestedTensor"
+        )
+
+    if reduce_on_ragged and inp._lengths is not None:
+        raise RuntimeError(
+            "softmax(): not supported where lengths is not None "
+            + "if reducing across the ragged dimension for NestedTensor"
+        )
+
+    new_kwargs["dim"] = new_kwargs["dim"][
+        0
+    ]  # torch.softmax takes in the reduction dimension as an integer
+
+    if reduce_on_ragged:
+        padded_softmax_values = torch.nn.functional.softmax(
+            torch.ops.aten._jagged_to_padded_dense_forward(
+                inp._values.flatten(
+                    start_dim=inp._ragged_idx
+                ),  # values are required to be 2D tensors for j2pd
+                [inp._offsets],
+                max_lengths=[inp._max_seqlen],  # max length of ragged dimension
+                padding_value=float("-inf"),  # e^-inf = 0
+            ),
+            dim=inp._ragged_idx,
+        )
+
+        softmax_values = torch.ops.aten._padded_dense_to_jagged_forward(
+            padded_softmax_values,
+            [inp._offsets],
+            total_L=inp._values.shape[
+                0
+            ],  # providing this parameter helps avoid a GPU/CPU sync
+        ).reshape(
+            -1, *inp._values.shape[1:]
+        )  # expand softmax_values back to original shape (inp._values.shape)
+
+        return NestedTensor(softmax_values, **extract_kwargs(inp))
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
@@ -1038,7 +1109,7 @@ def view_default(func, *args, **kwargs):
 
 @register_jagged_func(
     torch.ops.aten.native_layer_norm.default,
-    "input: jt, normalized_shape: any, weight: any?, bias: any?, eps: any",
+    "input: jt_all, normalized_shape: any, weight: any?, bias: any?, eps: any",
 )
 def native_layer_norm_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
