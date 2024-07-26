@@ -163,8 +163,8 @@ static PyObject* THPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       "torch.Event ipc is not supported yet, please open an issue if you need this!");
-  std::string handle = "0";
-  return PyBytes_FromStringAndSize((const char*)&handle, sizeof(handle));
+  const char* handle = "0";
+  return PyBytes_FromStringAndSize(handle, 1);
   END_HANDLE_TH_ERRORS
 }
 
