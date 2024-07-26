@@ -217,25 +217,28 @@ class ROCmTemplateKernel(ROCmKernel):
         """
         Hook called from template call to get the contiguous stride of an arg.
         """
+
+        if node is None:
+            return str(default_value)
+
+        # 1D bias case, i.e. the shape when initialized is (N,)
+        # -> torch stride is (0, 1) and bias is row-major from CK POV
+        if node.get_stride() == [0, 1]:
+            return "0L"
+
+        # Broadcasted bias case, i.e. the shape when initialized is (M, 1)
+        # -> torch stride is (1, 0) and bias is col-major from CK POV
+        # There is numerical mismatch which needs debugging, currently this case is disabled for adding CK template choices.
+        if node.get_stride() == [1, 0]:
+            return "0L"
+
         # strides: in torch, stride measures how many positions to advance the data pointer when the dimension index is incremented
         # in CK, the stride is the size of the contiguous dimension
         # so depending whether input is regular or transposed,
         # the CK stride is either in -2 or -1 position of the strides list
         # the below should do the job for 2D inputs
-        if node is None:
-            return str(default_value)
-
-        # 1D bias case, i.e. the shape when initialized is (N,)
-        if node.get_stride() == [0, 1]:
-            return "0L"
-
-        # This is supposed to work for the broadcasted bias case, i.e. (M, 1)
-        # But it doesn't? There is numerical mismatch.
-        if node.get_stride() == [1, 0]:
-            return "0L"
-
         contiguous_stride = functools.reduce(
-            lambda a, b: max(b, a), node.get_stride(), sympy.Integer(0)
+            sympy.Max, node.get_stride(), sympy.Integer(0)
         )
         return cexpr(self.rename_indexing(contiguous_stride))
 
