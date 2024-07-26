@@ -374,7 +374,6 @@ void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
   writer_ = std::move(writer);
 }
 
-
 std::string NCCLTraceBuffer::dump_json(
     const std::optional<std::unordered_map<
         std::string,
