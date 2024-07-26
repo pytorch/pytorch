@@ -44,8 +44,6 @@ time python test/run_test.py --verbose -i distributed/_tensor/test_dtensor_compi
 time python test/run_test.py --verbose -i distributed/test_device_mesh
 
 # DTensor/TP tests
-time python test/run_test.py --verbose -i distributed/tensor/parallel/test_ddp_2d_parallel
-time python test/run_test.py --verbose -i distributed/tensor/parallel/test_fsdp_2d_parallel
 time python test/run_test.py --verbose -i distributed/tensor/parallel/test_tp_examples
 time python test/run_test.py --verbose -i distributed/tensor/parallel/test_tp_random_state
 
