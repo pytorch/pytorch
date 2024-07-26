@@ -3017,6 +3017,7 @@ class GraphModule(torch.nn.Module):
         self.assertIsInstance(it2, enumerate)
         self.assertEqual(list(it1), list(it2))
 
+
 def udf_mul(x, y):
     return x * y
 
