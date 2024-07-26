@@ -6625,7 +6625,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.randn(2)
         out = f(torch.randn(2))
-        opt_out = torch.compile(dynamic=True, fullgraph=True)(f)(x)
+        opt_out = torch.compile(backend="eager", dynamic=True, fullgraph=True)(f)(x)
         self.assertEqual(out, opt_out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
