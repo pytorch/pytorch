@@ -189,9 +189,6 @@ class TestBenchmarking(TestCase):
 
         return [*sums, *mms]
 
-    def diff(self, baseline, experimental):
-        return abs(experimental - baseline) / baseline
-
     def counter_fallback_to_original_benchmarking(self):
         return counters["inductor"]["benchmarking_fallback_to_original_benchmarking"]
 
@@ -239,11 +236,7 @@ class TestBenchmarkingCPU(TestBenchmarking):
         for _ in range(10):
             _callable()
         baseline_timing_ms = ((time.perf_counter() - start_time_s) * 1000) / 10
-        self.assertEqual(
-            (baseline_timing_ms < timing_ms)
-            or (self.diff(baseline_timing_ms, timing_ms) < 0.25),
-            True,
-        )
+        self.assertEqual(baseline_timing_ms, timing_ms, rtol=0.25)
 
     def gpu_properties_are_not_initialized(self):
         gpu_properties = [
@@ -496,12 +489,9 @@ class TestBenchmarkingGPU(TestBenchmarking):
         elapsed_time_ms = (time.perf_counter() - start_time_s) * 1000
         torch.cuda.synchronize()
         self.assertEqual(
-            self.diff(
-                benchmarker.cpu_launch_overhead_ms_per_event_record,
-                elapsed_time_ms / 1000,
-            )
-            < 0.25,
-            True,
+            benchmarker.cpu_launch_overhead_ms_per_event_record,
+            elapsed_time_ms / 1000,
+            rtol=0.25,
         )
 
     @patches
@@ -516,12 +506,9 @@ class TestBenchmarkingGPU(TestBenchmarking):
         elapsed_time_ms = (time.perf_counter() - start_time_s) * 1000
         torch.cuda.synchronize()
         self.assertEqual(
-            self.diff(
-                benchmarker.cpu_launch_overhead_ms_per_gpu_cache_clear,
-                elapsed_time_ms / 100,
-            )
-            < 0.25,
-            True,
+            benchmarker.cpu_launch_overhead_ms_per_gpu_cache_clear,
+            elapsed_time_ms / 100,
+            rtol=0.25,
         )
 
     @patches
@@ -544,12 +531,9 @@ class TestBenchmarkingGPU(TestBenchmarking):
         end_event.record()
         torch.cuda.synchronize()
         self.assertEqual(
-            self.diff(
-                benchmarker.gpu_time_ms_per_gpu_cache_clear,
-                start_event.elapsed_time(end_event) / 100,
-            )
-            < 0.25,
-            True,
+            benchmarker.gpu_time_ms_per_gpu_cache_clear,
+            start_event.elapsed_time(end_event) / 100,
+            rtol=0.25,
         )
 
     @patches
@@ -565,12 +549,9 @@ class TestBenchmarkingGPU(TestBenchmarking):
         end_event.record()
         torch.cuda.synchronize()
         self.assertEqual(
-            self.diff(
-                benchmarker.gpu_time_ms_per_gpu_clock_cycle,
-                start_event.elapsed_time(end_event) / gpu_clock_cycles_to_sleep,
-            )
-            < 0.25,
-            True,
+            benchmarker.gpu_time_ms_per_gpu_clock_cycle,
+            start_event.elapsed_time(end_event) / gpu_clock_cycles_to_sleep,
+            rtol=0.25,
         )
 
 
