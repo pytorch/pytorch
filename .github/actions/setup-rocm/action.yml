@@ -78,8 +78,8 @@ runs:
           fi
         fi
       done
-      env:
-        test_matrix: ${{ inputs.test-matrix }}
+    env:
+      test_matrix: ${{ inputs.test-matrix }}
 
     - name: Runner diskspace health check
       uses: ./.github/actions/diskspace-cleanup
