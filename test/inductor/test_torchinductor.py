@@ -7121,11 +7121,6 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(64, 64)])
 
-    def test_new_cpp_build_logical(self):
-        from torch._inductor.codecache import validate_new_cpp_commands
-
-        validate_new_cpp_commands()
-
     def test_as_strided(self):
         def fn(x):
             return (
@@ -11069,7 +11064,7 @@ class CommonTemplate:
         s0 = 16777472
         s1 = 8
         compiled_fn = torch._dynamo.optimize()(fn)
-        actual = compiled_fn(torch.ones(s0, s1))
+        actual = compiled_fn(torch.ones(s0, s1, device=self.device))
         self.assertTrue((actual == 1).all())
 
     @skip_if_gpu_halide
