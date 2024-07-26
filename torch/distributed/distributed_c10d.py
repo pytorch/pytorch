@@ -4515,12 +4515,20 @@ def new_group(
     should be created in the same order in all processes.
 
     .. warning::
-        Using multiple process groups with the ``NCCL`` backend concurrently
-        is not safe and the user should perform explicit synchronization in
-        their application to ensure only one process group is used at a time.
-        This means collectives from one process group should have completed
-        execution on the device (not just enqueued since CUDA execution is
-        async) before collectives from another process group are enqueued.
+        When using multiple process groups with the ``NCCL`` backend, the user
+        must ensure a globally consistent execution order of collectives across
+        ranks.
+
+        If multiple threads within a process issue collectives, explicit
+        synchronization is necessary to ensure consistent ordering.
+
+        When using async variants of torch.distributed communication APIs,
+        a work object is returned and the communication kernel is
+        enqueued on a separate CUDA stream, allowing overlap of communication
+        and computation. Once one or more async ops have been issued on one process
+        group, they must be synchronized by calling `work.wait()` before using
+        another process group.
+
         See `Using multiple NCCL communicators concurrently <https://docs.nvid
         ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
         -multiple-nccl-communicators-concurrently>`_ for more details.
