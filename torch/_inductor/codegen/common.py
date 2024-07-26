@@ -306,6 +306,47 @@ DTYPE_TO_COMPUTATION_DTYPE = {
 }
 
 
+def deduce_output_dtype_by_name(
+    op_name: str,
+    *args,
+    **kwargs,
+) -> Optional[torch.dtype]:
+    """
+    Given op name and a list of input dtypes, deduce the output dtype
+    """
+    if op_name in boolean_ops():
+        return torch.bool
+    elif op_name in (
+        "to_dtype",
+        "index_expr",
+    ):
+        return kwargs["dtype"] if "dtype" in kwargs else args[-1]
+    elif op_name in (
+        "rand",
+        "randn",
+    ):
+        return torch.float
+    elif op_name in (
+        "get_index",
+        "randint64",
+        "load_seed",
+    ):
+        return torch.int64
+    elif op_name == "reduction":
+        return kwargs["dtype"] if "dtype" in kwargs else args[1]
+    elif op_name == "constant":
+        dtype = kwargs["dtype"] if "dtype" in kwargs else args[-1]
+        return DTYPE_TO_COMPUTATION_DTYPE[dtype]  # type: ignore[index]
+    elif op_name in (
+        "load",
+        "store",
+        "store_reduction",
+    ):
+        buf_name = args[1]
+        return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
+    return None
+
+
 class DataTypePropagation:
     def __init__(self, body) -> None:
         self.body = body
@@ -343,57 +384,29 @@ class DataTypePropagation:
         return dtype
 
     def deduce_node_dtype(self, node: torch.fx.Node):
-        if node.target in boolean_ops():
-            return torch.bool
-
         if node.op == "placeholder":
             return None
 
-        if node.target == "output":
+        if node.target == "output" and len(node.args) != 1:
             # we can infer output node if it only have 1 arg
-            if len(node.args) != 1:
-                return None
-
-        if node.target in (
-            "to_dtype",
-            "index_expr",
-        ):
-            return node.args[-1]
-
-        if node.target in (
-            "rand",
-            "randn",
-        ):
-            return torch.float
-
-        if node.target in (
-            "get_index",
-            "index_expr",
-            "randint64",
-        ):
-            return torch.int64
-
-        if node.target in (
-            "load",
-            "store",
-            "store_reduction",
-        ):
-            buf_name = node.args[1]
-            return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
+            return None
 
         if node.target == operator.getitem:
             return self.deduce_node_dtype(node.args[0])  # type: ignore[arg-type]
 
         assert isinstance(node.target, str)
 
-        if node.target == "reduction":
-            return node.args[1]
-
-        if node.target == "constant":
-            return DTYPE_TO_COMPUTATION_DTYPE[node.args[-1]]  # type: ignore[index]
-
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
+
+        if (
+            output_dtype := deduce_output_dtype_by_name(
+                node.target,
+                *node.args,
+                **node.kwargs,
+            )
+        ) is not None:
+            return output_dtype
 
         return self.deduce_node_dtype_by_inputs(node)
 
