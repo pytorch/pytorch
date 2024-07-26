@@ -1,0 +1,219 @@
+name: mac-test
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      test-matrix:
+        required: true
+        type: string
+        description: JSON description of what test configs to run.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
+      python-version:
+        required: false
+        type: string
+        default: "3.8"
+        description: |
+          The python version to be used. Will be 3.8 by default
+      timeout-minutes:
+        required: false
+        type: number
+        default: 270
+        description: |
+          Set the maximum (in minutes) how long the workflow should take to finish
+
+jobs:
+  test:
+    # Don't run on forked repos or empty test matrix
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
+    # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
+    # Also ensure that we always run with the right architecture
+    defaults:
+      run:
+        shell: bash -e -l {0}
+    strategy:
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+    env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+      TEST_CONFIG: ${{ matrix.config }}
+      SHARD_NUMBER: ${{ matrix.shard }}
+      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+    steps:
+      - name: Print runner OS/HW info
+        run: |
+          sysctl machdep.cpu.brand_string kern.osproductversion
+
+      - name: Clean up leftover processes on MacOS pet runner
+        continue-on-error: true
+        run: |
+          for PROCESS in "python" "conda" "ninja" "clang"; do
+            echo "Cleaning up all remaining ${PROCESS} process"
+            pkill "${PROCESS}" || true
+          done
+
+      - name: Clean up leftover local python3 site-packages on MacOS pet runner
+        continue-on-error: true
+        run: |
+          for dir in  ~/.local/lib/python3.*/site-packages; do
+            echo "Cleaning up ${dir}"
+            rm -rf "${dir}"
+          done
+
+      - name: Clean up disk space before running MacOS workflow
+        uses: pytorch/test-infra/.github/actions/check-disk-space@main
+
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
+      - name: Download build artifacts
+        uses: ./.github/actions/download-build-artifacts
+        with:
+          name: ${{ inputs.build-environment }}
+          use-gha: true
+
+      - name: Download TD artifacts
+        continue-on-error: true
+        uses: ./.github/actions/download-td-artifacts
+        with:
+          use-gha: true
+
+      - name: Setup miniconda
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: ${{ inputs.python-version }}
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
+
+      - name: Start monitoring script
+        id: monitor-script
+        continue-on-error: true
+        run: |
+          ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for keep-going label and re-enabled test issues
+        # This uses the filter-test-configs action because it conviniently
+        # checks for labels and re-enabled test issues.  It does not actually do
+        # any filtering.  All filtering is done in the build step.
+        id: keep-going
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+          job-name: ${{ steps.get-job-id.outputs.job-name }}
+
+      - name: Set Test step time
+        id: test-timeout
+        shell: bash
+        env:
+          JOB_TIMEOUT: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+        run: |
+          echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
+
+      - name: Test
+        id: test
+        timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
+        env:
+          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
+          PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
+          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
+          NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
+          NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
+          PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
+        run: |
+          # shellcheck disable=SC1090
+          set -ex
+
+          arch
+
+          if [[ -n "$CONDA_ENV" ]]; then
+            # Use binaries under conda environment
+            export PATH="$CONDA_ENV/bin":$PATH
+          fi
+
+          # Print out some information about the test environment
+          which conda
+          conda --version
+          ${CONDA_RUN} which python3
+          ${CONDA_RUN} python3 --version
+          ${CONDA_RUN} which python
+          ${CONDA_RUN} python --version
+
+          ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
+
+          set +e
+          pushd "${RUNNER_TEMP}"
+          # Install pip dependencies if they are not found. This is to mitigate a peculiar
+          # flaky missing dependencies on MacOS
+          ${CONDA_RUN} python3 -c "import torch"
+          RC=$?
+          popd
+
+          if [ "${RC}" -ne 0 ]; then
+            ${CONDA_RUN} python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
+          fi
+          set -e
+
+          ${CONDA_RUN} .ci/pytorch/macos-test.sh
+
+      - name: Print remaining test logs
+        shell: bash
+        if: always() && steps.test.conclusion
+        run: |
+          cat test/**/*_toprint.log || true
+
+      - name: Stop monitoring script
+        if: always() && ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        continue-on-error: true
+        env:
+          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        run: |
+          kill "$MONITOR_SCRIPT_PID"
+
+      - name: Upload test artifacts
+        uses: ./.github/actions/upload-test-artifacts
+        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
+        with:
+          use-gha: true
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Clean up disk space
+        if: always()
+        continue-on-error: true
+        uses: pytorch/test-infra/.github/actions/check-disk-space@main

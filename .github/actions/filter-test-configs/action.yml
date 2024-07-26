@@ -1,0 +1,157 @@
+name: Filter test configs matrix
+
+description: |
+  Apply filter to the test configs matrix to keep only entries specified
+  by the PR test-config labels. If no test-config label is set, the same
+  test configs matrix is returned untouched.
+
+inputs:
+  github-token:
+    description: GITHUB_TOKEN
+    required: true
+  test-matrix:
+    required: true
+    type: string
+    description: JSON description of what test configs to run.
+  selected-test-configs:
+    required: false
+    type: string
+    description: |
+      A comma-separated list of test configurations from the test matrix to keep,
+      The empty list means we are going to keep every configurations by defaults
+    default: ""
+  job-name:
+    type: string
+    required: false
+    default: ""
+
+outputs:
+  test-matrix:
+    description: The filtered test configs matrix.
+    value: ${{ steps.filter.outputs.test-matrix }}
+  is-test-matrix-empty:
+    description: True if the filtered test configs matrix is empty. False otherwise.
+    value: ${{ steps.filter.outputs.is-test-matrix-empty }}
+  keep-going:
+    description: True if keep-going label was on PR or [keep-going] in PR body.
+    value: ${{ steps.filter.outputs.keep-going }}
+  reenabled-issues:
+    description: Comma separated list of issue numbers that should correspond to disable test issues that the PR fixes
+    value: ${{ steps.filter.outputs.reenabled-issues }}
+  ci-verbose-test-logs:
+    description: True if ci-verbose-test-logs label was on PR or [ci-verbose-test-logs] in PR body.
+    value: ${{ steps.filter.outputs.ci-verbose-test-logs }}
+  ci-no-test-timeout:
+    description: True if ci-no-test-timeout label was on PR or [ci-no-test-timeout] in PR body.
+    value: ${{ steps.filter.outputs.ci-no-test-timeout }}
+  ci-no-td:
+    description: True if ci-no-td label was on PR or [ci-no-td] in PR body.
+    value: ${{ steps.filter.outputs.ci-no-td }}
+  ci-td-distributed:
+    description: True if ci-td-distributed label was on PR or [ci-td-distributed] in PR body.
+    value: ${{ steps.filter.outputs.ci-td-distributed }}
+
+runs:
+  using: composite
+  steps:
+    - uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+      name: Setup dependencies
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      with:
+        shell: bash
+        timeout_minutes: 10
+        max_attempts: 5
+        retry_wait_seconds: 30
+        command: |
+          set -eux
+          # PyYAML 6.0 doesn't work with MacOS x86 anymore
+          # This must run on Python-3.7 (AmazonLinux2) so can't use request=3.32.2
+          python3 -m pip install requests==2.27.1 pyyaml==6.0.1
+
+    - name: Parse ref
+      id: parse-ref
+      shell: bash
+      run: |
+        set -x
+
+        # Use relative path here as this could be checked out anywhere, not necessarily
+        # in runner workspace
+        python3 "${GITHUB_ACTION_PATH}/../../scripts/parse_ref.py"
+
+    - name: Get the job name
+      id: get-job-name
+      if: inputs.job-name == ''
+      continue-on-error: true
+      shell: bash
+      run: |
+        set -x
+
+        # TODO: This is a very hacky way to get the job name. GitHub runner has the info
+        # but doesn't expose it in anyway. The job name is part of the job message the
+        # runner receives, so it's there and printed out to the diag log. Below is the
+        # code responsible for printing it. Need to check with GitHub to see if they can
+        # expose this variable as part of GitHub context.
+        # https://github.com/actions/runner/blob/main/src/Runner.Worker/JobExtension.cs#L345
+        pushd "${{ runner.workspace }}/../../_diag"
+        pwd
+
+        LOG_FILE=$(grep -l -r "${{ github.sha }}" *.log | tail -n 1)
+        if [ -n "${LOG_FILE}" ]; then
+          # For some reasons, awk {print $2} on Linux and Windows (bash) work correctly while it
+          # needs to be awk {print $3} on MacOS
+          case ${RUNNER_OS} in
+            macOS)
+              JOB_NAME=$(grep -r "\"jobDisplayName\"" "${LOG_FILE}" | awk -F '[:]' '{print $3}' | sed 's/"//g' | xargs)
+              ;;
+            *)
+              JOB_NAME=$(grep -r "\"jobDisplayName\"" "${LOG_FILE}" | awk -F '[:]' '{print $2}' | sed 's/"//g' | xargs)
+              ;;
+          esac
+          echo "job-name=${JOB_NAME}" >> "${GITHUB_OUTPUT}"
+        fi
+
+        popd
+
+    - name: Select all requested test configurations
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        JOB_NAME: ${{ inputs.job-name == '' && steps.get-job-name.outputs.job-name || inputs.job-name }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        TAG: ${{ steps.parse-ref.outputs.tag }}
+        EVENT_NAME: ${{ github.event_name }}
+        SCHEDULE: ${{ github.event.schedule }}
+        HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      id: filter
+      run: |
+        echo "Workflow: ${GITHUB_WORKFLOW}"
+        echo "Job name: ${JOB_NAME}"
+
+        # Use relative path here as this could be checked out anywhere, not necessarily
+        # in runner workspace
+        python3 "${GITHUB_ACTION_PATH}/../../scripts/filter_test_configs.py" \
+          --workflow "${GITHUB_WORKFLOW}" \
+          --job-name "${JOB_NAME}" \
+          --test-matrix "${{ inputs.test-matrix }}" \
+          --selected-test-configs "${{ inputs.selected-test-configs }}" \
+          --pr-number "${PR_NUMBER}" \
+          --tag "${TAG}" \
+          --event-name "${EVENT_NAME}" \
+          --schedule "${SCHEDULE}" \
+          --branch "${HEAD_BRANCH}"
+
+    - name: Print the filtered test matrix
+      shell: bash
+      run: |
+        echo "Filtered matrix:"
+        echo "${{ steps.filter.outputs.test-matrix }}"
+
+        echo
+        echo "Is the current job unstable? ${{ steps.filter.outputs.is-unstable }}"
+
+        echo
+        echo "Is keep-going label set? ${{ steps.filter.outputs.keep-going }}"
+
+        echo
+        echo "Renabled issues? ${{ steps.filter.outputs.reenabled-issues }}"
