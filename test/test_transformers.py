@@ -2088,7 +2088,7 @@ class TestSDPA(NNTestCase):
                 actual = torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=casual)
             with sdpa_kernel(backends=[SDPBackend.MATH]):
-                if not bool_mask and dtype in [torch.bfloat16, torch.float16]:
+                if not bool_mask and dtype in [torch.bfloat16, torch.float16] and attn_mask is not None:
                     attn_mask = attn_mask.float()
                 math_ref = torch.nn.functional.scaled_dot_product_attention(
                     q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=casual)
