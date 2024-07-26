@@ -312,6 +312,30 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(store1.libuvBackend, self._use_libuv)
         self.assertEqual(store2.libuvBackend, self._use_libuv)
 
+    def test_repr(self) -> None:
+        # server
+        store1 = self._create_store()
+        self.assertRegex(
+            repr(store1),
+            r"TCPStore\("
+            r"client=TCPClient\(SocketImpl\(fd=\d+, addr=\[?localhost\]?:\d+, remote=\[?localhost\]?:\d+\)\), "
+            r"server=TCPServer\(port=\d+\)\)",
+        )
+
+        # client
+        store2 = dist.TCPStore(
+            store1.host,
+            store1.port,
+            world_size=2,
+            is_master=False,
+        )
+        self.assertRegex(
+            repr(store2),
+            r"TCPStore\("
+            r"client=TCPClient\(SocketImpl\(fd=\d+, addr=\[?localhost\]?:\d+, remote=\[?localhost\]?:\d+\)\), "
+            r"server=<nullptr>\)",
+        )
+
     @skip_if_win32()
     @retry_on_connect_failures
     def test_init_pg_and_rpc_with_same_socket(self):

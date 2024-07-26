@@ -2971,6 +2971,12 @@ class GraphModule(torch.nn.Module):
 
         return f(*map(lambda x: x + 1, [a, b]))
 
+    @make_test
+    def test_map_unpack_twice(a, b):
+        m = map(lambda x: x + 1, [a, b])
+        l1 = list(m)
+        l2 = list(m)
+        return l1, l2
 
 def udf_mul(x, y):
     return x * y
