@@ -24,6 +24,7 @@
 #include <ATen/ops/cosh_native.h>
 #include <ATen/ops/cumprod_native.h>
 #include <ATen/ops/cumsum_native.h>
+#include <ATen/ops/_logcumsumexp_native.h>
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/exp2_native.h>
 #include <ATen/ops/expm1_native.h>
@@ -62,6 +63,7 @@ namespace at::native {
 enum class MPSCumulativeOpType : uint8_t {
   CUMSUM = 0,
   CUMPROD = 1,
+  LOGCUMSUMEXP = 2,
 };
 
 namespace mps {
@@ -451,6 +453,8 @@ static void cumulative_op_impl(const Tensor& self,
       cpu_result = self.to(at::Device(kCPU)).cumsum(dim, dtype);
     } else if (cumulativeOpType == MPSCumulativeOpType::CUMPROD) {
       cpu_result = self.to(at::Device(kCPU)).cumprod(dim, dtype);
+    } else if (cumulativeOpType == MPSCumulativeOpType::LOGCUMSUMEXP) {
+      cpu_result = self.to(at::Device(kCPU)).logcumsumexp(dim);
     }
     at::_copy_from_and_resize(cpu_result, result);
     return;
@@ -478,6 +482,10 @@ static void cumulative_op_impl(const Tensor& self,
           rc = [mpsGraph cumulativeSumWithTensor:inputTensor axis:dim name:nil];
         } else if (cumulativeOpType == MPSCumulativeOpType::CUMPROD) {
           rc = [mpsGraph cumulativeProductWithTensor:inputTensor axis:dim name:nil];
+        } else if (cumulativeOpType == MPSCumulativeOpType::LOGCUMSUMEXP) {
+          MPSGraphTensor* expTensor = [mpsGraph exponentWithTensor:inputTensor name:nil];
+          MPSGraphTensor* prodTensor =  [mpsGraph cumulativeSumWithTensor:expTensor axis:dim name:nil];
+          rc = [mpsGraph logarithmWithTensor:prodTensor name:nil];
         }
         if ((mps::getMPSDataType(result) != [rc dataType]) || castInputData) {
           return mps::castMPSTensor(mpsGraph, rc, result.scalar_type());
@@ -495,6 +503,35 @@ TORCH_IMPL_FUNC(cumprod_out_mps)
 (const Tensor& self, int64_t dim, std::optional<ScalarType> dtype, const Tensor& result) {
   return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::CUMPROD, "cumprod_out_mps");
 }
+
+Tensor& _logcumsumexp_out_mps(const Tensor& self, int64_t dim, Tensor& result) {
+  const auto wrap_dim = maybe_wrap_dim(dim, self.dim());
+  result.resize_(self.sizes());
+  if (self.dim() == 0) {
+    result.fill_(self);
+    return result;
+  }
+  if (self.numel() == 0) {
+    result.zero_();
+    return result;
+  }
+
+  ScalarType dtype = self.scalar_type();
+  cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::LOGCUMSUMEXP, "logcumsumexp_out_mps");
+  return result;
+}
+
+Tensor _logcumsumexp_mps(const Tensor& self, int64_t dim) {
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
+  return _logcumsumexp_out_mps(self, dim, result);
+}
+
+
+
+//TORCH_IMPL_FUNC(_logcumsumexp_out_mps)
+//(const Tensor& self, int64_t dim, std::optional<ScalarType> dtype, const Tensor& result) {
+//  return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::LOGCUMSUMEXP, "_logcumsumexp_out_mps");
+//}
 
 TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
   if (!self.is_complex()) {
