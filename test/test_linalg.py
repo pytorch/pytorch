@@ -5878,8 +5878,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     def test_addmm(self, device, dtype):
         self._test_addmm_impl(torch.addmm, None, device, dtype)
 
-    @onlyCUDA
-    @skipCUDAIfNotRocm
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,
                         torch.half: 5e-2, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(
