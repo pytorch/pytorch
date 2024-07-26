@@ -16653,18 +16653,6 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_jit_alias_remapping",
             ),
-            # Trying to use forward AD ... that does not support it.
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestOperators",
-            #     "test_vjpvmap",
-            # ),
-            # # Trying to use forward AD ... that does not support it.
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestOperators",
-            #     "test_vmapjvpvjp",
-            # ),
             # TensorIterator does not support symbolic shapes.
             DecorateInfo(
                 unittest.expectedFailure,
@@ -16691,18 +16679,6 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_jit_alias_remapping",
             ),
-            # Trying to use forward AD ... that does not support it.
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestOperators",
-            #     "test_vjpvmap",
-            # ),
-            # Trying to use forward AD ... that does not support it.
-            # DecorateInfo(
-            #     unittest.expectedFailure,
-            #     "TestOperators",
-            #     "test_vmapjvpvjp",
-            # ),
             # TensorIterator does not support symbolic shapes.
             DecorateInfo(
                 unittest.expectedFailure,
