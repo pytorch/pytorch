@@ -953,7 +953,7 @@ class Reduction(Loops):
                 split_size * num_threads
             )
 
-        def outer_reduction_splits(reduction_numel_hint, numel_hint):  # type: ignore[no-untyped-def]  # no example
+        def outer_reduction_splits(reduction_numel_hint, numel_hint):  # type: ignore[no-untyped-def]
             # TODO the best heuristic currently has XBLOCK (corresponding to numel_hint) 128
             # extend to even smaller number of outputs
             num_warps = 8
@@ -1098,7 +1098,7 @@ class Reduction(Loops):
             )
 
     @staticmethod
-    def _unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type, src_dtype):  # type: ignore[no-untyped-def] # no example
+    def _unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type, src_dtype):  # type: ignore[no-untyped-def]
         """Convert inner_fn from a reduction to an pointwise"""
         reduction_ranges = [
             V.graph.sizevars.evaluate_static_shape(x) for x in reduction_ranges
@@ -1106,7 +1106,7 @@ class Reduction(Loops):
 
         combine_fn = get_reduction_combine_fn(reduction_type, src_dtype)
 
-        def fn(index):  # type: ignore[no-untyped-def] # no example
+        def fn(index):  # type: ignore[no-untyped-def]
             return functools.reduce(
                 combine_fn,
                 (
@@ -1125,7 +1125,7 @@ class Reduction(Loops):
                 FlexibleLayout.contiguous_strides(reduction_ranges),
             ).make_indexer()
 
-            def value_fn(index, rindex):  # type: ignore[no-untyped-def] # no example
+            def value_fn(index, rindex):  # type: ignore[no-untyped-def]
                 rindex = [sympy.expand(i) for i in rindex]
                 return (
                     inner_fn(index, rindex),
@@ -1373,7 +1373,7 @@ class Reduction(Loops):
         return wrapper_fn
 
     @classmethod
-    def _multilayer_wrap_loader_existing_ranges(  # type: ignore[no-untyped-def] # no example
+    def _multilayer_wrap_loader_existing_ranges(  # type: ignore[no-untyped-def]
         cls,
         loader,
         original_ranges,
@@ -1389,7 +1389,7 @@ class Reduction(Loops):
             original_reduction_ranges, tuple(new_ranges) + tuple(new_reduction_ranges)
         )
 
-        def wrapper_fn(merged_index, new_reduction_index):  # type: ignore[no-untyped-def] # no example
+        def wrapper_fn(merged_index, new_reduction_index):  # type: ignore[no-untyped-def]
             original_idx = merged_index[: len(original_ranges)]
             new_index = merged_index[len(original_ranges) :]
             return loader(
@@ -1503,7 +1503,7 @@ class Reduction(Loops):
         )
 
     @classmethod
-    def create_multilayer_existing_ranges(  # type: ignore[no-untyped-def] # no example
+    def create_multilayer_existing_ranges(  # type: ignore[no-untyped-def]
         cls,
         device: torch.device,
         dst_dtype: torch.dtype,
@@ -1566,7 +1566,7 @@ class WelfordReduction(Reduction):
             loader = inner_fns[0]
         else:
 
-            def loader(idx, reduction_idx):  # type: ignore[no-untyped-def] # no example
+            def loader(idx, reduction_idx):  # type: ignore[no-untyped-def]
                 return tuple(fn(idx, reduction_idx) for fn in inner_fns)
 
         super().__init__(
@@ -1612,8 +1612,8 @@ class WelfordReduction(Reduction):
 
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
-        def const(val):  # type: ignore[no-untyped-def] # no example
-            def inner_fn(idx):  # type: ignore[no-untyped-def] # no example
+        def const(val):  # type: ignore[no-untyped-def]
+            def inner_fn(idx):  # type: ignore[no-untyped-def]
                 return ops.constant(
                     val,
                     dtype,
@@ -1634,8 +1634,8 @@ class WelfordReduction(Reduction):
 
         if reduction_numel == 1:
 
-            def copy(loader):  # type: ignore[no-untyped-def] # no example
-                def inner_fn(idx):  # type: ignore[no-untyped-def] # no example
+            def copy(loader):  # type: ignore[no-untyped-def]
+                def inner_fn(idx):  # type: ignore[no-untyped-def]
                     reduction_index = [Integer(0) for _ in reduction_ranges]
                     return loader(idx, reduction_index)
 
@@ -1746,7 +1746,7 @@ class WelfordReduction(Reduction):
             # If we need mask, then "welford_reduce" doesn't work because
             # masked inputs shouldn't count towards the welford weight
 
-            def constant(idx, reduction_idx, value):  # type: ignore[no-untyped-def] # no example
+            def constant(idx, reduction_idx, value):  # type: ignore[no-untyped-def]
                 return ops.constant(value, dtype)
 
             return cls.create_multilayer(
@@ -1789,7 +1789,7 @@ class WelfordReduction(Reduction):
 
         i_loaders = [i.make_loader() for i in intermediates]
 
-        def intermediate_loader_fn(index, reduction_index, loader):  # type: ignore[no-untyped-def] # no example
+        def intermediate_loader_fn(index, reduction_index, loader):  # type: ignore[no-untyped-def]
             return loader([*index, *reduction_index])
 
         numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
@@ -1880,7 +1880,7 @@ class Scan(Loops):
         return extract_free_unbacked_symbols(self.inner_fn, idx)
 
     @classmethod
-    def create(  # type: ignore[no-untyped-def, override]  # no example
+    def create(  # type: ignore[no-untyped-def, override]
         cls,
         device: torch.device,
         dtypes: Tuple[torch.dtype, ...],
@@ -1944,7 +1944,7 @@ class Scan(Loops):
             else:
                 scan_type = SplitScan
 
-        def reindex(index, scan_index):  # type: ignore[no-untyped-def] # no example
+        def reindex(index, scan_index):  # type: ignore[no-untyped-def]
             assert len(scan_index) == len(scan_ranges)
             assert len(index) == len(pointwise_ranges)
             return [*index[:axis], *scan_index, *index[axis:]]
@@ -1976,7 +1976,7 @@ class Scan(Loops):
         return results
 
     @classmethod
-    def num_splits(  # type: ignore[no-untyped-def] # no example
+    def num_splits(  # type: ignore[no-untyped-def]
         cls,
         device: torch.device,
         dtype: torch.dtype,
@@ -1988,7 +1988,7 @@ class Scan(Loops):
         scan_numel: Expr,
     ):
         # TODO: custom splitting heuristic for scan
-        def wrapper_fn(idx, reduction_idx):  # type: ignore[no-untyped-def] # no example
+        def wrapper_fn(idx, reduction_idx):  # type: ignore[no-untyped-def]
             return inner_fn([*idx[:axis], *reduction_idx, *idx[axis:]])
 
         return Reduction.num_splits(
@@ -2037,7 +2037,7 @@ class Sort(Loops):
         assert len(self.ranges) + len(self.sort_ranges) == len(self.size)
         super().__post_init__()
 
-    def store_reduction(self, output_name, indexer, vars, sort_vars):  # type: ignore[no-untyped-def] # no example
+    def store_reduction(self, output_name, indexer, vars, sort_vars):  # type: ignore[no-untyped-def]
         idx = self.reindex(vars, sort_vars)
         values = [inner_fn(idx) for inner_fn in self.inner_fns]
         result = ops.sort(self.dtypes, values, self.stable, self.descending)
@@ -2071,7 +2071,7 @@ class Sort(Loops):
         return extract_free_unbacked_symbols(self.inner_fn, idx)
 
     @classmethod
-    def create(  # type: ignore[no-untyped-def, override] # no example
+    def create(  # type: ignore[no-untyped-def, override]
         cls,
         device: torch.device,
         dtypes: Tuple[torch.dtype, ...],
@@ -2117,7 +2117,7 @@ class Sort(Loops):
                 for output_index in range(len(dtypes))
             ]
 
-        def reindex(index, sort_index):  # type: ignore[no-untyped-def] # no example
+        def reindex(index, sort_index):  # type: ignore[no-untyped-def]
             assert len(sort_index) == len(sort_ranges)
             assert len(index) == len(pointwise_ranges)
             return [*index[:axis], *sort_index, *index[axis:]]
@@ -2438,7 +2438,7 @@ class PermuteView(BaseView):
 
 class SqueezeView(BaseView):
     @classmethod
-    def create(cls, x, *, dim=None):  # type: ignore[no-untyped-def] # no example
+    def create(cls, x, *, dim=None):  # type: ignore[no-untyped-def]
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
             new_size = []
@@ -2504,7 +2504,7 @@ class GenericView(BaseView):
     def make_reindexer(self) -> Callable[[Sequence[_IntLike]], Sequence[_IntLike]]:
         return self.reindex
 
-    def reindex_str(self):  # type: ignore[no-untyped-def] # no example
+    def reindex_str(self):  # type: ignore[no-untyped-def]
         index_old = [
             sympy_index_symbol_with_prefix(SymT.INDEX, n) for n in range(len(self.size))
         ]
@@ -2519,7 +2519,7 @@ class GenericView(BaseView):
     __repr__ = __str__
 
     @classmethod
-    def create(cls, x, new_size, reindex):  # type: ignore[no-untyped-def] # no example
+    def create(cls, x, new_size, reindex):  # type: ignore[no-untyped-def]
         return cls(x, list(new_size), reindex)
 
     def get_size(self) -> Sequence[_IntLike]:
@@ -2770,7 +2770,7 @@ class DtypeView(BaseView):
     target_dtype: torch.dtype
 
     @classmethod
-    def create(cls, x, new_dtype):  # type: ignore[no-untyped-def] # no example
+    def create(cls, x, new_dtype):  # type: ignore[no-untyped-def]
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
             new_layout = FixedLayout(
@@ -3284,7 +3284,7 @@ class FlexibleLayout(Layout):
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
     @staticmethod
-    def stride_ordered_for_memory_format(sizes, memory_format):  # type: ignore[no-untyped-def] # no example
+    def stride_ordered_for_memory_format(sizes, memory_format):  # type: ignore[no-untyped-def]
         """
         Create a stride based on a memory format.
 
@@ -3309,7 +3309,7 @@ class FlexibleLayout(Layout):
             raise NotImplementedError
 
     @staticmethod
-    def same_ordered(sizes, stride):  # type: ignore[no-untyped-def] # no example
+    def same_ordered(sizes, stride):  # type: ignore[no-untyped-def]
         """
         Create a stride that has the same stride order as given stride
 
@@ -3348,7 +3348,7 @@ class FlexibleLayout(Layout):
             self.offset,
         )
 
-    def as_same_order(self, stride):  # type: ignore[no-untyped-def] # no example
+    def as_same_order(self, stride):  # type: ignore[no-untyped-def]
         new_stride = self.same_ordered(self.size, stride)
         if self.should_pad_strides():
             new_stride = self._pad_strides(new_stride, self.size, self.dtype)
@@ -3391,7 +3391,7 @@ class NonOwningLayout(Layout):
     def make_indexer(self) -> Callable[[Sequence[_IntLike]], _IntLike]:
         return self.as_fixed().make_indexer()
 
-    def maybe_guard_aligned(self):  # type: ignore[no-untyped-def] # no example
+    def maybe_guard_aligned(self):  # type: ignore[no-untyped-def]
         layout = self.view.get_layout()
         assert isinstance(layout, Layout)
         offset = layout.offset
@@ -3464,7 +3464,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
         return layout
 
     @classmethod
-    def realize_into(cls, src, dst, unsafe_alias=False):  # type: ignore[no-untyped-def] # no example
+    def realize_into(cls, src, dst, unsafe_alias=False):  # type: ignore[no-untyped-def]
         dst.realize()
         # NOTE: We must realize users of `dst` before we realize `src`, since
         # realization order determines scheduling order. Otherwise, src's
@@ -3580,7 +3580,7 @@ class Buffer(IRNode):
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_fill_order(order)
 
-    def freeze_layout_with_same_order(self, stride):  # type: ignore[no-untyped-def] # no example
+    def freeze_layout_with_same_order(self, stride):  # type: ignore[no-untyped-def]
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_same_order(stride)
 
@@ -3696,7 +3696,7 @@ class ShapeAsConstantBuffer(IRNode):
 class ComputedBuffer(OperationBuffer):
     data: Loops
 
-    def get_computed_buffer_name(self):  # type: ignore[no-untyped-def] # no example
+    def get_computed_buffer_name(self):  # type: ignore[no-untyped-def]
         """
         Returns self.name if it exists, otherwise returns the name of the data node if that exists.
         If neither exist, returns None.
@@ -4184,7 +4184,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         return self._choice_timings
 
     @contextlib.contextmanager
-    def swap_as_triton_caller(self, caller: TritonTemplateCallerBase):  # type: ignore[no-untyped-def] # no example
+    def swap_as_triton_caller(self, caller: TritonTemplateCallerBase):  # type: ignore[no-untyped-def]
         assert isinstance(caller, torch._inductor.select_algorithm.TritonTemplateCaller)
         assert self.layout == caller.layout
 
@@ -4574,7 +4574,7 @@ class ExternKernel(InputsKernel):
                 x.name for x in self.op_overload._schema.arguments if x.kwarg_only
             ]
 
-    def fill_non_provided_args(self, args, kwargs, convert_val_to_str=False):  # type: ignore[no-untyped-def] # no example
+    def fill_non_provided_args(self, args, kwargs, convert_val_to_str=False):  # type: ignore[no-untyped-def]
         # Previously, we want to maintain forward-compatibility by skipping
         # default args in the serialized artifacts in fbcode. However,
         # some of our shim interfaces require default values being set.
@@ -5419,7 +5419,7 @@ class InplaceCopyFallback(ExternKernel):
         V.graph.register_operation(self)
 
     @classmethod
-    def create(cls, dst, src, non_blocking: bool = False):  # type: ignore[no-untyped-def] # no example
+    def create(cls, dst, src, non_blocking: bool = False):  # type: ignore[no-untyped-def]
         inputs = [cls.realize_input(t) for t in [dst, src]]
         constant_args = (non_blocking,)
         result = InplaceCopyFallback(
@@ -5630,7 +5630,7 @@ class IndexPutFallback(ExternKernel):
 
 class DeviceCopy(ExternKernelOut):
     @classmethod
-    def create(cls, x, device):  # type: ignore[no-untyped-def] # no example
+    def create(cls, x, device):  # type: ignore[no-untyped-def]
         if (
             not x.is_extern()
             and all(r in V.graph.constants for r in x.get_read_names())
@@ -5903,7 +5903,7 @@ class FallbackKernel(ExternKernelAlloc):
 
         for s, keypath in unbacked_bindings.items():
 
-            def go(expr, keypath):  # type: ignore[no-untyped-def] # no example
+            def go(expr, keypath):  # type: ignore[no-untyped-def]
                 if keypath == ():
                     return expr
 
@@ -5926,7 +5926,7 @@ class FallbackKernel(ExternKernelAlloc):
                 else:
                     raise AssertionError(f"unrecognized keypath {keypath}")
 
-            def go_outer():  # type: ignore[no-untyped-def] # no example
+            def go_outer():  # type: ignore[no-untyped-def]
                 if V.graph.cpp_wrapper and config.abi_compatible:
                     # Special handling for the top level buffer access,
                     # because self.get_name() is actually never bound; the
@@ -5954,7 +5954,7 @@ class FallbackKernel(ExternKernelAlloc):
         else:
             return set()
 
-    def set_cpp_kernel(self, kernel):  # type: ignore[no-untyped-def] # no example
+    def set_cpp_kernel(self, kernel):  # type: ignore[no-untyped-def]
         from .codegen.wrapper import get_cpp_op_schema
 
         assert (
@@ -6043,7 +6043,7 @@ class FallbackKernel(ExternKernelAlloc):
     # This is currently only implemented for fbcode. Eventually, we will also make this work for OSS.
     # Detailed design doc can be found at
     # https://docs.google.com/document/d/1wC4DOZFaYym2t1Esz0X5yxlLI3RDnSiyRbUus3bkJ64/edit?usp=sharing
-    def export_extern_kernel_node(self):  # type: ignore[no-untyped-def] # no example
+    def export_extern_kernel_node(self):  # type: ignore[no-untyped-def]
         assert isinstance(self, FallbackKernel)
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
         args = self.fill_non_provided_args(args, kwargs)
@@ -6058,7 +6058,7 @@ class FallbackKernel(ExternKernelAlloc):
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
         # serialize_outputs
-        def handle_single_output(return_type, output):  # type: ignore[no-untyped-def] # no example
+        def handle_single_output(return_type, output):  # type: ignore[no-untyped-def]
             if isinstance(return_type, torch.TensorType):
                 # For single Tensor
                 out = output
@@ -6291,7 +6291,7 @@ class ComplexView(FallbackKernel):
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].get_name()]
 
-    def __init__(  # type: ignore[no-untyped-def] # no example
+    def __init__(  # type: ignore[no-untyped-def]
         self,
         layout,
         kernel,
@@ -6829,7 +6829,7 @@ class WhileLoop(ExternKernel):
 
 
 class EffectfulKernel(FallbackKernel):
-    def __init__(  # type: ignore[no-untyped-def] # no example
+    def __init__(  # type: ignore[no-untyped-def]
         self,
         layout,
         kernel,
@@ -7091,7 +7091,7 @@ class LoopBodyBlock:
                 size = add_index(size, "other")
                 return self._inner.check_bounds(index, size, lower, upper)
 
-            def bucketize(  # type: ignore[no-untyped-def] # no example
+            def bucketize(  # type: ignore[no-untyped-def]
                 self,
                 values,
                 offsets_name: str,
@@ -7127,14 +7127,14 @@ class LoopBodyBlock:
                 )
 
             @staticmethod
-            def scan(  # type: ignore[no-untyped-def] # no example
+            def scan(  # type: ignore[no-untyped-def]
                 dtype_proxy,
                 combine_fn: Callable[
                     [Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]
                 ],
                 value_proxy,
             ):
-                def shim(dtypes, values):  # type: ignore[no-untyped-def] # no example
+                def shim(dtypes, values):  # type: ignore[no-untyped-def]
                     return V.ops.scan(dtypes, combine_fn, values)
 
                 name = self.body.add_submodule(shim, "scan")
@@ -7147,18 +7147,18 @@ class LoopBodyBlock:
                 # Proxies are iterable, but some methods expect tuples/lists
                 return tuple(result[i] for i in range(len(value_proxy)))
 
-            def sort(self, dtypes, values, stable, descending):  # type: ignore[no-untyped-def] # no example
+            def sort(self, dtypes, values, stable, descending):  # type: ignore[no-untyped-def]
                 result = self._inner.sort(dtypes, values, stable, descending)
                 # Proxies are iterable, but some methods expect tuples/lists
                 return tuple(result[i] for i in range(len(values)))
 
-            def frexp(self, value_proxy):  # type: ignore[no-untyped-def] # no example
+            def frexp(self, value_proxy):  # type: ignore[no-untyped-def]
                 result = self._inner.frexp(value_proxy)
                 # Proxies are iterable, but some methods expect tuples/lists
                 return (result[0], result[1])
 
             @staticmethod
-            def indirect_indexing(index_proxy, size, check=True, wrap_neg=True):  # type: ignore[no-untyped-def] # no example
+            def indirect_indexing(index_proxy, size, check=True, wrap_neg=True):  # type: ignore[no-untyped-def]
                 """
                 Flow data from tensors into indexing formulas.
                 Introduce a call_module to update the indexing.
@@ -7166,7 +7166,7 @@ class LoopBodyBlock:
 
                 var = self.body.add_indirect(size)
 
-                def set_indirect(new_var):  # type: ignore[no-untyped-def] # no example
+                def set_indirect(new_var):  # type: ignore[no-untyped-def]
                     self.body.replace_indirect(
                         var, V.ops.indirect_indexing(new_var, size, check, wrap_neg)
                     )
@@ -7248,7 +7248,7 @@ class _CollectiveKernel(FallbackKernel):
     # the constraints, we model collective -> wait_tensor as as two-step
     # mutation of the input buffers.
     @classmethod
-    def create_inplace(  # type: ignore[no-untyped-def] # no example
+    def create_inplace(  # type: ignore[no-untyped-def]
         cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
     ) -> None:
         cpp_kernel_name = kernel._name
@@ -7313,7 +7313,7 @@ class _CollectiveKernel(FallbackKernel):
     # TODO(yifu): add a pre-grad pass to validate the correctness of collective
     # usage in the user program.
     @classmethod
-    def create_out_of_place(  # type: ignore[no-untyped-def] # no example
+    def create_out_of_place(  # type: ignore[no-untyped-def]
         cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
     ):
         cpp_kernel_name = kernel._name
@@ -7388,7 +7388,7 @@ class _WaitKernel(_CollectiveKernel):
             return []
 
     @classmethod
-    def create_wait(cls, kernel, inp: TensorBox) -> None:  # type: ignore[no-untyped-def] # no example
+    def create_wait(cls, kernel, inp: TensorBox) -> None:  # type: ignore[no-untyped-def]
         with V.graph.fake_mode:
             (
                 example_output,
