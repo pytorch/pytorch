@@ -526,13 +526,6 @@ Tensor _logcumsumexp_mps(const Tensor& self, int64_t dim) {
   return _logcumsumexp_out_mps(self, dim, result);
 }
 
-
-
-//TORCH_IMPL_FUNC(_logcumsumexp_out_mps)
-//(const Tensor& self, int64_t dim, std::optional<ScalarType> dtype, const Tensor& result) {
-//  return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::LOGCUMSUMEXP, "_logcumsumexp_out_mps");
-//}
-
 TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
   if (!self.is_complex()) {
     at::mps::sign_outf(self, const_cast<Tensor&>(output));
