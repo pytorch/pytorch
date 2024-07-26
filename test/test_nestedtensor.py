@@ -2931,11 +2931,6 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
-    @decorateIf(
-        xfailIfTorchDynamo,
-        # only fails in python 3.11. TODO: Debug this!
-        lambda params: params["layout"] == torch.jagged and sys.version_info >= (3, 11),
-    )
     @parametrize("layout", [torch.strided, torch.jagged], name_fn=layout_name)
     def test_dropout_backward(self, layout):
         if layout == torch.jagged:
