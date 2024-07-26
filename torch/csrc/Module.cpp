@@ -1981,7 +1981,7 @@ Call this whenever a new thread is created in order to propagate values from
 #ifdef USE_CUDA
     return sdp::is_flash_attention_available();
 #else
-        return false;
+    return false;
 #endif
   });
   py_module.def(

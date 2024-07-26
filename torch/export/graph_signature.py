@@ -134,7 +134,6 @@ def _sig_to_specs(
     outputs: List[ArgumentSpec],
     input_tokens: List[str],
     output_tokens: List[str],
-    non_persistent_buffers: Set[str],
 ) -> Tuple[List[InputSpec], List[OutputSpec]]:
     def to_input_spec(inp: ArgumentSpec) -> InputSpec:
         if isinstance(inp, TokenArgument):
@@ -156,7 +155,11 @@ def _sig_to_specs(
                 kind=InputKind.BUFFER,
                 arg=inp,
                 target=inputs_to_buffers[name],
-                persistent=(inputs_to_buffers[name] not in non_persistent_buffers),
+                # Mark as True for now; we will fix this up to distinguish
+                # persistent from non-persistent later in tracing.
+                # See: rewrite_non_persistent_buffers()
+                # TODO(suo): this is horrible.
+                persistent=True,
             )
         else:
             raise AssertionError(f"Unknown tensor input kind: {name}")

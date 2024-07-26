@@ -1,6 +1,5 @@
 #include <c10/util/irange.h>
 #include <fmt/format.h>
-#include <fmt/ranges.h>
 #include <torch/csrc/distributed/c10d/Backoff.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
@@ -94,10 +93,6 @@ class TCPServer {
       std::unique_ptr<BackgroundThread>&& daemon)
       : port_{port}, daemon_{std::move(daemon)} {}
 
-  std::string repr() const {
-    return fmt::format("TCPServer(port={})", port_);
-  }
-
  private:
   std::uint16_t port_;
   std::unique_ptr<BackgroundThread> daemon_;
@@ -161,9 +156,9 @@ class TCPClient {
       const TCPStoreOptions& opts,
       std::shared_ptr<Backoff> backoff);
 
-  void sendRaw(uint8_t* data, size_t length) {
+  void sendRaw(uint8_t* data, size_t lenght) {
     try {
-      tcputil::sendBytes(socket_.handle(), data, length);
+      tcputil::sendBytes(socket_.handle(), data, lenght);
     } catch (const std::exception& e) {
       C10D_WARNING("sendBytes failed on {}: {}", socket_.repr(), e.what());
       throw;
@@ -199,10 +194,6 @@ class TCPClient {
 
   explicit TCPClient(Socket&& socket) : socket_{std::move(socket)} {}
 
-  std::string repr() const {
-    return fmt::format("TCPClient({})", socket_.repr());
-  }
-
  private:
   Socket socket_;
 };
@@ -211,12 +202,12 @@ std::unique_ptr<TCPClient> TCPClient::connect(
     const SocketAddress& addr,
     const TCPStoreOptions& opts,
     std::shared_ptr<Backoff> backoff) {
+  auto timeout = std::chrono::duration_cast<std::chrono::seconds>(opts.timeout);
   Socket socket = Socket::connect(
       addr.host,
       addr.port,
-      SocketOptions{}
-          .connect_timeout(opts.timeout)
-          .connect_backoff(std::move(backoff)));
+      SocketOptions{}.connect_timeout(timeout).connect_backoff(
+          std::move(backoff)));
 
   return std::make_unique<TCPClient>(std::move(socket));
 }
@@ -641,12 +632,7 @@ void TCPStore::doWait(
       TORCH_CHECK(false, "wait_canceled response is expected");
     }
   }
-  C10_THROW_ERROR(
-      DistStoreError,
-      fmt::format(
-          "wait timeout after {}ms, keys: {}",
-          timeout.count(),
-          fmt::join(keys, ", ")));
+  C10_THROW_ERROR(DistStoreError, "Socket Timeout");
 }
 
 void TCPStore::append(
@@ -715,12 +701,6 @@ TCPStore::collectClientCounters() const noexcept {
     res[kv.first] = kv.second.observe();
   }
   return res;
-}
-
-std::string TCPStore::repr() const {
-  auto clientRepr = client_ ? client_->repr() : "<nullptr>";
-  auto serverRepr = server_ ? server_->repr() : "<nullptr>";
-  return fmt::format("TCPStore(client={}, server={})", clientRepr, serverRepr);
 }
 
 } // namespace c10d

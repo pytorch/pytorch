@@ -447,9 +447,7 @@ class FSDPParam:
             unsharded_param = _from_local_no_grad(unsharded_param, self._tp_spec)
         if hasattr(self, "_unsharded_param"):
             assert ca.compiled_autograd_enabled
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-                self._unsharded_param
-            ):
+            with torch.no_grad():
                 torch.ops.fsdp.set_.default(self._unsharded_param, unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(

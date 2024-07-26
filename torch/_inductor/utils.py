@@ -67,8 +67,6 @@ log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
-InputType = Union[torch.Tensor, int]
-
 
 GPU_ALIGN_BYTES = 16
 
@@ -352,7 +350,7 @@ def gen_gm_and_inputs(target, args, kwargs):
         len(target._schema.returns) == 1
         and str(target._schema.returns[0].type) == "Tensor"
     ):
-        node = (node,)  # type: ignore[assignment]
+        node = (node,)
     g.output(node)
 
     gm = torch.fx.GraphModule({}, g)
