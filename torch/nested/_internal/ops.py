@@ -457,7 +457,7 @@ def to_copy_default(func, *args, **kwargs):
     from torch._subclasses.fake_tensor import FakeTensor
     from torch._subclasses.functional_tensor import FunctionalTensor
 
-    if isinstance(new_offsets, FunctionalTensor) or isinstance(new_offsets, FakeTensor):
+    if isinstance(new_offsets, (FakeTensor, FunctionalTensor)):
         # Temporary hack until we have the union find
         return new_offsets.set_nested_int(inp._offsets.get_nested_int())
     else:

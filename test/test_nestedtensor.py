@@ -4722,7 +4722,6 @@ class TestNestedTensorSubclass(TestCase):
             lambda: nt.unbind(),
         )
 
-    @xfailIfTorchDynamo
     def test_layer_norm_2(self, device):
         test_tensor_list = self._get_list_for_jagged_tensor(
             ((2, 3, 4), 3), device=device, requires_grad=True

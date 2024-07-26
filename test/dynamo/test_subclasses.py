@@ -1741,9 +1741,10 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
     # doing so today.
     #
     # Using an ephemeral source has some consequences. But we are happy if
-    # we are not silently miss recompiles, e.g. we guard when necessary.
-    # We know that this is true, because dynamo guards alone are already
-    # sufficient.
+    # - we are not silently miss recompiles, e.g. we guard when necessary.
+    #   We know that this is true, because dynamo guards alone are already
+    #   sufficient.
+    # - we are not producing errors for the cases we care about
     #
     # The main case we care about is when we guard that two shapes are equal.
     # In this case, the replacements logic would simplify away the ephemeral
@@ -1940,22 +1941,6 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         self._validate_compile(fn, arg_fn)
 
     def test_in_graph_construction_mixed_3(self):
-        # More involved mixed case
-        def fn(nt, values, offsets):
-            nt1 = torch.nested.nested_tensor_from_jagged(values * 2, offsets)
-            nt2 = torch.nested.nested_tensor_from_jagged(values * 3, offsets)
-            return nt1 + nt2 + nt
-
-        values = torch.randn(9, 5, requires_grad=True)
-        offsets = torch.tensor([0, 2, 6, 9], dtype=torch.int64)
-
-        def arg_fn(values=values, offsets=offsets):
-            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
-            return nt, values, offsets
-
-        self._validate_compile(fn, arg_fn)
-
-    def test_in_graph_construction_mixed_4(self):
         # More involved mixed case
         def fn(nt, values, offsets):
             nt1 = torch.nested.nested_tensor_from_jagged(values * 2, offsets)
