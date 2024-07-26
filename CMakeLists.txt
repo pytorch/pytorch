@@ -864,7 +864,7 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform"
   ON
-  "USE_CUDA OR USE_ROCM;NOT MSVC"
+  "USE_CUDA OR USE_ROCM"
   OFF)
 
 # We are currenlty not using alibi attention for Flash So we disable this
