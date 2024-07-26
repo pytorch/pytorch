@@ -129,24 +129,6 @@ class CKGemmTemplate(CKTemplate):
                 using BlockGemmPipelineVersion = ck::BlockGemmPipelineVersion;
             """
         )
-        if 3 == len(self.input_nodes):
-            # inputs contain bias; add epilogue op definition
-            res.splice(
-                """
-                struct ScaledAdd {
-                    ScaledAdd(F32 alpha, F32 beta) : alpha(alpha), beta(beta) {}
-
-                    template <typename E, typename C, typename D>
-                    __host__ __device__ constexpr void
-                    operator()(E& e, const C& c, const D& d) const {
-                        e = ck::type_convert<E>(alpha * ck::type_convert<F32>(c) + beta * ck::type_convert<F32>(d));
-                    }
-
-                    F32 alpha;
-                    F32 beta;
-                }; // ScaledAdd
-                """
-            )
         return res
 
     def filter_op(self, op: "CKGemmOperation"):
@@ -285,7 +267,7 @@ class CKGemmTemplate(CKTemplate):
         if Bias is not None:
             op.ds_layouts = (torch_layout_to_ck_layout(Bias.get_layout()),)
             op.ds_element_dtypes = ((self._TORCH_DTYPE_TO_CK[Bias.get_layout().dtype]),)
-            op.c_elementwise_op = "ScaledAdd"
+            op.c_elementwise_op = "Bilinear"
 
         op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
             op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,
@@ -329,7 +311,7 @@ class CKGemmTemplate(CKTemplate):
             d_stride=kernel.contiguous_stride(Bias),
             alpha=self.alpha,
             beta=self.beta,
-            epilogue=f"ScaledAdd {{ {self.alpha}, {self.beta} }}"
+            epilogue=f"Bilinear {{ {self.alpha}, {self.beta} }}"
             if Bias is not None
             else "PassThrough {}",
             has_bias=Bias is not None,
