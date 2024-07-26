@@ -420,7 +420,7 @@ class TestFlexAttention(InductorTestCase):
         k_shape = (B, Hkv, S, D)
         v_shape = (B, Hkv, S, D)
 
-        q = q1.view(Hq // Hkv, Hkv, B, D).transpose(0, 2)
+        q = q1.view(1, Hq, B, D).transpose(0, 2)
 
         k_strides, k_offset = k_s(B, Hkv, S, D)
         k_max = [x * (y - 1) for x, y in zip(k_strides, k_shape)]

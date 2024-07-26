@@ -410,9 +410,16 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     # Reshape query for GQA: [B, Hq, Mq, D] -> [B, Hkv, G, Mq, D]
     gqa_query_shape = (
-        query.get_size()[:1] + [-1, gqa_shared_heads] + query.get_size()[2:]
+        query.get_size()[:1]
+        + [key.get_size()[1], gqa_shared_heads]
+        + query.get_size()[2:]
     )
-    query = lowerings[aten.view](query, gqa_query_shape)
+    gqa_query_stride = (
+        query.get_stride()[:1]
+        + [query.get_stride()[1] * gqa_shared_heads, query.get_stride()[1]]
+        + query.get_stride()[2:]
+    )
+    query = lowerings[aten.as_strided](query, gqa_query_shape, gqa_query_stride)
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
