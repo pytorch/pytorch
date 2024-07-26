@@ -484,8 +484,8 @@ static void cumulative_op_impl(const Tensor& self,
           rc = [mpsGraph cumulativeProductWithTensor:inputTensor axis:dim name:nil];
         } else if (cumulativeOpType == MPSCumulativeOpType::LOGCUMSUMEXP) {
           MPSGraphTensor* expTensor = [mpsGraph exponentWithTensor:inputTensor name:nil];
-          MPSGraphTensor* prodTensor =  [mpsGraph cumulativeSumWithTensor:expTensor axis:dim name:nil];
-          rc = [mpsGraph logarithmWithTensor:prodTensor name:nil];
+          MPSGraphTensor* sumTensor =  [mpsGraph cumulativeSumWithTensor:expTensor axis:dim name:nil];
+          rc = [mpsGraph logarithmWithTensor:sumTensor name:nil];
         }
         if ((mps::getMPSDataType(result) != [rc dataType]) || castInputData) {
           return mps::castMPSTensor(mpsGraph, rc, result.scalar_type());
