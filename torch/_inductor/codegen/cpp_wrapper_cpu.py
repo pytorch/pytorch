@@ -990,7 +990,7 @@ class CppWrapperCpu(WrapperCodeGen):
             output_buffer = V.graph.graph_outputs[idx]
             if isinstance(output_buffer, ir.BaseView):
                 output_storage = output_buffer.unwrap_view()
-                if isinstance(output_storage.data, ir.ConstantBuffer):
+                if isinstance(output_storage.data, ir.ConstantBuffer):  # type: ignore[attr-defined] # next PR
                     is_constant_buffer = True
 
             if config.abi_compatible:

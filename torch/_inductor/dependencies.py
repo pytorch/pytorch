@@ -486,8 +486,8 @@ def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
     new_sizes: List[List[sympy.Expr]] = []
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
-        new_sizes.append(new_size)
-        args.append(reindex(list(map(add_var, new_size))))
+        new_sizes.append(new_size)  # type: ignore[arg-type] # next PR
+        args.append(reindex(list(map(add_var, new_size))))  # type: ignore[arg-type] # next PR
     return args, var_ranges
 
 
@@ -551,7 +551,7 @@ def extract_input_node_reduction_ranges(
     size = None
     while reduction_size is None and len(reads) > 0:
         seen = set()
-        new_reads = []
+        new_reads = []  # type: ignore[var-annotated] # next PR
         for read in reads:
             if not isinstance(read, MemoryDep):
                 continue

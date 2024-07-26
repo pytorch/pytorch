@@ -953,7 +953,7 @@ def repeat(x, repeats):
 def view(x, sizes):
     assert isinstance(x, TensorBox)
     assert isinstance(sizes, (list, tuple))
-    return TensorBox(View.create(x.data, sizes))
+    return TensorBox(View.create(x.data, sizes))  # type: ignore[arg-type] # next PR
 
 
 @register_lowering(aten.permute, type_promotion_kind=None)
@@ -967,7 +967,7 @@ def permute(x, dims):
 def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
-    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))
+    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))  # type: ignore[arg-type] # next PR
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)

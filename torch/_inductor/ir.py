@@ -75,6 +75,7 @@ from .dependencies import (
     extract_free_unbacked_symbols,
     extract_input_node_reduction_ranges,
     extract_read_writes,
+    ReadWrites,
     var_builder,
 )
 from .ops_handler import OpCounterCSE
@@ -447,17 +448,17 @@ class IRNode:
 
 @dataclasses.dataclass
 class Operation:
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.operation_name: Optional[str] = None
 
-    def get_device(self):
+    def get_device(self) -> torch.device:
         raise NotImplementedError
 
-    def get_origin_node(self):
+    def get_origin_node(self) -> Optional[Node]:
         assert hasattr(self, "origin_node")
         return self.origin_node
 
-    def get_origins(self):
+    def get_origins(self) -> Set[Node]:
         assert hasattr(self, "origins")
         return self.origins
 
@@ -465,31 +466,31 @@ class Operation:
         assert self.operation_name is not None
         return self.operation_name
 
-    def is_extern(self):
+    def is_extern(self) -> bool:
         return False
 
-    def is_no_op(self):
+    def is_no_op(self) -> bool:
         return False
 
-    def get_read_writes(self):
+    def get_read_writes(self) -> ReadWrites:
         raise NotImplementedError
 
-    def is_user_of(self, name):
+    def is_user_of(self, name: str) -> bool:
         return name in self.get_read_names()
 
     def get_read_names(self) -> Set[str]:
         return {dep.name for dep in self.get_reads()}
 
-    def get_reads(self):
+    def get_reads(self) -> Set[Dep]:
         return self.get_read_writes().reads
 
-    def get_outputs(self) -> List[Buffer]:
+    def get_outputs(self) -> Sequence[Buffer]:
         raise NotImplementedError
 
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+    def get_unbacked_symbol_defs(self) -> Set[Symbol]:
         return set()
 
-    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[Symbol]:
         """
         Returns the unbacked symbols which are required to be in scope in
         order to successfully perform codegen for this buffer.  For example,
@@ -506,7 +507,7 @@ class Operation:
         """
         return set()
 
-    def get_workspace_size(self):
+    def get_workspace_size(self) -> int:
         """
         Gets extra global memory size needed by this buffer.
         Some algorithms (e.g. group gemm) may require extra global memory in the generated code.
@@ -2227,87 +2228,87 @@ def is_stride_order_storage_and_layout(
 class BaseView(IRNode):
     data: IRNode
 
-    def get_unbacked_symbol_uses(self):
+    def get_unbacked_symbol_uses(self) -> Set[Symbol]:
         return self.data.get_unbacked_symbol_uses()
 
-    def make_reindexer(self):
+    def make_reindexer(self) -> Callable[[Sequence[_IntLike]], Sequence[_IntLike]]:
         raise NotImplementedError(f"make_reindexer NYI on {self}")
 
-    def make_indexer(self):
+    def make_indexer(self) -> Callable[[Sequence[_IntLike]], _IntLike]:
         inner = self.data.make_indexer()
         reindex = self.make_reindexer()
 
-        def indexer(idx):
+        def indexer(idx: Sequence[_IntLike]) -> _IntLike:
             return inner(reindex(idx))
 
         return indexer
 
-    def make_loader(self):
+    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
         inner = self.data.make_loader()
         reindex = self.make_reindexer()
 
-        def loader(idx):
+        def loader(idx: Sequence[_IntLike]) -> OpsValue:
             return inner(reindex(idx))
 
         return loader
 
     @property
-    def dtype(self):
+    def dtype(self) -> torch.dtype:
         return self.data.dtype
 
-    def get_layout(self):
+    def get_layout(self) -> _AnyLayout:
         return self.data.get_layout()
 
-    def get_device(self):
+    def get_device(self) -> torch.device:
         return self.data.get_device()
 
-    def get_origin_node(self):
+    def get_origin_node(self) -> Optional[Node]:
         return None
 
-    def get_name(self):
+    def get_name(self) -> str:
         return self.data.get_name()
 
-    def get_pointwise_size(self):
+    def get_pointwise_size(self) -> Sequence[_IntLike]:
         return self.get_size()
 
-    def mark_reuse(self, users):
+    def mark_reuse(self, users: int) -> None:
         return self.data.mark_reuse(users)
 
-    def has_exceeded_max_reads(self):
+    def has_exceeded_max_reads(self) -> bool:
         return self.data.has_exceeded_max_reads()
 
-    def realize(self):
+    def realize(self) -> Optional[str]:
         return self.data.realize()
 
-    def realize_hint(self):
+    def realize_hint(self) -> None:
         return self.data.realize_hint()
 
-    def get_storage_numel(self):
+    def get_storage_numel(self) -> _IntLike:
         return self.data.get_storage_numel()
 
-    def is_extern(self):
+    def is_extern(self) -> bool:
         return self.data.is_extern()  # type: ignore[attr-defined]
 
-    def is_module_buffer(self):
+    def is_module_buffer(self) -> bool:
         return self.data.is_module_buffer()  # type: ignore[attr-defined]
 
     def get_read_names(self) -> Set[str]:
         return self.data.get_read_names()
 
-    def get_reads(self):
+    def get_reads(self) -> Set[Dep]:
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
                 self.make_loader(),
                 self.get_size(),  # type: ignore[arg-type] # next PR
             ).reads
 
-    def unwrap_view(self):
+    def unwrap_view(self) -> IRNode:
         x: IRNode = self
         while isinstance(x, BaseView):
             x = x.data
         return x
 
-    def constant_to_device(self, device):
+    def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
@@ -2316,10 +2317,10 @@ class BaseView(IRNode):
 
 @dataclasses.dataclass
 class ExpandView(BaseView):
-    size: List[Expr]
+    size: List[_IntLike]
 
     @staticmethod
-    def _normalize_size(x, new_size):
+    def _normalize_size(x: IRNode, new_size: Sequence[_IntLike]) -> Sequence[_IntLike]:
         """Replace `-1` with correct sizes"""
         sizevars = V.graph.sizevars
         new_size = list(map(sympy.expand, new_size))
@@ -2344,42 +2345,42 @@ class ExpandView(BaseView):
         return new_size
 
     @classmethod
-    def create(cls, x, new_size):
+    def create(cls, x: IRNode, new_size: Sequence[_IntLike]) -> BaseView:
         new_size = cls._normalize_size(x, new_size)
 
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
             skip = len(new_size) - len(old_layout.size)
             assert skip >= 0
-            new_stride = [sympy.Integer(0)] * skip
+            new_stride = [Integer(0)] * skip
             for stride, size in zip(old_layout.stride, old_layout.size):
-                new_stride.append(stride if size != 1 else sympy.Integer(0))
+                new_stride.append(stride if size != 1 else Integer(0))
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
-                list(new_size),
+                list(new_size),  # type: ignore[arg-type] # next PR
                 new_stride,
                 old_layout.offset,
             )
             return ReinterpretView(storage, new_layout)
 
-        return ExpandView(x, new_size)
+        return ExpandView(x, list(new_size))
 
-    def get_size(self):
+    def get_size(self) -> Sequence[_IntLike]:
         return self.size
 
-    def make_reindexer(self):
+    def make_reindexer(self) -> Callable[[Sequence[_IntLike]], Sequence[_IntLike]]:
         target = self.get_size()
         actual = self.data.get_size()
         skip = len(target) - len(actual)
 
-        def reindex(index):
+        def reindex(index: Sequence[_IntLike]) -> Sequence[_IntLike]:
             index = list(index[skip:])
             assert len(index) == len(actual)
             for i in range(len(actual)):
                 if actual[i] == 1:
                     # zero out broadcast dimension
-                    index[i] = sympy.Integer(0)
+                    index[i] = Integer(0)
             return index
 
         return reindex
@@ -2387,10 +2388,10 @@ class ExpandView(BaseView):
 
 @dataclasses.dataclass
 class PermuteView(BaseView):
-    dims: List[Expr]
+    dims: List[int]
 
     @classmethod
-    def create(cls, x, dims):
+    def create(cls, x: IRNode, dims: Sequence[int]) -> BaseView:
         dims = cls._map_neg_dims(dims)
         assert set(dims) == set(range(len(dims)))
 
@@ -2405,23 +2406,23 @@ class PermuteView(BaseView):
             )
             return ReinterpretView(storage, new_layout)
 
-        return PermuteView(x, dims)
+        return PermuteView(x, list(dims))
 
     @classmethod
-    def _map_neg_dims(cls, dims):
+    def _map_neg_dims(cls, dims: Sequence[int]) -> Sequence[int]:
         return [dim if dim >= 0 else len(dims) + dim for dim in dims]
 
-    def get_size(self):
+    def get_size(self) -> Sequence[_IntLike]:
         assert set(self._map_neg_dims(self.dims)) == set(range(len(self.dims)))
-        size = self.data.get_size()
-        return [size[i] for i in self.dims]  # type: ignore[call-overload]
+        size = list(self.data.get_size())
+        return [size[i] for i in self.dims]
 
-    def make_reindexer(self):
-        inv = {j: i for i, j in enumerate(self.dims)}
-        inv = [inv[i] for i in range(len(self.dims))]  # type: ignore[index]
+    def make_reindexer(self) -> Callable[[Sequence[_IntLike]], Sequence[_IntLike]]:
+        inv_ = {j: i for i, j in enumerate(self.dims)}
+        inv = [inv_[i] for i in range(len(self.dims))]
         assert set(inv) == set(range(len(self.dims)))
 
-        def reindex(index):
+        def reindex(index: Sequence[_IntLike]) -> Sequence[_IntLike]:
             return [index[i] for i in inv]
 
         return reindex
@@ -2429,7 +2430,7 @@ class PermuteView(BaseView):
 
 class SqueezeView(BaseView):
     @classmethod
-    def create(cls, x, *, dim=None):
+    def create(cls, x, *, dim=None):  # type: ignore[no-untyped-def] # no example
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
             new_size = []
@@ -2467,40 +2468,42 @@ class SqueezeView(BaseView):
             return View.create(x, [s for i, s in enumerate(x.get_size()) if i != dim])
 
     @staticmethod
-    def squeezer(size: Tuple[sympy.Expr, ...]):
+    def squeezer(
+        size: Sequence[_IntLike],
+    ) -> Tuple[Sequence[_IntLike], Callable[..., object]]:
         new_size = [s for s in size if s != 1]
         not_one = [i for i, s in enumerate(size) if s != 1]
         length = len(size)
 
-        def reindex(index: List[sympy.Expr]) -> Tuple[sympy.Expr, ...]:
+        def reindex(index: Sequence[_IntLike]) -> Sequence[_IntLike]:
             assert len(index) == len(not_one), f"{index} {not_one}"
-            new_index = [sympy.Integer(0)] * length
+            new_index = [Integer(0)] * length
             for idx, s in zip(not_one, index):
                 new_index[idx] = s
             return tuple(new_index)
 
         return new_size, reindex
 
-    def __init__(self, data):
+    def __init__(self, data: None) -> None:
         raise AssertionError("use SqueezeView.create()")
 
 
 @dataclasses.dataclass
 class GenericView(BaseView):
-    size: List[Expr]
+    size: List[_IntLike]
     reindex: Callable[..., Any]
 
-    def make_reindexer(self):
+    def make_reindexer(self) -> Callable[[Sequence[_IntLike]], Sequence[_IntLike]]:
         return self.reindex
 
-    def reindex_str(self):
+    def reindex_str(self):  # type: ignore[no-untyped-def] # no example
         index_old = [
             sympy_index_symbol_with_prefix(SymT.INDEX, n) for n in range(len(self.size))
         ]
         index_new = list(self.reindex(index_old))
         return f"lambda {', '.join(map(str, index_old))}: {index_new}"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.str_helper(
             [self.data, f"size={self.size}", f"reindex={self.reindex_str()}"]
         )
@@ -2508,17 +2511,17 @@ class GenericView(BaseView):
     __repr__ = __str__
 
     @classmethod
-    def create(cls, x, new_size, reindex):
+    def create(cls, x, new_size, reindex):  # type: ignore[no-untyped-def] # no example
         return cls(x, list(new_size), reindex)
 
-    def get_size(self):
+    def get_size(self) -> Sequence[_IntLike]:
         return self.size
 
 
 @dataclasses.dataclass
 class View(GenericView):
     @staticmethod
-    def handle_negative_index(idx, size):
+    def handle_negative_index(idx: _IntLike, size: _IntLike) -> _IntLike:
         idx = sympy.expand(idx)
         size = sympy.expand(size)
         evaluate_expr = V.graph.sizevars.shape_env.evaluate_expr
@@ -2527,13 +2530,13 @@ class View(GenericView):
         return idx
 
     @classmethod
-    def create(cls, x, new_size):
+    def create(cls, x: Union[View, ReinterpretView, StorageBox], new_size: Sequence[_IntLike]) -> BaseView:  # type: ignore[override]
         assert isinstance(new_size, (tuple, list))
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
         # Skip pointless views
-        if V.graph.sizevars.statically_known_list_equals(old_size, new_size):
-            return x
+        if V.graph.sizevars.statically_known_list_equals(old_size, new_size):  # type: ignore[arg-type] # next PR
+            return x  # type: ignore[return-value]
 
         unbacked_symbols_in_sizes = False
         if (
@@ -2544,22 +2547,24 @@ class View(GenericView):
 
         if 0 in new_size:
 
-            def fake_reindex(index):
+            def fake_reindex(index: _IntLike) -> Sequence[int]:
                 return tuple([0] * len(old_size))
 
-            return cls(x, list(new_size), fake_reindex)
+            return cls(x, new_size, fake_reindex)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
         elif is_contiguous_storage_and_layout(x) or unbacked_symbols_in_sizes:
             if unbacked_symbols_in_sizes and (not is_contiguous_storage_and_layout(x)):
                 # realize x; otherwise, the dynamic_reshape_indexer below will fail
                 # due to the size_hint's inability to process unbacked SymInts
-                x = ExternKernel.realize_input(x)
+                x_ = ExternKernel.realize_input(x)
+            else:
+                x_ = x
 
-            storage, old_layout = as_contiguous_storage_and_layout(x)
+            storage, old_layout = as_contiguous_storage_and_layout(x_)
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
-                new_size,
+                new_size,  # type: ignore[arg-type] # next PR
                 FlexibleLayout.contiguous_strides(new_size),
                 old_layout.offset,
             )
@@ -2569,14 +2574,16 @@ class View(GenericView):
         return cls(x, list(new_size), reindex)
 
     @staticmethod
-    def resolve_negative_size(old_size, new_size):
-        new_size = [V.graph.sizevars.simplify(x) for x in new_size]
-        old_size = [V.graph.sizevars.simplify(x) for x in old_size]
+    def resolve_negative_size(
+        old_size: Sequence[_IntLike], new_size: Sequence[_IntLike]
+    ) -> Tuple[List[_IntLike], List[_IntLike]]:
+        new_size = [V.graph.sizevars.simplify(x) for x in new_size]  # type: ignore[arg-type] # next PR
+        old_size = [V.graph.sizevars.simplify(x) for x in old_size]  # type: ignore[arg-type] # next PR
 
         new_size = list(new_size)
         for i in range(len(new_size)):
             if new_size[i] == -1:
-                new_size[i] = sympy.Integer(1)
+                new_size[i] = Integer(1)
                 new_size[i] = CleanDiv(sympy_product(old_size), sympy_product(new_size))
                 break
 
@@ -2584,7 +2591,9 @@ class View(GenericView):
         return old_size, new_size
 
     @classmethod
-    def dynamic_reshape_indexer(cls, old_size, new_size):
+    def dynamic_reshape_indexer(
+        cls, old_size: Sequence[_IntLike], new_size: Sequence[_IntLike]
+    ) -> Callable[[Sequence[_IntLike]], Sequence[_IntLike]]:
         try:
             reindex = cls._dynamic_reshape_indexer(old_size, new_size)
         except (AssertionError, IndexError):
@@ -2596,7 +2605,9 @@ class View(GenericView):
         return reindex
 
     @staticmethod
-    def _dynamic_reshape_indexer(old_size, new_size):
+    def _dynamic_reshape_indexer(
+        old_size: Sequence[_IntLike], new_size: Sequence[_IntLike]
+    ) -> Callable[[Sequence[_IntLike]], Sequence[_IntLike]]:
         """
         Perform a reshape entirely by modifying indexing math
         """
@@ -2615,22 +2626,22 @@ class View(GenericView):
             size_old = stack_old.pop()
             var, size_new = stack_new.pop()
             if size_old == 1:
-                view_expr.append(sympy.Integer(0))
+                view_expr.append(Integer(0))
                 stack_new.append((var, size_new))  # re-add
             elif size_new == 1:
                 stack_old.append(size_old)  # re-add
             elif size_hint(size_new) == size_hint(size_old):
                 view_expr.append(var)
-                V.graph.sizevars.guard_equals(size_new, size_old)
+                V.graph.sizevars.guard_equals(size_new, size_old)  # type: ignore[arg-type] # next PR
             elif size_hint(size_new) < size_hint(size_old):
                 while size_hint(size_new) < size_hint(size_old):
                     var2, size_new2 = stack_new.pop()
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
-                V.graph.sizevars.guard_equals(size_new, size_old)
+                V.graph.sizevars.guard_equals(size_new, size_old)  # type: ignore[arg-type] # next PR
             elif size_hint(size_new) > size_hint(size_old):
-                divisor = sympy.Integer(1)
+                divisor = Integer(1)
                 modulus = size_old
                 view_expr.append(ModularIndexing(var, divisor, modulus))
                 divisor = divisor * modulus
@@ -2639,23 +2650,23 @@ class View(GenericView):
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
                     size_old = size_old * modulus
-                V.graph.sizevars.guard_equals(size_new, size_old)
+                V.graph.sizevars.guard_equals(size_new, size_old)  # type: ignore[arg-type] # next PR
             else:
                 raise AssertionError
 
         while stack_old:
             size_old = stack_old.pop()
-            V.graph.sizevars.guard_equals(size_old, 1)  # type: ignore[arg-type]
-            view_expr.append(sympy.Integer(0))
+            V.graph.sizevars.guard_equals(size_old, 1)  # type: ignore[arg-type] # next PR
+            view_expr.append(Integer(0))
 
         while stack_new:
             var, size_new = stack_new.pop()
-            V.graph.sizevars.guard_equals(size_new, 1)  # type: ignore[arg-type]
+            V.graph.sizevars.guard_equals(size_new, 1)  # type: ignore[arg-type] # next PR
 
         view_expr.reverse()
         assert len(view_expr) == len(old_size)
 
-        def reindex(index):
+        def reindex(index: Sequence[_IntLike]) -> Sequence[_IntLike]:
             assert len(index) == len(vars), (len(index), len(vars))
             replacements = dict(zip(vars, index))
             return tuple(sympy_subs(x, replacements) for x in view_expr)  # type: ignore[arg-type]
@@ -2669,12 +2680,12 @@ class ReinterpretView(BaseView):
 
     layout: Layout
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         super().__post_init__()
         if isinstance(self.data, BaseView):
             self.data = self.data.unwrap_view()
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.str_helper(
             [
                 self.data,
@@ -2684,27 +2695,27 @@ class ReinterpretView(BaseView):
 
     __repr__ = __str__
 
-    def get_name(self):
+    def get_name(self) -> str:
         return self.data.get_name()
 
-    def get_device(self):
+    def get_device(self) -> torch.device:
         return self.layout.device
 
-    def get_origin_node(self):
+    def get_origin_node(self) -> Optional[Node]:
         return None
 
     @property
-    def dtype(self):
+    def dtype(self) -> torch.dtype:
         return self.layout.dtype
 
-    def get_size(self):
+    def get_size(self) -> Sequence[_IntLike]:
         return list(self.layout.size)
 
-    def get_stride(self):
+    def get_stride(self) -> Sequence[_IntLike]:
         return list(self.layout.stride)
 
-    def make_loader(self):
-        def loader(index):
+    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
+        def loader(index: Sequence[_IntLike]) -> OpsValue:
             indexer = self.layout.make_indexer()
             tmp_loader = ops.load(self.get_name(), indexer(index))
             if self.layout.dtype != self.data.dtype:
@@ -2714,23 +2725,23 @@ class ReinterpretView(BaseView):
 
         return loader
 
-    def make_indexer(self):
+    def make_indexer(self) -> Callable[[Sequence[_IntLike]], _IntLike]:
         return self.layout.make_indexer()
 
-    def get_layout(self):
+    def get_layout(self) -> Layout:
         return self.layout
 
-    def freeze_layout(self):
+    def freeze_layout(self) -> None:
         pass
 
-    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[Symbol]:
         return (
             free_unbacked_symbols(self.layout.size)
             | free_unbacked_symbols(self.layout.stride)
             | free_unbacked_symbols(self.layout.offset)
         )
 
-    def codegen_reference(self, writer=None):
+    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         # reinterpret_tensor is similar to as_strided except:
         # - offset is added to the existing offset (rather than replacing it)
         # - view tracking is disabled similar to unsafe_view
@@ -2751,7 +2762,7 @@ class DtypeView(BaseView):
     target_dtype: torch.dtype
 
     @classmethod
-    def create(cls, x, new_dtype):
+    def create(cls, x, new_dtype):  # type: ignore[no-untyped-def] # no example
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
             new_layout = FixedLayout(
@@ -2764,22 +2775,22 @@ class DtypeView(BaseView):
             return ReinterpretView(storage, new_layout)
         return DtypeView(x, new_dtype)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.str_helper([self.data, self.target_dtype])
 
     __repr__ = __str__
 
     @property
-    def dtype(self):
+    def dtype(self) -> torch.dtype:
         return self.target_dtype
 
-    def get_size(self):
+    def get_size(self) -> Sequence[_IntLike]:
         return self.data.get_size()
 
-    def make_loader(self):
+    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
         inner = self.data.make_loader()
 
-        def loader(idx):
+        def loader(idx: Sequence[_IntLike]) -> OpsValue:
             return ops.to_dtype_bitcast(inner(idx), self.target_dtype, self.data.dtype)
 
         return loader
@@ -2787,25 +2798,33 @@ class DtypeView(BaseView):
 
 class SliceView(View):
     @classmethod
-    def normalize_start_end(cls, x, dim, start, end):
+    def normalize_start_end(
+        cls,
+        x: Union[ReinterpretView, MutableBox],
+        dim: Union[int, Integer],
+        start: _IntLike,
+        end: _IntLike,
+    ) -> Tuple[_IntLike, _IntLike]:
         """
         Normalize start and end such that both are in the range
         [0, x.get_size()[dim]] and start <= end.
         """
         sizevars = V.graph.sizevars
-        dim_size = x.get_size()[dim]
+        dim_size = typing.cast(List[_IntLike], x.get_size())[dim]
 
         if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
 
-            def clamp(x, lower, upper):
+            def clamp(x: _IntLike, lower: _IntLike, upper: _IntLike) -> _IntLike:
                 return sympy.Min(sympy.Max(x, lower), upper)
 
         else:
 
-            def clamp(x, lower, upper):
-                return sizevars.evaluate_min(sizevars.evaluate_max(x, lower), upper)
+            def clamp(x: _IntLike, lower: _IntLike, upper: _IntLike) -> _IntLike:
+                return sizevars.evaluate_min(sizevars.evaluate_max(x, lower), upper)  # type: ignore[arg-type] # next PR
 
-        def clamp_wrap(val, lower, upper, default):
+        def clamp_wrap(
+            val: _IntLike, lower: _IntLike, upper: _IntLike, default: _IntLike
+        ) -> _IntLike:
             if val is None:
                 return default
             val = cls.handle_negative_index(val, dim_size)
@@ -2816,9 +2835,17 @@ class SliceView(View):
         return start, end
 
     @classmethod
-    def create(cls, x, dim, start, end, step=1, clamp=True):
+    def create(  # type: ignore[override]
+        cls,
+        x: Union[ReinterpretView, MutableBox],
+        dim: Union[int, Integer],
+        start: _IntLike,
+        end: _IntLike,
+        step: int = 1,
+        clamp: bool = True,
+    ) -> IRNode:
         step = sympy.expand(step)
-        assert isinstance(step, sympy.Expr) or step > 0
+        assert isinstance(step, Expr) or step > 0
         try:
             if start == 0 and end >= 2**63 - 1 and step == 1:
                 return x
@@ -2846,11 +2873,12 @@ class SliceView(View):
                 old_layout.dtype,
                 new_size,
                 new_stride,
-                old_layout.offset + old_layout.stride[dim] * start,
+                old_layout.offset
+                + typing.cast(List[_IntLike], old_layout.stride)[dim] * start,
             )
             return ReinterpretView(storage, new_layout)
 
-        def reindex(index):
+        def reindex(index: Sequence[Integer]) -> Sequence[Integer]:
             assert len(index) == len(new_size), f"wrong ndim {index} {new_size}"
             index = list(index)
             index[dim] = index[dim] * step + start
@@ -3325,8 +3353,8 @@ class NonOwningLayout(Layout):
         super().__init__(
             layout.device,
             layout.dtype,
-            layout.size,
-            layout.stride,
+            layout.size,  # type: ignore[union-attr, arg-type] # next PR
+            layout.stride,  # type: ignore[union-attr] # next PR
         )
         self.view = view
 
@@ -3334,7 +3362,7 @@ class NonOwningLayout(Layout):
         return self.as_fixed().make_indexer()
 
     def maybe_guard_aligned(self):
-        offset = self.view.get_layout().offset
+        offset = self.view.get_layout().offset  # type: ignore[union-attr] # next PR
         if offset == 0:
             return True
         from .compile_fx import ALIGNMENT
@@ -4327,7 +4355,7 @@ class ConcatKernel(NopKernel):
             dtype=src.get_dtype(),
             inner_fn=src.make_loader(),
             ranges=[
-                V.graph.sizevars.guard_equals(a, b)
+                V.graph.sizevars.guard_equals(a, b)  # type: ignore[arg-type] # next PR
                 for a, b in zip(src.get_size(), dst.get_size())
             ],
         )
@@ -4634,7 +4662,7 @@ class ExternKernel(InputsKernel):
         if (
             x_unwrap_view_fx_node is not None
             and "val" in x_unwrap_view_fx_node.meta
-            and isinstance(x_unwrap_view.layout, FlexibleLayout)
+            and isinstance(x_unwrap_view.layout, FlexibleLayout)  # type: ignore[attr-defined] # next PR
             and (
                 x_unwrap_view_fx_node.meta["val"].is_contiguous(
                     memory_format=torch.channels_last
@@ -4644,11 +4672,11 @@ class ExternKernel(InputsKernel):
                 )
             )
         ):
-            x_unwrap_view.freeze_layout_with_same_order(
-                make_channels_last_strides_for(x_unwrap_view.get_size())
+            x_unwrap_view.freeze_layout_with_same_order(  # type: ignore[attr-defined] # next PR
+                make_channels_last_strides_for(x_unwrap_view.get_size())  # type: ignore[arg-type] # next PR
             )
         else:
-            x_unwrap_view.freeze_layout()
+            x_unwrap_view.freeze_layout()  # type: ignore[attr-defined] # next PR
 
         index_args, var_ranges = dependencies.index_vars_squeeze(
             x.get_size(), prefix="r"  # type: ignore[arg-type] # next PR
@@ -4656,7 +4684,7 @@ class ExternKernel(InputsKernel):
         range_vars = index_args[0]
         index = x.make_indexer()(range_vars)
 
-        index = V.graph.sizevars.simplify_with_ranges(index, var_ranges)
+        index = V.graph.sizevars.simplify_with_ranges(index, var_ranges)  # type: ignore[arg-type] # next PR
         strides = V.graph.sizevars.stride_vars(index, range_vars)
         offset = V.graph.sizevars.offset_var(index, range_vars)
         expected = sympy_dot(range_vars, strides) + offset
