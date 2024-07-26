@@ -229,6 +229,11 @@ class ROCmTemplateKernel(ROCmKernel):
         if node.get_stride() == [0, 1]:
             return 0
 
+        # This is supposed to work for the broadcasted bias case, i.e. (M, 1)
+        # But it doesn't?
+        if node.get_stride() == [1, 0]:
+            return 0
+
         contiguous_stride = functools.reduce(
             lambda a, b: max(b, a), node.get_stride(), sympy.Integer(0)
         )
