@@ -1062,6 +1062,9 @@ class SymNodeVariable(VariableTracker):
             self._tensor_var = SourcelessBuilder.create(
                 tx, torch.scalar_tensor
             ).call_function(tx, [self], {})
+            tmp_kwargs = self._tensor_var.proxy.node.kwargs.copy()
+            tmp_kwargs["dtype"] = self._tensor_var.dtype
+            self._tensor_var.proxy.node.kwargs = tmp_kwargs
         return self._tensor_var
 
     def evaluate_expr(self, output_graph=None):
