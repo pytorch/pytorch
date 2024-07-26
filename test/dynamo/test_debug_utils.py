@@ -2,13 +2,23 @@
 
 import unittest
 
+from contextlib import contextmanager
+
 import torch
 
+import torch._prims_common as utils
+import torch.nn.functional as F
+
 from functorch import make_fx
+from torch import nn
+from torch._decomp import decomposition_table
 from torch._dynamo import debug_utils
 from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.test_case import TestCase
+from torch._prims_common.wrappers import elementwise_type_promotion_wrapper, out_wrapper
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
+aten = torch.ops.aten
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
@@ -172,19 +182,7 @@ def forward(self, x_1):
         self.assertEqual(list(kwargs["primals_4"].shape), [5])
         self.assertEqual(kwargs["primals_5"], 5)
 
-
     def test_compiler_bisector(self):
-        from contextlib import contextmanager
-
-        import torch
-        import torch._prims_common as utils
-        import torch.nn.functional as F
-        from torch import nn
-        from torch._decomp import decomposition_table
-        from torch._prims_common.wrappers import elementwise_type_promotion_wrapper, out_wrapper
-
-        aten = torch.ops.aten
-
         @out_wrapper()
         @elementwise_type_promotion_wrapper(
             type_promoting_args=("self",),
@@ -205,7 +203,6 @@ def forward(self, x_1):
             )
             return -1 / rate * torch.log1p(-torch.rand_like(self))
 
-
         @contextmanager
         def patch_exp_decomp():
             curr_decomp = decomposition_table[aten.exponential.default]
@@ -215,7 +212,6 @@ def forward(self, x_1):
 
             finally:
                 decomposition_table[aten.exponential.default] = curr_decomp
-
 
         class GumbelVectorQuantizer(nn.Module):
             def __init__(self):
@@ -242,7 +238,6 @@ def forward(self, x_1):
                 ).type_as(hidden_states)
                 return codevector_probs
 
-
         def test_fn():
             with patch_exp_decomp():
                 vq = GumbelVectorQuantizer().cuda()
@@ -260,11 +255,10 @@ def forward(self, x_1):
 
             return not out_compiled.isnan().any()
 
-
         from torch._inductor.bisect_helper import BisectionManager
-        out = BisectionManager.do_bisect(test_fn)
-        self.assertEqual(out, (['aot_eager_decomp_partition', 'decomposition'], 4))
 
+        out = BisectionManager.do_bisect(test_fn)
+        self.assertEqual(out, (["aot_eager_decomp_partition", "decomposition"], 4))
 
 
 if __name__ == "__main__":
