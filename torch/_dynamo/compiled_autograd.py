@@ -362,15 +362,15 @@ compiled_autograd_enabled = False
 # global flag to check if we are processing graphs produced from a compiled autograd graph
 in_compiled_autograd_region = False
 
-# state variable to track number of eager warmup runs that are already run
-warmup_count = 0
-
 
 @contextlib.contextmanager
 def enable(compiler_fn):
-    global warmup_count
-    if warmup_count < torch._dynamo.config.warmup_runs:
-        warmup_count += 1
+    # state variable to track number of eager warmup runs that are already run
+    if not hasattr(enable, "warmup_count"):
+        enable.warmup_count = 0
+    if enable.warmup_count < torch._dynamo.config.warmup_runs:
+        enable.warmup_count += 1
+        verbose_log.debug("compiled autograd warmup run done: %s", enable.warmup_count)
         yield
     else:
         prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(

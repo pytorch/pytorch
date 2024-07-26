@@ -569,10 +569,16 @@ class OptimizeContext(_TorchDynamoContext):
     def __call__(self, fn):
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            if self.warmup_count < torch._dynamo.config.warmup_runs:
+            # NOTE: Compiled Autograd warmup is handled by itself, not here.
+            if (
+                self.warmup_count < torch._dynamo.config.warmup_runs
+                and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+            ):
                 inner_fn = self.disable_context(fn)
+                out = inner_fn(*args, **kwargs)
                 self.warmup_count += 1
-                return inner_fn(*args, **kwargs)
+                log.debug("OptimizeContext warmup run done: %d", self.warmup_count)
+                return out
             else:
                 return super(OptimizeContext, self).__call__(fn)(*args, **kwargs)
 
