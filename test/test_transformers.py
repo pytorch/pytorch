@@ -1954,7 +1954,7 @@ class TestSDPACpuOnly(NNTestCase):
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
     @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.float16])
     @parametrize("batch_size", [2, 12])
-    @parametrize("q_seq_len", [267, 1030])
+    @parametrize("q_seq_len", [514, 1030])
     @parametrize("kv_seq_len", [514])
     @parametrize("n_head", [1, 3])
     @parametrize("head_dim", [8])
@@ -2997,11 +2997,13 @@ class TestSDPACudaOnly(NNTestCase):
     @skipIfRocm  # FIXME: "capturing stream has unjoined work"
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [1, 8])
-    @parametrize("sequence_legnths", [(512, 512), (256, 512), (128, 1024)])
+    @parametrize("seq_len_q", [256, 1024])
+    @parametrize("seq_len_k", [256, 1024])
     @parametrize("head_dim", [32, 64])
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0, 0.22])
-    @parametrize("dtype", [torch.float16,])
+    @parametrize("dtype", [torch.float16])
+    @parametrize("scale", [None, "l1"])
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
     def test_fused_attention_vs_math_ref_grads_cudagraph(self, device, batch_size: int, sequence_legnths: Tuple[int, int],
                                                          head_dim: int,
