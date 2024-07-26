@@ -10,7 +10,6 @@ from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
-    _dispatch_sqrt,
     _foreach_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
@@ -429,7 +428,7 @@ def _multi_tensor_nadam(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if grouped_state_steps[0].is_cpu:
+        if not torch._utils.is_compiling() and grouped_state_steps[0].is_cpu:
             torch._foreach_add_(
                 grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
@@ -489,8 +488,7 @@ def _multi_tensor_nadam(
             torch._foreach_sqrt_(bias_correction_sqrt)
         else:
             bias_correction_sqrt = [
-                _dispatch_sqrt(1 - beta2 ** _get_value(step))
-                for step in grouped_state_steps
+                (1 - beta2 ** _get_value(step)) ** 0.5 for step in grouped_state_steps
             ]
             mus = [
                 beta1 * (1.0 - 0.5 * (0.96 ** (_get_value(step) * momentum_decay)))
