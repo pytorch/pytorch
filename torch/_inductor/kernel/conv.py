@@ -490,7 +490,7 @@ def convolution(
 
         layout = conv_layout(x, weight, None, **kwargs)
         req_stride_order = ir.get_stride_order(
-            V.graph.sizevars.size_hints(layout.stride)
+            V.graph.sizevars.size_hints(layout.stride)  # type: ignore[arg-type]
         )
         return req_stride_order == ir.NHWC_STRIDE_ORDER
 
@@ -532,7 +532,7 @@ def convolution(
     else:
         layout = conv_layout(x, weight, None, **kwargs)
         req_stride_order = ir.get_stride_order(
-            V.graph.sizevars.size_hints(layout.stride)
+            V.graph.sizevars.size_hints(layout.stride)  # type: ignore[arg-type]
         )
         x = ir.ExternKernel.require_stride_order(x, req_stride_order)
         weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
