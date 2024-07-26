@@ -1880,6 +1880,19 @@ class CommonTemplate:
             )
             self.common(fn, (inp,), atol=1e-5, rtol=1e-4, check_lowp=False)
 
+    def test_cummin_inf(self):
+        def fn(a):
+            return torch.cummin(a, -1)
+
+        self.common(fn, (torch.full((100,), float('inf'), device=self.device, dtype=torch.float64),))
+
+    def test_cummax_inf(self):
+        def fn(a):
+            return torch.cummax(a, -1)
+        print(self.common)
+
+        self.common(fn, (torch.full((100,), float('-inf'), device=self.device, dtype=torch.float64),))
+
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skipCUDAIf(TEST_WITH_ROCM, "Computation not done in float on ROCm")
     @skip_if_gpu_halide  # accuracy issue
