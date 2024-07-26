@@ -602,7 +602,7 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
                 if (
                     node.target != operator.getitem
                     or node.args[0].target
-                    != torch.ops.aten._native_batch_norm_legit.default
+                    != torch.ops.aten._batch_norm_with_update.default
                 ):
                     continue
                 if node.args[0].args[0].op == "placeholder":
@@ -903,6 +903,24 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
             expected_node_occurrence=node_occurrence,
         )
 
+    def test_fold_bn_erases_bn_node(self):
+        """
+        Ensure the BN node is erased from the graph after folding
+        it into conv in `convert_pt2e` even in train mode.
+        """
+        m = self._get_conv_bn_model(has_conv_bias=False, has_bn=True, has_relu=False)
+        m = capture_pre_autograd_graph(m, self.example_inputs)
+        quantizer = XNNPACKQuantizer()
+        quantizer.set_global(
+            get_symmetric_quantization_config(is_per_channel=False, is_qat=True),
+        )
+        m = prepare_qat_pt2e(m, quantizer)
+        m = convert_pt2e(m)
+        (conv_node, bn_node, getitem_node) = _get_conv_bn_getitem_nodes(m)
+        self.assertTrue(conv_node is not None)
+        self.assertTrue(bn_node is None)
+        self.assertTrue(getitem_node is None)
+
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EQAT_ConvBn1d(TestQuantizePT2EQAT_ConvBn_Base):
@@ -945,7 +963,7 @@ def _get_conv_bn_getitem_nodes(model: torch.fx.GraphModule):
     for n in model.graph.nodes:
         if _is_conv_node(n):
             conv_node = n
-        if n.target == torch.ops.aten._native_batch_norm_legit.default:
+        if n.target == torch.ops.aten._batch_norm_with_update.default:
             bn_node = n
         if n.target == operator.getitem:
             getitem_node = n

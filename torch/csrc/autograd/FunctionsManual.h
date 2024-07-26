@@ -1124,7 +1124,7 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_no_update_backward_manual(
     const std::optional<Tensor>& save_mean_opt,
     const std::optional<Tensor>& save_var_opt,
     double eps,
-    std::array<bool,3> grad_input_mask,
+    std::array<bool, 3> grad_input_mask,
     const Tensor& reserve);
 
 } // namespace torch::autograd::generated::details

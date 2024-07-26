@@ -1861,21 +1861,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self._test_move_exported_model_dropout(inplace=True)
 
     def _get_bn_train_eval_ops(self):
-        if TEST_WITH_ROCM:
-            return (
-                torch.ops.aten.miopen_batch_norm.default,
-                torch.ops.aten.miopen_batch_norm.default,
-            )
-        elif TEST_CUDA:
-            return (
-                torch.ops.aten.cudnn_batch_norm.default,
-                torch.ops.aten.cudnn_batch_norm.default,
-            )
-        else:
-            return (
-                torch.ops.aten._native_batch_norm_legit.default,
-                torch.ops.aten._native_batch_norm_legit_no_training.default,
-            )
+        return (
+            torch.ops.aten._batch_norm_with_update.default,
+            torch.ops.aten._batch_norm_no_update.default,
+        )
 
     def test_move_exported_model_bn(self):
         """

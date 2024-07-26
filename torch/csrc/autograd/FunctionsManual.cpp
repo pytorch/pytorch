@@ -7163,22 +7163,24 @@ Tensor _batch_norm_no_update_jvp_manual(
     const Tensor& saved_mean,
     const Tensor& saved_invstd,
     double eps) {
-  const bool has_running_mean = running_mean.has_value() && running_mean->defined();
-  const bool has_running_var = running_var.has_value() && running_var->defined();
+  const bool has_running_mean =
+      running_mean.has_value() && running_mean->defined();
+  const bool has_running_var =
+      running_var.has_value() && running_var->defined();
   const bool train = !has_running_mean || !has_running_var;
   return batch_norm_jvp(
-    input_p,
-    input_t,
-    weight_p,
-    weight_t,
-    bias_p,
-    bias_t,
-    running_mean,
-    running_var,
-    saved_mean,
-    saved_invstd,
-    train,
-    eps);
+      input_p,
+      input_t,
+      weight_p,
+      weight_t,
+      bias_p,
+      bias_t,
+      running_mean,
+      running_var,
+      saved_mean,
+      saved_invstd,
+      train,
+      eps);
 }
 
 /**
@@ -7195,23 +7197,25 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_no_update_backward_manual(
     const std::optional<Tensor>& save_mean_opt,
     const std::optional<Tensor>& save_var_opt,
     double eps,
-    std::array<bool,3> grad_input_mask,
+    std::array<bool, 3> grad_input_mask,
     const Tensor& reserve) {
-  const bool has_running_mean = running_mean_opt.has_value() && running_mean_opt->defined();
-  const bool has_running_var = running_var_opt.has_value() && running_var_opt->defined();
+  const bool has_running_mean =
+      running_mean_opt.has_value() && running_mean_opt->defined();
+  const bool has_running_var =
+      running_var_opt.has_value() && running_var_opt->defined();
   const bool train = !has_running_mean || !has_running_var;
   return at::batch_norm_backward(
-    grad_output,
-    input,
-    weight_opt,
-    running_mean_opt,
-    running_var_opt,
-    save_mean_opt,
-    save_var_opt,
-    train,
-    eps,
-    grad_input_mask,
-    reserve);
+      grad_output,
+      input,
+      weight_opt,
+      running_mean_opt,
+      running_var_opt,
+      save_mean_opt,
+      save_var_opt,
+      train,
+      eps,
+      grad_input_mask,
+      reserve);
 }
 
 } // namespace details
