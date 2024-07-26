@@ -214,7 +214,7 @@ static bool isSupportedHipLtROCmArch(int index) {
 #endif
 
 template <typename scalar_t>
-static void launchTunableGemmAndBias(cublasCommonArgs &args, Tensor& result, const Tensor& self, bool is_rocm) {
+static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
   bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
   bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
   at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
@@ -223,18 +223,15 @@ static void launchTunableGemmAndBias(cublasCommonArgs &args, Tensor& result, con
   params.m = args.m;
   params.n = args.n;
   params.k = args.k;
+  params.alpha = alpha.to<at::opmath_type<scalar_t>>();
   params.a = args.mata->const_data_ptr<scalar_t>();
   params.lda = args.lda;
   params.b = args.matb->const_data_ptr<scalar_t>();
   params.ldb = args.ldb;
-  if (is_rocm) {
-    params.bias = (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr;
-  }
-  else {
-    params.bias = self.const_data_ptr<scalar_t>();
-  }
   params.c = args.result->data_ptr<scalar_t>();
   params.ldc = args.result_ld;
+  params.bias = bias;
+  params.activation = activation;
   if (transa_ && transb_) {
     static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{};
     gemm(&params);
@@ -385,7 +382,11 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         [&] {
         auto tuning_ctx = at::cuda::tunable::getTuningContext();
         if (tuning_ctx->IsTunableOpEnabled()) {
-          launchTunableGemmAndBias<scalar_t>(args, result, self, true);
+          launchTunableGemmAndBias<scalar_t>(
+              args,
+              alpha,
+              (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
+              activation_to_gemm_and_blas_arg(activation));
         }
         else {
           at::cuda::blas::gemm_and_bias<scalar_t>(
@@ -426,7 +427,11 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         [&] {
         auto tuning_ctx = at::cuda::tunable::getTuningContext();
         if (tuning_ctx->IsTunableOpEnabled()) {
-          launchTunableGemmAndBias<scalar_t>(args, result, self, false);
+          launchTunableGemmAndBias<scalar_t>(
+              args,
+              alpha,
+              self.const_data_ptr<scalar_t>(),
+              activation_epilogue);
         }
         else {
           at::cuda::blas::gemm_and_bias<scalar_t>(
