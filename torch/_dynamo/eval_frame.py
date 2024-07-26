@@ -553,7 +553,6 @@ class OptimizeContext(_TorchDynamoContext):
         )
         self.warmup_count = 0
         self.disable_context = DisableContext()
-        self.optimize_context = None
 
         if config.compiled_autograd:
 
