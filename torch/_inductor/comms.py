@@ -618,8 +618,11 @@ def enforce_comm_ordering_for_fsdp(
     prev_ag_wait = None
     for ag_group_node, wait_group_node in ag_grouped_node_to_wait_grouped_node.items():
         if prev_ag_wait is not None:
+            mutating_buf = next(iter(ag_group_node.get_buffer_names()))
             for o in prev_ag_wait.get_outputs():
-                ag_group_node.add_fake_dep(WeakDep(o.get_name()))
+                ag_group_node.add_fake_dep(
+                    WeakDep(o.get_name(), mutating_buf=mutating_buf)
+                )
         prev_ag_wait = wait_group_node
 
     # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
@@ -627,8 +630,11 @@ def enforce_comm_ordering_for_fsdp(
     prev_rs_wait = None
     for rs_group_node, wait_group_node in rs_grouped_node_to_wait_grouped_node.items():
         if prev_rs_wait is not None:
+            mutating_buf = next(iter(rs_group_node.get_buffer_names()))
             for o in prev_rs_wait.get_outputs():
-                rs_group_node.add_fake_dep(WeakDep(o.get_name()))
+                rs_group_node.add_fake_dep(
+                    WeakDep(o.get_name(), mutating_buf=mutating_buf)
+                )
         prev_rs_wait = wait_group_node
 
     return new_order  # type: ignore[return-value]
