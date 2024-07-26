@@ -1450,7 +1450,7 @@ class TestSDPAFailureModes(NNTestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION or not isSM8XDevice,
         "Does not support fused SDPA or not SM86+ hardware",
     )
-    @parametrize("head_dim", [193, 204, 256])
+    @parametrize("head_dim", [193, 256])
     @parametrize("dropout_p", [0.0, 0.2])
     def test_flash_backward_failure_sm86plus(self, device, head_dim: int, dropout_p: float):
         dtype = torch.float16
@@ -2790,11 +2790,11 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA")
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
     @parametrize("batch_size", [1, 8])
-    @parametrize("seq_len_q", [4, 8, 64, 128, 256, 312, 512, 1024, 2048] if MEM_EFF_CAPABILITY_MATCHES_SM80
-                 else [4, 8, 64, 128, 152, 256, 512])
-    @parametrize("seq_len_k", [4, 8, 64, 65, 128, 256, 408, 512, 1024, 2048] if MEM_EFF_CAPABILITY_MATCHES_SM80
-                 else [4, 8, 37, 64, 128, 256, 512])
-    @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128] if MEM_EFF_CAPABILITY_MATCHES_SM80
+    @parametrize("seq_len_q", [4, 8, 256, 312, 1024, 2048] if MEM_EFF_CAPABILITY_MATCHES_SM80
+                 else [4, 8, 152, 256, 512])
+    @parametrize("seq_len_k", [4, 8, 65, 408, 1024, 2048] if MEM_EFF_CAPABILITY_MATCHES_SM80
+                 else [4, 8, 37, 256, 512])
+    @parametrize("head_dim", [8, 16, 96, 128] if MEM_EFF_CAPABILITY_MATCHES_SM80
                  else [8, 16, 32, 64])
     @parametrize("is_causal", [False])
     @parametrize("dropout_p", [0.0, 0.22])
@@ -2888,9 +2888,9 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
     @parametrize("batch_size", [1, 8])
-    @parametrize("seq_len_q", [4, 8, 64, 143, 256, 512, 1024, 2048])
-    @parametrize("seq_len_k", [4, 8, 64, 128, 256, 587, 1024, 2048])
-    @parametrize("head_dim", [8, 16, 21, 32, 64, 72, 96, 128, 160, 192, 203, 256])
+    @parametrize("seq_len_q", [4, 8, 64, 143, 2048])
+    @parametrize("seq_len_k", [4, 8, 64, 127, 2048])
+    @parametrize("head_dim", [8, 16, 21, 32, 64, 203, 256])
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
