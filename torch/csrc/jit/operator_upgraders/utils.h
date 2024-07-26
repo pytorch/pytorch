@@ -1,8 +1,8 @@
 #pragma once
 #include <c10/macros/Export.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 

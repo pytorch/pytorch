@@ -259,6 +259,22 @@ static PyObject* get_type_of_overloaded_arg(PyObject* obj_or_type) {
   return (PyObject*)Py_TYPE(obj_or_type);
 }
 
+static py::object maybe_get_registered_torch_dispatch_rule(
+    PyObject* torch_api_function,
+    const py::object& torch_dispatch_object) {
+  // This is a static object, so we must leak the Python object
+  // "release()" is used here to preserve 1 refcount on the
+  // object, preventing it from ever being de-allocated by CPython.
+  static const py::handle find_torch_dispatch_rule =
+      py::object(py::module_::import("torch._library.simple_registry")
+                     .attr("find_torch_dispatch_rule"))
+          .release();
+  auto result = find_torch_dispatch_rule(
+      py::reinterpret_borrow<py::object>(torch_api_function),
+      torch_dispatch_object.get_type());
+  return result;
+}
+
 static py::object dispatch_on_subclass(
     PyObject* args,
     PyObject* kwargs,
@@ -268,7 +284,7 @@ static py::object dispatch_on_subclass(
     bool is_torch_function,
     const char* torch_function_name_str,
     std::optional<c10::impl::TorchDispatchModeKey> maybe_mode_key =
-        c10::nullopt) {
+        std::nullopt) {
   py::object ret;
   for (auto& arg : overloaded_args) {
     py::object torch_function =
@@ -296,6 +312,29 @@ static py::object dispatch_on_subclass(
           torch_function_name_str,
           "` as a plain method is deprecated ",
           "and will be an error in future, please define it as a classmethod.");
+    }
+
+    if (!is_torch_function) {
+      auto maybe_torch_dispatch_rule = maybe_get_registered_torch_dispatch_rule(
+          torch_api_function, py::reinterpret_borrow<py::object>(arg));
+      if (!maybe_torch_dispatch_rule.is_none()) {
+        torch_function = maybe_torch_dispatch_rule;
+        auto py_arg = py::reinterpret_borrow<py::object>(arg);
+        ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
+            torch_function.ptr(),
+            py_arg.get_type().ptr(),
+            torch_api_function,
+            py_types.ptr(),
+            args,
+            kwargs,
+            NULL));
+        if (ret.ptr() == nullptr) {
+          throw python_error();
+        }
+        if (ret.ptr() != Py_NotImplemented) {
+          break;
+        }
+      }
     }
 
     ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
@@ -327,8 +366,8 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
     const char* torch_function_name_str) {
   // Disable mode on the inside; this makes for a more user-friendly
   // experience if you try to, e.g., print your tensors.
-  at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
-  at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
+  std::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
+  std::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
   py::object mode_obj;
   // NB: We only really need keep the mode_obj live if the function call
   // fails for error reporting, but whatever, Python refcounts are cheap
@@ -354,6 +393,25 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
       "Defining your mode's `",
       torch_function_name_str,
       "` as a classmethod is not supported, please make it a plain method");
+
+  if (!is_torch_function) {
+    auto maybe_torch_dispatch_rule =
+        maybe_get_registered_torch_dispatch_rule(torch_api_function, mode_obj);
+    if (!maybe_torch_dispatch_rule.is_none()) {
+      auto ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
+          maybe_torch_dispatch_rule.ptr(),
+          mode_obj.ptr(),
+          torch_api_function,
+          py_types.ptr(),
+          args,
+          kwargs,
+          NULL));
+      if (ret.ptr() == nullptr) {
+        throw python_error();
+      }
+      return std::make_tuple(ret, mode_obj);
+    }
+  }
 
   // Blegh.  This accidentally works in PyObject_CallFunctionObjArgs below
   // because the nullptr terminates the argument list ick ick ick.
@@ -1005,11 +1063,11 @@ std::string FunctionParameter::type_name() const {
 
 static inline std::optional<int64_t> parse_as_integer(const std::string& s) {
   if (s.empty())
-    return c10::nullopt;
+    return std::nullopt;
   char* str_end = nullptr;
   long ans = strtol(s.c_str(), &str_end, 0);
   // *str_end == 0 if the entire string was parsed as an integer.
-  return (*str_end == 0) ? std::optional<int64_t>(ans) : c10::nullopt;
+  return (*str_end == 0) ? std::optional<int64_t>(ans) : std::nullopt;
 }
 
 /*

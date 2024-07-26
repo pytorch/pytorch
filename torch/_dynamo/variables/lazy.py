@@ -95,7 +95,7 @@ class LazyVariableTracker(VariableTracker):
         Walk an object and realize all LazyVariableTrackers inside it.
         """
         if cache is None:
-            cache = dict()
+            cache = {}
 
         idx = id(value)
         if idx in cache:

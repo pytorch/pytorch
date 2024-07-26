@@ -76,7 +76,7 @@ TORCH_API TensorBase empty_cpu(
     IntArrayRef size,
     ScalarType dtype,
     bool pin_memory = false,
-    std::optional<c10::MemoryFormat> memory_format_opt = c10::nullopt);
+    std::optional<c10::MemoryFormat> memory_format_opt = std::nullopt);
 
 TORCH_API TensorBase empty_cpu(
     IntArrayRef size,
@@ -110,7 +110,7 @@ TORCH_API TensorBase empty_strided_cpu(
 TORCH_API TensorBase empty_meta(
     IntArrayRef size,
     ScalarType dtype,
-    std::optional<c10::MemoryFormat> memory_format_opt = c10::nullopt);
+    std::optional<c10::MemoryFormat> memory_format_opt = std::nullopt);
 
 TORCH_API TensorBase empty_meta(
     IntArrayRef size,

@@ -4,7 +4,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/DistributionsHelper.h>
@@ -377,7 +377,7 @@ struct RandomFromToStub {
   }
 };
 
-Tensor& random_(Tensor& self, int64_t from, optional<int64_t> to, std::optional<Generator> gen) {
+Tensor& random_(Tensor& self, int64_t from, std::optional<int64_t> to, std::optional<Generator> gen) {
   return at::native::templates::random_from_to_impl<RandomFromToStub, Generator>(self, from, to, std::move(gen));
 }
 
@@ -390,7 +390,7 @@ Tensor& random_meta_(Tensor& self, std::optional<Generator> gen) {
   return self;
 }
 
-Tensor& random_meta_(Tensor& self, int64_t from, optional<int64_t> to, std::optional<Generator> gen) {
+Tensor& random_meta_(Tensor& self, int64_t from, std::optional<int64_t> to, std::optional<Generator> gen) {
   // No error checking yay
   return self;
 }

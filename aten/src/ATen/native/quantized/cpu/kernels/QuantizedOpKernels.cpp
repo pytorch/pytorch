@@ -116,7 +116,7 @@ Tensor qcat_nhwc_kernel(
       qx0.options().memory_format(MemoryFormat::ChannelsLast),
       scale,
       zero_point,
-      c10::nullopt);
+      std::nullopt);
 
   // N, H, and W are explicitly captured here because there's a bug in GCC5
   // and clang5 which causes an internal compiler error if they're not
@@ -597,7 +597,7 @@ void qrelu_kernel(const Tensor& qx, Tensor& qy) {
         at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
         qx.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
     using Vec = Vectorized<scalar_t>;
     auto zero_point_vec = Vec(scalar_t(zero_point));
     auto iter = TensorIterator::unary_op(qy, qx);
@@ -762,7 +762,7 @@ void qgelu_kernel(const Tensor& qx, Tensor& qy, GeluType approximate) {
           at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
           output_scale,
           output_zero_point,
-          c10::nullopt);
+          std::nullopt);
       auto iter = TensorIterator::unary_op(qy, qx);
 
       using Vec = Vectorized<scalar_t>;
@@ -801,7 +801,7 @@ void qgelu_kernel(const Tensor& qx, Tensor& qy, GeluType approximate) {
           at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
           output_scale,
           output_zero_point,
-          c10::nullopt);
+          std::nullopt);
       auto iter = TensorIterator::unary_op(qy, qx);
 
       using Vec = Vectorized<scalar_t>;
@@ -846,7 +846,7 @@ void qsigmoid_kernel(
         at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         output_scale,
         output_zero_point,
-        c10::nullopt);
+        std::nullopt);
     auto iter = TensorIterator::unary_op(qy, qx);
 
     using Vec = Vectorized<scalar_t>;
@@ -950,7 +950,7 @@ void qclamp_kernel(
         at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
         qx.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
     using Vec = Vectorized<scalar_t>;
     auto iter = TensorIterator::unary_op(qy, qx);
     auto min = min_scalar.to<float>();
@@ -985,7 +985,7 @@ void qclamp_min_kernel(const Tensor& qx, const Scalar& min_scalar, Tensor& qy) {
             .memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
         qx.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
     using Vec = Vectorized<scalar_t>;
     auto iter = TensorIterator::unary_op(qy, qx);
     auto min = min_scalar.to<float>();
@@ -1011,7 +1011,7 @@ void qclamp_max_kernel(const Tensor& qx, const Scalar& max_scalar, Tensor& qy) {
             .memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
         qx.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
     using Vec = Vectorized<scalar_t>;
     auto iter = TensorIterator::unary_op(qy, qx);
     auto max = max_scalar.to<float>();
@@ -1053,7 +1053,7 @@ void qthreshold_kernel(
       at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
       qx.q_scale(),
       qx.q_zero_point(),
-      c10::nullopt);
+      std::nullopt);
 
     // vectorized
     using Vec = Vectorized<float>;
@@ -1171,7 +1171,7 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
         at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         output_scale,
         output_zero_point,
-        c10::nullopt);
+        std::nullopt);
     auto iter = TensorIterator::unary_op(qy, qx);
 
     using Vec = Vectorized<scalar_t>;
@@ -2966,7 +2966,7 @@ void qmean_inner_dim_kernel(
       at::device(kCPU).dtype(dtype).memory_format(self.suggest_memory_format()),
       self.q_scale(),
       self.q_zero_point(),
-      c10::nullopt);
+      std::nullopt);
 
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "quantized_mean_kernel_impl_cpu", [&]() {
     scalar_t* X_data = self.data_ptr<scalar_t>();
@@ -3020,7 +3020,7 @@ void qstd_inner_dim_kernel(
       at::device(kCPU).dtype(dtype).memory_format(self.suggest_memory_format()),
       x_scale,
       x_zp,
-      c10::nullopt);
+      std::nullopt);
 
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "quantized_std_kernel_impl_cpu", [&]() {
     scalar_t* X_data = self.data_ptr<scalar_t>();

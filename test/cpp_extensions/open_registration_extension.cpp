@@ -21,6 +21,8 @@
 #include <ATen/core/GeneratorForPrivateuseone.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <ATen/ops/view.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <ATen/native/transformers/attention.h>
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;
@@ -125,12 +127,18 @@ void quantize_tensor_per_tensor_affine_privateuse1(
     // do nothing
 }
 
+int64_t _fused_sdp_choice_privateuse1(const at::Tensor & query, const at::Tensor & key, const at::Tensor & value,
+    const c10::optional<at::Tensor> & attn_mask, double dropout_p, bool is_causal, c10::optional<double> scale){
+  auto backend = sdp::SDPBackend::overrideable;
+  return static_cast<int64_t>(backend);
+}
 } // namespace
 
 namespace at::native {
 
 REGISTER_PRIVATEUSE1_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_PRIVATEUSE1_DISPATCH(quantize_tensor_per_tensor_affine_stub, &quantize_tensor_per_tensor_affine_privateuse1);
+REGISTER_PRIVATEUSE1_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_privateuse1);
 
 } // namespace at::native
 struct CustomBackendMetadata : public c10::BackendMeta {
@@ -354,8 +362,15 @@ at::Tensor custom__copy_from(const at::Tensor& self, const at::Tensor& dst, bool
                 self.storage().nbytes());
   } else {
     // Using cpu tensor to accomplishment stride copy.
-    at::Tensor cpu_self = unsafe_create_cpu_tensor_from_dummy_tensor(self);
-    at::Tensor cpu_dst = unsafe_create_cpu_tensor_from_dummy_tensor(dst);
+    auto convert_to_cpu_tensor = [](const at::Tensor& src) -> at::Tensor {
+      if (src.device().type() == c10::DeviceType::PrivateUse1) {
+        return unsafe_create_cpu_tensor_from_dummy_tensor(src);
+      } else {
+        return src;
+      }
+    };
+    at::Tensor cpu_self = convert_to_cpu_tensor(self);
+    at::Tensor cpu_dst = convert_to_cpu_tensor(dst);
     cpu_dst.copy_(cpu_self);
   }
 
@@ -382,7 +397,7 @@ at::Tensor& custom_set_source_Storage(at::Tensor& result, c10::Storage src) {
   int64_t new_size = static_cast<int64_t>(src.nbytes() / result.dtype().itemsize());
   c10::IntArrayRef stride = {};
   result.unsafeGetTensorImpl()->set_storage_offset(0);
-  at::OptionalIntArrayRef stride_opt = stride.data() != nullptr ? at::OptionalIntArrayRef(stride) : c10::nullopt;
+  at::OptionalIntArrayRef stride_opt = stride.data() != nullptr ? at::OptionalIntArrayRef(stride) : std::nullopt;
   at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(),
                                new_size, stride_opt,
                                /*resize_storage=*/!result.is_meta());
@@ -396,7 +411,7 @@ at::Tensor& custom_set_source_Storage_storage_offset(at::Tensor& result,
                                                      c10::IntArrayRef size,
                                                      c10::IntArrayRef stride) {
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
-  at::OptionalIntArrayRef stride_opt = stride.data() != nullptr ? at::OptionalIntArrayRef(stride) : c10::nullopt;
+  at::OptionalIntArrayRef stride_opt = stride.data() != nullptr ? at::OptionalIntArrayRef(stride) : std::nullopt;
   at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(),
                                size, stride_opt,
                                /*resize_storage=*/!result.is_meta());
@@ -458,6 +473,59 @@ const at::Tensor& custom_resize_(const at::Tensor& self, at::IntArrayRef size,
   return self;
 }
 
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, c10::SymInt, c10::SymInt, at::Tensor, at::Tensor, at::Tensor>
+custom_scaled_dot_product_fused_attention_overrideable(
+    const at::Tensor & query,
+    const at::Tensor & key,
+    const at::Tensor & value,
+    const c10::optional<at::Tensor> & attn_bias,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    std::optional<double> scale) {
+  const int64_t batch_size = query.size(0);
+  const int64_t num_heads = query.size(1);
+  const int64_t head_dim_qk = query.size(3);
+  const int64_t head_dim_v = value.size(3);
+  const int64_t max_seqlen_q = query.size(2);
+  const int64_t max_seqlen_kv = key.size(2);
+
+  auto opts = query.options();
+  auto output = at::empty({batch_size, num_heads, max_seqlen_q, head_dim_v}, opts);
+  auto logsumexp = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
+  auto debug_attn_mask = at::empty({batch_size, num_heads, max_seqlen_q, max_seqlen_kv},
+                                   opts.dtype(at::kFloat));
+  auto philox_seed = at::empty({}, at::dtype(at::kLong));
+  auto philox_offset = at::empty({}, at::dtype(at::kLong));
+
+  return std::make_tuple(output, logsumexp, at::Tensor(), at::Tensor(), max_seqlen_q, max_seqlen_kv, philox_seed, philox_offset, debug_attn_mask);
+}
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
+custom_scaled_dot_product_fused_attention_overrideable_backward(
+    const at::Tensor & grad_out,
+    const at::Tensor & query,
+    const at::Tensor & key,
+    const at::Tensor & value,
+    const at::Tensor & attn_bias,
+    std::array<bool,4> grad_input_mask,
+    const at::Tensor & out,
+    const at::Tensor & logsumexp,
+    const at::Tensor & cum_seq_q,
+    const at::Tensor & cum_seq_k,
+    int64_t max_q,
+    int64_t max_k,
+    double dropout_p,
+    bool is_causal,
+    const at::Tensor & philox_seed,
+    const at::Tensor & philox_offset,
+    std::optional<double> scale) {
+  return std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>(
+          at::empty_like(query),
+          at::empty_like(key),
+          at::empty_like(value),
+          at::empty_like(attn_bias));
+}
+
 // This macro does the heavy lifting.
 // With TORCH_LIBRARY_IMPL, you can register custom kernels for your backend.
 // For open registration, we're registering all of our kernels to the PrivateUse1 dispatch key.
@@ -482,6 +550,9 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("resize_", &custom_resize_);
   m.impl("as_strided", at::native::as_strided_tensorimpl);
   m.impl("quantize_per_tensor", at::native::quantize_per_tensor);
+  m.impl("_fused_sdp_choice", &_fused_sdp_choice_privateuse1);
+  m.impl("_scaled_dot_product_fused_attention_overrideable", &custom_scaled_dot_product_fused_attention_overrideable);
+  m.impl("_scaled_dot_product_fused_attention_overrideable_backward", &custom_scaled_dot_product_fused_attention_overrideable_backward);
 }
 
 void custom_cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
@@ -491,6 +562,7 @@ void custom_cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("sub.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
   m.impl("_foreach_add.List", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
+  m.impl("_fused_adamw_", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
   m.impl("index.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
   m.impl("triu_indices", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
 }
@@ -540,7 +612,10 @@ void set_custom_device_index(c10::DeviceIndex device_index) {
   custom_device_index = device_index;
 }
 
+struct FooHooksArgs : public at::PrivateUse1HooksArgs {};
+
 struct FooHooksInterface : public at::PrivateUse1HooksInterface {
+    FooHooksInterface(FooHooksArgs) {}
     ~FooHooksInterface() override = default;
     const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) override {
       static auto device_gen = make_generator_privateuse1(device_index);
@@ -548,32 +623,47 @@ struct FooHooksInterface : public at::PrivateUse1HooksInterface {
     }
 };
 
-struct FooHooksArgs : public at::PrivateUse1HooksArgs {};
-
 TORCH_DECLARE_REGISTRY(PrivateUse1HooksRegistry, FooHooksInterface, FooHooksArgs);
-#define REGISTER_PRIVATEUSE1_HOOKS(clsname) \
-  C10_REGISTER_CLASS(PrivateUse1HooksRegistry, clsname, clsname)
-
 C10_DEFINE_REGISTRY(PrivateUse1HooksRegistry, FooHooksInterface, FooHooksArgs)
+// Using Create function to get PrivateUse1HooksInterface point from PrivateUse1HooksRegistry class.
+C10_REGISTER_TYPED_CLASS(PrivateUse1HooksRegistry, "FooHooks", FooHooksInterface)
 
+static at::PrivateUse1HooksInterface* privateuse1_hooks_local = nullptr;
 static at::PrivateUse1HooksInterface* get_private_hooks() {
-  static at::PrivateUse1HooksInterface* privateuse1_hooks;
   static c10::once_flag once;
   c10::call_once(once, [] {
-    privateuse1_hooks = PrivateUse1HooksRegistry()->Create("PrivateUse1Hooks", {}).release();
-    if (!privateuse1_hooks) {
-      privateuse1_hooks = new FooHooksInterface();
+    privateuse1_hooks_local = PrivateUse1HooksRegistry()->Create("FooHooks", {}).release();
+    if (!privateuse1_hooks_local) {
+      privateuse1_hooks_local = new FooHooksInterface(FooHooksArgs{});
     }
   });
-  return privateuse1_hooks;
+  return privateuse1_hooks_local;
 }
 
 void register_hook() {
   at::RegisterPrivateUse1HooksInterface(get_private_hooks());
 }
 
+bool is_register_hook() {
+  return privateuse1_hooks_local != nullptr;
+}
+
 const at::Generator& default_generator(c10::DeviceIndex device_index) {
   return at::globalContext().defaultGenerator(at::Device(c10::DeviceType::PrivateUse1, device_index));;
+}
+
+void fallback_with_undefined_tensor() {
+  at::Tensor first = at::empty((2,3)).to(at::DeviceType::PrivateUse1);
+  at::Tensor second = at::Tensor();
+  at::Tensor step = at::empty({}).fill_(2).to(at::DeviceType::PrivateUse1);
+  at::Tensor grad_scale = at::empty({}).fill_(0.00001).to(at::DeviceType::PrivateUse1);
+  at::Tensor found_inf = at::empty({}).fill_(1).to(at::DeviceType::PrivateUse1);
+  at::TensorList tensors = {first, first};
+  at::TensorList undefined_tensors = {first, second};
+  at::TensorList steps = {step, step};
+  return at::_fused_adamw_(tensors, tensors, tensors, tensors, undefined_tensors,
+                           steps, 0.001, 0.9, 0.999, 1e-2, 1e-8, false, false,
+                           grad_scale, found_inf);
 }
 
 struct CustomAutogradFnReturnsSelf : public torch::autograd::Function<CustomAutogradFnReturnsSelf> {
@@ -622,7 +712,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("check_backend_meta", &check_backend_meta, "check if BackendMeta serialization correctly");
     m.def("custom_serialization_registry", &custom_serialization_registry, "register custom serialization function");
     m.def("register_hook", &register_hook, "register_hook for privateuse1");
+    m.def("is_register_hook", &is_register_hook, "is_register_hook for privateuse1");
     m.def("default_generator", &default_generator, "default_generator for privateuse1");
+    m.def("fallback_with_undefined_tensor", &fallback_with_undefined_tensor, "fallback_with_undefined_tensor for privateuse1");
 
     // Co-opting this file to more easily test torch.compile'ing of custom autograd functions in C++
     m.def("custom_autograd_fn_returns_self", &custom_autograd_fn_returns_self);

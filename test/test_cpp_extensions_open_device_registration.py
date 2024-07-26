@@ -10,7 +10,6 @@ from typing import Union
 from unittest.mock import patch
 
 import torch
-
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_utils import (
@@ -192,7 +191,8 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         ):
             self.module.register_generator_second()
 
-        self.module.register_hook()
+        if self.module.is_register_hook() is False:
+            self.module.register_hook()
         default_gen = self.module.default_generator(0)
         self.assertTrue(
             default_gen.device.type == torch._C._get_privateuse1_backend_name()
@@ -577,6 +577,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         z = torch._foreach_add(x, y)
         self.assertEqual(z_cpu, z[0])
         self.assertEqual(z_cpu, z[1])
+
+        # call _fused_adamw_ with undefined tensor.
+        self.module.fallback_with_undefined_tensor()
 
     def test_open_device_numpy_serialization_map_location(self):
         torch.utils.rename_privateuse1_backend("foo")

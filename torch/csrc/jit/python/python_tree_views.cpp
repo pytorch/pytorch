@@ -14,7 +14,7 @@ namespace torch::jit {
 
 std::optional<std::string> maybeConvertToString(const py::object& obj) {
   if (obj.is_none()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   std::stringstream ss;
   ss << py::str(obj);
@@ -180,7 +180,7 @@ void initTreeViewBindings(PyObject* module) {
           return std::optional<Ident>(property.setter().get().name());
         }
 
-        return std::optional<Ident>(c10::nullopt);
+        return std::optional<Ident>(std::nullopt);
       });
 
   py::class_<ClassDef, TreeView>(m, "ClassDef")

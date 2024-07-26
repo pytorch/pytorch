@@ -19,7 +19,7 @@ class RequestImpl : public Request {
  public:
   RequestImpl(const httplib::Request& req) : req_(req) {}
 
-  const std::string& body() override {
+  const std::string& body() const override {
     return req_.body;
   }
 

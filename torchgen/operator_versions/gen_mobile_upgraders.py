@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
+
+from __future__ import annotations
+
 import os
 from enum import Enum
 from operator import itemgetter
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import torch
 from torch.jit.generate_bytecode import generate_upgraders_bytecode
@@ -185,7 +188,7 @@ PER_OPERATOR_UPGRADER_LIST = CodeTemplate(
 )
 
 
-def construct_instruction(instruction_list_from_yaml: List[Any]) -> str:
+def construct_instruction(instruction_list_from_yaml: list[Any]) -> str:
     instruction_list_part = []
     for instruction in instruction_list_from_yaml:
         instruction_list_part.append(
@@ -200,7 +203,7 @@ def construct_instruction(instruction_list_from_yaml: List[Any]) -> str:
     )
 
 
-def construct_constants(constants_list_from_yaml: List[Any]) -> str:
+def construct_constants(constants_list_from_yaml: list[Any]) -> str:
     constants_list_part = []
     for constant_from_yaml in constants_list_from_yaml:
         convert_constant = None
@@ -226,7 +229,7 @@ def construct_constants(constants_list_from_yaml: List[Any]) -> str:
     )
 
 
-def construct_operators(operator_list_from_yaml: List[Any]) -> str:
+def construct_operators(operator_list_from_yaml: list[Any]) -> str:
     operator_list_part = []
     for operator in operator_list_from_yaml:
         operator_list_part.append(
@@ -241,7 +244,7 @@ def construct_operators(operator_list_from_yaml: List[Any]) -> str:
     )
 
 
-def construct_types(types_tr_list_from_yaml: List[Any]) -> str:
+def construct_types(types_tr_list_from_yaml: list[Any]) -> str:
     types_tr_list_part = []
     for types_tr in types_tr_list_from_yaml:
         types_tr_list_part.append(ONE_TYPE.substitute(type_str=types_tr))
@@ -260,7 +263,7 @@ def construct_register_size(register_size_from_yaml: int) -> str:
 
 
 def construct_version_maps(
-    upgrader_bytecode_function_to_index_map: Dict[str, Any]
+    upgrader_bytecode_function_to_index_map: dict[str, Any]
 ) -> str:
     version_map = torch._C._get_operator_version_map()
     sorted_version_map_ = sorted(version_map.items(), key=itemgetter(0))  # type: ignore[no-any-return]
@@ -302,8 +305,8 @@ def construct_version_maps(
 
 
 def get_upgrader_bytecode_function_to_index_map(
-    upgrader_dict: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+    upgrader_dict: list[dict[str, Any]]
+) -> dict[str, Any]:
     upgrader_bytecode_function_to_index_map = {}
     index = 0
     for upgrader_bytecode in upgrader_dict:
@@ -315,7 +318,7 @@ def get_upgrader_bytecode_function_to_index_map(
     return upgrader_bytecode_function_to_index_map
 
 
-def write_cpp(cpp_path: str, upgrader_dict: List[Dict[str, Any]]) -> None:
+def write_cpp(cpp_path: str, upgrader_dict: list[dict[str, Any]]) -> None:
     body_parts = []
     upgrader_bytecode_function_to_index_map = (
         get_upgrader_bytecode_function_to_index_map(upgrader_dict)
@@ -370,7 +373,7 @@ def write_cpp(cpp_path: str, upgrader_dict: List[Dict[str, Any]]) -> None:
         out_file.write(upgrader_file_content.encode("utf-8"))
 
 
-def sort_upgrader(upgrader_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def sort_upgrader(upgrader_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
     sorted_upgrader_list = sorted(
         upgrader_list, key=lambda one_upgrader: next(iter(one_upgrader))
     )

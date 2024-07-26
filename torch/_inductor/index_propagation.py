@@ -31,8 +31,8 @@ import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
-from .utils import generate_assert
 
+from .utils import generate_assert
 from .virtualized import V
 
 
@@ -189,7 +189,12 @@ class IndexPropagation:
 
     """
 
-    def __init__(self, inner: Any, iter_ranges: Dict[sympy.Symbol, sympy.Expr]):
+    def __init__(
+        self,
+        inner: Any,
+        iter_ranges: Dict[sympy.Symbol, sympy.Expr],
+        indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr],
+    ):
         self._inner = inner
         self.shape_env = V.graph.sizevars.shape_env
 
@@ -199,6 +204,9 @@ class IndexPropagation:
         self.var_to_range = tuple(
             itertools.chain(self.shape_env.var_to_range.items(), var_to_range.items())
         )
+        # NOTE: this is intentionally kept as a reference so the caller can
+        # update it in-place
+        self.indirect_var_ranges = indirect_var_ranges
 
         axioms = []
         for x, s in iter_ranges.items():
@@ -306,10 +314,17 @@ class IndexPropagation:
               to perform wrap_expr and in CSEProxy.check_bounds to elide upper / lower bounds also
               for indirect_indexing
         """
+        var_to_range = (
+            *self.var_to_range,
+            *(
+                (k, ValueRanges(0, upper_bound(v) - 1))
+                for k, v in self.indirect_var_ranges.items()
+            ),
+        )
         evaluated = self.shape_env._maybe_evaluate_static(
             e,
             axioms=self.axioms,
-            var_to_range=self.var_to_range,
+            var_to_range=var_to_range,
         )
         return bool(evaluated)
 
@@ -351,9 +366,4 @@ class IndexPropagation:
         indirect_var = self.fallback(
             "indirect_indexing", (index, size, check), {}
         ).value
-        assert (
-            indirect_var not in self.var_to_range
-        ), f"{indirect_var} should've been created in the fallback."
-        indirect_range = (indirect_var, ValueRanges(0, upper_bound(size) - 1))
-        self.var_to_range = self.var_to_range + (indirect_range,)
         return indirect_var

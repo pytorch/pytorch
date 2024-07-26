@@ -2,7 +2,6 @@
 import unittest
 
 import torch
-
 import torch._inductor.config as inductor_config
 from torch._dynamo.testing import rand_strided
 from torch._inductor.fx_passes.pad_mm import (
@@ -11,7 +10,6 @@ from torch._inductor.fx_passes.pad_mm import (
     get_padded_length,
     should_pad_common,
 )
-
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch.testing import FileCheck
@@ -422,6 +420,28 @@ class PadMMTest(TestCase):
         )
         FileCheck().check_count("exclude_pad:True", 1, exactly=True).run(
             repr(local_cache)
+        )
+
+    @fresh_inductor_cache()
+    @inductor_config.patch(max_pointwise_cat_inputs=2)
+    def test_exclude_cat_padding(self):
+        @torch.compile()
+        def mm(inps, b):
+            return torch.cat(inps) @ b
+
+        inp = torch.rand([2046, 2046], device="cuda")
+        inp2 = torch.rand([2046, 2046], device="cuda")
+
+        inps = inp.chunk(3)
+        mm(inps, inp2)
+        FileCheck().check_count("exclude_pad:False", 2, exactly=True).run(
+            repr(get_pad_cache().get_local_cache())
+        )
+
+        inps = inp.chunk(2)
+        mm(inps, inp2)
+        FileCheck().check_count("exclude_pad:False", 3, exactly=True).run(
+            repr(get_pad_cache().get_local_cache())
         )
 
 

@@ -7,6 +7,7 @@ from typing import Optional, Sequence
 import torch
 from torch import _prims, Tensor
 
+
 log = logging.getLogger(__name__)
 
 
@@ -81,13 +82,6 @@ force_stride_order = make_prim(
     "inductor_force_stride_order(Tensor input, SymInt[] stride) -> Tensor",
     eager_force_stride,
     doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
-)
-masked_scatter_with_index = make_prim(
-    "inductor_masked_scatter_with_index(Tensor input, Tensor mask, Tensor source_idx, Tensor source) -> Tensor",
-    lambda input_tensor, mask, index, source: torch.masked_scatter(
-        input_tensor, mask, source
-    ),
-    doc="masked_scatter with precomputed indices",
 )
 _unsafe_index_put_ = make_prim(
     "_unsafe_index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)",

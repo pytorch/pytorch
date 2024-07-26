@@ -84,7 +84,7 @@ inline std::optional<Tensor> _allreduce_return_trivial(
   if (self.numel() == 0) {
     return at::scalar_tensor(ident, self.options());
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 #define OPTION_TYPE_EQUALITY_CHECK(option, out, self) \

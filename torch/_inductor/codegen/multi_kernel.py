@@ -12,6 +12,7 @@ from ..utils import cache_on_self
 from ..virtualized import V
 from .common import TensorArg
 
+
 log = logging.getLogger(__name__)
 
 
@@ -194,6 +195,7 @@ class MultiKernel:
         for the multi-kernel.
         """
         assert kernel_name == self.kernel_name
+        V.graph.wrapper_code.write_triton_header_once()
         call_args_list = []
         arg_types_list = []
         for kernel in self.kernels:

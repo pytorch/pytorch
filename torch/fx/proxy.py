@@ -92,8 +92,10 @@ _COPY_META_FIELDS = [
     "source_fn_stack",
     "original_aten",
     "recompute",
+    "ac_graph_id",
     "from_node",
     "quantization_tag",
+    "_numeric_debug_handle",
 ]
 
 

@@ -6,7 +6,7 @@ import dataclasses
 import functools
 import logging
 
-from typing import Any, Optional
+from typing import Any
 
 import onnxscript  # type: ignore[import]
 from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
@@ -194,7 +194,7 @@ def _onnxscript_traced_onnx_function(obj: onnxscript.TracedOnnxFunction) -> str:
 
 
 # from torch/fx/graph.py to follow torch format
-def _stringify_shape(shape: Optional[torch.Size]) -> str:
+def _stringify_shape(shape: torch.Size | None) -> str:
     if shape is None:
         return ""
     return f"[{', '.join(str(x) for x in shape)}]"
@@ -248,7 +248,7 @@ diagnose_call = functools.partial(
 
 @dataclasses.dataclass
 class UnsupportedFxNodeDiagnostic(Diagnostic):
-    unsupported_fx_node: Optional[torch.fx.Node] = None
+    unsupported_fx_node: torch.fx.Node | None = None
 
     def __post_init__(self) -> None:
         super().__post_init__()

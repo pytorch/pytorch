@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import importlib
-
 import math
 import operator
 import os
@@ -13,11 +12,14 @@ from typing import List
 import torch
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
+from torch._inductor import metrics
 from torch._inductor.codegen.common import device_codegens, register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.wrapper import WrapperCodeGen
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -33,6 +35,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -52,6 +55,7 @@ from inductor.test_torchinductor import (
     copy_tests,
     TestFailure,
 )
+
 
 importlib.import_module("filelock")
 
@@ -74,6 +78,12 @@ if TEST_WITH_ROCM:
         ("cpu", "cuda"), is_skip=True
     )
     test_failures["test_unbacked_reduction"] = TestFailure(("cpu"), is_skip=True)
+
+
+if os.getenv("BUILD_ENVIRONMENT", "").endswith("-debug"):
+    # Fails with TORCH_INTERNAL_ASSERT(!is_heap_allocated()), see https://github.com/pytorch/pytorch/issues/130073
+    test_failures["test_resize_as_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
+    test_failures["test_resize_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
 
 
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
@@ -138,6 +148,51 @@ class TestInductorDynamic(TestCase):
         self._stack.close()
         TestCase.tearDown(self)
         torch._dynamo.reset()
+
+    def test_constant_fold_uniform_value_dynamic(self, device):
+        def full_add_zero(x):
+            a = torch.full(x.shape, 1, dtype=x.dtype, device=x.device)
+            b = a - 1
+            return x + b
+
+        def full_mul_one(x):
+            a = torch.full(x.shape, -1, dtype=x.dtype, device=x.device)
+            b = 2 + a
+            return x * b
+
+        def full_view_op(x):
+            a = torch.ones([1], dtype=x.dtype, device=x.device)
+            a = a[:, None]
+            return x * a
+
+        def full_mul_symint(x):
+            a = torch.full(x.shape, -1, dtype=x.dtype, device=x.device)
+            b = 2 + a
+            return b * x.shape[0]
+
+        fns = (full_add_zero, full_mul_one, full_view_op)
+
+        x = torch.randn((2, 4), device=device)
+        y = torch.randn((3, 4), device=device)
+
+        for dynamic in [False, True]:
+            torch._dynamo.reset()
+            for fn in fns:
+                ref = fn(x)
+                fn_c = torch.compile(fn, dynamic=dynamic)
+
+                actual, source_codes = run_and_get_code(fn_c, x)
+
+                if fn is not full_mul_symint:
+                    # due to constant folding, fn returns x directly.
+                    if device == "cpu":
+                        FileCheck().check_not("cpp_fused").run(source_codes[0])
+                    else:
+                        FileCheck().check_not("triton.jit").run(source_codes[0])
+
+                self.assertEqual(ref, actual)
+                self.assertEqual(fn(x), fn_c(x))
+                self.assertEqual(fn(y), fn_c(y))
 
     def test_arange_dynamic(self, device):
         def fn(a):
@@ -856,6 +911,52 @@ class TestInductorDynamic(TestCase):
             return torch.ones(a, a)
 
         f(torch.tensor([5], device=device))
+
+    def test_sort_dynamic_shape_with_check(self, device):
+        if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
+
+            def check_count(n):
+                self.assertEqual(metrics.generated_kernel_count, 0)
+
+        else:
+
+            def check_count(n):
+                self.assertEqual(metrics.generated_kernel_count, n)
+
+        # Test dynamic shapes with statically known small enough to generate
+        # persistent sort kernel
+        def fn(a, descending):
+            torch._check(a.shape[-1] <= 256)
+            return a.sort(dim=-1, stable=True, descending=descending)
+
+        inp = torch.rand(10, 128, dtype=torch.float32, device=device)
+        inp[:, 10:20] = 1.0
+        inp[:, 30:40] = 1.0
+        metrics.reset()
+
+        opt_fn = torch.compile(fn, dynamic=True)
+        expect = fn(inp, False)
+        actual = opt_fn(inp, False)
+        self.assertEqual(actual, expect)
+        check_count(1)
+
+        expect = fn(inp, True)
+        actual = opt_fn(inp, True)
+        self.assertEqual(actual, expect)
+        check_count(2)
+
+        # Non-power of two
+        inp[:, :120]
+
+        expect = fn(inp, False)
+        actual = opt_fn(inp, False)
+        self.assertEqual(actual, expect)
+        check_count(2)  # Reused existing kernel
+
+        expect = fn(inp, True)
+        actual = opt_fn(inp, True)
+        self.assertEqual(actual, expect)
+        check_count(2)  # Reused existing kernel
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
