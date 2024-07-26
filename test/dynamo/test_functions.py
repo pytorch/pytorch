@@ -2978,6 +2978,7 @@ class GraphModule(torch.nn.Module):
         l2 = list(m)
         return l1, l2
 
+    @make_test
     def test_enumerate(a, b):
         return list(enumerate([a, b], start=1)), a + 1
 
