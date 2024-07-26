@@ -770,7 +770,7 @@ class triton:
     autotune_cublasLt = True
 
     # Tune the generated Triton kernels at compile time instead of first time they run
-    autotune_at_compile_time = False
+    autotune_at_compile_time = True
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
