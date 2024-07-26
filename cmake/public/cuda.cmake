@@ -170,7 +170,7 @@ else()
 endif()
 
 # nvToolsExt
-find_path(nvtx3_dir NAMES nvtx3 PATHS "${CUDA_INCLUDE_DIRS}" "${PROJECT_SOURCE_DIR}/third_party/NVTX/c/include" NO_DEFAULT_PATH)
+find_path(nvtx3_dir NAMES nvtx3 PATHS "${PROJECT_SOURCE_DIR}/third_party/NVTX/c/include" NO_DEFAULT_PATH)
 find_package_handle_standard_args(nvtx3 DEFAULT_MSG nvtx3_dir)
 if(nvtx3_FOUND)
   add_library(torch::nvtx3 INTERFACE IMPORTED)
