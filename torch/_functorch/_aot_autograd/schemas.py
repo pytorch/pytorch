@@ -346,6 +346,11 @@ class ViewAndMutationMeta:
         default_factory=list
     )
 
+    # Indexes of saved tensors which are donated buffer.
+    # Donated buffer means the tensor is not alias of any forward user input, forward user output,
+    # and backward output.
+    bw_donated_idxs: Optional[List[int]] = None
+
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
