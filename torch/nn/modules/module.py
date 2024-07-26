@@ -63,6 +63,7 @@ optimizer_dict = {
     'lbfgs': optim.LBFGS
 }
 
+# Define a dictionary that maps short names to loss classes
 loss_dict = {
     'mse': nn.MSELoss,
     'l1': nn.L1Loss,
