@@ -2160,6 +2160,7 @@ def wrap_fx_proxy_cls(
         set_example_value(proxy.node, example_value)
         return SDPAParamsVariable(proxy, **options)
     elif isinstance(example_value, bool) and proxy.node.target in [
+        torch.backends.cuda.is_flash_attention_available,
         torch.backends.cuda.can_use_flash_attention,
         torch.backends.cuda.can_use_efficient_attention,
     ]:
