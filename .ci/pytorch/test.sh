@@ -711,6 +711,9 @@ test_inductor_torchbench_cpu_smoketest_perf(){
   TORCHINDUCTOR_ABI_COMPATIBLE=1 python benchmarks/dynamo/timm_models.py --device cpu --accuracy \
     --bfloat16 --inference --export-aot-inductor --disable-cudagraphs --only adv_inception_v3 \
     --output "$TEST_REPORTS_DIR/aot_inductor_smoke_test.csv"
+  TORCHINDUCTOR_ABI_COMPATIBLE=1 python benchmarks/dynamo/timm_models.py --device cpu --accuracy \
+    --bfloat16 --inference --export-aot-inductor --disable-cudagraphs --only beit_base_patch16_224 \
+    --output "$TEST_REPORTS_DIR/aot_inductor_smoke_test.csv"
   python benchmarks/dynamo/check_accuracy.py \
     --actual "$TEST_REPORTS_DIR/aot_inductor_smoke_test.csv" \
     --expected "benchmarks/dynamo/ci_expected_accuracy/aot_inductor_timm_inference.csv"
