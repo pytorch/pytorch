@@ -1256,7 +1256,7 @@ bool is_tensor_and_append_overloaded(
 bool is_tensor_list_and_append_overloaded(
     PyObject* obj,
     std::vector<PyObject*>* overloaded_args,
-    int argnum,
+    size_t argnum,
     bool throw_error);
 
 /* Given an argument that is definitely a tensor and is definitely overloaded,
