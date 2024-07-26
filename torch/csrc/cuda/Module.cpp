@@ -1218,38 +1218,12 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
   });
 
-  m.def(
-      "_set_storage_access_error_msg", [](const at::Tensor& t, std::string s) {
-        t.unsafeGetTensorImpl()
-            ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
-      });
-
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
   });
-
-  m.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-    return c10::raw::weak_intrusive_ptr::use_count(storage_impl);
-  });
-
-  m.def(
-      "_tensors_data_ptrs_at_indices_equal",
-      [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
-        for (size_t i = 0, end = indices.size(); i < end; ++i) {
-          auto index = indices[i].cast<int64_t>();
-          auto t = tensors[index].cast<at::Tensor>();
-          auto data_ptr = data_ptrs[index].cast<int64_t>();
-          if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
-            return false;
-          }
-        }
-        return true;
-      });
 
   m.def(
       "_construct_CUDA_Tensor_From_Storage_And_Metadata",
