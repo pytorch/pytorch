@@ -13,8 +13,10 @@ from typing import Any, Callable, Dict, NoReturn, Optional, Set, Union
 from typing_extensions import deprecated
 from unittest import mock
 
+from torch.utils._ordered_set import OrderedSet
+
 # Types saved/loaded in configs
-CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
+CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict, OrderedSet)
 
 
 def install_config_module(module: ModuleType) -> None:

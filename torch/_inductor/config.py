@@ -1096,6 +1096,8 @@ if TYPE_CHECKING:
 
 from torch.utils._config_module import install_config_module
 
+del OrderedSet
+
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
