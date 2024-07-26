@@ -773,6 +773,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     if (attn_mask.has_value()) {
         if (attn_mask->dtype() == at::kBool) {
             attn = at::_safe_softmax(attn, *attn_mask, -1);
+            attn = attn.to(query.dtype());
         } else {
             // Existing logic for non-boolean masks
             if (at::areAnyTensorSubclassLike({attn, *attn_mask})) {
