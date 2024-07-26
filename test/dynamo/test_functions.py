@@ -2972,6 +2972,12 @@ class GraphModule(torch.nn.Module):
         return f(*map(lambda x: x + 1, [a, b]))
 
     @make_test
+    def test_map_unpack_twice(a, b):
+        m = map(lambda x: x + 1, [a, b])
+        l1 = list(m)
+        l2 = list(m)
+        return l1, l2
+
     def test_enumerate(a, b):
         return list(enumerate([a, b], start=1)), a + 1
 

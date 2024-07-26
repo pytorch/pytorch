@@ -1430,10 +1430,7 @@ class BuiltinVariable(VariableTracker):
 
         if iterable.has_unpack_var_sequence(tx):
             return variables.EnumerateVariable(
-                variables.ListIteratorVariable(
-                    iterable.unpack_var_sequence(tx),
-                    mutable_local=MutableLocal(),
-                ),
+                iterable.unpack_var_sequence(tx),
                 start,
                 mutable_local=MutableLocal(),
             )
