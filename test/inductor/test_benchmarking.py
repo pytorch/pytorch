@@ -346,7 +346,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
             self.sanity_check(_callable, timing_ms)
 
     @patches
-    def test_lazy_benchmark_cpu_smoke(self, benchmarker, kernels):
+    def test_lazy_benchmark_gpu_smoke(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
         timings_ms = benchmarker.lazy_benchmark_gpu(callables)
         for _callable, timing_ms in zip(callables, timings_ms):
