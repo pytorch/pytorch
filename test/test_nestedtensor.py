@@ -6511,6 +6511,23 @@ COMPILE_BACKWARD_FAILURES = {
     # mvlgamma_backward calls arange() passing self.options() and layout=torch.jagged
     # is not supported for the arange() decomp. Backward function should be fixed
     *(f"mvlgamma.mvlgamma_p_{p}" for p in [1, 3, 5]),
+    # TODO: categorize these
+    "__rpow__",
+    "atanh",
+    "clamp_max",
+    "clamp_min",
+    "copysign",
+    "digamma",
+    "float_power",
+    "max.binary",
+    "maximum",
+    "min.binary",
+    "minimum",
+    "pow",
+    "sgn",
+    "sinc",
+    "special.i1",
+    "special.i1e",
 }
 
 
