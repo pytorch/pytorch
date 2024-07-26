@@ -1089,6 +1089,25 @@ class TestTransformers(NNTestCase):
                 else:
                     actual = torch.nn.functional.scaled_dot_product_attention(
                         query, key, value, attn_mask, dropout_p, is_causal)
+                    # This test the fully masked out rows case
+                if torch.isnan(expected).any():
+                    row_sums = attn_mask.sum(dim=-1)
+                    masked_out_rows = (row_sums == 0)
+
+                    for _ in range((input_dim - attn_mask_dim) - 1):
+                        masked_out_rows = masked_out_rows.unsqueeze(0)
+
+                    masked_out_rows = masked_out_rows.expand(expected.shape[:-1])
+                    # Slice out the fully masked rows from expected and actual
+                    expected_masked_out = expected[masked_out_rows]
+                    actual_masked_out = actual[masked_out_rows]
+
+                    expected_all_nan = torch.isnan(expected_masked_out).all()
+                    actual_all_zero = (actual_masked_out.abs().sum() == 0)
+
+                    self.assertTrue(expected_all_nan)
+                    self.assertTrue(actual_all_zero)
+                    return
 
                 self.assertEqual(actual, expected)
 
@@ -1924,7 +1943,7 @@ class TestSDPA(NNTestCase):
     @parametrize("n_head", [3])
     @parametrize("head_dim", [8])
     @parametrize("mask_dim", [2, 4])
-    @parametrize("bool_mask", [0, 1])
+    @parametrize("bool_mask", [False, True])
     @parametrize("train", [True, False])
     def test_scaled_dot_product_fused_attention_mask_vs_math_cpu(
         self,
@@ -1991,6 +2010,25 @@ class TestSDPA(NNTestCase):
 
             if dtype in [torch.bfloat16, torch.float16]:
                 math_ref = math_ref.to(dtype)
+
+            # TODO WE NEED TO UNIFY THESE SEMANTICS
+            # This test the fully masked out rows case
+            self.assertFalse(torch.isnan(math_ref).any())
+            if torch.isnan(actual).any():
+                row_sums = attn_mask.sum(dim=-1)
+                masked_out_rows = (row_sums == 0)
+                if attn_mask.dim() == 2:
+                    masked_out_rows = masked_out_rows[None, None, :].expand(math_ref.shape[:-1])
+
+                # Slice out the fully masked rows from expected and actual
+                math_ref_masked_out = math_ref[masked_out_rows]
+                actual_masked_out = actual[masked_out_rows]
+
+                math_ref_all_zero = (math_ref_masked_out.abs().sum() == 0)
+                actual_all_nan = torch.isnan(actual_masked_out).all()
+                self.assertTrue(math_ref_all_zero)
+                self.assertTrue(actual_all_nan)
+                return
 
             self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
 

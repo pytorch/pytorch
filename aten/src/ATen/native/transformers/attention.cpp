@@ -667,9 +667,9 @@ Tensor scaled_dot_product_attention(
           query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
-  std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
     case sdp::SDPBackend::cudnn_attention: {
+      std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
           query_, key, value, attn_mask_, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
@@ -688,10 +688,12 @@ Tensor scaled_dot_product_attention(
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
       }
       // For the CPU case we do not need to pad the last dim
+      std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
       return std::get<0>(at::_scaled_dot_product_flash_attention_for_cpu(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
     }
     case sdp::SDPBackend::efficient_attention: {
+      std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       if (attn_mask.has_value()) {
         attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
@@ -702,13 +704,14 @@ Tensor scaled_dot_product_attention(
     }
     case sdp::SDPBackend::overrideable: {
       auto out_lse_softmax = at::_scaled_dot_product_fused_attention_overrideable(
-          query_, key, value, attn_mask, dropout_p, is_causal, false /*return_debug_mask*/, scale);
+          query_, key, value, attn_mask_, dropout_p, is_causal, false /*return_debug_mask*/, scale);
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::math:
       if (query_.device().type() == DeviceType::MPS && dropout_p == 0.0
           && query_.is_contiguous() && key.is_contiguous() && value.is_contiguous()
           && !query_.is_nested() && !key.is_nested() && !value.is_nested()) {
+        std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
             query_,
             key,
@@ -723,7 +726,7 @@ Tensor scaled_dot_product_attention(
           query_,
           key,
           value,
-          attn_mask,
+          attn_mask_,
           dropout_p,
           is_causal,
           std::nullopt, /*dropout_mask*/
@@ -768,13 +771,21 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     }
     auto attn = at::matmul(query, key.transpose(-2, -1) * scaling_factor);
     if (attn_mask.has_value()) {
-      if (at::areAnyTensorSubclassLike({attn, *attn_mask})) {
-        attn = attn.add(*attn_mask);
-      } else {
-        attn.add_(*attn_mask);
-      }
+        if (attn_mask->dtype() == at::kBool) {
+            attn = at::_safe_softmax(attn, *attn_mask, -1);
+        } else {
+            // Existing logic for non-boolean masks
+            if (at::areAnyTensorSubclassLike({attn, *attn_mask})) {
+                attn = attn.add(*attn_mask);
+            } else {
+                attn.add_(*attn_mask);
+            }
+            attn = at::softmax(attn, -1);
+        }
+    } else {
+        // No mask, just apply regular softmax
+        attn = at::softmax(attn, -1);
     }
-    attn = at::softmax(attn, -1);
     if (dropout_p > 0.0) {
       if (dropout_mask.has_value()) {
         // In order to validate the correctness of the fused kernels, we need to
