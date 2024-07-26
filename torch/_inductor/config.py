@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import os  # noqa: C101
 import sys
 from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING, Union
@@ -6,11 +5,11 @@ from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING, Unio
 import torch
 
 
-def is_fbcode():
+def is_fbcode() -> bool:
     return not hasattr(torch.version, "git_version")
 
 
-def fx_graph_remote_cache_default():
+def fx_graph_remote_cache_default() -> Optional[bool]:
     if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1":
         return True
     if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "0":
@@ -331,15 +330,15 @@ autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", ""
 autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "")
 
 
-def run_autoheuristic(name):
+def run_autoheuristic(name: str) -> bool:
     return collect_autoheuristic(name) or use_autoheuristic(name)
 
 
-def collect_autoheuristic(name):
+def collect_autoheuristic(name: str) -> bool:
     return name in torch._inductor.config.autoheuristic_collect.split(",")
 
 
-def use_autoheuristic(name):
+def use_autoheuristic(name: str) -> bool:
     return name in torch._inductor.config.autoheuristic_use.split(",")
 
 
@@ -433,6 +432,12 @@ assert_indirect_indexing = True
 # compute CSE bounds on variables that do not appear in the FX graph
 compute_all_bounds = False
 
+# benchmark combo kernels and only allow ones with perf gains
+benchmark_combo_kernel = False
+# combo_kernel autotuning options: 0 - disable, 1 - enable except for foreach,
+# 2 - enable for all
+combo_kernels_autotune = 1
+
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 
@@ -456,7 +461,7 @@ optimize_scatter_upon_const_tensor = (
 
 # The multiprocessing start method to use for inductor workers in the codecache.
 # Can be "subprocess" or "fork".
-def decide_worker_start_method():
+def decide_worker_start_method() -> str:
     start_method = os.environ.get(
         "TORCHINDUCTOR_WORKER_START", "fork" if is_fbcode() else "subprocess"
     )
@@ -495,7 +500,7 @@ _fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
 _micro_pipeline_tp: bool = False
 
 
-def decide_compile_threads():
+def decide_compile_threads() -> int:
     """
     Here are the precedence to decide compile_threads
     1. User can override it by TORCHINDUCTOR_COMPILE_THREADS.  One may want to disable async compiling by
@@ -691,6 +696,13 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "0")
         == "1"
     )
+
+    # Maximal allowed number of slices on K-dim for a GEMM kernel. This controls
+    # the maximal parallelism of K-slicing. Since K-slicing requires extra thread
+    # synchronization and buffers,  the maximal number of slices is limited to
+    # mitigate the sync overhead and memory usage.
+    # When set to 0, the number of slices is unlimited.
+    gemm_max_k_slices = int(os.environ.get("TORCHINDUCTOR_CPP_GEMM_MAX_K_SLICES", "1"))
 
 
 # config specific to codegen/triton.py
@@ -1077,6 +1089,7 @@ if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
+
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])

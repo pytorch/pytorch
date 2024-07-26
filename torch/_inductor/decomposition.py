@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 import logging
@@ -36,6 +37,7 @@ from .utils import (
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
 )
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
