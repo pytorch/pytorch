@@ -232,6 +232,9 @@ def spec_to_bytes(spec: "placement_types.DTensorSpec") -> int:
 def get_padded_tensor(
     tensor: torch.Tensor, padding_size: Sequence[int]
 ) -> torch.Tensor:
+    """
+    Given a tensor and a sequence of padding size, return a padded tensor with padding applied on all dimensions if needed.
+    """
     if all(padding_size_on_dim == 0 for padding_size_on_dim in padding_size):
         return tensor
     pad = []
@@ -243,12 +246,16 @@ def get_padded_tensor(
 
 
 def get_unpadded_tensor(
-    tensor: torch.Tensor, unpadded_size: Sequence[int]
+    tensor: torch.Tensor, unpadded_shape: Sequence[int]
 ) -> torch.Tensor:
-    if list(tensor.shape) == unpadded_size:
+    """
+    Returns a tensor with the shape equal to the unpadded shape.
+    For example, given unpadded_shape = [1, 2, 3], returns tensor[:1, :2, :3].
+    """
+    if list(tensor.shape) == unpadded_shape:
         return tensor
 
-    slices = [slice(0, unpadded_size_on_dim) for unpadded_size_on_dim in unpadded_size]
+    slices = [slice(0, unpadded_size_on_dim) for unpadded_size_on_dim in unpadded_shape]
     return tensor[slices]
 
 
