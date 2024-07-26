@@ -149,7 +149,7 @@ class BaseListVariable(VariableTracker):
         return super().call_method(tx, name, args, kwargs)
 
     @staticmethod
-    def list_compare(tx, op, left, right):
+    def list_compare(tx: "InstructionTranslator", op, left, right):
         return variables.UserFunctionVariable(polyfill.list_cmp).call_function(
             tx, [variables.BuiltinVariable(op), left, right], {}
         )

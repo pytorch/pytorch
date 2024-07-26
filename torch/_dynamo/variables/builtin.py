@@ -332,7 +332,9 @@ class BuiltinVariable(VariableTracker):
                 ((VariableTracker, UserDefinedVariable), user_defined_handler)
             )
 
-            def user_defined_inplace_handler(tx, a, b, *, forward_name=inplace_name):
+            def user_defined_inplace_handler(
+                tx: "InstructionTranslator", a, b, *, forward_name=inplace_name
+            ):
                 return a.call_method(tx, forward_name, [b], {})
 
             op_handlers[in_place_op].append(
@@ -343,7 +345,7 @@ class BuiltinVariable(VariableTracker):
             )
 
             # Dynamic shape args
-            def dynamic_handler(tx, a, b, *, fn=op):
+            def dynamic_handler(tx: "InstructionTranslator", a, b, *, fn=op):
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(
@@ -371,10 +373,10 @@ class BuiltinVariable(VariableTracker):
         # Special cases - lower precedence but still prefer these over constant folding
 
         # List-like addition (e.g. [1, 2] + [3, 4])
-        def tuple_add_handler(tx, a, b):
+        def tuple_add_handler(tx: "InstructionTranslator", a, b):
             return TupleVariable([*a.items, *b.unpack_var_sequence(tx)])
 
-        def size_add_handler(tx, a, b):
+        def size_add_handler(tx: "InstructionTranslator", a, b):
             return SizeVariable([*a.items, *b.unpack_var_sequence(tx)])
 
         list_like_addition_handlers = [
@@ -415,7 +417,7 @@ class BuiltinVariable(VariableTracker):
         ]
         op_handlers[operator.add].extend(list_like_addition_handlers)
 
-        def list_iadd_handler(tx, a, b):
+        def list_iadd_handler(tx: "InstructionTranslator", a, b):
             if not a.mutable_local or not b.has_unpack_var_sequence(tx):
                 # Handler doesn't apply
                 return None
@@ -442,7 +444,7 @@ class BuiltinVariable(VariableTracker):
         op_handlers[operator.iadd].extend(list_like_iadd_handlers)
 
         # List-like expansion (e.g. [1, 2, 3] * 3)
-        def expand_list_like(tx, lst, const):
+        def expand_list_like(tx: "InstructionTranslator", lst, const):
             if isinstance(lst, ConstantVariable):
                 lst, const = const, lst
             return lst.__class__(
@@ -462,7 +464,7 @@ class BuiltinVariable(VariableTracker):
         has_set_items = (SetVariable, DictKeys)
 
         def create_cmp_op_handlers(op):
-            def compare_by_value(tx, a, b):
+            def compare_by_value(tx: "InstructionTranslator", a, b):
                 return ConstantVariable(op(a.value, b.value))
 
             result = [((ConstantVariable, ConstantVariable), compare_by_value)]
@@ -472,18 +474,22 @@ class BuiltinVariable(VariableTracker):
                 none_result = op(object(), None)
                 if op.__name__.startswith("is_"):
 
-                    def never(tx, a, b):
+                    def never(tx: "InstructionTranslator", a, b):
                         return ConstantVariable(none_result)
 
                     obj_op_none = never
                     none_op_obj = never
                 else:
 
-                    def obj_op_none(tx, a, b: ConstantVariable):
+                    def obj_op_none(
+                        tx: "InstructionTranslator", a, b: ConstantVariable
+                    ):
                         if b.value is None or b.value is True or b.value is False:
                             return ConstantVariable(none_result)
 
-                    def none_op_obj(tx, a: ConstantVariable, b):
+                    def none_op_obj(
+                        tx: "InstructionTranslator", a: ConstantVariable, b
+                    ):
                         if a.value is None or a.value is True or a.value is False:
                             return ConstantVariable(none_result)
 
@@ -510,20 +516,20 @@ class BuiltinVariable(VariableTracker):
                     ]
                 )
 
-            def list_compare_nocheck(tx, left, right):
+            def list_compare_nocheck(tx: "InstructionTranslator", left, right):
                 return BaseListVariable.list_compare(tx, op, left, right)
 
-            def list_compare_check(tx, left, right):
+            def list_compare_check(tx: "InstructionTranslator", left, right):
                 if type(left) is not type(
                     right
                 ):  # Mismatch in BaseListVariable subclasses
                     unimplemented(f"{op.__name__}({left}, {right})")
                 return BaseListVariable.list_compare(tx, op, left, right)
 
-            def compare_set_items(tx, left, right):
+            def compare_set_items(tx: "InstructionTranslator", left, right):
                 return ConstantVariable(op(left.set_items, right.set_items))
 
-            def compare_via_method(tx, left, right):
+            def compare_via_method(tx: "InstructionTranslator", left, right):
                 return left.call_method(tx, f"__{op.__name__}__", [right], {})
 
             if op.__name__.startswith("is_"):
@@ -595,7 +601,7 @@ class BuiltinVariable(VariableTracker):
 
             if op.__name__.startswith("is_"):
 
-                def handle_is(tx, left, right):
+                def handle_is(tx: "InstructionTranslator", left, right):
                     # If the two objects are of different type, we can safely return False
                     # and True for `is` and `is not`, respectively
                     if type(left) is not type(right):
@@ -719,7 +725,9 @@ class BuiltinVariable(VariableTracker):
 
         if inspect.isclass(fn) and issubclass(fn, Exception):
 
-            def create_exception_class_object(tx, args, kwargs):
+            def create_exception_class_object(
+                tx: "InstructionTranslator", args, kwargs
+            ):
                 if fn is AssertionError and not all(
                     isinstance(x, variables.ConstantVariable)
                     and isinstance(x.value, str)
@@ -753,7 +761,7 @@ class BuiltinVariable(VariableTracker):
                 handlers.append(lambda tx, args, _: binop_handler(tx, *args))
             else:
 
-                def call_binop_handlers(tx, args, _):
+                def call_binop_handlers(tx: "InstructionTranslator", args, _):
                     for fn in binop_handlers:
                         rv = fn(tx, *args)
                         if rv:
@@ -764,7 +772,7 @@ class BuiltinVariable(VariableTracker):
         self_handler = getattr(obj, f"call_{fn.__name__}", None)
         if self_handler:
 
-            def call_self_handler(tx, args, kwargs):
+            def call_self_handler(tx: "InstructionTranslator", args, kwargs):
                 try:
                     result = self_handler(tx, *args, **kwargs)
                     if result is not None:
@@ -804,7 +812,7 @@ class BuiltinVariable(VariableTracker):
                 and not has_kwargs
             ):
 
-                def constant_fold_handler(tx, args, kwargs):
+                def constant_fold_handler(tx: "InstructionTranslator", args, kwargs):
                     # fast path
                     try:
                         res = fn(
@@ -816,7 +824,7 @@ class BuiltinVariable(VariableTracker):
 
             else:
 
-                def constant_fold_handler(tx, args, kwargs):
+                def constant_fold_handler(tx: "InstructionTranslator", args, kwargs):
                     # path with a runtime check
                     if check_unspec_or_constant_args(args, kwargs):
                         try:
@@ -838,7 +846,7 @@ class BuiltinVariable(VariableTracker):
         elif len(handlers) == 1:
             (handler,) = handlers
 
-            def builtin_dipatch(tx, args, kwargs):
+            def builtin_dipatch(tx: "InstructionTranslator", args, kwargs):
                 rv = handler(tx, args, kwargs)
                 if rv:
                     return rv
@@ -846,7 +854,7 @@ class BuiltinVariable(VariableTracker):
 
         else:
 
-            def builtin_dipatch(tx, args, kwargs):
+            def builtin_dipatch(tx: "InstructionTranslator", args, kwargs):
                 for fn in handlers:
                     rv = fn(tx, args, kwargs)
                     if rv:
@@ -1285,7 +1293,7 @@ class BuiltinVariable(VariableTracker):
         return BuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
     @staticmethod
-    def call_custom_dict(tx, user_cls, *args, **kwargs):
+    def call_custom_dict(tx: "InstructionTranslator", user_cls, *args, **kwargs):
         if not kwargs:
             if not args:
                 args = ({},)
@@ -1327,7 +1335,9 @@ class BuiltinVariable(VariableTracker):
         unimplemented(f"{user_cls.__name__}(): {args} {kwargs}")
 
     @staticmethod
-    def call_custom_dict_fromkeys(tx, user_cls, *args, **kwargs):
+    def call_custom_dict_fromkeys(
+        tx: "InstructionTranslator", user_cls, *args, **kwargs
+    ):
         assert user_cls in {dict, OrderedDict, defaultdict}
         if kwargs:
             # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
