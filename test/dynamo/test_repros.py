@@ -4920,6 +4920,17 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
 
+    def test_vc_bumped_in_inference_graph(self):
+        @torch.compile
+        def f(x):
+            return x.mul_(2)
+
+        x = torch.randn(4)
+        vc_before = x._version
+        f(x)
+        vc_after = x._version
+        self.assertTrue(vc_after > vc_before)
+
     def test_nn_module_callable(self):
         class M(nn.Module):
             def forward(self, x):
