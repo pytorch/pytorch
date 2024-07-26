@@ -537,16 +537,16 @@ def _softmax_default(func, *args, **kwargs):
         (new_kwargs["dim"],),
         "softmax",
         inp._ragged_idx,
-        allow_batch_dim=True,
     )
 
-    new_kwargs["dim"] = new_kwargs["dim"][
-        0
-    ]  # torch.softmax takes in the reduction dimension as an integer
+    if reduce_on_batch:
+        raise RuntimeError(
+            "softmax(): not supported when reducing across the batch dimension for NestedTensor"
+        )
 
     if reduce_on_ragged and inp._ragged_idx > 1:
         raise RuntimeError(
-            "not supported when reducing along the ragged dimension for ragged_idx > 1 for NestedTensor"
+            "softmax(): not supported when reducing along the ragged dimension for ragged_idx > 1 for NestedTensor"
         )
 
     if reduce_on_ragged and inp._lengths is not None:
@@ -554,6 +554,10 @@ def _softmax_default(func, *args, **kwargs):
             "softmax(): not supported where lengths is not None "
             + "if reducing across the ragged dimension for NestedTensor"
         )
+
+    new_kwargs["dim"] = new_kwargs["dim"][
+        0
+    ]  # torch.softmax takes in the reduction dimension as an integer
 
     if reduce_on_ragged:
         padded_softmax_values = torch.nn.functional.softmax(
