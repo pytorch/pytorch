@@ -365,7 +365,6 @@ in_compiled_autograd_region = False
 
 @contextlib.contextmanager
 def enable(compiler_fn):
-    # state variable to track number of eager warmup runs that are already run
     if not hasattr(enable, "warmup_count"):
         enable.warmup_count = 0
     if enable.warmup_count < torch._dynamo.config.warmup_runs:
