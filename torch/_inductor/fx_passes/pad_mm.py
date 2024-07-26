@@ -23,7 +23,6 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
 from ...utils._triton import has_triton
-
 from ..pattern_matcher import (
     fwd_only,
     gen_register_replacement,
@@ -32,6 +31,7 @@ from ..pattern_matcher import (
     ReplaceFn,
     SearchFn,
 )
+
 
 aten = torch.ops.aten
 

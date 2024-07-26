@@ -12,6 +12,7 @@ from torch._inductor.codegen.multi_kernel import MultiKernelCall
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -259,6 +260,17 @@ class MultiKernelTest(TestCase):
         with config.patch("triton.multi_kernel", force_multi_kernel):
             act = torch.compile(f)(x)
         self.assertTrue(torch.allclose(ref, act))
+
+    def test_split_scan(self, force_multi_kernel=1):
+        def f(x):
+            x = x.view(-1)
+            return torch.cumsum(x, 0)
+
+        x = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float32, device="cuda")
+        expect = f(x)
+        with config.patch("triton.multi_kernel", force_multi_kernel):
+            actual = torch.compile(f)(x)
+        self.assertEqual(expect, actual)
 
     # Use benchmarking to pick the faster kernel
     test_reduction_scratch_buffer_cpp_wrapper = make_cpp_wrapper_test(

@@ -270,20 +270,17 @@ class FSDPParam:
             name_dims_error = "FSDP requires named DeviceMesh dims for ND parallelism"
             assert dp_mesh.mesh_dim_names is not None, name_dims_error
             assert tp_mesh.mesh_dim_names is not None, name_dims_error
-
             submesh_names = dp_mesh.mesh_dim_names + tp_mesh.mesh_dim_names
             self._spmd_mesh = dp_global_mesh[submesh_names]
             if len(self._tp_spec.placements) != 1:
                 raise NotImplementedError(
                     f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
                 )
-
             # TODO: Hard code FSDP + TP; need to support HSDP + TP
             self._spmd_placements: Tuple[Placement, ...] = (
                 Shard(0),
                 self._tp_spec.placements[0],
             )
-
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,
