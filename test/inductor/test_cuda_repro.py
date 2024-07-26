@@ -694,6 +694,22 @@ class CudaReproTests(TestCase):
         ref = torch.compile(fn, fullgraph=True)(*args)
         assert same(ref, correct)
 
+    def test_scatter_index_not_wrapped(self):
+        src = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], device=self.device)
+        index = torch.tensor([0, 1, 0, 1, 2, 0], device=self.device)
+        input = torch.tensor([1.0, 2.0, 3.0, 4.0], device=self.device)
+        compiled_sr = torch.compile(torch.scatter_reduce)
+
+        input_orig = input.clone()
+        out, code = run_and_get_code(compiled_sr, input, 0, index, src, "sum")
+        # tmp0 - not wrapping of negative numbers
+        FileCheck().check("tl.device_assert(((0 <= tmp0) & (tmp0 < 4))").check_next(
+            "atomic_add"
+        ).run(code[0])
+        self.assertEqual(
+            out, torch.scatter_reduce(input_orig.clone(), 0, index, src, "sum")
+        )
+
     def test_embedding_var_mean(self):
         def forward(arg0_1):
             full = torch.ops.aten.full.default(

@@ -17,7 +17,8 @@ if TYPE_CHECKING:
 __all__ = ['Node', 'map_arg', 'map_aggregate', "has_side_effect"]
 
 BaseArgumentTypes = Union[str, int, float, bool, complex, torch.dtype,
-                          torch.Tensor, torch.device, torch.memory_format, torch.layout, torch._ops.OpOverload]
+                          torch.Tensor, torch.device, torch.memory_format, torch.layout, torch._ops.OpOverload,
+                          torch.SymInt, torch.SymBool, torch.SymFloat]
 base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
 Target = Union[Callable[..., Any], str]
@@ -767,7 +768,7 @@ def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
     if isinstance(a, tuple):
         t = tuple(map_aggregate(elem, fn) for elem in a)
         # Support NamedTuple (if it has `_fields`) by repacking into original type.
-        return t if not hasattr(a, '_fields') else type(a)(*t)
+        return t if not hasattr(a, '_fields') else type(a)(*t)  # type: ignore[arg-type]
     elif isinstance(a, list):
         return immutable_list(map_aggregate(elem, fn) for elem in a)
     elif isinstance(a, dict):

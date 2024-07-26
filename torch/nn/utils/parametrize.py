@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import collections
 import copyreg
@@ -792,7 +793,7 @@ def transfer_parametrizations_and_params(
                 )
 
             # apply the params's parametrizations to to_module
-            for param_func in from_module.parametrizations[parameter_name]:
+            for param_func in from_module.parametrizations[parameter_name]:  # type: ignore[attr-defined]
                 register_parametrization(to_module, parameter_name, param_func)
             assert isinstance(to_module.parametrizations, ModuleDict)  # for mypy
 

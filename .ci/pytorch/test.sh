@@ -320,7 +320,6 @@ test_inductor_distributed() {
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_comm.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_multi_group --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_with_activation_checkpointing --verbose
-  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_mlp --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_hsdp --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_transformer_checkpoint_resume --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_gradient_accumulation --verbose
@@ -431,10 +430,17 @@ test_perf_for_dashboard() {
 
   local device=cuda
   local taskset=""
-  if [[ "${TEST_CONFIG}" == *cpu-x86* ]]; then
-    device=cpu-x86
-    end_core=$(test_inductor_set_cpu_affinity)
+  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
+    if [[ "${TEST_CONFIG}" == *cpu_x86* ]]; then
+      device=cpu_x86
+    elif [[ "${TEST_CONFIG}" == *cpu_aarch64* ]]; then
+      device=cpu_aarch64
+    fi
+    test_inductor_set_cpu_affinity
+    end_core=$(( $(test_inductor_get_core_number)-1 ))
     taskset="taskset -c 0-$end_core"
+  elif [[ "${TEST_CONFIG}" == *cuda_a10g* ]]; then
+    device=cuda_a10g
   fi
 
   for mode in "${modes[@]}"; do
@@ -543,6 +549,10 @@ test_single_dynamo_benchmark() {
       # This can be removed once the ABI-compatible mode becomes default.
       # For CPU device, we perfer non ABI-compatible mode on CI when testing AOTInductor.
       export TORCHINDUCTOR_ABI_COMPATIBLE=1
+    fi
+
+    if [[ "${TEST_CONFIG}" == *_avx2* ]]; then
+      TEST_CONFIG=${TEST_CONFIG::-5}
     fi
     python "benchmarks/dynamo/$suite.py" \
       --ci --accuracy --timing --explain \
@@ -653,6 +663,10 @@ test_inductor_torchbench_smoketest_perf() {
   done
 }
 
+test_inductor_get_core_number() {
+  echo $(($(lscpu | grep 'Socket(s):' | awk '{print $2}') * $(lscpu | grep 'Core(s) per socket:' | awk '{print $4}')))
+}
+
 test_inductor_set_cpu_affinity(){
   #set jemalloc
   JEMALLOC_LIB="/usr/lib/x86_64-linux-gnu/libjemalloc.so.2"
@@ -661,16 +675,16 @@ test_inductor_set_cpu_affinity(){
   export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
   export KMP_AFFINITY=granularity=fine,compact,1,0
   export KMP_BLOCKTIME=1
-  CORES=$(lscpu | grep Core | awk '{print $4}')
-  export OMP_NUM_THREADS=$CORES
-  echo $(( CORES-1 ))
+  cores=$(test_inductor_get_core_number)
+  export OMP_NUM_THREADS=$cores
 }
 
 test_inductor_torchbench_cpu_smoketest_perf(){
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  end_core=$(test_inductor_set_cpu_affinity)
+  test_inductor_set_cpu_affinity
+  end_core=$(( $(test_inductor_get_core_number)-1 ))
   MODELS_SPEEDUP_TARGET=benchmarks/dynamo/expected_ci_speedup_inductor_torchbench_cpu.csv
 
   grep -v '^ *#' < "$MODELS_SPEEDUP_TARGET" | while IFS=',' read -r -a model_cfg
@@ -699,6 +713,17 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     # The threshold value needs to be actively maintained to make this check useful.
     python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target"
   done
+
+  # Add a few ABI-compatible accuracy tests for CPU. These can be removed once we turn on ABI-compatible as default.
+  TORCHINDUCTOR_ABI_COMPATIBLE=1 python benchmarks/dynamo/timm_models.py --device cpu --accuracy \
+    --bfloat16 --inference --export-aot-inductor --disable-cudagraphs --only adv_inception_v3 \
+    --output "$TEST_REPORTS_DIR/aot_inductor_smoke_test.csv"
+  TORCHINDUCTOR_ABI_COMPATIBLE=1 python benchmarks/dynamo/timm_models.py --device cpu --accuracy \
+    --bfloat16 --inference --export-aot-inductor --disable-cudagraphs --only beit_base_patch16_224 \
+    --output "$TEST_REPORTS_DIR/aot_inductor_smoke_test.csv"
+  python benchmarks/dynamo/check_accuracy.py \
+    --actual "$TEST_REPORTS_DIR/aot_inductor_smoke_test.csv" \
+    --expected "benchmarks/dynamo/ci_expected_accuracy/aot_inductor_timm_inference.csv"
 }
 
 test_torchbench_gcp_smoketest(){
@@ -1317,8 +1342,11 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
-    test_inductor_aoti
-    test_inductor_distributed
+    if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.8-gcc11-build ]]; then
+      # Temporarily skip test_inductor_aoti due to https://github.com/pytorch/pytorch/issues/130311
+      test_inductor_aoti
+      test_inductor_distributed
+    fi
   fi
 elif [[ "${TEST_CONFIG}" == *dynamo* ]]; then
   install_torchvision
