@@ -1,5 +1,5 @@
 import warnings
-from typing import Iterable, List, NamedTuple, Optional, Tuple, Union
+from typing import Iterable, List, Literal, NamedTuple, Optional, Tuple, Union
 
 import torch
 from torch import _VF, Tensor
@@ -375,6 +375,7 @@ def pad_sequence(
     sequences: Union[Tensor, List[Tensor]],
     batch_first: bool = False,
     padding_value: float = 0.0,
+    padding_side: Union[Literal["left", "right"], str] = "right",  # noqa: PYI051
 ) -> Tensor:
     r"""Pad a list of variable length Tensors with :attr:`padding_value`.
 
@@ -404,6 +405,8 @@ def pad_sequence(
         batch_first (bool, optional): if ``True``, the output will be in ``B x T x *``
             format, ``T x B x *`` otherwise.
         padding_value (float, optional): value for padded elements. Default: 0.
+        padding_side (str, optional): the side to pad the sequences on.
+            Default: "right".
 
     Returns:
         Tensor of size ``T x B x *`` if :attr:`batch_first` is ``False``.
@@ -428,7 +431,9 @@ def pad_sequence(
 
     # assuming trailing dimensions and type of all the Tensors
     # in sequences are same and fetching those from sequences[0]
-    return torch._C._nn.pad_sequence(sequences, batch_first, padding_value)
+    return torch._C._nn.pad_sequence(
+        sequences, batch_first, padding_value, padding_side
+    )
 
 
 def unpad_sequence(

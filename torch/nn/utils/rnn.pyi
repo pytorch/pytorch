@@ -76,6 +76,7 @@ def pad_sequence(
     sequences: Tensor | Iterable[Tensor],
     batch_first: bool = False,
     padding_value: float = ...,
+    padding_side="right",
 ) -> Tensor: ...
 def pack_sequence(
     sequences: Sequence[Tensor],

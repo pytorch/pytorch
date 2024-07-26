@@ -188,6 +188,23 @@ class PackedSequenceTest(TestCase):
         padded = rnn_utils.pad_sequence([b, a, c])
         self.assertEqual(padded, expected.transpose(0, 1))
 
+        # padding_side = "left", batch_first=True
+        expected = torch.tensor([[0, 4, 5], [1, 2, 3], [0, 0, 6]])
+        padded = rnn_utils.pad_sequence(
+            [b, a, c],
+            batch_first=True,
+            padding_side="left",
+        )
+        self.assertEqual(padded, expected)
+
+        # padding_side = "left", batch_first=False
+        padded = rnn_utils.pad_sequence(
+            [b, a, c],
+            batch_first=False,
+            padding_side="left",
+        )
+        self.assertEqual(padded, expected.transpose(0, 1))
+
         # pad with non-zero value
         expected = torch.tensor([[4, 5, 1], [1, 2, 3], [6, 1, 1]])
         padded = rnn_utils.pad_sequence([b, a, c], True, 1)
@@ -217,6 +234,28 @@ class PackedSequenceTest(TestCase):
 
             # batch first = false
             padded = rnn_utils.pad_sequence(sequences)
+            self.assertEqual(padded, expected.transpose(0, 1))
+
+            # padding_side = "left", batch_first=True
+            expected = torch.stack(
+                [
+                    pad(seq.flip(0), maxlen * maxlen).flip(0)
+                    for seq in sequences
+                ]
+            )
+            padded = rnn_utils.pad_sequence(
+                sequences,
+                batch_first=True,
+                padding_side="left",
+            )
+            self.assertEqual(padded, expected)
+
+            # padding_side = "left", batch_first=False
+            padded = rnn_utils.pad_sequence(
+                sequences,
+                batch_first=False,
+                padding_side="left",
+            )
             self.assertEqual(padded, expected.transpose(0, 1))
 
     def test_unpad_sequence(self):
