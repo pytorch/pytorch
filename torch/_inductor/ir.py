@@ -944,7 +944,7 @@ class Reduction(Loops):
                 split_size * num_threads
             )
 
-        def outer_reduction_splits(reduction_numel_hint, numel_hint):  # type: ignore[no-untyped-def]  # no example
+        def outer_reduction_splits(reduction_numel_hint, numel_hint):  # type: ignore[no-untyped-def]
             # TODO the best heuristic currently has XBLOCK (corresponding to numel_hint) 128
             # extend to even smaller number of outputs
             num_warps = 8
@@ -1089,7 +1089,7 @@ class Reduction(Loops):
             )
 
     @staticmethod
-    def _unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type, src_dtype):  # type: ignore[no-untyped-def] # no example
+    def _unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type, src_dtype):  # type: ignore[no-untyped-def]
         """Convert inner_fn from a reduction to an pointwise"""
         reduction_ranges = [
             V.graph.sizevars.evaluate_static_shape(x) for x in reduction_ranges
@@ -1097,7 +1097,7 @@ class Reduction(Loops):
 
         combine_fn = get_reduction_combine_fn(reduction_type, src_dtype)
 
-        def fn(index):  # type: ignore[no-untyped-def] # no example
+        def fn(index):  # type: ignore[no-untyped-def]
             return functools.reduce(
                 combine_fn,
                 (
@@ -1116,7 +1116,7 @@ class Reduction(Loops):
                 FlexibleLayout.contiguous_strides(reduction_ranges),
             ).make_indexer()
 
-            def value_fn(index, rindex):  # type: ignore[no-untyped-def] # no example
+            def value_fn(index, rindex):  # type: ignore[no-untyped-def]
                 rindex = [sympy.expand(i) for i in rindex]
                 return (
                     inner_fn(index, rindex),
@@ -1364,7 +1364,7 @@ class Reduction(Loops):
         return wrapper_fn
 
     @classmethod
-    def _multilayer_wrap_loader_existing_ranges(  # type: ignore[no-untyped-def] # no example
+    def _multilayer_wrap_loader_existing_ranges(  # type: ignore[no-untyped-def]
         cls,
         loader,
         original_ranges,
@@ -1380,7 +1380,7 @@ class Reduction(Loops):
             original_reduction_ranges, tuple(new_ranges) + tuple(new_reduction_ranges)
         )
 
-        def wrapper_fn(merged_index, new_reduction_index):  # type: ignore[no-untyped-def] # no example
+        def wrapper_fn(merged_index, new_reduction_index):  # type: ignore[no-untyped-def]
             original_idx = merged_index[: len(original_ranges)]
             new_index = merged_index[len(original_ranges) :]
             return loader(
@@ -1494,7 +1494,7 @@ class Reduction(Loops):
         )
 
     @classmethod
-    def create_multilayer_existing_ranges(  # type: ignore[no-untyped-def] # no example
+    def create_multilayer_existing_ranges(  # type: ignore[no-untyped-def]
         cls,
         device: torch.device,
         dst_dtype: torch.dtype,
@@ -1557,7 +1557,7 @@ class WelfordReduction(Reduction):
             loader = inner_fns[0]
         else:
 
-            def loader(idx, reduction_idx):  # type: ignore[no-untyped-def] # no example
+            def loader(idx, reduction_idx):  # type: ignore[no-untyped-def]
                 return tuple(fn(idx, reduction_idx) for fn in inner_fns)
 
         super().__init__(
@@ -1603,8 +1603,8 @@ class WelfordReduction(Reduction):
 
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
-        def const(val):  # type: ignore[no-untyped-def] # no example
-            def inner_fn(idx):  # type: ignore[no-untyped-def] # no example
+        def const(val):  # type: ignore[no-untyped-def]
+            def inner_fn(idx):  # type: ignore[no-untyped-def]
                 return ops.constant(
                     val,
                     dtype,
@@ -1625,8 +1625,8 @@ class WelfordReduction(Reduction):
 
         if reduction_numel == 1:
 
-            def copy(loader):  # type: ignore[no-untyped-def] # no example
-                def inner_fn(idx):  # type: ignore[no-untyped-def] # no example
+            def copy(loader):  # type: ignore[no-untyped-def]
+                def inner_fn(idx):  # type: ignore[no-untyped-def]
                     reduction_index = [Integer(0) for _ in reduction_ranges]
                     return loader(idx, reduction_index)
 
@@ -1737,7 +1737,7 @@ class WelfordReduction(Reduction):
             # If we need mask, then "welford_reduce" doesn't work because
             # masked inputs shouldn't count towards the welford weight
 
-            def constant(idx, reduction_idx, value):  # type: ignore[no-untyped-def] # no example
+            def constant(idx, reduction_idx, value):  # type: ignore[no-untyped-def]
                 return ops.constant(value, dtype)
 
             return cls.create_multilayer(
@@ -1780,7 +1780,7 @@ class WelfordReduction(Reduction):
 
         i_loaders = [i.make_loader() for i in intermediates]
 
-        def intermediate_loader_fn(index, reduction_index, loader):  # type: ignore[no-untyped-def] # no example
+        def intermediate_loader_fn(index, reduction_index, loader):  # type: ignore[no-untyped-def]
             return loader([*index, *reduction_index])
 
         numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
@@ -1871,7 +1871,7 @@ class Scan(Loops):
         return extract_free_unbacked_symbols(self.inner_fn, idx)
 
     @classmethod
-    def create(  # type: ignore[no-untyped-def, override]  # no example
+    def create(  # type: ignore[no-untyped-def, override]
         cls,
         device: torch.device,
         dtypes: Tuple[torch.dtype, ...],
@@ -1935,7 +1935,7 @@ class Scan(Loops):
             else:
                 scan_type = SplitScan
 
-        def reindex(index, scan_index):  # type: ignore[no-untyped-def] # no example
+        def reindex(index, scan_index):  # type: ignore[no-untyped-def]
             assert len(scan_index) == len(scan_ranges)
             assert len(index) == len(pointwise_ranges)
             return [*index[:axis], *scan_index, *index[axis:]]
@@ -1967,7 +1967,7 @@ class Scan(Loops):
         return results
 
     @classmethod
-    def num_splits(  # type: ignore[no-untyped-def] # no example
+    def num_splits(  # type: ignore[no-untyped-def]
         cls,
         device: torch.device,
         dtype: torch.dtype,
@@ -1979,7 +1979,7 @@ class Scan(Loops):
         scan_numel: Expr,
     ):
         # TODO: custom splitting heuristic for scan
-        def wrapper_fn(idx, reduction_idx):  # type: ignore[no-untyped-def] # no example
+        def wrapper_fn(idx, reduction_idx):  # type: ignore[no-untyped-def]
             return inner_fn([*idx[:axis], *reduction_idx, *idx[axis:]])
 
         return Reduction.num_splits(
@@ -2028,7 +2028,7 @@ class Sort(Loops):
         assert len(self.ranges) + len(self.sort_ranges) == len(self.size)
         super().__post_init__()
 
-    def store_reduction(self, output_name, indexer, vars, sort_vars):  # type: ignore[no-untyped-def] # no example
+    def store_reduction(self, output_name, indexer, vars, sort_vars):  # type: ignore[no-untyped-def]
         idx = self.reindex(vars, sort_vars)
         values = [inner_fn(idx) for inner_fn in self.inner_fns]
         result = ops.sort(self.dtypes, values, self.stable, self.descending)
@@ -2062,7 +2062,7 @@ class Sort(Loops):
         return extract_free_unbacked_symbols(self.inner_fn, idx)
 
     @classmethod
-    def create(  # type: ignore[no-untyped-def, override] # no example
+    def create(  # type: ignore[no-untyped-def, override]
         cls,
         device: torch.device,
         dtypes: Tuple[torch.dtype, ...],
@@ -2108,7 +2108,7 @@ class Sort(Loops):
                 for output_index in range(len(dtypes))
             ]
 
-        def reindex(index, sort_index):  # type: ignore[no-untyped-def] # no example
+        def reindex(index, sort_index):  # type: ignore[no-untyped-def]
             assert len(sort_index) == len(sort_ranges)
             assert len(index) == len(pointwise_ranges)
             return [*index[:axis], *sort_index, *index[axis:]]
