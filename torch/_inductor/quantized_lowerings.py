@@ -46,7 +46,6 @@ def register_woq_mm_ops():
         _, _, _, layout, mat1, mat2, vec1 = mm_args(
             input, weight, scale, layout=layout, is_woq_gemm=True
         )
-        # expanded_scale = L.reshape(vec1, (input.get_size()[0], scale.get_size()[-1]))
         assert (
             mat1.get_dtype() in [torch.bfloat16, torch.float16, torch.float]
             and mat2.get_dtype() == torch.int8
@@ -72,7 +71,12 @@ def register_woq_mm_ops():
                 epilogue_creator=epilogue_creator,
             )
 
-        if not use_aten_gemm_kernels():
+        if (
+            len(choices) == 0
+            and inductor_config.autotune_fallback_to_aten
+            and not use_aten_gemm_kernels()
+        ):
+            log.warning("No choices for GEMM, using ATen backend as fallback")
             return aten__weight_int8pack_mm.bind(
                 (mat1, mat2, vec1), aten_layout
             ).output_node()

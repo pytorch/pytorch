@@ -399,7 +399,7 @@ inline void {{kernel_name}}_kernel(
         if constexpr (accum) {
             constexpr int row = i / COLS;
             constexpr int col = i % COLS;
-            {%- if (input_dtype == torch.bfloat16 or input_dtype == torch.float16) and input2_dtype == torch.int8 %}
+            {%- if input_dtype in [torch.bfloat16, torch.float16] and input2_dtype == torch.int8 %}
             auto c = VectorizedIn::loadu(C + row * ldc + col * VLEN, VLEN);
             vc[i] = at::vec::convert<{{compute_t}}>(c);
             {%- else %}
@@ -424,7 +424,7 @@ inline void {{kernel_name}}_kernel(
         }
 
         if constexpr (row == 0) {
-            {%- if input2_dtype == torch.bfloat16 or input2_dtype == torch.float16 %}
+            {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
             auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
             vb[col] = at::vec::convert<{{compute_t}}>(b);
             {%- elif input2_dtype == torch.int8 %}
@@ -448,7 +448,7 @@ inline void {{kernel_name}}_kernel(
     auto storec = [&](auto i) {
         constexpr int row = i / COLS;
         constexpr int col = i % COLS;
-        {%- if output_dtype == torch.bfloat16 or output_dtype == torch.float16 %}
+        {%- if output_dtype in [torch.bfloat16, torch.float16] %}
         auto vc_lower_precision = at::vec::convert<{{input_t}}>(vc[i]);
         vc_lower_precision.store(C + row * ldc + col * VLEN, VLEN);
         {%- else %}

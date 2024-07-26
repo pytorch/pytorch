@@ -547,19 +547,14 @@ class CppPackedGemmTemplate(CppTemplate):
                 )
             else:
                 if is_woq_gemm:
-                    blocked_w = (
-                        torch.nn.functional.pad(W, (0, padded_n - n))
-                        .reshape(padded_n // block_n, block_n, k)
-                        .transpose(1, 2)
-                        .contiguous()
-                    )
-                else:
-                    blocked_w = (
-                        torch.nn.functional.pad(W, (0, padded_n - n))
-                        .reshape(k, padded_n // block_n, block_n)
-                        .transpose(0, 1)
-                        .contiguous()
-                    )
+                    # Change weight shape to (k, n) to apply padding
+                    W = W.transpose(0, 1).contiguous()
+                blocked_w = (
+                    torch.nn.functional.pad(W, (0, padded_n - n))
+                    .reshape(k, padded_n // block_n, block_n)
+                    .transpose(0, 1)
+                    .contiguous()
+                )
                 if micro_gemm.get_b_layout() != LayoutType.NORMAL:
                     layout_str = (
                         "VNNI4"
