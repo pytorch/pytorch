@@ -10,7 +10,7 @@ import pickle
 import pstats
 import shutil
 import subprocess
-from typing import Any, Callable, Dict, IO, Iterator, List, Optional, Union
+from typing import Any, Callable, Dict, IO, Iterator, List, Optional, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -424,7 +424,7 @@ class DebugContext:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
+        exc_type: Optional[Type[BaseException]],
         exc_val: Optional[BaseException],
         exc_tb: Optional[Any],
     ) -> None:
