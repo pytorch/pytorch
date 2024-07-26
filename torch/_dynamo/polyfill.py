@@ -3,6 +3,7 @@
 """
 Python polyfills for common builtins.
 """
+import itertools
 import math
 from typing import Any, Callable, Sequence
 
@@ -24,7 +25,7 @@ def any(iterator):
 
 
 def index(iterator, item, start=0, end=None):
-    for i, elem in list(enumerate(list(iterator)))[start:end]:
+    for i, elem in itertools.islice(enumerate(list(iterator)), start, end):
         if item == elem:
             return i
     # This will not run in dynamo
