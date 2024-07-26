@@ -359,10 +359,10 @@ class CppTemplateCaller(ir.ChoiceCaller):
     def output_node(self) -> ir.TensorBox:
         return ir.TensorBox.create(
             ir.CppTemplateBuffer(
-                layout=self.layout,
+                layout=self.layout,  # type: ignore[arg-type] # next PR
                 inputs=self.input_nodes,
-                make_kernel_render=self.make_kernel_render,
+                make_kernel_render=self.make_kernel_render,  # type: ignore[arg-type] # next PR
                 template=self.template,
-                choice=self,
+                choice=self,  # type: ignore[arg-type] # next PR
             )
         )

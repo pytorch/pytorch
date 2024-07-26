@@ -892,7 +892,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
     def output_node(self):
         return ir.TensorBox.create(
             ir.TritonTemplateBuffer(
-                layout=self.layout,
+                layout=self.layout,  # type: ignore[arg-type] # next PR
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
                 debug_extra=self.debug_extra,

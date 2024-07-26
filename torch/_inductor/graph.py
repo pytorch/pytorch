@@ -1490,7 +1490,7 @@ class GraphLowering(torch.fx.Interpreter):
             shape_env = V.graph.sizevars.shape_env
 
             def make_assert(expr: Expr, msg: str) -> None:
-                assert_op = ir.AssertScalar(expr, msg)
+                assert_op = ir.AssertScalar(expr, msg)  # type: ignore[arg-type] # next PR
                 self.register_buffer(assert_op, set_name=True)
                 self.register_operation(assert_op)
 
