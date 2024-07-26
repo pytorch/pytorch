@@ -621,19 +621,16 @@ public:
         c10::optional<c10::ScalarType> dtype) {
 
         TORCH_CHECK(self.is_floating_point(), "Expected softmax matrix to be floating point, but got ", self.dtype());
-
         auto attn_mask_float = convert_boolean_attn_mask(mask, mask.dtype());
         TORCH_INTERNAL_ASSERT(attn_mask_float.has_value(), "Expected attn_mask to return a tensor!");
-
         auto masked_input = self + attn_mask_float.value();
-        auto out = softmax(masked_input, dim);
-
+        // Use at::softmax to resolve ambiguity
+        auto out = at::softmax(masked_input, dim, dtype);
         auto scalar_options = TensorOptions().dtype(out.dtype()).device(out.device());
-        auto result = where(mask.logical_not(), scalar_tensor(0.0, scalar_options), out);
-
+        auto result = at::where(mask.logical_not(), at::scalar_tensor(0.0, scalar_options), out);
+        // Convert to variable_list
         ctx->save_for_backward({result});
         ctx->saved_data["dim"] = dim;
-
         return result;
     }
 
@@ -644,12 +641,10 @@ public:
         auto saved = ctx->get_saved_variables();
         auto result = saved[0];
         int64_t dim = ctx->saved_data["dim"].toInt();
-
         auto grad = grad_outputs[0];
         auto grad_input = grad * result;
         auto grad_sum = grad_input.sum(dim, /*keepdim=*/true);
         grad_input -= result * grad_sum;
-
         // Return gradients for input tensors. Use Tensor() for tensors that don't need gradients.
         return {grad_input, Tensor(), Tensor(), Tensor()};
     }
