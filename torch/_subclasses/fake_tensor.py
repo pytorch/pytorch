@@ -1580,10 +1580,19 @@ class FakeTensorMode(TorchDispatchMode):
             storage = view_arg.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
                 empty.set_(storage, storage_offset, shape, stride)
-        elif storage_offset != 0:
-            storage = empty.untyped_storage()
-            with in_kernel_invocation_manager(self), maybe_suppress():
-                empty.set_(storage, storage_offset, shape, stride)
+        else:
+            if isinstance(storage_offset, SymInt):
+                # Do it this way so we don't import symbolic_shapes (which imports
+                # expensive sympy) unless we have to.
+                from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+                zero_offset = guard_size_oblivious(storage_offset == 0)
+            else:
+                zero_offset = storage_offset == 0
+            if not zero_offset:
+                storage = empty.untyped_storage()
+                with in_kernel_invocation_manager(self), maybe_suppress():
+                    empty.set_(storage, storage_offset, shape, stride)
 
         if isinstance(storage_bytes, SymInt):
             # Do it this way so we don't import symbolic_shapes (which imports
@@ -2147,8 +2156,8 @@ class FakeTensorMode(TorchDispatchMode):
         any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
         schema_info = get_schema_info(func)
         if any_constant and schema_info.is_mutable():
-            _, new_kwargs = normalize_function(
-                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+            _, new_kwargs = normalize_function(  # type: ignore[misc]
+                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
             )
             for k, v in new_kwargs.items():
                 k = k if (k != "input" or schema_info.has_argument(k)) else "self"
