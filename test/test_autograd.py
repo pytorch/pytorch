@@ -9605,10 +9605,9 @@ for shape in [(1,), ()]:
             def unpack(name):
                 return torch.load(name)
 
-            a = torch.ones(5, requires_grad=True)
-            y = a * a
-
             with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+                a = torch.ones(5, requires_grad=True)
+                y = a * a
                 self.assertEqual(a, y.grad_fn._saved_self)
 
                 y.sum().backward()
