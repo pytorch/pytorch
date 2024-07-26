@@ -55,11 +55,12 @@ def is_const_source(
     return (
         node.op == "get_attr"
         or (
-            # convert -> permute
-            next(iter(node.users.keys())).target
-            == torch.ops.prims.convert_element_type.default
-            and node.target == torch.ops.aten.permute.default
+            # const_arg -> convert -> permute
+            node.target == torch.ops.aten.permute.default
             and node.args[0].op == "get_attr"  # type: ignore[union-attr]
+            and node.users.keys()
+            and next(iter(node.users.keys())).target
+            == torch.ops.prims.convert_element_type.default
         )
         or (
             node.op == "placeholder"
