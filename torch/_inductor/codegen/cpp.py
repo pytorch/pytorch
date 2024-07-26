@@ -202,7 +202,7 @@ def reduction_combine(
 def reduction_project(reduction_type, acc):
     if is_welford_reduction(reduction_type):
         return f"{acc}.mean", f"{acc}.m2", f"{acc}.weight"
-    elif reduction_type in {"argmin", "argmax"} and not f"{acc}".endswith("vec"):
+    elif reduction_type in {"argmin", "argmax"}:
         return f"{acc}.index"
     return acc
 
@@ -2401,6 +2401,7 @@ class CppVecKernel(CppKernel):
                 value,
                 index=index,
                 horizontal_reduction=horizontal_reduction,
+                src_dtype=src_dtype,
             )
             self.stores.writeline(f"{acc_vec} = {combine};")
         self._gen_parallel_reduction_buffers(
@@ -2532,7 +2533,9 @@ class CppVecKernel(CppKernel):
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>"
         if reduction_type in {"argmin", "argmax"}:
-            return f"IndexValueVec<{DTYPE_TO_CPP[scalar_type]}, {self.tiling_factor}>"
+            n_src = self._get_num_vectors(scalar_type)
+            n_idx = self._get_num_vectors(torch.int64)
+            return f"IndexValueVec<{DTYPE_TO_CPP[scalar_type]}, {n_src}, {n_idx}>"
         return vec_type
 
     def welford_weight_reciprocal_vec(self, dtype, num_threads=None):
@@ -2552,6 +2555,7 @@ class CppVecKernel(CppKernel):
         use_weight_recps=False,
         index: Optional[sympy.Symbol] = None,
         horizontal_reduction: Optional[bool] = None,
+        src_dtype: Optional[torch.dtype] = torch.float32,
     ):
         if reduction_type == "max":
             return f"at::vec::maximum({var}, {next_value})"
@@ -2577,11 +2581,17 @@ class CppVecKernel(CppKernel):
                 mean, m2, weight = reduction_project(reduction_type, next_value)
             return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
         elif reduction_type in ("argmin", "argmax"):
+            assert src_dtype is not None
+            cdtype = DTYPE_TO_CPP[src_dtype]
+            n_src = self._get_num_vectors(src_dtype)
+            n_idx = self._get_num_vectors(torch.int64)
+            t_extra = ""
+            arg_extra = ""
             if index is not None:
                 assert horizontal_reduction is not None
-                return f"{reduction_type}_combine_vec({var}, {next_value}, {index}, {str(horizontal_reduction).lower()})"
-            else:
-                return f"{reduction_type}_combine_vec({var}, {next_value})"
+                t_extra = f", {str(horizontal_reduction).lower()}"
+                arg_extra = f", {index}"
+            return f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>({var}, {next_value}{arg_extra})"
         else:
             raise NotImplementedError
 

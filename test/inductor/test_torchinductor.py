@@ -8474,9 +8474,6 @@ class CommonTemplate:
                 aten.argmin(x, 1),
             )
 
-        if self.device == "cpu":
-            raise unittest.SkipTest("broken on CPU")
-
         # Unrolled reduction
         t1 = torch.randn((6, 6))
         t1[:, 1] = float("nan")
@@ -8566,12 +8563,6 @@ class CommonTemplate:
                 [rank4_inps, rank3_inps, rank5_inps],
             )
 
-    @unittest.skip(
-        """
-        FIXME: In the case of having equally max/min elements, our implementation returns
-        the last index instead of the first one
-        """
-    )
     def test_argmax_argmin3(self):
         def fn(x):
             return (
@@ -8583,7 +8574,7 @@ class CommonTemplate:
 
         self.common(
             fn,
-            [torch.randint(0, 5, [10, 10])],
+            [torch.randint(0, 5, [64, 64])],
         )
 
     def test_vdd_clamp(self):
