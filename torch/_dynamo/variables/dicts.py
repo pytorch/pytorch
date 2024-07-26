@@ -303,6 +303,7 @@ class ConstDictVariable(VariableTracker):
                     ListVariable,
                     TupleVariable,
                     ListIteratorVariable,
+                    variables.IteratorVariable,
                 ),
             )
             and self.mutable_local
