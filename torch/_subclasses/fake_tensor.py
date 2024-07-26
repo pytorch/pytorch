@@ -1077,6 +1077,7 @@ class FakeTensorMode(TorchDispatchMode):
         export: bool = False,
     ) -> None:
         log.debug("create_mode 0x%x", id(self))
+        super().__init__()
         self.allow_fallback_kernels = allow_fallback_kernels
 
         import torch._dynamo.config

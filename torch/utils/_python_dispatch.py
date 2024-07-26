@@ -5,6 +5,7 @@ import warnings
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload
 from typing_extensions import TypeGuard
+from collections import deque
 
 import torch
 import torchgen
@@ -67,14 +68,14 @@ class TorchDispatchMode:
             assert isinstance(_dispatch_key, torch._C.DispatchKey)
             self.__dict__["_dispatch_key"] = _dispatch_key
 
-        self.old_dispatch_mode_flag = False
+        self.old_dispatch_mode_flags = deque()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError
 
     def __enter__(self):
         global _is_in_torch_dispatch_mode
-        self.old_dispatch_mode_flag = _is_in_torch_dispatch_mode
+        self.old_dispatch_mode_flags.append(_is_in_torch_dispatch_mode)
         _is_in_torch_dispatch_mode = True
         _push_mode(self)
         return self
@@ -86,7 +87,7 @@ class TorchDispatchMode:
             # We should probably revisit this.
             mb_dk_or_mode_key = self.__dict__.get("_mode_key", None)
         global _is_in_torch_dispatch_mode
-        _is_in_torch_dispatch_mode = self.old_dispatch_mode_flag
+        _is_in_torch_dispatch_mode = self.old_dispatch_mode_flags.pop()
         _pop_mode(mb_dk_or_mode_key)
 
     @classmethod

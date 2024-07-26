@@ -277,6 +277,7 @@ class FunctionalTensor(torch.Tensor):
 
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self, pre_dispatch=False, export=False, _allow_token_discovery=False):
+        super().__init__()
         self.export = export
         self.is_on_stack = False
         self.enter_stack = []
