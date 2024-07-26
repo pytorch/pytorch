@@ -191,10 +191,20 @@ class UtilTest(DTensorTestBase):
             self.assertEqual(local_unpadded_shape, [0, 8])
 
     def test_padding_and_unpadding(self):
+        # test padding tensor with tensor.numel() != 0
         tensor = torch.randn(7, 13)
         unpadded_shape = tensor.shape
         padded_shape = [8, 16]
+        padding_size = compute_padding_size(padded_shape, unpadded_shape)
+        padded_tensor = get_padded_tensor(tensor, padding_size)
+        self.assertEqual(padded_shape, padded_tensor.shape)
+        unpadded_tensor = get_unpadded_tensor(padded_tensor, unpadded_shape)
+        self.assertEqual(tensor, unpadded_tensor)
 
+        # test padding tensor with tensor.numel() == 0
+        tensor = torch.randn(0, 13)
+        unpadded_shape = tensor.shape
+        padded_shape = [8, 13]
         padding_size = compute_padding_size(padded_shape, unpadded_shape)
         padded_tensor = get_padded_tensor(tensor, padding_size)
         self.assertEqual(padded_shape, padded_tensor.shape)
