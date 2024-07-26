@@ -17,6 +17,7 @@ from typing import (
     List,
     Optional,
     overload,
+    Sequence,
     Set,
     Tuple,
     TypeVar,
@@ -34,6 +35,9 @@ from torch.utils._foreach_utils import (
     Indices,
 )
 from torch.utils.hooks import RemovableHandle
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
@@ -112,7 +116,9 @@ def _stack_if_compiling(x):
         return x
 
 
-def _disable_dynamo_if_unsupported(single_tensor_fn=None):
+def _disable_dynamo_if_unsupported(
+    single_tensor_fn: Optional[Callable[..., object]] = None
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     # workaround for torchscript BC
     # it requires all called functions to be in the
     # global environment at the site at which the
@@ -120,7 +126,7 @@ def _disable_dynamo_if_unsupported(single_tensor_fn=None):
     if single_tensor_fn:
         globals()[single_tensor_fn.__name__] = single_tensor_fn
 
-    def wrapper(func):
+    def wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         import inspect
 
         disabled_func = torch._disable_dynamo(func)
@@ -137,15 +143,18 @@ def _disable_dynamo_if_unsupported(single_tensor_fn=None):
         # but this only occurs in the rare case that the user explicitly deletes
         # the capturable flag. If capturable=True, this is not a problem.
         @functools.wraps(func)
-        def maybe_fallback(*args, **kwargs):
+        def maybe_fallback(*args: _P.args, **kwargs: _P.kwargs):
             if is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
-                and (args[state_steps_ind] and args[state_steps_ind][0].is_cuda)
+                and (
+                    isinstance(arg := args[state_steps_ind], Sequence)
+                    and arg[0].is_cuda
+                )
                 or (
                     "state_steps" in kwargs
-                    and kwargs["state_steps"]
-                    and kwargs["state_steps"][0].is_cuda
+                    and isinstance(arg := kwargs["state_steps"], Sequence)
+                    and arg[0].is_cuda
                 )
             ):
                 return disabled_func(*args, **kwargs)
@@ -300,7 +309,6 @@ def register_optimizer_step_post_hook(hook: GlobalOptimizerPostHook) -> Removabl
 
 ParamsT: TypeAlias = Union[Iterable[torch.Tensor], Iterable[Dict[str, Any]]]
 
-_P = ParamSpec("_P")
 R = TypeVar("R")
 T = TypeVar("T")
 
