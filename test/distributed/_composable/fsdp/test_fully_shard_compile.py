@@ -197,7 +197,7 @@ class TestFullyShardCompile(FSDPTest):
         else:
             return False
 
-    def _run_decide_global_ordering_of_comms_with_checks(self):
+    def _maybe_run_decide_global_ordering_of_comms_with_checks(self, fullgraph):
         def _check_fsdp_ops_in_snodes(snodes, is_fwd_graph, expect=True):
             assert_method = self.assertTrue if expect else self.assertFalse
             common_ops = {
@@ -236,14 +236,17 @@ class TestFullyShardCompile(FSDPTest):
             _check_fsdp_ops_in_snodes(new_snodes, is_fwd_graph, expect=False)
             return new_snodes
 
-        return mock.patch.object(
-            comms,
-            "decide_global_ordering_of_comms",
-            functools.partial(
-                _decide_global_ordering_of_comms_with_checks,
-                orig_fn=comms.decide_global_ordering_of_comms,
-            ),
-        )
+        if fullgraph:
+            return mock.patch.object(
+                comms,
+                "decide_global_ordering_of_comms",
+                functools.partial(
+                    _decide_global_ordering_of_comms_with_checks,
+                    orig_fn=comms.decide_global_ordering_of_comms,
+                ),
+            )
+        else:
+            return contextlib.nullcontext()
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._functorch.config.patch(recompute_views=True)
@@ -450,7 +453,7 @@ class TestFullyShardCompile(FSDPTest):
         for fullgraph in [True, False]:
             with self._reinplace_all_gather_with_optional_checks(
                 fullgraph
-            ), self._run_decide_global_ordering_of_comms_with_checks():
+            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(fullgraph):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
                         *self._create_nested_fully_shard_factory_fns(
@@ -559,7 +562,9 @@ class TestFullyShardCompile(FSDPTest):
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(
                 fullgraph
-            ), self._run_decide_global_ordering_of_comms_with_checks():
+            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
+                fullgraph
+            ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
                         *self._create_transformer_factory_fns(),
