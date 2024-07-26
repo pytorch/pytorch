@@ -152,8 +152,6 @@ def _math_attention_inner(
         mask_mod, prefix=(), suffix=mask_mod_in_dim_buffers, group_dim=True
     )
 
-    # todo: We wouldn't need these overrides in this file if Dynamo always did the
-    # rewriting.
     with TransformGetItemToIndex():
         scores = (scores * scale).to(working_precision)
         post_mod_scores = torch.where(
@@ -810,7 +808,7 @@ def trace_flex_attention_backward(
         )
     assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
     block_mask = block_mask[:-1] + (mask_graph,)
-    proxy_mode.tracer.root.register_module("fw_graph", fw_graph)
+    proxy_mode.tracer.root.register_module("fw_graph", fw_graph)  # type: ignore[arg-type]
     proxy_mode.tracer.root.register_module("joint_graph", joint_graph)
     proxy_mode.tracer.root.register_module("mask_graph", mask_graph)
     node_args = (
