@@ -1334,8 +1334,6 @@ tensorInfoLegacyIfScalar(cuda::detail::TensorInfo<T, IndexType> ti) {
   return ti;
 }
 
-}
-
 uint64_t getDefaultMaxThreadsPerBlock() {
 #ifndef USE_ROCM
   return 128;
@@ -1349,6 +1347,9 @@ uint64_t getDefaultMaxThreadsPerBlock() {
   return 256;
 #endif
 }
+
+}
+
 
 template <typename scalar_t>
 void index_select_out_cuda_impl(
