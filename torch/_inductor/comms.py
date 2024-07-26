@@ -130,25 +130,9 @@ def _schedule_for_comm(
         def __lt__(self, other):
             return self.score < other.score
 
-    # A mutating node's unmet_dependencies doesn't cover the dependencies
-    # caused by the mutation. Instead, they are described by associated
-    # MutationOutput node. Thus, to safely schedule a mutating node, we have to
-    # add the unmet_dependencies of the associated MutationOutput nodes to the
-    # mutating node.
-    # TODO(yifu): this is needed due to a mutation handling bug in the
-    # scheduler. It should be fixed by https://github.com/pytorch/pytorch/pull/128893.
-    # We can remove this logic once the fix is landed.
-    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {}
-    for snode in snodes:
-        if isinstance(snode.node, ir.MutationOutput):
-            src_name = snode.node.node_doing_mutating.get_name()
-            src_snode = buf_name_to_snode[src_name]
-            assert src_snode in unmet_deps
-            unmet_deps[src_snode] |= {
-                dep.name for dep in snode.unmet_dependencies if dep.name != src_name
-            }
-        assert snode not in unmet_deps
-        unmet_deps[snode] = {dep.name for dep in snode.unmet_dependencies}
+    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {
+        snode: {dep.name for dep in snode.unmet_dependencies} for snode in snodes
+    }
 
     ready: List[Runnable] = []
     buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(set)
@@ -229,13 +213,11 @@ def decide_global_ordering_of_comms(nodes: List[BaseSchedulerNode]):
     """
     comm_nodes = [n for n in nodes if is_collective(n.node)]
 
-    def item(x: Set[str]) -> str:
-        assert len(x) == 1
-        return next(iter(x))
-
     for i in range(1, len(comm_nodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
-        comm_nodes[i].add_fake_dep(WeakDep(item(comm_nodes[i - 1].get_buffer_names())))
+        mutating_buf = next(iter(comm_nodes[i].get_buffer_names()))
+        for buf in comm_nodes[i - 1].get_buffer_names():
+            comm_nodes[i].add_fake_dep(WeakDep(buf, mutating_buf=mutating_buf))
 
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
