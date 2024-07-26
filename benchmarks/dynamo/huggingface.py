@@ -108,46 +108,6 @@ with open(MODELS_FILENAME, "r") as fh:
 assert len(BATCH_SIZE_KNOWN_MODELS)
 
 
-SKIP_ACCURACY_CHECK_MODELS = {
-    # Models too large to have eager, dynamo and fp64_numbers simultaneosuly
-    # even for 40 GB machine.
-    "DebertaV2ForMaskedLM",
-    "BlenderbotForCausalLM",
-}
-
-SKIP_DUE_TO_CONTROL_FLOW = {"AllenaiLongformerBase"}
-
-
-REQUIRE_HIGHER_TOLERANCE_TRAINING = {
-    "MT5ForConditionalGeneration",
-    # AlbertForQuestionAnswering fails in CI GCP A100 but error does not seem
-    # harmful.
-    "AlbertForQuestionAnswering",
-}
-
-REQUIRE_HIGHER_TOLERANCE_MAX_AUTOTUNE_TRAINING = {
-    # DebertaForQuestionAnswering needs higher tolerance in Max-Autotune mode
-    "DebertaForQuestionAnswering",
-}
-
-REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
-    "GPT2ForSequenceClassification",
-    "RobertaForQuestionAnswering",
-}
-REQUIRE_HIGHER_TOLERANCE_INFERENCE_CPU_ONLY = {
-    "LayoutLMForSequenceClassification",
-}
-
-
-ONLY_EVAL_MODE = {
-    "M2M100ForConditionalGeneration",  # Fails with dynamo for train mode
-}
-
-FP32_ONLY_MODELS = {
-    "GoogleFnet",
-}
-
-
 # TODO(kit1980): deduplicate with the same in torchbench.py
 @functools.lru_cache(maxsize=1)
 def load_yaml_file():
@@ -417,11 +377,11 @@ class HuggingfaceRunner(BenchmarkRunner):
 
     @property
     def fp32_only_models(self):
-        return FP32_ONLY_MODELS
+        return self._config["only_fp32"]
 
     @property
     def skip_models_due_to_control_flow(self):
-        return SKIP_DUE_TO_CONTROL_FLOW
+        return self._skip["control_flow"]
 
     def _get_model_cls_and_config(self, model_name):
         if model_name not in EXTRA_MODELS:
@@ -502,7 +462,9 @@ class HuggingfaceRunner(BenchmarkRunner):
         if (
             is_training
             and not use_eval_mode
-            and not (self.args.accuracy and model_name in ONLY_EVAL_MODE)
+            and not (
+                self.args.accuracy and model_name in self._config["only_inference"]
+            )
         ):
             model.train()
         else:
@@ -532,7 +494,7 @@ class HuggingfaceRunner(BenchmarkRunner):
     @property
     def skip_accuracy_checks_large_models_dashboard(self):
         if self.args.dashboard or self.args.accuracy:
-            return SKIP_ACCURACY_CHECK_MODELS
+            return self._accuracy["skip"]["large_models"]
         return set()
 
     @property
@@ -550,19 +512,19 @@ class HuggingfaceRunner(BenchmarkRunner):
         if is_training:
             from torch._inductor import config as inductor_config
 
-            if (name in REQUIRE_HIGHER_TOLERANCE_TRAINING) or (
+            if (name in self._config["tolerance"]["higher_training"]) or (
                 inductor_config.max_autotune
-                and name in REQUIRE_HIGHER_TOLERANCE_MAX_AUTOTUNE_TRAINING
+                and name in self._config["tolerance"]["higher_max_autotune_training"]
             ):
                 return 2e-2, cosine
             else:
                 return 1e-2, cosine
         else:
-            if name in REQUIRE_HIGHER_TOLERANCE_INFERENCE:
+            if name in self._config["tolerance"]["higher_inference"]:
                 return 4e-3, cosine
             if (
                 current_device == "cpu"
-                and name in REQUIRE_HIGHER_TOLERANCE_INFERENCE_CPU_ONLY
+                and name in self._config["tolerance"]["higher_inference"]
             ):
                 return 4e-3, cosine
         return 1e-3, cosine

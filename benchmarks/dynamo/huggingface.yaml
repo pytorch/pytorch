@@ -15,6 +15,8 @@ skip:
       # OOMs
       - OPTForCausalLM
 
+  control_flow:
+    - AllenaiLongformerBase
 
 batch_size:
   # TODO - Fails even after fake tensors
@@ -69,3 +71,40 @@ batch_size:
     - TrOCRForCausalLM: 2
     - XGLMForCausalLM: 4
     - XLNetLMHeadModel: 2
+
+
+tolerance:
+  higher_training:
+    - MT5ForConditionalGeneration
+    # AlbertForQuestionAnswering fails in CI GCP A100 but error does not seem
+    # harmful.
+    - AlbertForQuestionAnswering
+
+  higher_max_autotune_training:
+    # DebertaForQuestionAnswering needs higher tolerance in Max-Autotune mode
+    - DebertaForQuestionAnswering
+
+  higher_inference:
+    - GPT2ForSequenceClassification
+    - RobertaForQuestionAnswering
+
+  higher_inference_cpu:
+    - LayoutLMForSequenceClassification
+
+  cosine: []
+
+
+accuracy:
+  skip:
+    large_models:
+      # Models too large to have eager, dynamo and fp64_numbers simultaneously
+      # even for 40 GB machine.
+      - DebertaV2ForMaskedLM
+      - BlenderbotForCausalLM
+
+only_inference:
+  # Fails with dynamo for train mode
+  - M2M100ForConditionalGeneration
+
+only_fp32:
+  - GoogleFnet
