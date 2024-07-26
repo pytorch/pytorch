@@ -258,13 +258,7 @@ class PT2EQATTestCase(QuantizationTestCase):
             relu_node = None
             getitem_node = output_fq_node.args[0]
         bn_node = getitem_node.args[0]
-        if is_cuda:
-            if torch.version.cuda is not None:
-                expected_bn_op = torch.ops.aten.cudnn_batch_norm.default
-            elif torch.version.hip is not None:
-                expected_bn_op = torch.ops.aten.miopen_batch_norm.default
-        else:
-            expected_bn_op = torch.ops.aten._native_batch_norm_legit.default
+        expected_bn_op = torch.ops.aten._batch_norm_with_update.default
         self.assertEqual(getitem_node.target, operator.getitem)
         self.assertEqual(bn_node.target, expected_bn_op)
 
@@ -608,7 +602,7 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
                 if (
                     node.target != operator.getitem
                     or node.args[0].target
-                    != torch.ops.aten._native_batch_norm_legit.default
+                    != torch.ops.aten._batch_norm_with_update.default
                 ):
                     continue
                 if node.args[0].args[0].op == "placeholder":
@@ -969,7 +963,7 @@ def _get_conv_bn_getitem_nodes(model: torch.fx.GraphModule):
     for n in model.graph.nodes:
         if _is_conv_node(n):
             conv_node = n
-        if n.target == torch.ops.aten._native_batch_norm_legit.default:
+        if n.target == torch.ops.aten._batch_norm_with_update.default:
             bn_node = n
         if n.target == operator.getitem:
             getitem_node = n
