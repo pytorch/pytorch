@@ -221,6 +221,7 @@ def _is_bn_node(n: Node):
         torch.ops.aten._batch_norm_with_update.default,
     ]
 
+
 def fold_bn_weights_into_conv_node(
     conv_node: Node,
     conv_weight_node: Node,

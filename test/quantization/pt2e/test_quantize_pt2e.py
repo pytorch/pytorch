@@ -54,7 +54,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TemporaryFileName,
     TEST_CUDA,
-    TEST_WITH_ROCM,
 )
 
 
