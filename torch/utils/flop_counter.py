@@ -1,19 +1,19 @@
 # mypy: allow-untyped-defs
-# mypy: allow-untyped-decorators
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
-from typing import List, Any, Dict, Optional, Union, Tuple, Iterator
+from typing import List, Any, Dict, Optional, Union, Tuple, Iterator, TypeVar, Callable
+from typing_extensions import ParamSpec
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch._decomp import register_decomposition
 from math import prod
 from functools import wraps
 import warnings
 
-
-
 __all__ = ["FlopCounterMode", "register_flop_formula"]
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 aten = torch.ops.aten
 
@@ -31,11 +31,24 @@ def shape_wrapper(f):
         return f(*args, out_shape=out_shape, **kwargs)
     return nf
 
-def register_flop_formula(targets, get_raw=False):
-    def register_fun(flop_formula):
+def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    def register_fun(flop_formula: Callable[_P, _T]) -> Callable[_P, _T]:
         if not get_raw:
             flop_formula = shape_wrapper(flop_formula)
-        register_decomposition(targets, registry=flop_registry, unsafe=True)(flop_formula)
+
+        def register(target):
+            if not isinstance(target, torch._ops.OpOverloadPacket):
+                raise ValueError(
+                    f"register_flop_formula(targets): expected each target to be "
+                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), got "
+                    f"{target} which is of type {type(target)}")
+            if target in flop_registry:
+                raise RuntimeError(f"duplicate registrations for {target}")
+            flop_registry[target] = flop_formula
+
+        # To handle allowing multiple aten_ops at once
+        torch.utils._pytree.tree_map_(register, targets)
+
         return flop_formula
 
     return register_fun

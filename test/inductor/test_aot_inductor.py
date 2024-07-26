@@ -52,6 +52,7 @@ if HAS_CUDA:
         add_kernel_autotuned,
         add_kernel_with_optional_param,
         add_kernel_with_scaling,
+        mul2_inplace_kernel,
     )
 
 if IS_WINDOWS and IS_CI:
@@ -2292,6 +2293,22 @@ class AOTInductorTestsTemplate:
             )
 
             self.check_model(Model(), inputs)
+
+    def test_repeated_user_defined_triton_kernel(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                for _ in range(3):
+                    mul2_inplace_kernel[4,](x, n_elements=4, BLOCK_SIZE=16)
+                return x
+
+        inputs = (torch.randn(4, 4, device=self.device),)
+        self.check_model(Model(), inputs)
 
     def test_convolution(self):
         class Model(torch.nn.Module):
