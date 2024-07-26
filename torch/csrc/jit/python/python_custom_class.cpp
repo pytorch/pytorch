@@ -10,7 +10,7 @@ namespace torch::jit {
 struct CustomMethodProxy;
 struct CustomObjectProxy;
 
-py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
+py::object ScriptClass::__call__(py::args args, const py::kwargs& kwargs) {
   auto instance =
       Object(at::ivalue::Object::create(class_type_, /*numSlots=*/1));
   Function* init_fn = instance.type()->findMethod("__init__");

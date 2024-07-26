@@ -3911,6 +3911,9 @@ class ChoiceCaller:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {}
 
+    def autoheuristic_id(self) -> str:
+        return "unsupported_choice"
+
 
 class TritonTemplateCallerBase(ChoiceCaller):
     def get_make_kernel_render(self) -> Any:
@@ -4826,8 +4829,21 @@ class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs(skip_out=True)]
+        kernel_name = self.get_kernel_name()
+        if (
+            V.graph.cpp_wrapper
+            and self.cpp_kernel_name == "torch::inductor::_mm_plus_mm"
+        ):
+            # For https://github.com/pytorch/pytorch/issues/128474
+            kernel_name = (
+                "aoti_torch__mm_plus_mm_out"
+                if config.abi_compatible
+                else "torch::inductor::_mm_plus_mm_out"
+            )
+        else:
+            kernel_name = self.get_kernel_name()
         wrapper.generate_extern_kernel_out(
-            self.get_kernel_name(),
+            kernel_name,
             self.codegen_reference(),
             self.output_view.codegen_reference() if self.output_view else None,
             args,
