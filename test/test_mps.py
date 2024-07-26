@@ -2355,6 +2355,22 @@ class TestMPS(TestCaseMPS):
             else:
                 self.assertEqual(len(w), 0)
 
+    def test_masked_fill__non_contiguous(self):
+        shape = (3, 5)
+
+        x_mps = torch.randn(shape, device="mps")
+        x_cpu = x_mps.detach().clone().cpu()
+        mask_mps = torch.zeros(shape, device="mps", dtype=torch.bool)
+        mask_cpu = mask_mps.detach().clone().cpu()
+
+        x_mps_strided = x_mps.T
+        x_cpu_strided = x_cpu.T
+
+        x_mps_strided.masked_fill_(mask_mps.T.contiguous(), float("-inf"))
+        x_cpu_strided.masked_fill_(mask_cpu.T.contiguous(), float("-inf"))
+
+        self.assertEqual(x_mps_strided, x_cpu_strided)
+
     def test_nhwc_operation(self):
         def helper(shape, channels_last=False):
             import numpy as np
