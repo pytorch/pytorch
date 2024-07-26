@@ -1946,7 +1946,7 @@ def _export_for_training(
         module_call_graph=module_call_graph,
         example_inputs=(args, kwargs),
         constants=export_artifact.aten.constants,
-        verifier=TrainingIRVerifier,
+        verifiers=[TrainingIRVerifier],
     )
 
     return exported_program
@@ -2070,6 +2070,8 @@ def _export(
     if not _is_torch_jit_trace:
         _verify_placeholder_names(gm, export_graph_signature)
 
+    from torch._export.verifier import Verifier
+
     exported_program = ExportedProgram(
         root=gm,
         graph=gm.graph,
@@ -2079,6 +2081,7 @@ def _export(
         module_call_graph=module_call_graph,
         example_inputs=(args, kwargs),
         constants=export_artifact.aten.constants,
+        verifiers=[Verifier],
     )
 
     return exported_program
