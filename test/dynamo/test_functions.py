@@ -983,6 +983,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return torch.ones(2, 2)
         return x.sin()
 
+    @make_test
+    def test_zip_longest(x):
+        list1 = [1, 2, 3]
+        list2 = ["a", "b"]
+        list3 = [True, False, True, False]
+        return torch.sin(x + 1), list(
+            itertools.zip_longest(list1, list2, list3, fillvalue=None)
+        )
+
     def test_dict_param_keys(self):
         a_param = torch.nn.Parameter(torch.ones([4, 4]))
 
