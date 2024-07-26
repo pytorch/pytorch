@@ -28,7 +28,7 @@ std::optional<StrongFunctionPtr> as_function(const py::object& obj) {
   if (py::isinstance<StrongFunctionPtr>(obj)) {
     return py::cast<StrongFunctionPtr>(obj);
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 FunctionSchema PythonValue::getSchema(
@@ -66,8 +66,8 @@ FunctionSchema PythonValue::getSchema(
       args.emplace_back(
           /*name=*/*names_it,
           /*type=*/TensorType::get(),
-          /*N=*/c10::nullopt,
-          /*default_value=*/c10::nullopt,
+          /*N=*/std::nullopt,
+          /*default_value=*/std::nullopt,
           /*kwarg_only=*/false);
     }
 
@@ -95,8 +95,8 @@ FunctionSchema PythonValue::getSchema(
       args.emplace_back(
           /*name=*/*names_it,
           /*type=*/std::move(*types_it),
-          /*N=*/c10::nullopt,
-          /*default_value=*/c10::nullopt,
+          /*N=*/std::nullopt,
+          /*default_value=*/std::nullopt,
           /*kwarg_only=*/false);
     }
     rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
@@ -240,10 +240,10 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     // these APIs.
     if (field == "current_device" || field == "set_device") {
       return std::make_shared<BuiltinFunction>(
-          Symbol::cuda("_" + field), c10::nullopt);
+          Symbol::cuda("_" + field), std::nullopt);
     } else {
       return std::make_shared<BuiltinFunction>(
-          Symbol::cuda(field), c10::nullopt);
+          Symbol::cuda(field), std::nullopt);
     }
   }
 
@@ -673,7 +673,7 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
   if (const auto fnAttr = concreteType_->findFunctionAttribute(field)) {
     return std::make_shared<FunctionValue>(*fnAttr);
   } else if (const auto builtin = concreteType_->findBuiltinFunction(field)) {
-    return std::make_shared<BuiltinFunction>(*builtin, /*self=*/c10::nullopt);
+    return std::make_shared<BuiltinFunction>(*builtin, /*self=*/std::nullopt);
   }
 
   // 5. Check if it's an attribute of the original Python class that this
@@ -1263,7 +1263,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       py::module::import("torch.jit._builtins").attr("_find_builtin")(obj);
   if (!builtin_name.is_none()) {
     return std::make_shared<BuiltinFunction>(
-        Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
+        Symbol::fromQualString(py::str(builtin_name)), std::nullopt);
   }
 
   if (py::cast<bool>(py::module::import("torch._jit_internal")

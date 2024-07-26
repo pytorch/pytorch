@@ -7,6 +7,7 @@
 CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend) {
   this->check_fn = guarded_code.attr("check_fn");
   this->code = guarded_code.attr("code");
+  this->compile_id = guarded_code.attr("compile_id");
   this->backend = backend;
   // TODO - clean this up when enable_cpp_guard_manager is True by default
   if (py::hasattr(this->check_fn, "root")) {

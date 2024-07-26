@@ -92,9 +92,9 @@ IValue pickle_load(const std::vector<char>& data) {
       "data",
       /*pickle_prefix=*/"",
       /*tensor_prefix=*/"",
-      /*type_resolver=*/c10::nullopt,
-      /*obj_loader=*/c10::nullopt,
-      /*device=*/c10::nullopt,
+      /*type_resolver=*/std::nullopt,
+      /*obj_loader=*/std::nullopt,
+      /*device=*/std::nullopt,
       reader);
 #else
   AT_ERROR(

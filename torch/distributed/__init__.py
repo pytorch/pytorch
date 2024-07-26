@@ -1,11 +1,9 @@
 # mypy: allow-untyped-defs
-import os
-import sys
-from enum import Enum
 import pdb
-import io
+import sys
 
 import torch
+
 
 def is_available() -> bool:
     """
@@ -32,31 +30,31 @@ DistStoreError = torch._C._DistStoreError
 
 if is_available():
     from torch._C._distributed_c10d import (
-        Store,
-        FileStore,
-        TCPStore,
-        ProcessGroup as ProcessGroup,
-        Backend as _Backend,
-        PrefixStore,
-        Reducer,
-        Logger,
-        BuiltinCommHookType,
-        GradBucket,
-        Work as _Work,
-        _DEFAULT_FIRST_BUCKET_BYTES,
-        _register_comm_hook,
-        _register_builtin_comm_hook,
         _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
-        _verify_params_across_processes,
+        _ControlCollectives,
+        _DEFAULT_FIRST_BUCKET_BYTES,
+        _make_nccl_premul_sum,
+        _register_builtin_comm_hook,
+        _register_comm_hook,
+        _StoreCollectives,
         _test_python_store,
+        _verify_params_across_processes,
+        Backend as _Backend,
+        BuiltinCommHookType,
         DebugLevel,
+        FileStore,
         get_debug_level,
+        GradBucket,
+        Logger,
+        PrefixStore,
+        ProcessGroup as ProcessGroup,
+        Reducer,
         set_debug_level,
         set_debug_level_from_env,
-        _make_nccl_premul_sum,
-        _ControlCollectives,
-        _StoreCollectives,
+        Store,
+        TCPStore,
+        Work as _Work,
     )
 
     class _DistributedPdb(pdb.Pdb):
@@ -66,10 +64,11 @@ if is_available():
         Usage:
         _DistributedPdb().set_trace()
         """
+
         def interaction(self, *args, **kwargs):
             _stdin = sys.stdin
             try:
-                sys.stdin = open('/dev/stdin')
+                sys.stdin = open("/dev/stdin")
                 pdb.Pdb.interaction(self, *args, **kwargs)
             finally:
                 sys.stdin = _stdin
@@ -101,36 +100,30 @@ if is_available():
             del guard
 
     if sys.platform != "win32":
-        from torch._C._distributed_c10d import (
-            HashStore,
-            _round_robin_process_groups,
-        )
+        from torch._C._distributed_c10d import _round_robin_process_groups, HashStore
 
-    from .distributed_c10d import *  # noqa: F403
+    from .device_mesh import DeviceMesh, init_device_mesh
 
     # Variables prefixed with underscore are not auto imported
     # See the comment in `distributed_c10d.py` above `_backend` on why we expose
     # this.
-
+    from .distributed_c10d import *  # noqa: F403
     from .distributed_c10d import (
         _all_gather_base,
-        _reduce_scatter_base,
-        _create_process_group_wrapper,
-        _rank_not_in_group,
         _coalescing_manager,
         _CoalescingManager,
+        _create_process_group_wrapper,
         _get_process_group_name,
+        _rank_not_in_group,
+        _reduce_scatter_base,
         get_node_local_rank,
     )
-
+    from .remote_device import _remote_device
     from .rendezvous import (
-        rendezvous,
         _create_store_from_options,
         register_rendezvous_handler,
+        rendezvous,
     )
-
-    from .remote_device import _remote_device
-    from .device_mesh import init_device_mesh, DeviceMesh
 
     set_debug_level_from_env()
 
@@ -143,4 +136,5 @@ else:
 
     class _ProcessGroupStub:
         pass
+
     sys.modules["torch.distributed"].ProcessGroup = _ProcessGroupStub  # type: ignore[attr-defined]

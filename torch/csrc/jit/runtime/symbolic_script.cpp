@@ -1609,7 +1609,7 @@ static void loadModule(const CompilationUnit& module) {
 
 static void loadFunctions() {
   for (const std::string& str : functions) {
-    compilation_unit.define(c10::nullopt, str, nativeResolver(), nullptr);
+    compilation_unit.define(std::nullopt, str, nativeResolver(), nullptr);
   }
   loadModule(compilation_unit);
 }
@@ -1635,7 +1635,7 @@ std::optional<GradientPair> gradientInfoForSchema(
       return sym_script_it->second;
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool hasGradientInfoForSchema(const FunctionSchema& schema) {

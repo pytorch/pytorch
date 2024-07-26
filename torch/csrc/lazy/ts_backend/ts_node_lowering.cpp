@@ -37,7 +37,7 @@ TSOpVector LowerTSBuiltin(
     const std::vector<torch::jit::NamedValue>& arguments,
     const std::vector<torch::jit::NamedValue>& kwarguments) {
   auto builtin =
-      std::make_shared<torch::jit::BuiltinFunction>(sym, at::nullopt);
+      std::make_shared<torch::jit::BuiltinFunction>(sym, std::nullopt);
   auto magic_method = std::make_shared<torch::jit::MagicMethod>("", builtin);
   auto ret = magic_method->call({}, *function, arguments, kwarguments, 0);
   auto& sv = dynamic_cast<torch::jit::SimpleValue&>(*ret);

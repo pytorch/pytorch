@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
-from typing import cast, Dict, List, Match, Optional, Sequence, Set, Tuple
+from typing import cast, Sequence
 
 from torchgen import local
 from torchgen.api import cpp
@@ -48,16 +50,16 @@ class Derivative:
     original_formula: str
 
     # Names of the arguments for which this formula calculates derivatives.
-    var_names: Tuple[str, ...]
+    var_names: tuple[str, ...]
 
     # Saved inputs that are referenced by the formula.
-    saved_inputs: Tuple[SavedAttribute, ...]
+    saved_inputs: tuple[SavedAttribute, ...]
 
     # Saved outputs that are referenced by the formula.
-    saved_outputs: Tuple[SavedAttribute, ...]
+    saved_outputs: tuple[SavedAttribute, ...]
 
     # Gradients that are referenced by name in the formula.
-    named_gradients: Set[str]
+    named_gradients: set[str]
 
 
 # Represents a forward formula that calculates forward derivatives
@@ -71,17 +73,17 @@ class ForwardDerivative:
 
     # Name of the output arguments for which this formula calculates forward
     # derivatives
-    var_names: Tuple[str, ...]
+    var_names: tuple[str, ...]
 
     # Type of the output arguments for which this formula calculates forward
     # derivatives
-    var_types: Tuple[Type, ...]
+    var_types: tuple[Type, ...]
 
     # Inputs for which the forward derivatives are required for this formula
-    required_inputs_fw_grad: Optional[Tuple[str, ...]]
+    required_inputs_fw_grad: tuple[str, ...] | None
 
     # Inputs for which the primal is required for this formula
-    required_inputs_primal: Optional[Tuple[str, ...]]
+    required_inputs_primal: tuple[str, ...] | None
 
     # Flag to specify if this formula requires the original value of self
     # This is only used by inplace operations
@@ -116,7 +118,7 @@ class DifferentiabilityInfo:
     # The name of the generated autograd function.
     # It's set only if we will calculate a derivative, i.e.
     # 'args_with_derivatives' is not empty.
-    op: Optional[str]
+    op: str | None
 
     # The derivatives formulae for this function.
     # Note that the length of this sequence is the number of differentiable inputs
@@ -138,7 +140,7 @@ class DifferentiabilityInfo:
 
     # The named gradients that are used in any of the derivatives.
     # Invariant: all(name in available_named_gradients for name in used_named_gradients)
-    used_named_gradients: Set[str]
+    used_named_gradients: set[str]
 
     # The function's input arguments for which it calculates derivatives.
     # It's the union of 'var_names' of all 'derivatives', sorted by the
@@ -149,7 +151,7 @@ class DifferentiabilityInfo:
     non_differentiable_arg_names: Sequence[str]
 
     # Raw data read from derivatives.yaml.
-    output_differentiability: Optional[List[bool]]
+    output_differentiability: list[bool] | None
 
     # output_differentiability in derivatives.yaml can be a list of
     # conditions that express if the output is differentiable. In this case,
@@ -157,7 +159,7 @@ class DifferentiabilityInfo:
     # (NB: we only support one condition right now).
     # output_differentiability gets populated with True for each condition,
     # while output_differentiability_conditions gets populated with the conditions
-    output_differentiability_conditions: Optional[List[str]]
+    output_differentiability_conditions: list[str] | None
 
     @property
     def has_derivatives(self) -> bool:
@@ -170,7 +172,7 @@ class DifferentiabilityInfo:
     # See Note [Codegen'd {view}_copy Operators]
     def create_view_copy_from_view_derivative(
         self, g: NativeFunctionsViewGroup
-    ) -> Optional["DifferentiabilityInfo"]:
+    ) -> DifferentiabilityInfo | None:
         if g.view_copy is None:
             return None
         f = g.view_copy
@@ -201,7 +203,7 @@ class DifferentiabilityInfo:
         )
 
 
-def uses_ident(info: Optional[DifferentiabilityInfo], ident: str) -> bool:
+def uses_ident(info: DifferentiabilityInfo | None, ident: str) -> bool:
     if info is None:
         return False
     for derivative in info.derivatives:
@@ -211,11 +213,11 @@ def uses_ident(info: Optional[DifferentiabilityInfo], ident: str) -> bool:
     return False
 
 
-def uses_retain_variables(info: Optional[DifferentiabilityInfo]) -> bool:
+def uses_retain_variables(info: DifferentiabilityInfo | None) -> bool:
     return uses_ident(info, "retain_variables")
 
 
-def uses_single_grad(info: Optional[DifferentiabilityInfo]) -> bool:
+def uses_single_grad(info: DifferentiabilityInfo | None) -> bool:
     return uses_ident(info, "grad")
 
 
@@ -253,8 +255,8 @@ class DifferentiableOutput:
 @dataclass(frozen=True)
 class NativeFunctionWithDifferentiabilityInfo:
     func: NativeFunction
-    info: Optional[Dict[str, DifferentiabilityInfo]]
-    fw_derivatives: Optional[Dict[str, Sequence[ForwardDerivative]]]
+    info: dict[str, DifferentiabilityInfo] | None
+    fw_derivatives: dict[str, Sequence[ForwardDerivative]] | None
 
 
 # TODO: Update comment below since it is out of date.
@@ -363,19 +365,19 @@ def is_reference_for_foreach(
 # TODO(crcrpar): Avoid hard coding "Default" ideally.
 def gen_foreach_derivativeinfo(
     foreach_function: NativeFunction,
-    functional_info_by_signature: Dict[
-        FunctionSchema, Dict[str, DifferentiabilityInfo]
+    functional_info_by_signature: dict[
+        FunctionSchema, dict[str, DifferentiabilityInfo]
     ],
-    non_functional_info_by_signature: Dict[
-        FunctionSchema, Dict[str, DifferentiabilityInfo]
+    non_functional_info_by_signature: dict[
+        FunctionSchema, dict[str, DifferentiabilityInfo]
     ],
     dispatch_key: str = "Default",
-) -> Tuple[Optional[DifferentiabilityInfo], bool]:
+) -> tuple[DifferentiabilityInfo | None, bool]:
     """Generate DifferentiabilityInfo for out-place foreach function, return the existing one for in-place.
 
     The second return value indicates whether the info is generated in this function.
     """
-    ref_diff_info: Optional[DifferentiabilityInfo] = None
+    ref_diff_info: DifferentiabilityInfo | None = None
 
     for function_schema, diff_info in functional_info_by_signature.items():
         if not is_reference_for_foreach(foreach_function, function_schema):
@@ -485,13 +487,13 @@ def gen_foreach_derivativeinfo(
             if arg.name in all_var_names
         ]
 
-    forward_derivatives: List[ForwardDerivative] = []
+    forward_derivatives: list[ForwardDerivative] = []
     fw_derivative: ForwardDerivative
     for fw_derivative in ref_diff_info.forward_derivatives:
-        var_names: List[str] = list(fw_derivative.var_names)  # type: ignore[no-redef]
-        var_types: List[Type] = list(fw_derivative.var_types)
-        required_inputs_fw_grad: List[str] = []
-        required_inputs_primal: List[str] = []
+        var_names: list[str] = list(fw_derivative.var_names)  # type: ignore[no-redef]
+        var_types: list[Type] = list(fw_derivative.var_types)
+        required_inputs_fw_grad: list[str] = []
+        required_inputs_primal: list[str] = []
         if fw_derivative.required_inputs_fw_grad is not None:
             required_inputs_fw_grad = list(fw_derivative.required_inputs_fw_grad)
         if fw_derivative.required_inputs_primal:
@@ -578,9 +580,9 @@ def gen_foreach_derivativeinfo(
 
 
 def match_differentiability_info(
-    native_functions: List[NativeFunction],
-    differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
-) -> List[NativeFunctionWithDifferentiabilityInfo]:
+    native_functions: list[NativeFunction],
+    differentiability_infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]],
+) -> list[NativeFunctionWithDifferentiabilityInfo]:
     """Sets the "derivative" key on declarations to matching autograd function
     In-place functions will use the out-of-place derivative definition if there
     is no in-place specific derivative.
@@ -599,7 +601,7 @@ def match_differentiability_info(
 
     def find_info(
         f: NativeFunction,
-    ) -> Tuple[Optional[Dict[str, DifferentiabilityInfo]], bool]:
+    ) -> tuple[dict[str, DifferentiabilityInfo] | None, bool]:
         # Don't bother matching info to generated out= variants
         if "generated" in f.tags and f.func.kind() == SchemaKind.out:
             return None, False
@@ -653,7 +655,7 @@ Attempted to convert a derivative formula for a mutable operator
 
         return None, False
 
-    result: List[NativeFunctionWithDifferentiabilityInfo] = []
+    result: list[NativeFunctionWithDifferentiabilityInfo] = []
     for f in native_functions:
         info_dict, is_exact_match = find_info(f)
 
@@ -677,7 +679,7 @@ Attempted to convert a derivative formula for a mutable operator
             )
             continue
 
-        fw_derivative_dict: Dict[str, Sequence[ForwardDerivative]] = {}
+        fw_derivative_dict: dict[str, Sequence[ForwardDerivative]] = {}
         for key, info in info_dict.items():
             if not info.forward_derivatives:
                 fw_derivative_dict[key] = []
@@ -713,7 +715,7 @@ Attempted to convert a derivative formula for a mutable operator
                 formula = fw_info.formula
 
                 def replace_self_with_original_self(formula: str, postfix: str) -> str:
-                    def repl(m: Match[str]) -> str:
+                    def repl(m: re.Match[str]) -> str:
                         return f"{m.group(1)}original_self{postfix}{m.group(2)}"
 
                     return re.sub(IDENT_REGEX.format(f"self{postfix}"), repl, formula)
@@ -734,7 +736,7 @@ Attempted to convert a derivative formula for a mutable operator
                         formula = replace_self_with_original_self(formula, "_t")
 
                 # replace "result" from the formula by "self_p"
-                def repl(m: Match[str]) -> str:
+                def repl(m: re.Match[str]) -> str:
                     return f"{m.group(1)}self_p{m.group(2)}"
 
                 formula = re.sub(IDENT_REGEX.format("result"), repl, formula)
@@ -758,8 +760,8 @@ Attempted to convert a derivative formula for a mutable operator
                     # If there is a need, we can relax (2) to allow any op that has an in-place variant
                     is_single_method_on_self_t = False
                     directly_do_inplace = False
-                    op_name: Optional[str] = None
-                    between_parens: Optional[str] = None
+                    op_name: str | None = None
+                    between_parens: str | None = None
                     match = re.fullmatch(r"self_t.([\w]*)\((.*)\)", formula)
                     if match:
                         op_name, between_parens = match.group(1), match.group(2)
@@ -823,7 +825,7 @@ Attempted to convert a derivative formula for a mutable operator
 
 
 def is_differentiable(
-    name: str, type: Type, info: Optional[DifferentiabilityInfo]
+    name: str, type: Type, info: DifferentiabilityInfo | None
 ) -> bool:
     return type.is_tensor_like() and (
         info is None or name not in info.non_differentiable_arg_names
@@ -832,10 +834,10 @@ def is_differentiable(
 
 def gen_differentiable_outputs(
     fn: NativeFunctionWithDifferentiabilityInfo, key: str = "Default"
-) -> List[DifferentiableOutput]:
+) -> list[DifferentiableOutput]:
     f = fn.func
     info = fn.info[key] if fn.info else None
-    outputs: List[DifferentiableOutput] = [
+    outputs: list[DifferentiableOutput] = [
         DifferentiableOutput(
             name=name,
             type=ret.type,
@@ -850,7 +852,7 @@ def gen_differentiable_outputs(
                 f"The length of output_differentiability ({len(output_differentiability)}), "
                 f"does not match the number of outputs ({len(outputs)})."
             )
-        differentiable_outputs: List[DifferentiableOutput] = []
+        differentiable_outputs: list[DifferentiableOutput] = []
         if False in output_differentiability and f.func.kind() == SchemaKind.inplace:
             raise RuntimeError(
                 "output_differentiability=False for inplace operation (version_counter won't get updated)"

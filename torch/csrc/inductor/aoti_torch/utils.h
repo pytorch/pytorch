@@ -7,9 +7,9 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Logging.h>
-#include <c10/util/Optional.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <optional>
 
 #define AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(...)    \
   try {                                                    \
@@ -51,56 +51,54 @@ inline AtenTensorHandle new_tensor_handle(at::Tensor&& tensor) {
 inline void assert_inf_and_nan(
     const std::string& tensor_name,
     at::Tensor& check_tensor) {
-  auto flattened = check_tensor.view({-1});
-
-  for (int64_t i = 0; i < flattened.numel(); i++) {
-    auto value = flattened[i].item<float>();
-    if (std::isinf(value)) {
-      throw std::runtime_error("At least one INF in " + tensor_name);
-    } else if (std::isnan(value)) {
-      throw std::runtime_error("At least one NaN in " + tensor_name);
-    }
+  auto isnan_tensor = check_tensor.isnan();
+  if (isnan_tensor.any().item<bool>()) {
+    throw std::runtime_error("At least one NaN in " + tensor_name);
+  }
+  auto isinf_tensor = check_tensor.isinf();
+  if (isinf_tensor.any().item<bool>()) {
+    throw std::runtime_error("At least one INF in " + tensor_name);
   }
 }
 
 // utility functions to convert a pointer to an optional value
 template <class T>
 inline std::optional<T> pointer_to_optional(T* ptr) {
-  return ptr ? c10::make_optional(*ptr) : c10::nullopt;
+  return ptr ? std::make_optional(*ptr) : std::nullopt;
 }
 
 template <class T, class U, typename = std::enable_if_t<!std::is_same_v<T, U>>>
 inline std::optional<T> pointer_to_optional(U* ptr) {
-  return ptr ? c10::make_optional<T>(T(*ptr)) : c10::nullopt;
+  return ptr ? std::make_optional<T>(T(*ptr)) : std::nullopt;
 }
 
 template <>
 inline std::optional<at::Tensor> pointer_to_optional(AtenTensorHandle* ptr) {
-  return ptr ? c10::make_optional(*tensor_handle_to_tensor_pointer(*ptr))
-             : c10::nullopt;
+  return ptr ? std::make_optional(*tensor_handle_to_tensor_pointer(*ptr))
+             : std::nullopt;
 }
 
 template <>
 inline std::optional<at::Tensor> pointer_to_optional(
     const AtenTensorHandle* ptr) {
-  return ptr ? c10::make_optional(*tensor_handle_to_tensor_pointer(*ptr))
-             : c10::nullopt;
+  return ptr ? std::make_optional(*tensor_handle_to_tensor_pointer(*ptr))
+             : std::nullopt;
 }
 
 template <>
 inline std::optional<at::Generator> pointer_to_optional(
     AtenGeneratorHandle* ptr) {
-  return ptr ? c10::make_optional(*generator_handle_to_generator_pointer(*ptr))
-             : c10::nullopt;
+  return ptr ? std::make_optional(*generator_handle_to_generator_pointer(*ptr))
+             : std::nullopt;
 }
 
 inline std::optional<c10::Device> pointer_to_optional_device(
     int32_t* device_type,
     int32_t device_index) {
-  return device_type ? c10::make_optional(c10::Device(
+  return device_type ? std::make_optional(c10::Device(
                            static_cast<c10::DeviceType>(*device_type),
                            static_cast<c10::DeviceIndex>(device_index)))
-                     : c10::nullopt;
+                     : std::nullopt;
 }
 
 // utility functions to convert a pointer to a list
@@ -180,8 +178,8 @@ inline std::optional<c10::ArrayRef<T>> pointer_to_optional_list(
     U** ptr,
     int64_t len) {
   return ptr
-      ? c10::make_optional<c10::ArrayRef<T>>(pointer_to_list<T>(*ptr, len))
-      : c10::nullopt;
+      ? std::make_optional<c10::ArrayRef<T>>(pointer_to_list<T>(*ptr, len))
+      : std::nullopt;
 }
 
 } // namespace torch::aot_inductor

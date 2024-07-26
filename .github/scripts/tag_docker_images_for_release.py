@@ -41,7 +41,7 @@ def main() -> None:
     )
 
     options = parser.parse_args()
-    tagged_images: Dict[str, bool] = dict()
+    tagged_images: Dict[str, bool] = {}
     platform_images = [
         generate_binary_build_matrix.WHEEL_CONTAINER_IMAGES,
         generate_binary_build_matrix.LIBTORCH_CONTAINER_IMAGES,

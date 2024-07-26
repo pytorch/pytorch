@@ -1,18 +1,5 @@
 # Owner(s): ["oncall: profiler"]
 
-# if tqdm is not shutdown properly, it will leave the monitor thread alive.
-# This causes an issue in the multithreading test because we check all events
-# in that test with their tids. The events that correspond to these lingering
-# threads all have TID of (uint64_t)(-1) which is invalid.
-# The work around is turnning off monitoring thread when tqdm is loaded.
-# Since these are unit tests, it is safe to turn off monitor thread.
-try:
-    import tqdm
-
-    tqdm.tqdm.monitor_interval = 0
-except ImportError:
-    pass
-
 import collections
 import gc
 import json
@@ -37,6 +24,7 @@ import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
+from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
 from torch.autograd.profiler import KinetoStepTracker, profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
@@ -62,9 +50,7 @@ from torch.profiler._pattern_matcher import (
     report_all_anti_patterns,
     SynchronizedDataLoaderPattern,
 )
-
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
-
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -84,15 +70,27 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+
+# if tqdm is not shutdown properly, it will leave the monitor thread alive.
+# This causes an issue in the multithreading test because we check all events
+# in that test with their tids. The events that correspond to these lingering
+# threads all have TID of (uint64_t)(-1) which is invalid.
+# The work around is turnning off monitoring thread when tqdm is loaded.
+# Since these are unit tests, it is safe to turn off monitor thread.
+try:
+    import tqdm
+
+    tqdm.tqdm.monitor_interval = 0
+except ImportError:
+    pass
+
 try:
     import psutil
 
     HAS_PSUTIL = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_PSUTIL = False
-
-
-from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
+    psutil = None
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
@@ -717,7 +715,9 @@ class TestProfiler(TestCase):
 
         def create_cuda_tensor_oom():
             device = torch.device("cuda:0")
-            return torch.empty(1024, 1024, 1024, 20, dtype=torch.float32, device=device)
+            return torch.empty(
+                1024, 1024, 1024, 1024, dtype=torch.float32, device=device
+            )
 
         def check_trace(fname):
             prof.export_chrome_trace(fname)
@@ -1479,7 +1479,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 """
         try:
             subprocess.check_output(
-                [sys.executable, "-W", "all", "-c", script],
+                [sys.executable, "-W", "always", "-c", script],
                 cwd=os.path.dirname(os.path.realpath(__file__)),
             )
         except subprocess.CalledProcessError as e:
@@ -1539,6 +1539,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         for e in p.events():
             if e.name == "add_test_fast_rf1":
                 self.assertTrue(e.input_shapes == [])
+                self.assertTrue(e.kwinputs == {})
         with profile(record_shapes=True) as p:
             # add optional args
             cm = torch._C._profiler._RecordFunctionFast(
@@ -1555,6 +1556,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         for e in p.events():
             if e.name == "add_test_fast_rf2":
                 self.assertTrue(e.input_shapes == [[4, 4], [4, 4]])
+                self.assertTrue(e.kwinputs == {"stream": 0, "grid": "lambda x : x + 1"})
 
         with profile(record_shapes=True) as p:
             cm = torch._C._profiler._RecordFunctionFast(
@@ -1619,6 +1621,34 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         for e in p.events():
             if e.name == "add_test_fast_rf6":
                 self.assertTrue(e.input_shapes == [[4, 4], [4, 4]])
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_profiler_op_event_kwargs(self):
+        x, y = (torch.rand((4, 4)) for _ in range(2))
+        with profile(record_shapes=True) as p:
+            cm = torch._C._profiler._RecordFunctionFast(
+                "add_test_kwinputs",
+                [x, y],
+                {"stream": 0, "grid": "lambda x : x + 1", "debug": 'debug"'},
+            )
+            for _ in range(4):
+                with cm:
+                    x.add(y)
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+                op_events = [
+                    e for e in j["traceEvents"] if e.get("cat", "") == "cpu_op"
+                ]
+                for e in op_events:
+                    if e["name"] == "add_test_kwinputs":
+                        args = e["args"]
+                        self.assertTrue("stream" in args)
+                        self.assertTrue("grid" in args)
+                        self.assertTrue(args["stream"] == "0")
+                        self.assertTrue(args["grid"] == "lambda x : x + 1")
+                        self.assertTrue(args["debug"] == "None")
 
     def test_is_profiler_enabled(self):
         self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
@@ -1822,6 +1852,65 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         self.assertEqual(self._schedule_helper(warmup=1, active=5, repeat=0), 83)
         self.assertEqual(self._schedule_helper(warmup=10, active=10, repeat=4), 40)
         self.assertEqual(self._schedule_helper(warmup=50, active=1, repeat=0), 1)
+
+    def _step_helper_func(self, prof):
+        time.sleep(0.1)
+        torch.randn(1, 3, 224, 224)
+        prof.step()
+
+    def _partial_overlap(self, prof_step, step_helper_func):
+        p_start = prof_step["ts"]
+        p_end = prof_step["ts"] + prof_step["dur"]
+        h_start = step_helper_func["ts"]
+        h_end = step_helper_func["ts"] + step_helper_func["dur"]
+
+        if p_start < h_start and p_end < h_end and p_end > h_start:
+            return True
+        if p_start > h_start and p_start < h_end and p_end > h_end:
+            return True
+        return False
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_cpu_annotation_overlap(self):
+        with torch.profiler.profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            record_shapes=True,
+            with_stack=True,
+            schedule=torch.profiler.schedule(wait=0, warmup=0, active=5, repeat=1),
+        ) as prof:
+            for i in range(5):
+                self._step_helper_func(prof)
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            prof_steps = []
+            step_helper_funcs = []
+            with open(fname) as f:
+                report = json.load(f)
+                for event in report["traceEvents"]:
+                    if "ProfilerStep" in event["name"]:
+                        prof_steps.append(event)
+                    if "step_helper_func" in event["name"]:
+                        step_helper_funcs.append(event)
+            self.assertEqual(len(prof_steps), 5)
+            self.assertEqual(len(step_helper_funcs), 5)
+            for i in range(0, len(step_helper_funcs)):
+                for j in range(0, len(step_helper_funcs)):
+                    self.assertTrue(
+                        not self._partial_overlap(prof_steps[i], step_helper_funcs[j])
+                    )
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_user_annotation(self):
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        with profile(activities=supported_activities()) as p:
+            with torch.profiler.record_function("test_user_annotation"):
+                self.payload(use_cuda=use_cuda)
+
+        for evt in p.key_averages():
+            if evt.key == "test_user_annotation":
+                self.assertTrue(evt.is_user_annotation)
+            else:
+                self.assertFalse(evt.is_user_annotation)
 
 
 class SimpleNet(nn.Module):

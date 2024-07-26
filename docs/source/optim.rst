@@ -122,8 +122,14 @@ Base class
 
     Optimizer.add_param_group
     Optimizer.load_state_dict
+    Optimizer.register_load_state_dict_pre_hook
+    Optimizer.register_load_state_dict_post_hook
     Optimizer.state_dict
+    Optimizer.register_state_dict_pre_hook
+    Optimizer.register_state_dict_post_hook
     Optimizer.step
+    Optimizer.register_step_pre_hook
+    Optimizer.register_step_post_hook
     Optimizer.zero_grad
 
 Algorithms
@@ -134,6 +140,7 @@ Algorithms
     :nosignatures:
 
     Adadelta
+    Adafactor
     Adagrad
     Adam
     AdamW
@@ -177,6 +184,7 @@ Below is a table showing the available and default implementations of each algor
     :delim: ;
 
     :class:`Adadelta`;foreach;yes;no
+    :class:`Adafactor`;for-loop;no;no
     :class:`Adagrad`;foreach;yes;yes (cpu only)
     :class:`Adam`;foreach;yes;yes
     :class:`AdamW`;foreach;yes;yes
@@ -188,7 +196,7 @@ Below is a table showing the available and default implementations of each algor
     :class:`RAdam`;foreach;yes;no
     :class:`RMSprop`;foreach;yes;no
     :class:`Rprop`;foreach;yes;no
-    :class:`SGD`;foreach;yes;yes (CPU and CUDA only)
+    :class:`SGD`;foreach;yes;yes
 
 Below table is showing the stability status for fused implementations:
 
@@ -198,6 +206,7 @@ Below table is showing the stability status for fused implementations:
     :delim: ;
 
     :class:`Adadelta`;unsupported;unsupported;unsupported
+    :class:`Adafactor`;unsupported;unsupported;unsupported
     :class:`Adagrad`;beta;unsupported;unsupported
     :class:`Adam`;beta;stable;beta
     :class:`AdamW`;beta;stable;beta
@@ -209,7 +218,7 @@ Below table is showing the stability status for fused implementations:
     :class:`RAdam`;unsupported;unsupported;unsupported
     :class:`RMSprop`;unsupported;unsupported;unsupported
     :class:`Rprop`;unsupported;unsupported;unsupported
-    :class:`SGD`;beta;beta;unsupported
+    :class:`SGD`;beta;beta;beta
 
 How to adjust learning rate
 ---------------------------

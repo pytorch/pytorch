@@ -218,7 +218,7 @@ static Tensor mkldnn_linear_pointwise(
 
   const ideep::tensor mkldnn_input = itensor_view_from_dense(input_reshaped);
 
-  std::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
+  std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
     mkldnn_bias = itensor_from_tensor(bias);
   }
@@ -303,7 +303,7 @@ static Tensor mkldnn_linear_pointwise_binary(
   const ideep::tensor mkldnn_other = itensor_from_tensor(other_reshaped);
   const ideep::tensor mkldnn_input = itensor_view_from_dense(input_reshaped);
 
-  std::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
+  std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
     mkldnn_bias = itensor_from_tensor(bias);
   }

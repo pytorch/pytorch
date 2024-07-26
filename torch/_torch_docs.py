@@ -2,6 +2,7 @@
 """Adds docstrings to functions defined in the torch._C module."""
 
 import re
+from typing import Dict
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
@@ -169,7 +170,7 @@ rocm_fp16_notes = {
 :ref:`different precision<fp16_on_mi200>` for backward."""
 }
 
-reproducibility_notes = {
+reproducibility_notes: Dict[str, str] = {
     "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
 a CUDA device. See :doc:`/notes/randomness` for more information.""",
     "backward_reproducibility_note": """This operation may produce nondeterministic gradients when given tensors on \
@@ -7757,12 +7758,11 @@ Keyword args:
 
 Example::
 
-    >>> b = torch.tensor(
-           [[0, 0, 0, 2, 0, 0, 2],
-            [0, 3, 0, 0, 2, 0, 1],
-            [2, 2, 2, 0, 0, 0, 3],
-            [2, 2, 3, 0, 1, 1, 0],
-            [1, 1, 0, 0, 2, 0, 2]])
+    >>> b = torch.tensor([[0, 0, 0, 2, 0, 0, 2],
+    ...                   [0, 3, 0, 0, 2, 0, 1],
+    ...                   [2, 2, 2, 0, 0, 0, 3],
+    ...                   [2, 2, 3, 0, 1, 1, 0],
+    ...                   [1, 1, 0, 0, 2, 0, 2]])
     >>> torch.mode(b, 0)
     torch.return_types.mode(
     values=tensor([0, 2, 0, 0, 0, 0, 2]),
@@ -9443,7 +9443,7 @@ Args:
 Keyword args:
     {out}
     {dtype} If `dtype` is not given, infer the data type from the other input
-        arguments. If any of `start`, `end`, or `stop` are floating-point, the
+        arguments. If any of `start`, `end`, or `step` are floating-point, the
         `dtype` is inferred to be the default dtype, see
         :meth:`~torch.get_default_dtype`. Otherwise, the `dtype` is inferred to
         be `torch.int64`.
@@ -11424,7 +11424,7 @@ Example::
 add_docstr(
     torch.rot90,
     r"""
-rot90(input, k=1, dims=[0,1]) -> Tensor
+rot90(input, k=1, dims=(0, 1)) -> Tensor
 
 Rotate an n-D tensor by 90 degrees in the plane specified by dims axis.
 Rotation direction is from the first towards the second axis if k > 0, and from the second towards the first for k < 0.
@@ -13662,6 +13662,265 @@ Example::
 
             [[0.0000]]]], size=(2, 2, 1, 1), dtype=torch.quint8,
         quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
+""",
+)
+
+
+add_docstr(
+    torch.Stream,
+    r"""
+Stream(device, *, priority) -> Stream
+
+An in-order queue of executing the respective tasks asynchronously in first in first out (FIFO) order.
+It can control or synchronize the execution of other Stream or block the current host thread to ensure
+the correct task sequencing.
+
+See in-depth description of the CUDA behavior at :ref:`cuda-semantics` for details
+on the exact semantic that applies to all devices.
+
+Arguments:
+    device (:class:`torch.device`, optional): the desired device for the Stream.
+        If not given, the current :ref:`accelerator<accelerators>` type will be used.
+    priority (int, optional): priority of the stream, should be 0 or negative, where negative
+        numbers indicate higher priority. By default, streams have priority 0.
+
+Returns:
+    Stream: An torch.Stream object.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+""",
+)
+
+
+add_docstr(
+    torch.Stream.query,
+    r"""
+Stream.query() -> bool
+
+Check if all the work submitted has been completed.
+
+Returns:
+    bool: A boolean indicating if all kernels in this stream are completed.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+    >>> s_cuda.query()
+    True
+""",
+)
+
+
+add_docstr(
+    torch.Stream.record_event,
+    r"""
+Stream.record_event(event) -> Event
+
+Record an event. En-queuing it into the Stream to allow further synchronization from the current point in the FIFO queue.
+
+Arguments:
+    event (:class:`torch.Event`, optional): event to record. If not given, a new one will be allocated.
+
+Returns:
+    Event: Recorded event.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+    >>> e_cuda = s_cuda.record_event()
+""",
+)
+
+
+add_docstr(
+    torch.Stream.synchronize,
+    r"""
+Stream.synchronize() -> None
+
+Wait for all the kernels in this stream to complete.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+    >>> s_cuda.synchronize()
+""",
+)
+
+
+add_docstr(
+    torch.Stream.wait_event,
+    r"""
+Stream.wait_event(event) -> None
+
+Make all future work submitted to the stream wait for an event.
+
+Arguments:
+    event (:class:`torch.Event`): an event to wait for.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s1_cuda = torch.Stream(device='cuda')
+    >>> s2_cuda = torch.Stream(device='cuda')
+    >>> e_cuda = s1_cuda.record_event()
+    >>> s2_cuda.wait_event(e_cuda)
+""",
+)
+
+
+add_docstr(
+    torch.Stream.wait_stream,
+    r"""
+Stream.wait_stream(stream) -> None
+
+Synchronize with another stream. All future work submitted to this stream will wait until all kernels
+already submitted to the given stream are completed.
+
+Arguments:
+    stream (:class:`torch.Stream`): a stream to synchronize.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s1_cuda = torch.Stream(device='cuda')
+    >>> s2_cuda = torch.Stream(device='cuda')
+    >>> s2_cuda.wait_stream(s1_cuda)
+""",
+)
+
+
+add_docstr(
+    torch.Event,
+    r"""
+Event(device, *, enable_timing) -> Event
+
+Query and record Stream status to identify or control dependencies across Stream and measure timing.
+
+Arguments:
+    device (:class:`torch.device`, optional): the desired device for the Event.
+        If not given, the current :ref:`accelerator<accelerators>` type will be used.
+    enable_timing (bool, optional): indicates if the event should measure time (default: ``False``).
+
+Returns:
+    Event: An torch.Event object.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> e_cuda = torch.Event(device='cuda')
+""",
+)
+
+
+add_docstr(
+    torch.Event.elapsed_time,
+    r"""
+Event.elapsed_time(end_event) -> float
+
+Returns the elapsed time in milliseconds between when this event and the :attr:`end_event` are
+each recorded via :func:`torch.Stream.record_event`.
+
+Arguments:
+    end_event (:class:`torch.Event`): The ending event has been recorded.
+
+Returns:
+    float: Time between starting and ending event in milliseconds.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+    >>> e1_cuda = s_cuda.record_event()
+    >>> e2_cuda = s_cuda.record_event()
+    >>> ms = e1_cuda.elapsed_time(e2_cuda)
+""",
+)
+
+
+add_docstr(
+    torch.Event.query,
+    r"""
+Event.query() -> bool
+
+Check if the stream where this event was recorded already moved past the point where the event was recorded.
+Always returns ``True`` if the Event was not recorded.
+
+Returns:
+    bool: A boolean indicating if all work currently captured by event has completed.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+    >>> e_cuda = s_cuda.record_event()
+    >>> e_cuda.query()
+    True
+""",
+)
+
+
+add_docstr(
+    torch.Event.record,
+    r"""
+Event.record(stream) -> None
+
+Record the event in a given stream. The stream's device must match the event's device.
+This function is equivalent to ``stream.record_event(self)``.
+
+Arguments:
+    stream (:class:`torch.Stream`, optional): A stream to be recorded.
+    If not given, the current stream will be used.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> e_cuda = torch.Event(device='cuda')
+    >>> e_cuda.record()
+""",
+)
+
+
+add_docstr(
+    torch.Event.synchronize,
+    r"""
+Event.synchronize() -> None
+
+Wait for the event to complete. This prevents the CPU thread from proceeding until the event completes.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+    >>> e_cuda = s_cuda.record_event()
+    >>> e_cuda.synchronize()
+""",
+)
+
+
+add_docstr(
+    torch.Event.wait,
+    r"""
+Event.wait(stream) -> None
+
+Make all future work submitted to the given stream wait for this event.
+
+Arguments:
+    stream (:class:`torch.Stream`, optional): A stream to synchronize.
+    If not given, the current stream will be used.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s1_cuda = torch.Stream(device='cuda')
+    >>> s2_cuda = torch.Stream(device='cuda')
+    >>> e_cuda = s1_cuda.record()
+    >>> e_cuda.wait(s2)
 """,
 )
 
