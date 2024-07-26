@@ -533,25 +533,39 @@ class TestFullyShardCompile(FSDPTest):
                 for fwd_ag_block_info in [
                     dict(overlapped_compute_op_str=None, num_resize=0, num_set=2),
                     dict(
-                        overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
+                        num_set=2,
                     ),
                     dict(
-                        overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
+                        num_set=2,
                     ),
                     dict(
-                        overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
+                        num_set=2,
                     ),
                     dict(
-                        overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
+                        num_set=2,
                     ),
                     dict(
-                        overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
+                        num_set=2,
                     ),
                     dict(
-                        overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
+                        num_set=2,
                     ),
                     dict(
-                        overlapped_compute_op_str="extern_kernels.mm(", num_resize=2, num_set=2
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=2,
+                        num_set=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
@@ -570,7 +584,9 @@ class TestFullyShardCompile(FSDPTest):
                 for bwd_ag_block_info in [
                     dict(overlapped_compute_op_str=None, num_resize=0, num_set=2),
                     dict(
-                        overlapped_compute_op_str="extern_kernels.mm(", num_resize=0, num_set=2
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=0,
+                        num_set=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
@@ -584,7 +600,9 @@ class TestFullyShardCompile(FSDPTest):
                     )
                 for bwd_rs_block_info in [
                     dict(overlapped_compute_op_str="extern_kernels.mm("),
-                    dict(overlapped_compute_op_str=None),  # TODO: improve compute/comm overlap
+                    dict(
+                        overlapped_compute_op_str=None
+                    ),  # TODO: improve compute/comm overlap
                     dict(overlapped_compute_op_str=None),
                 ]:
                     file_check = self.inductor_code_check_fsdp_reduce_scatter(
@@ -724,7 +742,9 @@ class TestFullyShardCompile(FSDPTest):
                 file_check = FileCheck().check("def call(args):")
                 for bwd_ag_block_info in [
                     dict(
-                        overlapped_compute_op_str="extern_kernels.mm(", num_resize=0, num_set=12
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=0,
+                        num_set=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
@@ -743,7 +763,9 @@ class TestFullyShardCompile(FSDPTest):
                     )
                 for bwd_rs_block_info in [
                     dict(overlapped_compute_op_str="extern_kernels.mm("),
-                    dict(overlapped_compute_op_str=None),  # TODO: improve compute/comm overlap
+                    dict(
+                        overlapped_compute_op_str=None
+                    ),  # TODO: improve compute/comm overlap
                     dict(overlapped_compute_op_str=None),
                     dict(overlapped_compute_op_str=None),
                 ]:
