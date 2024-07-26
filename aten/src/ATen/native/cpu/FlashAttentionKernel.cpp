@@ -422,6 +422,11 @@ void cpu_flash_attention(
             dst_data,
             headSize);
       }
+      // We set fully masked out rows to 0, for this masked out rows the sum is 0, so we need to set it to 1
+      for (const auto row : c10::irange(qBlockSize)){
+        qk_sum_data[row] = qk_sum_data[row] == 0 ? 1 : qk_sum_data[row];
+      }
+
       // dst <- dst / sum[row]
       // reorder MHA output with strides
       for (int64_t row = 0; row < qBlockSize; ++row) {
