@@ -606,8 +606,8 @@ class TS2FXGraphConverter:
                     f"lifted_tensor_{name}"  # Follow naming convention from EP tracing.
                 )
                 fx_node = self.fx_graph.get_attr(alias_name)
-                self.name_to_constant[alias_name] = node.t("value")
-                value = fx_node
+                self.name_to_node[name] = fx_node
+                name, value = alias_name, node.t("value")
             elif constant_kind == "ival":
                 value = node.ival("value")
             else:
@@ -1333,10 +1333,14 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         # Because during conversion, we set tensor constants as GetAttr,
         # retracing cannot recognize them as tensor constants but instead
         # treat them as buffers. We need to set them again here.
-        ep._constants = name_to_constant
+        ep._constants = {
+            k: v for k, v in name_to_constant.items()
+            if isinstance(v, (torch.Tensor, torch.ScriptObject))
+        }
         for k in name_to_constant:
             ep.state_dict.pop(k, None)
-        for spec in ep.graph_signature.input_specs:
+
+        for i, spec in enumerate(ep.graph_signature.input_specs):
             # Mark as constant tensors for erroneously traced buffers.
             if (
                 spec.kind == InputKind.BUFFER
