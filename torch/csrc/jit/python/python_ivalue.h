@@ -49,15 +49,8 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
     // when using C++. The reason is unclear.
     try {
       pybind11::gil_scoped_acquire ag;
-      PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object>
-          storage;
-      auto& extractorFn =
-          storage
-              .call_once_and_store_result([]() -> py::object {
-                return py::module_::import("torch._jit_internal")
-                    .attr("_extract_tensors");
-              })
-              .get_stored();
+      static py::object& extractorFn = *new py::object(
+          py::module::import("torch._jit_internal").attr("_extract_tensors"));
       return extractorFn(py_obj_).cast<std::vector<at::Tensor>>();
     } catch (py::error_already_set& e) {
       auto err = std::runtime_error(
