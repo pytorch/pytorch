@@ -55,7 +55,7 @@ def is_const_source(
     return (
         node.op == "get_attr"
         or (
-            # const_arg -> convert -> permute
+            # const_arg -> permute -> convert
             node.target == torch.ops.aten.permute.default
             and node.args[0].op == "get_attr"  # type: ignore[union-attr]
             and node.users.keys()
