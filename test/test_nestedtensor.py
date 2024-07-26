@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
+from torch.utils._pytree import tree_map
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
 
@@ -262,8 +263,22 @@ def convert_nt_to_jagged(nt):
     return buffer_from_jagged(nt)
 
 
+# Base TestCase for NT tests; used to define common helpers, etc.
+class NestedTensorTestCase(TestCase):
+    def assertEqualIgnoringNestedInts(self, a, b):
+        # unbinding NJTs allows us to compare them as essentially equal without
+        # caring about exact nested int comparison
+        def _unbind_njts(x):
+            if isinstance(x, torch.Tensor) and x.is_nested and x.layout == torch.jagged:
+                return x.unbind()
+            else:
+                return x
+
+        self.assertEqual(tree_map(_unbind_njts, a), tree_map(_unbind_njts, b))
+
+
 @markDynamoStrictTest
-class TestNestedTensor(TestCase):
+class TestNestedTensor(NestedTensorTestCase):
     @parametrize("batch_size", [2, 4])
     @parametrize("max_seq_len", [3, 5])
     @parametrize("vocab_size", [10, 20])
@@ -831,7 +846,7 @@ class TestNestedTensor(TestCase):
 
 
 @markDynamoStrictTest
-class TestNestedTensorDeviceType(TestCase):
+class TestNestedTensorDeviceType(NestedTensorTestCase):
     # Helper function to generate a pair of random nested tensors
     # the 2 nested tensors have same shapes
     def random_nt_pair(self, device, dtype, num_tensors, max_dims):
@@ -2679,7 +2694,7 @@ class TestNestedTensorDeviceType(TestCase):
 
 
 @markDynamoStrictTest
-class TestNestedTensorAutograd(TestCase):
+class TestNestedTensorAutograd(NestedTensorTestCase):
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck
     # includes the default parameters used for testing ops with gradcheck. However nested tensor
     # does not support the stack op therefore we turn it off for these tests
@@ -3457,7 +3472,7 @@ def get_tolerances(
 # We can probably parametrizing existing tests instead of having a separate
 # test class as we begin to support more ops. Also maybe rewrite with OpInfos.
 @markDynamoStrictTest
-class TestNestedTensorSubclass(TestCase):
+class TestNestedTensorSubclass(NestedTensorTestCase):
     # TODO: consolidate with the below
     def _get_list_for_jagged_tensor(self, nested_size, device, requires_grad=True):
         Ds = nested_size[1:]
@@ -3729,13 +3744,13 @@ class TestNestedTensorSubclass(TestCase):
         nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
         out = torch.split(nt, 2, -1)
         self.assertEqual(len(out), 2)
-        self.assertEqual(
+        self.assertEqualIgnoringNestedInts(
             out[0],
             torch.nested.as_nested_tensor(
                 [a[:, 0:2], b[:, 0:2], c[:, 0:2]], layout=torch.jagged
             ),
         )
-        self.assertEqual(
+        self.assertEqualIgnoringNestedInts(
             out[1],
             torch.nested.as_nested_tensor(
                 [a[:, 2:], b[:, 2:], c[:, 2:]], layout=torch.jagged
@@ -3756,13 +3771,13 @@ class TestNestedTensorSubclass(TestCase):
         nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
         out = torch.split(nt, [1, 2], -1)
         self.assertEqual(len(out), 2)
-        self.assertEqual(
+        self.assertEqualIgnoringNestedInts(
             out[0],
             torch.nested.as_nested_tensor(
                 [a[:, 0:1], b[:, 0:1], c[:, 0:1]], layout=torch.jagged
             ),
         )
-        self.assertEqual(
+        self.assertEqualIgnoringNestedInts(
             out[1],
             torch.nested.as_nested_tensor(
                 [a[:, 1:], b[:, 1:], c[:, 1:]], layout=torch.jagged
@@ -5034,11 +5049,11 @@ class TestNestedTensorSubclass(TestCase):
             # should be the non-copying (view) case
             self.assertTrue(nt._is_view() and nt._base is t)
 
-        # should be equivalent to construction from unbound tensor list
+        # should have equivalent components to construction from unbound tensor list
         nt_from_unbind = torch.nested.as_nested_tensor(
             list(t.unbind(0)), device=device, dtype=dtype, layout=layout
         )
-        self.assertEqual(nt, nt_from_unbind)
+        self.assertEqualIgnoringNestedInts(nt, nt_from_unbind)
 
         # ensure call on a NT with the same properties returns the NT directly
         nt2 = torch.nested.as_nested_tensor(
