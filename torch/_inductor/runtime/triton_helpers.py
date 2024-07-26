@@ -39,7 +39,7 @@ def promote_to_tensor(x):
 
 @triton.jit
 def div_floor_integer(a, b):
-    # NOTE:: a // b is C division, but we want floor division
+    # NOTE: a // b is C division, but we want floor division
     # Based on c10::div_floor_integer
     quot = a // b
     remainder = a % b
@@ -49,7 +49,7 @@ def div_floor_integer(a, b):
 
 @triton.jit
 def remainder_integer(a, b):
-    # NOTE:: a % b matches C division, not floor division
+    # NOTE: a % b matches C division, not floor division
     remainder = a % b
     return tl.where(remainder != 0 and ((a < 0) != (b < 0)), remainder + b, remainder)
 

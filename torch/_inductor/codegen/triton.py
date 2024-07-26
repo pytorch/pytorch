@@ -396,7 +396,7 @@ class TritonPrinter(PythonPrinter):
         quot_s = self._print(quot)
         div_s = self._print(div)
         if quot.is_nonnegative and div.is_nonnegative:
-            return f"{self.paren(quot_s)} // {self.paren(div_s)}"
+            return f"({self.paren(quot_s)} // {self.paren(div_s)})"
         return f"triton_helpers.div_floor_integer({quot_s},  {div_s})"
 
     # TODO: This is wrong, when lhs, rhs > 2**53, Python does a higher
