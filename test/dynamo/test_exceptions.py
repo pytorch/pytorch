@@ -227,6 +227,33 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(4)
         self.assertEqual(mod(x), opt_mod(x))
 
+    def test_stop_iteration(self):
+        def zip_longest(*iterables, fillvalue=None):
+            # Get the iterators for each iterable
+            iterators = [iter(it) for it in iterables]
+
+            result = []
+            while True:
+                for it in iterators:
+                    try:
+                        value = next(it)
+                    except StopIteration:
+                        result.append(fillvalue)
+                        return result
+                    result.append(value)
+
+        def fn(x, y):
+            torch.cos(torch.randn(4))
+            return tuple(zip_longest(x, y))
+
+        x = [1, 2, 3, 4]
+        y = [10, 11, 12]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
