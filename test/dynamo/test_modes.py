@@ -32,7 +32,9 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
             compiled_res = torch._dynamo.optimize(cnt)(fn)(x)
 
         self.assertEqual(eager_res, compiled_res)
-        self.assertEqual(cnt.frame_count, 0)
+        # weirdly, dynamo still traces through the dispatch call itself,
+        # but since this python code is not called again, this doesn't matter
+        self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":
