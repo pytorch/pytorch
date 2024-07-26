@@ -3001,6 +3001,10 @@ class Layout(IRNode):
     def dtype(self) -> torch.dtype:
         return self._dtype
 
+    @dtype.setter
+    def dtype(self, value) -> None:
+        self._dtype = value
+
     @property
     def stride(self) -> Sequence[_IntLike]:
         return self._stride  # type: ignore[return-value]
