@@ -67,11 +67,10 @@ runs:
             echo "$msg"
             exit 1
         fi
-        test_matrix="${{ inputs.test-matrix }}"
-        tests=${test-matrix.include[i]["config"]}
-        for (( i = 0; i < ${#tests}; i++ ))
-        do
-          if [[ ${ ${tests}  != "default" ]]; then
+        configs=$(echo "$test_matrix" | jq -c '.include[]')
+        echo "$configs" | while IFS= read -r config; do
+          test=$(echo "$config" | jq -r '.config')
+          if [[ "${test}""  != "default" ]]; then
             if [[ $ngpu -eq 1 ]]; then
                 echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
                 echo "$msg"
@@ -80,8 +79,7 @@ runs:
           fi
         done
       env:
-        test-matrix: 
-
+        test_matrix: ${{ inputs.test-matrix }}
     - name: Runner diskspace health check
       uses: ./.github/actions/diskspace-cleanup
       if: always()
