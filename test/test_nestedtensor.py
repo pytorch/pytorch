@@ -6504,12 +6504,20 @@ FORWARD_FAILURES = {
 
 BACKWARD_FAILURES = {
     *FORWARD_FAILURES,
-    # TODO: sort these
-    "__rpow__",
-    "atanh",
+    # TODO: categorize these
     "cdouble",
     "cfloat",
     "chalf",
+}
+
+COMPILE_BACKWARD_FAILURES = {
+    *BACKWARD_FAILURES,
+    # mvlgamma_backward calls arange() passing self.options() and layout=torch.jagged
+    # is not supported for the arange() decomp. Backward function should be fixed
+    *(f"mvlgamma.mvlgamma_p_{p}" for p in [1, 3, 5]),
+    # TODO: categorize these
+    "__rpow__",
+    "atanh",
     "clamp_max",
     "clamp_min",
     "copysign",
@@ -6524,13 +6532,6 @@ BACKWARD_FAILURES = {
     "sinc",
     "special.i1",
     "special.i1e",
-}
-
-COMPILE_BACKWARD_FAILURES = {
-    *BACKWARD_FAILURES,
-    # mvlgamma_backward calls arange() passing self.options() and layout=torch.jagged
-    # is not supported for the arange() decomp. Backward function should be fixed
-    *(f"mvlgamma.mvlgamma_p_{p}" for p in [1, 3, 5]),
 }
 
 
