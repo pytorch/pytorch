@@ -790,7 +790,7 @@ static bool is_scalar_list(PyObject* obj) {
 bool is_tensor_list_and_append_overloaded(
     PyObject* obj,
     std::vector<PyObject*>* overloaded_args,
-    int argnum,
+    size_t argnum,
     bool throw_error) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
