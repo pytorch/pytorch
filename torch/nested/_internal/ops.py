@@ -37,6 +37,11 @@ def _wrap_jagged_dim(
 
 
 def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1):
+    """
+    For NestedTensor operators that support multiple dimensions,
+    wraps dimensions to non-negative values,
+    and returns metadata related to reduction dimension(s).
+    """
     from torch._prims_common import canonicalize_dims
 
     wrapped_dims = [
@@ -1097,18 +1102,65 @@ def convolution_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten.mean.dim, "self: jt, dim: any?, keepdim: any, dtype: any?"
+    torch.ops.aten.mean.dim, "self: jt_all, dim: any?, keepdim: any?, dtype: any?"
 )
 def mean_dim(func, *args, **kwargs):
+    """
+    Performs a mean along the provided tensor dimension.
+    Returns a dense tensor if the ragged dimension is reduced away, else returns a nested tensor.
+    """
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    inp = new_kwargs.pop("input")
-    # NB: mean expects dim as a single item list of ints for some reason
-    new_kwargs["dim"] = [_wrap_jagged_dim(inp.dim(), new_kwargs["dim"][0], "mean")]
+    if len(new_kwargs["dim"]) > 1:
+        raise RuntimeError(
+            "mean(): not supported across multiple dimensions for NestedTensor"
+        )
 
-    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+    if not new_kwargs["keepdim"]:
+        raise RuntimeError("mean(): not supported when keepdim=False for NestedTensor")
+
+    inp = new_kwargs.pop("input")
+
+    (
+        new_kwargs["dim"],
+        reduce_on_batch,
+        reduce_on_ragged,
+        reduce_on_non_batch,  # noqa: UFMT
+    ) = _wrap_jagged_dims(
+        inp.dim(),
+        new_kwargs["dim"],
+        "mean",
+        inp._ragged_idx,
+    )
+
+    if inp._ragged_idx != 1:
+        raise RuntimeError(
+            "mean(): not supported when ragged_idx != 1 for NestedTensor"
+        )
+
+    if reduce_on_ragged and inp._lengths is not None:
+        raise RuntimeError(
+            "mean(): not supported where lengths is not None "
+            + "if reducing across the ragged dimension for NestedTensor"
+        )
+
+    if reduce_on_ragged:  # raggedness reduced away
+        torch_sum = torch.sum(inp, dim=inp._ragged_idx, keepdim=new_kwargs["keepdim"])
+
+        # for every non-batch dimension past the ragged dimension,
+        #   unsqueeze lengths into the same shape as the PyTorch sum,
+        #   as the extra dimensions must all be divided by the same length
+        lengths = inp._offsets.diff()
+        for _ in range(inp.dim() - inp._ragged_idx - 1):
+            lengths = lengths.unsqueeze(-1)
+
+        return torch_sum / lengths.broadcast_to(torch_sum.shape)
+
+    return NestedTensor(
+        func(inp._values, **new_kwargs), **extract_kwargs(inp)
+    )  # raggedness preserved
 
 
 @register_jagged_func(torch.ops.aten.stack.default, "tensors: any, dim: any")

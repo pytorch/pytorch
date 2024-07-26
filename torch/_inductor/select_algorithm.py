@@ -384,7 +384,7 @@ class TritonTemplateKernel(TritonKernel):
 
                     return f"({fixed_inputs[name]})"
 
-                def indirect_indexing(self, index_var, size, check):
+                def indirect_indexing(self, index_var, size, check, wrap_neg=True):
                     return sympy_index_symbol(str(index_var))
 
             with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
@@ -751,7 +751,7 @@ class TritonTemplate(KernelTemplate):
             num_stages=num_stages,
             num_warps=num_warps,
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
-            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),
+            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
 
