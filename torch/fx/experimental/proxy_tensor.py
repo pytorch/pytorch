@@ -1789,7 +1789,11 @@ def maybe_handle_decomp(
         args: Tuple[object, ...],
         kwargs: Dict[str, object]
 ) -> object:
+    from torch._inductor.bisect_helper import BisectionManager
     if op in CURRENT_DECOMPOSITION_TABLE:
+        if not BisectionManager.torch_bisect("aot_eager_decomp_partition", "decomposition"):
+            return NotImplemented
+
         with proxy_mode:
             return CURRENT_DECOMPOSITION_TABLE[op](*args, **kwargs)
     return NotImplemented
