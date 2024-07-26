@@ -2,6 +2,7 @@
 
 import itertools
 import random
+from typing import List
 
 import torch
 import torch.nn.utils.rnn as rnn_utils
@@ -218,17 +219,14 @@ class PackedSequenceTest(TestCase):
         # more dimensions
         maxlen = 9
         for num_dim in (0, 1, 2, 3):
-            sequences = []
+            sequences: List[torch.Tensor] = []
             trailing_dims = [4] * num_dim
             for i in range(1, maxlen + 1):
                 seq_len = i * i
                 sequences.append(torch.rand(seq_len, 5, *trailing_dims))
             random.shuffle(sequences)
-            expected = []
-            for seq in sequences:
-                expected.append(pad(seq, maxlen * maxlen))
             # batch first = true
-            expected = torch.stack(expected)
+            expected = torch.stack([pad(seq, maxlen * maxlen) for seq in sequences])
             padded = rnn_utils.pad_sequence(sequences, True)
             self.assertEqual(padded, expected)
 
@@ -238,10 +236,7 @@ class PackedSequenceTest(TestCase):
 
             # padding_side = "left", batch_first=True
             expected = torch.stack(
-                [
-                    pad(seq.flip(0), maxlen * maxlen).flip(0)
-                    for seq in sequences
-                ]
+                [pad(seq.flip(0), maxlen * maxlen).flip(0) for seq in sequences]
             )
             padded = rnn_utils.pad_sequence(
                 sequences,
