@@ -2015,14 +2015,16 @@ class TestSDPA(NNTestCase):
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
     @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.float16])
-    @parametrize("batch_size", [2])
-    @parametrize("q_seq_len", [267])
+    @parametrize("batch_size", [2, 12])
+    @parametrize("q_seq_len", [267, 1030])
     @parametrize("kv_seq_len", [514])
-    @parametrize("n_head", [3])
+    @parametrize("n_head", [1, 3])
     @parametrize("head_dim", [8])
     @parametrize("mask_dim", [2, 4])
     @parametrize("bool_mask", [0, 1])
     @parametrize("train", [True, False])
+    @parametrize("casual", [True, False])
+    @parametrize("set_attn_mask", [True, False])
     def test_scaled_dot_product_fused_attention_mask_vs_math_cpu(
         self,
         device,
@@ -2036,6 +2038,8 @@ class TestSDPA(NNTestCase):
         mask_dim,
         bool_mask,
         train,
+        casual,
+        set_attn_mask,
     ):
         tol = Tolerances(1e-5, 5e-6)
         if dtype is torch.bfloat16:
@@ -2069,22 +2073,25 @@ class TestSDPA(NNTestCase):
             q = q.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
             k = k.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
             v = v.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
-            if bool_mask:
-                attn_mask = torch.randint(0, 2, size=mask_shape, dtype=torch.bool, device=device)
+            if set_attn_mask:
+                if bool_mask:
+                    attn_mask = torch.randint(0, 2, size=mask_shape, dtype=torch.bool, device=device)
+                else:
+                    attn_mask = torch.randn(mask_shape, dtype=dtype, device=device)
             else:
-                attn_mask = torch.randn(mask_shape, dtype=dtype, device=device)
+                attn_mask = None
             q2 = q2.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
             k2 = k2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
             v2 = v2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
 
             with sdpa_kernel(backends=[fused_kernel]):
                 actual = torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+                    q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=casual)
             with sdpa_kernel(backends=[SDPBackend.MATH]):
                 if not bool_mask and dtype in [torch.bfloat16, torch.float16]:
                     attn_mask = attn_mask.float()
                 math_ref = torch.nn.functional.scaled_dot_product_attention(
-                    q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+                    q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=casual)
 
             if dtype in [torch.bfloat16, torch.float16]:
                 math_ref = math_ref.to(dtype)
