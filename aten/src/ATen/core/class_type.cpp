@@ -70,7 +70,7 @@ static std::string getSchemaInputTypesString(const FunctionSchema& schema) {
   return input_types.str();
 }
 
-std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
+std::string ClassType::getForwardPreHookErrorMessage(size_t pre_hook_idx) const {
   const std::string& pre_hook_name = forward_pre_hooks_[pre_hook_idx]->name();
   const FunctionSchema& forward_schema = getMethod("forward").getSchema();
   std::string input_types = getSchemaInputTypesString(forward_schema);
@@ -98,7 +98,7 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
   return return_string;
 }
 
-std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
+std::string ClassType::getForwardHookErrorMessage(size_t hook_idx) const {
   const std::string& hook_name = forward_hooks_[hook_idx]->name();
   const FunctionSchema& forward_schema = getMethod("forward").getSchema();
   std::string input_types = getSchemaInputTypesString(forward_schema);
@@ -190,7 +190,7 @@ static void checkForwardHookInputArguments(
 }
 
 void ClassType::checkForwardPreHookSchema(
-    int pre_hook_idx,
+    size_t pre_hook_idx,
     const FunctionSchema& pre_hook_schema) const {
   const torch::jit::Function* pre_hook = forward_pre_hooks_[pre_hook_idx];
   std::string hook_id =
@@ -287,7 +287,7 @@ void ClassType::checkForwardPreHookSchema(
 }
 
 void ClassType::checkForwardHookSchema(
-      int hook_idx,
+      size_t hook_idx,
       const FunctionSchema& hook_schema) const {
   const torch::jit::Function* hook = forward_hooks_[hook_idx];
   std::string hook_id =
@@ -451,8 +451,7 @@ bool ClassType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
         return false;
       }
       if (!self_method->getSchema().isSubtypeOf(
-              // NOLINTNEXTLINE(bugprone-argument-comment)
-              schema, /*is_method=*/true, why_not)) {
+              schema, /*as_method=*/true, why_not)) {
         if (why_not) {
           *why_not << "Method on class '" << repr_str()
                    << "' (1) is not compatible with interface '"

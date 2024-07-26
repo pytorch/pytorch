@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 import logging
@@ -36,6 +37,7 @@ from .utils import (
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
 )
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -300,7 +302,13 @@ def cat(tensors, dim=0):
         # runtime assert forcing u0 to be zero.  So if this hasn't happened,
         # we know that the unbacked SymInt has appropriate size and there are
         # no problems.
-        return len(x.shape) != 1 or guard_size_oblivious(x.shape[0] > 0)
+        if len(x.shape) == 1 and guard_size_oblivious(x.shape[0] == 0):
+            return False
+
+        if dim < len(x.shape) and guard_size_oblivious(x.shape[dim] == 0):
+            return False
+
+        return True
 
     filtered_tensors = list(filter(non_empty_tensor, tensors))
 

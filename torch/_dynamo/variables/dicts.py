@@ -5,7 +5,10 @@ import dataclasses
 import functools
 import inspect
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 from torch._subclasses.fake_tensor import is_fake
 
@@ -348,7 +351,7 @@ class DefaultDictVariable(ConstDictVariable):
     @staticmethod
     def is_supported_arg(arg):
         if isinstance(arg, variables.BuiltinVariable):
-            return arg.fn in [list, tuple, dict]
+            return arg.fn in (list, tuple, dict, set)
         else:
             return isinstance(arg, variables.functions.BaseUserFunctionVariable)
 
@@ -443,6 +446,24 @@ class SetVariable(ConstDictVariable):
             assert len(args) == 1
             return variables.UserFunctionVariable(
                 polyfill.set_isdisjoint
+            ).call_function(tx, [self, args[0]], {})
+        elif name == "intersection":
+            assert not kwargs
+            assert len(args) == 1
+            return variables.UserFunctionVariable(
+                polyfill.set_intersection
+            ).call_function(tx, [self, args[0]], {})
+        elif name == "union":
+            assert not kwargs
+            assert len(args) == 1
+            return variables.UserFunctionVariable(polyfill.set_union).call_function(
+                tx, [self, args[0]], {}
+            )
+        elif name == "difference":
+            assert not kwargs
+            assert len(args) == 1
+            return variables.UserFunctionVariable(
+                polyfill.set_difference
             ).call_function(tx, [self, args[0]], {})
         elif (
             name == "update"
@@ -567,7 +588,9 @@ def _is_matching_diffusers_cls(cls) -> bool:
     return mod is not None and issubclass(cls, mod.BaseOutput)
 
 
-def _call_hasattr_customobj(self, tx, name: str) -> "VariableTracker":
+def _call_hasattr_customobj(
+    self, tx: "InstructionTranslator", name: str
+) -> "VariableTracker":
     """Shared method between DataClassVariable and CustomizedDictVariable where items are attrs"""
     if tx.output.side_effects.is_attribute_mutation(self):
         try:
@@ -786,7 +809,7 @@ class CustomizedDictVariable(ConstDictVariable):
 
         unimplemented(f"custom dict: call_method unimplemented name={name}")
 
-    def var_getattr(self, tx, name: str) -> "VariableTracker":
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         name_vt = ConstantVariable.create(name)
         if name_vt in self:
             return self.call_method(tx, "__getitem__", [name_vt], {})
@@ -841,12 +864,12 @@ class HFPretrainedConfigVariable(VariableTracker):
         self.obj = obj
         assert self.is_matching_cls(type(obj))
 
-    def var_getattr(self, tx, name: str) -> "VariableTracker":
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         from . import ConstantVariable
 
         return ConstantVariable.create(getattr(self.obj, name))
 
-    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         return variables.ConstantVariable.create(hasattr(self.obj, name))
 
 
@@ -871,7 +894,11 @@ class PythonSysModulesVariable(VariableTracker):
         )
 
     def call_method(
-        self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+        self,
+        tx: "InstructionTranslator",
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
     ):
         if name == "__getitem__":
             return self.call_getitem(tx, *args, **kwargs)
@@ -881,7 +908,7 @@ class PythonSysModulesVariable(VariableTracker):
             return self.call_contains(tx, *args, **kwargs)
         unimplemented(f"sys.modules.{name}(*{args}, **{kwargs})")
 
-    def _contains_helper(self, tx, key: VariableTracker):
+    def _contains_helper(self, tx: "InstructionTranslator", key: VariableTracker):
         k = key.as_python_constant()
         has_key = k in sys.modules
         install_guard(
@@ -891,12 +918,15 @@ class PythonSysModulesVariable(VariableTracker):
         )
         return k, has_key
 
-    def call_contains(self, tx, key: VariableTracker):
+    def call_contains(self, tx: "InstructionTranslator", key: VariableTracker):
         k, has_key = self._contains_helper(tx, key)
         return ConstantVariable.create(value=has_key)
 
     def call_get(
-        self, tx, key: VariableTracker, default: Optional[VariableTracker] = None
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        default: Optional[VariableTracker] = None,
     ):
         from .builder import VariableBuilder
 
@@ -913,7 +943,7 @@ class PythonSysModulesVariable(VariableTracker):
 
         return ConstantVariable.create(value=None)
 
-    def call_getitem(self, tx, key: VariableTracker):
+    def call_getitem(self, tx: "InstructionTranslator", key: VariableTracker):
         from .builder import VariableBuilder
 
         k, has_key = self._contains_helper(tx, key)

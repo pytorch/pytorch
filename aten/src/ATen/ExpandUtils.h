@@ -499,7 +499,7 @@ inline Tensor sum_to(
   return _sum_to(std::move(tensor), shape, always_return_non_view);
 }
 
-static inline bool is_expandable_to(
+inline bool is_expandable_to(
     SymIntArrayRef shape,
     c10::SymIntArrayRef desired) {
   size_t ndim = shape.size();
@@ -517,7 +517,7 @@ static inline bool is_expandable_to(
   return true;
 }
 
-static inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
+inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
   auto sym_shape = c10::SymIntArrayRef(
       reinterpret_cast<const c10::SymInt*>(shape.data()), shape.size());
   auto sym_desired = c10::SymIntArrayRef(
