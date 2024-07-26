@@ -585,10 +585,10 @@ class TestInductorDynamic(TestCase):
         res0 = opt(x0)
         self.assertEqual(ref0, res0)
         # The second run triggers dynamic shapes.
-        # x1 = torch.rand(8)
-        # ref1 = fn(x1)
-        # res1 = opt(x1)
-        # self.assertEqual(ref1, res1)
+        x1 = torch.rand(8)
+        ref1 = fn(x1)
+        res1 = opt(x1)
+        self.assertEqual(ref1, res1)
 
     @onlyOn(GPU_TYPE)
     def test_pad_dynamic(self, device):
