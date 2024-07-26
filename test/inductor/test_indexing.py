@@ -235,12 +235,7 @@ class TestIndexingSimplification(InductorTestCase):
         triton_code = run_and_get_triton_code(f, x)
         # Make sure the 2 load uses simpified indexing rather than something like
         # tl.load(in_ptr0 + ((5504*x1) + (x0 // 2)),
-        self.assertEqual(
-            2,
-            triton_code.count(
-                "tl.load(in_ptr0 + (triton_helpers.div_floor_integer(x2, 2)),"
-            ),
-        )
+        self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + ((x2 // 2)),"))
         if DO_PERF_TEST:
             ms = do_bench_gpu(lambda: f(x))
             print(f"{ms=:.03f}")

@@ -123,12 +123,12 @@ def gen_common_triton_imports():
 
 
 block_offsets = {
-    symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True)
+    symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True, nonnegative=True)
     for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
 }
 
 block_sizes = {
-    symt: sympy.Symbol(f"{prefix_str[symt].upper()}BLOCK", integer=True, nonzero=True)
+    symt: sympy.Symbol(f"{prefix_str[symt].upper()}BLOCK", integer=True, positive=True)
     for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
 }
 
@@ -385,16 +385,20 @@ class TritonPrinter(PythonPrinter):
 
     def _print_PythonMod(self, expr):
         quot, div = expr.args
-        quot = self._print(quot)
-        div = self._print(div)
-        return f"triton_helpers.remainder_integer({quot}, {div})"
+        quot_s = self._print(quot)
+        div_s = self._print(div)
+        if quot.is_nonnegative and div.is_nonnegative:
+            return f"{self.paren(quot_s)} % {self.paren(div_s)}"
+        return f"triton_helpers.remainder_integer({quot_s}, {div_s})"
 
     def _print_FloorDiv(self, expr):
         assert expr.is_integer
         quot, div = expr.args
-        quot = self.doprint(quot)
-        div = self.doprint(div)
-        return f"triton_helpers.div_floor_integer({quot}, {div})"
+        quot_s = self._print(quot)
+        div_s = self._print(div)
+        if quot.is_nonnegative and div.is_nonnegative:
+            return f"({self.paren(quot_s)} // {self.paren(div_s)})"
+        return f"triton_helpers.div_floor_integer({quot_s},  {div_s})"
 
     # TODO: This is wrong, when lhs, rhs > 2**53, Python does a higher
     # precision algorithm, which we would need to replicate here

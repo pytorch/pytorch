@@ -120,7 +120,9 @@ class SizeVarAllocator:
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
         value_ranges = {
-            k: ValueRanges(0, v - 1 if not has_free_symbols([v]) else IntInfinity())
+            k: ValueRanges(
+                0, max(0, v - 1) if not has_free_symbols([v]) else IntInfinity()
+            )
             for k, v in var_ranges.items()
         }
 
