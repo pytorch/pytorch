@@ -42,9 +42,12 @@ from .higher_order_ops import (
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
+    EnumerateVariable,
     IteratorVariable,
     ItertoolsVariable,
+    MapVariable,
     RepeatIteratorVariable,
+    ZipVariable,
 )
 from .lazy import LazyVariableTracker
 from .lists import (

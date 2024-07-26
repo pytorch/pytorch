@@ -4920,6 +4920,17 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
 
+    def test_vc_bumped_in_inference_graph(self):
+        @torch.compile
+        def f(x):
+            return x.mul_(2)
+
+        x = torch.randn(4)
+        vc_before = x._version
+        f(x)
+        vc_after = x._version
+        self.assertTrue(vc_after > vc_before)
+
     def test_nn_module_callable(self):
         class M(nn.Module):
             def forward(self, x):
@@ -5357,6 +5368,23 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         tensor = torch.randn([2, 3])
         res = random_op(tensor, params)
 
+    def test_data_attr_mutation_after_saved_for_bw(self):
+        def f(x):
+            out = x.sin()
+            x.data.mul_(2)
+            return out
+
+        x = torch.randn(4, requires_grad=True)
+        x_test = x.clone().detach().requires_grad_(True)
+
+        out = f(x)
+        out_test = torch.compile(f, backend="aot_eager")(x_test)
+        self.assertEqual(out, out_test)
+
+        out.sum().backward()
+        out_test.sum().backward()
+        self.assertEqual(x.grad, x_test.grad)
+
     # https://github.com/pytorch/pytorch/issues/128072
     def test_map_with_multiple_args(self):
         def f(a, b):
@@ -5368,15 +5396,39 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return x, y
 
         def g(x, y):
-            return tuple(map(f, x, y))
+            return map(f, x, y)
 
         opt_g = torch.compile(g, fullgraph=True, backend="eager")
 
         inps = gen_inps(3, 3)
-        self.assertEqual(g(*inps), opt_g(*inps))
+        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
+        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
 
         inps = gen_inps(3, 5)
-        self.assertEqual(g(*inps), opt_g(*inps))
+        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
+        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
+
+    def test_staticmethod_allow_in_graph(self):
+        class MyClass:
+            i = 3
+
+            @staticmethod
+            def foo_inner(x):
+                return torch.mul(x, MyClass.i)
+
+            # if dynamo inlines with fullgraph, will error
+            # verify that dynamo doesn't inline
+            @staticmethod
+            @torch._dynamo.allow_in_graph
+            def foo1(x):
+                torch._dynamo.graph_break()
+                return MyClass.foo_inner(x)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f_bad(x):
+            return MyClass.foo1(x)
+
+        f_bad(torch.ones(2, 2))
 
     def test_guard_with_tuple_mutation(self):
         class Foo:
@@ -5397,6 +5449,21 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(fn(inp, d), opt_fn(inp, d))
         d["b"][0].x = 12
         self.assertEqual(fn(inp, d), opt_fn(inp, d))
+
+    def test_compile_complex_conj(self):
+        def f(x):
+            return torch.mul(x, 2j)
+
+        x_ref = torch.randn(4, 2, requires_grad=True)
+        x_test = x_ref.clone().detach().requires_grad_(True)
+
+        out_ref = f(torch.view_as_complex(x_ref))
+        out_test = torch.compile(f, backend="aot_eager")(torch.view_as_complex(x_test))
+        self.assertEqual(out_ref, out_test)
+
+        torch.view_as_real(out_ref).sum().backward()
+        torch.view_as_real(out_test).sum().backward()
+        self.assertEqual(x_ref.grad, x_test.grad)
 
     def test_changing_stride(self):
         cnt = torch._dynamo.testing.CompileCounter()

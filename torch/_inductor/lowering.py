@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 import itertools
@@ -8,7 +7,8 @@ import operator
 import os
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import sympy
@@ -74,6 +74,8 @@ from .utils import (
 )
 from .virtualized import ops, V
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
 lowerings: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
@@ -336,7 +338,7 @@ def register_lowering(
     broadcast=False,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
-):
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Shim to support decorator syntax.
     """
@@ -5672,8 +5674,11 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
         return clone(x), _full(0, device, torch.int64, shape)
 
     dim_size = shape[dim] if len(shape) else 1
+    if not V.graph.sizevars.statically_known_lt(dim_size, torch.iinfo(torch.int16).max):
+        return sort_fallback(x, stable=stable, dim=dim, descending=descending)
+
     indices = iota(
-        dim_size, start=0, step=1, dtype=torch.int64, device=device, requires_grad=False
+        dim_size, start=0, step=1, dtype=torch.int16, device=device, requires_grad=False
     )
     view_shape = [1] * len(shape)
     if len(shape):
@@ -5693,7 +5698,8 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
     if values is None:
         return sort_fallback(x, stable=stable, dim=dim, descending=descending)
 
-    return values, indices
+    assert indices is not None
+    return values, to_dtype(indices, torch.int64)
 
 
 @register_lowering(aten.sort.default, type_promotion_kind=None)
@@ -5999,7 +6005,7 @@ def sym_numel(a):
 
 
 for method, func in magic_methods.items():
-    register_lowering(method_to_operator(method))(func)
+    register_lowering(method_to_operator(method))(func)  # type: ignore[arg-type]
 
 
 @register_lowering(aten._foobar)
