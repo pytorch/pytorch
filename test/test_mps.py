@@ -2366,8 +2366,8 @@ class TestMPS(TestCaseMPS):
         x_mps_strided = x_mps.T
         x_cpu_strided = x_cpu.T
 
-        x_mps_strided.masked_fill_(mask_mps.T.contiguous(), float("-inf"))
-        x_cpu_strided.masked_fill_(mask_cpu.T.contiguous(), float("-inf"))
+        x_mps_strided.masked_fill_(mask_mps.T, float("-inf"))
+        x_cpu_strided.masked_fill_(mask_cpu.T, float("-inf"))
 
         self.assertEqual(x_mps_strided, x_cpu_strided)
 
