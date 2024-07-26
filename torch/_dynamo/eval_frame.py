@@ -551,6 +551,9 @@ class OptimizeContext(_TorchDynamoContext):
             dynamic=dynamic,
             compiler_config=compiler_config,
         )
+        self.warmup_count = 0
+        self.disable_context = DisableContext()
+        self.optimize_context = None
 
         if config.compiled_autograd:
 
@@ -562,6 +565,18 @@ class OptimizeContext(_TorchDynamoContext):
                 return functools.partial(ctx.__exit__, None, None, None)
 
             self.enter_exit_hooks.append(call_compiled_autograd)
+
+    def __call__(self, fn):
+        @functools.wraps(fn)
+        def _fn(*args, **kwargs):
+            if self.warmup_count < torch._dynamo.config.warmup_runs:
+                inner_fn = self.disable_context(fn)
+                self.warmup_count += 1
+                return inner_fn(*args, **kwargs)
+            else:
+                return super(OptimizeContext, self).__call__(fn)(*args, **kwargs)
+
+        return _fn
 
     def __reduce__(self):
         return (

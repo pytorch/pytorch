@@ -362,23 +362,31 @@ compiled_autograd_enabled = False
 # global flag to check if we are processing graphs produced from a compiled autograd graph
 in_compiled_autograd_region = False
 
+# state variable to track number of eager warmup runs that are already run
+warmup_count = 0
+
 
 @contextlib.contextmanager
 def enable(compiler_fn):
-    prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-        functools.partial(AutogradCompilerInstance, compiler_fn)
-    )
-    if snapshot_verbose_logging_enabled():
-        torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
-    global compiled_autograd_enabled
-    compiled_autograd_enabled = True
-    try:
-        with torch.autograd.set_multithreading_enabled(False):
-            yield
-    finally:
-        if not prior:
-            compiled_autograd_enabled = False
-        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+    global warmup_count
+    if warmup_count < torch._dynamo.config.warmup_runs:
+        warmup_count += 1
+        yield
+    else:
+        prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+            functools.partial(AutogradCompilerInstance, compiler_fn)
+        )
+        if snapshot_verbose_logging_enabled():
+            torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
+        global compiled_autograd_enabled
+        compiled_autograd_enabled = True
+        try:
+            with torch.autograd.set_multithreading_enabled(False):
+                yield
+        finally:
+            if not prior:
+                compiled_autograd_enabled = False
+            torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
 
 
 @contextlib.contextmanager
