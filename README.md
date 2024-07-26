@@ -221,7 +221,7 @@ make triton
 
 ```bash
 # Add this package on intel x86 processor machines only
-conda install intel::mkl-static intel::mkl-include
+pip install mkl-static mkl-include
 # Add these packages if torch.distributed is needed
 conda install pkg-config libuv
 ```
