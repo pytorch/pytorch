@@ -261,7 +261,7 @@ class Library:
             dispatch_key: dispatch key that the input function should be registered for. By default, it uses
                           the dispatch key that the library was created with.
             with_keyset: flag controlling if the current dispatcher call keyset should be passed as the first argument
-                         to :arg:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
+                         to :attr:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
 
         Example::
             >>> my_lib = Library("aten", "IMPL")
@@ -340,7 +340,7 @@ class Library:
             dispatch_key: dispatch key that the input function should be registered for. By default, it uses
                           the dispatch key that the library was created with.
             with_keyset: flag controlling if the current dispatcher call keyset should be passed as the first argument
-                         to :arg:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
+                         to :attr:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
 
         Example::
             >>> my_lib = Library("_", "IMPL")
