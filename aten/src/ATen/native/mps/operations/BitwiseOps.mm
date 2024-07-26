@@ -255,6 +255,10 @@ static void _bitwise_op_out_mps(const Tensor& self,
       output.fill_(c10::Scalar(self.item<int64_t>() | other.item<int64_t>()));
     } else if (op_name == "xor") {
       output.fill_(c10::Scalar(self.item<int64_t>() ^ other.item<int64_t>()));
+    } else if (op_name == "lshift") {
+      output.fill_(c10::Scalar(self.item<int64_t>() << other.item<int64_t>()));
+    } else if (op_name == "rshift") {
+      output.fill_(c10::Scalar(self.item<int64_t>() >> other.item<int64_t>()));
     } else {
       TORCH_CHECK(false, "Unknown operation to be performed over scalars ", op_name);
     }
