@@ -8,7 +8,6 @@
 
 #include <c10/core/Allocator.h>
 
-#include <c10/util/python_stub.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
 #include <string>
@@ -18,6 +17,7 @@ class Context;
 }
 
 namespace at {
+
 constexpr const char* MTIA_HELP =
     "The MTIA backend requires MTIA extension for PyTorch;"
     "this error has occurred because you are trying "
@@ -96,11 +96,6 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
   }
 
   virtual Allocator* getPinnedMemoryAllocator() const override {
-    FAIL_MTIAHOOKS_FUNC(__func__);
-    return nullptr;
-  }
-
-  virtual PyObject* memoryStats(DeviceIndex device) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return nullptr;
   }
