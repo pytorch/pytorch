@@ -336,7 +336,7 @@ class AutogradCompilerInstance:
 
     def bind_tensors_to_proxies(self, tensors, proxies):
         if isinstance(proxies, torch.fx.Proxy):
-            proxies = [proxies[i] for i in range(len(tensors))]
+            proxies = [proxies[i] for i in range(len(tensors))]  # type: ignore[index]
         assert len(tensors) == len(proxies)
         track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
 
