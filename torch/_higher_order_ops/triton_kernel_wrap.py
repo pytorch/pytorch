@@ -5,7 +5,6 @@ import dataclasses
 import inspect
 import logging
 import threading
-import typing
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Union
 
@@ -748,8 +747,6 @@ triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)
 # The "TritonHOPifier": a class that transforms a call to a triton kernel into
 # a call to the triton_kernel_wrapper_mutation HOP.
 
-fx_acceptable_types = typing.get_args(fx.node.BaseArgumentTypes)
-
 
 class TritonHOPifier:
     """Orchestrator for converting a user-defined triton kernel into a call
@@ -974,14 +971,13 @@ class TracingTritonHOPifier(TritonHOPifier):
     def call_HOP(self, variable, grids, combined_args, tx):
         assert tx is None
 
+        def is_graphable(val):
+            return isinstance(val, fx.node.base_types)
+
         non_graphable_args = {
-            k: v
-            for k, v in combined_args.items()
-            if not isinstance(v, fx_acceptable_types)
+            k: v for k, v in combined_args.items() if not is_graphable(v)
         }
-        graphable_args = {
-            k: v for k, v in combined_args.items() if isinstance(v, fx_acceptable_types)
-        }
+        graphable_args = {k: v for k, v in combined_args.items() if is_graphable(v)}
 
         constant_args_idx = kernel_side_table.add_constant_args(non_graphable_args)
         return triton_kernel_wrapper_mutation(
