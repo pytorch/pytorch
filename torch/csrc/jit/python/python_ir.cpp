@@ -485,7 +485,9 @@ void initPythonIRBindings(PyObject* module_) {
           [](Graph& g) {
             auto tup = g.createTuple(g.outputs());
             tup->insertBefore(g.return_node());
-            for (int64_t i = static_cast<int64_t>(g.outputs().size()) - 1; i >= 0; i--) {
+            for (int64_t i = static_cast<int64_t>(g.outputs().size()) - 1;
+                 i >= 0;
+                 i--) {
               g.eraseOutput(0);
             }
             g.registerOutput(tup->output());

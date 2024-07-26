@@ -278,7 +278,9 @@ struct TORCH_API Module : public Object {
   // A set of functions to maintain input shapes through torch.jit.save and
   // torch.jit.load. It only works on tensors and lists/dicts of tensors
   // because tracing is only supported by these types.
-  void store_traced_inputs(const std::string& func_name, std::vector<IValue> inputs) {
+  void store_traced_inputs(
+      const std::string& func_name,
+      std::vector<IValue> inputs) {
     if (inputs.empty()) {
       return;
     }

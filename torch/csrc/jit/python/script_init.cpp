@@ -268,7 +268,8 @@ void checkMutableFunctionDefault(
     const Argument& arg,
     const py::object& def_arg) {
   if (checkMutableFunctionDefault(def_arg) || arg.type()->cast<ClassType>()) {
-    throw (ErrorReport(range)
+    throw(
+        ErrorReport(range)
         << "Mutable default parameters are not supported because Python binds them to the function"
         << " and they persist across function calls.\n As a workaround, make the default None and instantiate"
         << " the default parameter within the body of the function. Found "
@@ -337,7 +338,8 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     auto overload_name = overload_params[i].ident().name();
     auto impl_name = impl_params[i].ident().name();
     if (overload_name != impl_name) {
-      throw (ErrorReport(overload_decl.range())
+      throw(
+          ErrorReport(overload_decl.range())
           << "Overload parameters must have the same names. "
           << "Found " << overload_name << " and " << impl_name
           << " on argument " << i);
@@ -346,13 +348,15 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
   }
   for (size_t i = overload_params.size(); i < impl_params.size(); ++i) {
     if (!defaults.count(impl_params[i].ident().name())) {
-      throw (ErrorReport(impl_decl.range())
+      throw(
+          ErrorReport(impl_decl.range())
           << "Expected to find default parameter on argument"
           << impl_params[i].ident().name()
           << " because it is not defined on the overloaded declaration");
     }
     if (!impl_params[i].type().present()) {
-      throw (ErrorReport(impl_decl.range())
+      throw(
+          ErrorReport(impl_decl.range())
           << "Parameters not specified on the overloaded declaration must have a type annotation in the implementation function."
           << " Did not find type for param " << impl_params[i].ident().name());
     }
@@ -372,7 +376,8 @@ static StrongFunctionPtr script_compile_overloaded_function(
     const FunctionDefaults& implementation_defaults,
     const py::object& signature) {
   if (signature.is_none()) {
-    throw (ErrorReport(overload_decl.range())
+    throw(
+        ErrorReport(overload_decl.range())
         << "Must explicitly add type annotations to overloaded functions");
   }
 
@@ -1727,7 +1732,8 @@ void initJitScriptBindings(PyObject* module) {
          const ResolutionCallback& rcb) {
         C10_LOG_API_USAGE_ONCE("torch.script.class");
         if (classDef.superclass().present()) {
-          throw (ErrorReport(classDef.range())
+          throw(
+              ErrorReport(classDef.range())
               << "Torchscript does not support class inheritance.");
         }
         auto cu = get_python_cu();
@@ -1749,7 +1755,8 @@ void initJitScriptBindings(PyObject* module) {
 
         for (const auto& def : classDef.body()) {
           if (def.kind() != TK_DEF) {
-            throw (ErrorReport(def.range())
+            throw(
+                ErrorReport(def.range())
                 << "Currently class bodies can only contain method "
                    "definitions. File an issue on GitHub if you want "
                    "something else!");

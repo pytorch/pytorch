@@ -176,7 +176,8 @@ void initScriptListBindings(PyObject* module) {
             for (const auto i : c10::irange(slicelength)) {
               try {
                 self->setItem(
-                    static_cast<ptrdiff_t>(start), toIValue(value[i], self->type()->getElementType()));
+                    static_cast<ptrdiff_t>(start),
+                    toIValue(value[i], self->type()->getElementType()));
               } catch (const py::cast_error& e) {
                 throw py::type_error();
               }
