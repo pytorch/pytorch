@@ -295,11 +295,8 @@ def compute_padding_size(
     padded_size: Sequence[int], unpadded_size: Sequence[int]
 ) -> Tuple[int, ...]:
     """
-    Given the padded and unpadded shape of a tensor, this util returns a list of padding needed to make
-    the unpadded tensor to be the same shape of padded tensor. The pad_size has the same length of padded_size and
-    unpadded_size, in which the length equals to the number of dimensions of the tensor to be padded.
-
-    padding_size[i] is the length of padding needed on the i-th tensor dimension.
+    Given the padded and unpadded shape of a tensor, returns a tuple of padding.
+    padding_size[i] is the size of padding needed on the i-th tensor dimension.
     """
     assert len(padded_size) == len(unpadded_size)
     padding_size = [
