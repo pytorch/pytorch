@@ -3,12 +3,10 @@
 #include <string>
 #include <thread>
 
+#include <httplib.h>
+
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
-
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-literal-operator")
-#include <httplib.h>
-C10_DIAGNOSTIC_POP()
 
 namespace c10d::control_plane {
 
