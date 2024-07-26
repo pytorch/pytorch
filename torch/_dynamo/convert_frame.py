@@ -793,7 +793,7 @@ def _compile(
                 cache_entry, frame
             )
 
-        exceeded, limit_type = exceeds_cache_size_limit(cache_size)
+        exceeded, limit_type = exceeds_cache_size_limit(cache_size, compile_id)
         if exceeded:
 
             def format_func_info(code: CodeType) -> str:
@@ -1069,7 +1069,7 @@ def replay(filename: str) -> None:
     record.globals = dict(itertools.chain(record.globals.items(), globals().items()))
 
     try:
-        _compile(
+        _compile(  # type: ignore[call-arg]
             record.code,
             record.globals,
             record.locals,
