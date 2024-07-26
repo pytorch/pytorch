@@ -530,7 +530,7 @@ def pack_sequence(
     sequences: Union[List[Tensor], Tuple[Tensor, ...]],
     enforce_sorted: bool = True,
 ) -> PackedSequence:
-    r"""Packs a sequence of variable length Tensors.
+    r"""Packs a list or tuple of variable length Tensors.
 
     Consecutive call of the next functions: ``pad_sequence``, ``pack_padded_sequence``.
 
