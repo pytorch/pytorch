@@ -1897,7 +1897,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     ), "BackwardState requires CompiledAutograd"
                     ctx.maybe_clear_saved_tensors()
 
-                    saved_tensors_use_once = not torch._C._autograd._get_current_graph_task_keep_graph()
+                    saved_tensors_use_once = (
+                        not torch._C._autograd._get_current_graph_task_keep_graph()
+                    )
 
                     if CompiledFunction.compiled_bw is None:
                         assert lazy_backward_info is not None
