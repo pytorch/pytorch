@@ -821,7 +821,6 @@ struct NCCLTraceBuffer {
   }
 
   std::list<json> getCollectiveTraceJson(bool onlyActive) {
-
     std::list<json> entries;
     for (auto& e : dump_entries()) {
       if (onlyActive && e.time_discovered_completed_.has_value()) {
