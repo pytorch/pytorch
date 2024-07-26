@@ -88,7 +88,7 @@ def maybe_fallback_to_original_benchmarking(
                     "benchmarking_fallback_to_original_benchmarking"
                 ] += 1
                 return getattr(self, original_fn_name)(self, *args, **kwargs)
-            return fn(*args, **kwargs)
+            return fn(self, *args, **kwargs)
 
         return wrapper
 
@@ -110,7 +110,7 @@ def maybe_fallback_to_non_lazy_benchmarking(
                     "benchmarking_fallback_to_non_lazy_benchmarking"
                 ] += 1
                 return getattr(self, non_lazy_fn_name)(self, *args, **kwargs)
-            return fn(*args, **kwargs)
+            return fn(self, *args, **kwargs)
 
         return wrapper
 
