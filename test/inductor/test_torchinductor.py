@@ -1889,7 +1889,6 @@ class CommonTemplate:
     def test_cummax_inf(self):
         def fn(a):
             return torch.cummax(a, -1)
-        print(self.common)
 
         self.common(fn, (torch.full((100,), float('-inf'), device=self.device, dtype=torch.float64),))
 
