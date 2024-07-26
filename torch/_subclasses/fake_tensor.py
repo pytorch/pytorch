@@ -1579,7 +1579,8 @@ class FakeTensorMode(TorchDispatchMode):
             assert isinstance(view_arg, FakeTensor)
             storage = view_arg.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
-                empty.set_(storage, storage_offset, shape, stride)
+                if not isinstance(storage.nbytes(), SymInt):
+                    empty.set_(storage, storage_offset, shape, stride)
         else:
             if isinstance(storage_offset, SymInt):
                 # Do it this way so we don't import symbolic_shapes (which imports

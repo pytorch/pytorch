@@ -207,7 +207,13 @@ class _StorageBase:
         raise NotImplementedError
 
     def __repr__(self):
-        info_str = f"[{torch.typename(self)}(device={self.device}) of size {len(self)}]"
+        if n := getattr(self, "_size", None):
+            sz = f"{n()} items"
+        elif n := getattr(self, "_nbytes", None):
+            sz = f"{n()} bytes"
+        else:
+            sz = "<unsized>"
+        info_str = f"[{torch.typename(self)}(device={self.device}) of {sz}]"
         if self.device.type == "meta":
             return "...\n" + info_str
         data_str = " " + "\n ".join(str(self[i]) for i in range(self.size()))
