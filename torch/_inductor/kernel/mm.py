@@ -40,6 +40,7 @@ from ..utils import (
 )
 from .mm_common import (
     addmm_epilogue,
+    extra_mm_configs,
     int8_mm_configs,
     mixed_mm_configs,
     mm_args,
@@ -152,6 +153,7 @@ aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    name = "mm"
 
     aten_layout = layout
     if not use_max_autotune():
@@ -185,26 +187,43 @@ def tuned_mm(mat1, mat2, *, layout=None):
             [mat1, mat2],
         )
 
-    name = "mm"
     input_nodes = [mat1, mat2]
-    if torch._inductor.config.run_autoheuristic(name):
-        if is_triton(mat1):
-            # using AutoHeuristic for ranking
-            ah_choices = mm_autoheuristic(
-                mat1,
-                mat2,
-                m,
-                n,
-                k,
+    if (
+        is_nonzero
+        and use_triton_template(layout)
+        and torch._inductor.config.run_autoheuristic(name)
+        and is_triton(mat1)
+    ):
+        always_included = []
+        if use_aten_gemm_kernels():
+            always_included.append("extern_mm")
+        num_choices_before_extra_configs = len(choices)
+        for config in extra_mm_configs(m, n, k):
+            mm_template.maybe_append_choice(
                 choices,
-                name,
-                input_nodes,
-                mm_operations(),
-                None,
-                top_k=10,
+                input_nodes=(mat1, mat2),
+                layout=layout,
+                **mm_options(config, m, n, k, layout),
             )
-            if ah_choices is not None and len(ah_choices) > 0:
-                choices = ah_choices
+        # using AutoHeuristic for ranking
+        ah_choices = mm_autoheuristic(
+            mat1,
+            mat2,
+            m,
+            n,
+            k,
+            choices,
+            name,
+            input_nodes,
+            mm_operations(),
+            None,
+            top_k=10,
+            always_included=always_included,
+        )
+        if ah_choices is not None and len(ah_choices) > 0:
+            choices = ah_choices
+        else:
+            choices = choices[num_choices_before_extra_configs]
 
     if (
         len(choices) == 0
@@ -215,7 +234,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
     try:
-        return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
+        return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
     except NoValidChoicesError:
         if not inductor_config.autotune_fallback_to_aten:
             raise
@@ -490,7 +509,18 @@ def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
 
 
 def mm_autoheuristic(
-    mat1, mat2, m, n, k, choices, name, input_nodes, ops, precondition, top_k=-1
+    mat1,
+    mat2,
+    m,
+    n,
+    k,
+    choices,
+    name,
+    input_nodes,
+    ops,
+    precondition,
+    top_k=-1,
+    always_included=None,
 ):
     m, n, k = get_size_hints(mat1, mat2, m, n, k)
     if not dims_are_int([m, n, k]):
@@ -531,7 +561,10 @@ def mm_autoheuristic(
         precondition=precondition,
     )
     if top_k != -1:
-        return autoheuristic.get_top_k_choices_caller(top_k)
+        # TODO: is there a cleaner way to ensure aten.mm is always included?
+        return autoheuristic.get_top_k_choices_caller(
+            top_k, always_included=always_included
+        )
     return autoheuristic.get_choice_caller()
 
 
