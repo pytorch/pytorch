@@ -14,13 +14,13 @@ import torch.nn.functional as F
 from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._inductor import comms
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import is_fallback_op, run_and_get_code
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import init_device_mesh
 from torch.testing import FileCheck
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import at_least_x_gpu, skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -32,6 +32,10 @@ from torch.utils._triton import has_triton
 
 def _is_op_in_graph(graph, op):
     return any(node.target is op for node in graph.nodes)
+
+
+def _is_fallback_op_in_snodes(snodes, op):
+    return any(is_fallback_op(snode.node, op) for snode in snodes)
 
 
 class TestFullyShardCompileCompute(FSDPTest):
@@ -84,9 +88,11 @@ class TestFullyShardCompileCompute(FSDPTest):
 
 
 class TestFullyShardCompile(FSDPTest):
+    fake_pg = not at_least_x_gpu(2)
+
     @property
     def world_size(self) -> int:
-        return min(2, torch.cuda.device_count())
+        return 2
 
     def test_dynamo_trace_use_training_state(self):
         torch._dynamo.reset()
@@ -176,9 +182,79 @@ class TestFullyShardCompile(FSDPTest):
         else:
             return contextlib.nullcontext()
 
+    def _is_fwd_graph(self, snodes):
+        ag_copy_in_snode = None
+        for snode in snodes:
+            if is_fallback_op(snode.node, torch.ops.fsdp.all_gather_copy_in.default):
+                ag_copy_in_snode = snode
+                break
+        self.assertTrue(ag_copy_in_snode is not None)
+        if any(
+            dep.name.startswith("primals_")
+            for dep in ag_copy_in_snode.read_writes.reads
+        ):
+            return True
+        else:
+            return False
+
+    def _maybe_run_decide_global_ordering_of_comms_with_checks(self, fullgraph):
+        def _check_fsdp_ops_in_snodes(snodes, is_fwd_graph, expect=True):
+            assert_method = self.assertTrue if expect else self.assertFalse
+            common_ops = {
+                torch.ops.fsdp.all_gather_copy_in.default,
+                torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                torch.ops.fsdp.split_with_sizes_copy.default,
+            }
+            bwd_only_ops = {
+                torch.ops.fsdp.chunk_cat.default,
+                torch.ops._c10d_functional.reduce_scatter_tensor.default,
+            }
+            for op in common_ops:
+                assert_method(
+                    _is_fallback_op_in_snodes(
+                        snodes,
+                        op,
+                    ),
+                    msg=f"{op}",
+                )
+            if not is_fwd_graph:
+                for op in bwd_only_ops:
+                    assert_method(
+                        _is_fallback_op_in_snodes(
+                            snodes,
+                            op,
+                        ),
+                        msg=f"{op}",
+                    )
+
+        def _decide_global_ordering_of_comms_with_checks(
+            snodes, name_to_buf, name_to_fused_node, orig_fn
+        ):
+            is_fwd_graph = self._is_fwd_graph(snodes)
+            _check_fsdp_ops_in_snodes(snodes, is_fwd_graph, expect=True)
+            new_snodes = orig_fn(snodes, name_to_buf, name_to_fused_node)
+            _check_fsdp_ops_in_snodes(new_snodes, is_fwd_graph, expect=False)
+            return new_snodes
+
+        if fullgraph:
+            return mock.patch.object(
+                comms,
+                "decide_global_ordering_of_comms",
+                functools.partial(
+                    _decide_global_ordering_of_comms_with_checks,
+                    orig_fn=comms.decide_global_ordering_of_comms,
+                ),
+            )
+        else:
+            return contextlib.nullcontext()
+
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._functorch.config.patch(recompute_views=True)
     @torch._functorch.config.patch(cse=False)
+    @torch._inductor.config.patch(
+        reorder_for_compute_comm_overlap=True,
+        reorder_for_compute_comm_overlap_passes=[],
+    )
     def _test_traceable_fsdp(
         self, model_init_fn, input_creation_fn, backend, fullgraph
     ):
@@ -231,16 +307,17 @@ class TestFullyShardCompile(FSDPTest):
 
         losses_compiled = test_compiled()
         losses_eager = test_eager()
-        for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
-            self.assertTrue(
-                torch.allclose(
-                    torch.tensor(loss_compiled),
-                    torch.tensor(loss_eager),
-                    rtol=1e-5,
-                    atol=1e-8,
-                ),
-                f"{loss_compiled} vs {loss_eager}",
-            )
+        if not self.fake_pg:
+            for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
+                self.assertTrue(
+                    torch.allclose(
+                        torch.tensor(loss_compiled),
+                        torch.tensor(loss_eager),
+                        rtol=1e-5,
+                        atol=1e-8,
+                    ),
+                    f"{loss_compiled} vs {loss_eager}",
+                )
 
     def _create_simple_mlp_factory_fns(self):
         hidden_dim = 16
@@ -267,14 +344,14 @@ class TestFullyShardCompile(FSDPTest):
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
-    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @skipIfRocm
-    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(),
@@ -284,7 +361,6 @@ class TestFullyShardCompile(FSDPTest):
 
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
     def test_simple_mlp_fullgraph_backend_inductor(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
@@ -296,14 +372,20 @@ class TestFullyShardCompile(FSDPTest):
         class TestSubmodule(nn.Module):
             def __init__(self, hidden_dim):
                 super().__init__()
-                self.param = nn.Parameter(
-                    torch.randn(hidden_dim, hidden_dim, device="cuda")
+                self.param1 = nn.Parameter(
+                    torch.zeros(
+                        hidden_dim, hidden_dim, dtype=torch.float, device="cuda"
+                    )
+                )
+                self.param2 = nn.Parameter(
+                    torch.zeros(hidden_dim, dtype=torch.float, device="cuda")
                 )
 
             def forward(self, x):
-                ret = torch.matmul(x, self.param)
                 if not fullgraph:
                     torch._dynamo.graph_break()
+                ret = torch.matmul(x, self.param1)
+                ret = ret * self.param2
                 ret = torch.relu(ret)
                 return ret
 
@@ -346,7 +428,7 @@ class TestFullyShardCompile(FSDPTest):
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
-    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager(self):
         for fullgraph in [True, False]:
             self._test_traceable_fsdp(
@@ -356,7 +438,7 @@ class TestFullyShardCompile(FSDPTest):
             )
 
     @skipIfRocm
-    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager_decomp_partition(self):
         for fullgraph in [True, False]:
             self._test_traceable_fsdp(
@@ -367,10 +449,11 @@ class TestFullyShardCompile(FSDPTest):
 
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
     def test_nested_fully_shard_backend_inductor(self):
         for fullgraph in [True, False]:
-            with self._reinplace_all_gather_with_optional_checks(fullgraph):
+            with self._reinplace_all_gather_with_optional_checks(
+                fullgraph
+            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(fullgraph):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
                         *self._create_nested_fully_shard_factory_fns(
@@ -444,7 +527,7 @@ class TestFullyShardCompile(FSDPTest):
         )
 
     @skipIfRocm
-    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_transformer_backend_aot_eager(self):
         for fullgraph in [True, False]:
             with self._maybe_add_graph_break_to_sdpa(
@@ -457,7 +540,7 @@ class TestFullyShardCompile(FSDPTest):
                 )
 
     @skipIfRocm
-    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_aot_eager_decomp_partition(self):
@@ -471,14 +554,17 @@ class TestFullyShardCompile(FSDPTest):
 
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor(self):
         for fullgraph in [True, False]:
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
-            ), self._reinplace_all_gather_with_optional_checks(fullgraph):
+            ), self._reinplace_all_gather_with_optional_checks(
+                fullgraph
+            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
+                fullgraph
+            ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
                         *self._create_transformer_factory_fns(),
