@@ -9,8 +9,7 @@
 #include <string>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // clang-format off
 // TreeView provides a statically-typed way to traverse the tree, which should
@@ -1262,8 +1261,7 @@ inline Expr pep604union_to_union(const Expr& expr) {
   return std::move(synthesised_union);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
 
 namespace std {
 

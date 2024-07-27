@@ -99,7 +99,7 @@ FunctionSchema PythonValue::getSchema(
           /*default_value=*/std::nullopt,
           /*kwarg_only=*/false);
     }
-    rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
+    rets.push_back(Argument("0", ret_type, {}, {}, false));
   }
 
   std::string name;
