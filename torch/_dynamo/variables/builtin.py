@@ -1064,7 +1064,7 @@ class BuiltinVariable(VariableTracker):
                     user_func_variable = variables.UserFunctionVariable(bound_method)
                 except AssertionError as e:
                     # Won't be able to do inline the str method, return to avoid graph break
-                    log.warning(f"Failed to create UserFunctionVariable: {e}")
+                    log.warning("Failed to create UserFunctionVariable: %s", e)
                     return
 
                 # Inline the user function
