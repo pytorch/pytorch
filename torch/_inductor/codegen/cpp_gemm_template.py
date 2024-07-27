@@ -239,6 +239,8 @@ class CppPackedGemmTemplate(CppTemplate):
         self.register_blocking = register_blocking
         m, n = layout.size
         _, k = input_nodes[0].get_size()
+        if has_free_symbols((k,)):
+            k = V.graph.sizevars.shape_env.size_hint(k)
         self.m, self.n, self.k = m, n, k
         self.padded_n = get_padded_n(n, self.register_blocking.block_n)
         self.is_dynamic_M = has_free_symbols((m,))

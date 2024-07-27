@@ -12,7 +12,7 @@ from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
 from ..runtime.runtime_utils import next_power_of_2
-from ..utils import ceildiv as cdiv
+from ..utils import has_free_symbols, ceildiv as cdiv
 
 
 log = logging.getLogger(__name__)
@@ -279,6 +279,9 @@ def mm_args(mat1, mat2, *others, layout=None, out_dtype=None, use_4x2_dim=False)
     if use_4x2_dim:
         k2 = k2 * 2
     k = V.graph.sizevars.guard_equals(k1, k2)
+    if has_free_symbols((k,)) and any(_k.is_number for _k in [k1, k2]):
+        k = V.graph.sizevars.shape_env.size_hint(k)
+
     if layout is None:
         from torch._inductor.ir import FixedLayout
 
