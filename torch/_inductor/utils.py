@@ -62,6 +62,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from . import config
 from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 
+_IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
 
@@ -779,8 +780,13 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
         if delete:
             shutil.rmtree(inductor_cache_dir)
     except Exception:
-        log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
-        raise
+        if not _IS_WINDOWS:
+            """
+            Windows can't delete the loaded modules, because the modules binaries are opened.
+            TODO: discuss if have better solution to handle this issue.
+            """
+            log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
+            raise
     finally:
         clear_inductor_caches()
 
