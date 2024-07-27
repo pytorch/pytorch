@@ -375,7 +375,7 @@ def pad_sequence(
     sequences: Union[Tensor, List[Tensor]],
     batch_first: bool = False,
     padding_value: float = 0.0,
-    padding_side: Union[Literal["left", "right"], str] = "right",  # noqa: PYI051
+    padding_side: str = "right",
 ) -> Tensor:
     r"""Pad a list of variable length Tensors with :attr:`padding_value`.
 
