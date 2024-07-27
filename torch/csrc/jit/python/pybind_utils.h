@@ -1262,18 +1262,18 @@ TORCH_PYTHON_API std::optional<py::object> _maybe_handle_torch_function(
     const std::string& method_name,
     const std::string& overload_name,
     bool is_overload,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs);
 
 TORCH_PYTHON_API bool checkSchemaAllowFakeScriptObject(
     const FunctionSchema& schema,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs);
 
 TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,
     Symbol symbol,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs,
     bool is_overload,
     std::optional<c10::DispatchKey> dk = std::nullopt);
