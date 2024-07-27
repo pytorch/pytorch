@@ -220,12 +220,12 @@ class MicroPipelineTPTest(TestCase):
             code = run_and_get_triton_code(compiled, A_shard, B)
 
         if gather_dim == A_dims - 1:
-            assert "fused_all_gather_matmul" not in code
-            assert "all_gather_into_tensor" in code
+            self.assertNotIn("fused_all_gather_matmul", code)
+            self.assertIn("all_gather_into_tensor", code)
         else:
             # Decomposing the matmul on the K dimension is not supported
-            assert "fused_all_gather_matmul" in code
-            assert "all_gather_into_tensor" not in code
+            self.assertIn("fused_all_gather_matmul", code)
+            self.assertNotIn("all_gather_into_tensor", code)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])
