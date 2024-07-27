@@ -180,7 +180,7 @@ class BisectionManager:
     @classmethod
     def advance_subsystem(
         cls, current_system: str, current_subsystem: str
-    ) -> tuple[bool, str, str]:
+    ) -> Tuple[bool, str, str]:
         """
         Move to the next subsystem within the current system.
 

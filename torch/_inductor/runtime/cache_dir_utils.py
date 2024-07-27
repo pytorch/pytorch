@@ -1,9 +1,10 @@
-import os
 import getpass
+import os
 import re
 import tempfile
 
 # Factoring out to file without torch dependencies
+
 
 def cache_dir() -> str:
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
@@ -13,7 +14,7 @@ def cache_dir() -> str:
     return cache_dir
 
 
-def default_cache_dir():
+def default_cache_dir() -> str:
     sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
     return os.path.join(
         tempfile.gettempdir(),
