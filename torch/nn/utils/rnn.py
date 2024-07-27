@@ -29,8 +29,8 @@ __all__ = [
     "unpack_sequence",
 ]
 
-T = TypeVar("T")
-R = TypeVar("R")
+_T = TypeVar("_T")
+_R = TypeVar("_R")
 
 
 class PackedSequence_(NamedTuple):
@@ -40,7 +40,7 @@ class PackedSequence_(NamedTuple):
     unsorted_indices: Optional[torch.Tensor]
 
 
-def bind(optional: Optional[T], fn: Callable[[T], R]) -> Optional[R]:
+def bind(optional: Optional[_T], fn: Callable[[_T], _R]) -> Optional[_R]:
     if optional is None:
         return None
     return fn(optional)
