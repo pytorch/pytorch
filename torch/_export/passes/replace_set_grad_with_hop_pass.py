@@ -185,8 +185,6 @@ def _sequential_split_and_maybe_inline_subgraphs(
     new_gm.recompile()
     return new_gm, new_signature
 
-    return gm, graph_signature
-
 
 def replace_set_grad_with_hop_pass(gm: torch.fx.GraphModule, graph_signature):
     new_gm, new_signature = _sequential_split_and_maybe_inline_subgraphs(

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 r"""Implementation for the NAdam algorithm."""
 from typing import cast, List, Optional, Tuple, Union
@@ -9,6 +10,7 @@ from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
+    _dispatch_sqrt,
     _foreach_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
@@ -487,7 +489,8 @@ def _multi_tensor_nadam(
             torch._foreach_sqrt_(bias_correction_sqrt)
         else:
             bias_correction_sqrt = [
-                (1 - beta2 ** _get_value(step)) ** 0.5 for step in grouped_state_steps
+                _dispatch_sqrt(1 - beta2 ** _get_value(step))
+                for step in grouped_state_steps
             ]
             mus = [
                 beta1 * (1.0 - 0.5 * (0.96 ** (_get_value(step) * momentum_decay)))
