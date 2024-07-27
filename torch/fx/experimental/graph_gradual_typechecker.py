@@ -3,8 +3,8 @@ from functools import reduce
 import torch
 import operator
 from torch.fx.tensor_type import Dyn, is_consistent, TensorType, is_more_precise
-from typing import Callable, Dict, TypeVar
-from typing_extensions import ParamSpec
+from typing import Callable, Dict, TypeVar as _TypeVar
+from typing_extensions import ParamSpec as _ParamSpec
 from torch.fx.node import Target, Node
 from torch.nn.modules.batchnorm import BatchNorm2d
 from torch.nn.modules.conv import Conv2d
@@ -15,8 +15,8 @@ from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
 
 import sympy
 
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
+_T = _TypeVar("_T")
+_P = _ParamSpec("_P")
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 _REFINEMENT_RULES: Dict[Target, Callable] = {}
