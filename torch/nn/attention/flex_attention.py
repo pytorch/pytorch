@@ -450,7 +450,7 @@ def _broadcast_to_dim(x, dim):
     return x
 
 
-def round_up_to_multiple(x, multiple):
+def _round_up_to_multiple(x, multiple):
     return (x + multiple - 1) // multiple * multiple
 
 
@@ -684,8 +684,8 @@ def create_block_mask(
         mod_type == _ModificationType.MASK_MOD
     ), f"create-block_mask requires a mask_mod function! Got {mask_mod}"
     inner_func = _create_block_mask_inner
-    Q_LEN = Q_LEN if Q_LEN < 128 else round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
-    KV_LEN = round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
+    Q_LEN = Q_LEN if Q_LEN < 128 else _round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
+    KV_LEN = _round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
     with TransformGetItemToIndex():
@@ -702,8 +702,8 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     of the query and key tensors.
     """
     device = query.device
-    kv_len = round_up_to_multiple(key.size()[-2], 128)
-    q_len = round_up_to_multiple(query.size()[-2], 128)
+    kv_len = _round_up_to_multiple(key.size()[-2], 128)
+    q_len = _round_up_to_multiple(query.size()[-2], 128)
     return BlockMask(
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),

@@ -556,6 +556,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 0,
             )
 
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
