@@ -223,7 +223,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         if ah_choices is not None and len(ah_choices) > 0:
             choices = ah_choices
         else:
-            choices = choices[num_choices_before_extra_configs]
+            choices = choices[:num_choices_before_extra_configs]
 
     if (
         len(choices) == 0
