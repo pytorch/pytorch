@@ -49,6 +49,7 @@ from ..pattern_matcher import (
     ListOf,
     Match,
     MULTIPLE,
+    PatternExpr,
     PatternMatcherPass,
     register_graph_pattern,
     stable_topological_sort,
@@ -203,7 +204,9 @@ def reorder_for_locality(graph: torch.fx.Graph):
 
 
 def register_lowering_pattern(
-    pattern, extra_check=_return_true, pass_number=1
+    pattern: PatternExpr,
+    extra_check: Callable[[Match], bool] = _return_true,
+    pass_number: int = 1,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Register an aten to inductor IR replacement pattern

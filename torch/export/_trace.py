@@ -54,6 +54,7 @@ from torch.export.exported_program import OutputKind
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
+    _DataDependentErrorHandlerNonStrict,
     ConstraintViolationError,
     free_unbacked_symbols,
     GuardOnDataDependentSymNode,
@@ -760,11 +761,19 @@ def _export_to_aten_ir(
         input_specs=input_specs, output_specs=output_specs
     )
 
+    constants = rewrite_script_object_meta(gm)
+    constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
+
     if pre_dispatch:
         from torch._export.passes.replace_set_grad_with_hop_pass import (
             replace_set_grad_with_hop_pass,
         )
 
+        # Note: replace_set_grad_with_hop_pass need to be after lift_constant_pass because
+        # a getattr of a constant tensor doesn't have meta["val"] until after lift_constant_pass.
+        # If replace_set_grad_with_hop_pass is before lift_constant_pass,
+        # and the constant_tensor is passed as input of the set grad hop, the placeholder's
+        # meta["val"] will be None and fails our verifier for placeholder.
         gm, export_graph_signature = replace_set_grad_with_hop_pass(
             gm, export_graph_signature
         )
@@ -777,9 +786,6 @@ def _export_to_aten_ir(
             if node.op in ["placeholder", "output"]:
                 node.meta.pop("nn_module_stack", None)
                 node.meta.pop("stack_trace", None)
-
-    constants = rewrite_script_object_meta(gm)
-    constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
     # Prettify names for placeholder nodes.
     placeholder_naming_pass(
@@ -1817,7 +1823,7 @@ def _non_strict_export(
             _is_torch_jit_trace=_is_torch_jit_trace,
         )
 
-    with fake_mode:
+    with fake_mode, _DataDependentErrorHandlerNonStrict():
         with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
             patched_mod,
             new_fake_args,
@@ -1945,7 +1951,7 @@ def _export_for_training(
         module_call_graph=module_call_graph,
         example_inputs=(args, kwargs),
         constants=export_artifact.aten.constants,
-        verifier=TrainingIRVerifier,
+        verifiers=[TrainingIRVerifier],
     )
 
     return exported_program
@@ -2069,6 +2075,8 @@ def _export(
     if not _is_torch_jit_trace:
         _verify_placeholder_names(gm, export_graph_signature)
 
+    from torch._export.verifier import Verifier
+
     exported_program = ExportedProgram(
         root=gm,
         graph=gm.graph,
@@ -2078,6 +2086,7 @@ def _export(
         module_call_graph=module_call_graph,
         example_inputs=(args, kwargs),
         constants=export_artifact.aten.constants,
+        verifiers=[Verifier],
     )
 
     return exported_program
