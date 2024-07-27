@@ -13,6 +13,7 @@ DISTRIBUTED = [
 ]
 
 register_log("dynamo", ["torch._dynamo", *DYNAMIC])
+register_log("fake_tensor", ["torch._subclasses.fake_tensor"])
 register_log("aot", ["torch._functorch.aot_autograd", "torch._functorch._aot_autograd"])
 register_log("autograd", "torch.autograd")
 register_log("inductor", ["torch._inductor", "torch._inductor.cudagraph_trees"])
