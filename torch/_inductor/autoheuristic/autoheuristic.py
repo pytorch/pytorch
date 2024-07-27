@@ -1,6 +1,7 @@
 import json
 import os
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from functools import partial
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 from torch._inductor.autoheuristic.autoheuristic_utils import (
@@ -15,6 +16,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 from torch._inductor.autoheuristic.learned_heuristic_controller import (
     LearnedHeuristicController,
 )
+from torch._inductor.ir import ChoiceCaller
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import get_gpu_shared_memory
 
@@ -38,19 +40,7 @@ def get_metadata_str_from_log(log_path: str) -> str:
         return json_string
 
 
-class _Feedback:
-    """
-    This is a base class for Feedback objects. It takes a function that calculates the feedback for a given choice.
-    """
-
-    def __init__(self, feedback_fn: Callable[[Choice], Feedback]) -> None:
-        self.feedback_fn = feedback_fn
-
-    def __call__(self, choice: Choice) -> Feedback:
-        return self.feedback_fn(choice)
-
-
-class LocalFeedback(_Feedback):
+class LocalFeedback:
     """
     To be able to collect data for a choice, a function providing feedback given a choice has to be provided.
     LocalFeedback can be used when AutoHeuristic should immediately run the function to collect feedback for each choice
@@ -58,19 +48,10 @@ class LocalFeedback(_Feedback):
     """
 
     def __init__(self, feedback_fn: Callable[[Choice], Feedback]) -> None:
-        super().__init__(feedback_fn)
+        self.feedback_fn = feedback_fn
 
-
-class GlobalFeedback(_Feedback):
-    """
-    In contrast to LocalFeedback, GlobalFeedback can be used when it is not possible to immediately collect feedback for
-    the provided choices. GlobalFeedback will be required for example for kernel choice selection, where the feedback
-    will be provided later after autotuning has happened in select_algorithm.py.
-    """
-
-    # TODO: will be supported later
-    def __init__(self, feedback_fn: Callable[[Choice], Feedback]) -> None:
-        super().__init__(feedback_fn)
+    def __call__(self, choice: Choice) -> Feedback:
+        return self.feedback_fn(choice)
 
 
 class InconsistentMetadata(Exception):
@@ -95,7 +76,7 @@ class AutoHeuristic:
         self,
         fallback: Callable[[], Choice],
         choices: List[Choice],
-        feedback: Union[LocalFeedback, GlobalFeedback],
+        feedback: Optional[LocalFeedback],
         context: AHContext,
         name: str,
         augment_context: Optional[List[AHOperation]] = None,
@@ -108,7 +89,7 @@ class AutoHeuristic:
             fallback: A callable that returns a Choice when the heuristic is unsure which choice to make, or
             AutoHeuristic is in data collection mode.
             choices: A list of possible choices the heuristic can make.
-            feedback: An instance of LocalFeedback or GlobalFeedback that provides feedback for a given choice.
+            feedback: An instance of LocalFeedback that provides feedback for a given choice.
             context: Context to store with each choice and feedback.
             name: A string that identifies the heuristic.
             augment_context: An optional list of AHOperation instances that augment the context.
@@ -137,12 +118,11 @@ class AutoHeuristic:
         else:
             self.log_path = torch._inductor.config.autoheuristic_log_path
 
-        if torch._inductor.config.collect_autoheuristic(self.name) and isinstance(
-            self.feedback, LocalFeedback
-        ):
-            for choice in self.choices:
-                feedback_val = self.feedback(choice)
-                self.save_data(choice, feedback_val)
+        if torch._inductor.config.collect_autoheuristic(self.name):
+            if self.feedback is not None:
+                for choice in self.choices:
+                    feedback_val = self.feedback(choice)
+                    self.save_data(choice, feedback_val)
 
     def satisfies_precondition(self) -> bool:
         return self.precondition is None or self.precondition(
@@ -227,3 +207,96 @@ class AutoHeuristic:
 
         with open(log_path, "a") as f:
             f.write("\n".join(lines) + "\n")
+
+
+class AutoHeuristicSelectAlgorithm(AutoHeuristic):
+    """
+    AutoHeuristicSelectAlgorithm is a subclass of AutoHeuristic that allows one to collect data and learn a heuristic
+    when one wants to use AutoHeuristic for kernel choice selection.
+    """
+
+    def __init__(
+        self,
+        fallback: Callable[[], Optional[ChoiceCaller]],
+        choices: List[ChoiceCaller],
+        input_nodes: List[Any],
+        context: AHContext,
+        name: str,
+        augment_context: Optional[List[AHOperation]] = None,
+        precondition: Optional[Callable[[AHMetadata, AHContext], bool]] = None,
+    ) -> None:
+        """
+        The arguments choices, input_nodes and name have to match the ones used in the call to
+        autotune_select_algorithm(), e.g. if the following call is made
+        autotune_select_algorithm(name, choices, input_nodes, layout), the same name, choices and input_nodes
+        have to be used here.
+        """
+        self.input_nodes = input_nodes
+        self.choicestr2choice: Dict[str, ChoiceCaller] = {}
+        for choice in choices:
+            self.choicestr2choice[choice.autoheuristic_id()] = choice
+        choices_str = list(self.choicestr2choice.keys())
+
+        def fallback_str() -> str:
+            fallback_choice = fallback()
+            if fallback_choice is None:
+                # TODO: Find a nicer way to handle this
+                return "unsure"
+            return fallback_choice.autoheuristic_id()
+
+        super().__init__(
+            fallback_str,
+            choices_str,
+            None,
+            context,
+            name,
+            augment_context,
+            precondition,
+        )
+
+        if (
+            torch._inductor.config.collect_autoheuristic(self.name)
+            and self.satisfies_precondition()
+        ):
+            self.register_global_feedback(input_nodes, choices)
+
+    def register_global_feedback(
+        self, input_nodes: List[Any], choices: List[ChoiceCaller]
+    ) -> None:
+        """
+        Registers a callback in select_algorithm, which is called with the timing of each choice.
+        """
+
+        from torch._inductor.select_algorithm import (
+            add_feedback_saver,
+            create_inputs_key,
+            create_precompile_key,
+        )
+
+        def store_global_feedback(
+            ah_inputs_key: str,
+            ah_precompile_key: str,
+            timings: Dict[ChoiceCaller, float],
+            name: str,
+            input_nodes: List[Any],
+            choices: List[ChoiceCaller],
+        ) -> None:
+            current_inputs_key = create_inputs_key(input_nodes)
+            if current_inputs_key != ah_inputs_key:
+                return
+            current_precompile_key = create_precompile_key(
+                name, current_inputs_key, choices
+            )
+            if current_precompile_key != ah_precompile_key:
+                return
+            for choice, time in timings.items():
+                self.save_data(choice.autoheuristic_id(), time)
+
+        inputs_key = create_inputs_key(input_nodes)
+        precompile_key = create_precompile_key(self.name, inputs_key, choices)
+        feedback_saver = partial(store_global_feedback, inputs_key, precompile_key)
+        add_feedback_saver(feedback_saver)
+
+    def get_choice_caller(self) -> Optional[ChoiceCaller]:
+        choice = self.get_choice()
+        return self.choicestr2choice.get(choice, None)
