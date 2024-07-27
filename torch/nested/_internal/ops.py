@@ -1102,7 +1102,7 @@ def view_default(func, *args, **kwargs):
 
 @register_jagged_func(
     torch.ops.aten.native_layer_norm.default,
-    "input: jt, normalized_shape: any, weight: any?, bias: any?, eps: any",
+    "input: jt_all, normalized_shape: any, weight: any?, bias: any?, eps: any",
 )
 def native_layer_norm_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
