@@ -166,7 +166,6 @@ struct TokenTrie {
 // once.
 struct TORCH_API SharedParserData {
   SharedParserData() : head(new TokenTrie()) {
-    std::stringstream ss;
     for (const char* c = valid_single_char_tokens; *c; c++) {
       std::string str(1, *c);
       head->insert(str.c_str(), *c);
@@ -489,8 +488,8 @@ struct Lexer {
         break;
       case TK_WHITESPACE:
       case TK_WHITESPACE_EOF: {
-        const auto depth = r.kind == TK_WHITESPACE_EOF ? indent_stack.front()
-                                        : r.range.size();
+        const auto depth =
+            r.kind == TK_WHITESPACE_EOF ? indent_stack.front() : r.range.size();
         // note: TK_WHITESPACE_EOF is whitespace right before the EOF token
         // just like we allow the code to be indented to a particular initial
         // indent level, we allow the final indent to be anything and set

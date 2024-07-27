@@ -8,7 +8,10 @@ namespace torch::jit {
 inline bool isCharCount(char c, const std::string& str, size_t start, int len) {
   // count checks from [start, start + len)
   return start + len <= str.size() &&
-      std::count(str.begin() + static_cast<ptrdiff_t>(start), str.begin() + static_cast<ptrdiff_t>(start + len), c) == len;
+      std::count(
+          str.begin() + static_cast<ptrdiff_t>(start),
+          str.begin() + static_cast<ptrdiff_t>(start + len),
+          c) == len;
 }
 
 inline std::optional<char> parseOctal(const std::string& str, size_t pos) {
@@ -62,17 +65,17 @@ inline std::string parseStringLiteral(
         c = '\t';
         break;
       case 'x':
-        throw (ErrorReport(range) << "unsupported hex specifier");
+        throw(ErrorReport(range) << "unsupported hex specifier");
       case 'u':
       case 'U':
-        throw (ErrorReport(range) << "unsupported unicode specifier");
+        throw(ErrorReport(range) << "unsupported unicode specifier");
       default:
         // octal value in format \nnn, n is [0-7]
         if (auto v = parseOctal(ret_str, pos)) {
           to_erase = 4;
           c = *v;
         } else {
-          throw (ErrorReport(range) << " ill formed octal specifier");
+          throw(ErrorReport(range) << " ill formed octal specifier");
         }
     }
     ret_str.replace(pos, to_erase, /* num copies */ 1, c);
