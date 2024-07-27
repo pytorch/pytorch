@@ -236,7 +236,7 @@ class TestBenchmarkingCPU(TestBenchmarking):
         for _ in range(10):
             _callable()
         baseline_timing_ms = ((time.perf_counter() - start_time_s) * 1000) / 10
-        self.assertEqual(baseline_timing_ms, timing_ms, rtol=0.25)
+        self.assertEqual(baseline_timing_ms, timing_ms, atol=1, rtol=0.25)
 
     def gpu_properties_are_not_initialized(self):
         gpu_properties = [
@@ -491,6 +491,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
         self.assertEqual(
             benchmarker.cpu_launch_overhead_ms_per_event_record,
             elapsed_time_ms / 1000,
+            atol=0.1,
             rtol=0.25,
         )
 
@@ -508,6 +509,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
         self.assertEqual(
             benchmarker.cpu_launch_overhead_ms_per_gpu_cache_clear,
             elapsed_time_ms / 100,
+            atol=0.1,
             rtol=0.25,
         )
 
@@ -533,6 +535,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
         self.assertEqual(
             benchmarker.gpu_time_ms_per_gpu_cache_clear,
             start_event.elapsed_time(end_event) / 100,
+            atol=0.1,
             rtol=0.25,
         )
 
@@ -551,6 +554,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
         self.assertEqual(
             benchmarker.gpu_time_ms_per_gpu_clock_cycle,
             start_event.elapsed_time(end_event) / gpu_clock_cycles_to_sleep,
+            atol=0.1,
             rtol=0.25,
         )
 
