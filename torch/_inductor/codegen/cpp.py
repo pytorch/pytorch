@@ -1432,7 +1432,7 @@ class CppVecOverrides(CppOverrides):
         ], f"{__name__} does not support {dtype}"
         node: torch.fx.Node = V.interpreter.current_node
         assert node and isinstance(node, torch.fx.Node)
-        opt_ctx_x = get_opt_ctx(node.args[1])
+        opt_ctx_x = get_opt_ctx(node.args[1])  # type: ignore[arg-type]
         assert opt_ctx_x
         assert opt_ctx_x.dtype is not None
         assert isinstance(V.kernel, CppVecKernel)
@@ -3058,7 +3058,7 @@ class CppVecKernelChecker(CppVecKernel):
                     return tmp_var
 
             @staticmethod
-            def indirect_indexing(index_var, size, check=True):
+            def indirect_indexing(index_var, size, check=True, wrap_neg=True):
                 return sympy_index_symbol(str(index_var))
 
             @staticmethod
