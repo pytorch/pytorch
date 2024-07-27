@@ -40,3 +40,23 @@ del rmsprop  # type: ignore[name-defined] # noqa: F821
 del optimizer  # type: ignore[name-defined] # noqa: F821
 del nadam  # type: ignore[name-defined] # noqa: F821
 del lbfgs  # type: ignore[name-defined] # noqa: F821
+
+__all__ = [
+    "Adafactor",
+    "Adadelta",
+    "Adagrad",
+    "Adam",
+    "Adamax",
+    "AdamW",
+    "ASGD",
+    "LBFGS",
+    "lr_scheduler",
+    "NAdam",
+    "Optimizer",
+    "RAdam",
+    "RMSprop",
+    "Rprop",
+    "SGD",
+    "SparseAdam",
+    "swa_utils",
+]
