@@ -369,6 +369,9 @@ inline_inbuilt_nn_modules = (
     os.environ.get("TORCHDYNAMO_INLINE_INBUILT_NN_MODULES", "0") == "1"
 )
 
+# Number of eager warmup runs to run before compiling.
+warmup_runs = 0
+
 
 def default_debug_dir_root():
     # [@compile_ignored: debug]
