@@ -13,8 +13,7 @@
 #include <torch/csrc/jit/frontend/versioned_symbols.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 
@@ -853,5 +852,4 @@ struct TORCH_API SliceValue : public SugaredValue {
   Value* step_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
