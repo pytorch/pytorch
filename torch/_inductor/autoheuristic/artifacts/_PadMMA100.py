@@ -4,6 +4,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
     AHMetadata,
     Choice,
+    CHOICE_COL,
 )
 from torch._inductor.autoheuristic.learnedheuristic_interface import LearnedHeuristic
 
@@ -24,7 +25,7 @@ class PadMMA100(LearnedHeuristic):
         )
 
     def get_feedback(self, context: AHContext, choice: Choice) -> float:
-        context.context_dict["choice"] = choice
+        context.context_dict[CHOICE_COL] = choice
         return self.predict(context)
 
     def get_speedup_threshold(self) -> float:

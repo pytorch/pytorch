@@ -27,6 +27,7 @@ from ..pattern_matcher import (
 )
 from .replace_random import replace_random_passes
 
+
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
 aten = torch.ops.aten
@@ -504,7 +505,7 @@ def pointless_view(match: Match, arg, size):
     node = match.output_node()
     arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
     if size == arg_size:
-        node.replace_all_uses_with(node.args[0])
+        node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]  # type: ignore[arg-type]
         match.erase_nodes(graph)
 
 

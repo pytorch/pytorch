@@ -1,7 +1,9 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
 from functools import wraps
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, TypeVar, Union
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._prims as prims
@@ -26,6 +28,7 @@ __all__ = [
     "alpha_dropout",
     "celu",
     "celu_",
+    "channel_shuffle",
     "dropout",
     "elu",
     "elu_",
@@ -63,6 +66,9 @@ __all__ = [
     "threshold_",
     "triplet_margin_loss",
 ]
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 Tensor = torch.Tensor
 aten = torch._ops.ops.aten
@@ -126,22 +132,27 @@ def alpha_dropout(
     return self * dropout_mask + b
 
 
-def _inplace_wrapper(fn):
+def _inplace_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     """
     Given a nn.functional non-linearity, implements its `inplace: bool` argument
     """
 
     # nb. We use the name of the first argument used in the unary references
     @wraps(fn)
-    def _fn(a, *args, inplace=False, **kwargs):
-        if inplace:
+    def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        a = args[0]
+        if "inplace" not in kwargs:
+            kwargs["inplace"] = False
+        if kwargs["inplace"]:
             torch._check(
                 "out" not in kwargs,
                 lambda: "Cannot set inplace=True and pass out= at the same time",
             )
-            return fn(a, *args, inplace=False, out=a, **kwargs)
+            kwargs["inplace"] = False
+            kwargs["out"] = a
+            return fn(*args, **kwargs)
         else:
-            return fn(a, *args, inplace=False, **kwargs)
+            return fn(*args, **kwargs)
 
     return _fn
 
@@ -260,6 +271,44 @@ def relu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
         raise NotImplementedError
 
     return torch.where(torch.le(a, 0), 0, a)
+
+
+@register_decomposition(aten.channel_shuffle)
+@out_wrapper()
+def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
+    """
+    Reference implementation of :func:`torch.nn.functional.channel_shuffle`.
+    """
+    from torch._meta_registrations import device_hint
+
+    torch._check(
+        input.dim() > 2,
+        lambda: f"channel_shuffle expects input with > 2 dims, but got input with sizes {list(input.size())}",
+    )
+    c = input.shape[1]
+    torch._check(
+        groups > 0,
+        lambda: f"Number of groups to divide channels in must be positive. Value of groups:{groups}",
+    )
+    torch._check(
+        (c % groups) == 0,
+        lambda: f"Number of channels must be divisible by groups. Got {c} channels and {groups} groups.",
+    )
+    n = input.shape[0]
+    cg = c // groups
+    dhw = input.shape[2:]
+
+    if input.numel() == 0 or (
+        device_hint(input) == "cuda" and (groups == 1 or groups == c)
+    ):
+        return input.view(input.shape)
+
+    return (
+        input.reshape(n, groups, cg, *dhw)
+        .transpose(1, 2)
+        .reshape(input.shape)
+        .contiguous()
+    )
 
 
 def group_norm(

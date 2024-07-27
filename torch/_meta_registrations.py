@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import math
 from enum import Enum
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._prims_common as utils
@@ -34,13 +35,15 @@ from torch._prims_common.wrappers import (
 from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.utils import _pytree as pytree
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 aten = torch.ops.aten
 
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
 
 
-def register_meta(op):
+def register_meta(op) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     def wrapper(fn):
         fn = _convert_out_params(fn)
 
@@ -3259,7 +3262,7 @@ def meta__convert_weight_to_int4pack(w, inner_k_tiles):
         lambda: f"expected w to be uint8, got {w.dtype}",
     )
     n = w.size(0)
-    k = w.size(1)
+    k = w.size(1) * 2  # w is [n][k / 2] uint8
     return w.new_empty(
         (
             n // 8,
@@ -6180,22 +6183,6 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     )
     return torch.empty_like(self, dtype=result_dtype)
-
-
-@register_meta(aten.channel_shuffle.default)
-def meta_channel_shuffle(input, groups):
-    # Assume the input shape is (*, C, H, W), where * represents any number of leading dimensions
-    *leading_dims, C, H, W = input.size()
-    # The output shape is the same as the input
-    return torch.empty(
-        *leading_dims,
-        C,
-        H,
-        W,
-        dtype=input.dtype,
-        layout=input.layout,
-        device=input.device,
-    )
 
 
 @register_meta(aten._local_scalar_dense)

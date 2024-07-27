@@ -58,13 +58,18 @@ from torch.utils._sympy.functions import (
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+
 from . import config
 from .runtime.runtime_utils import ceildiv as runtime_ceildiv
+
+_IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
+InputType = Union[torch.Tensor, int]
+
 
 GPU_ALIGN_BYTES = 16
 
@@ -348,7 +353,7 @@ def gen_gm_and_inputs(target, args, kwargs):
         len(target._schema.returns) == 1
         and str(target._schema.returns[0].type) == "Tensor"
     ):
-        node = (node,)
+        node = (node,)  # type: ignore[assignment]
     g.output(node)
 
     gm = torch.fx.GraphModule({}, g)
@@ -775,8 +780,13 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
         if delete:
             shutil.rmtree(inductor_cache_dir)
     except Exception:
-        log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
-        raise
+        if not _IS_WINDOWS:
+            """
+            Windows can't delete the loaded modules, because the modules binaries are opened.
+            TODO: discuss if have better solution to handle this issue.
+            """
+            log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
+            raise
     finally:
         clear_inductor_caches()
 
@@ -1181,11 +1191,9 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
     )
-    # TODO(jgong5): support n % n_block_size != 0
     return (
         layout.dtype in layout_dtypes
         and micro_gemm is not None
-        and n % micro_gemm.register_blocking[1] == 0
         and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and mat2.is_module_buffer()
