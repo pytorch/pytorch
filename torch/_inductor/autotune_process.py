@@ -133,7 +133,7 @@ class TuningProcess:
             elif isinstance(obj, Ping):
                 response_queue.put(Pong())
             elif isinstance(obj, BenchmarkRequest):
-                response_queue.put(obj.benchmark())
+                response_queue.put(float(obj.benchmark()))
             else:
                 raise RuntimeError(f"Invalid request type {type(obj)}")
 
