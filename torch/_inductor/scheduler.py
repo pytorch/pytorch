@@ -1435,6 +1435,9 @@ class GroupedSchedulerNode(BaseSchedulerNode):
             result.extend(node.get_outputs())
         return result
 
+    def get_nodes(self) -> Sequence[BaseSchedulerNode]:
+        return self.snodes
+
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
         # GroupedSchedulerNode cannot be fused with another node

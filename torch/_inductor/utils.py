@@ -1547,6 +1547,26 @@ def is_wait(node):
     return type(node) == ir._WaitKernel
 
 
+def contains_collective(snode):
+    from torch._inductor.scheduler import BaseSchedulerNode, GroupedSchedulerNode
+
+    assert isinstance(snode, BaseSchedulerNode)
+    if isinstance(snode, GroupedSchedulerNode):
+        return any(contains_collective(x) for x in snode.snodes)
+    else:
+        return is_collective(snode.node)
+
+
+def contains_wait(snode):
+    from torch._inductor.scheduler import BaseSchedulerNode, GroupedSchedulerNode
+
+    assert isinstance(snode, BaseSchedulerNode)
+    if isinstance(snode, GroupedSchedulerNode):
+        return any(contains_wait(x) for x in snode.snodes)
+    else:
+        return is_wait(snode.node)
+
+
 def is_fallback_op(node, op):
     from . import ir
 
