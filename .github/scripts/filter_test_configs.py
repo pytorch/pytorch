@@ -505,6 +505,7 @@ def perform_misc_tasks(
         "ci-verbose-test-logs",
         check_for_setting(labels, pr_body, "ci-verbose-test-logs"),
     )
+    set_output("ci-showlocals", check_for_setting(labels, pr_body, "ci-showlocals"))
     set_output(
         "ci-no-test-timeout", check_for_setting(labels, pr_body, "ci-no-test-timeout")
     )
