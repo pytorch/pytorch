@@ -12,7 +12,7 @@ from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
 from ..runtime.runtime_utils import next_power_of_2
-from ..utils import has_free_symbols, ceildiv as cdiv
+from ..utils import ceildiv as cdiv, has_free_symbols
 
 
 log = logging.getLogger(__name__)
