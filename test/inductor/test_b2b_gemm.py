@@ -56,7 +56,7 @@ class B2BGEMMTest(TestCase):
                 return torch.mm(torch.mm(m1, m2), m3)
 
             f_opt = torch.compile(f, dynamic=False)
-            return benchmarker.benchmark_gpu(f_opt, (m1, m2, m3), {})
+            return benchmarker.benchmark(f_opt, (m1, m2, m3), {}, warmup=100, rep=1000)
 
         @torch._inductor.config.patch(b2b_gemm_pass=True)
         def run_with_b2b_gemm_on(
@@ -66,7 +66,7 @@ class B2BGEMMTest(TestCase):
                 return torch.mm(torch.mm(m1, m2), m3)
 
             f_opt = torch.compile(f, dynamic=False)
-            return benchmarker.benchmark_gpu(f_opt, (m1, m2, m3), {})
+            return benchmarker.benchmark(f_opt, (m1, m2, m3), {}, warmup=100, rep=1000)
 
         speedups = []
         print()

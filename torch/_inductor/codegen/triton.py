@@ -270,11 +270,9 @@ class BlockPtrOptions:
                 self.replace_roffset(offset, sympy.Integer(0)) for offset in offsets
             ]
         args = [
-            (
-                f"{name} + ({f(self.constant_offset)})"
-                if self.constant_offset != 0
-                else name
-            ),
+            f"{name} + ({f(self.constant_offset)})"
+            if self.constant_offset != 0
+            else name,
             f"shape={f(self.shape)}",
             f"strides={f(self.strides)}",
             f"block_shape={f(self.block_shape)}",
@@ -2464,11 +2462,15 @@ class TritonKernel(SIMDKernel):
 
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])
         with result.indent():
-            result.writeline("from triton.testing import do_bench")
+            result.writeline(
+                "from torch._inductor.runtime.benchmarking import benchmarker"
+            )
             result.writeline("")
 
             result.writeline("args = get_args()")
-            result.writeline("ms = do_bench(lambda: call(args))")
+            result.writeline(
+                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40, fast_flush=True)"
+            )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
             result.writeline(
@@ -2523,15 +2525,15 @@ class TritonKernel(SIMDKernel):
             inductor_meta["profile_bandwidth_regex"] = config.profile_bandwidth_regex
             inductor_meta["profile_bandwidth_output"] = config.profile_bandwidth_output
         if config.coordinate_descent_tuning:
-            inductor_meta["coordinate_descent_tuning"] = (
-                config.coordinate_descent_tuning
-            )
-            inductor_meta["coordinate_descent_search_radius"] = (
-                config.coordinate_descent_search_radius
-            )
-            inductor_meta["coordinate_descent_check_all_directions"] = (
-                config.coordinate_descent_check_all_directions
-            )
+            inductor_meta[
+                "coordinate_descent_tuning"
+            ] = config.coordinate_descent_tuning
+            inductor_meta[
+                "coordinate_descent_search_radius"
+            ] = config.coordinate_descent_search_radius
+            inductor_meta[
+                "coordinate_descent_check_all_directions"
+            ] = config.coordinate_descent_check_all_directions
         return inductor_meta
 
     def codegen_kernel(self, name=None):

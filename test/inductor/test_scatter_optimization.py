@@ -191,7 +191,7 @@ class TestScatterOpt(TestCase):
             torch.cuda.reset_peak_memory_stats()
             for _ in range(3):
                 opt_f(opt_model, x, label)
-            ms = benchmarker.benchmark_gpu(lambda: opt_f(opt_model, x, label))
+            ms = benchmarker.benchmark(lambda: opt_f(opt_model, x, label), (), {})
             peak_mem = torch.cuda.max_memory_allocated() / 10**9
             print(f"{ms=:.3f}, {peak_mem=:.3f} GB")
 

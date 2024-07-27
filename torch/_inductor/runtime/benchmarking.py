@@ -513,9 +513,9 @@ class Benchmarker:
         warmup: int = 25,
         rep: int = 100,
         grad_to_none: Optional[torch.Tensor] = None,
-        quantiles: Optional[List[float]] = [0.5, 0.2, 0.8],
+        quantiles: Optional[List[float]] = None,
         fast_flush: bool = True,
-        return_mode: str = "mean",
+        return_mode: str = "median",
         **kwargs: Any,
     ) -> float:
         """
@@ -685,7 +685,8 @@ class Benchmarker:
                     callables
                 ) - len(callables_to_benchmark)
                 log.debug(
-                    "Early pruning pruned {num_pruned_callables} from {num_callables} total callables, continuing benchmarking with remaining {num_unpruned_callables} callables.",
+                    "Early pruning pruned {num_pruned_callables} from {num_callables} total callables,"
+                    + " continuing benchmarking with remaining {num_unpruned_callables} callables.",
                     extra=dict(
                         num_pruned_callables=len(callables)
                         - len(callables_to_benchmark),

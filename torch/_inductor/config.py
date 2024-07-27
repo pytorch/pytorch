@@ -1075,6 +1075,7 @@ class trace:
 # 1: Force enable
 # None: Enable in OSS (expect for fallbacks), JK-based for internal
 class benchmarking:
+    @staticmethod
     def get_config(key: str) -> Optional[bool]:
         value = os.environ.get(key, None)
         if value is None:

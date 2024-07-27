@@ -168,7 +168,7 @@ class TestBenchmarking(TestCase):
     def get_various_kernels_by_device(self, device):
         def make_sum(size):
             fn, args, kwargs = torch.sum, [torch.randn(size, device=device)], {}
-            _callable = lambda: fn(*args, **kwargs)
+            _callable = lambda: fn(*args, **kwargs)  # noqa: E731
             return (fn, args, kwargs, _callable)
 
         sums = [make_sum(size) for size in [10, 100, 1000, 10000, 100000]]
@@ -182,7 +182,7 @@ class TestBenchmarking(TestCase):
                 ],
                 {},
             )
-            _callable = lambda: fn(*args, **kwargs)
+            _callable = lambda: fn(*args, **kwargs)  # noqa: E731
             return (fn, args, kwargs, _callable)
 
         mms = [make_mm(size) for size in [32, 64, 128, 256, 512]]
@@ -249,6 +249,7 @@ class TestBenchmarkingCPU(TestBenchmarking):
         for gpu_property in gpu_properties:
             self.assertEqual(gpu_property, 0)
 
+    @staticmethod
     def patches(fn):
         @config.patch({"benchmarking.fallback_to_original_benchmarking": False})
         @config.patch({"benchmarking.enable_lazy_benchmarking": True})
@@ -326,6 +327,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
         roofline_timing_ms = start_event.elapsed_time(end_event) / 10
         self.assertEqual(timing_ms <= roofline_timing_ms, True)
 
+    @staticmethod
     def patches(fn):
         @requires_gpu()
         @config.patch({"benchmarking.fallback_to_original_benchmarking": False})
