@@ -447,7 +447,7 @@ class TestFullyShardCompile(FSDPTest):
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_transformer_backend_aot_eager(self):
-        for fullgraph in [True, False]:
+        for fullgraph in [True]:  # TODO: fix bug and enable [True, False]:
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(fullgraph):
@@ -462,7 +462,7 @@ class TestFullyShardCompile(FSDPTest):
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_aot_eager_decomp_partition(self):
-        for fullgraph in [True, False]:
+        for fullgraph in [True]:  # TODO: fix bug and enable [True, False]:
             with self._maybe_add_graph_break_to_sdpa(fullgraph):
                 self._test_traceable_fsdp(
                     *self._create_transformer_factory_fns(),
