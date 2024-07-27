@@ -935,7 +935,9 @@ void initJitScriptBindings(PyObject* module) {
   std::unordered_map<std::string, MagicMethodImplType> special_magic_methods;
   special_magic_methods.emplace(
       "__str__",
-      [](const Object& self, py::args args, py::kwargs kwargs) -> py::object {
+      [](const Object& self,
+         py::args args,
+         const py::kwargs& kwargs) -> py::object {
         auto method = self.find_method("__str__");
         if (!method) {
           return py::str("ScriptObject <" + self.type()->str() + ">");
@@ -950,7 +952,9 @@ void initJitScriptBindings(PyObject* module) {
 
   special_magic_methods.emplace(
       "__repr__",
-      [](const Object& self, py::args args, py::kwargs kwargs) -> py::object {
+      [](const Object& self,
+         py::args args,
+         const py::kwargs& kwargs) -> py::object {
         auto method = self.find_method("__repr__");
         if (!method) {
           std::stringstream ss;
@@ -1888,7 +1892,7 @@ void initJitScriptBindings(PyObject* module) {
             std::move(reader),
             std::move(storage_context),
             optional_device,
-            std::move(ts_id));
+            ts_id);
       });
   m.def(
       "import_ir_module_from_buffer",
@@ -2449,7 +2453,7 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("_pickle_save", [](IValue v) {
-    auto bytes = torch::jit::pickle_save(std::move(v));
+    auto bytes = torch::jit::pickle_save(v);
     return py::bytes(bytes.data(), bytes.size());
   });
 

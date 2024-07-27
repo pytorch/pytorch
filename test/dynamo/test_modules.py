@@ -2757,7 +2757,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         fn(inp, mod)
         self.assertEqual(num_compiles, 2)
 
-    def test_no_guard_on_torch_nn_modules(self):
+    @patch.object(torch._dynamo.config, "guard_nn_modules", True)
+    def test_guard_on_torch_nn_modules(self):
         # https://github.com/pytorch/pytorch/issues/110048
 
         class MockModule(torch.nn.Module):
