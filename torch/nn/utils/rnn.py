@@ -1,5 +1,5 @@
 import warnings
-from typing import Iterable, List, Literal, NamedTuple, Optional, Tuple, Union
+from typing import Iterable, List, NamedTuple, Optional, Tuple, Union
 
 import torch
 from torch import _VF, Tensor
