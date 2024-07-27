@@ -7,6 +7,7 @@ from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
+    _fused_scaled_matmul_reduce_scatter_fallback,
     enable_symm_mem_for_group,
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
@@ -172,7 +173,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def test_fused_all_gather_matmul(self, gather_dim: int) -> None:
         self._init_process()
 
-        B = 8
+        BATCH = 8
         M = 64
         N = 16
         K = 32
@@ -181,7 +182,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         world_size = self.world_size
 
         torch.manual_seed(42 + rank)
-        A_shard = torch.rand(B, M // self.world_size, K, device="cuda")
+        A_shard = torch.rand(BATCH, M // self.world_size, K, device="cuda")
         Bs = [torch.rand(K, N, device="cuda") for _ in range(3)]
 
         ag_output_0, mm_outputs_0 = _fused_all_gather_matmul_fallback(
@@ -205,7 +206,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def test_fused_all_gather_scaled_matmul(self, gather_dim: int) -> None:
         self._init_process()
 
-        B = 8
+        BATCH = 8
         M = 64
         N = 16
         K = 32
@@ -214,7 +215,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         world_size = self.world_size
 
         torch.manual_seed(42 + rank)
-        A_shard = torch.rand(B, M // self.world_size, K, device="cuda").to(
+        A_shard = torch.rand(BATCH, M // self.world_size, K, device="cuda").to(
             torch.float8_e4m3fn
         )
         A_scale = torch.tensor(0.1, device="cuda")
@@ -267,7 +268,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def test_fused_matmul_reduce_scatter(self, scatter_dim: int) -> None:
         self._init_process()
 
-        B = 8
+        BATCH = 8
         M = 64
         N = 16
         K = 32
@@ -276,7 +277,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         world_size = self.world_size
 
         torch.manual_seed(42 + rank)
-        A = torch.rand(B, M, K, device="cuda")
+        A = torch.rand(BATCH, M, K, device="cuda")
         B = torch.rand(K, N, device="cuda")
 
         output_0 = _fused_matmul_reduce_scatter_fallback(
@@ -286,6 +287,53 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             A, B, "avg", scatter_dim=scatter_dim, group_name=group.group_name
         )
 
+        assert torch.allclose(output_0, output_1)
+        assert output_0.stride() == output_1.stride()
+
+        dist.destroy_process_group()
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    @parametrize("scatter_dim", [0, 1])
+    def test_fused_scaled_matmul_reduce_scatter(self, scatter_dim: int) -> None:
+        self._init_process()
+
+        BATCH = 8
+        M = 64
+        N = 16
+        K = 32
+        group = dist.group.WORLD
+        rank = self.rank
+        world_size = self.world_size
+
+        torch.manual_seed(42 + rank)
+        A = torch.rand(BATCH, M, K, device="cuda").to(torch.float8_e4m3fn)
+        A_scale = torch.tensor(0.1, device="cuda")
+        B = torch.rand(N, K, device="cuda").to(torch.float8_e4m3fn).T
+        B_scale = torch.tensor(0.1, device="cuda")
+
+        output_0 = _fused_scaled_matmul_reduce_scatter_fallback(
+            A,
+            B,
+            A_scale,
+            B_scale,
+            torch.bfloat16,
+            "avg",
+            scatter_dim=scatter_dim,
+            group_name=group.group_name,
+        )
+        output_1 = torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(
+            A,
+            B,
+            A_scale,
+            B_scale,
+            torch.bfloat16,
+            "avg",
+            scatter_dim=scatter_dim,
+            group_name=group.group_name,
+        )
+
+        print(output_0, output_1)
         assert torch.allclose(output_0, output_1)
         assert output_0.stride() == output_1.stride()
 
