@@ -566,6 +566,10 @@ class OptimizeContext(_TorchDynamoContext):
             self.enter_exit_hooks.append(call_compiled_autograd)
 
     def __call__(self, fn):
+        # public api for compiler config/options
+        def get_compiler_config():
+            return self.compiler_config
+
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
             mod = fn
@@ -573,6 +577,10 @@ class OptimizeContext(_TorchDynamoContext):
             # Save the function pointer to find the original callable while nesting
             # of decorators.
             new_mod._torchdynamo_orig_callable = mod.forward
+            # when compiling torch.nn.Module,
+            # provide public api OptimizedModule.get_compiler_config()
+            assert not hasattr(new_mod, "get_compiler_config")
+            new_mod.get_compiler_config = get_compiler_config
             return new_mod
 
         @functools.wraps(fn)
@@ -593,6 +601,9 @@ class OptimizeContext(_TorchDynamoContext):
         # Save the function pointer to find the original callable while nesting
         # of decorators.
         _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+        _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
+        _fn._torchdynamo_disable = False  # type: ignore[attr-defined]
+        _fn.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
         return _fn
 
     def __reduce__(self):
