@@ -1280,6 +1280,9 @@ class OutputGraph:
                 all_states = [None] * compile_pg.size()
                 dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
                 ds.all_states = all_states
+            # Clear speculation log, because are tracing may diverge due to
+            # this information from the compiler collective
+            tx.speculation_log.clear()
             raise exc.CompileCollectiveRestartAnalysis
 
         assert self.should_exit
