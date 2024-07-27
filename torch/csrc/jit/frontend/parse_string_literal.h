@@ -63,17 +63,17 @@ inline std::string parseStringLiteral(
         c = '\t';
         break;
       case 'x':
-        throw ErrorReport(range) << "unsupported hex specifier";
+        throw (ErrorReport(range) << "unsupported hex specifier");
       case 'u':
       case 'U':
-        throw ErrorReport(range) << "unsupported unicode specifier";
+        throw (ErrorReport(range) << "unsupported unicode specifier");
       default:
         // octal value in format \nnn, n is [0-7]
         if (auto v = parseOctal(ret_str, pos)) {
           to_erase = 4;
           c = *v;
         } else {
-          throw ErrorReport(range) << " ill formed octal specifier";
+          throw (ErrorReport(range) << " ill formed octal specifier");
         }
     }
     ret_str.replace(pos, to_erase, /* num copies */ 1, c);
