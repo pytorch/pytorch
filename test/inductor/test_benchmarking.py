@@ -283,11 +283,25 @@ class TestBenchmarkingCPU(TestBenchmarking):
         self.gpu_properties_are_not_initialized()
 
     @patches
+    def test_lazy_benchmark_smoke(self, benchmarker, kernels):
+        fn_args_kwargs_list = [(fn, args, kwargs) for fn, args, kwargs, _ in kernels]
+        timings_ms = [
+            benchmarker.lazy_benchmark(*fn_args_kwargs)
+            for fn_args_kwargs in fn_args_kwargs_list
+        ]
+        timings_ms = [float(timing_ms) for timing_ms in timings_ms]
+        callables = [_callable for _, _, _, _callable in kernels]
+        for _callable, timing_ms in zip(callables, timings_ms):
+            self.sanity_check(_callable, timing_ms)
+        self.gpu_properties_are_not_initialized()
+
+    @patches
     def test_lazy_benchmark_cpu_smoke(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
         timings_ms = [
             benchmarker.lazy_benchmark_cpu(_callable) for _callable in callables
         ]
+        timings_ms = [float(timing_ms) for timing_ms in timings_ms]
         for _callable, timing_ms in zip(callables, timings_ms):
             self.sanity_check(_callable, timing_ms)
         self.gpu_properties_are_not_initialized()
@@ -346,11 +360,25 @@ class TestBenchmarkingGPU(TestBenchmarking):
             self.sanity_check(_callable, timing_ms)
 
     @patches
+    def test_lazy_benchmark_smoke(self, benchmarker, kernels):
+        fn_args_kwargs_list = [(fn, args, kwargs) for fn, args, kwargs, _ in kernels]
+        timings_ms = [
+            benchmarker.lazy_benchmark(*fn_args_kwargs)
+            for fn_args_kwargs in fn_args_kwargs_list
+        ]
+        timings_ms = [float(timing_ms) for timing_ms in timings_ms]
+        callables = [_callable for _, _, _, _callable in kernels]
+        for _callable, timing_ms in zip(callables, timings_ms):
+            self.sanity_check(_callable, timing_ms)
+        self.gpu_properties_are_not_initialized()
+
+    @patches
     def test_lazy_benchmark_gpu_smoke(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
         timings_ms = [
             benchmarker.lazy_benchmark_gpu(_callable) for _callable in callables
         ]
+        timings_ms = [float(timing_ms) for timing_ms in timings_ms]
         for _callable, timing_ms in zip(callables, timings_ms):
             self.sanity_check(_callable, timing_ms)
 
