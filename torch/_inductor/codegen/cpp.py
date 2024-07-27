@@ -2112,6 +2112,7 @@ class CppVecKernel(CppKernel):
         dtype: torch.dtype,
         buffer: Optional[IndentedBuffer] = None,
         store_value: Optional[Union[str, CppCSEVariable]] = None,
+        accu: bool = False,
     ) -> Optional[CppCSEVariable]:
         """
         Load or store a vector in a non-contiguous way. The vector is initialized from an array that is
@@ -2126,10 +2127,12 @@ class CppVecKernel(CppKernel):
         :param dtype: data type of `var` or `index` if `var` is None.
         :param buffer: the code buffer to write the generated code to. If None, we write to `self.loads`.
         :param store_value: the value to store. If None, we load the vector.
+        :param accu: whether accumulate the store_value to store_ptr. If True, a store_value should be provided
         :return: a CppCSEVariable that represents the loaded vector or None if it is a store.
         """
         assert not store_value or var is not None, "store var must be provided"
-
+        if accu:
+            assert store_value
         if buffer is None:
             buffer = self.loads
 
@@ -2214,7 +2217,8 @@ class CppVecKernel(CppKernel):
                     code.writeline(f"if ({load_mask})")
                     stack.enter_context(code.indent())
                 if store_value:
-                    code.writeline(f"{rhs} = tmpbuf[{itervar_inner}];")
+                    conjunction = "+=" if accu else "="
+                    code.writeline(f"{rhs} {conjunction} tmpbuf[{itervar_inner}];")
                 else:
                     code.writeline(f"tmpbuf[{itervar_inner}] = {rhs};")
             if not store_value:
@@ -2231,7 +2235,7 @@ class CppVecKernel(CppKernel):
             csevar.is_vec = True
             return csevar
 
-    def load(self, name: str, index: sympy.Expr):
+    def load_to_buffer(self, name: str, index: sympy.Expr, buffer: IndentedBuffer):
         var = self.args.input(name)
         index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
@@ -2243,13 +2247,16 @@ class CppVecKernel(CppKernel):
         elif stride == 1:
             # load contiguously
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)
-            csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
+            csevar = self.cse.generate(buffer, line)  # type: ignore[assignment]
         else:
-            csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
+            csevar = self._load_or_store_non_contiguous(var, index, dtype, buffer)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
         csevar.update_on_args("load", (self, name, index), {})
         csevar.is_vec = True
         return csevar
+
+    def load(self, name: str, index: sympy.Expr):
+        return self.load_to_buffer(name, index, self.loads)
 
     def _get_store_line(
         self,
@@ -2257,6 +2264,7 @@ class CppVecKernel(CppKernel):
         var: str,
         index: sympy.Expr,
         dtype: torch.dtype,
+        accu: bool = False,
     ):
         """
         Get a store line buffer that stores `value` into `var` at `index` of `dtype`. It handles
@@ -2281,21 +2289,38 @@ class CppVecKernel(CppKernel):
                 code.writeline(f"{value}.store({var_expr}, {self.tiling_factor});")
         else:
             self._load_or_store_non_contiguous(
-                var, index, dtype, buffer=code, store_value=value
+                var, index, dtype, buffer=code, store_value=value, accu=accu
             )
         return code
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
-        assert mode is None
         assert isinstance(value, CppCSEVariable), value
         if not value.is_vec:
             # this happens when we store a scalar into a vectorized buffer like "fill"
             value = self.broadcast(value)
         var = self.args.output(name)
         index = self.rename_indexing(index)
-        code = self._get_store_line(value, var, index, V.graph.get_dtype(name))
-        self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
+        if mode is None:
+            code = self._get_store_line(value, var, index, V.graph.get_dtype(name))
+            self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
+        elif mode == "atomic_add":
+            if not config.cpp.dynamic_threads and self.num_threads == 1:
+                load_var = self.load_to_buffer(name, index, self.stores)
+                code = self._get_store_line(
+                    f"({load_var} + {value})",
+                    var,
+                    index,
+                    V.graph.get_dtype(name),
+                    accu=True,
+                )
+                self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
+            else:
+                index = ops.index_expr(index, torch.int64)
+                line = f"atomic_add_vec({var}, {index}, {value});"
+                self.stores.writeline(DeferredLine(name, line))
+        else:
+            raise NotImplementedError(f"store mode={mode}")
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         assert reduction_type in {
@@ -2795,10 +2820,6 @@ class CppVecKernelChecker(CppVecKernel):
 
             assert "buf" in name
             index = self.rename_indexing(index)
-
-            if mode:
-                self.disable_vec(f"store mode: {mode}")
-                return self.simd_vec
 
             return self.simd_vec
 
