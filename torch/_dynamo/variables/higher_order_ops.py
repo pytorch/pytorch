@@ -1009,11 +1009,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder, wrap_fx_proxy
 
-        def slice_along_axis(size, d=0):
-            li = list(size)
-            li[d] = 1
-            return tuple(li)
-
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         def arg_extractor(combine_fn, input, dim, lifted_args):
