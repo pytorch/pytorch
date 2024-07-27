@@ -6,7 +6,6 @@ from torch._inductor.kernel.mm_common import mm_args
 from . import config as inductor_config, lowering
 from .codegen.cpp_gemm_template import CppPackedGemmTemplate
 from .lowering import register_lowering
-from .mkldnn_lowerings import create_epilogue_with_attr
 from .select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -59,16 +58,12 @@ def register_woq_mm_ops():
             else []
         )
 
-        def epilogue_creator(buf):
-            return create_epilogue_with_attr(buf, "mul", other=vec1)
-
         if use_cpp_packed_gemm_template(aten_layout, mat1, mat2, is_woq_gemm=True):
             CppPackedGemmTemplate.add_choices(
                 choices,
                 aten_layout,
                 [mat1, mat2, vec1],
                 is_woq_gemm=True,
-                epilogue_creator=epilogue_creator,
             )
 
         if (

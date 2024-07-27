@@ -11,10 +11,11 @@ import torch.utils
 
 from ..._dynamo.utils import counters
 from .. import config, ir, lowering as L
+from ..epilogue_creator import create_epilogue_with_attr
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
-from ..virtualized import ops, V
+from ..virtualized import V
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
 from .cpp_template_kernel import CppTemplateKernel
@@ -475,12 +476,12 @@ class CppPackedGemmTemplate(CppTemplate):
             return new_inputs, layout_or_out
 
         def normalize_shapes(inputs, layout_or_out):
-            if not trans_w:
+            if not trans_w and not is_woq_gemm:
                 return inputs, layout_or_out
-
             new_inputs = list(inputs)
             X = inputs[0]
             W = inputs[1]
+            # B might is scale in case of WoQ GEMM
             B = inputs[2] if len(inputs) > 2 else None
             if isinstance(W, ir.IRNode):
                 if trans_w:
@@ -662,7 +663,7 @@ class CppPackedGemmTemplate(CppTemplate):
         assert len(self.input_nodes) >= 2
 
         int8_gemm = self.input_nodes[0].get_dtype() == torch.uint8
-
+        is_woq_gemm = False
         x_scale = None
         x_zp = None
         w_scale = None
@@ -678,8 +679,13 @@ class CppPackedGemmTemplate(CppTemplate):
             Y = self.output_node
         else:
             X, W = self.input_nodes[0], self.input_nodes[1]
-            inp = self.input_nodes[2] if self.has_bias else None
             Y = self.output_node
+            is_woq_gemm = (
+                X.get_dtype() in [torch.float16, torch.bfloat16]
+                and W.get_dtype() == torch.int8
+                and Y.get_dtype() in [torch.float16, torch.bfloat16]
+            )
+            inp = self.input_nodes[2] if self.has_bias or is_woq_gemm else None
 
         if template_buffer_node is not None:
             # Use the updated prepacked weight buffer
@@ -696,30 +702,21 @@ class CppPackedGemmTemplate(CppTemplate):
         Y_aliases: Set[str] = set()
         # TODO(jgong5): for int8 gemm, bias-add is handled outside of gemm template,
         # but we'd better move it here to align with fp.
-        if inp is not None and self.beta != 0 and not int8_gemm:
-
-            def bias_epilogue(input_buffer: ir.Buffer):
-                dtype = self.layout.dtype
-                bias_loader = inp.make_loader()
-                input_loader = input_buffer.make_loader()
-
-                def bias_add_inner(index):
-                    bias = bias_loader(index)
-                    input = input_loader(index)
-                    if self.beta != 1:
-                        result = ops.constant(self.beta, torch.float) * bias + input
-                    else:
-                        result = bias + input
-                    return result
-
-                return ir.Pointwise(
-                    device=input_buffer.get_device(),
-                    dtype=dtype,
-                    inner_fn=bias_add_inner,
-                    ranges=input_buffer.get_size(),
+        if inp is not None and self.beta != 0 and not int8_gemm and not is_woq_gemm:
+            # add an epilogue for bias add
+            def _bias_add_epilogue(buf):
+                return create_epilogue_with_attr(
+                    buf, "bias_add", other=inp, beta=self.beta, dtype=self.layout.dtype
                 )
 
-            epilogue_creators.append(bias_epilogue)
+            epilogue_creators.append(_bias_add_epilogue)
+
+        elif inp is not None and is_woq_gemm:
+            # scale is applied as an epilogue
+            def _mul_epilogue(buf):
+                return create_epilogue_with_attr(buf, "mul", other=inp)
+
+            epilogue_creators.append(_mul_epilogue)
 
         if self.epilogue_creator is not None:
             epilogue_creators.append(self.epilogue_creator)
