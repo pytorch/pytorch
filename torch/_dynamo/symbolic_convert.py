@@ -14,7 +14,6 @@ import logging
 import operator
 import re
 import sys
-import textwrap
 import threading
 import traceback
 import types
@@ -135,6 +134,7 @@ class SpeculationEntry:
     filename: str
     lineno: int
     instruction_pointer: int
+    inst: Instruction  # for debugging only
     failed: bool = False
     reason: Optional[GraphCompileReason] = None
 
@@ -170,27 +170,48 @@ class SpeculationLog:
         self.entries.clear()
         self.index = 0
 
-    def next(self, filename: str, lineno: int, instruction_pointer) -> SpeculationEntry:
+    def next(
+        self, filename: str, lineno: int, instruction_pointer, inst
+    ) -> SpeculationEntry:
         """
         Lookup or create a SpeculationEntry() that is shared across
         RestartAnalysis calls.  Args are used only for debug checks.
         """
         if len(self.entries) == self.index:
-            self.entries.append(SpeculationEntry(filename, lineno, instruction_pointer))
+            self.entries.append(
+                SpeculationEntry(filename, lineno, instruction_pointer, inst)
+            )
         entry = self.entries[self.index]
-        self.index += 1
+        prev_entry_msg = ""
+        if self.index != 0:
+            prev_entry = self.entries[self.index - 1]
+            prev_entry_msg = (
+                f"Previous instruction: {prev_entry.filename}:{prev_entry.lineno}"
+                f"({prev_entry.inst.opname} @ {prev_entry.instruction_pointer})\n"
+            )
         assert (
             entry.instruction_pointer == instruction_pointer
             and entry.filename == filename
             and entry.lineno == lineno
-        ), textwrap.dedent(
-            f"""
-            SpeculationLog diverged at {self.index} of {len(self.entries)}:
-            - Run1: {entry.filename}:{entry.lineno} (ip={entry.instruction_pointer})
-            - Run2: {filename}:{lineno} (ip={instruction_pointer})
-            Please submit a bug report.
-            """
-        )
+        ), f"""
+SpeculationLog diverged at index {self.index} (log had {len(self.entries)} entries):
+- Expected: {entry.filename}:{entry.lineno} ({entry.inst.opname} at ip={entry.instruction_pointer})
+- Actual: {filename}:{lineno} ({inst.opname} at ip={instruction_pointer})
+{prev_entry_msg}
+There are two usual reasons why this may have occured:
+- When Dynamo analysis restarted, the second run took a different path than
+  the first.  If this occurred, the previous instruction is the critical instruction that
+  behaved differently.
+- Speculation entries are only added under certain conditions (as seen in
+  step()), e.g., there must exist operators in the graph; those conditions may
+  have changed on restart.
+
+If this divergence was intentional, clear the speculation log before restarting (do NOT
+do this for graph breaks, you will infinite loop).
+
+Otherwise, please submit a bug report, ideally including the contents of TORCH_LOGS=+dynamo
+"""
+        self.index += 1
         return entry
 
 
@@ -2453,8 +2474,13 @@ class InstructionTranslatorBase(
             self.strict_checks_fn = prior
 
     def speculate(self) -> SpeculationEntry:
+        assert self.instruction_pointer is not None
+        assert self.instruction_pointer > 0
         return self.speculation_log.next(
-            self.f_code.co_filename, self.lineno, self.instruction_pointer
+            self.f_code.co_filename,
+            self.lineno,
+            self.instruction_pointer - 1,
+            self.instructions[self.instruction_pointer - 1],
         )
 
     def __init__(
