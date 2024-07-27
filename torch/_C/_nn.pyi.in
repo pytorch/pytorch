@@ -63,7 +63,7 @@ def _parse_to(
 def pad_sequence(
     sequences: List[Tensor],
     batch_first: bool = False,
-    padding_value: Union[int, float, bool] = 0.0,
+    padding_value: float = 0.0,
     padding_side: Union[Literal["left", "right"], str] = "right",
 ) -> Tensor: ...
 def flatten_dense_tensors(tensors: List[Tensor]) -> Tensor: ...
