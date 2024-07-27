@@ -94,10 +94,6 @@ class TCPServer {
       std::unique_ptr<BackgroundThread>&& daemon)
       : port_{port}, daemon_{std::move(daemon)} {}
 
-  std::string repr() const {
-    return fmt::format("TCPServer(port={})", port_);
-  }
-
  private:
   std::uint16_t port_;
   std::unique_ptr<BackgroundThread> daemon_;
@@ -161,9 +157,9 @@ class TCPClient {
       const TCPStoreOptions& opts,
       std::shared_ptr<Backoff> backoff);
 
-  void sendRaw(uint8_t* data, size_t length) {
+  void sendRaw(uint8_t* data, size_t lenght) {
     try {
-      tcputil::sendBytes(socket_.handle(), data, length);
+      tcputil::sendBytes(socket_.handle(), data, lenght);
     } catch (const std::exception& e) {
       C10D_WARNING("sendBytes failed on {}: {}", socket_.repr(), e.what());
       throw;
@@ -198,10 +194,6 @@ class TCPClient {
   void setTimeout(std::chrono::milliseconds value);
 
   explicit TCPClient(Socket&& socket) : socket_{std::move(socket)} {}
-
-  std::string repr() const {
-    return fmt::format("TCPClient({})", socket_.repr());
-  }
 
  private:
   Socket socket_;
@@ -715,12 +707,6 @@ TCPStore::collectClientCounters() const noexcept {
     res[kv.first] = kv.second.observe();
   }
   return res;
-}
-
-std::string TCPStore::repr() const {
-  auto clientRepr = client_ ? client_->repr() : "<nullptr>";
-  auto serverRepr = server_ ? server_->repr() : "<nullptr>";
-  return fmt::format("TCPStore(client={}, server={})", clientRepr, serverRepr);
 }
 
 } // namespace c10d
