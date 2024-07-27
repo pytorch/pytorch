@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 """Base optimizer."""
 import functools
+import math
 import warnings
 from collections import defaultdict, OrderedDict
 from copy import deepcopy
@@ -110,6 +111,15 @@ def _stack_if_compiling(x):
         return torch.stack(x)
     else:
         return x
+
+
+def _dispatch_sqrt(
+    x: float,
+):  # float annotation is needed because of torchscript type inference
+    if not torch.jit.is_scripting() and isinstance(x, torch.Tensor):
+        return x.sqrt()
+    else:
+        return math.sqrt(x)
 
 
 def _disable_dynamo_if_unsupported(single_tensor_fn=None):
