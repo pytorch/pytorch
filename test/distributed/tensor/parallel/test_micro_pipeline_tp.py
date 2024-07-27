@@ -1,5 +1,6 @@
 # Owner(s): ["module: c10d"]
 import unittest
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -225,6 +226,61 @@ class MicroPipelineTPTest(TestCase):
             # Decomposing the matmul on the K dimension is not supported
             assert "fused_all_gather_matmul" in code
             assert "all_gather_into_tensor" not in code
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @parametrize("A_dims", [2, 3])
+    @parametrize("gather_dim", [0, 1, 2])
+    @fresh_inductor_cache()
+    def test_fuse_all_gather_scaled_matmul(self, A_dims, gather_dim):
+        if gather_dim >= A_dims:
+            return
+
+        group = dist.group.WORLD
+
+        def func(
+            A_shard: torch.Tensor,
+            B: torch.Tensor,
+            A_scale: torch.Tensor,
+            B_scale: torch.Tensor,
+            out_dtype: Optional[torch.dtype],
+        ) -> torch.Tensor:
+            A = _fp8_all_gather(
+                A_shard, gather_dim=gather_dim, group_name=group.group_name
+            )
+            if len(A_shard.shape) > 2:
+                C = torch._scaled_mm(
+                    A.flatten(0, -2), B, A_scale, B_scale, out_dtype=out_dtype
+                )
+                return C.view(*A.shape[:-1], -1)
+            else:
+                return torch._scaled_mm(A, B, A_scale, B_scale, out_dtype=out_dtype)
+
+        if A_dims == 2:
+            A_shard_shape = [64, 32]
+        elif A_dims == 3:
+            A_shard_shape = [2, 64, 32]
+        else:
+            raise AssertionError(f"Invalid A_dims: {A_dims}")
+
+        A_shard_shape[gather_dim] //= self.world_size
+        A_shard = torch.rand(*A_shard_shape, device="cuda").to(torch.float8_e4m3fn)
+        B = torch.rand(16, 32, device="cuda").to(torch.float8_e4m3fn).T
+        A_scale = torch.tensor(0.1, device="cuda")
+        B_scale = torch.tensor(0.1, device="cuda")
+
+        with _test_mode():
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(
+                compiled, A_shard, B, A_scale, B_scale, torch.bfloat16
+            )
+
+        if gather_dim == A_dims - 1:
+            self.assertNotIn("fused_all_gather_scaled_matmul", code)
+            self.assertIn("all_gather_into_tensor", code)
+        else:
+            # Decomposing the matmul on the K dimension is not supported
+            self.assertIn("fused_all_gather_scaled_matmul", code)
+            self.assertNotIn("all_gather_into_tensor", code)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])
