@@ -387,7 +387,7 @@ def frexp(x):
 def _compare_and_swap_with_index(
     x,
     idxs,
-    valid_mask,
+    rnumel,
     flip,
     i: tl.constexpr,
     n_dims: tl.constexpr,
@@ -423,19 +423,12 @@ def _compare_and_swap_with_index(
     right_idx = tl.reshape(right_idx, x.shape)
 
     # valid
-    if valid_mask is None:
+    if rnumel is None:
         left_valid_mask = tl.full(x.shape, True, tl.int1)
         right_valid_mask = tl.full(x.shape, True, tl.int1)
     else:
-        y_valid_mask = tl.reshape(valid_mask, shape)
-        left_valid_mask = tl.broadcast_to(
-            tl.sum(y_valid_mask * left_mask.to(tl.int8), 1)[:, None, :], shape
-        ).to(tl.int1)
-        right_valid_mask = tl.broadcast_to(
-            tl.sum(y_valid_mask * right_mask.to(tl.int8), 1)[:, None, :], shape
-        ).to(tl.int1)
-        left_valid_mask = tl.reshape(left_valid_mask, x.shape)
-        right_valid_mask = tl.reshape(right_valid_mask, x.shape)
+        left_valid_mask = left_idx < rnumel
+        right_valid_mask = right_idx < rnumel
 
     # actual compare-and-swap
     ix = x.to(idtype, bitcast=True)
@@ -455,21 +448,15 @@ def _compare_and_swap_with_index(
     cond = cond ^ flip
     ret = ix ^ tl.where(cond, ileft ^ iright, tl.zeros_like(ix))
     new_idxs = idxs ^ tl.where(cond, left_idx ^ right_idx, tl.zeros_like(idxs))
-    if valid_mask is None:
-        new_valid_mask = tl.full(x.shape, True, tl.int1)
-    else:
-        new_valid_mask = valid_mask ^ tl.where(
-            cond, left_valid_mask ^ right_valid_mask, tl.zeros_like(valid_mask)
-        )
 
-    return ret.to(x.dtype, bitcast=True), new_idxs, new_valid_mask
+    return ret.to(x.dtype, bitcast=True), new_idxs
 
 
 @triton.jit
 def _bitonic_merge_with_index(
     x,
     idxs,
-    mask,
+    rnumel,
     stage: tl.constexpr,
     alternating: tl.constexpr,
     n_dims: tl.constexpr,
@@ -491,28 +478,23 @@ def _bitonic_merge_with_index(
     else:
         flip = False
     # perform `stage` rounds of `compare-and-swap`
-    next_mask = mask
     for i in tl.static_range(stage):
-        x, idxs, next_mask = _compare_and_swap_with_index(
-            x, idxs, mask, flip, i + (n_dims - stage), n_dims, stable, descending
+        x, idxs = _compare_and_swap_with_index(
+            x, idxs, rnumel, flip, i + (n_dims - stage), n_dims, stable, descending
         )
-        if mask is not None:
-            mask = next_mask
-    return x, idxs, next_mask
+    return x, idxs
 
 
 @triton.jit
 def sort_with_index(
     x,  # value
     idxs,  # index
-    mask,  # mask if current value is valid (invalid values sort to the end)
+    rnumel,  # number of elements
     dim: tl.constexpr = None,
     stable: tl.constexpr = tl.constexpr(False),
     descending: tl.constexpr = tl.constexpr(False),
 ):
     x, idxs = tl.broadcast(x, idxs)
-    if mask is not None:
-        x, mask = tl.broadcast(x, mask)
     # handle default dimension or check that it is the most minor dim
     _dim: tl.constexpr = len(x.shape) - 1 if dim is None else dim
     tl.static_assert(
@@ -522,16 +504,14 @@ def sort_with_index(
     n_dims: tl.constexpr = _log2(x.shape[_dim])
 
     for i in tl.static_range(1, n_dims + 1):
-        x, idxs, next_mask = _bitonic_merge_with_index(
+        x, idxs = _bitonic_merge_with_index(
             x,
             idxs,
-            mask,
+            rnumel,
             i,
             alternating=i < n_dims,
             n_dims=n_dims,
             stable=stable,
             descending=descending,
         )
-        if mask is not None:
-            mask = next_mask
     return x, idxs
