@@ -1056,9 +1056,20 @@ class BuiltinVariable(VariableTracker):
             else:
                 # Overrides for custom str method
                 # Pass method as function to call tx.inline_user_function_return
-                return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(str_method.__func__), [arg], {}
-                )
+
+                bound_method = str_method.__func__
+
+                try:
+                    # Only supports certain function types
+                    user_func_variable = variables.UserFunctionVariable(bound_method)
+                except AssertionError as e:
+                    # Won't be able to do inline the str method, return to avoid graph break
+                    log.warning(f"Failed to create UserFunctionVariable: {e}")
+                    return
+
+                # Inline the user function
+                user_func_variable = variables.UserFunctionVariable(bound_method)
+                return tx.inline_user_function_return(user_func_variable, [arg], {})
 
     def _call_min_max(self, tx: "InstructionTranslator", *args):
         if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
