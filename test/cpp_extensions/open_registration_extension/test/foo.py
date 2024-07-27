@@ -1,8 +1,9 @@
 import torch
-import pytorch_openreg
-
-my_tensor = torch.empty((2, 2), device="openreg")
-
-del my_tensor
 
 
+def run():
+    my_tensor = torch.empty((2, 2)).to(device="openreg")
+
+
+if __name__ == "__main__":
+    run()
