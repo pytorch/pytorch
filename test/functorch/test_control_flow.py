@@ -1516,24 +1516,30 @@ class <lambda>(torch.nn.Module):
             return x + y
 
         # This specific length was failing in the past
+        fails_for_backend = []
         n = 9
         x = torch.arange(n, device=torch.device("cuda"))
-        torch.compiler.reset()
-        with torch._dynamo.utils.disable_cache_limit():
-            associative_scan1 = torch.compile(associative_scan, fullgraph=True)
-            associative_scan2 = associative_scan
+        for backend in ['eager', 'aot_eager', 'aot_eager_decomp_partition', 'inductor']:
+            torch.compiler.reset()
+            with torch._dynamo.utils.disable_cache_limit():
+                associative_scan1 = torch.compile(associative_scan, backend=backend, fullgraph=True)
+                associative_scan2 = associative_scan
 
-        # Flip only non-compiled and compare with compiled reverse=True
-        result1 = associative_scan1(fct, x, 0, True, True)
-        result2 = torch.flip(
-            associative_scan2(fct, torch.flip(x, [0]), 0, False, True), [0]
-        )
-        result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+            try:
+                # Flip only non-compiled and compare with compiled reverse=True
+                result1 = associative_scan1(fct, x, 0, True, True)
+            except torch._dynamo.debug_utils.AccuracyError:
+                fails_for_backend.append(backend)
+            result2 = torch.flip(
+                associative_scan2(fct, torch.flip(x, [0]), 0, False, True), [0]
+            )
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
 
-        self.assertEqual(result1, result2)
-        self.assertEqual(result1, result3)
-
-        fails_for = []
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+            
+        print('Flip test fails for backends: ' + str(fails_for_backend))
+        self.assertEqual(len(fails_for_backend), 0)
 
         for n in range(20):
             x = torch.arange(n, device=torch.device("cuda"))
@@ -1588,8 +1594,6 @@ class <lambda>(torch.nn.Module):
 
             self.assertEqual(result1, result2)
             self.assertEqual(result1, result3)
-
-        print(fails_for)
 
     def test_generic_associative_scan_generic_scan_fallback_CPU(self):
         n = 6

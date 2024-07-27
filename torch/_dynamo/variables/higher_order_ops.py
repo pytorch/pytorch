@@ -1036,16 +1036,13 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 args=(
                     SourcelessBuilder.create(
                         tx,
-                        slice_along_axis(leaf.size, dim.as_proxy())
+                        leaf.size
                         if leaf.size is not None
-                        else slice_along_axis(
-                            BuiltinVariable(getattr)
+                        else BuiltinVariable(getattr)
                             .call_function(
                                 tx, [leaf, ConstantVariable.create("shape")], {}
                             )
                             .items,
-                            dim.as_proxy(),
-                        ),
                     ),
                 ),
                 kwargs={

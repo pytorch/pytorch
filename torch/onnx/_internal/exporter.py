@@ -322,7 +322,7 @@ class ResolvedExportOptions(ExportOptions):
     onnx_registry: OnnxRegistry
 
     # Private only attributes
-    decomposition_table: dict[torch._ops.OpOverload, Callable]
+    decomposition_table: dict[torch._ops.OperatorBase | torch._ops.OpOverload, Callable]
     """A dictionary that maps operators to their decomposition functions."""
 
     onnxfunction_dispatcher: (

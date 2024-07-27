@@ -22,7 +22,7 @@ class Decompose(_pass.Transform):
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
         module: torch.fx.GraphModule,
-        decomposition_table: Mapping[torch._ops.OpOverload, Callable],
+        decomposition_table: Mapping[torch._ops.OperatorBase | torch._ops.OpOverload, Callable],
         enable_dynamic_axes: bool,
         allow_fake_constant: bool | None = False,
     ):

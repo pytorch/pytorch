@@ -1208,7 +1208,7 @@ def export(
     aten_graph: bool = False,
     pre_dispatch: bool = False,
     decomposition_table: Optional[
-        Dict[torch._ops.OpOverload, Callable[..., Any]]
+        Dict[torch._ops.OperatorBase | torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "symbolic",
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
