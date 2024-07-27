@@ -249,7 +249,6 @@ class TestBenchmarkingCPU(TestBenchmarking):
         for gpu_property in gpu_properties:
             self.assertEqual(gpu_property, 0)
 
-    @staticmethod
     def patches(fn):
         @config.patch({"benchmarking.fallback_to_original_benchmarking": False})
         @config.patch({"benchmarking.enable_lazy_benchmarking": True})
@@ -327,7 +326,6 @@ class TestBenchmarkingGPU(TestBenchmarking):
         roofline_timing_ms = start_event.elapsed_time(end_event) / 10
         self.assertEqual(timing_ms <= roofline_timing_ms, True)
 
-    @staticmethod
     def patches(fn):
         @requires_gpu()
         @config.patch({"benchmarking.fallback_to_original_benchmarking": False})
