@@ -13,6 +13,8 @@ import torch
 from . import config, ir
 from .dependencies import WeakDep
 from .utils import (
+    contains_collective,
+    contains_wait,
     find_recursive_deps_of_node,
     find_recursive_users_of_node,
     is_collective,
@@ -103,10 +105,15 @@ def _schedule_for_comm(
     # When only sink_waits is True, only score_1 and score_2 are considered.
     # When neither is True, the original order is yielded.
     buf_name_to_snode = {}
+    name_to_fused_node = {}
     scores_0, scores_1, scores_2 = {}, {}, {}
     for idx, snode in enumerate(snodes):
         for buf_name in snode.get_buffer_names():
             buf_name_to_snode[buf_name] = snode
+
+        for op_name in snode.get_operation_names():
+            name_to_fused_node[op_name] = snode
+        name_to_fused_node[snode.get_name()] = snode
 
         node_name = snode.get_name()
         scores_0[node_name] = sys.maxsize
@@ -115,22 +122,24 @@ def _schedule_for_comm(
 
     comm_idx = 0
     for snode in snodes:
-        if raise_comms and is_collective(snode.node):
+        if raise_comms and contains_collective(snode):
             scores_0[snode.get_name()] = comm_idx
             for anc in snode.ancestors:
-                scores_0[anc] = min(scores_0[anc], comm_idx)
+                anc_fused_name = name_to_fused_node[anc].get_name()
+                scores_0[anc_fused_name] = min(scores_0[anc_fused_name], comm_idx)
             comm_idx += 1
-        elif sink_waits and is_wait(snode.node):
+        elif sink_waits and contains_wait(snode):
             scores_1[snode.get_name()] = 1
 
     class Runnable:
         def __init__(self, snode):
             self.snode = snode
             name = next(iter(snode.get_operation_names()))
+            fused_name = name_to_fused_node[name].get_name()
             self.score = (
-                scores_0[name],
-                scores_1[name],
-                scores_2[name],
+                scores_0[fused_name],
+                scores_1[fused_name],
+                scores_2[fused_name],
             )
 
         def __lt__(self, other):
@@ -171,7 +180,7 @@ def _schedule_for_comm(
         candidates = [
             x
             for x in ready
-            if not is_collective(x.snode.node) and not is_wait(x.snode.node)
+            if not contains_collective(x.snode) and not contains_wait(x.snode)
         ]
         if len(candidates) == 0:
             return None
@@ -183,7 +192,7 @@ def _schedule_for_comm(
         to overlap with it. The strategy is described in the comment of
         `reorder_compute_for_overlap`.
         """
-        assert is_collective(snode.node)
+        assert contains_collective(snode)
         schedule(snode)
 
         collective_cost = snode_to_cost[snode]
@@ -198,7 +207,7 @@ def _schedule_for_comm(
 
     while len(ready):
         snode = heapq.heappop(ready).snode
-        if reorder_for_overlap and is_collective(snode.node):
+        if reorder_for_overlap and contains_collective(snode):
             schedule_collective_for_overlap(snode)
         else:
             schedule(snode)
@@ -232,7 +241,7 @@ def decide_global_ordering_of_comms(
     ):
         nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_buf, name_to_fused_node)
 
-    comm_nodes = [n for n in nodes if is_collective(n.node)]
+    comm_nodes = [n for n in nodes if contains_collective(n)]
 
     for i in range(1, len(comm_nodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
@@ -279,7 +288,7 @@ def visualize_overlap(order):
     cur_comm_node = None
     for snode in order:
         if cur_comm_node is None:
-            if is_collective(snode.node):
+            if contains_collective(snode):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
             elif is_wait(snode.node):
@@ -290,7 +299,7 @@ def visualize_overlap(order):
                 total_est_runtime += estimate_op_runtime(snode)
             overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
         else:  # cur_comm_node is not None
-            if is_collective(snode.node):
+            if contains_collective(snode):
                 raise AssertionError(
                     "Found two collectives running at the same time. "
                     "`visualize_overlap` needs to be updated to handle this case"
