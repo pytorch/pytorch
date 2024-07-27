@@ -590,7 +590,9 @@ def _fused_all_gather_scaled_matmul(
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
 
     if _is_test_mode:
-        return _fused_all_gather_matmul_fallback(A_shard, Bs, gather_dim, group_name)
+        return _fused_all_gather_scaled_matmul_fallback(
+            A_shard, Bs, A_scale, B_scales, out_dtypes, gather_dim, group_name
+        )
     if A_shard.dim() < 2:
         raise ValueError("A_shard must be a matrix")
     for B in Bs:
