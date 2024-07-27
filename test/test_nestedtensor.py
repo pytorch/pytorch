@@ -4332,9 +4332,11 @@ class TestNestedTensorSubclass(TestCase):
         """
         Layer normalization on NestedTensor passes when trying to normalize across ragged dimension, where ragged_idx == 1.
         """
-        if (
-            torch._dynamo.is_compiling() and not requires_grad
-        ):  # requires_grad = False does not work with dynamo
+
+        # requires_grad = False does not currently work with dynamo tests and throws this error:
+        #   AssertionError: SymInts must use SymNodeVariable.
+        #   If the underlying value is static, we will create a ConstantVariable and specialize.
+        if torch._dynamo.is_compiling() and not requires_grad:
             return
 
         tensor_lists = self._get_example_tensor_lists(
@@ -4355,10 +4357,7 @@ class TestNestedTensorSubclass(TestCase):
             if (
                 nt.dim() >= 3
             ):  # layer norm only works for tensors with 3 or more dimensions
-                normalized_shape = (
-                    -1,
-                    *nt.shape[nt._ragged_idx + 1 :],
-                )  # pass in -1 for ragged shape (ragged shape value itself is never used in layer_norm())
+                normalized_shape = nt.shape[nt._ragged_idx :]
 
                 out_actual = torch.nn.functional.layer_norm(
                     nt, normalized_shape=normalized_shape
@@ -4372,7 +4371,7 @@ class TestNestedTensorSubclass(TestCase):
 
                 self.assertTrue(
                     out_actual.is_nested,
-                    f"layer_norm(): the result of reducing a nested tensor along the ragged dimension is a nested tensor",
+                    "layer_norm(): the result of reducing a nested tensor along the ragged dimension is a nested tensor",
                 )  # output is a nested tensor
                 self.assertEqual(out_actual._values.shape, out_expected.shape)
                 self.assertTrue(torch.allclose(out_actual.values(), out_expected))
@@ -4411,7 +4410,9 @@ class TestNestedTensorSubclass(TestCase):
                     RuntimeError,
                     "not supported for NestedTensor objects with 2 or fewer dimensions",
                 ):
-                    out = torch.nn.functional.layer_norm(nt, normalized_shape=(-1,))
+                    out = torch.nn.functional.layer_norm(
+                        nt, normalized_shape=(nt.shape[nt._ragged_idx],)
+                    )
 
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
@@ -4944,13 +4945,15 @@ class TestNestedTensorSubclass(TestCase):
             lengths=offsets.diff() - 2,  # arbitrary subtraction to create holes
         )
 
+        ragged_size = nt_with_holes.shape[nt_with_holes._ragged_idx]
+
         normalized_shapes = (
             (10, 30),  # normalization on non-ragged dimension passes
-            (-1, 10, 30),  # normalization on ragged dimension fails
+            (ragged_size, 10, 30),  # normalization on ragged dimension fails
         )
 
         for normalized_shape in normalized_shapes:
-            if -1 in normalized_shape:
+            if ragged_size in normalized_shape:
                 with self.assertRaisesRegex(
                     RuntimeError,
                     "not supported where lengths is not None if operating on the ragged dimension for NestedTensor",

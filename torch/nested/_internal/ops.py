@@ -1102,7 +1102,7 @@ def view_default(func, *args, **kwargs):
 
 @register_jagged_func(
     torch.ops.aten.native_layer_norm.default,
-    "input: jt_all, normalized_shape: any, weight: any?, bias: any?, eps: any",
+    "input: jt, normalized_shape: any, weight: any?, bias: any?, eps: any",
 )
 def native_layer_norm_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -1116,24 +1116,25 @@ def native_layer_norm_default(func, *args, **kwargs):
             "layer_norm(): not supported for NestedTensor objects with 2 or fewer dimensions"
         )
 
-    normalized_shape = new_kwargs[
-        "normalized_shape"
-    ]  # denote -1 as the ragged dimension, i.e. normalize on the ragged dimension
+    normalized_shape = new_kwargs["normalized_shape"]
+    ragged_size = inp.shape[inp._ragged_idx]
 
-    num_output_dims = inp.dim() - len(normalized_shape)
+    num_dims_not_normalized = inp.dim() - len(normalized_shape)
 
-    if num_output_dims == 0:  # error if trying to normalize over the batch dimension
+    if (
+        num_dims_not_normalized == 0
+    ):  # error if trying to normalize over the batch dimension
         raise RuntimeError(
             "layer_norm(): not supported when normalizing over the batch dimension for NestedTensor"
         )
 
-    if -1 in normalized_shape and inp._lengths is not None:
+    if ragged_size in normalized_shape and inp._lengths is not None:
         raise RuntimeError(
             "layer_norm(): not supported where lengths is not None if operating on the ragged dimension for NestedTensor"
         )
 
     if (
-        -1 in normalized_shape
+        ragged_size in normalized_shape
     ):  # special handling for normalizing over the ragged dimension
         padded_input = torch.ops.aten._jagged_to_padded_dense_forward(
             inp._values.flatten(
