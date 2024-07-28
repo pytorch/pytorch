@@ -28,7 +28,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._utils_internal import log_export_usage
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.graph_signature import (
-    _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
     ExportGraphSignature,
@@ -302,6 +301,7 @@ def aot_load(so_path: str, device: str) -> Callable:
         in_spec = pytree.treespec_loads(call_spec[0])
         out_spec = pytree.treespec_loads(call_spec[1])
         flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
+        flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
         flat_outputs = runner.run(flat_inputs)  # type: ignore[attr-defined]
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
