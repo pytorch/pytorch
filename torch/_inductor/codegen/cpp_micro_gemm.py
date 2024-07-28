@@ -630,10 +630,11 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
 
     // create a buffer for tiles of B.
     // To make things simpler, use the stack instead of calling a memory allocator.
-    // allocating an array of size 512 + 64, and then using an address that's 64 bytes aligned
-    // TODO: loop-unrolling of the compute lambda may result in incorrect output
+    // allocating an array of size 1024 + 64, and then using an address that's 64 bytes aligned.
+    // TODO: loop-unrolling of the "compute" lambda may result in incorrect output
     // as this buffer would be used, so maybe 4 of these should be used?
-    {{input_t}} bf16_weights_buf[576];
+    // Since UT output is correct, looks like loop unrolling isn't actually happening.
+    {{input_t}} bf16_weights_buf[544];
     int bf16_weights_buf_ptr_mod = (uintptr_t)((void*)bf16_weights_buf) % 64;
     {{input_t}}* bf16_weights_buf_ptr =
         bf16_weights_buf_ptr_mod == 0

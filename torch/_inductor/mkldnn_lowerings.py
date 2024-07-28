@@ -8,8 +8,7 @@ from torch._inductor.kernel.mm_common import mm_args
 
 from . import ir, mkldnn_ir
 from .codegen.cpp_gemm_template import CppPackedGemmTemplate
-from .epilogue_creator import create_epilogue_with_attr
-from .ir import TensorBox
+from .ir import create_epilogue_with_attr, TensorBox
 from .lowering import (
     add,
     add_needs_realized_inputs,

@@ -11,7 +11,7 @@ import torch.utils
 
 from ..._dynamo.utils import counters
 from .. import config, ir, lowering as L
-from ..epilogue_creator import create_epilogue_with_attr
+from ..ir import create_epilogue_with_attr
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
