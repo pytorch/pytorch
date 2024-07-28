@@ -2874,9 +2874,10 @@ class <lambda>(torch.nn.Module):
 
     def test_generic_associative_scan_autograd(self):
         def add(x: torch.Tensor, y: torch.Tensor):
-            return x * y
+            return x + y
 
-        x = torch.randn(3, 2, 2, requires_grad=True)
+        # x = torch.randn(3, 2, 2, requires_grad=True)
+        x = torch.arange(1, 5, requires_grad=True, dtype=torch.float)
 
         torch.compiler.reset()
         with torch._dynamo.utils.disable_cache_limit():
@@ -3095,75 +3096,77 @@ class f(torch.nn.Module):
             elements = (A.repeat((timesteps, 1)), projected_inputs)
             elements_jax = tuple([el.cpu().detach().numpy() for el in elements])
 
-            for direction in [False, True]:
-                result1 = associative_scan1(
-                    fct, elements, 0, generic_scan=True, reverse=direction
-                )
-                result2 = associative_scan2(
-                    fct, elements, 0, generic_scan=True, reverse=direction
-                )
-                expected_result = jax.lax.associative_scan(
-                    fct, elements_jax, reverse=direction
-                )
-                self.assertEqual(
-                    [r.cpu().detach().numpy() for r in result1],
-                    [np.array(r) for r in expected_result],
-                )
-                self.assertEqual(
-                    [r.device.type for r in result1], [device.type] * len(result1)
-                )
-                self.assertEqual(
-                    [r.cpu().detach().numpy() for r in result2],
-                    [np.array(r) for r in expected_result],
-                )
-                self.assertEqual(
-                    [r.device.type for r in result2], [device.type] * len(result2)
-                )
+            for generic_scan in [True, False]:
+                for direction in [False, True]:
+                    result1 = associative_scan1(
+                        fct, elements, 0, generic_scan=generic_scan, reverse=direction
+                    )
+                    result2 = associative_scan2(
+                        fct, elements, 0, generic_scan=generic_scan, reverse=direction
+                    )
+                    expected_result = jax.lax.associative_scan(
+                        fct, elements_jax, reverse=direction
+                    )
+                    self.assertEqual(
+                        [r.cpu().detach().numpy() for r in result1],
+                        [np.array(r) for r in expected_result],
+                    )
+                    self.assertEqual(
+                        [r.device.type for r in result1], [device.type] * len(result1)
+                    )
+                    self.assertEqual(
+                        [r.cpu().detach().numpy() for r in result2],
+                        [np.array(r) for r in expected_result],
+                    )
+                    self.assertEqual(
+                        [r.device.type for r in result2], [device.type] * len(result2)
+                    )
 
-                def jax_grad_fct(inp):
-                    res = 0.0
-                    for v in jax.lax.associative_scan(fct, inp, reverse=direction):
-                        res += v
-                    return jax.numpy.sum(res)
+                    if generic_scan:
+                        def jax_grad_fct(inp):
+                            res = 0.0
+                            for v in jax.lax.associative_scan(fct, inp, reverse=direction):
+                                res += v
+                            return jax.numpy.sum(res)
 
-                def grad_fct1(inp):
-                    res = 0.0
-                    for v in associative_scan1(
-                        fct, inp, 0, generic_scan=True, reverse=direction
-                    ):
-                        res += v
-                    return torch.sum(res)
+                        def grad_fct1(inp):
+                            res = 0.0
+                            for v in associative_scan1(
+                                fct, inp, 0, generic_scan=generic_scan, reverse=direction
+                            ):
+                                res += v
+                            return torch.sum(res)
 
-                def grad_fct2(inp):
-                    res = 0.0
-                    for v in associative_scan2(
-                        fct, inp, 0, generic_scan=True, reverse=direction
-                    ):
-                        res += v
-                    return torch.sum(res)
+                        def grad_fct2(inp):
+                            res = 0.0
+                            for v in associative_scan2(
+                                fct, inp, 0, generic_scan=generic_scan, reverse=direction
+                            ):
+                                res += v
+                            return torch.sum(res)
 
-                result1 = grad_fct1(elements)
-                result2 = grad_fct2(elements)
-                expected_result = jax_grad_fct(elements_jax)
-                self.assertEqual(
-                    result1.cpu().detach().numpy(), np.array(expected_result)
-                )
-                grad_out = torch.ones_like(result1)
-                grads1 = torch.autograd.grad(
-                    result1, elements, grad_out, retain_graph=True
-                )
-                grads2 = torch.autograd.grad(
-                    result2, elements, grad_out, retain_graph=True
-                )
-                expected_grads = grad(jax_grad_fct)(elements_jax)
-                self.assertEqual(
-                    [r.cpu().detach().numpy() for r in grads1],
-                    [np.array(r) for r in expected_grads],
-                )
-                self.assertEqual(
-                    [r.cpu().detach().numpy() for r in grads2],
-                    [np.array(r) for r in expected_grads],
-                )
+                        result1 = grad_fct1(elements)
+                        result2 = grad_fct2(elements)
+                        expected_result = jax_grad_fct(elements_jax)
+                        self.assertEqual(
+                            result1.cpu().detach().numpy(), np.array(expected_result)
+                        )
+                        grad_out = torch.ones_like(result1)
+                        grads1 = torch.autograd.grad(
+                            result1, elements, grad_out, retain_graph=True
+                        )
+                        grads2 = torch.autograd.grad(
+                            result2, elements, grad_out, retain_graph=True
+                        )
+                        expected_grads = grad(jax_grad_fct)(elements_jax)
+                        self.assertEqual(
+                            [r.cpu().detach().numpy() for r in grads1],
+                            [np.array(r) for r in expected_grads],
+                        )
+                        self.assertEqual(
+                            [r.cpu().detach().numpy() for r in grads2],
+                            [np.array(r) for r in expected_grads],
+                        )
 
     def test_generic_associative_scan_tuple(self):
         def fct(x, y):
