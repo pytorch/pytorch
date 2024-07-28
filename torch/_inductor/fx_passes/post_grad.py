@@ -5,18 +5,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Set,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
-from typing_extensions import ParamSpec
+from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor as inductor
@@ -67,8 +56,6 @@ from .split_cat import POST_GRAD_PATTERNS
 if TYPE_CHECKING:
     from sympy import Expr
 
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -202,9 +189,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
         torch.fx.map_arg((node.args, node.kwargs), visit)
 
 
-def register_lowering_pattern(
-    pattern, extra_check=_return_true, pass_number=1
-) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
     """
     Register an aten to inductor IR replacement pattern
     """
