@@ -74,7 +74,7 @@ void writeArchiveAndTensors(
     const char* data,
     size_t size,
     const std::vector<at::Tensor>& tensors,
-    caffe2::serialize::PyTorchStreamWriter& out) {
+    torch::serialize::PyTorchStreamWriter& out) {
   std::string prefix = archive_name + "/";
   size_t i = 0;
   for (const auto& td : tensors) {

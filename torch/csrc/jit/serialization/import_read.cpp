@@ -1,4 +1,3 @@
-#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 
 #include <utility>
@@ -12,7 +11,7 @@ IValue readArchiveAndTensors(
     std::optional<TypeResolver> type_resolver,
     std::optional<ObjLoader> obj_loader,
     std::optional<at::Device> device,
-    caffe2::serialize::PyTorchStreamReader& stream_reader,
+    torch::serialize::PyTorchStreamReader& stream_reader,
     c10::TypePtr (*type_parser)(const std::string&),
     std::shared_ptr<DeserializationStorageContext> storage_context) {
   std::string picklename = pickle_prefix + archive_name + ".pkl";
@@ -56,7 +55,7 @@ IValue readArchiveAndTensors(
 }
 
 bool check_zip_file(
-    const std::shared_ptr<caffe2::serialize::ReadAdapterInterface>& rai) {
+    const std::shared_ptr<torch::serialize::ReadAdapterInterface>& rai) {
   std::array<uint8_t, 2> first_short{};
   static constexpr uint8_t first_slot = 0x80;
   static constexpr uint8_t second_slot = 0x02;

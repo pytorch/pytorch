@@ -467,16 +467,6 @@ filegroup(
 
 
 filegroup(
-    name = "caffe2_serialize_srcs",
-    srcs = [
-        "caffe2/serialize/file_adapter.cc",
-        "caffe2/serialize/inline_container.cc",
-        "caffe2/serialize/istream_adapter.cc",
-        "caffe2/serialize/read_adapter_interface.cc",
-    ],
-)
-
-filegroup(
     name = "caffe2_utils_srcs",
     srcs = [
         "caffe2/utils/proto_wrap.cc",
@@ -516,7 +506,6 @@ cc_library(
     hdrs = glob(
         [
             "caffe2/perfkernels/*.h",
-            "caffe2/serialize/*.h",
             "caffe2/utils/*.h",
             "caffe2/utils/threadpool/*.h",
             "modules/**/*.h",
@@ -540,7 +529,6 @@ cc_library(
     srcs = [
         ":caffe2_core_srcs",
         ":caffe2_perfkernels_srcs",
-        ":caffe2_serialize_srcs",
         ":caffe2_utils_srcs",
     ],
     copts = CAFFE2_COPTS + ["-mf16c"],
@@ -763,6 +751,7 @@ cc_library(
         "@kineto",
         "@cpp-httplib",
         "@nlohmann",
+        "//third_party/miniz-2.1.0:miniz",
     ] + if_cuda([
         "@cuda//:nvToolsExt",
         "@cutlass",
@@ -992,6 +981,7 @@ test_suite(
         "tensor_options_test",
         "tensor_test",
         "torch_include_test",
+        "inline_container_test",
     ],
 )
 

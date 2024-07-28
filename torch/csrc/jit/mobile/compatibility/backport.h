@@ -4,13 +4,6 @@
 #include <istream>
 #include <memory>
 
-namespace caffe2 {
-namespace serialize {
-class ReadAdapterInterface;
-class PyTorchStreamWriter;
-} // namespace serialize
-} // namespace caffe2
-
 namespace torch {
 namespace jit {
 

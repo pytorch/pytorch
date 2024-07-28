@@ -2,8 +2,8 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/ArrayRef.h>
-#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/Export.h>
+#include <torch/csrc/api/include/torch/serialize/inline_container.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
@@ -103,7 +103,7 @@ TORCH_API IValue unpickle(
         Unpickler::defaultTypeParser);
 
 #ifndef C10_MOBILE
-class VectorReader : public caffe2::serialize::ReadAdapterInterface {
+class VectorReader : public torch::serialize::ReadAdapterInterface {
  public:
   VectorReader(std::vector<char> data) : data_(std::move(data)) {}
 

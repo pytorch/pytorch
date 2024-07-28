@@ -7,10 +7,9 @@
 #include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
-#include <caffe2/serialize/in_memory_adapter.h>
-#include <caffe2/serialize/inline_container.h>
-#include <caffe2/serialize/read_adapter_interface.h>
-#include <caffe2/serialize/versions.h>
+#include <torch/csrc/api/include/torch/serialize/in_memory_adapter.h>
+#include <torch/csrc/api/include/torch/serialize/inline_container.h>
+#include <torch/csrc/api/include/torch/serialize/read_adapter_interface.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
@@ -28,7 +27,7 @@
 
 // The import process to serialize the bytecode package.
 // An example for bytecode.pkl of a small mobile_module looks like:
-// (4,  # model version number (caffe2::serialize::kProducedBytecodeVersion)
+// (4,  # model version number (torch::serialize::kProducedBytecodeVersion)
 //  # first method
 //  (
 //   # function name
@@ -83,9 +82,9 @@
 
 namespace torch {
 namespace jit {
-using caffe2::serialize::MemoryReadAdapter;
-using caffe2::serialize::PyTorchStreamReader;
-using caffe2::serialize::ReadAdapterInterface;
+using torch::serialize::MemoryReadAdapter;
+using torch::serialize::PyTorchStreamReader;
+using torch::serialize::ReadAdapterInterface;
 
 OpCode parseOpCode(const char* str);
 
@@ -160,7 +159,7 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
 }
 
 bool isTensorInBytecodeArchive(
-    caffe2::serialize::PyTorchStreamReader& stream_reader) {
+    torch::serialize::PyTorchStreamReader& stream_reader) {
   auto records = stream_reader.getAllRecords();
   for (const auto& record : records) {
     if (record.find("bytecode/") != std::string::npos) {
@@ -320,14 +319,14 @@ void BytecodeDeserializer::parseMethods(
   }
   TORCH_CHECK(
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      caffe2::serialize::kMinSupportedBytecodeVersion <= bytecode_version_ &&
+      torch::serialize::kMinSupportedBytecodeVersion <= bytecode_version_ &&
           // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-          bytecode_version_ <= caffe2::serialize::kMaxSupportedBytecodeVersion,
+          bytecode_version_ <= torch::serialize::kMaxSupportedBytecodeVersion,
       "Lite Interpreter version number does not match. ",
       "The model version must be between ",
-      caffe2::serialize::kMinSupportedBytecodeVersion,
+      torch::serialize::kMinSupportedBytecodeVersion,
       " and ",
-      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      torch::serialize::kMaxSupportedBytecodeVersion,
       " but the model version is ",
       bytecode_version_);
 
@@ -388,7 +387,7 @@ void BytecodeDeserializer::parseMethods(
 
     // 2. Decides if upgrader is needed
     bool use_upgrader =
-        (operator_version_ < caffe2::serialize::kProducedFileFormatVersion);
+        (operator_version_ < torch::serialize::kProducedFileFormatVersion);
 
     parseInstructions(
         function_name,

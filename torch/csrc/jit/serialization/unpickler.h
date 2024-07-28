@@ -2,8 +2,8 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/ArrayRef.h>
-#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/Export.h>
+#include <torch/csrc/api/include/torch/serialize/versions.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 
@@ -43,7 +43,7 @@ class TORCH_API Unpickler {
         type_resolver_(std::move(type_resolver)),
         use_storage_device_(false),
         type_parser_(type_parser),
-        version_(caffe2::serialize::kProducedFileFormatVersion) {}
+        version_(torch::serialize::kProducedFileFormatVersion) {}
 
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
@@ -57,7 +57,7 @@ class TORCH_API Unpickler {
         obj_loader_(std::move(obj_loader)),
         use_storage_device_(false),
         type_parser_(type_parser),
-        version_(caffe2::serialize::kProducedFileFormatVersion) {}
+        version_(torch::serialize::kProducedFileFormatVersion) {}
 
   // tensors inside the pickle contain meta-data, the raw tensor
   // dead is retrieved by calling `read_record`.
@@ -81,7 +81,7 @@ class TORCH_API Unpickler {
         use_storage_device_(use_storage_device),
         type_parser_(type_parser),
         storage_context_(std::move(storage_context)),
-        version_(caffe2::serialize::kProducedFileFormatVersion) {}
+        version_(torch::serialize::kProducedFileFormatVersion) {}
 
   // consume the pickle stream, producing an IValue from the contents.
   // Type Tags: the pickler will restore the type tags on

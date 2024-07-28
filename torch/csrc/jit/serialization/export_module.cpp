@@ -25,7 +25,7 @@
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
-#include <caffe2/serialize/inline_container.h>
+#include <torch/serialize/inline_container.h>
 
 #include <ATen/ATen.h>
 
@@ -51,7 +51,7 @@ CompilationOptions getOptionsFromGlobal() {
       BytecodeEmitMode::is_emit_promoted_ops_enabled();
   compilation_options.incl_interface_call = getMobileInterfaceCallExport();
   compilation_options.model_version =
-      caffe2::serialize::kProducedBytecodeVersion;
+      torch::serialize::kProducedBytecodeVersion;
   return compilation_options;
 }
 
@@ -659,7 +659,7 @@ void ScriptModuleSerializer::writeByteCode(
     const bool save_mobile_debug_info) {
   std::vector<c10::IValue> elements;
   BackendDebugInfoRecorder debug_info_recorder;
-  int64_t version_to_write = caffe2::serialize::kProducedBytecodeVersion;
+  int64_t version_to_write = torch::serialize::kProducedBytecodeVersion;
 
   elements.emplace_back(static_cast<int64_t>(version_to_write));
   std::vector<c10::IValue> debug_info_elements;
@@ -857,7 +857,7 @@ void ExportModule(
     bool use_flatbuffer) {
   if (!use_flatbuffer) {
     // the zip archive need to know the filepath
-    caffe2::serialize::PyTorchStreamWriter writer(filename);
+    torch::serialize::PyTorchStreamWriter writer(filename);
     ScriptModuleSerializer serializer(writer);
     serializer.serialize(
         module, extra_files, bytecode_format, save_mobile_debug_info);
@@ -927,7 +927,7 @@ void ExportModule(
     save_jit_module_to_write_func(
         module, extra_files, save_mobile_debug_info, writer_func);
   } else {
-    caffe2::serialize::PyTorchStreamWriter writer(writer_func);
+    torch::serialize::PyTorchStreamWriter writer(writer_func);
     ScriptModuleSerializer serializer(writer);
     serializer.serialize(
         module, extra_files, bytecode_format, save_mobile_debug_info);
@@ -957,7 +957,7 @@ std::vector<std::string> export_opnames(const script::Module& m) {
 // to control if instructions for bytecode default inputs are emitted
 // or not. It's the major difference between bytecode v5 and v6.
 thread_local bool emitBytecodeDefaultInputs =
-    caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
+    torch::serialize::kProducedBytecodeVersion <= 5 ? true : false;
 bool BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() {
   return emitBytecodeDefaultInputs;
 }
@@ -967,7 +967,7 @@ void BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
 }
 
 thread_local bool emitDefautlArgsWithOutArgs =
-    caffe2::serialize::kProducedBytecodeVersion <= 6 ? false : true;
+    torch::serialize::kProducedBytecodeVersion <= 6 ? false : true;
 bool BytecodeEmitMode::is_default_args_before_out_args_enabled() {
   return emitDefautlArgsWithOutArgs;
 }
@@ -976,7 +976,7 @@ void BytecodeEmitMode::set_default_args_before_out_args_enabled(bool enabled) {
 }
 
 thread_local bool emitDefaultEmitPromotedOps =
-    caffe2::serialize::kProducedBytecodeVersion <= 7 ? false : true;
+    torch::serialize::kProducedBytecodeVersion <= 7 ? false : true;
 bool BytecodeEmitMode::is_emit_promoted_ops_enabled() {
   return emitDefaultEmitPromotedOps;
 }
