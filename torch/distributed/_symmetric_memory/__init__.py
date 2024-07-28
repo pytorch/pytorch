@@ -503,17 +503,13 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     scatter_dim: int,
     group_name: str,
 ) -> torch.Tensor:
-    if torch.cuda.get_device_capability() < (8, 9) and _is_test_mode:
-        C = torch.empty(
-            A.flatten(0, -2).shape[0],
-            B.shape[1],
-            dtype=out_dtype or A.dtype,
-            device=A.device,
-        )
-    else:
-        C = torch._scaled_mm(
-            A.flatten(0, -2).contiguous(), B, A_scale, B_scale, out_dtype=out_dtype
-        )
+    C = torch._scaled_mm(
+        A.flatten(0, -2).contiguous(),
+        B,
+        A_scale,
+        B_scale,
+        out_dtype=out_dtype,
+    )
     C = C.view(*A.shape[:-1], B.shape[1])
     res = funcol.reduce_scatter_tensor(
         C,
@@ -637,10 +633,6 @@ def _fused_all_gather_scaled_matmul_fallback(
         B_scale: torch.Tensor,
         out_dtype: Optional[torch.dtype],
     ) -> torch.Tensor:
-        if torch.cuda.get_device_capability() < (8, 9) and _is_test_mode:
-            return torch.empty(
-                A.shape[0], B.shape[1], dtype=out_dtype or A.dtype, device=A.device
-            )
         leading_dims = A.shape[:-1]
         res = torch.ops.aten._scaled_mm(
             A.flatten(0, -2), B, A_scale, B_scale, out_dtype=out_dtype
