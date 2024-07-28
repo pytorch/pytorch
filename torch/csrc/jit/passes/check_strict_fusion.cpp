@@ -108,7 +108,6 @@ static void checkForUnfusedOps(Node* enter_node) {
       }
       ss << "\n";
     }
-    auto range = enter_node->input()->node()->sourceRange();
     throw (ErrorReport(enter_node->input()->node()->sourceRange()) << ss.str());
   }
 }

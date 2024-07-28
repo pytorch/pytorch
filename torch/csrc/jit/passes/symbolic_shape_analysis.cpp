@@ -100,6 +100,17 @@ struct ShapeArg
   }
 };
 
+static std::ostream& operator<<(std::ostream& out, const ShapeArg& sa) {
+  if (auto val = sa.asConstantInt()) {
+    out << *val;
+  } else if (auto ss = sa.asShapeSymbol()) {
+    out << *ss;
+  } else {
+    out << "UNK";
+  }
+  return out;
+}
+
 struct ShapeArguments {
   // Superset of SymbolicShape, with additional support for unknown, nonsymbolic
   // vals
@@ -135,6 +146,21 @@ struct ShapeArguments {
   std::vector<ShapeArg> maybe_shape_symbols_;
 };
 
+static std::ostream& operator<<(std::ostream& os, const ShapeArguments& sa) {
+  if (!sa.has_dim()) {
+    os << "(UNKNOWN DIM)";
+    return os;
+  }
+
+  os << "(";
+  for (const auto i : c10::irange(sa.len())) {
+    os << sa.at(i);
+  }
+  os << ")";
+
+  return os;
+}
+
 bool setSymbolicShapeAnalysisTestMode(bool value) {
   bool old_value = symbolic_shape_analysis_test_mode;
   symbolic_shape_analysis_test_mode = value;
@@ -146,6 +172,15 @@ bool symbolicShapeAnalysisTestModeEnabled() {
 }
 
 using SSArgument = std::variant<ShapeArguments, IValue>;
+
+static std::ostream& operator<<(std::ostream& out, const SSArgument& sa) {
+  if (const IValue* iv = std::get_if<IValue>(&sa)) {
+    out << *iv;
+  } else {
+    out << std::get<ShapeArguments>(sa);
+  }
+  return out;
+}
 
 namespace {
 
