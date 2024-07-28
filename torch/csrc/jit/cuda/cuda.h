@@ -134,7 +134,8 @@ inline void CUDAStream::waitEvent(const c10::intrusive_ptr<CUDAEvent>& event) {
   event->event_->block(*stream_);
 }
 
-inline void CUDAStream::waitStream(const c10::intrusive_ptr<CUDAStream>& stream) {
+inline void CUDAStream::waitStream(
+    const c10::intrusive_ptr<CUDAStream>& stream) {
   auto ev = c10::make_intrusive<CUDAEvent>();
   stream->recordEvent(ev);
   waitEvent(ev);
