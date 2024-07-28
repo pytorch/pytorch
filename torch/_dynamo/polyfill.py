@@ -3,7 +3,6 @@
 """
 Python polyfills for common builtins.
 """
-import itertools
 import math
 from typing import Any, Callable, Sequence
 
