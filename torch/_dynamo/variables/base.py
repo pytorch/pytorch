@@ -2,7 +2,7 @@
 
 import collections
 from enum import Enum
-from typing import Any, Callable, Dict, List, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator

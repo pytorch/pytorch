@@ -278,6 +278,8 @@ class Library:
                 to register a fallthrough.
             dispatch_key: dispatch key that the input function should be registered for. By default, it uses
                           the dispatch key that the library was created with.
+            with_keyset: flag controlling if the current dispatcher call keyset should be passed as the first argument
+                         to :attr:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
 
         Example::
             >>> my_lib = Library("aten", "IMPL")
@@ -344,6 +346,43 @@ class Library:
 
         _impls.add(key)
         self._op_impls.add(key)
+
+    def fallback(self, fn, dispatch_key="", *, with_keyset=False):
+        r"""Registers the function implementation as the fallback for the given key.
+
+        This function only works for a library with global namespace ("_").
+
+        Args:
+            fn: function used as fallback for the given dispatch key or :func:`~fallthrough_kernel`
+                to register a fallthrough.
+            dispatch_key: dispatch key that the input function should be registered for. By default, it uses
+                          the dispatch key that the library was created with.
+            with_keyset: flag controlling if the current dispatcher call keyset should be passed as the first argument
+                         to :attr:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
+
+        Example::
+            >>> my_lib = Library("_", "IMPL")
+            >>> def fallback_kernel(op, *args, **kwargs):
+            >>>     # Handle all autocast ops generically
+            >>>     # ...
+            >>> my_lib.fallback(fallback_kernel, "Autocast")
+        """
+        if dispatch_key == "":
+            dispatch_key = self.dispatch_key
+
+        if self.ns != "_":
+            raise RuntimeError(
+                f"""Fallback can only be registered using libary fragment on the global namespace "_" but it is {self.ns}"""
+            )
+
+        assert dispatch_key != ""
+        assert self.m is not None
+
+        self.m.fallback(
+            dispatch_key,
+            fn,
+            with_keyset,
+        )
 
     def _destroy(self):
         if self.m is not None:
