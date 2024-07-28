@@ -2,7 +2,6 @@
 
 #include <c10/util/Exception.h>
 
-#include <mutex>
 #include <string>
 #include <unordered_map>
 

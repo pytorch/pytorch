@@ -13,7 +13,7 @@ git checkout "$SYNC_BRANCH"
 
 # Using a hardcoded SHA here is a massive speedup as we can skip the entire history of the pytorch GitHub repo.
 # This specific SHA was chosen as it was before the "branch point" of the stable branch
-for SHA in $(git log ba3b05fdf37ddbc3c301294d6a560a816335e717..origin/main --pretty="%h" --reverse -- torch/distributed torch/csrc/distributed test/distributed test/cpp/c10d benchmarks/distributed)
+for SHA in $(git log ba3b05fdf37ddbc3c301294d6a560a816335e717..origin/main --pretty="%h" -- torch/distributed torch/csrc/distributed test/distributed test/cpp/c10d benchmarks/distributed)
 do
     # `git merge-base --is-ancestor` exits with code 0 if the given SHA is an ancestor, and non-0 otherwise
     if git merge-base --is-ancestor $SHA HEAD || [[ $(git log --grep="(cherry picked from commit $SHA") ]]
