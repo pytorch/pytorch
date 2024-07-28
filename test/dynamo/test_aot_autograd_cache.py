@@ -287,6 +287,101 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
     @largeTensorTest("64GB", device=GPU_TYPE)
     @parametrize("device", (GPU_TYPE,))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_autograd_guard_single_entry(self, device, dtype):
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+            raise unittest.SkipTest("requires CUDA SM80 or later")
+
+        def fn(x, y):
+            return (x + x, y + y)
+
+        def expect_miss(compiled_fn, a, b):
+            self._clear_dynamo_and_codecache()
+            counters.clear()
+            res = compiled_fn(a, b)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_guard_miss"],
+                0,
+            )
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            return res
+
+        def expect_hit(compiled_fn, a, b):
+            self._clear_dynamo_and_codecache()
+            counters.clear()
+            res = compiled_fn(a, b)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_guard_miss"],
+                0,
+            )
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_hit"],
+                1,
+            )
+            return res
+
+        def expect_guard_miss(compiled_fn, a, b):
+            self._clear_dynamo_and_codecache()
+            counters.clear()
+            res = compiled_fn(a, b)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_guard_miss"],
+                1,
+            )
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_hit"],
+                0,
+            )
+            return res
+
+        compiled_fn = torch.compile(fn, dynamic=True)
+
+        a_shape = (5, 6)
+        b_shape = (7, 8)
+        a = torch.rand(a_shape, device=device, dtype=dtype)
+        b = torch.rand(b_shape, device=device, dtype=dtype)
+        res1 = expect_miss(compiled_fn, a, b)
+
+        # Same shape, should cache hit
+        a2 = a.detach().clone()
+        b2 = b.detach().clone()
+
+        res2 = expect_hit(compiled_fn, a2, b2)
+
+        self.assertEqual(res1, res2)
+
+        a_shape = (5, 6)
+        b_shape = (47000, 47001)
+        a3 = torch.rand(a_shape, device=device, dtype=dtype)
+        b3 = torch.rand(b_shape, device=device, dtype=dtype)
+
+        expect_guard_miss(compiled_fn, a3, b3)
+
+        a_shape = (6, 7)
+        b_shape = (47000, 47001)
+        a4 = torch.rand(a_shape, device=device, dtype=dtype)
+        b4 = torch.rand(b_shape, device=device, dtype=dtype)
+        expect_hit(compiled_fn, a4, b4)
+
+        # Change the shape back to the original,
+        # FXGraphCache should hit because it stores
+        # multiple entries
+        a_shape = (5, 6)
+        b_shape = (7, 8)
+        a5 = torch.rand(a_shape, device=device, dtype=dtype)
+        b5 = torch.rand(b_shape, device=device, dtype=dtype)
+        expect_hit(compiled_fn, a5, b5)
+
+    @largeTensorTest("64GB", device=GPU_TYPE)
+    @parametrize("device", (GPU_TYPE,))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize("requires_grad", (True, False))
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
