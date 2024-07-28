@@ -2,7 +2,7 @@
 astunparse
 expecttest!=0.2.0
 hypothesis
-numpy
+numpy<2
 psutil
 pyyaml
 requests
