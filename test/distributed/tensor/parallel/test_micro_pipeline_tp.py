@@ -10,6 +10,7 @@ from torch._inductor.fx_passes.micro_pipeline_tp import (
     _get_unexposed_collectives,
     find_all_gather_patterns,
     find_reduce_scatter_patterns,
+    micro_pipeline_tp_pass,
 )
 from torch._inductor.fx_passes.post_grad import remove_noop_ops, view_to_reshape
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
@@ -268,12 +269,25 @@ class MicroPipelineTPTest(TestCase):
         A_scale = torch.tensor(0.1, device="cuda")
         B_scale = torch.tensor(0.1, device="cuda")
 
+        gm = _make_post_grad_fx(func, A_shard, B, A_scale, B_scale, torch.bfloat16)
+        with _test_mode():
+            micro_pipeline_tp_pass(gm.graph)
+        if gather_dim == A_dims - 1:
+            self.assertNotIn("fused_all_gather_scaled_matmul", str(gm.graph))
+            self.assertIn("all_gather_into_tensor", str(gm.graph))
+        else:
+            # Decomposing the matmul on the K dimension is not supported
+            self.assertIn("fused_all_gather_scaled_matmul", str(gm.graph))
+            self.assertNotIn("all_gather_into_tensor", str(gm.graph))
+
+        if torch.cuda.get_device_capability() < (8, 9):
+            return
+
         with _test_mode():
             compiled = torch.compile(func)
             code = run_and_get_triton_code(
                 compiled, A_shard, B, A_scale, B_scale, torch.bfloat16
             )
-
         if gather_dim == A_dims - 1:
             self.assertNotIn("fused_all_gather_scaled_matmul", code)
             self.assertIn("all_gather_into_tensor", code)
@@ -346,12 +360,20 @@ class MicroPipelineTPTest(TestCase):
         A_scale = torch.tensor(0.1, device="cuda")
         B_scale = torch.tensor(0.1, device="cuda")
 
+        gm = _make_post_grad_fx(func, A, B, A_scale, B_scale, torch.bfloat16)
+        with _test_mode():
+            micro_pipeline_tp_pass(gm.graph)
+        self.assertIn("fused_scaled_matmul_reduce_scatter", str(gm.graph))
+        self.assertNotIn("reduce_scatter_tensor", str(gm.graph))
+
+        if torch.cuda.get_device_capability() < (8, 9):
+            return
+
         with _test_mode():
             compiled = torch.compile(func)
             code = run_and_get_triton_code(
                 compiled, A, B, A_scale, B_scale, torch.bfloat16
             )
-
         self.assertIn("fused_scaled_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
 
