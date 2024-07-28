@@ -592,6 +592,7 @@ def _export_to_aten_ir(
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
+    _check_autograd_state=True,
     _is_torch_jit_trace=False,
 ) -> ATenExportArtifact:
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
@@ -599,8 +600,12 @@ def _export_to_aten_ir(
     # mode, we don't care. At predispatch level, we don't care about the state change.
     is_grad_enabled = torch._C.is_grad_enabled()
     grad_safe_guard = nullcontext()
-    if not pre_dispatch and is_grad_enabled:
-        grad_safe_guard = AutogradStateOpsFailSafeguard()  # type: ignore[assignment]
+    # export_to_aten_ir is called when we decompose the ep into inference IR
+    # In that setting, we actually shouldn't check the state change as at this point,
+    # because the intention is specalizing to inference.
+    if _check_autograd_state:
+        if not pre_dispatch and is_grad_enabled:
+            grad_safe_guard = AutogradStateOpsFailSafeguard()  # type: ignore[assignment]
 
     @contextmanager
     def _compiling_state_context():
