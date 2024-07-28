@@ -948,10 +948,8 @@ void initJitScriptBindings(PyObject* module) {
         }
         return invokeScriptMethodFromPython(
             *method,
-            // NOLINTNEXTLINE(performance-move-const-arg)
             std::move(args),
-            // NOLINTNEXTLINE(performance-move-const-arg)
-            std::move(kwargs));
+            kwargs);
       });
 
   special_magic_methods.emplace(
@@ -967,10 +965,8 @@ void initJitScriptBindings(PyObject* module) {
         }
         return invokeScriptMethodFromPython(
             *method,
-            // NOLINTNEXTLINE(performance-move-const-arg)
             std::move(args),
-            // NOLINTNEXTLINE(performance-move-const-arg)
-            std::move(kwargs));
+            kwargs);
       });
 
   for (const char* mm_name : magic_method_names) {
@@ -1448,7 +1444,6 @@ void initJitScriptBindings(PyObject* module) {
             Function& callee = *strongPtr.function_;
             py::object result = invokeScriptFunctionFromPython(
                 callee,
-                // NOLINTNEXTLINE(performance-move-const-arg)
                 tuple_slice(std::move(args), 1),
                 kwargs);
             return result;
