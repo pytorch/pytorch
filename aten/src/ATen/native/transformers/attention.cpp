@@ -618,7 +618,7 @@ Tensor _safe_softmax(
     std::optional<ScalarType> dtype) {
   TORCH_CHECK(self.is_floating_point(), "Expected softmax matrix to be floating point, but got ", self.dtype());
   TORCH_CHECK(mask.dtype() == at::kBool, "Expected mask to be a boolean tensor, but got ", mask.dtype());
-  const auto attn_mask_float = convert_boolean_attn_mask(mask, mask.dtype());
+  const auto attn_mask_float = convert_boolean_attn_mask(mask, self.dtype());
   TORCH_INTERNAL_ASSERT(attn_mask_float.has_value(), "Expected attn_mask to return a tensor!");
   const auto out = at::softmax(self + attn_mask_float.value(), dim);
   const auto scalar_options = at::TensorOptions().dtype(out.dtype()).device(out.device());
