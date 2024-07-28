@@ -16,7 +16,6 @@ from unittest.mock import patch
 import numpy as np
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
@@ -28,7 +27,6 @@ from torch._dynamo.testing import (
 from torch._dynamo.utils import ifdynstaticdefault, same
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.lists import RangeVariable
-
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
@@ -38,6 +36,7 @@ from torch.testing._internal.common_utils import (
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
+
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
@@ -181,6 +180,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         for x in itertools.chain.from_iterable([[a, b], [1, 2]]):
             v = v + x
         return v
+
+    def test_itertools_reconstruct(self):
+        def fn(a):
+            it1 = itertools.repeat(1)
+            it2 = itertools.count(2)
+            for _ in range(3):
+                a += next(it1)
+                a += next(it2)
+            return it1, it2, a
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        i1, i2, a = fn(torch.ones(3, 3))
+        it1, it2, b = opt_fn(torch.ones(3, 3))
+        self.assertEqual(next(i1), next(it1))
+        self.assertEqual(next(i2), next(it2))
+        self.assertEqual(a, b)
 
     @make_test
     def test_obj_eq(a, b):
@@ -2970,6 +2985,45 @@ class GraphModule(torch.nn.Module):
         l1 = list(m)
         l2 = list(m)
         return l1, l2
+
+    @make_test
+    def test_enumerate(a, b):
+        return list(enumerate([a, b], start=1)), a + 1
+
+    @make_test
+    def test_map_enumerate(a, b):
+        return list(enumerate(map(lambda x: x + 1, [a, b]), start=1)), a + 1
+
+    def test_enumerate_custom(self):
+        class MyClass:
+            def __iter__(self):
+                self.a = 1
+                return self
+
+            def __next__(self):
+                if self.a > 3:
+                    raise StopIteration
+                self.a += 1
+                return self.a
+
+        def fn(x):
+            for i, it in enumerate(MyClass()):
+                x += i + it
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3, 3)), opt_fn(torch.ones(3, 3)))
+
+    def test_enumerate_reconstruct(self):
+        def fn(a, b):
+            return enumerate([a, b], start=1)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        inps = (torch.randn(3, 3), torch.randn(3, 3))
+        it1 = fn(*inps)
+        it2 = opt_fn(*inps)
+        self.assertIsInstance(it2, enumerate)
+        self.assertEqual(list(it1), list(it2))
 
 
 def udf_mul(x, y):
