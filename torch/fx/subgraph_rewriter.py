@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 from .graph_module import GraphModule
 from .graph import Graph
 from .node import Node
@@ -319,8 +318,8 @@ def _replace_pattern(
 
         # Hook the output Node of the replacement subgraph in to the
         # original Graph at the correct location
-        assert len(match.returning_nodes) == len(copied_returning_nodes)
-        for gn, copied_node in zip(match.returning_nodes, copied_returning_nodes):
+        assert len(match.returning_nodes) == len(copied_returning_nodes)  # type: ignore[arg-type]
+        for gn, copied_node in zip(match.returning_nodes, copied_returning_nodes):  # type: ignore[arg-type]
             gn.replace_all_uses_with(copied_node)
             match_changed_node[gn] = copied_node
         # Remove the original nodes

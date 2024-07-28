@@ -165,7 +165,7 @@ class MetaTracer(torch.fx.Tracer):
                 meta_target = manual_meta_overrides.get(target, target)
                 meta_out = meta_target(*args_metas, **kwargs_metas)
             elif kind == 'call_method':
-                meta_out = getattr(args_metas[0], target)(*args_metas[1:], **kwargs_metas)
+                meta_out = getattr(args_metas[0], target)(*args_metas[1:], **kwargs_metas)  # type: ignore[index]  # type: ignore[index]
             elif kind == 'call_module':
                 assert hasattr(self, 'orig_forward')
                 self._disable_module_getattr = True
@@ -173,7 +173,7 @@ class MetaTracer(torch.fx.Tracer):
                     mod = self.root.get_submodule(target)
                     mod_type = type(mod)
                     if mod_type in manual_meta_overrides:
-                        meta_out = manual_meta_overrides[mod_type](mod, *args_metas, **kwargs_metas)
+                        meta_out = manual_meta_overrides[mod_type](mod, *args_metas, **kwargs_metas)  # type: ignore[misc, arg-type]
                     else:
                         meta_out = self.orig_forward(*args_metas, **kwargs_metas)
                 finally:
@@ -237,7 +237,7 @@ class MetaTracer(torch.fx.Tracer):
     def proxy(self, node):
         return MetaProxy(node, self)
 
-    def trace(self, root, meta_args : Dict[str, torch.Tensor], concrete_args=None):
+    def trace(self, root, meta_args : Dict[str, torch.Tensor], concrete_args=None):  # type: ignore[override]
         assert isinstance(meta_args, dict)
         self.meta_args = meta_args
 
@@ -263,7 +263,7 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable[..., Any]],
                    meta_args : Optional[Dict[str, torch.Tensor]] = None,
                    concrete_args: Optional[Dict[str, Any]] = None) -> torch.fx.GraphModule:
     tracer = MetaTracer()
-    graph = tracer.trace(root, meta_args, concrete_args)
+    graph = tracer.trace(root, meta_args, concrete_args)  # type: ignore[arg-type]
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     gm = torch.fx.GraphModule(tracer.root, graph, name)
     return gm

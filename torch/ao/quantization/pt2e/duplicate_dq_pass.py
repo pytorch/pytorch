@@ -46,8 +46,8 @@ def _maybe_duplicate_dq(
 
         new_args = map_arg(user.args, maybe_replace_node)
         new_kwargs = map_arg(user.kwargs, maybe_replace_node)
-        user.args = new_args
-        user.kwargs = new_kwargs
+        user.args = new_args  # type: ignore[assignment]
+        user.kwargs = new_kwargs  # type: ignore[assignment]
 
 
 class DuplicateDQPass(PassBase):

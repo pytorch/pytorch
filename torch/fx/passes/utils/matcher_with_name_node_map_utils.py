@@ -31,8 +31,8 @@ def _split_to_graph_and_name_node_map(
                 name_node_map, Dict
             ), "Expecting the input graph to have a dict output as the last element"
             n.args = (flattened,)
-            orig_pytree_info = gm._graph._codegen.pytree_info
-            gm._graph._codegen.pytree_info = _PyTreeInfo(
+            orig_pytree_info = gm._graph._codegen.pytree_info  # type: ignore[attr-defined]
+            gm._graph._codegen.pytree_info = _PyTreeInfo(  # type: ignore[attr-defined]
                 orig_pytree_info.orig_args, orig_pytree_info.in_spec, out_spec
             )
     gm.recompile()

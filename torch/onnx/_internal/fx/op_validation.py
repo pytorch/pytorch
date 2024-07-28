@@ -243,7 +243,7 @@ def _fx_args_to_torch_args(
         if isinstance(arg, torch.fx.Node):
             fake_tensor = arg.meta.get("val")
             if fake_tensor is None and arg.op == "get_attr":
-                fake_tensor = getattr(fx_graph_module, arg.target)  # type: ignore[operator]
+                fake_tensor = getattr(fx_graph_module, arg.target)  # type: ignore[operator, arg-type]
             # NOTE: Currently, we are aware of
             # FakeTensor/Tensor/SymInt/SymFloat/Symbool/int/float/bool could be in
             # arg.meta["val"]/get_attr.
@@ -254,8 +254,8 @@ def _fx_args_to_torch_args(
                 wrapped_args.append(real_tensor)
             elif isinstance(fake_tensor, (int, float, bool)):
                 wrapped_args.append(fake_tensor)
-            elif symbolic_shapes.has_hint(fake_tensor):
-                wrapped_args.append(symbolic_shapes.hint_int(fake_tensor))
+            elif symbolic_shapes.has_hint(fake_tensor):  # type: ignore[arg-type]
+                wrapped_args.append(symbolic_shapes.hint_int(fake_tensor))  # type: ignore[arg-type]
             else:
                 raise ValueError(
                     f"Unexpected input argument type found inside fx.Node. arg: {arg}; "
