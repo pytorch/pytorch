@@ -439,13 +439,14 @@ def _safe_softmax(self, mask, dim, dtype=None):
         lambda: f"Expected mask to be boolean, but got {mask.dtype}",
     )
     # Convert boolean attention mask to float mask
-    attn_mask_float = convert_boolean_attn_mask(mask, mask.dtype)
+    attn_mask_float = convert_boolean_attn_mask(mask, self.dtype)
     # Apply softmax with the mask
     out = torch.softmax(self + attn_mask_float, dim, dtype)
     # Create a scalar tensor with same dtype and device as output
     zero_tensor = torch.tensor(0.0, dtype=out.dtype, device=out.device)
     # Apply the mask to the output
     return torch.where(torch.logical_not(mask), zero_tensor, out)
+
 
 @register_decomposition(aten.smooth_l1_loss)
 @out_wrapper()
@@ -1602,7 +1603,7 @@ def native_group_norm_backward(
     utils.check_same_shape(mean, rstd, allow_cpu_scalar_tensors=False)
     torch._check(
         input.numel() == N * C * HxW,
-        lambda: f"Expect input to have { N * C * HxW} elements",
+        lambda: f"Expect input to have {N * C * HxW} elements",
     )
     torch._check(
         mean.shape == (N, group),
