@@ -1403,8 +1403,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
         )
 
     @testing.expectedFailureRetraceability  # Unexpected type in sourceless builder torch._higher_order_ops.wrap.WrapWithSetGradEnabled
-    @testing.expectedFailureTrainingIRToRunDecomp  # Encountered autograd state manager op
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_set_grad_empty(self):
         class M(torch.nn.Module):
             def forward(self, x):
