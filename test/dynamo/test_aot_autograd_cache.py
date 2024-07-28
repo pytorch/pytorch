@@ -289,6 +289,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize("requires_grad", (True, False))
     @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_autograd_inductor_guards(self, device, dtype, requires_grad):
         """
@@ -314,6 +315,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
             ((47000, 47001), (5, 6)),
         )
         expected_hits = expected_misses = expected_saves = 0
+        expected_guard_misses = 0
         for a_shape, b_shape in shapes:
             a = torch.rand(
                 a_shape, device=device, dtype=dtype, requires_grad=requires_grad
@@ -327,15 +329,15 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
             # see a recompilation (along with a cache miss).
             res1 = compiled_fn(a, b)
             # A first call should miss in the cache.
-            # NOTE: Currently, this cache miss is *not* due to guards,
-            # but instead because the AOTAutogradCache key calculation specializes on input shapes.
-            # Once we allow tensors with symints as part of the cache key calculation, it will
-            # instead cache miss because of guard failure.
             expected_misses += 1
-
             self.assertEqual(
                 counters["aot_autograd"]["autograd_cache_miss"], expected_misses
             )
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_guard_miss"],
+                expected_guard_misses,
+            )
+
             self.assertEqual(
                 counters["aot_autograd"]["autograd_cache_hit"], expected_hits
             )
@@ -366,6 +368,12 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(
                 counters["aot_autograd"]["autograd_cache_miss"], expected_misses
             )
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_guard_miss"],
+                expected_guard_misses,
+            )
+            # First compile is a regular cache miss, subsequent are guard misses
+            expected_guard_misses += 1
             self.assertEqual(
                 counters["aot_autograd"]["autograd_cache_hit"], expected_hits
             )
