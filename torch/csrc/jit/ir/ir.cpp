@@ -1298,8 +1298,8 @@ Node::Node(Graph* graph_, NodeKind kind_)
       owning_block_(nullptr),
       scope_(graph_->current_scope_),
       callstack_(std::nullopt),
-      op_(nullptr),
-      topo_position_(0) {
+      op_(nullptr)
+      {
   graph_->all_nodes.emplace(this);
 }
 
@@ -2044,14 +2044,14 @@ void inlineCallStackOfNode(
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    std::optional<ModuleInstanceInfo> m_info);
+    const std::optional<ModuleInstanceInfo>& m_info);
 
 static void inlineCallStackOfBlock(
     Block* b,
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    std::optional<ModuleInstanceInfo> m_info) {
+    const std::optional<ModuleInstanceInfo>& m_info) {
   for (auto n : b->nodes()) {
     inlineCallStackOfNode(n, new_cs_entries, callee, to_replace, m_info);
   }
@@ -2062,7 +2062,7 @@ void inlineCallStackOfNode(
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    std::optional<ModuleInstanceInfo> m_info) {
+    const std::optional<ModuleInstanceInfo>& m_info) {
   auto new_node_cs = new_node->callstack();
 
   InlinedCallStack* raw_callstack_ptr =
