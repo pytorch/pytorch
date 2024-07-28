@@ -49,6 +49,7 @@ from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
     fresh_inductor_cache,
+    InputType,
     should_assume_input_aligned,
     tensor_is_aligned,
 )
@@ -530,7 +531,8 @@ def compile_fx_inner(
     start = time.time()
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
-    inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
+
+    inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)  # type: ignore[arg-type]
 
     def codegen_and_compile(
         gm,
@@ -880,7 +882,7 @@ def fx_codegen_and_compile(
 
 
 def get_input_idxs_to_check(
-    inputs: Union[List[torch.Tensor], Sequence[int]],
+    inputs: List[InputType],
     static_input_idxs: Sequence[int],
 ) -> Sequence[int]:
     """
@@ -958,7 +960,7 @@ def cudagraphify(
     return run
 
 
-def static_input(x: torch.Tensor):
+def static_input(x: torch.Tensor) -> torch.Tensor:
     """
     Copy and input while preserving strides
     """
@@ -984,9 +986,9 @@ def cudagraphify_impl(
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
-    check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)
-    static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
-    copy_misaligned_inputs(inputs, check_input_idxs)
+    check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)  # type: ignore[arg-type]
+    static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)  # type: ignore[arg-type]
+    copy_misaligned_inputs(inputs, check_input_idxs)  # type: ignore[arg-type]
 
     assert isinstance(inputs, list)
 
