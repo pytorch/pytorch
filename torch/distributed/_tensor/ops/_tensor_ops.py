@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from typing import cast, List, Optional, Sequence, Tuple
@@ -594,7 +595,7 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
             args_schema=(
                 schema_suggestion.args_schema[0],
                 dim,
-                schema_suggestion.args_schema[1][dim],  # type: ignore[index]
+                schema_suggestion.args_schema[1][dim],
             ),
             kwargs_schema=op_schema.kwargs_schema,
         )
