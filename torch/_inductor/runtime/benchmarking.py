@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import functools
-import random
 import time
 from functools import cached_property
 from importlib import import_module
+from random import shuffle
 from statistics import median
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from typing_extensions import Self
@@ -636,7 +636,9 @@ class Benchmarker:
         torch.cuda._sleep(int(1 / self.gpu_time_ms_per_gpu_clock_cycle))
         start_time_s = time.perf_counter()
         for event_pairs in interleaved_event_pairs:
-            for _callable, (start_event, end_event) in zip(callables, event_pairs):
+            for _callable, (start_event, end_event) in shuffle(
+                list(zip(callables, event_pairs))
+            ):
                 buffer.zero_()
                 start_event.record()
                 _callable()
@@ -744,8 +746,8 @@ class Benchmarker:
             for _ in range(memory_warmup_iters_per_block):
                 buffer.zero_()
             for event_pairs in interleaved_event_pairs[block_start:block_end]:
-                for _callable, (start_event, end_event) in zip(
-                    callables_to_benchmark, event_pairs
+                for _callable, (start_event, end_event) in shuffle(
+                    list(zip(callables_to_benchmark, event_pairs))
                 ):
                     buffer.zero_()
                     start_event.record()
