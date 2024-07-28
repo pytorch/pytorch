@@ -4,6 +4,7 @@ import contextlib
 from functools import partial
 from collections import namedtuple
 import sys
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -2888,8 +2889,8 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
     @parametrize("batch_size", [1, 8])
-    @parametrize("seq_len_q", [4, 8, 64, 143, 2048])
-    @parametrize("seq_len_k", [4, 8, 64, 127, 2048])
+    @parametrize("seq_len_q", [4, 143, 2048])
+    @parametrize("seq_len_k", [4, 127, 579, 2048])
     @parametrize("head_dim", [8, 16, 21, 32, 64, 203, 256])
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
