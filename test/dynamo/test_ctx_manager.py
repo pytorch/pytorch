@@ -2,12 +2,10 @@
 import unittest
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
-
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
