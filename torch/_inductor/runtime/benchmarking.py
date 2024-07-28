@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import functools
-import time
-from functools import cached_property
+from functools import cached_property, wraps
 from importlib import import_module
-from random import shuffle
+from random import randint, shuffle
 from statistics import median
+from time import perf_counter
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from typing_extensions import Self
 
@@ -22,15 +21,15 @@ def time_and_log(fn: Callable[..., Any]) -> Callable[..., Any]:
     if not torch._logging._internal.log_state.is_artifact_enabled("benchmarking"):
         return fn
 
-    @functools.wraps(fn)
+    @wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        start_time = time.perf_counter()
+        start_time = perf_counter()
         result = fn(*args, **kwargs)
         log.debug(
             "{function_name} took {elapsed_time_s} seconds.",
             extra=dict(
                 function_name=fn.__name__,
-                elapsed_time_s=time.perf_counter() - start_time,
+                elapsed_time_s=perf_counter() - start_time,
             ),
         )
         return result
@@ -77,7 +76,7 @@ def maybe_fallback_to_original_benchmarking(
     original_fn_name: str,
 ) -> Callable[..., Any]:
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        @functools.wraps(fn)
+        @wraps(fn)
         def wrapper(self: Benchmarker, *args: Any, **kwargs: Any) -> Any:
             if should_fallback_to_original_benchmarking:
                 log.debug(
@@ -99,7 +98,7 @@ def maybe_fallback_to_non_lazy_benchmarking(
     non_lazy_fn_name: str,
 ) -> Callable[..., Any]:
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        @functools.wraps(fn)
+        @wraps(fn)
         def wrapper(self: Benchmarker, *args: Any, **kwargs: Any) -> Any:
             if not should_enable_lazy_benchmarking:
                 log.debug(
@@ -223,9 +222,9 @@ class Benchmarker:
             )
         )
         for idx in range(2500):
-            start_time_s = time.perf_counter()
+            start_time_s = perf_counter()
             torch.cuda.Event(enable_timing=True).record()
-            elapsed_time_ms = (time.perf_counter() - start_time_s) * 1000
+            elapsed_time_ms = (perf_counter() - start_time_s) * 1000
             # recording an event is near instantaneous, unless we have hit
             # the queue limit, so 1ms seems like a good enough upper bound
             if elapsed_time_ms > 1:
@@ -240,11 +239,11 @@ class Benchmarker:
         ] += 1
         # ensures the queue is empty
         torch.cuda.synchronize()
-        start_time_s = time.perf_counter()
+        start_time_s = perf_counter()
         for _ in range(100):
             torch.cuda.Event(enable_timing=True).record()
         torch.cuda.synchronize()
-        return ((time.perf_counter() - start_time_s) * 1000) / 100
+        return ((perf_counter() - start_time_s) * 1000) / 100
 
     @cached_property
     def cpu_launch_overhead_ms_per_gpu_cache_clear(self: Self) -> float:
@@ -270,12 +269,12 @@ class Benchmarker:
         start_event = torch.cuda.Event(enable_timing=True)
         end_event = torch.cuda.Event(enable_timing=True)
         start_event.record()
-        start_time_s = time.perf_counter()
+        start_time_s = perf_counter()
         # 100 buffer zeroes is long enough to reduce uncertainty
         for _ in range(100):
             buffer.zero_()
         cpu_launch_overhead_ms_per_gpu_cache_clear = (
-            (time.perf_counter() - start_time_s) * 1000
+            (perf_counter() - start_time_s) * 1000
         ) / 100
         end_event.record()
         torch.cuda.synchronize()
@@ -350,9 +349,9 @@ class Benchmarker:
         for _ in range(warmup_iters):
             _callable()
         for _ in range(benchmark_iters):
-            start_time_s = time.perf_counter()
+            start_time_s = perf_counter()
             _callable()
-            timings_ms.append((time.perf_counter() - start_time_s) * 1000)
+            timings_ms.append((perf_counter() - start_time_s) * 1000)
         return median(timings_ms)
 
     def original_do_bench_cpu(
@@ -367,9 +366,9 @@ class Benchmarker:
             fn()
         durations = []
         for _ in range(times):
-            t0 = time.perf_counter()
+            t0 = perf_counter()
             fn()
-            t1 = time.perf_counter()
+            t1 = perf_counter()
             durations.append((t1 - t0) * 1000)
         # return the median time
         sorted_durations = sorted(durations)
@@ -431,7 +430,7 @@ class Benchmarker:
         buffer.zero_()
 
         event_pairs = self.get_event_pairs(estimation_iters)
-        start_time_s = time.perf_counter()
+        start_time_s = perf_counter()
         for start_event, end_event in event_pairs:
             buffer.zero_()
             start_event.record()
@@ -440,7 +439,7 @@ class Benchmarker:
         # before we synchronize we want to measure the cpu-side cost of our buffer
         # zero, launching the callable, and the associated event records
         cpu_launch_overhead_ms_per_iter = (
-            (time.perf_counter() - start_time_s) * 1000
+            (perf_counter() - start_time_s) * 1000
         ) / estimation_iters
         torch.cuda.synchronize()
         estimated_timing_ms = self.get_min_timing_ms(event_pairs)
@@ -634,7 +633,7 @@ class Benchmarker:
             len(callables), estimation_iters
         )
         torch.cuda._sleep(int(1 / self.gpu_time_ms_per_gpu_clock_cycle))
-        start_time_s = time.perf_counter()
+        start_time_s = perf_counter()
         for event_pairs in interleaved_event_pairs:
             for _callable, (start_event, end_event) in shuffle(
                 list(zip(callables, event_pairs))
@@ -644,7 +643,7 @@ class Benchmarker:
                 _callable()
                 end_event.record()
         cpu_launch_overhead_ms_per_iter = (
-            (time.perf_counter() - start_time_s) * 1000
+            (perf_counter() - start_time_s) * 1000
         ) / estimation_iters
         torch.cuda.synchronize()
         estimated_timings_ms = self.get_interleaved_min_timings_ms(
@@ -846,7 +845,7 @@ class Benchmarker:
         # have a lazy benchmark grouping of one, because we would never remove _callable
         # from the lazy benchmark queue and as such any memory referenced by _callable
         # would remain allocated
-        key = str(hash(_callable) + random.randint(-(2**100), 2**100)) + kwargs_hash
+        key = str(hash(_callable) + randint(-(2**100), 2**100)) + kwargs_hash
         self.kwargs_hash_to_futures_gpu.setdefault(kwargs_hash, []).append(
             (_callable, key)
         )
