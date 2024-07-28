@@ -25,7 +25,6 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <algorithm>
 #include <memory>
-#include <numeric>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -42,8 +41,7 @@ but not limited to:
 
 static bool symbolic_shape_analysis_test_mode = false;
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // This is similar to c10::SymbolicShape, but instead of either having
 // a concrete dimension or a symbolic dimension, an argument may be:
@@ -102,17 +100,6 @@ struct ShapeArg
   }
 };
 
-static std::ostream& operator<<(std::ostream& out, const ShapeArg& sa) {
-  if (auto val = sa.asConstantInt()) {
-    out << *val;
-  } else if (auto ss = sa.asShapeSymbol()) {
-    out << *ss;
-  } else {
-    out << "UNK";
-  }
-  return out;
-}
-
 struct ShapeArguments {
   // Superset of SymbolicShape, with additional support for unknown, nonsymbolic
   // vals
@@ -148,21 +135,6 @@ struct ShapeArguments {
   std::vector<ShapeArg> maybe_shape_symbols_;
 };
 
-static std::ostream& operator<<(std::ostream& os, const ShapeArguments& sa) {
-  if (!sa.has_dim()) {
-    os << "(UNKNOWN DIM)";
-    return os;
-  }
-
-  os << "(";
-  for (const auto i : c10::irange(sa.len())) {
-    os << sa.at(i);
-  }
-  os << ")";
-
-  return os;
-}
-
 bool setSymbolicShapeAnalysisTestMode(bool value) {
   bool old_value = symbolic_shape_analysis_test_mode;
   symbolic_shape_analysis_test_mode = value;
@@ -174,15 +146,6 @@ bool symbolicShapeAnalysisTestModeEnabled() {
 }
 
 using SSArgument = std::variant<ShapeArguments, IValue>;
-
-static std::ostream& operator<<(std::ostream& out, const SSArgument& sa) {
-  if (const IValue* iv = std::get_if<IValue>(&sa)) {
-    out << *iv;
-  } else {
-    out << std::get<ShapeArguments>(sa);
-  }
-  return out;
-}
 
 namespace {
 
@@ -210,7 +173,7 @@ bool isListOfTensors(const TypePtr& type) {
 
 std::optional<size_t> normIndex(int64_t index, size_t len) {
   if (index < 0) {
-    index = index + len;
+    index = index + static_cast<int64_t>(len);
   }
   if (index >= 0 && index < static_cast<int64_t>(len)) {
     return index;
@@ -235,7 +198,7 @@ bool shapeGraphCleanupPasses(std::shared_ptr<Graph> graph) {
   return made_change;
 }
 
-void replaceWithIValue(Value* v, IValue val) {
+void replaceWithIValue(Value* v, const IValue& val) {
   WithInsertPoint guard(*v->node()->owningBlock()->nodes().begin());
   v->replaceAllUsesWith(v->owningGraph()->insertConstant(val));
 }
@@ -600,7 +563,7 @@ struct SymbolicShapeOpAnalyzer {
 
   SymbolicShapeOpAnalyzer(
       const FunctionSchema* schema,
-      std::shared_ptr<Graph> graph)
+      const std::shared_ptr<Graph>& graph)
       : schema_(schema) {
     shape_compute_graph_ = graph->copy();
   }
@@ -895,7 +858,7 @@ struct SymbolicShapeGraphAnalyzer {
             output_index_to_symbolic_shape_[i];
       }
     }
-    for (int64_t i = erase_indices.size() - 1; i >= 0; i--) {
+    for (int64_t i = static_cast<int64_t>(erase_indices.size()) - 1; i >= 0; i--) {
       stitched_shape_compute_graph->eraseOutput(erase_indices[i]);
     }
     for (size_t i = 0; i < stitched_shape_compute_graph->inputs().size();) {
@@ -945,7 +908,7 @@ struct SymbolicShapeGraphAnalyzer {
   }
 
   void registerStitchedComputeOutput(
-      std::shared_ptr<Graph> stitched_shape_compute_graph,
+      const std::shared_ptr<Graph>& stitched_shape_compute_graph,
       Value* output,
       int64_t symbolic_shape) {
     stitched_shape_compute_graph->registerOutput(output);
@@ -958,8 +921,8 @@ struct SymbolicShapeGraphAnalyzer {
 
   void joinPartialEvaluatedShapeGraphToLargeShapeGraph(
       Node* curr,
-      std::shared_ptr<Graph> partial_eval_graph,
-      std::shared_ptr<Graph> stitched_shape_compute_graph) {
+      const std::shared_ptr<Graph>& partial_eval_graph,
+      const std::shared_ptr<Graph>& stitched_shape_compute_graph) {
     // we are building up the large shape compute graph by iteratively
     // combining partially evaluated individual node shape graphs.
 
@@ -1183,5 +1146,4 @@ calculateSymbolicShapesOnOp(
   return res;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
