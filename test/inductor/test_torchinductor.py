@@ -10779,7 +10779,7 @@ class CommonTemplate:
         _, code = run_and_get_code(fn, x, x2)
         FileCheck().check("aten.view.dtype(reinterpret_tensor").run(code[0])
 
-    @skip_if_halide # need to fix
+    @skip_if_halide  # need to fix
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_scalar_outputs(self):
         def fn(x):
