@@ -88,26 +88,6 @@ class FunctionalTensor(torch.Tensor):
         torch.ops.prim.device.default,  # type: ignore[has-type]
     ]
 
-    # These are ops that claim to be functional, but actually are maybe-mutating/maybe-aliasing
-    # TODO (tmanlaibaatar) make it a tag
-    maybe_aliasing_or_mutating_ops = [
-        torch.ops.aten.dropout.default,  # type: ignore[has-type]
-        torch.ops.aten.batch_norm.default,  # type: ignore[has-type]
-        torch.ops.aten.native_batch_norm.default,  # type: ignore[has-type]
-        torch.ops.aten._batch_norm_impl_index.default,  # type: ignore[has-type]
-        torch.ops.aten.cudnn_batch_norm.default,  # type: ignore[has-type]
-        torch.ops.aten.miopen_batch_norm.default,  # type: ignore[has-type]
-        torch.ops.aten.atleast_1d.default,  # type: ignore[has-type]
-        torch.ops.aten.atleast_2d.default,  # type: ignore[has-type]
-        torch.ops.aten.atleast_3d.default,  # type: ignore[has-type]
-        torch.ops.aten.cartesian_prod.default,  # type: ignore[has-type]
-        torch.ops.aten.conj_physical.default,  # type: ignore[has-type]
-        torch.ops.aten.alpha_dropout.default,  # type: ignore[has-type]
-        torch.ops.aten.feature_dropout.default,  # type: ignore[has-type]
-        torch.ops.aten.feature_alpha_dropout.default,  # type: ignore[has-type]
-        torch.ops.aten.unsafe_chunk.default,  # type: ignore[has-type]
-    ]
-
     def __new__(cls, elem):
         assert torch._is_functional_tensor(elem)
 
@@ -345,7 +325,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                 return False
 
             # We unconditionally decompose ops that are maybe aliasing or mutating ops
-            if func in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+            if torch.Tag.maybe_aliasing_or_mutating in func.tags:
                 return True
 
             # (1) we unconditionally decompose maybe-aliasing or maybe-mutating ops,

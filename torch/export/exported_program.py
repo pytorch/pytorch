@@ -179,7 +179,7 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
         # TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
         # decomp part. (https://github.com/pytorch/pytorch/issues/129431)
         def assert_valid_to_preserve(op_overload):
-            if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+            if torch.Tag.maybe_aliasing_or_mutating in op_overload.tags:
                 raise RuntimeError(
                     f"We can't detect {op_overload} as a functional op statically, so we can't preserve it"
                 )

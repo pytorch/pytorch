@@ -309,25 +309,25 @@
 - func: _shape_as_tensor(Tensor self) -> Tensor
 
 - func: dropout(Tensor input, float p, bool train) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [nondeterministic_seeded, maybe_aliasing_or_mutating]
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
   tags: nondeterministic_seeded
 
 - func: feature_dropout(Tensor input, float p, bool train) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [nondeterministic_seeded, maybe_aliasing_or_mutating]
 
 - func: feature_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
   tags: nondeterministic_seeded
 
 - func: alpha_dropout(Tensor input, float p, bool train) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [nondeterministic_seeded, maybe_aliasing_or_mutating]
 
 - func: alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
   tags: nondeterministic_seeded
 
 - func: feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [nondeterministic_seeded, maybe_aliasing_or_mutating]
 
 - func: feature_alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
   tags: nondeterministic_seeded
@@ -477,7 +477,7 @@
 
 - func: conj_physical(Tensor self) -> Tensor
   variants: function, method
-  tags: pointwise
+  tags: [pointwise, maybe_aliasing_or_mutating]
 
 - func: conj_physical.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1026,17 +1026,20 @@
 
 - func: atleast_1d(Tensor self) -> Tensor
   variants: function
+  tags: maybe_aliasing_or_mutating
 
 - func: atleast_1d.Sequence(Tensor[] tensors) -> Tensor[]
 
 - func: atleast_2d(Tensor self) -> Tensor
   variants: function
+  tags: maybe_aliasing_or_mutating
 
 - func: atleast_2d.Sequence(Tensor[] tensors) -> Tensor[]
   variants: function
 
 - func: atleast_3d(Tensor self) -> Tensor
   variants: function
+  tags: maybe_aliasing_or_mutating
 
 - func: atleast_3d.Sequence(Tensor[] tensors) -> Tensor[]
   variants: function
@@ -1069,6 +1072,7 @@
   autogen: bartlett_window.periodic_out
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
+  tags: maybe_aliasing_or_mutating
 
 - func: quantized_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor
   dispatch:
@@ -1076,6 +1080,7 @@
   autogen: quantized_batch_norm.out
 
 - func: _batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)
+  tags: maybe_aliasing_or_mutating
 
 - func: _batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace) -> (Tensor, Tensor, Tensor)
 
@@ -1457,6 +1462,7 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  tags: maybe_aliasing_or_mutating
 
 - func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]
   variants: function, method
@@ -1859,6 +1865,7 @@
   dispatch:
     CUDA: cudnn_batch_norm
   autogen: cudnn_batch_norm.out
+  tags: maybe_aliasing_or_mutating
 
 # NB: You can only use this if you used cudnn_batch_norm training=True
 - func: cudnn_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, float epsilon, Tensor reserveSpace) -> (Tensor, Tensor, Tensor)
@@ -4063,6 +4070,7 @@
   dispatch:
     CUDA: miopen_batch_norm
   autogen: miopen_batch_norm.out
+  tags: maybe_aliasing_or_mutating
 
 - func: miopen_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, float epsilon) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -4307,6 +4315,7 @@
     CUDA: batch_norm_cuda
     MPS: batch_norm_mps
     MkldnnCPU: mkldnn_batch_norm
+  tags: maybe_aliasing_or_mutating
 
 - func: native_batch_norm.out(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   dispatch:
@@ -7721,6 +7730,7 @@
 
 - func: cartesian_prod(Tensor[] tensors) -> Tensor
   variants: function
+  tags: maybe_aliasing_or_mutating
 
 - func: combinations(Tensor self, int r=2, bool with_replacement=False) -> Tensor
   variants: function
