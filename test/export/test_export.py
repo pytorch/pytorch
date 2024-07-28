@@ -317,9 +317,6 @@ graph():
     return (x,)""",
         )
 
-    # Errors because fake mode is not detected from non-tensor inputs
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
-    @testing.expectedFailureTrainingIRToRunDecomp
     def test_no_tensor_computation_3(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
