@@ -10,19 +10,7 @@ import pickle
 import pstats
 import shutil
 import subprocess
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    IO,
-    Iterator,
-    List,
-    Optional,
-    Type,
-    TypeVar,
-    Union,
-)
-from typing_extensions import ParamSpec
+from typing import Any, Callable, Dict, IO, Iterator, List, Optional, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -51,9 +39,6 @@ log = logging.getLogger(__name__)
 SchedulerNodeList = List[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
-
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
 
 
 @functools.lru_cache(None)
@@ -321,9 +306,7 @@ class DebugContext:
     _counter = itertools.count()
 
     @staticmethod
-    def wrap(
-        fn: Callable[[Callable[_P, _T]], Callable[_P, _T]]
-    ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    def wrap(fn: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(fn)
         def inner(*args: Any, **kwargs: Any) -> Any:
             with DebugContext():

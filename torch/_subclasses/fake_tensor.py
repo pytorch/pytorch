@@ -1406,6 +1406,11 @@ class FakeTensorMode(TorchDispatchMode):
                     # Does this subsume arg.is_sparse?
                     raise _BypassDispatchCache("sparse tensor layout")
                 # sparse tensors don't have storage, so check is after
+
+                # FIXME: For now back out caching when there are symbolic nbytes
+                # - this doesn't seem to play nice with set(). See T196779132 for examples.
+                if isinstance(arg.untyped_storage().nbytes(), SymInt):
+                    raise _BypassDispatchCache("symbolic nbytes")
                 if is_sparse_compressed(arg):
                     raise _BypassDispatchCache("sparse compressed tensor")
                 metadata = extract_tensor_metadata(arg)
