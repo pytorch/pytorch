@@ -485,7 +485,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
 
     @patches
     def test_L2_cache_size(self, benchmarker, *args):
-        self.assertEqual(benchmarker.L2_cache_size > 0)
+        self.assertEqual(benchmarker.L2_cache_size > 0, True)
 
     @patches
     def test_gpu_queue_limit(self, benchmarker, *args):
