@@ -4,6 +4,7 @@ import functools
 from typing import Optional
 
 from .base import VariableTracker
+from .tensor import SymNodeVariable
 
 
 class LazyCache:
@@ -133,7 +134,7 @@ class LazyVariableTracker(VariableTracker):
 
 class LazySymNodeFormatString:
     def __init__(
-        self, sym_node_variable: VariableTracker, fmt_spec_var: VariableTracker
+        self, sym_node_variable: SymNodeVariable, fmt_spec_var: VariableTracker
     ):
         from .constant import ConstantVariable
 
