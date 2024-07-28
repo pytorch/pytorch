@@ -471,6 +471,7 @@ inductor_core_resources = [
     "torch/csrc/inductor/aoti_torch/shim_common.cpp",
     "torch/csrc/inductor/aoti_torch/tensor_converter.cpp",
     "torch/csrc/inductor/aoti_torch/mkldnn_tensor.cpp",
+    "torch/csrc/inductor/aoti_torch/oss_proxy_executor.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
 ]
 

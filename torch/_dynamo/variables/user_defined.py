@@ -103,11 +103,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
     @staticmethod
     @functools.lru_cache(None)
     def _in_graph_classes():
-        return set(tensortype_to_dtype.keys()) | {
+        _in_graph_class_list = {
             torch.Tensor,
             torch.cuda.Stream,
             torch.cuda.Event,
         }
+        if hasattr(torch, "hpu"):
+            _in_graph_class_list.update(
+                {
+                    torch.hpu.Stream,
+                    torch.hpu.Event,
+                }
+            )
+
+        return set(tensortype_to_dtype.keys()) | _in_graph_class_list
 
     def can_constant_fold_through(self):
         return self.value in self._constant_fold_classes()
@@ -143,7 +152,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if source is not None:
                 return VariableBuilder(tx, source)(func)
             else:
-                return SourcelessBuilder(tx)(func)
+                return SourcelessBuilder.create(tx, func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source:
