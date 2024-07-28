@@ -98,7 +98,7 @@ force_nn_module_property_static_shapes = True
 allow_ignore_mark_dynamic = False
 
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
-guard_nn_modules = not is_fbcode()
+guard_nn_modules = False if is_fbcode() else True
 
 # Uses CPython internal dictionary tags to detect mutation. There is some
 # overlap between guard_nn_modules_using_dict_tags and guard_nn_modules flag.
@@ -365,9 +365,7 @@ use_numpy_random_stream = False
 enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "1") == "1"
 
 # Inline inbuilt nn modules
-inline_inbuilt_nn_modules = (
-    os.environ.get("TORCHDYNAMO_INLINE_INBUILT_NN_MODULES", "0") == "1"
-)
+inline_inbuilt_nn_modules = not is_fbcode()
 
 
 def default_debug_dir_root():
