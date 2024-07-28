@@ -1298,8 +1298,7 @@ Node::Node(Graph* graph_, NodeKind kind_)
       owning_block_(nullptr),
       scope_(graph_->current_scope_),
       callstack_(std::nullopt),
-      op_(nullptr)
-      {
+      op_(nullptr) {
   graph_->all_nodes.emplace(this);
 }
 

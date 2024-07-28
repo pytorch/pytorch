@@ -185,7 +185,8 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       str = "-";
       L.next();
       if (L.cur().kind != TK_NUMBER) {
-        throw (ErrorReport(token.range)
+        throw(
+            ErrorReport(token.range)
             << "Expected a number after '-' but got:" << token.text());
       }
       [[fallthrough]];
@@ -197,10 +198,12 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         try {
           imag = std::stod(str.substr(0, str.size() - 1));
         } catch (const std::invalid_argument& e) {
-          throw (ErrorReport(token.range)
+          throw(
+              ErrorReport(token.range)
               << "Number cannot be converted to double");
         } catch (const std::out_of_range& e) {
-          throw (ErrorReport(token.range)
+          throw(
+              ErrorReport(token.range)
               << "Number is too long to be represented in type double");
         }
         r.c = c10::complex<double>(0, imag);
@@ -211,10 +214,12 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         try {
           r.f = std::stod(str);
         } catch (const std::invalid_argument& e) {
-          throw (ErrorReport(token.range)
+          throw(
+              ErrorReport(token.range)
               << "Number cannot be converted to double");
         } catch (const std::out_of_range& e) {
-          throw (ErrorReport(token.range)
+          throw(
+              ErrorReport(token.range)
               << "Number is too long to be represented in type double");
         }
       } else {
@@ -222,10 +227,11 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         try {
           r.i = std::stoll(str);
         } catch (const std::invalid_argument& e) {
-          throw (ErrorReport(token.range)
+          throw(
+              ErrorReport(token.range)
               << "Number cannot be converted to integer");
         } catch (const std::out_of_range& e) {
-          throw (ErrorReport(token.range) << "Number is too big");
+          throw(ErrorReport(token.range) << "Number is too big");
         }
       }
       L.next();
@@ -241,11 +247,13 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       L.next();
       auto text = L.expect(TK_IDENT);
       if (text.text() != "Tensor") {
-        throw (ErrorReport(token.range)
+        throw(
+            ErrorReport(token.range)
             << "Could not parse literal" << token.text());
       }
       if (!parse_tensor_constants_) {
-        throw (ErrorReport(token.range)
+        throw(
+            ErrorReport(token.range)
             << "Tensor constant encountered but `parse_tensor_constants` set to false"
             << token.text());
       }
@@ -263,7 +271,8 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       }
       auto text = L.expect(TK_NUMBER);
       if (!parse_tensor_constants_) {
-        throw (ErrorReport(token.range)
+        throw(
+            ErrorReport(token.range)
             << "Single-element tensor constant encountered but "
             << "`parse_tensor_constants` is set to false " << token.text());
       }
@@ -273,7 +282,8 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       return r;
     }
     default:
-      throw (ErrorReport(token.range)
+      throw(
+          ErrorReport(token.range)
           << "Could not parse literal" << token.text());
   }
 }
@@ -341,7 +351,7 @@ void IRParser::parseAttr(Node* n) {
           k = AttributeKind::tys;
           break;
         default:
-          throw (ErrorReport(L.cur().range) << "Unexpected attr type");
+          throw(ErrorReport(L.cur().range) << "Unexpected attr type");
       }
     });
     switch (k) {
@@ -364,14 +374,15 @@ void IRParser::parseAttr(Node* n) {
         n->tys_(Symbol::attr(attrname), tys);
         break;
       default:
-        throw (ErrorReport(L.cur().range) << "Unexpected attr type");
+        throw(ErrorReport(L.cur().range) << "Unexpected attr type");
     }
   } else if (L.cur().text() == "annotate") {
     L.next();
     L.expect('(');
     auto type = L.cur().text();
     if (type != "List" && type != "Dict") {
-      throw (ErrorReport(L.cur().range)
+      throw(
+          ErrorReport(L.cur().range)
           << "Unexpected annotation (only List and Dict can be parsed)");
     }
     L.next();
@@ -413,7 +424,7 @@ void IRParser::parseAttr(Node* n) {
         // initialized with random data later
         break;
       default:
-        throw (ErrorReport(L.cur().range) << "Unexpected attr type");
+        throw(ErrorReport(L.cur().range) << "Unexpected attr type");
     }
     return;
   }
@@ -543,7 +554,8 @@ void IRParser::parseOperator(Block* b) {
         // TODO: support?
         if (!schema_return_type->hasFreeVariables() &&
             !v.type->isSubtypeOf(*schema_return_type)) {
-          throw (ErrorReport(source_range)
+          throw(
+              ErrorReport(source_range)
               << "Annotated type " << v.type->repr_str()
               << " does not match schema type "
               << schema_return_type->repr_str() << " for operator " << *schema);
@@ -670,7 +682,8 @@ void IRParser::parseList(
 
 Value* IRParser::findValueInVMap(const std::string& name) {
   if (!vmap.count(name)) {
-    throw (ErrorReport(L.cur().range)
+    throw(
+        ErrorReport(L.cur().range)
         << "Cannot find a variable with name '" << name << "'");
   }
   return vmap.at(name);
