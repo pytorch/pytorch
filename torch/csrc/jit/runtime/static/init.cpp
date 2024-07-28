@@ -119,7 +119,9 @@ void initStaticModuleBindings(PyObject* module) {
           });
   m.def(
        "_jit_to_static_module",
-       [](const std::shared_ptr<torch::jit::Graph>& g) { return StaticModule(g); })
+       [](const std::shared_ptr<torch::jit::Graph>& g) {
+         return StaticModule(g);
+       })
       .def(
           "_jit_to_static_module",
           [](const torch::jit::Module& module) { return StaticModule(module); })

@@ -1519,8 +1519,7 @@ void BlockRunner::benchmark(
     LOG(INFO) << generate_latency_json(
         "static_runtime_first_iter", results.first_iter_time);
   }
-  std::cout << std::setw(15) << results.total_time << " ms. in Total"
-            << '\n';
+  std::cout << std::setw(15) << results.total_time << " ms. in Total" << '\n';
   std::cout << "BlockRunner setup time: " << results.setup_time << " ms"
             << '\n';
   std::cout << "Memory allocation time: " << results.memory_alloc_time
@@ -1529,8 +1528,7 @@ void BlockRunner::benchmark(
             << " ms" << '\n';
   std::cout << "Outputs deallocation time: " << results.output_dealloc_time
             << " ms" << '\n';
-  std::cout << "First iter time: " << results.first_iter_time << " ms"
-            << '\n';
+  std::cout << "First iter time: " << results.first_iter_time << " ms" << '\n';
   std::cout << "Number of operators: " << nodes_.size() << '\n';
 
   if (planner_) {
@@ -2260,7 +2258,7 @@ StaticRuntime::StaticRuntime(const StaticModule& sm)
     : async_task_launcher_(at::launch), values_(sm.value_buffer_size()) {
   std::copy(sm.constants().begin(), sm.constants().end(), values_.data());
   // default task launcher set to inter-op thread pool
-  
+
   block_ = std::make_unique<BlockRunner>(
       sm,
       values_.data(),
