@@ -39,7 +39,7 @@ from torch.utils._triton import has_triton
 
 
 def _make_post_grad_fx(f, *inps):
-    gm = make_fx(f, decompositions)(*inps)
+    gm = make_fx(f, decompositions, tracing_mode="fake")(*inps)
     remove_noop_ops(gm.graph)
     view_to_reshape(gm)
     return gm
