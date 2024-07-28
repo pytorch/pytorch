@@ -4502,8 +4502,6 @@ graph():
         self.assertEqual(len(ep.state_dict), 0)
         self.assertEqual(len(ep.constants), 1)
 
-        print("GRAPH", str(ep.graph).strip())
-
         if is_training_ir_test(self._testMethodName):
             self.assertExpectedInline(
                 str(ep.graph).strip(),
