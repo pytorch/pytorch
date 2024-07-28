@@ -536,6 +536,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(w_int8pack).eval()
         self.common(mod, (x, w_scales))
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        vec_amx = VecAMX()
+        self._check_amx_counter(vec_amx)
 
     @inductor_config.patch({"freezing": True})
     @patches

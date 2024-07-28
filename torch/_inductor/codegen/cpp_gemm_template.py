@@ -481,7 +481,7 @@ class CppPackedGemmTemplate(CppTemplate):
             new_inputs = list(inputs)
             X = inputs[0]
             W = inputs[1]
-            # B might is scale in case of WoQ GEMM
+            # B might actually be scale in case of WoQ GEMM
             B = inputs[2] if len(inputs) > 2 else None
             if isinstance(W, ir.IRNode):
                 if trans_w:
@@ -812,6 +812,7 @@ class CppPackedGemmTemplate(CppTemplate):
             if (
                 input_dtype in [torch.float, torch.bfloat16, torch.float16]
                 and input2_dtype == torch.int8
+                and not isinstance(micro_gemm, CppMicroGemmAMX)
             ):
                 return input_dtype
             else:

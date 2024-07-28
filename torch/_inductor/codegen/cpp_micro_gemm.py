@@ -488,6 +488,18 @@ def check_amx_extra(config, m, n, k, alpha, num_threads):
         VecAMX,
         [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
         input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        # the output of the microkernel is in FP32, but can it be converted to BF16 in the template
+        output_dtype=torch.float,
+        # the compute dtype won't be used anyway in the AMX micro-kernel, anyway,
+        # but is used to match for WoQ GEMM, which uses float for AVX2/AVX512
+        compute_dtype=torch.float,
+        extra_check=check_amx_extra,
+    ),
+    *generate_gemm_config(
+        VecAMX,
+        [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
+        input_dtype=torch.bfloat16,
         output_dtype=torch.float,
         extra_check=check_amx_extra,
     ),
@@ -603,6 +615,33 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         zero_c();
     }
 
+    {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
+    auto load_B_row = [&]({{input2_t}}* src, {{input_t}}* dst) {
+        {{kernel.unroll_pragma(2)}}
+        for (int i = 0; i < 2; i++) {
+            auto b32 = at::vec::convert_to_int32<int8_t>(src + i * 16);
+            auto b_bf16 = at::vec::convert<{{input_t}}>(b32);
+            b_bf16.store(dst + i * 16);
+         }
+    };
+
+    int num_b_rows = (last_k_offset > 0) ? 16 : (tail_k_size * sizeof({{input_t}})) / 4;
+    int b_tile_ptr_stride = ldb * {{vnni_size}};
+
+    // create a buffer for tiles of B.
+    // To make things simpler, use the stack instead of calling a memory allocator.
+    // allocating an array of size 512 + 64, and then using an address that's 64 bytes aligned
+    // TODO: loop-unrolling of the compute lambda may result in incorrect output
+    // as this buffer would be used, so maybe 4 of these should be used?
+    {{input_t}} bf16_weights_buf[576];
+    int bf16_weights_buf_ptr_mod = (uintptr_t)((void*)bf16_weights_buf) % 64;
+    {{input_t}}* bf16_weights_buf_ptr =
+        bf16_weights_buf_ptr_mod == 0
+            ? bf16_weights_buf
+            : ({{input_t}}*)((uintptr_t)((void*)bf16_weights_buf) + 64 - bf16_weights_buf_ptr_mod);
+    memset(bf16_weights_buf_ptr, 0, 1024);
+    {%- endif %}
+
     auto compute = [&](int k) {
     {%- set tile_offset_a = num_rows // 16 * num_columns %}
     {%- set tile_offset_b = tile_offset_a + num_rows // 16 %}
@@ -615,12 +654,27 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         _tile_stream_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k, lda * sizeof({{input_t}}));
         {%- endif %}
         {%- if tile_row == 0 %}
+        {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
+        // load int8 weights and convert them to BF16, store in bf16_weights_buf and then load tile
+        {{kernel.unroll_pragma(8)}}
+        for (int i = 0; i < num_b_rows; i++) {
+            load_B_row(
+                const_cast<{{input2_t}}*>(B) + k * ldb + {{tile_col * 16 * vnni_size}} + i * b_tile_ptr_stride,
+                bf16_weights_buf_ptr + i * 32
+            );
+        }
+        _tile_loadd({{tile_idx_b}}, bf16_weights_buf_ptr, 64);
+        {%- else %}
         _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
+        {%- endif %}
         {%- endif %}
         {%- if int8_gemm %}
         _tile_dpbusd({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
         {%- else %}
         _tile_dpbf16ps({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+        {%- endif %}
+        {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
+        memset(bf16_weights_buf_ptr, 0, 1024);
         {%- endif %}
         {%- endfor %}
     {%- endfor %}
@@ -751,9 +805,20 @@ def create_micro_gemm(
                 continue
             if (
                 config.input_dtype == input_dtype
-                and config.output_dtype == output_dtype
                 and config.compute_dtype == compute_dtype
                 and config.input2_dtype == input2_dtype
+                and (
+                    config.output_dtype == output_dtype
+                    or (
+                        input_dtype == torch.bfloat16
+                        and input2_dtype == torch.int8
+                        and config.vec_isa_cls == VecAMX
+                    )
+                )
+                # For int8 WoQ GEMM, with AVX512/AVX2 micro-kernel, output dtype
+                # would be bfloat16 in config,but with AMX, it'd be float32,
+                # as the AMX micro-kernel computes output in Float, which
+                # is converted to BF16
             ):
                 if config.extra_check is not None and not config.extra_check(
                     config, m, n, k, alpha, num_threads
