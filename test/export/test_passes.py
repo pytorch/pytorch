@@ -812,7 +812,7 @@ def forward(self, x1, x2):
             new_gm.submod_1.code.strip("\n"),
             """\
 def forward(self, x1, x2):
-    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    _set_grad_enabled = torch._C._set_grad_enabled(True);  _set_grad_enabled = None
     add = torch.ops.aten.add.Tensor(x1, 1);  x1 = None
     add_1 = torch.ops.aten.add.Tensor(x2, 1);  x2 = None
     return (add, add_1)
@@ -822,7 +822,7 @@ def forward(self, x1, x2):
             new_gm.submod_2.code.strip("\n"),
             """\
 def forward(self, add, add_1):
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False);  _set_grad_enabled_1 = None
     sin = torch.ops.aten.sin.default(add);  add = None
     cos = torch.ops.aten.cos.default(add_1);  add_1 = None
     return (sin, cos)
@@ -832,7 +832,7 @@ def forward(self, add, add_1):
             new_gm.submod_3.code.strip("\n"),
             """\
 def forward(self, sin, cos):
-    _set_grad_enabled_2 = torch._C._set_grad_enabled(True)
+    _set_grad_enabled_2 = torch._C._set_grad_enabled(True);  _set_grad_enabled_2 = None
     add_2 = torch.ops.aten.add.Tensor(sin, 1);  sin = None
     add_3 = torch.ops.aten.add.Tensor(cos, 1);  cos = None
     return (add_2, add_3)

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
 import functools
@@ -408,7 +409,7 @@ def should_use_remote_fx_graph_cache():
     if not config.is_fbcode():
         return False
     try:
-        from triton.fb.fb_memcache import MEMCACHE_VERSION
+        from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
     except ModuleNotFoundError:
         return False
 
@@ -416,7 +417,7 @@ def should_use_remote_fx_graph_cache():
     if torch.version.hip is not None:
         jk_name = "pytorch/remote_cache:fx_graph_memcache_version_amd"
 
-    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)
+    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)
 
 
 # pass config dict back to user
@@ -1049,7 +1050,8 @@ def remove_unaligned_input_idxs(
     that aren't.
     """
     aligned_static_input_idxs = []
-    for idx, input in zip(static_input_idxs, inputs):
+    for idx in static_input_idxs:
+        input = inputs[idx]
         if isinstance(input, torch.Tensor) and (input.data_ptr() % ALIGNMENT) == 0:
             aligned_static_input_idxs.append(idx)
     if len(aligned_static_input_idxs) != len(static_input_idxs):
