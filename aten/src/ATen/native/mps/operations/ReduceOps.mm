@@ -152,7 +152,6 @@ static void reduction_out_mps(const Tensor& input_t,
                               MPSReductionType reduction_type,
                               const std::string& func_name) {
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  bool macOS15_0_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, func_name);
   bool canSqueezeLastDim = true;
   IntArrayRef input_shape = input_t.sizes();
@@ -246,21 +245,13 @@ static void reduction_out_mps(const Tensor& input_t,
 
         castOutputTensor = [mpsGraph reductionSumWithTensor:nonZeros axes:wrappedAxes name:nil];
       } else if (reduction_type == MPSReductionType::AMAX) {
-        if (macOS15_0_plus) {
-          castOutputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor
-                                                                         axes:wrappedAxes
-                                                                         name:nil];
-        } else {
-          castOutputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axes:wrappedAxes name:nil];
-        }
+        castOutputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor
+                                                                       axes:wrappedAxes
+                                                                       name:nil];
       } else if (reduction_type == MPSReductionType::AMIN) {
-        if (macOS15_0_plus) {
-          castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor
-                                                                         axes:wrappedAxes
-                                                                         name:nil];
-        } else {
-          castOutputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor axes:wrappedAxes name:nil];
-        }
+        castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor
+                                                                       axes:wrappedAxes
+                                                                       name:nil];
       } else if (reduction_type == MPSReductionType::TRACE) {
         MPSGraphTensor* bandPartWithTensor = [mpsGraph bandPartWithTensor:castInputTensor
                                                                  numLower:0
@@ -619,7 +610,6 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
 
 static Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction_type, const std::string& func_name) {
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  bool macOS15_0_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "min_max");
 
   using CachedGraph = MPSUnaryCachedGraph;
@@ -644,17 +634,9 @@ static Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction
 
       NSArray<NSNumber*>* axes = getTensorAxes(input_t);
       if (reduction_type == MPSReductionType::MAX) {
-        if (macOS15_0_plus) {
-          castOutputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axes:axes name:nil];
-        } else {
-          castOutputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axes:axes name:nil];
-        }
+        castOutputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axes:axes name:nil];
       } else if (reduction_type == MPSReductionType::MIN) {
-        if (macOS15_0_plus) {
-          castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor axes:axes name:nil];
-        } else {
-          castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor axes:axes name:nil];
-        }
+        castOutputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor axes:axes name:nil];
       }
 
       MPSGraphTensor* outputTensor = castOutputTensor;
@@ -684,7 +666,6 @@ static void min_max_out_mps(const Tensor& input_t,
                             MPSReductionType reduction_type,
                             const std::string& func_name) {
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  bool macOS15_0_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "min_max_out");
 
   if (output_t.numel() == 0) {
@@ -728,21 +709,13 @@ static void min_max_out_mps(const Tensor& input_t,
           castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
 
       if (reduction_type == MPSReductionType::MAX) {
-        if (macOS15_0_plus) {
-          outputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor
+        outputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor
                                                                      axis:(NSInteger)dim_
                                                                      name:nil];
-        } else {
-          outputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
-        }
       } else if (reduction_type == MPSReductionType::MIN) {
-        if (macOS15_0_plus) {
-          outputTensor = [mpsGraph reductionMinimumPropagateNanWithTensor:castInputTensor
+        outputTensor = [mpsGraph reductionMinimumPropagateNanWithTensor:castInputTensor
                                                                      axis:(NSInteger)dim_
                                                                      name:nil];
-        } else {
-          outputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
-        }
       }
 
       MPSGraphTensor* argreduceOutTensor = nil;
