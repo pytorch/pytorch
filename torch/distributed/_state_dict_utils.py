@@ -2,6 +2,7 @@
 import copy
 import io
 import math
+import weakref
 from typing import (
     Any,
     Callable,
@@ -21,7 +22,6 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-
 
 if dist.is_available() or TYPE_CHECKING:
     from torch.distributed import distributed_c10d
@@ -406,8 +406,17 @@ def _create_cpu_state_dict(
             return torch.tensor(0, dtype=obj.dtype)
 
         if share_memory:
-            t = torch.empty(*tuple(obj.size()), dtype=obj.dtype).share_memory_()
+            t = torch.empty(*tuple(obj.size()), dtype=obj.dtype)
+            t = t.share_memory_()
             if pin_memory:
+
+                def unpin_memory(t):
+                    succ = torch.cuda.cudart().cudaHostUnregister(t.data_ptr())
+                    assert (
+                        succ == 0
+                    ), f"Unpinning shared memory failed with error-code: {succ}"
+
+                weakref.finalize(t, unpin_memory, t)
                 succ = torch.cuda.cudart().cudaHostRegister(
                     t.data_ptr(),
                     t.numel() * t.element_size(),
