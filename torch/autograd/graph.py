@@ -580,6 +580,7 @@ def register_multi_post_accumulate_grad_hook(
     acc_grads = [_get_grad_fn_or_grad_acc(t) for t in tensors]
     count: Dict[int, int] = dict()
     nb_calls = None
+    lock = threading.Lock()
 
     @functools.wraps(fn)
     def wrapped_fn(tensor: torch.Tensor) -> None:
@@ -587,12 +588,15 @@ def register_multi_post_accumulate_grad_hook(
         id = torch._C._current_graph_task_id()
         assert id != -1, "expected this hook to be called inside a backward call"
         count[id] = count.get(id, 0)
-        if count[id] == 0:
-            nb_calls = sum(
-                torch._C._will_engine_execute_node(n) for n in acc_grads  # type: ignore[attr-defined]
-            )
-        count[id] += 1
-        if count[id] == nb_calls:
+
+        with lock:
+            curr_count, count[id] = count[id], count[id] + 1
+            if curr_count == 0:
+                # On the first call, compute the actual nb_calls
+                nb_calls = sum(map(torch._C._will_engine_execute_node, acc_grads))
+
+        assert nb_calls is not None
+        if curr_count == nb_calls - 1:
             fn(tuple(tensors))
             del count[id]
 
