@@ -47,16 +47,14 @@ def should_generic(
     config_val = getattr(benchmarking_config, config_name)
 
     @lru_cache(None)
-    def is_jk_enabled(jk_name: str) -> bool:
+    def is_jk_enabled(name: str) -> bool:
         try:
-            jk_value = getattr(
-                import_module("torch._inductor.fb.benchmarking"), jk_name
-            )
+            value = getattr(import_module("torch._inductor.fb.benchmarking"), name)
         except ModuleNotFoundError:
             return False
         else:
-            return jk_value >= torch._utils_internal.justknobs_getval_int(
-                f"pytorch/benchmarking:{jk_name}"
+            return value >= torch._utils_internal.justknobs_getval_int(
+                f"pytorch/benchmarking:{name}"
             )
 
     if config_val is not None:
