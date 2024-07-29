@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from functools import cached_property, wraps
+from functools import cached_property, lru_cache, partial, wraps
 from importlib import import_module
 from random import randint, shuffle
 from statistics import median
@@ -38,37 +38,63 @@ def time_and_log(fn: Callable[..., Any]) -> Callable[..., Any]:
 
 
 def should_generic(
-    config_name: str, default_oss: bool, default_internal: bool, jk_name: str
+    config_name: str,
+    default_oss: bool,
+    internal_if_enabled: bool,
+    internal_if_disabled: bool,
+    jk_name: str,
 ) -> bool:
     config_val = getattr(benchmarking_config, config_name)
-    # set config overrides defaults and jks
+
+    @lru_cache(None)
+    def is_jk_enabled(jk_name: str) -> bool:
+        try:
+            jk_value = getattr(
+                import_module("torch._inductor.fb.benchmarking"), jk_name
+            )
+        except ModuleNotFoundError:
+            return False
+        else:
+            return jk_value >= torch._utils_internal.justknobs_getval_int(
+                f"pytorch/benchmarking:{jk_name}"
+            )
+
     if config_val is not None:
         return config_val
     if not is_fbcode():
         return default_oss
-    try:
-        jk_val = getattr(import_module("torch._inductor.fb.benchmarking"), jk_name)
-    except ModuleNotFoundError:
-        return default_internal
-    return jk_val >= torch._utils_internal.justknobs_getval_int(
-        f"pytorch/benchmarking:{jk_name}"
+    if is_jk_enabled(jk_name):
+        return internal_if_enabled
+    return internal_if_disabled
+
+
+should_fallback_to_original_benchmarking = partial(
+    should_generic(
+        "fallback_to_original_benchmarking",
+        False,
+        False,
+        True,
+        "fallback_to_original_benchmarking_version",
     )
-
-
-should_fallback_to_original_benchmarking = should_generic(
-    "fallback_to_original_benchmarking",
-    False,
-    True,
-    "fallback_to_original_benchmarking_version",
 )
-should_enable_lazy_benchmarking = should_generic(
-    "enable_lazy_benchmarking", True, False, "enable_lazy_benchmarking_version"
+should_enable_lazy_benchmarking = partial(
+    should_generic(
+        "enable_lazy_benchmarking",
+        True,
+        False,
+        True,
+        "enable_lazy_benchmarking_version",
+    )
 )
-should_enable_early_ranking = should_generic(
-    "enable_early_ranking", True, False, "enable_early_ranking_verison"
+should_enable_early_ranking = partial(
+    should_generic(
+        "enable_early_ranking", True, False, True, "enable_early_ranking_verison"
+    )
 )
-should_enable_early_pruning = should_generic(
-    "enable_early_pruning", True, False, "enable_early_pruning_verison"
+should_enable_early_pruning = partial(
+    should_generic(
+        "enable_early_pruning", True, False, True, "enable_early_pruning_verison"
+    )
 )
 
 
@@ -78,7 +104,7 @@ def maybe_fallback_to_original_benchmarking(
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(fn)
         def wrapper(self: Benchmarker, *args: Any, **kwargs: Any) -> Any:
-            if should_fallback_to_original_benchmarking:
+            if should_fallback_to_original_benchmarking():
                 log.debug(
                     "Falling back to original benchmarking function {original_fn_name} from {fn_name}.",
                     extra=dict(original_fn_name=original_fn_name, fn_name=fn.__name__),
@@ -100,7 +126,7 @@ def maybe_fallback_to_non_lazy_benchmarking(
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(fn)
         def wrapper(self: Benchmarker, *args: Any, **kwargs: Any) -> Any:
-            if not should_enable_lazy_benchmarking:
+            if not should_enable_lazy_benchmarking():
                 log.debug(
                     "Falling back to non-lazy benchmarking function {non_lazy_fn_name} from {fn_name}.",
                     extra=dict(non_lazy_fn_name=non_lazy_fn_name, fn_name=fn.__name__),
@@ -645,7 +671,7 @@ class Benchmarker:
         )
 
         if ranking_key is not None:
-            if should_enable_early_ranking:
+            if should_enable_early_ranking():
                 log.debug(
                     "Returning early ranking for ranking key {ranking_key}.",
                     extra=dict(ranking_key=ranking_key),
@@ -663,7 +689,7 @@ class Benchmarker:
             callable_to_timing_ms[_callable] = estimated_timing_ms
 
         if pruning_key is not None:
-            if benchmarking_config.enable_early_pruning:
+            if should_enable_early_pruning():
                 cpu_launch_overhead_ms_per_iter_per_callable = (
                     cpu_launch_overhead_ms_per_iter / len(callables)
                 )
