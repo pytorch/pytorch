@@ -4,7 +4,7 @@ import functools
 import logging
 import operator
 import warnings
-from typing import Any, cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
+from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -17,11 +17,6 @@ from torch.distributed._tensor._op_schema import (
     OpSchema,
     OutputSpecType,
 )
-
-try:
-    from torch.utils._cxx_pytree import tree_map
-except ImportError:
-    from torch.utils._pytree import tree_map  # type: ignore[no-redef, assignment]
 from torch.distributed._tensor._redistribute import redistribute_local_tensor
 from torch.distributed._tensor._sharding_prop import ShardingPropagator
 from torch.distributed._tensor._tp_conv import (
@@ -341,10 +336,7 @@ class OpDispatcher:
                 )
             return replication_spec
 
-        def arg_to_spec(arg: Any) -> None:
-            nonlocal mesh
-            nonlocal args_schema
-            nonlocal local_args
+        for arg in args_list:
             if isinstance(arg, dtensor.DTensor):
                 args_schema.append(arg._spec)
                 local_args.append(arg._local_tensor)
@@ -364,8 +356,6 @@ class OpDispatcher:
                 args_schema.append(arg)
                 local_args.append(arg)
 
-        tree_map(arg_to_spec, args)
-
         for k, v in kwargs.items():
             if isinstance(v, dtensor.DTensor):
                 kwargs_schema[k] = v._spec
@@ -384,6 +374,7 @@ class OpDispatcher:
             else:
                 kwargs_schema[k] = v
                 local_kwargs[k] = v
+
         assert mesh is not None, f"found no DeviceMesh from dtensor args for {op_call}!"
         op_info = OpInfo(
             mesh,
