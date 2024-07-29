@@ -8,7 +8,6 @@ from torch.distributed._tensor._utils import (
     compute_local_shape,
     compute_local_shape_and_global_offset,
 )
-
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
@@ -17,12 +16,12 @@ from torch.distributed._tensor.placement_types import (
     TensorMeta,
 )
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
-
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+
 
 c10d_functional = torch.ops.c10d_functional
 

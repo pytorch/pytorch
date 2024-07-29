@@ -6,11 +6,10 @@ from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, Tenso
 from ...utils import sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer, Kernel, OpOverrides
-
 from ..cpp_utils import CppPrinter
-
 from .rocm_benchmark_request import ROCmBenchmarkRequest
 from .rocm_template_buffer import ROCmTemplateBuffer
+
 
 if TYPE_CHECKING:
     from torch._inductor.codegen.rocm.rocm_template import ROCmTemplate

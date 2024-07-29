@@ -38,14 +38,13 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/frontend/error_report.h>
-#include <atomic>
 #include <climits>
 #include <set>
 #include <stack>
 
 namespace {
 bool reportSourceLocation(size_t file_size) {
-  if (file_size < 512 * 1024) {
+  if (file_size < 512ull * 1024) {
     return true;
   }
   const char* enable_env =
@@ -225,7 +224,7 @@ static Value* asSimple(const SugaredValuePtr& value) {
 
 static std::shared_ptr<MagicMethod> makeMagic(
     const std::string& name,
-    SugaredValuePtr base) {
+    const SugaredValuePtr& base) {
   return std::make_shared<MagicMethod>(name, base);
 }
 
@@ -258,16 +257,12 @@ struct Environment {
         b(b),
         next(std::move(next)) {}
 
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   GraphFunction& method;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ResolverPtr resolver;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<std::string, std::function<std::string()>> error_messages;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Block* b;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Environment> next;
 
   // set type error in the lowest environment. if the variable is used after an
@@ -363,7 +358,7 @@ struct Environment {
       const SourceRange& loc,
       const std::string& name,
       SugaredValuePtr value,
-      TypePtr annotated_type) {
+      const TypePtr& annotated_type) {
     Value* as_simple_value = asSimple(value);
     if (as_simple_value && !as_simple_value->hasDebugName() &&
         meaningfulName(name) &&
@@ -382,22 +377,25 @@ struct Environment {
     // control flow
     if (auto parent = findInParentFrame(name)) {
       if (annotated_type) {
-        throw ErrorReport(loc)
+        throw(
+            ErrorReport(loc)
             << "Attempting to declare and annotate the type of variable '"
-            << name << "' but it is already defined in an outer block";
+            << name << "' but it is already defined in an outer block");
       }
       if (!as_simple_value) {
-        throw ErrorReport(loc)
+        throw(
+            ErrorReport(loc)
             << "Cannot re-assign '" << name << "' to a value of type "
             << value->kind() << " because " << name
-            << " is not a first-class value.  Only reassignments to first-class values are allowed";
+            << " is not a first-class value.  Only reassignments to first-class values are allowed");
       }
       Value* simple_parent = asSimple(parent);
       if (!simple_parent) {
-        throw ErrorReport(loc)
+        throw(
+            ErrorReport(loc)
             << "Cannot re-assign '" << name << "' because it has type "
             << value->kind() << " and " << name
-            << " is not a first-class value.  Only reassignments to first-class values are allowed";
+            << " is not a first-class value.  Only reassignments to first-class values are allowed");
       }
 
       auto parent_type = unshapedType(simple_parent->type());
@@ -424,17 +422,18 @@ struct Environment {
                    "is the type of elements in the list for Python 2)";
         }
         error << "\n" << why_not.str();
-        throw error;
+        throw ErrorReport(error);
       }
     }
     if (as_simple_value) {
       if (annotated_type &&
           !as_simple_value->type()->isSubtypeOf(*annotated_type)) {
-        throw ErrorReport(loc)
+        throw(
+            ErrorReport(loc)
             << "Variable '" << name << "' is annotated with type "
             << annotated_type->repr_str()
             << " but is being assigned to a value of type "
-            << as_simple_value->type()->repr_str();
+            << as_simple_value->type()->repr_str());
       }
       auto value_store_type =
           annotated_type ? annotated_type : as_simple_value->type();
@@ -457,9 +456,9 @@ struct Environment {
     // check if this value was not emitted in an if statement because of a
     // type mismatch. if it was, then we print a more informative error msg
     if (auto msg = findVariableTypeError(ident)) {
-      throw ErrorReport(range) << *msg << "and was used here";
+      throw(ErrorReport(range) << *msg << "and was used here");
     }
-    throw ErrorReport(range) << "undefined value " << ident;
+    throw(ErrorReport(range) << "undefined value " << ident);
   }
 
   SugaredValuePtr getSugaredVar(
@@ -641,9 +640,8 @@ struct DefContext {
 enum class LoopStatus { NOT_IN_LOOP, IN_LOOP, IN_UNROLLED_LOOP };
 
 struct WithLoopStatus {
-  WithLoopStatus(LoopStatus* prev, LoopStatus new_status) {
-    prev_value_ = *prev;
-    prev_ptr_ = prev;
+  WithLoopStatus(LoopStatus* prev, LoopStatus new_status)
+      : prev_ptr_(prev), prev_value_(*prev) {
     *prev = new_status;
   }
   ~WithLoopStatus() {
@@ -673,8 +671,9 @@ struct to_ir {
     // the case that this is a method with self we expect one fewer parameter
     // annotation than the number of parameters this Def takes.
     if (self && def.decl().params().empty()) {
-      throw ErrorReport(def.decl().params().range())
-          << "methods must have a self argument";
+      throw(
+          ErrorReport(def.decl().params().range())
+          << "methods must have a self argument");
     }
     method.setSchema(emitDef(def, self, graph->block()));
 
@@ -702,6 +701,7 @@ struct to_ir {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   GraphFunction& method;
   std::shared_ptr<Graph> graph;
   ResolverPtr resolver;
@@ -747,9 +747,10 @@ struct to_ir {
     if (exit_blocks.count(block) == 0) {
       auto decl_ret = def_stack_.back().declared_return_type_;
       if (decl_ret && decl_ret != NoneType::get()) {
-        throw ErrorReport(def.range())
+        throw(
+            ErrorReport(def.range())
             << "Function was not annotated as having type None, but does not "
-            << "return along all paths";
+            << "return along all paths");
       }
       WithInsertPoint b(*block->nodes().end());
       emitReturn(Return::create(
@@ -787,11 +788,12 @@ struct to_ir {
     TORCH_CHECK(self, "Expected __setstate__ to have a `self` argument");
     auto getstate = self->getClassType()->findMethod("__getstate__");
     if (!getstate) {
-      throw ErrorReport(def.range())
+      throw(
+          ErrorReport(def.range())
           << "`__setstate__` defined but not `__getstate__`. "
           << "You must have both defined on a ScriptModule "
           << "to customize serialization.\n"
-          << "Did you forget to use `@torch.jit.export`?";
+          << "Did you forget to use `@torch.jit.export`?");
     }
     getstate->ensure_defined();
     return self->getClassType()
@@ -821,8 +823,9 @@ struct to_ir {
     TORCH_INTERNAL_ASSERT(def.name().name() == "__setstate__");
     const auto numDeclParams = def.decl().params().size();
     if (numDeclParams != 2) {
-      throw ErrorReport(def.range())
-          << "Expected 2 arguments for `__setstate__`, got: " << numDeclParams;
+      throw(
+          ErrorReport(def.range())
+          << "Expected 2 arguments for `__setstate__`, got: " << numDeclParams);
     }
     return true;
   }
@@ -841,11 +844,12 @@ struct to_ir {
       expected_annotation_size--;
     }
     if (schema.arguments().size() != expected_annotation_size) {
-      throw ErrorReport(def.decl().params().range())
+      throw(
+          ErrorReport(def.decl().params().range())
           << "Number of type annotations for"
           << " function parameters (" << schema.arguments().size() << ")"
           << " does not match the number of parameters on the function ("
-          << expected_annotation_size << ")!";
+          << expected_annotation_size << ")!");
     }
 
     if (self) {
@@ -975,12 +979,14 @@ struct to_ir {
       const SourceRange& loc,
       const std::string& stmt_name) {
     if (loop_status_ == LoopStatus::NOT_IN_LOOP) {
-      throw ErrorReport(loc) << "SyntaxError: '" << stmt_name << "'"
-                             << " outside loop";
+      throw(
+          ErrorReport(loc) << "SyntaxError: '" << stmt_name << "'"
+                           << " outside loop");
     } else if (loop_status_ == LoopStatus::IN_UNROLLED_LOOP) {
-      throw ErrorReport(loc)
+      throw(
+          ErrorReport(loc)
           << "Because we emit iteration over modulelists or tuples as "
-             "unrolled loops, we do not support break or continue inside the body of these loops";
+             "unrolled loops, we do not support break or continue inside the body of these loops");
     }
   }
 
@@ -1004,10 +1010,11 @@ struct to_ir {
         Subscript subscript(target);
         const List<Expr>& subscript_exprs = subscript.subscript_exprs();
         if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-          throw ErrorReport(target.range())
+          throw(
+              ErrorReport(target.range())
               << "del statements only support deletion at a single index, "
                  "slicing is not supported"
-                 " (see https://github.com/pytorch/pytorch/issues/31430)";
+                 " (see https://github.com/pytorch/pytorch/issues/31430)");
         }
         const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
         const SourceRange& val_range = subscript.value().range();
@@ -1018,8 +1025,9 @@ struct to_ir {
         // implementation of del defined in a __delitem__ method.
         if (auto cls = val->type()->cast<ClassType>()) {
           if (!cls->findMethod("__delitem__")) {
-            throw ErrorReport(target.range())
-                << "Class does not define __delitem__";
+            throw(
+                ErrorReport(target.range())
+                << "Class does not define __delitem__");
           }
 
           // Use MethodValue to call the method to handle recursion.
@@ -1034,9 +1042,10 @@ struct to_ir {
         Var var(target);
         environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
       } else {
-        throw ErrorReport(target.range())
+        throw(
+            ErrorReport(target.range())
             << "del statements are only supported for deleting"
-               " list and dict items and variables";
+               " list and dict items and variables");
       }
     }
   }
@@ -1061,10 +1070,11 @@ struct to_ir {
             /*allow_conversions=*/true);
       }
       if (!actual_return->type()->isSubtypeOf(*declared_return_type)) {
-        throw ErrorReport(stmt.range())
+        throw(
+            ErrorReport(stmt.range())
             << "Return value was annotated as having type "
             << declared_return_type->repr_str() << " but is actually of type "
-            << actual_return->type()->repr_str();
+            << actual_return->type()->repr_str());
       }
     } else {
       declared_return_type = def_stack_.back().merged_return_type_;
@@ -1074,11 +1084,12 @@ struct to_ir {
       auto merged_return_type =
           unifyTypes(declared_return_type, actual_return->type());
       if (!merged_return_type) {
-        throw ErrorReport(stmt.range())
+        throw(
+            ErrorReport(stmt.range())
             << "Previous return statement returned a value of type "
             << declared_return_type->repr_str()
             << " but this return statement returns a value of type "
-            << actual_return->type()->repr_str();
+            << actual_return->type()->repr_str());
       }
       declared_return_type = merged_return_type.value();
     }
@@ -1154,8 +1165,9 @@ struct to_ir {
           emitWith(With(stmt));
           break;
         default:
-          throw ErrorReport(stmt)
-              << "Unrecognized statement kind " << kindToString(stmt.kind());
+          throw(
+              ErrorReport(stmt)
+              << "Unrecognized statement kind " << kindToString(stmt.kind()));
       }
       // Found an exit statement in this block. The remaining statements aren't
       // reachable so we don't emit them.
@@ -1366,10 +1378,11 @@ struct to_ir {
           [&](TypePtr type_ptr) { return type_match(type_ptr); });
 
       if (!is_dict_constructor && candidate_types.empty()) {
-        throw ErrorReport(src)
+        throw(
+            ErrorReport(src)
             << "Expected an Union type annotation "
             << "with an inner " << match_repr << " type, but got "
-            << (*refined_type_hint_ptr)->repr_str();
+            << (*refined_type_hint_ptr)->repr_str());
       } else if (candidate_types.size() == 1) {
         // The Union only had a single type of the container we want to
         // match, so we can unconditionally refine it to that type
@@ -1401,9 +1414,9 @@ struct to_ir {
       } else if ((*refined_type_hint_ptr)->kind() == AnyType::Kind) {
         do_if_anytype();
       } else {
-        throw ErrorReport(src)
-            << "Expected an annotation of type " << match_repr << " but got "
-            << type_hint->repr_str();
+        throw(
+            ErrorReport(src) << "Expected an annotation of type " << match_repr
+                             << " but got " << type_hint->repr_str());
       }
     }
   }
@@ -1416,7 +1429,9 @@ struct to_ir {
       const Expr& src) {
     TypePtr greatest_elem_type = nullptr;
     std::for_each(
-        all_candidates.begin(), all_candidates.end(), [&](TypePtr candidate) {
+        all_candidates.begin(),
+        all_candidates.end(),
+        [&](const TypePtr& candidate) {
           auto candidate_elem_type =
               candidate->expect<ListType>()->getElementType();
           if (unified_elem_type->isSubtypeOf(candidate_elem_type)) {
@@ -1439,12 +1454,13 @@ struct to_ir {
         }
         vector_repr << all_candidates[i]->repr_str();
       }
-      throw ErrorReport(src)
-          << "Union type annotation `" << type_hint->repr_str() << "` can hold "
-          << vector_repr.str() << ", but none of "
-          << "those types match the types of the given list "
-          << "elements, which were unified to "
-          << unified_elem_type->repr_str();
+      throw(
+          ErrorReport(src) << "Union type annotation `" << type_hint->repr_str()
+                           << "` can hold " << vector_repr.str()
+                           << ", but none of "
+                           << "those types match the types of the given list "
+                           << "elements, which were unified to "
+                           << unified_elem_type->repr_str());
     } else {
       (*refined_type_hint_ptr) = ListType::create(greatest_elem_type);
       ;
@@ -1491,12 +1507,14 @@ struct to_ir {
         }
         vector_repr << all_candidates[i]->repr_str();
       }
-      throw ErrorReport(src)
-          << "Union type annotation `" << type_hint->repr_str() << "` can hold "
-          << vector_repr.str() << ", but none of "
-          << "those dict types can hold the types of the given"
-          << " keys and values, which were unified to Dict["
-          << known_key_type->repr_str() << ", " << known_value_type->repr_str();
+      throw(
+          ErrorReport(src) << "Union type annotation `" << type_hint->repr_str()
+                           << "` can hold " << vector_repr.str()
+                           << ", but none of "
+                           << "those dict types can hold the types of the given"
+                           << " keys and values, which were unified to Dict["
+                           << known_key_type->repr_str() << ", "
+                           << known_value_type->repr_str());
     } else {
       (*refined_type_hint_ptr) = candidate;
     }
@@ -1596,10 +1614,11 @@ struct to_ir {
           !(*unified_elem_type)
                ->isSubtypeOf(*refined_type_hint->expectRef<ListType>()
                                   .getElementType())) {
-        throw ErrorReport(lc)
+        throw(
+            ErrorReport(lc)
             << "List type annotation `" << refined_type_hint->repr_str()
             << "` did not match the types of the given list elements,"
-            << " which were unified to " << (*unified_elem_type)->repr_str();
+            << " which were unified to " << (*unified_elem_type)->repr_str());
       }
 
       if (!all_candidates.empty()) {
@@ -1681,18 +1700,20 @@ struct to_ir {
       // type with the actual elements in the dict, so let the type
       // begin as the first element in the dict
       if (k->type()->kind() == UnionType::Kind) {
-        throw ErrorReport(dc)
+        throw(
+            ErrorReport(dc)
             << "Dicts may only contain homogeneous keys, but the type of "
-            << "the first generated key was " << k->type()->repr_str();
+            << "the first generated key was " << k->type()->repr_str());
       } else if (
           first_generated_key_type && first_generated_key_type != k->type()) {
         // Values can be heterogenous, so we only need to check that the
         // key types are all the same
-        throw ErrorReport(dc)
+        throw(
+            ErrorReport(dc)
             << "Dicts may only contain homogeneous keys. Expected "
             << "dict comprehension to generate type "
             << first_generated_key_type->repr_str() << ", but got "
-            << k->type()->repr_str();
+            << k->type()->repr_str());
       } else {
         dict_value->setType(DictType::create(k->type(), v->type()));
         first_generated_key_type = k->type();
@@ -1731,7 +1752,7 @@ struct to_ir {
         }
 
         if (!is_key_subtype || !is_value_subtype) {
-          throw ErrorReport(dc) << err.str();
+          throw(ErrorReport(dc) << err.str());
         }
       }
 
@@ -1840,8 +1861,7 @@ struct to_ir {
 
     // if this is an OR, eval second expression if first expr is False
     // If this is an AND, eval second expression if first expr is True
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Value* new_result;
+    Value* new_result = nullptr;
     std::optional<RefinementSet> refinements;
     std::optional<bool> static_if;
     if (is_or) {
@@ -1895,9 +1915,10 @@ struct to_ir {
     auto false_type = false_block->outputs().at(0)->type();
     auto unified = unifyTypes(true_type, false_type);
     if (!unified) {
-      throw ErrorReport(range)
+      throw(
+          ErrorReport(range)
           << "if-expression's true branch has type " << true_type->repr_str()
-          << " but false branch has type " << false_type->repr_str();
+          << " but false branch has type " << false_type->repr_str());
     }
 
     // Add op outputs
@@ -1906,20 +1927,26 @@ struct to_ir {
     return expr_value;
   }
   Value* emitToBool(const SourceRange& loc, Value* v) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Value* out;
+    Value* out = nullptr;
     try {
       auto bool_cast = environment_stack->getSugaredVar("bool", loc);
       out = asSimple(bool_cast->call(loc, method, {v}, {}, 0));
     } catch (...) {
-      throw ErrorReport(loc) << "Could not cast value of type "
-                             << v->type()->repr_str() << " to bool";
+      throw(
+          ErrorReport(loc) << "Could not cast value of type "
+                           << v->type()->repr_str() << " to bool");
+    }
+    if (!out) {
+      throw(
+          ErrorReport(loc) << "Could not cast value of type "
+                           << v->type()->repr_str() << " to bool");
     }
     // cast value not response for checking output type
     if (!out->type()->isSubtypeOf(*BoolType::get())) {
-      throw ErrorReport(loc)
+      throw(
+          ErrorReport(loc)
           << "expected a bool expression for condition but found "
-          << out->type()->repr_str();
+          << out->type()->repr_str());
     }
     return out;
   }
@@ -2051,10 +2078,8 @@ struct to_ir {
 
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      Value* tv;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      Value* fv;
+      Value* tv = nullptr;
+      Value* fv = nullptr;
 
       {
         WithInsertPoint insert(true_block);
@@ -2126,7 +2151,7 @@ struct to_ir {
               << " in the false branch";
         if (save_true->findInParentFrame(x) ||
             save_false->findInParentFrame(x)) {
-          throw error;
+          throw ErrorReport(error);
         } else {
           environment_stack->setVariableTypeError(
               x, [=]() -> std::string { return error.what(); });
@@ -2140,8 +2165,9 @@ struct to_ir {
   CondValue emitHasAttr(const Expr& objExpr, const Expr& attrExpr) {
     auto obj = emitSugaredExpr(objExpr, 1);
     if (attrExpr.kind() != TK_STRINGLITERAL) {
-      throw ErrorReport(attrExpr)
-          << "hasattr's second argument must be a string literal";
+      throw(
+          ErrorReport(attrExpr)
+          << "hasattr's second argument must be a string literal");
     }
     const std::string& name = StringLiteral(attrExpr).text();
     const bool hasAttr = obj->hasAttr(objExpr.range(), method, name);
@@ -2338,8 +2364,7 @@ struct to_ir {
     {
       Block* condition_block = n->addBlock();
       pushFrame(condition_block);
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      Value* out;
+      Value* out = nullptr;
       if (cond) {
         WithInsertPoint insert(condition_block);
         out = emitToBool(cond.value().range(), emitExpr(cond.value()));
@@ -2411,7 +2436,7 @@ struct to_ir {
       const SourceRange& loc,
       const std::function<void()>& emit_body) {
     if (itrs.size() != 1) {
-      throw ErrorReport(loc) << "List of iterables is not supported currently";
+      throw(ErrorReport(loc) << "List of iterables is not supported currently");
     }
 
     // Emit loop information for builtinFunction values like range(), zip(),
@@ -2453,8 +2478,9 @@ struct to_ir {
       entered.push(rhs);
 
       if (rhs->type()->kind() != TypeKind::ClassType) {
-        throw ErrorReport(e.range())
-            << "With item expression must return an object";
+        throw(
+            ErrorReport(e.range())
+            << "With item expression must return an object");
       }
 
       auto rhsClass = rhs->type()->expect<ClassType>();
@@ -2462,27 +2488,30 @@ struct to_ir {
       auto* exitMethod = rhsClass->findMethod("__exit__");
 
       if (!enterMethod || !exitMethod) {
-        throw ErrorReport(e.range())
-            << "Object returned by with item expression does not define __enter__ and __exit__ methods";
+        throw(
+            ErrorReport(e.range())
+            << "Object returned by with item expression does not define __enter__ and __exit__ methods");
       }
 
       // Check the schema of __enter__.
       auto& enterSchema = enterMethod->getSchema();
       if (enterSchema.arguments().size() != 1) {
-        throw ErrorReport(e.range())
-            << "__enter__ must have only one argument and one return value";
+        throw(
+            ErrorReport(e.range())
+            << "__enter__ must have only one argument and one return value");
       }
 
       // Check the schema of __exit__.
       auto& exitSchema = exitMethod->getSchema();
       if (exitSchema.arguments().size() != 4) {
-        throw ErrorReport(e.range()) << "__exit__ must have four arguments";
+        throw(ErrorReport(e.range()) << "__exit__ must have four arguments");
       } else {
         for (unsigned i = 1; i < 4; ++i) {
           if (exitSchema.arguments().at(i).type() != AnyType::get()) {
-            throw ErrorReport(e.range())
+            throw(
+                ErrorReport(e.range())
                 << "argument " << i
-                << " of __exit__ must have Any type; TorchScript does not currently support passing exception type, value, or traceback to the __exit__ function.";
+                << " of __exit__ must have Any type; TorchScript does not currently support passing exception type, value, or traceback to the __exit__ function.");
           }
         }
       }
@@ -2534,8 +2563,9 @@ struct to_ir {
     } else {
       // The raise was not followed by an exception (i.e. it was something like
       // `raise "error"` instead of `raise RuntimeError("error")`)
-      throw ErrorReport(raise.range())
-          << "exceptions must derive from BaseException";
+      throw(
+          ErrorReport(raise.range())
+          << "exceptions must derive from BaseException");
     }
 
     if (!error_message->type()->isSubtypeOf(*StringType::get())) {
@@ -2590,20 +2620,23 @@ struct to_ir {
       } else if (assignee.kind() == TK_STARRED) {
         num_starred++;
       } else {
-        throw ErrorReport(assignee) << "lhs of assignment must be a variable, "
-                                    << "subscript, or starred expression";
+        throw(
+            ErrorReport(assignee) << "lhs of assignment must be a variable, "
+                                  << "subscript, or starred expression");
       }
     }
 
     if (num_starred > 1) {
-      throw ErrorReport(r)
-          << "Only one starred expression is allowed on the lhs";
+      throw(
+          ErrorReport(r)
+          << "Only one starred expression is allowed on the lhs");
     }
 
     if (num_starred > 0 && num_normal_assign == 0) {
-      throw ErrorReport(r) << "A Starred expression may only appear on the "
-                           << "lhs within the presence of another non-starred"
-                           << " expression";
+      throw(
+          ErrorReport(r) << "A Starred expression may only appear on the "
+                         << "lhs within the presence of another non-starred"
+                         << " expression");
     }
 
     return num_starred;
@@ -2633,15 +2666,15 @@ struct to_ir {
       case '^':
         return use_inplace_op ? aten::bitwise_xor : aten::__xor__;
       case TK_LSHIFT:
-        // NOLINTNEXTLINE(bugprone-branch-clone)
-        return use_inplace_op ? aten::__lshift__ : aten::__lshift__;
+        return use_inplace_op ? aten::__ilshift__ : aten::__lshift__;
       case TK_RSHIFT:
         return use_inplace_op ? aten::__irshift__ : aten::__rshift__;
       case TK_POW:
         return aten::pow;
       default:
-        throw ErrorReport(stmt)
-            << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
+        throw(
+            ErrorReport(stmt)
+            << "Unknown augmented assignment: " << kindToString(stmt.aug_op()));
     }
   }
 
@@ -2662,8 +2695,9 @@ struct to_ir {
       case '%':
         return std::make_pair(std::string("__imod__"), std::string("__mod__"));
       default:
-        throw ErrorReport(stmt)
-            << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
+        throw(
+            ErrorReport(stmt)
+            << "Unknown augmented assignment: " << kindToString(stmt.aug_op()));
     }
   }
 
@@ -2680,9 +2714,10 @@ struct to_ir {
         emitAugAssignmentToSubscript(stmt);
       } break;
       default:
-        throw ErrorReport(stmt.lhs())
+        throw(
+            ErrorReport(stmt.lhs())
             << "unexpected expression on "
-            << "left-hand side of augmented assignment";
+            << "left-hand side of augmented assignment");
     }
   }
 
@@ -2732,10 +2767,11 @@ struct to_ir {
       } else if (type->findMethod(out_of_place_method_name)) {
         magic_method_name = out_of_place_method_name;
       } else {
-        throw ErrorReport(stmt.range())
+        throw(
+            ErrorReport(stmt.range())
             << "Cannot emit inplace op on " << type->repr_str()
             << " since it does not define an " << in_place_method_name << " or "
-            << out_of_place_method_name << " method";
+            << out_of_place_method_name << " method");
       }
 
       // x += y is equivalent to x = x.__iadd__(y) or x = x.__add__(y) if
@@ -2764,10 +2800,11 @@ struct to_ir {
     const auto subscriptExprs = lhs.subscript_exprs();
     const TypePtr type = sliceable->type();
     if (subscriptExprs.size() != 1) {
-      throw ErrorReport(subscriptExprs)
+      throw(
+          ErrorReport(subscriptExprs)
           << "Sliced expression not yet supported for " << type->repr_str()
           << " augmented assignment. "
-          << "File a bug if you want this";
+          << "File a bug if you want this");
     }
 
     TypePtr elemType = nullptr;
@@ -2778,8 +2815,9 @@ struct to_ir {
     }
 
     if (elemType == nullptr) {
-      throw ErrorReport(lhs)
-          << type->repr_str() << " does not support augmented assignment.";
+      throw(
+          ErrorReport(lhs) << type->repr_str()
+                           << " does not support augmented assignment.");
     }
     const auto idxValue = emitExpr(subscriptExprs[0]);
     const auto containerArg =
@@ -2807,10 +2845,7 @@ struct to_ir {
     if (sliceable->type()->isSubtypeOf(*TensorType::get())) {
       // If it's a tensor, just fully evaluate the subscript operation and emit
       // an in-place assignment
-      std::vector<Value*> tensorIndices;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      Value* sliced;
-      std::tie(sliced, tensorIndices) = emitIntAndSliceIndexing(
+      auto [sliced, tensorIndices] = emitIntAndSliceIndexing(
           lhs.range(), sliceable, lhs.subscript_exprs());
 
       const auto slicedArg = NamedValue(stmt.lhs().range(), "self", sliced);
@@ -2928,14 +2963,15 @@ struct to_ir {
     } else {
       const auto subscript = lhs.subscript_exprs();
       if (subscript.size() != 1 || subscript[0].kind() == TK_SLICE_EXPR) {
-        throw ErrorReport(subscript)
-            << "Sliced expression not yet supported for"
-            << " subscripted assignment. "
-            << "File a bug if you want this";
+        throw(
+            ErrorReport(subscript) << "Sliced expression not yet supported for"
+                                   << " subscripted assignment. "
+                                   << "File a bug if you want this");
       }
       if (sliceable->type()->isSubtypeOf(*AnyTupleType::get())) {
-        throw ErrorReport(lhs) << sliceable->type()->repr_str()
-                               << " does not support subscripted assignment";
+        throw(
+            ErrorReport(lhs) << sliceable->type()->repr_str()
+                             << " does not support subscripted assignment");
       }
 
       std::vector<NamedValue> args;
@@ -2970,13 +3006,15 @@ struct to_ir {
         method,
         starred_unpack ? std::nullopt : std::optional<size_t>{n_binders});
     if (outputs.size() < n_binders) {
-      throw ErrorReport(tl)
-          << "need " << (starred_unpack ? "at least " : "") << n_binders
-          << " values to unpack but found only " << outputs.size();
+      throw(
+          ErrorReport(tl) << "need " << (starred_unpack ? "at least " : "")
+                          << n_binders << " values to unpack but found only "
+                          << outputs.size());
     }
     if (outputs.size() > n_binders && !starred_unpack) {
-      throw ErrorReport(tl) << "too many values to unpack: need " << n_binders
-                            << " but found " << outputs.size();
+      throw(
+          ErrorReport(tl) << "too many values to unpack: need " << n_binders
+                          << " but found " << outputs.size());
     }
 
     emitExprsAssign(tl.inputs(), outputs, rhs_loc, n_binders);
@@ -2987,7 +3025,7 @@ struct to_ir {
       const at::ArrayRef<SugaredValuePtr> outputs,
       const SourceRange& rhs_loc,
       size_t n_binders) {
-    int i = 0;
+    size_t i = 0;
     for (auto assignee : lhs_exprs) {
       switch (assignee.kind()) {
         case TK_SUBSCRIPT:
@@ -3008,7 +3046,8 @@ struct to_ir {
         case TK_STARRED: {
           auto var = Starred(assignee).expr();
           if (var.kind() != TK_VAR) {
-            throw ErrorReport(var) << "Cannot pack a tuple into a non-variable";
+            throw(
+                ErrorReport(var) << "Cannot pack a tuple into a non-variable");
           }
           size_t n_matched = outputs.size() - n_binders;
           ArrayRef<std::shared_ptr<SugaredValue>> outputs_ref = outputs;
@@ -3042,8 +3081,9 @@ struct to_ir {
           i++;
         } break;
         default:
-          throw ErrorReport(assignee)
-              << "unexpected expression on the left-hand side";
+          throw(
+              ErrorReport(assignee)
+              << "unexpected expression on the left-hand side");
       }
     }
   }
@@ -3076,8 +3116,9 @@ struct to_ir {
 
   void emitSingleAssignment(const Assign& stmt) {
     if (!stmt.rhs().present()) {
-      throw ErrorReport(stmt.range())
-          << "For an assignment, expected an expression on the right-hand side";
+      throw(
+          ErrorReport(stmt.range())
+          << "For an assignment, expected an expression on the right-hand side");
     }
     const Expr& rhs = stmt.rhs().get();
     switch (stmt.lhs().kind()) {
@@ -3134,14 +3175,15 @@ struct to_ir {
         emitSubscriptAssign(stmt.range(), Subscript(stmt.lhs()), rhs);
         break;
       default:
-        throw ErrorReport(stmt.lhs())
-            << "unexpected expression on left-hand side of assignment";
+        throw(
+            ErrorReport(stmt.lhs())
+            << "unexpected expression on left-hand side of assignment");
     }
   }
 
   void emitSelectAssign(const Assign& stmt) {
     if (!stmt.rhs().present()) {
-      throw ErrorReport(stmt.range()) << "Expected RHS for assignment";
+      throw(ErrorReport(stmt.range()) << "Expected RHS for assignment");
     }
 
     TypePtr type_hint = nullptr;
@@ -3157,7 +3199,7 @@ struct to_ir {
 
   void emitSelectAssign(
       const Expr& lhs,
-      SugaredValuePtr rhs,
+      const SugaredValuePtr& rhs,
       const SourceRange& loc) {
     const auto lhs_select = Select(lhs);
     auto lhs_sv = emitSugaredExpr(lhs_select.value(), 1);
@@ -3165,7 +3207,7 @@ struct to_ir {
     lhs_sv->setAttr(loc, method, lhs_select.selector().name(), rhs_value);
   }
 
-  NodeKind getNodeKind(int kind, int ninputs) {
+  NodeKind getNodeKind(int kind, size_t ninputs) {
     switch (kind) {
       case '+':
         return aten::add;
@@ -3226,7 +3268,7 @@ struct to_ir {
     }
   }
 
-  std::string getOperatorOverload(int kind, int ninputs) {
+  std::string getOperatorOverload(int kind, size_t ninputs) {
     switch (kind) {
       case '+':
         return "__add__";
@@ -3312,37 +3354,40 @@ struct to_ir {
     });
   }
 
-  void checkApplyNumInputs(Apply& apply, size_t expected_inputs) {
+  void checkApplyNumInputs(const Apply& apply, size_t expected_inputs) {
     const SourceRange& loc = apply.range();
     if (apply.inputs().size() != expected_inputs) {
-      throw ErrorReport(loc)
-          << Var(apply.callee()).name().name() << " expected exactly "
-          << expected_inputs << " arguments but found "
-          << apply.inputs().size();
+      throw(
+          ErrorReport(loc) << Var(apply.callee()).name().name()
+                           << " expected exactly " << expected_inputs
+                           << " arguments but found " << apply.inputs().size());
     }
     if (!apply.attributes().empty()) {
-      throw ErrorReport(loc)
-          << Var(apply.callee()).name().name() << " takes no keyword arguments";
+      throw(
+          ErrorReport(loc) << Var(apply.callee()).name().name()
+                           << " takes no keyword arguments");
     }
   }
 
   void checkApplyNumInputsRange(
-      Apply& apply,
+      const Apply& apply,
       size_t min_expected_inputs,
       size_t max_expected_inputs) {
     const SourceRange& loc = apply.range();
     size_t position_arg_size = apply.inputs().size();
     if (position_arg_size < min_expected_inputs ||
         position_arg_size > max_expected_inputs) {
-      throw ErrorReport(loc)
-          << Var(apply.callee()).name().name()
-          << " expected to have number of arguments between "
-          << min_expected_inputs << " and " << max_expected_inputs
-          << " but found " << position_arg_size;
+      throw(
+          ErrorReport(loc) << Var(apply.callee()).name().name()
+                           << " expected to have number of arguments between "
+                           << min_expected_inputs << " and "
+                           << max_expected_inputs << " but found "
+                           << position_arg_size);
     }
     if (!apply.attributes().empty()) {
-      throw ErrorReport(loc)
-          << Var(apply.callee()).name().name() << " takes no keyword arguments";
+      throw(
+          ErrorReport(loc) << Var(apply.callee()).name().name()
+                           << " takes no keyword arguments");
     }
   }
 
@@ -3368,14 +3413,14 @@ struct to_ir {
   std::shared_ptr<SugaredValue> emitApplySpecialForm(
       Symbol form,
       Apply& apply,
-      std::shared_ptr<SugaredValue> sv,
+      const std::shared_ptr<SugaredValue>& sv,
       const TypePtr& type_hint = nullptr) {
     switch (form) {
       case prim::fork: {
         auto& trees = apply.inputs().tree()->trees();
         if (trees.empty()) {
-          throw ErrorReport(apply)
-              << "Expected at least one argument to fork()";
+          throw(
+              ErrorReport(apply) << "Expected at least one argument to fork()");
         }
         auto forked = emitSugaredExpr(Expr(trees[0]), 1);
         TreeList sliced_trees(trees.begin() + 1, trees.end());
@@ -3385,9 +3430,10 @@ struct to_ir {
       }
       case prim::awaitable: {
         auto tree = apply.inputs().tree();
-        if (!tree || tree->trees().size() < 1) {
-          throw ErrorReport(apply)
-              << "Expected at least one argument to awaitable()";
+        if (!tree || tree->trees().empty()) {
+          throw(
+              ErrorReport(apply)
+              << "Expected at least one argument to awaitable()");
         }
         auto& trees = tree->trees();
         auto awaited = emitSugaredExpr(Expr(trees[0]), 1);
@@ -3408,10 +3454,11 @@ struct to_ir {
 
         std::stringstream why_not;
         if (!expr->type()->isSubtypeOfExt(*type, &why_not)) {
-          throw ErrorReport(apply.inputs())
+          throw(
+              ErrorReport(apply.inputs())
               << "expected an expression of type " << type->repr_str()
               << " but found " << expr->type()->repr_str() << "\n"
-              << why_not.str();
+              << why_not.str());
         }
 
         // None is a subtype of Optional[T], but we want to remember what T is
@@ -3451,8 +3498,9 @@ struct to_ir {
         auto obj = emitSugaredExpr(apply.inputs()[0], 1);
         auto selector = apply.inputs()[1];
         if (selector.kind() != TK_STRINGLITERAL) {
-          throw ErrorReport(apply)
-              << "getattr's second argument must be a string literal";
+          throw(
+              ErrorReport(apply)
+              << "getattr's second argument must be a string literal");
         }
         const std::string& name = StringLiteral(selector).text();
 
@@ -3506,12 +3554,14 @@ struct to_ir {
           return base_error_msg;
         };
         if (kwargs.size() == 1 && kwargs[0].name() != "device") {
-          throw ErrorReport(apply)
-              << get_base_error_msg().str() << "Got kwarg " << kwargs[0].name();
+          throw(
+              ErrorReport(apply) << get_base_error_msg().str() << "Got kwarg "
+                                 << kwargs[0].name());
         }
         if (kwargs.size() > 1) {
-          throw ErrorReport(apply)
-              << get_base_error_msg().str() << "Got multiple kwargs\n";
+          throw(
+              ErrorReport(apply)
+              << get_base_error_msg().str() << "Got multiple kwargs\n");
         }
         auto dtype = dynamic_cast<LegacyTensorConstructor*>(sv.get())->dtype();
         auto dtype_ivalue = graph->insertConstant(dtype);
@@ -3546,9 +3596,10 @@ struct to_ir {
               {args[0]},
               {NamedValue(apply.range(), "dtype", dtype_ivalue)}));
         } else {
-          throw ErrorReport(apply)
+          throw(
+              ErrorReport(apply)
               << get_base_error_msg().str()
-              << "Got multiple positional arguments that were not all integers";
+              << "Got multiple positional arguments that were not all integers");
         }
       }
       case prim::isinstance: {
@@ -3562,8 +3613,9 @@ struct to_ir {
         auto operand = emitSugaredExpr(value, 1);
 
         if (!type_hint) {
-          throw ErrorReport(apply)
-              << "Expected type hint for result of tolist()";
+          throw(
+              ErrorReport(apply)
+              << "Expected type hint for result of tolist()");
         }
 
         return std::make_shared<SimpleValue>(graph->insertToList(
@@ -3582,14 +3634,15 @@ struct to_ir {
       // CreateObject special form.
       case prim::CreateObject: {
         if (apply.inputs().size() != 1) {
-          throw ErrorReport(apply) << "Only one argument to __new__ allowed";
+          throw(ErrorReport(apply) << "Only one argument to __new__ allowed");
         }
         auto arg = emitSugaredExpr(apply.inputs()[0], 1);
         auto class_arg = dynamic_cast<ClassValue*>(arg.get());
         if (!class_arg) {
-          throw ErrorReport(apply)
+          throw(
+              ErrorReport(apply)
               << "Expected class value as argument to __new__, got "
-              << arg->kind() << " instead";
+              << arg->kind() << " instead");
         }
         auto createNode =
             graph->insertNode(graph->createObject(class_arg->type_));
@@ -3618,8 +3671,9 @@ struct to_ir {
         // IterableTree(RangeValue(0, math.inf), SimpleValue(x))
         Value* start_index = nullptr;
         if (input_size == 0) {
-          throw ErrorReport(loc)
-              << "enumerate expected at least 1 arguments, got 0";
+          throw(
+              ErrorReport(loc)
+              << "enumerate expected at least 1 arguments, got 0");
         }
 
         if (input_size == 2) {
@@ -3627,15 +3681,17 @@ struct to_ir {
         }
         auto arg_size = input_size + attribute_size;
         if (arg_size > 2) {
-          throw ErrorReport(loc)
-              << "enumerate expected at most 2 arguments, got " << arg_size;
+          throw(
+              ErrorReport(loc)
+              << "enumerate expected at most 2 arguments, got " << arg_size);
         }
 
         if (attribute_size == 1) {
           if (attributes[0].name().name() != "start") {
-            throw ErrorReport(loc)
+            throw(
+                ErrorReport(loc)
                 << "enumerate expected kwarg name 'start', got '"
-                << attributes[0].name().name() << "'";
+                << attributes[0].name().name() << "'");
           }
           start_index =
               emitSugaredExpr(attributes[0].value(), 1)->asValue(loc, method);
@@ -3669,8 +3725,8 @@ struct to_ir {
         // IterableTree(IterableTree(x), IterableTree(y))
         auto inputs = apply.inputs();
         if (inputs.empty()) {
-          throw ErrorReport(apply)
-              << "zip expected at least 1 arguments, got 0";
+          throw(
+              ErrorReport(apply) << "zip expected at least 1 arguments, got 0");
         }
         auto iterable_tree = std::make_shared<IterableTree>();
         for (Expr expr : inputs) {
@@ -3692,9 +3748,10 @@ struct to_ir {
 
         auto inputs = apply.inputs();
         if (inputs.size() != 1) {
-          throw ErrorReport(apply)
+          throw(
+              ErrorReport(apply)
               << "__getitem__ expected exactly 1 arguments, got "
-              << inputs.size();
+              << inputs.size());
         }
         auto input =
             emitSugaredExpr(apply.inputs()[0], 1)->asValue(loc, method);
@@ -3715,9 +3772,10 @@ struct to_ir {
     if (apply.inputs().empty()) {
       TypePtr type = type_hint ? type_hint : ListType::ofTensors();
       if (!type->cast<ListType>()) {
-        throw ErrorReport(apply.range())
+        throw(
+            ErrorReport(apply.range())
             << "Expected list type annotation for list(), found "
-            << type_hint->repr_str();
+            << type_hint->repr_str());
       }
       return std::make_shared<SimpleValue>(
           graph
@@ -3786,7 +3844,7 @@ struct to_ir {
       }
 
       if (!is_key_subtype || !is_value_subtype) {
-        throw ErrorReport(apply) << err.str();
+        throw(ErrorReport(apply) << err.str());
       }
     };
 
@@ -3862,12 +3920,13 @@ struct to_ir {
     }
 
     if (!all_candidates.empty()) {
-      throw ErrorReport(apply)
+      throw(
+          ErrorReport(apply)
           << "There are multiple candidate "
           << "Dict types in the Union type annotation `"
           << type_hint->repr_str()
           << "`, and full type inference is not yet supported for the "
-          << "`dict()` constructor.";
+          << "`dict()` constructor.");
     }
 
     // If possible, just cast what we have to a Dict and add the
@@ -3916,11 +3975,12 @@ struct to_ir {
         refined_type_hint =
             DictType::create(StringType::get(), TensorType::get());
       } else if (!all_candidates.empty()) {
-        throw ErrorReport(apply.range())
+        throw(
+            ErrorReport(apply.range())
             << "Cannot determine the type "
             << "of an empty dict given the Union annotation `"
             << type_hint->repr_str() << "`, which contains multiple "
-            << "candidate Dict types ";
+            << "candidate Dict types ");
       }
 
       TORCH_CHECK(
@@ -4137,12 +4197,10 @@ struct to_ir {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs) {
     auto g = method.graph();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Node* fork_node;
     TypePtr out_type;
 
-    fork_node = g->insertNode(method.graph()->create(prim::forkClosure, 1))
-                    ->setSourceRange(loc);
+    auto fork_node = g->insertNode(method.graph()->create(prim::forkClosure, 1))
+                         ->setSourceRange(loc);
 
     // We create a fork by emitting a closure and setting the closure output
     // into the fork input. If a closure doesn't already exist, we create one.
@@ -4176,8 +4234,7 @@ struct to_ir {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs) {
     auto g = method.graph();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    TypePtr out_type;
+    TypePtr out_type{};
 
     auto await_node =
         g->insertNode(method.graph()->create(prim::awaitableClosure, 1))
@@ -4213,23 +4270,25 @@ struct to_ir {
     // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
     size_t rpcMinInputs = 2;
-    size_t rpcMaxInputs = 5; // NOLINT
+    size_t rpcMaxInputs = 5;
     std::string op_name = rpc_op.toUnqualString();
     if (apply.inputs().size() < rpcMinInputs ||
         apply.inputs().size() > rpcMaxInputs) {
-      throw ErrorReport(apply)
+      throw(
+          ErrorReport(apply)
           << "Possible forms of call to " << op_name << "(..) are\n"
           << op_name
           << "(dst_worker_name, user_callable, args, kwargs, timeout)\n"
           << op_name << "(dst_worker_name, user_callable, args, kwargs)\n"
           << op_name << "(dst_worker_name, user_callable, args)\n"
           << op_name << "(dst_worker_name, user_callable)\n"
-          << "Now the number of arguments is " << apply.inputs().size();
+          << "Now the number of arguments is " << apply.inputs().size());
     }
     if (!apply.attributes().empty()) {
-      throw ErrorReport(apply)
+      throw(
+          ErrorReport(apply)
           << op_name << "(dst_worker_name, user_callable, args, kwargs)"
-          << "does not support kwargs yet";
+          << "does not support kwargs yet");
     }
     // TODO: Make rpc_op(..) support taking kwargs,
     // like rpc_async(to="worker1", func=my_func, args=(), kwargs={})
@@ -4328,8 +4387,9 @@ struct to_ir {
       // rpc_remote returns RRefType of the functionSchema's return type
       output_type = RRefType::create(returns[0].type());
     } else {
-      throw ErrorReport(apply)
-          << rpc_op.toDisplayString() << " is not supported in TorchScript!'";
+      throw(
+          ErrorReport(apply)
+          << rpc_op.toDisplayString() << " is not supported in TorchScript!'");
     }
     rpc_node_output->setType(output_type);
     return std::make_shared<SimpleValue>(rpc_node_output);
@@ -4366,7 +4426,7 @@ struct to_ir {
             ->call(tree->range(), method, named_values, {}, 0));
   }
 
-  Value* emitListLiteral(ListLiteral ll, const TypePtr& type_hint) {
+  Value* emitListLiteral(const ListLiteral& ll, const TypePtr& type_hint) {
     auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
 
     // Empty List Literals that are not assigned to variables
@@ -4433,11 +4493,12 @@ struct to_ir {
           do_if_type_match);
 
       if (!all_candidates.empty() && values.empty()) {
-        throw ErrorReport(ll)
+        throw(
+            ErrorReport(ll)
             << "Cannot assign an empty list to a "
             << "variable annotated to be type " << refined_type_hint->repr_str()
             << " because there are multiple possible List "
-            << "type candidates in the Union annotation";
+            << "type candidates in the Union annotation");
       }
     }
 
@@ -4472,10 +4533,11 @@ struct to_ir {
 
       if (all_candidates.empty() && refined_type_hint &&
           !(*unified_elem_type)->isSubtypeOf(*inferred_elem_type)) {
-        throw ErrorReport(ll)
+        throw(
+            ErrorReport(ll)
             << "List type annotation `" << refined_type_hint->repr_str()
             << "` did not match the types of the given list elements,"
-            << " which were unified to " << (*unified_elem_type)->repr_str();
+            << " which were unified to " << (*unified_elem_type)->repr_str());
       }
 
       if (!all_candidates.empty()) {
@@ -4526,11 +4588,12 @@ struct to_ir {
         rhs_value_type = values[i]->type();
       } else {
         if (keys[i - 1]->type()->kind() != keys[i]->type()->kind()) {
-          throw ErrorReport(key_trees[i])
+          throw(
+              ErrorReport(key_trees[i])
               << "Dict keys must contain "
               << "only a single type. Expected: "
               << keys[i - 1]->type()->repr_str() << " but found "
-              << keys[i]->type()->repr_str() << " instead";
+              << keys[i]->type()->repr_str() << " instead");
         }
         rhs_value_type = *(unifyTypes(
             rhs_value_type, values[i]->type(), /*default_to_union=*/true));
@@ -4580,11 +4643,12 @@ struct to_ir {
           default_refined_type_hint_setter);
 
       if (!all_candidates.empty() && values.empty()) {
-        throw ErrorReport(dl)
+        throw(
+            ErrorReport(dl)
             << "Cannot assign an empty dict to a "
             << "variable annotated to be type " << type_hint->repr_str()
             << " because there are multiple possible Dict "
-            << "type candidates in the Union annotation";
+            << "type candidates in the Union annotation");
       }
     } else {
       default_refined_type_hint_setter();
@@ -4607,20 +4671,22 @@ struct to_ir {
 
       if (refined_type_hint->expect<DictType>()->getKeyType() !=
           keys.at(0)->type()) {
-        throw ErrorReport(dl)
+        throw(
+            ErrorReport(dl)
             << "Type annotation was inferred to be "
             << refined_type_hint->repr_str()
             << "but the type of keys given by the dict literal is "
-            << keys.at(0)->type()->repr_str();
+            << keys.at(0)->type()->repr_str());
       }
 
       if (!rhs_value_type->isSubtypeOf(
               refined_type_hint->expect<DictType>()->getValueType())) {
-        throw ErrorReport(dl)
+        throw(
+            ErrorReport(dl)
             << "Type annotation was inferred to be `"
             << refined_type_hint->repr_str()
             << "`, but the type of values given by the dict literal is "
-            << rhs_value_type->repr_str();
+            << rhs_value_type->repr_str());
       }
     }
 
@@ -4639,7 +4705,9 @@ struct to_ir {
     return result->output();
   }
 
-  Value* emitSimpleExpr(const TreeRef& tree, TypePtr type_hint = nullptr) {
+  Value* emitSimpleExpr(
+      const TreeRef& tree,
+      const TypePtr& type_hint = nullptr) {
     switch (tree->kind()) {
       case TK_FLOOR_DIV:
       case '@': {
@@ -4696,8 +4764,9 @@ struct to_ir {
         return emitUnaryOp(tree, "__invert__", aten::bitwise_not);
       }
       case TK_STARRED: {
-        throw ErrorReport(tree)
-            << "Unexpected starred expansion. File a bug report";
+        throw(
+            ErrorReport(tree)
+            << "Unexpected starred expansion. File a bug report");
       }
       case TK_CONST: {
         return emitConst(Const(tree));
@@ -4739,7 +4808,7 @@ struct to_ir {
         return emitDictComprehension(dc, type_hint);
       } break;
       default:
-        throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
+        throw(ErrorReport(tree) << "Cannot emit expr for: " << tree);
     }
   }
 
@@ -4889,7 +4958,7 @@ struct to_ir {
         subscript_exprs.size(), std::nullopt);
 
     auto handle_indexing = [&](const Expr& subscript_expr,
-                               int expr_idx,
+                               size_t expr_idx,
                                int64_t dim,
                                bool is_reverse = false) {
       dims[expr_idx] = dim;
@@ -4962,16 +5031,18 @@ struct to_ir {
         }
       } else if (index->type()->isSubtypeOf(*OptionalType::ofTensor())) {
         if (is_reverse) {
-          throw ErrorReport(loc)
-              << "Ellipses followed by tensor indexing is currently not supported";
+          throw(
+              ErrorReport(loc)
+              << "Ellipses followed by tensor indexing is currently not supported");
         } else {
           return dim + 1;
         }
       } else {
-        throw ErrorReport(loc)
+        throw(
+            ErrorReport(loc)
             << "Unsupported operation: indexing tensor with unsupported index type '"
             << index->type()->repr_str()
-            << "'. Only ints, slices, lists and tensors are supported";
+            << "'. Only ints, slices, lists and tensors are supported");
       }
     };
 
@@ -4989,8 +5060,9 @@ struct to_ir {
          rev_idx--) {
       auto subscript_expr = subscript_exprs[rev_idx];
       if (subscript_expr.kind() == TK_DOTS) {
-        throw ErrorReport(loc)
-            << "An index can only have a single ellipsis ('...')";
+        throw(
+            ErrorReport(loc)
+            << "An index can only have a single ellipsis ('...')");
       }
       rdim =
           handle_indexing(subscript_expr, rev_idx, rdim, /*is_reverse=*/true);
@@ -5072,9 +5144,10 @@ struct to_ir {
       Value* sliceable,
       const List<Expr>& subscript_exprs) {
     if (!sliceable->type()->isSubtypeOf(*TensorType::get())) {
-      throw ErrorReport(loc)
+      throw(
+          ErrorReport(loc)
           << "Unsupported operation: attempted to use multidimensional "
-          << "indexing on a non-tensor type";
+          << "indexing on a non-tensor type");
     }
 
     std::vector<Value*> tensor_indices;
@@ -5113,13 +5186,14 @@ struct to_ir {
       bool allow_out_of_bounds) {
     // set index to be positive to simplify logic in runtime
     int64_t adj_index = input_index;
-    int64_t tuple_len = tuple_type->elements().size();
+    int64_t tuple_len = static_cast<int64_t>(tuple_type->elements().size());
     if (input_index < 0) {
       adj_index = tuple_len + input_index;
     }
     if (!allow_out_of_bounds && (adj_index >= tuple_len || adj_index < 0)) {
-      throw ErrorReport(loc) << "Tuple index out of range. Tuple is length "
-                             << tuple_len << " and index is " << input_index;
+      throw(
+          ErrorReport(loc) << "Tuple index out of range. Tuple is length "
+                           << tuple_len << " and index is " << input_index);
     }
     return adj_index;
   }
@@ -5137,15 +5211,16 @@ struct to_ir {
     auto elems = tuple_typ->elements();
     TypePtr output_type;
     if (idx_val->type() != IntType::get()) {
-      throw ErrorReport(loc) << "tuple index must be an integer";
+      throw(ErrorReport(loc) << "tuple index must be an integer");
     }
     auto idx = toIValue(idx_val);
     if (!idx) {
       if (elems.empty() ||
           !convertibleToList(tuple_typ, ListType::create(elems[0]))) {
-        throw ErrorReport(loc)
+        throw(
+            ErrorReport(loc)
             << "Cannot index into a " << tuple_typ->repr_str()
-            << " with a non-integer literal because we cannot resolve the output type";
+            << " with a non-integer literal because we cannot resolve the output type");
       }
       output_type = elems[0];
     } else {
@@ -5163,7 +5238,8 @@ struct to_ir {
     if (ivalue && ivalue->isInt()) {
       return ivalue->to<int64_t>();
     } else {
-      throw ErrorReport(loc) << "tuple slice indices must be integer constants";
+      throw(
+          ErrorReport(loc) << "tuple slice indices must be integer constants");
     }
   }
 
@@ -5172,7 +5248,7 @@ struct to_ir {
       const NamedValue& tuple_val,
       const std::vector<std::optional<NamedValue>>& tuple_args) {
     auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
-    int64_t tuple_len = tuple_type->elements().size();
+    auto tuple_len = tuple_type->elements().size();
     auto beg_val = tuple_args[0];
     auto end_val = tuple_args[1];
     auto step = tuple_args[2];
@@ -5196,7 +5272,8 @@ struct to_ir {
           loc, tuple_type, getSliceInd(end_val->value(*graph), loc), true);
     }
 
-    int64_t num_values = slice_indices_adjust(tuple_len, &beg, &end, step_size);
+    int64_t num_values = slice_indices_adjust(
+        static_cast<int64_t>(tuple_len), &beg, &end, step_size);
 
     return graph
         ->insertNode(graph->createTupleSlice(
@@ -5321,6 +5398,7 @@ struct FunctionResolver : public Resolver {
 
  private:
   Resolver* otherResolver_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::unordered_map<std::string, Function*>& functionTable_;
 };
 
@@ -5724,13 +5802,15 @@ void CompilationUnit::define_interface(
       InterfaceType::create(c10::QualifiedName(qualifiedName), is_module);
   for (const Stmt& stmt : classDef.body()) {
     if (stmt.kind() != TK_DEF) {
-      throw ErrorReport(stmt)
-          << "interface declarations can only contain method definitions";
+      throw(
+          ErrorReport(stmt)
+          << "interface declarations can only contain method definitions");
     }
     auto method_def = Def(stmt);
     if (!method_def.decl().return_type().present()) {
-      throw ErrorReport(method_def)
-          << "interface declarations must have a return type annotated.";
+      throw(
+          ErrorReport(method_def)
+          << "interface declarations must have a return type annotated.");
     }
     FunctionSchema schema =
         typeParser.parseSchemaFromDef(method_def, /* skip_self*/ true);
@@ -5748,8 +5828,9 @@ void CompilationUnit::define_interface(
       if (cur_statement.kind() == TK_EXPR_STMT) {
         auto expr = ExprStmt(cur_statement).expr();
         if (expr.kind() != TK_STRINGLITERAL) {
-          throw ErrorReport(method_def.range())
-              << "interfaces declarations should only contain a single 'pass' statement.";
+          throw(
+              ErrorReport(method_def.range())
+              << "interfaces declarations should only contain a single 'pass' statement.");
         }
       }
       // if we see a "pass", we just stop there
@@ -5760,8 +5841,9 @@ void CompilationUnit::define_interface(
     }
 
     if (method_def.statements()[stmts_size - 1].kind() != TK_PASS) {
-      throw ErrorReport(method_def.range())
-          << "interfaces declarations should contain 'pass' statement.";
+      throw(
+          ErrorReport(method_def.range())
+          << "interfaces declarations should contain 'pass' statement.");
     }
   }
   this->register_type(iface);
