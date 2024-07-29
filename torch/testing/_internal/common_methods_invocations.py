@@ -13171,6 +13171,16 @@ op_db: List[OpInfo] = [
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),),
            ),
+    OpInfo('expand_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_expand,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
+           supports_out=True,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+           )),
     OpInfo('diag',
            ref=np.diag,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -23746,6 +23756,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.expand_as",
         torch_opinfo_name="expand_as",
+    ),
+    PythonRefInfo(
+        "_refs.expand_copy",
+        torch_opinfo_name="expand_copy",
+        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.flatten",

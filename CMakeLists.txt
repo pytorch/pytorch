@@ -855,7 +855,7 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform"
   ON
-  "USE_CUDA OR USE_ROCM; NOT MSVC OR CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0"
+  "USE_CUDA OR USE_ROCM;NOT MSVC"
   OFF)
 
 # We are currently not using alibi attention for Flash So we disable this
@@ -1165,6 +1165,10 @@ if(APPLE)
   endif()
   append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
+endif()
+
+if(USE_XPU)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_XPU")
 endif()
 
 if(EMSCRIPTEN)
