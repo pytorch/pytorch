@@ -25,7 +25,6 @@ class Benchmark(ABC):
     def work(self):
         pass
 
-    # if set, overriden to return true, prepare and reset wont be called on each iteration.
     def prepare_once(self):  # noqa: B027
         pass
 
