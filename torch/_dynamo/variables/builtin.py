@@ -1068,7 +1068,6 @@ class BuiltinVariable(VariableTracker):
                     return
 
                 # Inline the user function
-                user_func_variable = variables.UserFunctionVariable(bound_method)
                 return tx.inline_user_function_return(user_func_variable, [arg], {})
 
     def _call_min_max(self, tx: "InstructionTranslator", *args):
