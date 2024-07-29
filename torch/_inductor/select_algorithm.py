@@ -40,7 +40,7 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
-from .runtime.benchmarking import benchmarker
+from .runtime.benchmarking import do_bench
 from .runtime.hints import DeviceProperties
 from .utils import (
     FakeIndentedBuffer,
@@ -952,8 +952,8 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
-            return benchmarker.lazy_benchmark(
-                algo, args, {}, pruning_key="max-autotune-gemm"
+            return do_bench(
+                algo, args, {}, lazy=True, pruning_key="max-autotune-gemm"
             )
 
     def to_callable(self):
@@ -1473,10 +1473,12 @@ class AlgorithmSelectorCache(PersistentCache):
             else:
                 # triton templates want the base pointer for sliced tensors
                 result = choice.benchmark(*example_inputs, out=out)
-            # if VERIFY and expected is not None:
-            #     torch.testing.assert_close(out_extern, expected, **VERIFY)
-            # if torch.cuda.is_available():
-            #     torch.cuda.synchronize()  # shake out any CUDA errors
+            if VERIFY and expected is not None:
+                # if result is a LazyBenchmark we might not have run the kernel
+                # yet, if we're checking accuracy we need to make sure the lazy
+                # value has been finalized
+                result = float(result)
+                torch.testing.assert_close(out_extern, expected, **VERIFY)
             return result
 
         def benchmark_in_current_process(choices):

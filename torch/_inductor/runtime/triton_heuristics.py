@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import torch
 
-from .benchmarking import benchmarker
+from .benchmarking import do_bench
 from .coordinate_descent_tuner import CoordescTuner
 from .hints import (
     _NUM_THREADS_PER_WARP,
@@ -664,8 +664,8 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        return benchmarker.lazy_benchmark_gpu(
-            kernel_call, ranking_key=f"bench [{hash(self)}]"
+        return do_bench(
+            kernel_call, lazy=True, ranking_key=f"bench [{hash(self)}]"
         )
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:

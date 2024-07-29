@@ -8,7 +8,7 @@ from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 
 from .. import config
 from ..codecache import get_path, TritonFuture
-from ..runtime.benchmarking import benchmarker
+from ..runtime.benchmarking import do_bench
 from ..utils import cache_on_self, IndentedBuffer
 from ..virtualized import V
 from .common import TensorArg
@@ -321,7 +321,7 @@ class MultiKernelCall:
 
             return inner
 
-        return benchmarker.benchmark_many_gpu(
+        return do_bench(
             [wrap_fn(kernel) for kernel in self.kernels],
             ranking_key=f"benchmark_sub_kernels_{self.multi_kernel_name}",
         )

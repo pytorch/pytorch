@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
-from .runtime.benchmarking import benchmarker
+from .runtime.benchmarking import benchmarker, do_bench
 from .virtualized import V
 
 
@@ -133,6 +133,8 @@ class TuningProcess:
             elif isinstance(obj, Ping):
                 response_queue.put(Pong())
             elif isinstance(obj, BenchmarkRequest):
+                # LazyBenchmark is not pickleable, so we may need to finalize
+                # the value here, so convert to float immediately
                 response_queue.put(float(obj.benchmark()))
             else:
                 raise RuntimeError(f"Invalid request type {type(obj)}")
@@ -595,7 +597,7 @@ class GPUDeviceBenchmarkRequest(BenchmarkRequest):
             device_idx = torch.cuda.current_device()
 
         with torch.cuda.device(device_idx):
-            out = benchmarker.lazy_benchmark_gpu(fn, pruning_key="max-autotune-gemm")
+            out = do_bench(fn, lazy=True, pruning_key="max-autotune-gemm")
 
         return out
 

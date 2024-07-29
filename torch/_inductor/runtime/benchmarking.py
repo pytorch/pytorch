@@ -1002,3 +1002,25 @@ class Benchmarker:
 
 
 benchmarker = Benchmarker()
+
+
+def do_bench(callable_or_callables: Union[Callable[..., Any], List[Callable[..., Any]]], *args: Any, lazy: bool = False, **kwargs: Any) -> Union[LazyBenchmark, float]:
+    if isinstance(callable_or_callables, list):
+        # this is tricky, the caller format for benchmarker.benchmark_many_gpu has no
+        # indication of what device the callables are on, so we have no way of extracting
+        # this information in the do_bench wrapper. we also can't get this information
+        # from args or kwargs since the caller doesn't have to specify any of these
+        # by default. for now I think we can just fallback to the GPU implementation,
+        # since we shouldn't be using it on CPU yet. will cleanup this wrapper later
+        return benchmarker.benchmark_many_gpu(callable_or_callables, *args, **kwargs)
+    elif len(args) == 0:
+        # same problem as above
+        if lazy:
+            return benchmarker.lazy_benchmark_gpu(callable_or_callables, *args, **kwargs)
+        else:
+            return benchmarker.benchmark_gpu(callable_or_callables, *args, **kwargs)
+    else:
+        if lazy:
+            return benchmarker.lazy_benchmark(callable_or_callables, *args, **kwargs)
+        else:
+            return benchmarker.benchmark(callable_or_callables, *args, **kwargs)
