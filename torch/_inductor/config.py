@@ -281,7 +281,7 @@ max_autotune_gemm_backends = os.environ.get(
 # NB: in some cases for 1x1 convs we emit as matmul,
 # which will use the backends of `max_autotune_gemm_backends`
 max_autotune_conv_backends = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
+    "TORCHINDUCTOR_MAX_AUTOTUNE_CONV_BACKENDS", "ATEN,TRITON"
 ).upper()
 
 
