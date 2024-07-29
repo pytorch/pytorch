@@ -417,6 +417,7 @@ pr_time_benchmarks() {
 
 if [[ "${TEST_CONFIG}" == *pr_time_benchmarks* ]]; then
   pr_time_benchmarks
+  exit 0
 elif [[ "${TEST_CONFIG}" == *dynamo_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend eager)
 elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then

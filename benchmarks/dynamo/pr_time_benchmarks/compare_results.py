@@ -38,7 +38,7 @@ def compute_percentage_difference(data1, data2, output_file):
     if fail:
         sys.exit(1)
     else:
-        print("all benchmark passed")
+        print("all benchmarks passed")
 
 
 def main():
