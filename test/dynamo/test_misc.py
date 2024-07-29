@@ -7,6 +7,7 @@ import dis
 import enum
 import functools
 import gc
+import importlib
 import itertools
 import logging
 import math
@@ -83,12 +84,10 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
-try:
-    import optree
 
-    HAS_OPTREE = True
-except:
-    HAS_OPTREE = False
+HAS_OPTREE = importlib.util.find_spec("optree")
+if HAS_OPTREE:
+    import optree
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
