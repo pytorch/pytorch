@@ -563,7 +563,7 @@ class BaseSchedulerNode:
             else:
                 continue
 
-            def get_buf_elems(buf: Optional[Union[ir.Buffer, ir.TensorBox]]) -> int:
+            def get_buf_bytes(buf: Optional[Union[ir.Buffer, ir.TensorBox]]) -> int:
                 if not buf:
                     return 0
                 # Kind of a lazy way to get the MultiOutput nodes corresponding to
@@ -574,20 +574,26 @@ class BaseSchedulerNode:
                     for user in users:
                         assert isinstance(user.node, BaseSchedulerNode)
                         if isinstance(user.node.node, MultiOutput):
-                            tot += get_buf_elems(user.node.node)
+                            for sched_buf in user.node.get_outputs():
+                                tot += get_buf_bytes(sched_buf.node)
                         else:
                             # Buf is a MultiOutputLayout but not all of its
                             # users are MultiOutputs...
                             # TODO: Figure out what's going on
                             return 0
                     return tot
+                elif isinstance(buf.layout, ir.NoneLayout):
+                    return sum(
+                        get_buf_bytes(V.graph.get_buffer(mut_name))
+                        for mut_name in buf.get_mutation_names()
+                    )
                 else:
-                    return try_size_hint(sympy_product(buf.get_size()))
+                    buf_elems = try_size_hint(sympy_product(buf.get_size()))
+                    return get_dtype_size(buf.get_dtype()) * min(
+                        buf_accessed_elems, buf_elems
+                    )
 
-            buf_elems = get_buf_elems(buf)
-            node_bytes += min(buf_elems, buf_accessed_elems) * get_dtype_size(
-                buf.get_dtype()
-            )
+            node_bytes += get_buf_bytes(buf)
 
         return node_bytes
 
@@ -1414,6 +1420,10 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         del self.scheduler.name_to_fused_node[self.get_name()]
         return self.scheduler.fuse_nodes(self.snodes)
 
+    def add_fake_dep(self, fake_dep: Dep) -> None:
+        self.set_read_writes(self.read_writes.with_read(fake_dep))
+        self.unmet_dependencies.add(fake_dep)
+
     @cache_on_self
     def get_name(self) -> str:
         return "_".join([x.get_name() for x in self.snodes])
@@ -1430,6 +1440,9 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         for node in self.snodes:
             result.extend(node.get_outputs())
         return result
+
+    def get_nodes(self) -> Sequence[BaseSchedulerNode]:
+        return self.snodes
 
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
@@ -1571,14 +1584,18 @@ class Scheduler:
         self.compute_dependencies()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.dead_node_elimination()
-        if config.reorder_for_compute_comm_overlap:
-            comms.decide_global_ordering_of_comms(self.nodes)
+        self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.compute_ancestors()
+        if config.reorder_for_compute_comm_overlap:
+            self.nodes = comms.decide_global_ordering_of_comms(
+                self.nodes,
+                self.name_to_buf,
+                self.name_to_fused_node,
+            )
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
-        self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.logged_slow_fusion: Set[Tuple[str, str]] = set()

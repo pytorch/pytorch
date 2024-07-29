@@ -566,6 +566,11 @@ def triton_kernel_wrapper_mutation_fake_tensor_mode(
         return None
 
 
+@triton_kernel_wrapper_mutation.py_impl(DispatchKey.Meta)
+def _(*, kernel_idx, constant_args_idx, grid, kwargs):
+    return None
+
+
 def trace_triton_kernel_wrapper(proxy_mode, func_overload, node_args):
     with disable_proxy_modes_tracing():
         out = func_overload(**node_args)
