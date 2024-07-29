@@ -1183,7 +1183,6 @@ class TritonKernel(SIMDKernel):
         reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
         override_persistent_reduction=None,
-        optimize_mask=True,
     ):
         super().__init__(
             *groups,
@@ -1202,7 +1201,6 @@ class TritonKernel(SIMDKernel):
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints: Set[AutotuneHint] = set()
         self.triton_meta: Optional[Dict[str, object]] = None
-        self.optimize_mask: bool = optimize_mask
 
         self.codegen_range_tree()
 
@@ -2884,8 +2882,6 @@ class TritonKernel(SIMDKernel):
         return V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block)
 
     def filter_masks(self, mask_vars):
-        if not self.optimize_mask:
-            return
         for tree in self.range_trees:
             if self._has_constant_mask(tree):
                 mask_vars.discard(f"{tree.prefix}mask")
