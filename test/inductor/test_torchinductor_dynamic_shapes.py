@@ -922,7 +922,7 @@ class TestInductorDynamic(TestCase):
             y = sum(xs)
             return torch.zeros(y, device=device)
 
-        f(torch.tensor([5] * 80))
+        f(torch.tensor([5] * 320))
 
     def test_sort_dynamic_shape_with_check(self, device):
         if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
