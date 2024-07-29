@@ -12,6 +12,7 @@ from torch._inductor.runtime.runtime_utils import do_bench_gpu as do_bench
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
+
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 

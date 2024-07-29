@@ -5,7 +5,6 @@ import copy
 import itertools
 
 import torch
-
 from torch.distributed._tensor import DeviceMesh, distribute_module, distribute_tensor
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.ops.utils import is_tensor_partial, normalize_dim
@@ -344,10 +343,12 @@ class DistMathOpsTest(DTensorTestBase):
             comm_mode = CommDebugMode()
             with comm_mode:
                 y_dist = layer_norm_dist(x_dist)
+                y_dist.sum().backward()
 
             expected_fwd_comm = 0 if shard_dim < norm_idx else 1
+
             self.assertEqual(
-                comm_mode.get_total_counts(),
+                sum(comm_mode.comm_module_counts["Global"]["forward"].values()),
                 expected_fwd_comm,
                 f"comm count={comm_mode.get_total_counts()}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
@@ -357,13 +358,11 @@ class DistMathOpsTest(DTensorTestBase):
 
             # backward step
             y_local.sum().backward()
-            with comm_mode:
-                y_dist.sum().backward()
 
             expected_bwd_comm = 0 if shard_dim < norm_idx else 1
 
             self.assertEqual(
-                comm_mode.get_total_counts(),
+                sum(comm_mode.comm_module_counts["Global"]["backward"].values()),
                 expected_bwd_comm,
                 f"comm count={comm_mode.get_total_counts()}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
