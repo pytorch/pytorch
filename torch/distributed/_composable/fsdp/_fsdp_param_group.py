@@ -509,20 +509,22 @@ class FSDPParamGroup:
                 inp_tensor_indices.append(i)
                 inp_tensors.append(obj)
         if len(inp_tensors) == 0:
+            unsharded_params = [
+                fsdp_param.unsharded_param for fsdp_param in self.fsdp_params
+            ]
             # Guard using this flag in case that whether the module inputs
-            # require grad or not is dynamic from iteration to iteration
-            self._run_multi_grad_hook = True
+            # require grad or not is dynamic from iteration to iteration or if
+            # any unsharded parameters are frozen (where we conservatively do
+            # not run this hook in case the trainability is changing)
+            self._run_multi_grad_hook = (
+                all(t.requires_grad for t in unsharded_params)
+                and len(unsharded_params) > 0
+            )
             # Only need to register once since the unsharded parameter objects
             # are preserved from iteration to iteration in eager
-            if (
-                not ca.compiled_autograd_enabled
-                and self._multi_grad_hook_handle is None
-            ):
-                tensors = [
-                    fsdp_param.unsharded_param for fsdp_param in self.fsdp_params
-                ]
+            if self._run_multi_grad_hook and self._multi_grad_hook_handle is None:
                 self._multi_grad_hook_handle = register_multi_post_accumulate_grad_hook(
-                    tensors, self._multi_grad_post_backward
+                    unsharded_params, self._multi_grad_post_backward
                 )
             return args, kwargs  # no tensors that require gradients
         self._run_multi_grad_hook = False
