@@ -4143,8 +4143,8 @@ class TestCase(expecttest.TestCase):
         env["PYTORCH_API_USAGE_STDERR"] = "1"
         # remove CI flag since this is a wrapped test process.
         # CI flag should be set in the parent process only.
-        if "CI" in env.keys():
-            del env["CI"]
+        env.pop("CI", None)
+        env.pop("TEST_SHOWLOCALS", None)
         (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
         return stderr.decode('ascii')
 
