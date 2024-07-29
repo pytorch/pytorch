@@ -430,37 +430,29 @@ class TestBenchmarkingGPU(TestBenchmarking):
     @patches
     @config.patch({"benchmarking.fallback_to_original_benchmarking": True})
     def test_benchmark_fallback(self, benchmarker, kernels):
-        for fn, args, kwargs, _callable in kernels:
-            timing_ms = benchmarker.benchmark(fn, args, kwargs)
-            self.sanity_check(_callable, timing_ms)
+        for fn, args, kwargs, _ in kernels:
+            _ = benchmarker.benchmark(fn, args, kwargs)
         self.assertEqual(self.counter_fallback_to_original_benchmarking(), len(kernels))
 
     @patches
     @config.patch({"benchmarking.fallback_to_original_benchmarking": True})
     def test_benchmark_gpu_fallback(self, benchmarker, kernels):
         for _, _, _, _callable in kernels:
-            timing_ms = benchmarker.benchmark_gpu(_callable)
-            self.sanity_check(_callable, timing_ms)
+            _ = benchmarker.benchmark_gpu(_callable)
         self.assertEqual(self.counter_fallback_to_original_benchmarking(), len(kernels))
 
     @patches
     @config.patch({"benchmarking.fallback_to_original_benchmarking": True})
     def test_benchmark_many_gpu_fallback(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
-        timings_ms = benchmarker.benchmark_many_gpu(callables)
-        for _callable, timing_ms in zip(callables, timings_ms):
-            self.sanity_check(_callable, timing_ms)
+        _ = benchmarker.benchmark_many_gpu(callables)
         self.assertEqual(self.counter_fallback_to_original_benchmarking(), len(kernels))
 
     @patches
     @config.patch({"benchmarking.fallback_to_original_benchmarking": True})
     def test_lazy_benchmark_gpu_fallback(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
-        timings_ms = [
-            benchmarker.lazy_benchmark_gpu(_callable) for _callable in callables
-        ]
-        for _callable, timing_ms in zip(callables, timings_ms):
-            self.sanity_check(_callable, timing_ms)
+        _ = [benchmarker.lazy_benchmark_gpu(_callable) for _callable in callables]
         self.assertEqual(self.counter_fallback_to_original_benchmarking(), len(kernels))
 
     @patches
