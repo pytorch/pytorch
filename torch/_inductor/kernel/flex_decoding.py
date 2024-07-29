@@ -311,7 +311,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         value,
         subgraph,
         block_mask,
-        scale,
+        kernel_params,
         *other_buffers,
     ) = args
     (
@@ -426,14 +426,14 @@ def create_flex_decoding_kernel(*args, **kwargs):
             BLOCK_M=BLOCK_M,
             SPLIT_KV=SPLIT_KV,
             BLOCK_DMODEL=query.get_size()[-1],
-            SM_SCALE=scale,
+            SM_SCALE=kernel_params["scale"],
             # Performance tuning
             BLOCK_N=BLOCK_N,
             # For now, we always assume the "sound" option
-            ROWS_GUARANTEED_SAFE=False,
+            ROWS_GUARANTEED_SAFE=kernel_params["rows_guaranteed_safe"],
             SAFE_M_BOUNDARY=(query.get_size()[-2] % BLOCK_M) == 0,
             SAFE_N_BOUNDARY=True,
-            PRESCALE_QK=False,
+            PRESCALE_QK=kernel_params["prescale_qk"],
             SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
         )
 

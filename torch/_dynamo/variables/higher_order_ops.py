@@ -1670,7 +1670,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             value,
             score_mod,
             block_mask,
-            scale,
+            kernel_params,
         ) = self.normalize_to_args(args, kwargs)
 
         score_mod_node, score_mod_lifted_args = self.create_wrapped_node(
@@ -1688,7 +1688,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             key,
             value,
             TupleVariable(block_mask.items[:-1], source=block_mask.source),
-            scale,
+            kernel_params,
         ]
 
         # Store the invocation as a call
@@ -1706,10 +1706,10 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         example_value = (out_meta, lse_meta)
 
         # Compose the ordered HOO args:
-        # - inp_args: [query, key, value, block_mask, scale]
+        # - inp_args: [query, key, value, block_mask, kernel_params]
         # - subgraph node: [score_mod, mask_fn_node]
         # - lifted args from tracing subgraph: [score_mod_other_buffers, mask_fn_other_buffers]
-        _, _, _, inp_arg_block_mask, inp_arg_scale = inp_args
+        _, _, _, inp_arg_block_mask, inp_arg_kernel_params = inp_args
         block_mask = tuple(inp_arg_block_mask + (mask_fn_node,))
         return wrap_fx_proxy(
             tx=tx,
@@ -1720,7 +1720,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 + (
                     score_mod_node,
                     block_mask,
-                    inp_arg_scale,
+                    inp_arg_kernel_params,
                     score_mod_lifted_args,
                     mask_fn_lifted_args,
                 ),
