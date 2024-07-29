@@ -616,7 +616,6 @@ def _decompose_exported_program(
     new_range_constraints = _get_updated_range_constraints(
         gm,
         ep.range_constraints,
-        _is_executorch=False,
     )
 
     exported_program = ExportedProgram(
@@ -1085,7 +1084,6 @@ class ExportedProgram:
             range_constraints=_get_updated_range_constraints(
                 transformed_gm,
                 self.range_constraints,
-                _is_executorch=False,
             ),
             module_call_graph=copy.deepcopy(self._module_call_graph),
             example_inputs=self.example_inputs,
@@ -1153,27 +1151,7 @@ def _get_shape_env(gm):
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
     old_range_constraints: "Optional[Dict[sympy.Symbol, Any]]" = None,
-    _is_executorch: bool = True,
 ) -> "Dict[sympy.Symbol, Any]":
-    # FIXME(tmanlaibaatar) Remove this whole branch once https://github.com/pytorch/pytorch/pull/123764
-    if _is_executorch:
-        assert old_range_constraints is None
-        shape_env = _get_shape_env(gm)
-        if shape_env is None:
-            return {}
-        range_constraints = {
-            k: v
-            for k, v in shape_env.var_to_range.items()
-            if k not in shape_env.replacements
-        }
-        # Only when we have an unbacked symint, and it's used as constructor inputs,
-        # runtime_var_to_range will make a difference compated to var_to_range.
-        # e.g. [2, oo) -> [0, oo)
-        for k, v in shape_env.var_to_range.items():
-            if k not in shape_env.replacements:
-                range_constraints[k] = v
-        return range_constraints
-
     assert old_range_constraints is not None
 
     shape_env = _get_shape_env(gm)
