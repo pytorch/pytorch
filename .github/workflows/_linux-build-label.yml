@@ -1,0 +1,117 @@
+name: linux-build
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      docker-image-name:
+        required: true
+        type: string
+        description: Name of the base docker image to build with.
+      build-generates-artifacts:
+        required: false
+        type: boolean
+        default: true
+        description: If set, upload generated build artifacts.
+      build-with-debug:
+        required: false
+        type: boolean
+        default: false
+        description: If set, build in debug mode.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
+      cuda-arch-list:
+        required: false
+        type: string
+        default: "5.2"
+        description: Runner label to select worker type
+      runner:
+        required: false
+        type: string
+        default: "linux.2xlarge"
+        description: |
+          List of CUDA architectures CI build should target.
+      test-matrix:
+        required: false
+        type: string
+        description: |
+          An option JSON description of what test configs to run later on. This
+          is moved here from the Linux test workflow so that we can apply filter
+          logic using test-config labels earlier and skip unnecessary builds
+      s3-bucket:
+        description: S3 bucket to download artifact
+        required: false
+        type: string
+        default: "gha-artifacts"
+      aws-role-to-assume:
+        description: role to assume for downloading artifacts
+        required: false
+        type: string
+        default: ""
+      use_split_build:
+        description: |
+          [Experimental] Build a libtorch only wheel and build pytorch such that
+          are built from the libtorch wheel.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      HUGGING_FACE_HUB_TOKEN:
+        required: false
+        description: |
+          HF Auth token to avoid rate limits when downloading models or datasets from hub
+
+    outputs:
+      docker-image:
+        value: ${{ jobs.build.outputs.docker-image }}
+        description: The docker image containing the built PyTorch.
+      test-matrix:
+        value: ${{ jobs.build.outputs.test-matrix }}
+        description: An optional JSON description of what test configs to run later on.
+
+jobs:
+  build:
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch'
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 240
+    outputs:
+      docker-image: ${{ steps.linux-build.outputs.docker-image }}
+      test-matrix: ${{ steps.linux-build.outputs.test-matrix }}
+    steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      # [pytorch repo ref]
+      # Use a pytorch/pytorch reference instead of a reference to the local
+      # checkout because when we run this action we don't *have* a local
+      # checkout. In other cases you should prefer a local checkout.
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
+      - name: Linux Build
+        id: linux-build
+        uses: ./.github/actions/linux-build
+        with:
+          build-environment: ${{ inputs.build-environment }}
+          docker-image-name: ${{ inputs.docker-image-name }}
+          build-generates-artifacts: ${{ inputs.build-generates-artifacts }}
+          build-with-debug: ${{ inputs.build-with-debug }}
+          sync-tag: ${{ inputs.sync-tag }}
+          cuda-arch-list: ${{ inputs.cuda-arch-list }}
+          test-matrix: ${{ inputs.test-matrix }}
+          s3-bucket: ${{ inputs.s3-bucket }}
+          aws-role-to-assume: ${{ inputs.aws-role-to-assume }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+          use_split_build: ${{ inputs.use_split_build }}
