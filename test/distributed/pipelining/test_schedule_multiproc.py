@@ -19,7 +19,6 @@ from torch.distributed.pipelining import (
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
-    ZeroBubbleAlgorithm,
 )
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
@@ -556,10 +555,7 @@ class ScheduleTest(MultiProcContinousTest):
 
         # Attach to a schedule
         schedule = ScheduleClass(
-            stages,
-            chunks,
-            loss_fn=full_loss_fn,
-            zero_bubble_algorithm=ZeroBubbleAlgorithm.ZB2P,
+            stages, chunks, loss_fn=full_loss_fn, enable_zero_bubble=True
         )
 
         for _ in range(2):
