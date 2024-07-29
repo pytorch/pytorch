@@ -546,6 +546,7 @@ aten::_sparse_softmax
 aten::_sparse_softmax.out
 aten::_sparse_softmax_backward_data
 aten::_sparse_softmax_backward_data.out
+aten::_sparse_solve
 aten::_sparse_sparse_matmul
 aten::_sparse_sparse_matmul.out
 aten::_sparse_sum.dim
