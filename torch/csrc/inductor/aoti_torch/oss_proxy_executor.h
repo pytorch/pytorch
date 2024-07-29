@@ -46,8 +46,8 @@ struct OSSDynamicArg {
   nlohmann::json serialized_arg_val;
 };
 
-struct OpKernel {
-  OpKernel(std::string target, c10::OperatorHandle op_handle)
+struct OSSOpKernel {
+  OSSOpKernel(std::string target, c10::OperatorHandle op_handle)
       : target_(std::move(target)), op_handle_(std::move(op_handle)) {}
 
   std::string target_;
