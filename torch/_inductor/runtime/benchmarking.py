@@ -260,9 +260,7 @@ class Benchmarker:
         counters["inductor"][
             "benchmarking_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear"
         ] += 1
-        buffer = torch.empty(
-            int(self.L2_cache_size // 4), dtype=torch.int, device="cuda"
-        )
+        buffer = torch.empty(self.L2_cache_size // 4, dtype=torch.int, device="cuda")
         buffer.zero_()
         # synchronize after zeroing the buffer to reduce uncertainty
         torch.cuda.synchronize()
@@ -424,9 +422,7 @@ class Benchmarker:
         _callable()
         torch.cuda.synchronize()
 
-        buffer = torch.empty(
-            int(self.L2_cache_size // 4), dtype=torch.int, device="cuda"
-        )
+        buffer = torch.empty(self.L2_cache_size // 4, dtype=torch.int, device="cuda")
         buffer.zero_()
 
         event_pairs = self.get_event_pairs(estimation_iters)
@@ -544,9 +540,9 @@ class Benchmarker:
         # before each kernel call to make sure that the L2
         # doesn't contain any input data before the run
         if fast_flush:
-            cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
+            cache = torch.empty(256e6 // 4, dtype=torch.int, device="cuda")
         else:
-            cache = torch.empty(int(256e6), dtype=torch.int8, device="cuda")
+            cache = torch.empty(256e6, dtype=torch.int8, device="cuda")
 
         # Estimate the runtime of the function
         start_event = torch.cuda.Event(enable_timing=True)
@@ -624,9 +620,7 @@ class Benchmarker:
             _callable()
         torch.cuda.synchronize()
 
-        buffer = torch.empty(
-            int(self.L2_cache_size // 4), dtype=torch.int, device="cuda"
-        )
+        buffer = torch.empty(self.L2_cache_size // 4, dtype=torch.int, device="cuda")
         buffer.zero_()
 
         interleaved_event_pairs = self.get_interleaved_event_pairs(
