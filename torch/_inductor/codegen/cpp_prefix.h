@@ -15,6 +15,7 @@
 // in .h files instead of .cpp files, to avoid ABI backward-compatiblity breakage.
 
 #include <ATen/NumericUtils.h>
+#include <ATen/cpu/Utils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 
 #include <c10/util/Float8_e4m3fn.h>
@@ -403,6 +404,52 @@ void mm_get_thread_blocking(
   }
 
   assert(Mt != 0);
+}
+
+template<typename X_t, typename W_t>
+void mm_get_cache_blocking(
+    int num_threads,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t M0,
+    int64_t N0,
+    int64_t K0,
+    int64_t Mt_blocks,
+    int64_t Kt_blocks,
+    int64_t& Mc_blocks,
+    int64_t& Nc_blocks,
+    int64_t& Kc_blocks) {
+  Mc_blocks = Mt_blocks;
+  Nc_blocks = 1; // Nc_blocks is always 1
+  Kc_blocks = Kt_blocks;
+
+  // TODO: tune the factor here
+  float L1_limit_factor = 1.0;
+  float L2_limit_factor = 0.5;
+
+  int64_t L1_cache_size = at::cpu::L1d_cache_size(); // per core cache size in Bytes
+  assert(L1_cache_size > 0 && "Expect L1_cache_size > 0 but got 0");
+
+  int64_t L2_cache_size = at::cpu::L2_cache_size(); // per core cache size in Bytes
+  assert(L2_cache_size > 0 && "Expect L2_cache_size > 0 but got 0");
+
+  int64_t B_size_limit = L1_cache_size * L1_limit_factor;
+  int64_t A_size_limit = L2_cache_size * L2_limit_factor;
+
+  constexpr size_t num_byte_A = sizeof(X_t);
+  constexpr size_t num_byte_B = sizeof(W_t);
+
+  int64_t size_cache_B = K0 * Kc_blocks * N0 * Nc_blocks * num_byte_B;
+  if (size_cache_B > B_size_limit) {
+      Kc_blocks = std::floor(B_size_limit / (K0 * N0 * Nc_blocks * num_byte_B));
+  }
+
+  int64_t size_cache_A = M0 * Mc_blocks * K0 * Kc_blocks * num_byte_A;
+  if (size_cache_A > A_size_limit) {
+      Mc_blocks = std::floor(A_size_limit / (M0 * Kc_blocks * K0 * num_byte_A));
+  }
+  return;
 }
 
 inline void mm_get_thread_blocks(
