@@ -1142,7 +1142,7 @@ void initJitScriptBindings(PyObject* module) {
              const ResolutionCallback& rcb) {
             const auto self = ModuleSelf(std::move(concreteType));
             m._ivalue()->compilation_unit()->define(
-                *m.type()->name(), script, pythonResolver(rcb), &self);
+                m.type()->name().value(), script, pythonResolver(rcb), &self);
             didFinishEmitModule(m);
           })
       .def(
