@@ -1129,14 +1129,14 @@ def parse_args():
         parser.add_argument(
             "--showlocals",
             action=argparse.BooleanOptionalAction,
-            default=True,
+            default=(not IS_CI),
             help="Show local variables in tracebacks (default: True)",
         )
     else:
         parser.add_argument(
             "--showlocals",
             action="store_true",
-            default=True,
+            default=(not IS_CI),
             help="Show local variables in tracebacks (default: True)",
         )
         parser.add_argument("--no-showlocals", dest="showlocals", action="store_false")
