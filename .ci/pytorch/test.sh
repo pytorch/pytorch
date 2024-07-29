@@ -401,8 +401,6 @@ pr_time_benchmarks() {
   source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on current PR: "
   cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
-  git checkout HEAD~1
-
 
   # build torch at the base commit to
   if [[ "${BASE_SHA}" == "${SHA1}" ]]; then
