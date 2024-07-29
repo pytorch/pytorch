@@ -406,7 +406,7 @@ pr_time_benchmarks() {
   # another suggestion was to use historical stored data insetad of building Head~1
   python setup.py clean
   python setup.py develop
-  python ./benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.py "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
+  source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on main: "
   cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
 }
