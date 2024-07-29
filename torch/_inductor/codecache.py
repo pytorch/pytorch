@@ -1339,8 +1339,8 @@ def get_include_and_linking_paths(
         # Note - We include pytorch only on linux right now. There is more work
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
         # and we need a way to link to what PyTorch links.
-        ipaths = cpp_extension.include_paths(cuda) + _get_python_include_dirs()
-        lpaths = cpp_extension.library_paths(cuda) + [
+        ipaths = cpp_extension.include_paths(backend="cuda" if cuda else "cpu") + _get_python_include_dirs()
+        lpaths = cpp_extension.library_paths(backend="cuda" if cuda else "cpu") + [
             sysconfig.get_config_var("LIBDIR")
         ]
 
@@ -1394,7 +1394,7 @@ def get_include_and_linking_paths(
         # symbol not found, if those header files require a library.
         # For those cases, include the lpath and libs command as we do for pytorch above.
         # This approach allows us to only pay for what we use.
-        ipaths = cpp_extension.include_paths(cuda) + _get_python_include_dirs()
+        ipaths = cpp_extension.include_paths(backend="cuda" if cuda else "cpu") + _get_python_include_dirs()
         if aot_mode:
             ipaths += [os.path.dirname(cpp_prefix_path())]
         lpaths = []
@@ -3093,7 +3093,7 @@ def _cuda_lib_options() -> List[str]:
     _set_gpu_runtime_env()  # cpp_extension consults the env
     from torch.utils import cpp_extension
 
-    lpaths = cpp_extension.library_paths(cuda=True) + [
+    lpaths = cpp_extension.library_paths(backend="cuda") + [
         sysconfig.get_config_var("LIBDIR")
     ]
     extra_ldflags: List[str] = []
