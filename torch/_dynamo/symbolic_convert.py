@@ -1590,6 +1590,10 @@ class InstructionTranslatorBase(
         ) and argsvars.has_force_unpack_var_sequence(self):
             argsvars = TupleVariable(argsvars.force_unpack_var_sequence(self))
 
+        # Unpack for cases like fn(**obj) where obj is a map
+        if isinstance(kwargsvars, UserDefinedObjectVariable):
+            kwargsvars = BuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
+
         if not isinstance(argsvars, BaseListVariable) or not isinstance(
             kwargsvars, ConstDictVariable
         ):
