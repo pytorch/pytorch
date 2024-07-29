@@ -663,7 +663,7 @@ test_inductor_torchbench_smoketest_perf() {
 test_inductor_get_core_number() {
   if [[ "${TEST_CONFIG}" == *aarch64 ]]; then
     echo "$(($(lscpu | grep 'Cluster(s):' | awk '{print $2}') * $(lscpu | grep 'Core(s) per cluster:' | awk '{print $4}')))"
-  elif [[ "${TEST_CONFIG}" == *x86 ]]; then
+  else
     echo "$(($(lscpu | grep 'Socket(s):' | awk '{print $2}') * $(lscpu | grep 'Core(s) per socket:' | awk '{print $4}')))"
   fi
 }
