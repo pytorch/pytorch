@@ -65,7 +65,7 @@ def tensor_parallel_transformation(
         assert res is not None
         gm = res.graph_module
 
-    return exported_program._update(gm, sig, state_dict)
+    return exported_program._update(gm, sig, state_dict=state_dict)
 
 
 class TensorParallelTransformPass(PassBase):

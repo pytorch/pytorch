@@ -12,8 +12,8 @@ from common import (
     key,
     open_test_results,
 )
-
 from download_reports import download_reports
+
 
 """
 Usage: update_failures.py /path/to/dynamo_test_failures.py /path/to/test commit_sha

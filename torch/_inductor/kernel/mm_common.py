@@ -14,6 +14,7 @@ from .. import config as inductor_config
 from ..runtime.runtime_utils import next_power_of_2
 from ..utils import ceildiv as cdiv
 
+
 log = logging.getLogger(__name__)
 
 

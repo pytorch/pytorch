@@ -9,7 +9,7 @@ namespace at::native {
 
 using namespace mps;
 
-Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const c10::optional<Tensor>& bias_opt) {
+Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::optional<Tensor>& bias_opt) {
   // wT = transpose(weight);
   // y=x*wT+b
 
@@ -48,7 +48,7 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const c10::opt
   }
 
   Tensor output =
-      at::empty(output_size, input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, input.suggest_memory_format());
+      at::empty(output_size, input.scalar_type(), std::nullopt, kMPS, std::nullopt, input.suggest_memory_format());
 
   if (output.numel() == 0) {
     return output;
@@ -145,7 +145,7 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
   };
 
   Tensor output = at::empty(
-      input_size, grad_output.scalar_type(), c10::nullopt, kMPS, c10::nullopt, grad_output.suggest_memory_format());
+      input_size, grad_output.scalar_type(), std::nullopt, kMPS, std::nullopt, grad_output.suggest_memory_format());
   TORCH_CHECK(output.is_mps());
   if (grad_output.numel() == 0) {
     return output;
@@ -215,15 +215,15 @@ static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& gra
 
   Tensor output = at::empty({grad_output_reshaped.size(1), input_reshaped.size(1)},
                             grad_output.scalar_type(),
-                            c10::nullopt,
+                            std::nullopt,
                             kMPS,
-                            c10::nullopt,
+                            std::nullopt,
                             grad_output.suggest_memory_format());
   Tensor bias = at::empty({grad_output_reshaped.size(1)},
                           grad_output.scalar_type(),
-                          c10::nullopt,
+                          std::nullopt,
                           kMPS,
-                          c10::nullopt,
+                          std::nullopt,
                           grad_output.suggest_memory_format());
   TORCH_CHECK(output.is_mps());
   TORCH_CHECK(bias.is_mps());

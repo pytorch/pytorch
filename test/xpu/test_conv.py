@@ -1264,7 +1264,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
             assert_size_stride(out, (2, 512, 7, 7), (25088, 1, 3584, 512))
 
 
-instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), only_for="xpu")
+instantiate_device_type_tests(
+    TestConvolutionNNDeviceType, globals(), only_for="xpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
