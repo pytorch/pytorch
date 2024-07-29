@@ -18,7 +18,7 @@ from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 
 from .. import config
-from ..fx_utils import matches_module_function_pattern, matches_function_pattern
+from ..fx_utils import matches_function_pattern, matches_module_function_pattern
 from ..pattern_matcher import (
     init_once_fakemode,
     PatternMatcherPass,
@@ -526,14 +526,11 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                     continue
 
                 conv_args_is_constant = all(
-                    n.op == "get_attr"
-                    and len(n.users) == 1
-                    for n in conv_node.args[1:2]
+                    n is None or (n.op == "get_attr" and len(n.users) == 1)
+                    for n in conv_node.args[1:3]
                 )
                 bn_args_is_constant = all(
-                    n.op == "get_attr"
-                    and len(n.users) == 1
-                    for n in node.args[1:4]
+                    n.op == "get_attr" and len(n.users) == 1 for n in node.args[1:5]
                 )
 
                 if not conv_args_is_constant or not bn_args_is_constant:
@@ -545,12 +542,14 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                 if bn_running_mean is None or bn_running_var is None:
                     continue
 
-                if conv_node.args[2] is None:
-                    continue
                 conv_weight = fetch_attr(conv_node.args[1].target, gm)
-                conv_bias = fetch_attr(conv_node.args[2].target, gm)
+                conv_bias = (
+                    fetch_attr(conv_node.args[2].target, gm)
+                    if conv_node.args[2]
+                    else None
+                )
 
-                conv_weight, conv_bias = fuse_conv_bn_weights(
+                new_conv_weight, new_conv_bias = fuse_conv_bn_weights(
                     conv_weight,
                     conv_bias,
                     bn_running_mean,
@@ -559,8 +558,19 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                     bn_weight,
                     bn_bias,
                 )
-                set_attr(conv_node.args[1].target, gm, conv_weight)
-                set_attr(conv_node.args[2].target, gm, conv_bias)
+                setattr(gm, conv_node.args[1].name, new_conv_weight)
+                if conv_node.args[2]:
+                    setattr(gm, conv_node.args[2].name, new_conv_bias)
+                else:
+                    with gm.graph.inserting_before(conv_node):
+                        conv_bias_name = conv_node.args[1].name.replace(
+                            "weight", "bias"
+                        )
+                        setattr(gm, conv_bias_name, new_conv_bias)
+                        conv_bias_node = gm.graph.create_node(
+                            "get_attr", conv_bias_name, (), {}
+                        )
+                    conv_node.update_arg(2, conv_bias_node)
                 node.replace_all_uses_with(node.args[0])
                 node.graph.erase_node(node)
     gm.graph.lint()
