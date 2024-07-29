@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -30,6 +31,7 @@ from torch import SymInt, SymBool, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
+from torch._subclasses.fake_impls import fast_detach
 from torch.fx import Proxy
 from torch.fx import Tracer, GraphModule
 from torch.fx.graph_module import _assign_attr
@@ -276,7 +278,13 @@ def get_proxy_slot(
     return res
 
 def snapshot_fake(val: Tensor) -> Optional[Tensor]:
-    return val.detach()
+    # val.detach() will also eventually call fast_detach(),
+    # but this saves us a full trip into __torch_dispatch__
+    # (snapshot_fake is called a lot)
+    if isinstance(val, FakeTensor):
+        return fast_detach(val.fake_mode, val)
+    else:
+        return val.detach()
 
 _ExtractValType = Optional[Union[
     PySymType, _AnyScriptObjectType, BackwardState,
@@ -314,6 +322,7 @@ def extract_val(val: _ExtractValType) -> _ExtractValType:
 
     typing_extensions.assert_never(val)
 
+# Note [invariants for node meta 'val']
 # What invariants do we have for the 'val' set on the FX node?  It has accurate
 # metadata... but only for metadata that exists "below" all other subsystems
 # (most notably autograd, but also vmap, functorch transforms, etc).  This means
