@@ -3,12 +3,10 @@ import unittest
 import weakref
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
 import torch._logging
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 

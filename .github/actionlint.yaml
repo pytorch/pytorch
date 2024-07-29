@@ -14,6 +14,7 @@ self-hosted-runner:
     - linux.12xlarge.ephemeral
     - linux.24xlarge
     - linux.arm64.2xlarge
+    - linux.arm64.m7g.4xlarge
     - linux.4xlarge.nvidia.gpu
     - linux.8xlarge.nvidia.gpu
     - linux.16xlarge.nvidia.gpu
@@ -36,6 +37,7 @@ self-hosted-runner:
     - amz2023.linux.12xlarge
     - amz2023.linux.24xlarge
     - amz2023.linux.arm64.2xlarge
+    - amz2023.linux.arm64.m7g.4xlarge
     - amz2023.linux.4xlarge.nvidia.gpu
     - amz2023.linux.8xlarge.nvidia.gpu
     - amz2023.linux.16xlarge.nvidia.gpu
