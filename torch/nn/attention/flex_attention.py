@@ -22,6 +22,7 @@ from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
 )
 from torch.nn.attention._utils import _validate_sdpa_input
+from torch.utils._pytree import tree_map_only
 
 __all__ = [
     "BlockMask",
@@ -244,7 +245,8 @@ class BlockMask:
     q_indices: Tensor
     full_q_num_blocks: Optional[Tensor]
     full_q_indices: Optional[Tensor]
-    BLOCK_SIZE: Tuple[int, int]
+    KV_BLOCK_SIZE: int
+    Q_BLOCK_SIZE: int
     mask_mod: _mask_mod_signature
 
     def __init__(
@@ -253,32 +255,45 @@ class BlockMask:
         kv_indices: Tensor,
         full_kv_num_blocks: Optional[Tensor] = None,
         full_kv_indices: Optional[Tensor] = None,
-        BLOCK_SIZE: Union[int, Tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
+        q_num_blocks: Optional[Tensor] = None,
+        q_indices: Optional[Tensor] = None,
+        full_q_num_blocks: Optional[Tensor] = None,
+        full_q_indices: Optional[Tensor] = None,
+        KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
+        Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
         mask_mod: Optional[_mask_mod_signature] = None,
     ):
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
+
         self.kv_num_blocks = kv_num_blocks
         self.kv_indices = kv_indices
         self.full_kv_num_blocks = full_kv_num_blocks
         self.full_kv_indices = full_kv_indices
+        self.KV_BLOCK_SIZE = KV_BLOCK_SIZE
+        self.Q_BLOCK_SIZE = Q_BLOCK_SIZE
 
-        self.q_num_blocks, self.q_indices = _transpose_ordered(
-            kv_num_blocks, kv_indices
-        )
+        # Set q_num_blocks and q_indices if provided, otherwise generate them
+        if q_num_blocks is not None and q_indices is not None:
+            self.q_num_blocks = q_num_blocks
+            self.q_indices = q_indices
+        else:
+            self.q_num_blocks, self.q_indices = _transpose_ordered(
+                kv_num_blocks, kv_indices
+            )
 
-        if full_kv_num_blocks is not None:
+        # Set full_q_num_blocks and full_q_indices if provided, otherwise generate them if full_kv tensors are available
+        if full_q_num_blocks is not None and full_q_indices is not None:
+            self.full_q_num_blocks = full_q_num_blocks
+            self.full_q_indices = full_q_indices
+        elif full_kv_num_blocks is not None and full_kv_indices is not None:
             self.full_q_num_blocks, self.full_q_indices = _transpose_ordered(
                 full_kv_num_blocks, full_kv_indices
             )
         else:
             self.full_q_num_blocks, self.full_q_indices = None, None
-        if isinstance(BLOCK_SIZE, int):
-            BLOCK_SIZE = (BLOCK_SIZE, BLOCK_SIZE)
-        self.BLOCK_SIZE = BLOCK_SIZE
-        if mask_mod is None:
-            mask_mod = noop_mask
-        self.mask_mod = mask_mod
+
+        self.mask_mod = mask_mod if mask_mod is not None else noop_mask
 
     def as_tuple(self):
         return (
@@ -290,8 +305,8 @@ class BlockMask:
             self.q_indices,
             self.full_q_num_blocks,
             self.full_q_indices,
-            self.BLOCK_SIZE[0],
-            self.BLOCK_SIZE[1],
+            self.KV_BLOCK_SIZE,
+            self.Q_BLOCK_SIZE,
             self.mask_mod,
         )
 
@@ -318,7 +333,8 @@ class BlockMask:
             new_kv_indices,
             full_kv_num_blocks=new_kv_num_blocks_full,
             full_kv_indices=new_kv_indices_full,
-            BLOCK_SIZE=self.BLOCK_SIZE,
+            KV_BLOCK_SIZE=self.KV_BLOCK_SIZE,
+            Q_BLOCK_SIZE=self.Q_BLOCK_SIZE,
             mask_mod=self.mask_mod,
         )
 
@@ -333,10 +349,11 @@ class BlockMask:
             f"    q_indices={self.q_indices.shape},\n"
             f"    full_q_num_blocks={self.full_q_num_blocks.shape if self.full_q_num_blocks is not None else None},\n"
             f"    full_q_indices={self.full_q_indices.shape if self.full_q_indices is not None else None},\n"
-            f"    BLOCK_SIZE={self.BLOCK_SIZE},\n"
+            f"    BLOCK_SIZE={self.KV_BLOCK_SIZE, self.Q_BLOCK_SIZE},\n"
             f"    shape={self.shape},\n"
             f"    sparsity={self.sparsity():.2f}%,\n"
-            f"    mask_mod={self.mask_mod.__name__ if hasattr(self.mask_mod, '__name__') else self.mask_mod}\n"
+            f"    mask_mod={self.mask_mod.__name__ if hasattr(self.mask_mod, '__name__') else self.mask_mod},\n"
+            f"    device={self.kv_indices.device}\n"
             f")"
         )
 
@@ -344,8 +361,8 @@ class BlockMask:
     def shape(self):
         """Returns the shape of the mask."""
         *batch_dims, q_length, _ = self.kv_indices.shape
-        q_length = self.kv_indices.shape[-2] * self.BLOCK_SIZE[0]
-        kv_length = self.kv_indices.shape[-1] * self.BLOCK_SIZE[1]
+        q_length = self.kv_indices.shape[-2] * self.KV_BLOCK_SIZE
+        kv_length = self.kv_indices.shape[-1] * self.Q_BLOCK_SIZE
         return tuple(batch_dims + [q_length, kv_length])
 
     def numel(self):
@@ -364,7 +381,7 @@ class BlockMask:
         if self.full_kv_num_blocks is not None:
             computed_blocks += self.full_kv_num_blocks.sum()
 
-        computed_size = computed_blocks.item() * self.BLOCK_SIZE[0] * self.BLOCK_SIZE[1]
+        computed_size = computed_blocks.item() * self.KV_BLOCK_SIZE * self.Q_BLOCK_SIZE
         dense_ratio = computed_size / total_size
         return 100 * (1 - dense_ratio)
 
@@ -442,6 +459,33 @@ class BlockMask:
             total_vis.append(block_vis)
 
         return "\n".join(total_vis)
+
+    def to(self, device):
+        """Moves the BlockMask to the specified device.
+        Args:
+        device (torch.device or str): The target device to move the BlockMask to.
+            Can be a torch.device object or a string (e.g., 'cpu', 'cuda:0').
+
+        Returns:
+            BlockMask: A new BlockMask instance with all tensor components moved
+            to the specified device.
+
+        Example:
+        .. code-block:: python
+
+            >>> block_mask = BlockMask(...)
+            >>> block_mask_cuda = block_mask.to('cuda:0')
+
+        Note:
+            This method does not modify the original BlockMask in-place.
+            Instead, it returns a new BlockMask instance.
+        """
+        mapped_attributes = tree_map_only(
+            torch.Tensor,
+            lambda x: x.to(device),
+            self.as_tuple(),
+        )
+        return BlockMask(*mapped_attributes)
 
 
 def _broadcast_to_dim(x, dim):
@@ -551,7 +595,8 @@ def _create_sparse_block_from_block_mask(
         full_bm[1],
         partial_bm[0],
         partial_bm[1],
-        BLOCK_SIZE=(KV_BLOCK_SIZE, Q_BLOCK_SIZE),
+        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
+        Q_BLOCK_SIZE=Q_BLOCK_SIZE,
         mask_mod=mask_mod,
     )
 
@@ -709,7 +754,8 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
         full_kv_num_blocks=None,
         full_kv_indices=None,
-        BLOCK_SIZE=(kv_len, q_len),
+        KV_BLOCK_SIZE=kv_len,
+        Q_BLOCK_SIZE=q_len,
     )
 
 
