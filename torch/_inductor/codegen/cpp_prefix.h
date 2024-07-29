@@ -236,7 +236,6 @@ at::vec::VecMask<int64_t, NI> inline get_mask_for_argmin_argmax(
 template <typename T, int NV, int NI,
           typename std::enable_if_t<!at::vec::is_floating_point_v<T>, int> = 0>
 at::vec::VecMask<int64_t, NI> inline get_mask_for_argmin_argmax(
-  at::vec::VecMask<int64_t, NI>& final_mask,
   const at::vec::VecMask<T, NV>& vmask,
   const IndexValueVec<T, NV, NI>& a,
   const at::vec::VectorizedN<T, NV>& value,
