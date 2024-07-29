@@ -569,42 +569,42 @@ std::string Module::dump_to_str(
   for (const NameTensor& p : named_parameters(/*recurse=*/false)) {
     parameters_ss << p.name << " = ";
     if (print_param_values) {
-      parameters_ss << p.value << std::endl;
+      parameters_ss << p.value << '\n';
     } else {
-      parameters_ss << "..." << std::endl;
+      parameters_ss << "..." << '\n';
     }
   }
 
   for (const NameValue& p : named_attributes(/*recurse=*/false)) {
     attributes_ss << p.name << " = ";
     if (!p.value.isTensor() || print_attr_values) {
-      attributes_ss << p.value << std::endl;
+      attributes_ss << p.value << '\n';
     } else {
-      attributes_ss << "..." << std::endl;
+      attributes_ss << "..." << '\n';
     }
   }
 
   for (const Method& method : get_methods()) {
-    methods_ss << "  method " << method.name() << " {" << std::endl;
+    methods_ss << "  method " << method.name() << " {" << '\n';
     if (print_method_bodies) {
       methods_ss << torch::jit::jit_log_prefix(
                         "    ", method.graph()->toString())
-                 << std::endl;
+                 << '\n';
     }
-    methods_ss << "  }" << std::endl;
+    methods_ss << "  }" << '\n';
   }
 
-  ss << "module " << type()->name()->qualifiedName() << " {" << std::endl;
-  ss << "  parameters {" << std::endl;
+  ss << "module " << type()->name()->qualifiedName() << " {" << '\n';
+  ss << "  parameters {" << '\n';
   ss << torch::jit::jit_log_prefix("    ", parameters_ss.str());
-  ss << "  }" << std::endl;
-  ss << "  attributes {" << std::endl;
+  ss << "  }" << '\n';
+  ss << "  attributes {" << '\n';
   ss << torch::jit::jit_log_prefix("    ", attributes_ss.str());
-  ss << "  }" << std::endl;
-  ss << "  methods {" << std::endl;
+  ss << "  }" << '\n';
+  ss << "  methods {" << '\n';
   ss << torch::jit::jit_log_prefix("  ", methods_ss.str());
-  ss << "  }" << std::endl;
-  ss << "  submodules {" << std::endl;
+  ss << "  }" << '\n';
+  ss << "  submodules {" << '\n';
   for (const NameModule& s : named_children()) {
     // We do 4 spaces here, because one level of indentation comes from
     // 'submodules' scope and the other one goes from a specific submodule we're
@@ -614,8 +614,8 @@ std::string Module::dump_to_str(
         s.value.dump_to_str(
             print_method_bodies, print_attr_values, print_param_values));
   }
-  ss << "  }" << std::endl;
-  ss << "}" << std::endl;
+  ss << "  }" << '\n';
+  ss << "}" << '\n';
 
   return ss.str();
 }
@@ -626,7 +626,7 @@ void Module::dump(
     bool print_param_values = true) const {
   std::cout << dump_to_str(
                    print_method_bodies, print_attr_values, print_param_values)
-            << std::endl;
+            << '\n';
 }
 
 } // namespace torch::jit

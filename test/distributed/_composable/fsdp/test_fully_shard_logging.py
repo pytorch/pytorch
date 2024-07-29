@@ -9,6 +9,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import LoggingTestCase
 
+
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"

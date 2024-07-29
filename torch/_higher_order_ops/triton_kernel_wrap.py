@@ -5,10 +5,10 @@ import dataclasses
 import inspect
 import logging
 import threading
-import typing
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Union
 
+import torch
 import torch.fx as fx
 
 import torch.utils._pytree as pytree
@@ -566,6 +566,11 @@ def triton_kernel_wrapper_mutation_fake_tensor_mode(
         return None
 
 
+@triton_kernel_wrapper_mutation.py_impl(DispatchKey.Meta)
+def _(*, kernel_idx, constant_args_idx, grid, kwargs):
+    return None
+
+
 def trace_triton_kernel_wrapper(proxy_mode, func_overload, node_args):
     with disable_proxy_modes_tracing():
         out = func_overload(**node_args)
@@ -746,8 +751,6 @@ triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)
 ###############################################################################
 # The "TritonHOPifier": a class that transforms a call to a triton kernel into
 # a call to the triton_kernel_wrapper_mutation HOP.
-
-fx_acceptable_types = typing.get_args(fx.node.BaseArgumentTypes)
 
 
 class TritonHOPifier:
@@ -932,7 +935,14 @@ class TritonHOPifier:
                 self.raise_unsupported("Grid can have at most rank 3")
 
         assert len(grids) != 0
-        if len(set(grids)) == 1:
+
+        def intify(x):
+            if isinstance(x, torch.SymInt):
+                return int(x)
+            else:
+                return x
+
+        if len(set(pytree.tree_map(intify, grids))) == 1:
             # If there's only one unique grid, lets simplify
             grids = [grids[0]]
 
@@ -966,14 +976,13 @@ class TracingTritonHOPifier(TritonHOPifier):
     def call_HOP(self, variable, grids, combined_args, tx):
         assert tx is None
 
+        def is_graphable(val):
+            return isinstance(val, fx.node.base_types)
+
         non_graphable_args = {
-            k: v
-            for k, v in combined_args.items()
-            if not isinstance(v, fx_acceptable_types)
+            k: v for k, v in combined_args.items() if not is_graphable(v)
         }
-        graphable_args = {
-            k: v for k, v in combined_args.items() if isinstance(v, fx_acceptable_types)
-        }
+        graphable_args = {k: v for k, v in combined_args.items() if is_graphable(v)}
 
         constant_args_idx = kernel_side_table.add_constant_args(non_graphable_args)
         return triton_kernel_wrapper_mutation(

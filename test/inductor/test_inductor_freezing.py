@@ -9,7 +9,6 @@ import unittest
 import weakref
 
 import torch
-
 from torch import nn
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -17,6 +16,7 @@ from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import skipIfRocm
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 
+
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
         "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
@@ -39,10 +40,12 @@ if IS_WINDOWS and IS_CI:
 
 from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
 
+
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
 
 aten = torch.ops.aten
 prims = torch.ops.prims

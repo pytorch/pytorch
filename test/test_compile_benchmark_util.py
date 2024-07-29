@@ -6,6 +6,7 @@ import torch
 import torch._dynamo as torchdynamo
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 
+
 try:
     import tabulate  # noqa: F401  # type: ignore[import]
 

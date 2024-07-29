@@ -11,6 +11,7 @@ from torch.distributed.pipelining.schedules import (
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase
 
+
 F = _ComputationType.FORWARD
 B = _ComputationType.BACKWARD
 W = _ComputationType.WEIGHT

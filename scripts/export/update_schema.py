@@ -5,6 +5,7 @@ from yaml import dump, Dumper
 
 from torch._export.serde import schema_check
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="update_schema")
     parser.add_argument(
