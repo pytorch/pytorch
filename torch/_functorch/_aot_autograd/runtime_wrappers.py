@@ -57,6 +57,7 @@ from .subclass_utils import (
     get_types_for_subclass,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
+    unwrap_tensor_subclasses_maybe_joint,
     wrap_tensor_subclasses,
 )
 
@@ -638,12 +639,12 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
 
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
-            unwrapped_args = unwrap_tensor_subclasses(
+            unwrapped_args = unwrap_tensor_subclasses_maybe_joint(
                 args,
                 subclass_metas=runtime_metadata.subclass_inp_meta,
                 is_joint_structure=self.trace_joint,
                 is_runtime=True,
-                append_extra=True,
+                append_symints=True,
             )
             args.clear()
             # expectation: runtime_fn is a boxed fn
@@ -1829,13 +1830,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                     # Get the number of tangents after unwrapping
                     len_tangents = len(
-                        unwrap_tensor_subclasses(
-                            tangents,
-                            subclass_metas=None,
-                            is_joint_structure=False,
-                            is_runtime=True,
-                            append_extra=False,
-                        )
+                        unwrap_tensor_subclasses(tangents, append_symints=False)
                     )
                     assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
@@ -1860,13 +1855,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         for i, a in enumerate(all_args)
                     ]
 
-                    all_args = unwrap_tensor_subclasses(
-                        all_args,
-                        subclass_metas=tangent_metadata,
-                        is_joint_structure=False,
-                        is_runtime=True,
-                        append_extra=False,
-                    )
+                    all_args = unwrap_tensor_subclasses(all_args, append_symints=False)
                     tangents_start_idx = len(all_args) - len_tangents - len(rng_args)
                     tangents_end_idx = tangents_start_idx + len_tangents
 

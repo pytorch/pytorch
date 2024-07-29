@@ -56,6 +56,7 @@ from .subclass_utils import (
     remap_unwrapped_subclass_arg_indices,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
+    unwrap_tensor_subclasses_maybe_joint,
     wrap_tensor_subclasses_maybe_joint,
 )
 from .utils import maybe_to_fresh_input
@@ -685,22 +686,18 @@ def aot_dispatch_subclass(
             grad_inputs = wrapped_outs[1]
             subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
 
-            bw_out = unwrap_tensor_subclasses(
-                wrapped_outs[1],
-                subclass_metas=None,
-                is_joint_structure=False,
+            assert isinstance(wrapped_outs, tuple) and len(wrapped_outs) == 2
+            return unwrap_tensor_subclasses_maybe_joint(
+                wrapped_outs,
                 is_runtime=False,
-                append_extra=True,
+                is_joint_structure=True,
+                append_symints=True,
+                subclass_metas=None,
             )
-            wrapped_outs = (wrapped_outs[0], bw_out)
 
         # Step 3: Unwrap any subclass outputs back into dense tensors
         unwrapped_outs = unwrap_tensor_subclasses(
-            wrapped_outs,
-            subclass_metas=None,
-            is_joint_structure=use_trace_joint,
-            is_runtime=False,
-            append_extra=True,
+            wrapped_outs, append_symints=True, subclass_metas=None
         )
         return unwrapped_outs
 
@@ -717,13 +714,13 @@ def aot_dispatch_subclass(
     def metadata_fn(*primals):
         return inner_fn(fw_only, primals, use_trace_joint=False)
 
-    args_unwrapped = unwrap_tensor_subclasses(
-        args,
-        subclass_metas=None,
-        is_joint_structure=is_joint_structure,
-        is_runtime=False,
-        append_extra=True,
-    )
+    if is_joint_structure:
+        args_unwrapped = (
+            unwrap_tensor_subclasses(args[0], append_symints=True),
+            unwrap_tensor_subclasses(args[1], append_symints=False),
+        )
+    else:
+        args_unwrapped = unwrap_tensor_subclasses(args, append_symints=True)
     remapped_static_indices = remap_unwrapped_subclass_arg_indices(
         args, meta.static_input_indices
     )
