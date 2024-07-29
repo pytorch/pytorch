@@ -80,7 +80,8 @@ std::optional<AutocastScope> parseAutocast(
         // Search for `prim::SetAttr[name="_enabled"]`
         enabled = constant_as<bool>(use.user->input(1));
         TORCH_CHECK(
-            enabled.has_value(), "Autocast _enabled argument must be a constant");
+            enabled.has_value(),
+            "Autocast _enabled argument must be a constant");
       } else if (
           use.user->kind() == prim::SetAttr &&
           use.user->s(attr::name) == "device") {

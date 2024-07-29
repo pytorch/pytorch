@@ -63,7 +63,8 @@ void PropertyPropBase::propagateBlock(Block* block, bool insert_expands) {
     } catch (propagation_error& e) {
       setUnshapedType(node);
     } catch (std::exception& e) {
-      throw (ErrorReport(node->sourceRange())
+      throw(
+          ErrorReport(node->sourceRange())
           << ExceptionMessage(e)
           << "\nThe above operation failed shape propagation in this context");
     }
@@ -313,8 +314,7 @@ class ShapePropagator : public PropertyPropBase {
         return at::empty_strided(
                    *type->sizes().concrete_sizes(),
                    *type->strides().concrete_sizes(),
-                   at::TensorOptions(*type->device())
-                       .dtype(type->scalarType()))
+                   at::TensorOptions(*type->device()).dtype(type->scalarType()))
             .zero_();
       }
       // fallthrough

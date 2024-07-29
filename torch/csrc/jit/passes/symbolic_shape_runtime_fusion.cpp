@@ -595,7 +595,8 @@ RegisterOperators reg_guard({
                 }
                 // TODO: potential optimization - if there is a Symbolic
                 // Sym with only one use we dont need to test anything
-                flattened_input_dims.push_back(static_cast<int64_t>(sym_dim_index));
+                flattened_input_dims.push_back(
+                    static_cast<int64_t>(sym_dim_index));
               }
             }
           }
