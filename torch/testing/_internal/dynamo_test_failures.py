@@ -76,10 +76,7 @@ FIXME_inductor_non_strict = {
 # Instead we will gradually remove items from this list. Once the list is empty,
 # we will remove the list.
 FIXME_inductor_dont_reset_dynamo = {
-    "test_modules",
     "test_ops",
-    "test_ops_gradients",
-    "test_torch",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
