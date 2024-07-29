@@ -354,8 +354,8 @@ def cat(
     # optimization, avoid concat for single, repeated input
     if all(t is filtered_tensors[0] for t in filtered_tensors):
         inp = filtered_tensors[0]
-        dim = dim + len(inp) if dim < 0 else dim
         shape = list(inp.shape)
+        dim = dim + len(inp.shape) if dim < 0 else dim
         shape.insert(dim, len(filtered_tensors))
         return inp.unsqueeze(dim).expand(*shape).flatten(dim, dim + 1).clone()
 

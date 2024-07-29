@@ -7,9 +7,9 @@ import unittest
 from collections import defaultdict
 from functools import partial
 
+import torch._inductor.decomposition
 import torch.autograd
 from torch import Tensor
-import torch._inductor.decomposition
 from torch._decomp import core_aten_decompositions, decomposition_table
 from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import DispatchKey
