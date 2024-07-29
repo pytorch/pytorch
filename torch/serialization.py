@@ -794,7 +794,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
     import torch.nn as nn
 
     serialized_container_types = {}
-    serialized_storages = {}
+    serialized_storages: Dict[str, Tuple[torch.UntypedStorage, torch.dtype]] = {}
 
     # Since loading storages that view the same data with different dtypes is
     # not supported, we need to keep track of the dtype associated with each
@@ -1145,21 +1145,26 @@ def load(
     )
 
     def _get_wo_message(message: str) -> str:
-        pattern = r"GLOBAL (\S+) was not an allowed global by default."
-        has_unsafe_global = re.search(pattern, message) is not None
+        unsafe_global_pattern = r"GLOBAL (\S+) was not an allowed global by default."
+        has_unsafe_global = re.search(unsafe_global_pattern, message) is not None
+        blocklist_pattern = r"whose module (\S+) is blocked"
+        has_blocklist = re.search(blocklist_pattern, message) is not None
         if has_unsafe_global:
             updated_message = (
-                "Weights only load failed. This file can still be loaded, to do so you have two options "
+                "Weights only load failed. This file can still be loaded, to do so you have two options, "
+                "\033[1mdo those steps only if you trust the source of the checkpoint\033[0m. "
                 f"\n\t(1) {UNSAFE_MESSAGE}\n\t(2) Alternatively, to load with `weights_only=True` please check "
                 "the recommended steps in the following error message.\n\tWeightsUnpickler error: "
                 + message
             )
         else:
-            updated_message = (
-                f"Weights only load failed. {UNSAFE_MESSAGE}\n Please file an issue with the following "
-                "so that we can make `weights_only=True` compatible with your use case: WeightsUnpickler "
-                "error: " + message
-            )
+            updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
+            if not has_blocklist:
+                updated_message += (
+                    "Please file an issue with the following so that we can make "
+                    "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
+                )
+            updated_message += message
         return updated_message + DOCS_MESSAGE
 
     if weights_only is None:

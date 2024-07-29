@@ -19,7 +19,6 @@ Updated operators:
 from __future__ import annotations
 
 import functools
-from typing import Optional
 
 import torch
 from torch.onnx import _constants, _type_utils, symbolic_helper
@@ -139,10 +138,10 @@ def scaled_dot_product_attention(
     query: torch._C.Value,
     key: torch._C.Value,
     value: torch._C.Value,
-    attn_mask: Optional[torch._C.Value] = None,
+    attn_mask: torch._C.Value | None = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
-    scale: Optional[torch._C.Value] = None,
+    scale: torch._C.Value | None = None,
 ):
     assert (not is_causal) or (
         is_causal and symbolic_helper._is_none(attn_mask)
