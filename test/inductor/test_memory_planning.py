@@ -65,7 +65,7 @@ class TestMemoryPlanning(TestCase):
     def test_cpp_wrapper(self):
         f, args = self._generate(device="cuda")
         compiled = torch.compile(f, dynamic=True)
-        with config.patch("cpp_wrapper", True):
+        with config.patch({"cpp_wrapper": True, "abi_compatible": False}):
             result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(

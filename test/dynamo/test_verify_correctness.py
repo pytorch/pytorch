@@ -2,7 +2,6 @@
 import operator
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.config as config
 import torch._dynamo.test_case
