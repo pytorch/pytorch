@@ -201,7 +201,7 @@ class OpsHandler(Protocol[T]):
     # in scope, which are typically used by sympy.Expr indexing.
 
     def indirect_indexing(
-        self, x: T, size: sympy.Expr, check: bool = True
+        self, x: T, size: sympy.Expr, check: bool = True, wrap_neg=True
     ) -> sympy.Expr:
         """
         Convert an integral x into a sympy.Expr that can be subsequently used in
@@ -768,7 +768,7 @@ class NoopHandler:
         return (None,) * len(values)
 
     @staticmethod
-    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
+    def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy.Integer(0)
 
 
@@ -812,7 +812,7 @@ class MockHandler:
         )
 
     @staticmethod
-    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
+    def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy_index_symbol(str(index_var))
 
     @classmethod

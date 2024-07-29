@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -30,6 +31,7 @@ from torch import SymInt, SymBool, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
+from torch._subclasses.fake_impls import fast_detach
 from torch.fx import Proxy
 from torch.fx import Tracer, GraphModule
 from torch.fx.graph_module import _assign_attr
@@ -276,7 +278,13 @@ def get_proxy_slot(
     return res
 
 def snapshot_fake(val: Tensor) -> Optional[Tensor]:
-    return val.detach()
+    # val.detach() will also eventually call fast_detach(),
+    # but this saves us a full trip into __torch_dispatch__
+    # (snapshot_fake is called a lot)
+    if isinstance(val, FakeTensor):
+        return fast_detach(val.fake_mode, val)
+    else:
+        return val.detach()
 
 _ExtractValType = Optional[Union[
     PySymType, _AnyScriptObjectType, BackwardState,
@@ -314,6 +322,7 @@ def extract_val(val: _ExtractValType) -> _ExtractValType:
 
     typing_extensions.assert_never(val)
 
+# Note [invariants for node meta 'val']
 # What invariants do we have for the 'val' set on the FX node?  It has accurate
 # metadata... but only for metadata that exists "below" all other subsystems
 # (most notably autograd, but also vmap, functorch transforms, etc).  This means
@@ -498,7 +507,7 @@ def fetch_object_proxy(tracer: _ProxyTracer, t: Union[Tensor, _AnyScriptObjectTy
 HANDLED_TYPES = (Tensor, torch.nn.Parameter, FakeTensor)
 
 
-def maybe_record_pointwise_barrier(func: object, proxy_mode: ProxyTorchDispatchMode) -> None:
+def _maybe_record_pointwise_barrier(func: object, proxy_mode: ProxyTorchDispatchMode) -> None:
     """
     Records pointwise operators in user program (non decomposed) that were output in fp16/bf16
     """
@@ -547,7 +556,7 @@ def proxy_call(
 
     r = maybe_handle_decomp(proxy_mode, func, args, kwargs)
     if r is not NotImplemented:
-        maybe_record_pointwise_barrier(func, proxy_mode)
+        _maybe_record_pointwise_barrier(func, proxy_mode)
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
@@ -750,7 +759,7 @@ def proxy_call(
         constant = None
 
     track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
-    maybe_record_pointwise_barrier(func, proxy_mode)
+    _maybe_record_pointwise_barrier(func, proxy_mode)
     return out
 
 
