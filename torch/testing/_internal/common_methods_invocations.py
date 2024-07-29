@@ -16159,7 +16159,7 @@ op_db: List[OpInfo] = [
         )
     ),
     OpInfo(
-        'torch._safe_softmax',
+        'torch.ops.aten._safe_softmax.default',
         dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_safe_softmax,
         assert_jit_shape_analysis=True,
