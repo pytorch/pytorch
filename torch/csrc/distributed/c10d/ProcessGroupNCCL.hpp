@@ -437,34 +437,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::string group_name;
   };
 
-  // A struct to hold the latest status of the process group.
-  struct ProcessGroupStatus {
-    // the sequential number of the last collective enqueued into workMetaList_
-    // This is useful for indentifying a rank that has not join a collective
-    // initialized to be -1 to indicate no collective has been enqueued
-    int64_t lastEnqueuedSeq{-1};
-    // the sequential number of the last collective started as the kernel
-    int64_t lastStartedSeq{-1};
-    // the sequential number of the last colletive completed marked by
-    // the watchdog thread
-    // initialized to be -1 to indicate no collective has been completed
-    int64_t lastCompletedSeq{-1};
-
-    // the name of the last collective enqueued into workMetaList_
-    std::string lastEnqueuedWorkName;
-    // the name of the last collective started as the kernel
-    std::string lastStartedWorkName;
-    // the name of the last collective completed
-    std::string lastCompletedWorkName;
-
-    // the sizes of the last work enqueued
-    size_t lastEnqueuedNumelIn;
-    size_t lastEnqueuedNumelOut;
-    // the sizes of the last work completed
-    size_t lastCompletedNumelIn;
-    size_t lastCompletedNumelOut;
-  };
-
   // If you wish to create multiple process groups, each with a potentially
   // different rank and size, you can do so by passing a new store instance
   // to each one. If you have only a single store object, you can
@@ -670,6 +642,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void performNocolorSplit(at::Device device);
 
+  void extendTimeOutUntilFirstDone(const std::chrono::milliseconds& timeout);
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
@@ -829,6 +803,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Returns the global ranks of a PG.
   const std::vector<uint64_t>& groupRanks() const;
 
+  // Util function to assign timeout to each work.
+  void assignTimeoutToWork(
+      c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work,
+      c10::intrusive_ptr<Options> option);
+
  protected:
   // Function that runs as part of a separate thread aside from watchdog
   // thread because we need to check the heartbeat from watchdog thread
@@ -866,6 +845,17 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<Store> globalStore_;
 
   bool storeError_{false};
+
+  // The lock which protects the write/read of extendedTimeout_
+  std::mutex mtxTimeoutExtension_;
+
+  // The extended timeout on top of existing timeout for works issued before
+  // first work finishes.
+  std::chrono::milliseconds extendedTimeout_ = std::chrono::milliseconds(0);
+
+  // Record of first work and will get reset if timeout is further extended.
+  c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> firstWorkSinceExtended_ =
+      nullptr;
 
   const c10::intrusive_ptr<Options> options_;
 
@@ -1111,7 +1101,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Number of devices on this node.
   int localDeviceCount_{0};
 
-  ProcessGroupStatus pgStatus_;
+  std::shared_ptr<ProcessGroupStatus> pgStatus_ =
+      std::make_shared<ProcessGroupStatus>();
 };
 
 // Dumps the NCCL comm traces and additional information about the Process

@@ -281,7 +281,7 @@ manual_torch_name_rule_map = {
     "torch._functorch.deprecated.grad": UserFunctionVariable,
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
-    #
+    # everything else
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
