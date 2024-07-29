@@ -129,7 +129,7 @@ def create_subclass_meta(
 # NOTE: this function is hot, since we unwrap tensor subclass inputs at runtime
 
 
-def filter_symints(size: Union[Size, List[Union[int | SymInt]]]) -> List[SymInt]:
+def filter_symints(size: Union[Size, List[Union[int, SymInt]]]) -> List[SymInt]:
     return [s for s in size if isinstance(s, SymInt)]
 
 
