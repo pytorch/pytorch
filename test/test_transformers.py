@@ -3075,7 +3075,7 @@ class TestSDPACudaOnly(NNTestCase):
                 'out': 1.5,
                 'grad_query': 13.0,
                 'grad_key': 2.0,
-                'grad_value': 1.5,
+                'grad_value': 1.75,
             }
         )
 
