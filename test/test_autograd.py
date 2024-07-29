@@ -13024,7 +13024,7 @@ class TestMultithreadAutograd(TestCase):
 
         self._run_py_multithread_fn(backward_retain_graph, (out, t2, t3), num_threads=5)
 
-        # Expect only 4 threasd to increment count since the hook runs after
+        # Expect only 4 threads to increment count since the hook runs after
         # the custom backward that raises the error
         self.assertEqual(count[0], 4)
         self.assertEqual(err_count[0], 1)
