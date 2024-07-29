@@ -504,10 +504,13 @@ def register_multi_grad_hook(
 
                     if curr_count == 0:
                         # On the first call, compute the actual nb_calls and buffer
-                        nb_calls = sum(map(torch._C._will_engine_execute_node, grad_fns))
+                        nb_calls = sum(
+                            map(torch._C._will_engine_execute_node, grad_fns)
+                        )
 
                 buffer[id][idx] = grad
 
+                assert nb_calls is not None
                 if curr_count == nb_calls - 1:
                     fn = cast(Callable[[Sequence[Optional[torch.Tensor]]], None], fn)
                     fn(buffer[id])
