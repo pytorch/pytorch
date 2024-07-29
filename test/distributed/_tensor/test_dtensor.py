@@ -962,5 +962,58 @@ dtensor.max()
         self.assertIn("redistribute=False", stderr.decode("utf-8"))
 
 
+class TestGetCoordinate(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    @with_comms
+    def test_get_coordinate_on_tensor_dim(self):
+        mesh = init_device_mesh(self.device_type, (2, 4))
+        tensor = torch.randn([18, 20, 30])
+        dtensor = distribute_tensor(tensor, mesh, [Shard(0), Shard(0)])
+
+        def get_coordinate_on_tensor_dim(dtensor):
+            placements = dtensor.placements
+            mesh = dtensor.device_mesh
+
+            num_chunks_by_dim = [1 for _ in enumerate(dtensor.shape)]
+            for mesh_idx, placement in enumerate(placements):
+                if placement.is_shard():
+                    tensor_dim = placement.dim  # type: ignore[attr-defined]
+                    mesh_dim_size = mesh.size(mesh_idx)
+                    num_chunks_by_dim[tensor_dim] *= mesh_dim_size
+
+            coordinates = dtensor.device_mesh.get_coordinate()
+            num_chunked_by_dim = num_chunks_by_dim
+            strides = []
+            for mesh_dim, placement in enumerate(placements): 
+                if placement.is_shard():
+                    tensor_dim = placement.dim
+                    mesh_dim_size = mesh.size(mesh_dim)
+                    num_chunked_by_dim[tensor_dim] = num_chunked_by_dim[tensor_dim] // mesh_dim_size
+                    stride = num_chunked_by_dim[tensor_dim]
+                else:
+                    stride = 0
+                strides.append(stride)
+
+            print(f"{self.rank=}, {strides=}, {coordinates=}")
+
+        get_coordinate_on_tensor_dim(dtensor)
+
+
+    @with_comms
+    def test_get_coordinate_1(self):
+        mesh = init_device_mesh(self.device_type, (2,4))
+        tensor = torch.randn([16, 10])
+        dtensor = distribute_tensor(tensor, mesh, [Shard(0), Shard(0)])
+        local_size = dtensor.to_local().size()
+        dim_map = dtensor._spec.dim_map
+        print(f"{self.rank=}, {dim_map=}, {mesh.get_coordinate()=}")
+        print(f"{self.rank=}, {mesh.get_coordinate()=}, {local_size=}")
+        print(f"{self.rank}, {dtensor._spec.dim_map=}")
+        # print(f"{self.rank=}, {dtensor=}, {mesh.get_coordinate()=}, shard0_0 rank: {mesh['shard0_0'].get_local_rank()=}, shard0_1 rank: {mesh['shard0_1'].get_local_rank()=}")
+        
+
 if __name__ == "__main__":
     run_tests()
