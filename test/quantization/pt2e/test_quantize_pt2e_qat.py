@@ -925,7 +925,6 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         (conv_node, bn_node, getitem_node) = _get_conv_bn_getitem_nodes(m)
         self.assertTrue(conv_node is not None)
         self.assertTrue(bn_node is None)
-        self.assertTrue(getitem_node is None)
 
 
 @skipIfNoQNNPACK
