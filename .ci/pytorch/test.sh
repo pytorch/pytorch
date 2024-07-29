@@ -9,6 +9,7 @@ set -ex
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
+
 # Do not change workspace permissions for ROCm CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
 if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
@@ -392,13 +393,16 @@ test_inductor_cpp_wrapper_abi_compatible() {
 DYNAMO_BENCHMARK_FLAGS=()
 
 pr_time_benchmarks() {
+  pip install cirron
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
   # run the benchmarks on the current commit.
-  python benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.py "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
-  echo "content before"
-  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
+  source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
+  echo "benchmark results on current PR: "
+  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
+  git checkout HEAD~1
+
 
   # build torch at the base commit to
   if [[ "${BASE_SHA}" == "${SHA1}" ]]; then
@@ -427,9 +431,11 @@ pr_time_benchmarks() {
   pip show torch
 
   # run the benchmarks on parent.
-  python ./benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.py "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
-  echo "content after:"
-  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
+  python setup.py clean
+  python setup.py develop
+  source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
+  echo "benchmark results on main: "
+  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
 
   # resetting the original code
   git reset --hard "${SHA1}"
@@ -438,6 +444,7 @@ pr_time_benchmarks() {
   rm -r "${REPO_DIR}/venv" "${REPO_DIR}/base_dist"
   pip show torch
 }
+
 
 if [[ "${TEST_CONFIG}" == *pr_time_benchmarks* ]]; then
   pr_time_benchmarks
