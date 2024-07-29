@@ -352,6 +352,7 @@ def mps_ops_modifier(ops):
         'unsafe_chunk',
         'unsafe_split',
         'unsqueeze',
+        'unsqueeze_copy',
         'view_as',
         'view_as_real',
         'view',
