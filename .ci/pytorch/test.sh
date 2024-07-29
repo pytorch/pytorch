@@ -691,7 +691,7 @@ test_inductor_torchbench_cpu_smoketest_perf(){
   do
     local model_name=${model_cfg[0]}
     local data_type=${model_cfg[2]}
-    local speedup_target=${model_cfg[5]}
+    # local speedup_target=${model_cfg[5]}
     local backend=${model_cfg[1]}
     if [[ ${model_cfg[4]} == "cpp" ]]; then
       export TORCHINDUCTOR_CPP_WRAPPER=1
@@ -711,7 +711,8 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     fi
     cat "$output_name"
     # The threshold value needs to be actively maintained to make this check useful.
-    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target"
+    # TODO: re-enable this after https://github.com/pytorch/pytorch/pull/131812 lands
+    # python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target"
   done
 
   # Add a few ABI-compatible accuracy tests for CPU. These can be removed once we turn on ABI-compatible as default.
@@ -1271,7 +1272,7 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" != *perf_cpu_aarch64* ]]; then
   test_linux_aarch64
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
