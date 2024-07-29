@@ -3263,7 +3263,6 @@ def get_mod_inlinelist():
 # skip some standard python builtin libs
 SKIP_DIRS = [
     "<frozen importlib",
-    "<frozen abc",
     "<__array_function__ internals>",
     _config_module.__file__,
     "triton/backends",
