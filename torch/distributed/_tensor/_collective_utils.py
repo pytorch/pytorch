@@ -8,11 +8,13 @@ from typing import List, Optional
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.placement_types as placement_types
+from torch._C._distributed_c10d import _resolve_process_group
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
     _get_group_size_by_name,
     broadcast,
     get_global_rank,
+    get_group_rank,
     get_rank,
     GroupMember,
     ProcessGroup,
@@ -30,7 +32,12 @@ if not torch._running_with_deploy():
     def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
         group_size = _get_group_size_by_name(group_name)
         stacked_list = [torch.empty_like(input) for _ in range(group_size)]
-        return torch.cat(stacked_list, dim=gather_dim).chunk(group_size, dim=shard_dim)
+        group = _resolve_process_group(group_name)
+        group_rank = get_group_rank(group, get_rank())
+
+        return torch.cat(stacked_list, dim=gather_dim).chunk(group_size, dim=shard_dim)[
+            group_rank
+        ]
 
 else:
     import warnings

@@ -9,7 +9,7 @@ import torch.distributed as dist
 from torch import rand, randn, Tensor
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.ops.view_ops import (
+from torch.distributed._tensor.ops._view_ops import (
     Broadcast,
     dim_maps,
     Flatten,
