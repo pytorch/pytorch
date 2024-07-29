@@ -67,7 +67,7 @@ extern "C"
     );
     const int64_t num_Mc_blocks = (M0_blocks + Mc_blocks - 1) / Mc_blocks;
     const int64_t num_Nc_blocks = (N0_blocks + Nc_blocks - 1) / Nc_blocks;
-    const int64_t num_k_slices = (K0_blocks + Kt_blocks - 1) / Kt_blocks;    
+    const int64_t num_k_slices = (K0_blocks + Kt_blocks - 1) / Kt_blocks;
     {%- else %}
     constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
     constexpr int64_t M0_blocks = (M + M0 - 1) / M0;
