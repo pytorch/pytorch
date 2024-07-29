@@ -9,6 +9,7 @@ set -ex
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
+
 # Do not change workspace permissions for ROCm CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
 if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
@@ -392,11 +393,13 @@ test_inductor_cpp_wrapper_abi_compatible() {
 DYNAMO_BENCHMARK_FLAGS=()
 
 pr_time_benchmarks() {
+
+  pip install cirron
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  python benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.py "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
-  echo "content before"
-  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
+  source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
+  echo "benchmark results on current PR: "
+  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
 
 }
 
