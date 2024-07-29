@@ -72,7 +72,7 @@ class TorchDispatchMode:
 
     def _lazy_init_old_dispatch_mode_flags(self):
         if not hasattr(self, "old_dispatch_mode_flags"):
-            self.old_dispatch_mode_flags: Deque[bool] = deque() # type: ignore[no-redef]
+            self.old_dispatch_mode_flags: Deque[bool] = deque()  # type: ignore[no-redef]
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError
