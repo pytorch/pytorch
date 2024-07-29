@@ -240,6 +240,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "alias_copy",
+        dtypes=(torch.int8, torch.uint8, torch.int16, torch.float64),
         reason="OnnxExporterError: Failed to export model",
     ),
     xfail(

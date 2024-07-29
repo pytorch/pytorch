@@ -5,11 +5,13 @@ from collections import defaultdict
 
 import torch
 from torch.autograd import DeviceType
+
 from .runtime.runtime_utils import (
     create_bandwidth_info_str,
     do_bench_gpu,
     get_num_bytes,
 )
+
 
 _kernel_category_choices = [
     "foreach",
