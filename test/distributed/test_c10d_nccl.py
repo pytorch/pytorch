@@ -602,13 +602,11 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             # feasible in unit test. So this is only a very tiny case.
             time.sleep(6)
             pg.allreduce(torch.rand(10).cuda(self.rank))
-            self._check_nccl_timeout(timedelta(seconds=3))
         else:
-            dist.distributed_c10d._extend_timeout_all_pgs(timedelta(seconds=100))
-            self._check_nccl_timeout(timedelta(seconds=103))
+            dist.distributed_c10d._extend_timeout_until_first_done_all_pgs(
+                timedelta(seconds=100)
+            )
             pg.allreduce(torch.rand(10).cuda(self.rank))
-            dist.distributed_c10d._extend_timeout_all_pgs(timedelta(seconds=-10000))
-            self._check_nccl_timeout(timedelta(seconds=600))
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
