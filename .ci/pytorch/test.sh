@@ -397,12 +397,12 @@ pr_time_benchmarks() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  # run the benchmarks on the current commit.
+  # run the benchmarks on the current commit
   source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on current PR: "
   cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
 
-  # build torch at the base commit to
+  # build torch at the base commit
   if [[ "${BASE_SHA}" == "${SHA1}" ]]; then
     echo "On trunk, we should compare schemas with torch built from the parent commit"
     SHA_TO_COMPARE=$(git rev-parse "${SHA1}"^)
@@ -428,7 +428,7 @@ pr_time_benchmarks() {
 
   pip show torch
 
-  # run the benchmarks on parent.
+  # run the benchmarks on parent
   python setup.py clean
   python setup.py develop
   source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
