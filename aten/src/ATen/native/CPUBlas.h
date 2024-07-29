@@ -196,15 +196,15 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
 template <typename key_t, typename value_t>
 struct Kernel_Cache {
   using kstore_t = std::unordered_map<key_t, std::shared_ptr<value_t>>;
-  static inline std::shared_ptr<value_t> fetch_or_create(
+  static inline std::shared_ptr<value_t>&& fetch_or_create(
       const key_t& key,
       const std::function<std::shared_ptr<value_t>()>& callback) {
     auto&& search = get_store().find(key);
     if (search != get_store().end()) {
-      return search->second;
+      return std::move(search->second);
     } else {
       get_store().insert({key, callback()});
-      return get_store()[key];
+      return std::move(get_store()[key]);
     }
   }
 
@@ -353,7 +353,7 @@ struct Brgemm : public Kernel_Cache<BrgemmKey, GemmHelper> {
       auto&& v = std::make_shared<GemmHelper>(
           M, N, K, 1, ld_a, ld_b, ld_c, c10::CppTypeToScalarType<scalar_t_a>::value, c10::CppTypeToScalarType<scalar_t_b>::value, c10::CppTypeToScalarType<scalar_t_c>::value, alpha, beta);
       (*v).brg.generate();
-      return v;
+      return std::move(v);
     });
     ((*value).brg).set_hw_context();
     ((*value).brg).execute(A, B, offsets, C, (*value).scratchpad.data());
@@ -378,7 +378,7 @@ struct Brgemm : public Kernel_Cache<BrgemmKey, GemmHelper> {
       auto&& v = std::make_shared<GemmHelper>(
           M, N, K, 1, ld_a, ld_b, ld_c, c10::CppTypeToScalarType<scalar_t_a>::value, c10::CppTypeToScalarType<scalar_t_b>::value, c10::CppTypeToScalarType<scalar_t_c>::value, alpha, beta);
       (*v).brg.generate();
-      return v;
+      return std::move(v);
     });
     ((*value).brg).set_hw_context();
     ((*value).brg)
@@ -408,7 +408,7 @@ struct Pack : public Kernel_Cache<PackKey, dnnl::ukernel::brgemm_pack_B> {
       if ((*pack_tmp).need_pack()) {
         (*pack_tmp).generate();
       }
-      return pack_tmp;
+      return std::move(pack_tmp);
     });
     if ((*pack).need_pack()) {
       (*pack).execute(in, out);
@@ -426,7 +426,7 @@ struct Pack : public Kernel_Cache<PackKey, dnnl::ukernel::brgemm_pack_B> {
       if ((*pack_tmp).need_pack()) {
         (*pack_tmp).generate();
       }
-      return pack_tmp;
+      return std::move(pack_tmp);
     });
     return (*pack).need_pack();
   }
