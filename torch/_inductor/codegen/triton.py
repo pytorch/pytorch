@@ -594,7 +594,12 @@ class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton"""
 
     @staticmethod
-    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
+    def to_dtype(
+        x,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types=True,
+    ):
         def _get_min_elements_per_thread(
             src_dtype: torch.dtype, dst_dtype: torch.dtype
         ) -> int:
@@ -637,7 +642,13 @@ class TritonOverrides(OpOverrides):
             # to work around llvm uint conversion semantics
             # that produces 0's for negative values
             return f"{x}.to(tl.int8).to(tl.uint8)"
-        return f"{x}.to({triton_compute_type(dtype)})"
+
+        if use_compute_types:
+            out_dtype = triton_compute_type(dtype)
+        else:
+            out_dtype = triton_store_type(dtype)
+
+        return f"{x}.to({out_dtype})"
 
     @staticmethod
     def to_dtype_bitcast(x, dtype: torch.dtype, src_dtype: torch.dtype):
