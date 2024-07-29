@@ -156,13 +156,14 @@ def get_plain_tensors(subclass: Tensor) -> List[Tensor]:
     todo = [subclass]
     while todo:
         curr = todo.pop()
+        if not is_traceable_wrapper_subclass(curr):
+            plain_tensors.append(curr)
+            continue
+
         inner_keys, _ = curr.__tensor_flatten__()
-        for key in inner_keys:
-            val = getattr(curr, key)
-            if not is_traceable_wrapper_subclass(val):
-                plain_tensors.append(val)
-            else:
-                todo.append(val)
+        for key in reversed(inner_keys):
+            todo.append(getattr(curr, key))
+
     return plain_tensors
 
 
