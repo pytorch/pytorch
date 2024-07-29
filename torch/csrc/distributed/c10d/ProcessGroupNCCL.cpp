@@ -1579,9 +1579,9 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
 
 std::string ProcessGroupNCCL::createLogPrefix() const {
   if (!pg_desc_.empty() && pg_desc_ != "undefined") {
-    return c10::str("[PG ", pg_name_, " (", pg_desc_, ") Rank ", rank_, "] ");
+    return c10::str("[PG ", uid_, " (", pg_desc_, ") Rank ", rank_, "] ");
   }
-  return c10::str("[PG ", pg_name_, " Rank ", rank_, "] ");
+  return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
 }
 
 const std::string& ProcessGroupNCCL::logPrefix() const {
