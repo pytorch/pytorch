@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
-from .runtime.benchmarking import benchmarker, do_bench, LazyBenchmark
+from .runtime.benchmarking import benchmarker, LazyBenchmark
 from .virtualized import V
 
 
@@ -597,7 +597,7 @@ class GPUDeviceBenchmarkRequest(BenchmarkRequest):
             device_idx = torch.cuda.current_device()
 
         with torch.cuda.device(device_idx):
-            out = do_bench(fn, lazy=True, pruning_key="max-autotune-gemm")
+            out = benchmarker.lazy_benchmark_gpu(fn, pruning_key="max-autotune-gemm")
 
         return out
 

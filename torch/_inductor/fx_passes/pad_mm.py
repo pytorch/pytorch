@@ -20,7 +20,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     pad_mm_operations,
     pad_mm_precondition,
 )
-from torch._inductor.runtime.benchmarking import do_bench
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
@@ -558,9 +558,9 @@ def should_pad_bench(
                 return ah_should_pad
 
         if ori_time is None:
-            ori_time = do_bench(orig_bench_fn, lazy=True)
+            ori_time = benchmarker.lazy_benchmark_gpu(orig_bench_fn)
 
-        pad_time = do_bench(pad_bench_fn, lazy=True)
+        pad_time = benchmarker.lazy_benchmark_gpu(pad_bench_fn)
         ori_time, pad_time = float(ori_time), float(pad_time)
         set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
         return should_pad(key, ori_time, pad_time)
@@ -621,9 +621,9 @@ def run_autoheuristic(
 ) -> Optional[bool]:
     def feedback_fn(choice: str):
         if choice == orig_choice:
-            return do_bench(orig_bench_fn)
+            return benchmarker.benchmark_gpu(orig_bench_fn)
         elif choice == pad_choice:
-            return do_bench(pad_bench_fn)
+            return benchmarker.benchmark_gpu(pad_bench_fn)
         return None
 
     def fallback() -> str:
