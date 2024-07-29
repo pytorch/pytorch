@@ -6,6 +6,7 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+import io
 import multiprocessing as mp
 import os
 import runpy
@@ -14,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
-from contextlib import closing
+from contextlib import closing, redirect_stderr, redirect_stdout
 from unittest import mock
 from unittest.mock import MagicMock, Mock, patch
 
@@ -628,6 +629,34 @@ class ElasticLaunchTest(TestCase):
             ]
         )
         # nothing to validate, just make sure it runs
+
+    def test_capture_logs_using_default_logs_specs(self):
+        run_id = str(uuid.uuid4().int)
+        nnodes = 1
+        nproc_per_node = 4
+        args = [
+            f"--nnodes={nnodes}",
+            f"--nproc-per-node={nproc_per_node}",
+            f"--rdzv-id={run_id}",
+            "--redirect=3",
+            "--tee=3",
+            "--monitor-interval=1",
+            "--start-method=spawn",
+            "--no-python",
+        ]
+
+        script_args = [path("bin/test_script.sh"), f"{self.test_dir}"]
+
+        captured_out = io.StringIO()
+        captured_err = io.StringIO()
+        with redirect_stdout(captured_out), redirect_stderr(captured_err):
+            with patch.dict(
+                os.environ, {"TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE": "[rank${rank}]: "}
+            ):
+                launch.main(args + script_args)
+
+        for i in range(nproc_per_node):
+            self.assertTrue(f"[rank{i}]: creating " in captured_out.getvalue())
 
 
 if __name__ == "__main__":

@@ -147,7 +147,6 @@ manual_torch_name_rule_map = {
     "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
-    "torch.overrides.get_default_nowrap_functions": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
@@ -282,7 +281,7 @@ manual_torch_name_rule_map = {
     "torch._functorch.deprecated.grad": UserFunctionVariable,
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
-    #
+    # everything else
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
@@ -398,6 +397,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._calculate_package_version_based_on_upgraders",
         "torch._C._can_use_flash_attention",
         "torch._C._can_use_mem_efficient_attention",
+        "torch._C._can_use_cudnn_attention",
         "torch._C._check_onnx_proto",
         "torch._C._check_sparse_tensor_invariants",
         "torch._C._collect_all",
@@ -409,6 +409,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_cpu_support_avx2",
         "torch._C._cpu._is_cpu_support_avx512",
         "torch._C._cpu._is_cpu_support_avx512_vnni",
+        "torch._C._cpu._is_cpu_support_amx_tile",
+        "torch._C._cpu._init_amx",
         "torch._C._crash_if_aten_asan",
         "torch._C._crash_if_csrc_asan",
         "torch._C._crash_if_csrc_ubsan",
@@ -1579,6 +1581,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._unpack_dual",
         "torch._unsafe_index_put",
         "torch._unsafe_index",
+        "torch._unsafe_masked_index_put_accumulate",
+        "torch._unsafe_masked_index",
         "torch._use_cudnn_ctc_loss",
         "torch._use_cudnn_rnn_flatten_weight",
         "torch._values_copy",
@@ -2382,6 +2386,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.backends.cpu.get_cpu_capability",
         "torch.backends.cuda.can_use_efficient_attention",
         "torch.backends.cuda.can_use_flash_attention",
+        "torch.backends.cuda.can_use_cudnn_attention",
         "torch.backends.cuda.enable_flash_sdp",
         "torch.backends.cuda.enable_math_sdp",
         "torch.backends.cuda.enable_mem_efficient_sdp",
@@ -2423,6 +2428,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cpu._is_cpu_support_avx2",
         "torch.cpu._is_cpu_support_avx512",
         "torch.cpu._is_cpu_support_avx512_vnni",
+        "torch.cpu._is_cpu_support_amx_tile",
+        "torch.cpu._init_amx",
         "torch.cpu.current_device",
         "torch.cpu.current_stream",
         "torch.cpu.device_count",
@@ -2766,6 +2773,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.nn.grad.conv2d_weight",
         "torch.nn.grad.conv3d_input",
         "torch.nn.grad.conv3d_weight",
+        "torch.nn.modules.activation._is_make_fx_tracing",
         "torch.nn.modules.utils._list_with_default",
         "torch.nn.modules.utils._ntuple",
         "torch.nn.modules.utils._quadruple",
@@ -2833,7 +2841,7 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 
 @functools.lru_cache(None)
 def get_torch_obj_rule_map():
-    d: Dict[Any, VariableTracker] = dict()
+    d: Dict[Any, VariableTracker] = {}
     for m in torch_name_rule_map:
         for k, v in m.items():  # type: ignore[attr-defined]
             if ".py#" not in k:
@@ -2990,7 +2998,7 @@ def _builtin_function_ids() -> Dict[int, str]:
 
 @FunctionIdSet
 def _numpy_function_ids() -> Dict[int, str]:
-    rv = dict()
+    rv = {}
     for mod in NP_SUPPORTED_MODULES:
         rv.update(
             {
@@ -3211,6 +3219,7 @@ MOD_INLINELIST = {
     "torch.fx._pytree",
     "torch.fx.passes.shape_prop",
     "torch.nn",
+    "torch.overrides",
     "torch.random",
     "torch.sparse",
     "torch.testing",
@@ -3265,11 +3274,12 @@ SKIP_DIRS_RE = re.compile(r"match nothing^")
 is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
 # Skip fbcode paths(including torch.package paths) containing
 # one of the following strings.
-FBCODE_SKIP_DIRS = {
-    "torchrec/distributed",
-    "torchrec/fb/distributed",
-    "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py",
-}
+FBCODE_SKIP_DIRS = set()
+# Remove this after fbcode is fully migrated to tracing through torchrec.
+if torch._dynamo.config.skip_torchrec:
+    FBCODE_SKIP_DIRS.add("torchrec/distributed")
+    FBCODE_SKIP_DIRS.add("torchrec/fb/distributed")
+    FBCODE_SKIP_DIRS.add("caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py")
 FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS))})")
 
 

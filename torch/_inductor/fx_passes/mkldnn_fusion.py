@@ -5,11 +5,9 @@ from functools import reduce
 from typing import Any, Tuple
 
 import torch
-
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 
 from .. import ir
-
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     Arg,
@@ -27,6 +25,7 @@ from .quantization import (
     _register_quantization_weight_pack_pass,
     _register_woq_lowerings,
 )
+
 
 if torch._C._has_mkldnn:
     aten = torch.ops.aten
@@ -800,6 +799,12 @@ if torch._C._has_mkldnn:
                 return False
             bias_meta = add_node.args[1].meta.get("val")
             if weight_meta is None or bias_meta is None:
+                return False
+            assert weight_meta.dtype in (
+                torch.bfloat16,
+                torch.float16,
+            )
+            if bias_meta.dtype != weight_meta.dtype:
                 return False
             return (
                 linear_node.args[2] is None

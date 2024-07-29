@@ -182,7 +182,7 @@ IValue
 unpack_quantized_prepacked_sizes_conv2d(const IValue& ivalue) {
   auto params = ivalue.toCustomClass<ConvPackedParamsBase<2>>();
   auto [weight, bias] = params->unpack();
-  at::OptionalIntArrayRef bias_sizes = c10::nullopt;
+  at::OptionalIntArrayRef bias_sizes = std::nullopt;
   if (bias && bias->defined()) {
     bias_sizes = bias->sizes();
   }

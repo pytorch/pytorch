@@ -17,12 +17,14 @@ try:
     try:
         from . import (
             test_cpu_repro,
+            test_cpu_select_algorithm,
             test_mkldnn_pattern_matcher,
             test_torchinductor,
             test_torchinductor_dynamic_shapes,
         )
     except ImportError:
         import test_cpu_repro
+        import test_cpu_select_algorithm
         import test_mkldnn_pattern_matcher
         import test_torchinductor
         import test_torchinductor_dynamic_shapes
@@ -95,8 +97,15 @@ if config.abi_compatible:
         "test_qconv2d_relu_cpu",
         "test_qlinear_cpu",
         "test_qlinear_add_cpu",
+        "test_qlinear_add_relu_cpu",
         "test_qlinear_dequant_promotion_cpu",
+        "test_qlinear_gelu_cpu",
         "test_qlinear_relu_cpu",
+        *[
+            func
+            for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
+            if func.startswith("test_linear_with_pointwise")
+        ],
     ]
     for test_name in xfail_list:
         test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
@@ -125,7 +134,6 @@ def make_test_case(
     slow=False,
     func_inputs=None,
     code_string_count=None,
-    skip=None,
 ):
     test_name = f"{name}_{device}" if device else name
     if code_string_count is None:
@@ -134,8 +142,6 @@ def make_test_case(
     func = getattr(tests, test_name)
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
-    if skip:
-        func = unittest.skip(skip)(func)
 
     @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def fn(self):
@@ -183,7 +189,6 @@ if RUN_CPU:
         slow: bool = False
         func_inputs: list = None
         code_string_count: dict = {}
-        skip: str = None
 
     for item in [
         BaseTest("test_add_complex"),
@@ -235,6 +240,12 @@ if RUN_CPU:
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
+        *[
+            BaseTest(func, "", test_cpu_select_algorithm.TestSelectAlgorithmCPU())
+            for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
+            if func.startswith("test_linear_with_pointwise")
+        ],
+        BaseTest("test_polar"),
         BaseTest(
             "test_linear_binary",
             "",
@@ -243,7 +254,14 @@ if RUN_CPU:
             and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
         BaseTest(
-            "test_linear_packed", "", test_cpu_repro.CPUReproTests(), skip="Failing"
+            "test_linear_packed",
+            "",
+            test_cpu_repro.CPUReproTests(),
+            torch.backends.mkldnn.is_available()
+            and (
+                torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                or torch.ops.mkldnn._is_mkldnn_fp16_supported()
+            ),
         ),
         BaseTest(
             "test_lstm_packed_change_input_sizes",
@@ -255,7 +273,8 @@ if RUN_CPU:
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest(
             "test_multi_threading",
-            code_string_count={"py::gil_scoped_release release;": 1},
+            # Two threads compile, so we expect the output code to be printed twice.
+            code_string_count={"py::gil_scoped_release release;": 2},
         ),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest(
@@ -318,21 +337,18 @@ if RUN_CPU:
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
-            skip="Failing",
         ),
         BaseTest(
             "test_qlinear_add",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
-            skip="Failing",
         ),
         BaseTest(
             "test_qlinear_add_relu",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
-            skip="Failing",
         ),
         BaseTest(
             "test_qlinear_dequant_promotion",
@@ -388,7 +404,6 @@ if RUN_CPU:
             item.slow,
             item.func_inputs,
             item.code_string_count,
-            skip=item.skip,
         )
 
     test_torchinductor.copy_tests(

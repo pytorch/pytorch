@@ -144,7 +144,7 @@ bool isBeforeOrAfter(const Use& a, const Use& b, bool checking_before) {
 
 std::optional<const Use> firstOrLastUse(Value* v, bool find_first) {
   if (v->uses().empty()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   Use extreme_use = v->uses()[0];
   for (size_t i = 1; i < v->uses().size(); ++i) {
@@ -176,12 +176,12 @@ static std::vector<size_t> sort_indexes(at::ArrayRef<Value*> values) {
     // if neither has any uses, use original ordering. Since the
     // only values that jitter are ones added by the compiler and are guaranteed
     // to have uses, original ordering is fine.
-    if (first_uses[i1] == c10::nullopt && first_uses[i2] == c10::nullopt) {
+    if (first_uses[i1] == std::nullopt && first_uses[i2] == std::nullopt) {
       return i1 < i2;
     }
-    if (first_uses[i1] == c10::nullopt) {
+    if (first_uses[i1] == std::nullopt) {
       return false;
-    } else if (first_uses[i2] == c10::nullopt) {
+    } else if (first_uses[i2] == std::nullopt) {
       return true;
     }
 

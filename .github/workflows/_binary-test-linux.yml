@@ -63,6 +63,13 @@ on:
         required: true
         type: string
         description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, linux.arm64.2xlarge, and linux.rocm.gpu
+      use_split_build:
+        description: |
+          [Experimental] Build a libtorch only wheel and build pytorch such that
+          are built from the libtorch wheel.
+        required: false
+        type: boolean
+        default: false
     secrets:
       github-token:
         required: true
@@ -97,6 +104,7 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+      USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
@@ -124,18 +132,19 @@ jobs:
             echo "PR_NUMBER=${{ env.PR_NUMBER }}"
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
+            echo "USE_SPLIT_BUILD=${{ env.USE_SPLIT_BUILD }}"
           } >> "${GITHUB_ENV} }}"
 
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
-        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.4
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         continue-on-error: true
         with:
           github-secret: ${{ secrets.github-token }}
 
         # Setup the environment
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.4
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' || inputs.build_environment == 'linux-s390x-binary-manywheel' }}
 
@@ -158,6 +167,7 @@ jobs:
       - name: Checkout PyTorch to pytorch dir
         uses: malfet/checkout@silent-checkout
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
 
@@ -170,7 +180,7 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: release/2.4
+          ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -201,12 +211,12 @@ jobs:
           path: "${{ runner.temp }}/artifacts/"
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@release/2.4
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
         if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' && steps.filter.outputs.is-test-matrix-empty == 'False' }}
 
       - name: Pull Docker image
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.4
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
 
@@ -216,7 +226,7 @@ jobs:
 
       - name: Teardown Linux
         if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
-        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.4
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
 
       - name: Chown workspace
         if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'

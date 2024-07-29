@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
+import logging
 from contextlib import contextmanager
 from typing import cast
-import logging
-from . import api
-from . import TensorPipeAgent
+
+from . import api, TensorPipeAgent
+
 
 logger = logging.getLogger(__name__)
+
 
 @contextmanager
 def _group_membership_management(store, name, is_join):
@@ -29,10 +31,17 @@ def _group_membership_management(store, name, is_join):
             try:
                 store.wait([returned])
             except RuntimeError:
-                logger.error("Group membership token %s timed out waiting for %s to be released.", my_token, returned)
+                logger.error(
+                    "Group membership token %s timed out waiting for %s to be released.",
+                    my_token,
+                    returned,
+                )
                 raise
+
 
 def _update_group_membership(worker_info, my_devices, reverse_device_map, is_join):
     agent = cast(TensorPipeAgent, api._get_current_rpc_agent())
-    ret = agent._update_group_membership(worker_info, my_devices, reverse_device_map, is_join)
+    ret = agent._update_group_membership(
+        worker_info, my_devices, reverse_device_map, is_join
+    )
     return ret

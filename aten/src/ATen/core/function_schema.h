@@ -29,20 +29,20 @@ struct Argument {
   Argument(
       std::string name = "",
       const TypePtr& type = nullptr,
-      std::optional<int32_t> N = c10::nullopt,
-      std::optional<IValue> default_value = c10::nullopt,
+      std::optional<int32_t> N = std::nullopt,
+      std::optional<IValue> default_value = std::nullopt,
       bool kwarg_only = false,
-      std::optional<AliasInfo> alias_info = c10::nullopt)
+      std::optional<AliasInfo> alias_info = std::nullopt)
     : Argument(std::move(name), type, type, N, std::move(default_value), kwarg_only, std::move(alias_info)) {}
 
   Argument(
       std::string name,
       TypePtr fake_type,
       TypePtr real_type,
-      std::optional<int32_t> N = c10::nullopt,
-      std::optional<IValue> default_value = c10::nullopt,
+      std::optional<int32_t> N = std::nullopt,
+      std::optional<IValue> default_value = std::nullopt,
       bool kwarg_only = false,
-      std::optional<AliasInfo> alias_info = c10::nullopt)
+      std::optional<AliasInfo> alias_info = std::nullopt)
       : name_(std::move(name)),
         type_(fake_type ? std::move(fake_type) : TensorType::get()),
         real_type_(real_type ? std::move(real_type) : type_),
@@ -150,7 +150,7 @@ struct Argument {
         N_,
         default_value_,
         kwarg_only_,
-        alias_info_ ? std::optional<AliasInfo>(*alias_info_) : c10::nullopt);
+        alias_info_ ? std::optional<AliasInfo>(*alias_info_) : std::nullopt);
   }
 
   // this function checks whether this Argument is backward compatible with
@@ -325,7 +325,7 @@ struct TORCH_API FunctionSchema {
   std::optional<AliasAnalysisKind> alias_kind_;
 
   template <typename T>
-  void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
+  void checkArg(const IValue& value, const Argument& argument, std::optional<size_t> pos) const;
 
   void checkSchema() const {
     bool seen_default_arg = false;
@@ -397,7 +397,7 @@ struct TORCH_API FunctionSchema {
   bool is_mutable(c10::string_view name) const {
     std::optional<int> index = argumentIndexWithName(name);
     TORCH_INTERNAL_ASSERT(
-        index != c10::nullopt, "Schema has no argument named ", name);
+        index != std::nullopt, "Schema has no argument named ", name);
 
     return is_mutable({c10::SchemaArgType::input, static_cast<size_t>(*index)});
   }
@@ -436,7 +436,7 @@ struct TORCH_API FunctionSchema {
       if(name == arguments()[i].name())
         return i;
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
   FunctionSchema cloneWithName(std::string name, std::string overload_name) const {
     return FunctionSchema(
@@ -470,8 +470,8 @@ struct TORCH_API FunctionSchema {
   std::string formatTypeMismatchMsg(
       const Argument& expected,
       const std::string& actual_type,
-      std::optional<size_t> position = c10::nullopt,
-      std::optional<std::string> value = c10::nullopt) const;
+      std::optional<size_t> position = std::nullopt,
+      std::optional<std::string> value = std::nullopt) const;
 
   FunctionSchema cloneWithRemappedTypes(
       const std::function<TypePtr(TypePtr)> type_map) const;

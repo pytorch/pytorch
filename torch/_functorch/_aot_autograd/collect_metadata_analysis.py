@@ -11,7 +11,7 @@ a functionalized version of the graph under compilation.
 import collections
 import logging
 from functools import wraps
-from typing import Callable, DefaultDict, Dict, List
+from typing import Callable, DefaultDict, Dict, List, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -25,6 +25,7 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
+
 from .functional_utils import (
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,
@@ -86,7 +87,7 @@ def coerce_tangent(x):
     if is_traceable_wrapper_subclass(out) and hasattr(
         out, "__coerce_tangent_metadata__"
     ):
-        out = out.__coerce_tangent_metadata__()
+        out = out.__coerce_tangent_metadata__()  # type: ignore[attr-defined]
     # It's possible to have a subclass that advertises as contiguous,
     # but has noncontiguous inner tensors.
     # Force these to be conntiguous too
@@ -124,6 +125,8 @@ def run_functionalized_fw_and_collect_metadata(
     keep_input_mutations: bool,
     # TODO: refactor to kill this flag
     is_train: bool = False,
+    # Note: this is guaranteed to be set when running under dynamo
+    static_input_indices: Optional[List[int]] = None,
     pre_dispatch: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: Dict[Tensor, Tensor] = {}
@@ -666,14 +669,15 @@ from a multi-output view call"
         )
         user_outs = pytree.tree_map(from_fun, f_output_tangents)
 
-        if torch._dynamo.config.inline_inbuilt_nn_modules:
-            static_parameter_input_indices = [
+        nonlocal static_input_indices
+        static_input_indices = static_input_indices or []
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            passed_indices = set(static_input_indices)
+            static_input_indices = [
                 i
                 for i, arg in enumerate(flat_args)
-                if isinstance(arg, torch.nn.Parameter)
+                if (isinstance(arg, torch.nn.Parameter) or i in passed_indices)
             ]
-        else:
-            static_parameter_input_indices = []
 
         f_mutated_inputs = [
             inp
@@ -726,7 +730,7 @@ from a multi-output view call"
             subclass_tangent_meta=create_subclass_meta(traced_tangents),
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,
-            static_parameter_indices=static_parameter_input_indices,
+            static_input_indices=static_input_indices,
             tokens=mode._tokens,
         )
         return metadata

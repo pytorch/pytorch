@@ -94,7 +94,7 @@ struct ValidIterator : public IteratorImpl<Batch> {
   }
 
   BatchProducer next_batch_;
-  mutable optional<Batch> batch_;
+  mutable std::optional<Batch> batch_;
   mutable bool initialized_ = false;
 };
 

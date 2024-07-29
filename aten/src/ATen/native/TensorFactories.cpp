@@ -261,7 +261,7 @@ Tensor empty_names(
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory,
-    optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
@@ -305,7 +305,7 @@ Tensor empty_permuted_symint(SymIntArrayRef size, IntArrayRef physical_layout, s
     seen_dims[physical_layout[i]] = true;
   }
   // do a contiguous allocation
-  Tensor phys_tensor = at::empty_symint(phys_size, dtype_opt, layout_opt, device_opt, pin_memory_opt, c10::nullopt);
+  Tensor phys_tensor = at::empty_symint(phys_size, dtype_opt, layout_opt, device_opt, pin_memory_opt, std::nullopt);
   SymIntArrayRef phys_strides = phys_tensor.sym_strides();
   // permute the strides (inverse permutation!  This is why this is
   // empty_permute*d*, not empty_permute; it's not an empty + permute)
@@ -393,20 +393,20 @@ Tensor empty_like(
 
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
-      result = at::empty_strided_symint(self.sym_sizes(), self.sym_strides(), options.memory_format(c10::nullopt));
+      result = at::empty_strided_symint(self.sym_sizes(), self.sym_strides(), options.memory_format(std::nullopt));
     } else if (self.unsafeGetTensorImpl()->support_as_strided() && self.layout() == kStrided) {
       // If input tensor is not dense and non-overlapping but strided, we will infer an output strides
       // which keeps the layout permutation of the input tensor.
       std::vector<int64_t> strides = infer_dense_strides(self.sizes(), self.strides());
       // See Note [Explicit nullopt MemoryFormat argument]
-      result = at::empty_strided(self.sizes(), strides, options.memory_format(c10::nullopt));
+      result = at::empty_strided(self.sizes(), strides, options.memory_format(std::nullopt));
     } else {
       // See Note [Explicit nullopt MemoryFormat argument]
-      result = at::empty_symint(self.sym_sizes(), options.memory_format(self.suggest_memory_format()), c10::nullopt);
+      result = at::empty_symint(self.sym_sizes(), options.memory_format(self.suggest_memory_format()), std::nullopt);
     }
   } else {
     // See Note [Explicit nullopt MemoryFormat argument]
-    result = at::empty_symint(self.sym_sizes(), options.memory_format(memory_format), c10::nullopt);
+    result = at::empty_symint(self.sym_sizes(), options.memory_format(memory_format), std::nullopt);
   }
 
   if (self.opt_names()) {
@@ -481,7 +481,7 @@ Tensor empty_like_quantized(
                                         self.q_scale(),
                                         self.q_zero_point(),
                                         // See Note [Explicit nullopt MemoryFormat argument]
-                                        c10::nullopt);
+                                        std::nullopt);
   } else if (qscheme == kPerChannelAffine) {
     // Copy the tensors with channels to avoid accidental overrides
     return at::_empty_per_channel_affine_quantized(
@@ -491,7 +491,7 @@ Tensor empty_like_quantized(
         self.q_per_channel_axis(),
         options.memory_format(memory_format),
         // See Note [Explicit nullopt MemoryFormat argument]
-        c10::nullopt);
+        std::nullopt);
   } else {
     TORCH_CHECK(false, "Unsupported qscheme: ", toString(qscheme));
   }
@@ -509,7 +509,7 @@ Tensor new_empty_symint(
   auto layout = layout_opt.has_value() ? layout_opt : self.options().layout_opt();
   auto device = device_opt.has_value() ? device_opt : self.options().device_opt();
   auto pin_memory = pin_memory_opt.has_value() ? pin_memory_opt : self.options().pinned_memory_opt();
-  return at::empty_symint(size, dtype, layout, device, pin_memory, c10::nullopt);
+  return at::empty_symint(size, dtype, layout, device, pin_memory, std::nullopt);
 }
 
 Tensor new_empty_strided_symint(
@@ -870,7 +870,7 @@ Tensor rand(IntArrayRef size,
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
-  return native::rand(size, static_cast<std::optional<Generator>>(c10::nullopt), dtype, layout, device, pin_memory);
+  return native::rand(size, static_cast<std::optional<Generator>>(std::nullopt), dtype, layout, device, pin_memory);
 }
 
 Tensor rand(IntArrayRef size, std::optional<Generator> generator,
@@ -886,7 +886,7 @@ Tensor rand(IntArrayRef size, std::optional<Generator> generator,
 }
 
 Tensor& rand_out(IntArrayRef size, Tensor& result) {
-  return native::rand_out(size, c10::nullopt, result);
+  return native::rand_out(size, std::nullopt, result);
 }
 
 Tensor& rand_out(IntArrayRef size, std::optional<Generator> generator, Tensor& result) {
@@ -905,7 +905,7 @@ Tensor rand_like(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty_like(self, options, optional_memory_format);
-  return result.uniform_(0, 1, c10::nullopt);
+  return result.uniform_(0, 1, std::nullopt);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randint ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -915,7 +915,7 @@ Tensor randint(int64_t high, IntArrayRef size,
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
-  return native::randint(high, size, c10::nullopt /* generator*/, dtype, layout, device, pin_memory);
+  return native::randint(high, size, std::nullopt /* generator*/, dtype, layout, device, pin_memory);
 }
 
 Tensor randint(
@@ -937,7 +937,7 @@ Tensor randint(
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
-  return native::randint(low, high, size, c10::nullopt, dtype, layout, device, pin_memory);
+  return native::randint(low, high, size, std::nullopt, dtype, layout, device, pin_memory);
 }
 
 Tensor randint(
@@ -957,7 +957,7 @@ Tensor randint(
 }
 
 Tensor& randint_out(int64_t high, IntArrayRef size, Tensor& result) {
-  return native::randint_out(high, size, c10::nullopt, result);
+  return native::randint_out(high, size, std::nullopt, result);
 }
 
 Tensor& randint_out(int64_t high,
@@ -969,7 +969,7 @@ Tensor& randint_out(int64_t high,
 }
 
 Tensor& randint_out(int64_t low, int64_t high, IntArrayRef size, Tensor& result) {
-  return native::randint_out(low, high, size, c10::nullopt, result);
+  return native::randint_out(low, high, size, std::nullopt, result);
 }
 
 Tensor& randint_out(int64_t low,
@@ -993,7 +993,7 @@ Tensor randint_like(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty_like(self, options, optional_memory_format);
-  return result.random_(0, high, c10::nullopt);
+  return result.random_(0, high, std::nullopt);
 }
 
 Tensor randint_like(
@@ -1009,7 +1009,7 @@ Tensor randint_like(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty_like(self, options, optional_memory_format);
-  return result.random_(low, high, c10::nullopt);
+  return result.random_(low, high, std::nullopt);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randn ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1019,7 +1019,7 @@ Tensor randn(IntArrayRef size,
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
-  return native::randn(size, static_cast<std::optional<Generator>>(c10::nullopt), dtype, layout, device, pin_memory);
+  return native::randn(size, static_cast<std::optional<Generator>>(std::nullopt), dtype, layout, device, pin_memory);
 }
 
 Tensor randn(IntArrayRef size, std::optional<Generator> generator,
@@ -1035,7 +1035,7 @@ Tensor randn(IntArrayRef size, std::optional<Generator> generator,
 }
 
 Tensor& randn_out(IntArrayRef size, Tensor& result) {
-  return native::randn_out(size, c10::nullopt, result);
+  return native::randn_out(size, std::nullopt, result);
 }
 
 Tensor& randn_out(IntArrayRef size, std::optional<Generator> generator, Tensor& result) {
@@ -1073,7 +1073,7 @@ Tensor randn_like(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty_like(self, options, optional_memory_format);
-  return result.normal_(0, 1, c10::nullopt);
+  return result.normal_(0, 1, std::nullopt);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randperm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1109,7 +1109,7 @@ Tensor randperm(int64_t n,
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
-  return native::randperm(n, c10::nullopt, dtype, layout, device, pin_memory);
+  return native::randperm(n, std::nullopt, dtype, layout, device, pin_memory);
 }
 
 Tensor randperm(int64_t n, std::optional<Generator> generator,
@@ -1129,7 +1129,7 @@ Tensor randperm(int64_t n, std::optional<Generator> generator,
 }
 
 Tensor& randperm_out(int64_t n, Tensor& result) {
-  return at::randperm_out(result, n, c10::nullopt);
+  return at::randperm_out(result, n, std::nullopt);
 }
 
 Tensor& randperm_out_cpu(int64_t n, std::optional<Generator> generator, Tensor& result) {
@@ -1327,7 +1327,7 @@ Tensor _efficientzerotensor(IntArrayRef size,
     auto allocator = at::native::ZeroTensorAllocator(device_);
     auto dtype_ = dtype_or_default(dtype);
     auto zero_ks = at::DispatchKeySet(c10::DispatchKey::CPU) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
-    auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+    auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, std::nullopt);
     return out;
 }
 
@@ -1340,7 +1340,7 @@ Tensor _efficientzerotensor_meta_symint(SymIntArrayRef size,
   auto allocator = at::native::ZeroTensorAllocator(device_);
   auto dtype_ = dtype_or_default(dtype);
   auto zero_ks = at::DispatchKeySet(c10::DispatchKey::Meta) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
-  auto out = at::detail::empty_generic_symint(size, &allocator, zero_ks, dtype_, c10::nullopt);
+  auto out = at::detail::empty_generic_symint(size, &allocator, zero_ks, dtype_, std::nullopt);
   return out;
 }
 
@@ -1403,8 +1403,7 @@ Tensor zeros_like(
     auto res = at::native::sparse_compressed_tensor_with_dims(
       nnz, dense_dim, self.sizes(), blocksize, index_dtype,
       typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
-    Tensor compressed_indices, plain_indices;
-    std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(res);
+    auto [compressed_indices, plain_indices] = at::sparse_csr::getCompressedPlainIndices(res);
     compressed_indices.zero_();
     return res;
   }
@@ -1768,7 +1767,7 @@ Tensor clone(const Tensor& src, std::optional<c10::MemoryFormat> optional_memory
 Tensor full(
     IntArrayRef size,
     const Scalar& fill_value,
-    optional<DimnameList> names,
+    std::optional<DimnameList> names,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
@@ -1786,7 +1785,7 @@ Tensor full(
 
 Tensor ones(
     IntArrayRef size,
-    optional<DimnameList> names,
+    std::optional<DimnameList> names,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
@@ -1799,7 +1798,7 @@ Tensor ones(
 
 Tensor zeros(
     IntArrayRef size,
-    optional<DimnameList> names,
+    std::optional<DimnameList> names,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
@@ -1809,18 +1808,18 @@ Tensor zeros(
 
 Tensor randn(
     IntArrayRef size,
-    optional<DimnameList> names,
+    std::optional<DimnameList> names,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
-  return native::randn(size, c10::nullopt, names, dtype, layout, device, pin_memory);
+  return native::randn(size, std::nullopt, names, dtype, layout, device, pin_memory);
 }
 
 Tensor randn(
     IntArrayRef size,
     std::optional<Generator> generator,
-    optional<DimnameList> names,
+    std::optional<DimnameList> names,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
@@ -1834,18 +1833,18 @@ Tensor randn(
 
 Tensor rand(
     IntArrayRef size,
-    optional<DimnameList> names,
+    std::optional<DimnameList> names,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
-  return native::rand(size, c10::nullopt, names, dtype, layout, device, pin_memory);
+  return native::rand(size, std::nullopt, names, dtype, layout, device, pin_memory);
 }
 
 Tensor rand(
     IntArrayRef size,
     std::optional<Generator> generator,
-    optional<DimnameList> names,
+    std::optional<DimnameList> names,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,

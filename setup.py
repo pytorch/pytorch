@@ -199,8 +199,8 @@
 #      Builds pytorch as a wheel using libtorch.so from a seperate wheel
 
 import os
-import pkgutil
 import sys
+
 
 if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     print(
@@ -209,18 +209,6 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
-
-
-def _get_package_path(package_name):
-    loader = pkgutil.find_loader(package_name)
-    if loader:
-        # The package might be a namespace package, so get_data may fail
-        try:
-            file_path = loader.get_filename()
-            return os.path.dirname(file_path)
-        except AttributeError:
-            pass
-    return None
 
 
 BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
@@ -237,6 +225,7 @@ if sys.version_info < python_min_version:
 import filecmp
 import glob
 import importlib
+import importlib.util
 import json
 import shutil
 import subprocess
@@ -249,18 +238,26 @@ import setuptools.command.install
 import setuptools.command.sdist
 from setuptools import Extension, find_packages, setup
 from setuptools.dist import Distribution
-
 from tools.build_pytorch_libs import build_caffe2
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
-from tools.setup_helpers.env import (
-    build_type,
-    IS_DARWIN,
-    IS_LINUX,
-    IS_WINDOWS,
-    LIBTORCH_PKG_NAME,
-)
+from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
 from tools.setup_helpers.generate_linker_script import gen_linker_script
+
+
+def _get_package_path(package_name):
+    spec = importlib.util.find_spec(package_name)
+    if spec:
+        # The package might be a namespace package, so get_data may fail
+        try:
+            loader = spec.loader
+            if loader is not None:
+                file_path = loader.get_filename()  # type: ignore[attr-defined]
+                return os.path.dirname(file_path)
+        except AttributeError:
+            pass
+    return None
+
 
 # set up appropriate env variables
 if BUILD_LIBTORCH_WHL:
@@ -271,7 +268,7 @@ if BUILD_LIBTORCH_WHL:
 
 if BUILD_PYTHON_ONLY:
     os.environ["BUILD_LIBTORCHLESS"] = "ON"
-    os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path(LIBTORCH_PKG_NAME)}/lib"
+    os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path('torch')}/lib"
 
 ################################################################################
 # Parameters parsed from environment
@@ -347,9 +344,12 @@ cmake_python_include_dir = sysconfig.get_path("include")
 # Version, create_version_file, and package_name
 ################################################################################
 
-DEFAULT_PACKAGE_NAME = LIBTORCH_PKG_NAME if BUILD_LIBTORCH_WHL else "torch"
+package_name = os.getenv("TORCH_PACKAGE_NAME", "torch")
+LIBTORCH_PKG_NAME = os.getenv("LIBTORCH_PACKAGE_NAME", "torch_no_python")
+if BUILD_LIBTORCH_WHL:
+    package_name = LIBTORCH_PKG_NAME
 
-package_name = os.getenv("TORCH_PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
+
 package_type = os.getenv("PACKAGE_TYPE", "wheel")
 version = get_torch_version()
 report(f"Building wheel {package_name}-{version}")
@@ -472,7 +472,6 @@ def build_deps():
     check_submodules()
     check_pydep("yaml", "pyyaml")
     build_python = not BUILD_LIBTORCH_WHL
-
     build_caffe2(
         version=version,
         cmake_python_library=cmake_python_library,
@@ -561,7 +560,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             "libomp.dylib" if os.uname().machine == "arm64" else "libiomp5.dylib"
         )
         omp_rpath_lib_path = os.path.join("@rpath", omp_lib_name)
-        omp_loader_lib_path = os.path.join("@loader_path", omp_lib_name)
         if omp_rpath_lib_path not in libs:
             return
 
@@ -572,17 +570,16 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 continue
             target_lib = os.path.join(self.build_lib, "torch", "lib", omp_lib_name)
             self.copy_file(source_lib, target_lib)
-            # Change OMP library load path to loader_path and delete old rpath
+            # Delete old rpath and add @loader_lib to the rpath
             # This should prevent delocate from attempting to package another instance
-            # of OpenMP library in torch wheel
+            # of OpenMP library in torch wheel as well as loading two libomp.dylib into
+            # the address space, as libraries are cached by their unresolved names
             subprocess.check_call(
                 [
                     "install_name_tool",
-                    "-change",
-                    omp_rpath_lib_path,
-                    omp_loader_lib_path,
-                    "-delete_rpath",
+                    "-rpath",
                     rpath,
+                    "@loader_path",
                     libtorch_cpu_path,
                 ]
             )
@@ -869,6 +866,22 @@ else:
             with concat_license_files(include_files=True):
                 super().run()
 
+        def write_wheelfile(self, *args, **kwargs):
+            super().write_wheelfile(*args, **kwargs)
+
+            if BUILD_LIBTORCH_WHL:
+                # Remove extraneneous files in the libtorch wheel
+                for root, dirs, files in os.walk(self.bdist_dir):
+                    for file in files:
+                        if file.endswith((".a", ".so")) and os.path.isfile(
+                            os.path.join(self.bdist_dir, file)
+                        ):
+                            os.remove(os.path.join(root, file))
+                        elif file.endswith(".py"):
+                            os.remove(os.path.join(root, file))
+                # need an __init__.py file otherwise we wouldn't have a package
+                open(os.path.join(self.bdist_dir, "torch", "__init__.py"), "w").close()
+
 
 class install(setuptools.command.install.install):
     def run(self):
@@ -973,9 +986,6 @@ def configure_extension_build():
     if BUILD_LIBTORCH_WHL:
         main_libraries = ["torch"]
         main_sources = []
-
-    if cmake_cache_vars["USE_CUDA"]:
-        library_dirs.append(os.path.dirname(cmake_cache_vars["CUDA_CUDA_LIB"]))
 
     if build_type.is_debug():
         if IS_WINDOWS:
@@ -1125,23 +1135,21 @@ def main():
         raise RuntimeError(
             "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. Set one to 0 and rerun."
         )
-
-    # the list of runtime dependencies required by this built package
     install_requires = [
         "filelock",
         "typing-extensions>=4.8.0",
-        "sympy",
+        'sympy==1.12.1 ; python_version == "3.8"',
+        'sympy>=1.13.0 ; python_version >= "3.9"',
         "networkx",
         "jinja2",
         "fsspec",
-        'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
 
     if sys.version_info >= (3, 12, 0):
         install_requires.append("setuptools")
 
     if BUILD_PYTHON_ONLY:
-        install_requires.append(LIBTORCH_PKG_NAME)
+        install_requires.append(f"{LIBTORCH_PKG_NAME}=={get_torch_version()}")
 
     use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
     if (
@@ -1190,11 +1198,10 @@ def main():
         entry_points,
         extra_install_requires,
     ) = configure_extension_build()
-
     install_requires += extra_install_requires
 
     extras_require = {
-        "optree": ["optree>=0.11.0"],
+        "optree": ["optree>=0.12.0"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
 
@@ -1213,12 +1220,14 @@ def main():
         "fx/*.pyi",
         "optim/*.pyi",
         "autograd/*.pyi",
+        "jit/*.pyi",
         "nn/*.pyi",
         "nn/modules/*.pyi",
         "nn/parallel/*.pyi",
         "utils/data/*.pyi",
         "utils/data/datapipes/*.pyi",
         "lib/*.pdb",
+        "lib/*shm*",
         "lib/torch_shm_manager",
         "lib/*.h",
         "include/*.h",
@@ -1383,15 +1392,15 @@ def main():
         "utils/model_dump/*.mjs",
     ]
 
-    if BUILD_PYTHON_ONLY:
+    if not BUILD_LIBTORCH_WHL:
         torch_package_data.extend(
             [
-                "lib/libtorch_python*",
-                "lib/*shm*",
-                "lib/libtorch_global_deps*",
+                "lib/libtorch_python.so",
+                "lib/libtorch_python.dylib",
+                "lib/libtorch_python.dll",
             ]
         )
-    else:
+    if not BUILD_PYTHON_ONLY:
         torch_package_data.extend(
             [
                 "lib/*.so*",
@@ -1442,28 +1451,18 @@ def main():
         "packaged/autograd/*",
         "packaged/autograd/templates/*",
     ]
+    package_data = {
+        "torch": torch_package_data,
+    }
 
-    if BUILD_LIBTORCH_WHL:
-        modified_packages = []
-        for package in packages:
-            parts = package.split(".")
-            if parts[0] == "torch":
-                modified_packages.append(DEFAULT_PACKAGE_NAME + package[len("torch") :])
-        packages = modified_packages
-        package_dir = {LIBTORCH_PKG_NAME: "torch"}
-        torch_package_dir_name = LIBTORCH_PKG_NAME
-        package_data = {LIBTORCH_PKG_NAME: torch_package_data}
-        extensions = []
+    if not BUILD_LIBTORCH_WHL:
+        package_data["torchgen"] = torchgen_package_data
+        package_data["caffe2"] = [
+            "python/serialized_test/data/operator_test/*.zip",
+        ]
     else:
-        torch_package_dir_name = "torch"
-        package_dir = {}
-        package_data = {
-            "torch": torch_package_data,
-            "torchgen": torchgen_package_data,
-            "caffe2": [
-                "python/serialized_test/data/operator_test/*.zip",
-            ],
-        }
+        # no extensions in BUILD_LIBTORCH_WHL mode
+        extensions = []
 
     setup(
         name=package_name,
@@ -1481,7 +1480,6 @@ def main():
         install_requires=install_requires,
         extras_require=extras_require,
         package_data=package_data,
-        package_dir=package_dir,
         url="https://pytorch.org/",
         download_url="https://github.com/pytorch/pytorch/tags",
         author="PyTorch Team",

@@ -48,7 +48,7 @@ std::optional<RecordFunctionCallback> extractCallback(
     CallbackHandle handle) {
   auto it = findCallback(entries, handle);
   if (it == entries.end()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   auto out = it->callback_;
   entries.erase(it);
@@ -313,7 +313,7 @@ StepCallbacks CacheEntry::getActiveCallbacks() {
 std::optional<StepCallbacks> CacheEntry::getActiveCallbacksUnlessEmpty() {
   getActiveCallbacksImpl();
   if (C10_LIKELY(active_callbacks_.empty())) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return active_callbacks_;
 }
@@ -589,7 +589,7 @@ std::optional<OperatorName> RecordFunction::operator_name() const {
   return std::visit(
       c10::overloaded(
           [&](const std::string&) -> std::optional<OperatorName> {
-            return c10::nullopt;
+            return std::nullopt;
           },
           [](const schema_ref_t schema) -> std::optional<OperatorName> {
             return schema.get().operator_name();
@@ -601,7 +601,7 @@ std::optional<c10::FunctionSchema> RecordFunction::operator_schema() const {
   return std::visit(
       c10::overloaded(
           [&](const std::string&) -> std::optional<c10::FunctionSchema> {
-            return c10::nullopt;
+            return std::nullopt;
           },
           [](const schema_ref_t schema) -> std::optional<c10::FunctionSchema> {
             return schema.get();

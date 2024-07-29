@@ -126,7 +126,9 @@ pool2d_shape_check(
   int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format)
 {
   const int64_t ndim = input.ndimension();
+#ifndef STRIP_ERROR_MESSAGES
   const int64_t nOutputPlane = nInputPlane;
+#endif
 
   TORCH_CHECK(kW > 0 && kH > 0,
               "kernel size should be greater than zero, but got ",

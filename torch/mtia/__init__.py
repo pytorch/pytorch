@@ -4,6 +4,7 @@ This package enables an interface for accessing MTIA backend in python
 """
 
 import threading
+import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -107,9 +108,10 @@ def is_available() -> bool:
     return device_count() > 0
 
 
-def synchronize() -> None:
+def synchronize(device: Optional[_device_t] = None) -> None:
     r"""Waits for all jobs in all streams on a MTIA device to complete."""
-    return torch._C._mtia_deviceSynchronize()
+    with torch.mtia.device(device):
+        return torch._C._mtia_deviceSynchronize()
 
 
 def device_count() -> int:
@@ -260,6 +262,39 @@ def stream(stream: Optional["torch.mtia.Stream"]) -> StreamContext:
     return StreamContext(stream)
 
 
+def get_rng_state(device: Union[int, str, torch.device] = "mtia") -> Tensor:
+    r"""Returns the random number generator state as a ByteTensor.
+
+    Args:
+        device (torch.device or int, optional): The device to return the RNG state of.
+            Default: ``'mtia'`` (i.e., ``torch.device('mtia')``, the current mtia device).
+    """
+    warnings.warn(
+        "get_rng_state is not implemented in torch.mtia",
+        UserWarning,
+        stacklevel=2,
+    )
+    return torch.zeros([1], dtype=torch.uint8, device=device)
+
+
+def set_rng_state(
+    new_state: Tensor, device: Union[int, str, torch.device] = "mtia"
+) -> None:
+    r"""Sets the random number generator state.
+
+    Args:
+        new_state (torch.ByteTensor): The desired state
+        device (torch.device or int, optional): The device to set the RNG state.
+            Default: ``'mtia'`` (i.e., ``torch.device('mtia')``, the current mtia device).
+    """
+    warnings.warn(
+        "set_rng_state is not implemented in torch.mtia",
+        UserWarning,
+        stacklevel=2,
+    )
+    pass
+
+
 __all__ = [
     "init",
     "is_available",
@@ -273,4 +308,6 @@ __all__ = [
     "set_stream",
     "stream",
     "device",
+    "set_rng_state",
+    "get_rng_state",
 ]

@@ -39,7 +39,7 @@ on:
         type: string
         default: "linux.2xlarge"
         description: |
-          List of CUDA architectures CI build should target.
+          Label of the runner this job should run on.
       test-matrix:
         required: false
         type: string
@@ -64,6 +64,14 @@ on:
         required: false
         type: string
         default: ""
+      use_split_build:
+        description: |
+          [Experimental] Build a libtorch only wheel and build pytorch such that
+          are built from the libtorch wheel.
+        required: false
+        type: boolean
+        default: false
+
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -90,7 +98,7 @@ jobs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
     steps:
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.4
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
@@ -99,7 +107,7 @@ jobs:
       # checkout because when we run this action we don't *have* a local
       # checkout. In other cases you should prefer a local checkout.
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.4
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -114,7 +122,7 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.4
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
@@ -128,7 +136,7 @@ jobs:
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.4
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -181,6 +189,7 @@ jobs:
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+          USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -199,6 +208,7 @@ jobs:
             -e PR_LABELS \
             -e OUR_GITHUB_JOB_ID \
             -e HUGGING_FACE_HUB_TOKEN \
+            -e USE_SPLIT_BUILD \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -218,9 +228,19 @@ jobs:
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build
         with:
           name: ${{ inputs.build-environment }}
+          retention-days: 14
+          if-no-files-found: error
+          path: artifacts.zip
+          s3-bucket: ${{ inputs.s3-bucket }}
+
+      - name: Store PyTorch Build Artifacts on S3 for split build
+        uses: seemethere/upload-artifact-s3@v5
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build
+        with:
+          name: ${{ inputs.build-environment }}-experimental-split-build
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip
@@ -238,5 +258,5 @@ jobs:
           s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.4
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()

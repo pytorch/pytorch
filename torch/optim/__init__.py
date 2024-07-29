@@ -7,6 +7,7 @@ future.
 """
 
 from torch.optim import lr_scheduler, swa_utils
+from torch.optim._adafactor import Adafactor
 from torch.optim.adadelta import Adadelta
 from torch.optim.adagrad import Adagrad
 from torch.optim.adam import Adam
@@ -38,5 +39,22 @@ del optimizer  # type: ignore[name-defined] # noqa: F821
 del nadam  # type: ignore[name-defined] # noqa: F821
 del lbfgs  # type: ignore[name-defined] # noqa: F821
 
-
-import torch.optim._multi_tensor
+__all__ = [
+    "Adafactor",
+    "Adadelta",
+    "Adagrad",
+    "Adam",
+    "Adamax",
+    "AdamW",
+    "ASGD",
+    "LBFGS",
+    "lr_scheduler",
+    "NAdam",
+    "Optimizer",
+    "RAdam",
+    "RMSprop",
+    "Rprop",
+    "SGD",
+    "SparseAdam",
+    "swa_utils",
+]
