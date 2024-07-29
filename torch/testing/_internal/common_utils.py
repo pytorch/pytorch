@@ -899,7 +899,7 @@ TEST_IN_SUBPROCESS = args.subprocess
 TEST_SAVE_XML = args.save_xml
 REPEAT_COUNT = args.repeat
 SEED = args.seed
-SHOWLOCALS = args.showlocals
+SHOW_LOCALS = args.showlocals
 if not getattr(expecttest, "ACCEPT", False):
     expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
@@ -1137,7 +1137,7 @@ def run_tests(argv=UNITTEST_ARGS):
     if not lint_test_case_extension(suite):
         sys.exit(1)
 
-    if SHOWLOCALS:
+    if SHOW_LOCALS:
         argv = [
             argv[0],
             *(["--showlocals", "--tb=long", "--color=yes"] if USE_PYTEST else ["--locals"]),
