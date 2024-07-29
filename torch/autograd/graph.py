@@ -564,9 +564,9 @@ def register_multi_post_accumulate_grad_hook(
         fn(tensors: Tuple[torch.Tensor, ...]) -> None
 
     The hook ``fn`` will get the ``tensors`` passed as :attr:`tensors`. The
-    hook is like an "all" version of :meth:`torch.Tensor.register_post_accumulate_grad_hook`,
-    where the hook only runs after each tensor's post-accumulate-grad hook
-    would have run.
+    hook is like an "all" multi-hook version of
+    :meth:`torch.Tensor.register_post_accumulate_grad_hook`, where the hook
+    only runs after each tensor's post-accumulate-grad hook has run.
     """
     if any(not t.requires_grad for t in tensors):
         raise ValueError(
