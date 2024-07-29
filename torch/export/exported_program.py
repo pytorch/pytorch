@@ -56,7 +56,6 @@ from torch.fx.passes.infra.pass_manager import PassManager
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 from .graph_signature import (  # noqa: F401
-    _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
     CustomObjArgument,
@@ -656,10 +655,6 @@ class ExportedProgram:
         range_constraints: "Dict[sympy.Symbol, Any]",
         module_call_graph: List[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
-        verifier: Optional[Type[Any]] = None,  # TODO Deprecate this.
-        tensor_constants: Optional[
-            Dict[str, torch.Tensor]
-        ] = None,  # TODO: deprecate this
         constants: Optional[
             Dict[str, Union[torch.Tensor, FakeScriptObject, torch._C.ScriptObject]]
         ] = None,
@@ -679,16 +674,9 @@ class ExportedProgram:
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
 
-        self._constants = tensor_constants or constants or {}
-        assert self._constants is not None
+        self._constants = constants or {}
 
-        # TODO Clean up this after we bump executorch's pin.
-        assert verifier is None or verifiers is None
-        if verifiers is None:
-            if verifier is None:
-                verifiers = [Verifier]
-            else:
-                verifiers = [verifier]
+        verifiers = verifiers or [Verifier]
         assert all(issubclass(v, Verifier) for v in verifiers)
         self._verifiers = verifiers
         # Validate should be always the last step of the constructor.
@@ -1087,8 +1075,8 @@ class ExportedProgram:
             ),
             module_call_graph=copy.deepcopy(self._module_call_graph),
             example_inputs=self.example_inputs,
-            verifier=self.verifier,
             constants=self.constants,
+            verifiers=self.verifiers,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
@@ -1127,8 +1115,8 @@ class ExportedProgram:
             range_constraints=copy.deepcopy(self.range_constraints),
             module_call_graph=copy.deepcopy(self._module_call_graph),
             example_inputs=self.example_inputs,
-            verifiers=verifiers if verifiers is not None else self.verifiers,
             constants=self.constants,
+            verifiers=verifiers if verifiers is not None else self.verifiers,
         )
 
 
