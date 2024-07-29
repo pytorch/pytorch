@@ -1678,8 +1678,6 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
     # Note: [Compiling nested tensor global state]
     #
-    # Background:
-    #
     # Today there are two pieces of global eager state that NJTs deals with:
     # - tensor_id_counter: a global counter that assigns unique ids to tensors
     # - tensor_symint_registry: maps tensor to nested int
@@ -1689,35 +1687,49 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
     #     the FakeTensor.
     #
     # Ideally we would like to satisfy the following:
-    # - (1) The eager state is not modified during compilation
+    # - (1) The eager state is not mutated during tracing
     # - (2) Running the compiled function should mutate the eager state in the
-    #       same way as running the eager function
+    #       same way that running the eager function would
     #       (a) The global counter should be incremented
     #       (b) The registry is updated in the same way
     #
-    # Today we can satisfy (1) and (2a) but cannot satisfy (2b) in a way that
-    # completely faithful to eager because we trace away the side-effectful
-    # operations. We can fix this by wrapping the side-effectful operations in a
-    # custom op. The current plan is to do that in the UnionFind impl.
+    # Today we can satisfy (1) and (2a) but cannot satisfy (2b)
     #
     # Today, (1) is satisfied because we maintain a separate counter during
     # tracing, and cache nested int on FakeTensor instead of relying on
-    # tensor_symint_registry.(2a) is satisfied because when
-    # AOTAutograd runtime wrapper's rewraps the inner->inner graph outputs
-    # back into subclass, to the perspective of eager, we are constructing
-    # NTs for the first time.
+    # tensor_symint_registry.
     #
-    # Compile differs in two ways from eager:
+    # (2) is cannot be completely satisfied because we trace away the
+    # side-effectful operations (which we can fix this by wrapping the
+    # side-effectful operations in a custom op, and threading through effect
+    # tokens.) The current plan is to do that in the UnionFind impl.
+    #
+    # Interestingly, despite this, the state is mutated in a way that is somewhat
+    # close to what we want, e.g. if I construct a nested tensor using an
+    # offsets in the compiled region and return it, AOTAutograd runtime wrapper
+    # must rewrap the inner->inner graph outputs back into subclass. This
+    # triggers the eager logic to run, updating the counter and registry.
+    #
+    # Notably however, compile differs in two ways from eager:
     # (1) The order in which the offsets are assigned ids is differnet
-    # (2) if a nested int is returned without the offsets also being returned
-    #     as part of an NJT output, then the eager state will not be updated.
-    #     (Note: this is not a problem in the current implementation because
-    #     returning only a shape is not supported!)
+    #     the registry would be set in the order the offsets are returned
+    #     which is not necessarily the same order as they were constructed.
+    # (2) If a NestedTensor is not returned, then the AOTAutograd wrapping
+    #     logic will not be triggered.
+    #
+    # I claim that correctness is not affected by these differences today.
+    # e.g. there is never the case where two distinct offsets silently share
+    # the same id.
+    #
+    # (1) is clearly not a problem, and (2) should only be a problem if
+    # the nested int is returned on its own, without the corresponding NJT
+    # being returned. This is not a problem in the current implementation
+    # because returning only a shape is not supported!
 
     # Note: [Creating symbolic nested int]
     #
-    # We create symbolic nested int when we construct a nested tensor from a tensor
-    # There are two main cases:
+    # We must create a symbolic nested int when we construct a nested tensor
+    # from a tensor. There are two main cases:
     #
     # 1. The offsets has NOT been used to construct a NJT
     #    - Create a new plain nested int with current val of fake nt id counter
@@ -1726,30 +1738,30 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
     # 2. The offsets HAS been used to construct a NJT
     #    - Create a new symint with plain nested int as hint
     #
-    # More details:
+    # More details on case 2:
     # - During fakification of the offsets, we check the eager registry, and
     #   if the tensor HAS been used to construct a NJT,
     #   we create a symint, with the existing nested int as hint, and cache
     #   it on to the FakeTensor.
     #
-    # [ Ephemeral source ]
+    # [ Always use ephemeral source ]
     #
     # We create the new symint ALWAYS with ephemeral source whether that is
     # in case (1) or (2) even though we could've had a proper source for case (2).
-    # Using a proper source would enable a few more (edge) cases, but we plan to
-    # handle things more holistically in the future anyway, we don't bother
-    # doing so today.
+    # Using a proper source would enable a few more (edge) cases, but since
+    # we plan to handle things more holistically in the future anyway, we don't
+    # bother doing so today.
     #
     # Using an ephemeral source has some consequences. But we are happy if
-    # - we are not silently miss recompiles, e.g. we guard when necessary.
+    # - We do not silently miss recompiles, e.g. we guard when necessary.
     #   We know that this is true, because dynamo guards alone are already
     #   sufficient.
-    # - we are not producing errors for the cases we care about
+    # - We are not producing errors for the cases we care about
     #
     # The main case we care about is when we guard that two shapes are equal.
     # In this case, the replacements logic would simplify away the ephemeral
     # symbol, and there is no error produced.
-    # The supported case is when we guard that two shapes are not equal, in
+    # The unsupported case is when we guard that two shapes are not equal, in
     # which, we will try and fail to generate a guard.
 
     #

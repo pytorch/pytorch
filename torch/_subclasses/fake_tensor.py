@@ -2063,6 +2063,7 @@ class FakeTensorMode(TorchDispatchMode):
     def create_symbolic_nested_int(
         self, *, hint: Optional[Union[int, torch.SymInt]] = None
     ) -> torch.SymInt:
+        # See Note: [Creating symbolic nested int]
         # Returned nested int always has coeff=1; multiply the result by coeff if needed
         import torch.nested._internal.nested_tensor
 
@@ -2070,7 +2071,6 @@ class FakeTensorMode(TorchDispatchMode):
             hint = torch._C._get_nested_int(self.nt_tensor_id_counter, 1)
             self.incr_nt_tensor_id_counter()
 
-        # Why is it okay to use EphemeralSource?
         src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
         assert self.shape_env is not None
         ret = self.shape_env.create_symintnode(
