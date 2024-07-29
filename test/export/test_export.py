@@ -426,6 +426,26 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
 
+    # Traced graph contains a WrapWithSetGradEnabled hop but
+    # dynamo doesn't support the hop yet so the test fails in strict_mode when re-tracing.
+    @testing.expectedFailureRetraceability
+    def test_setgrad_lifted_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                with torch.enable_grad():
+                    c = torch.tensor(4)
+                    z = c + x + y
+
+                return z * z
+
+        m = M()
+        x = torch.randn(4)
+        y = torch.randn(4)
+        # Need to surround export with no_grad to bypass AutogradStateOpsFailSafeguard.
+        with torch.no_grad():
+            ep = export(m, (x, y))
+        self.assertEqual(ep.module()(x, y), m(x, y))
+
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self):
@@ -1872,6 +1892,223 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "Could not guard on data-dependent expression",
         ):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
+
+    def test_suggested_fixes_for_data_dependent_errors_basic(self):
+        # suggested fixes for data-dependent errors only work in non-strict mode
+        strict = False
+        error_type = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+
+        # Just to introduce some indirection: N is a top-level module N that calls
+        # module M, defined next.
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = M()
+
+            def forward(self, t):
+                return self.m(t) + 1
+
+        # example input
+        t = torch.tensor([1, 4, 4], dtype=torch.int32)
+
+        # We define a series of versions of M() below. Each version has
+        # raises a data-dependent error that the next version fixes, by
+        # copy-pasting a suggested fix in the error message. The fix is
+        # always a torch.check() on an unresolved condition (or its negation)
+        # on unbacked symints mentioned in the error message.
+        # Note that the suggested fixes are in terms of local variables
+        # near the location of error that "contain" the unbacked symints
+        # in the unresolved condition (either directly or indirectly, e.g.,
+        # inside a list or inside the shape of a tensor).
+
+        class M_v0(torch.nn.Module):
+            def forward(self, t):
+                items = [t[i].item() for i in range(t.numel())]
+                r = torch.randn([items[0], items[1]])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                return r.view(items[0], items[2])
+
+        M = M_v0
+        with self.assertRaisesRegex(
+            error_type,
+            "User code(.*\n)+"
+            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
+            "Suggested fixes.*:\n"
+            f".*{re.escape('torch._check(items[2] == (-1))')}.*\n"
+            f".*{re.escape('torch._check(items[2] != (-1))')}",
+        ):
+            export(N(), (t,), strict=strict)
+
+        class M_v1(torch.nn.Module):
+            def forward(self, t):
+                items = [t[i].item() for i in range(t.numel())]
+                r = torch.randn([items[0], items[1]])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                torch._check(items[2] != -1)
+                # Could not guard on data-dependent expression u2 >= 0
+                return r.view(items[0], items[2])
+
+        M = M_v1
+        with self.assertRaisesRegex(
+            error_type,
+            "User code(.*\n)+"
+            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
+            "Suggested fixes.*:\n"
+            f".*{re.escape('torch._check(items[2] >= 0)')}.*\n"
+            f".*{re.escape('torch._check(items[2] < 0)')}",
+        ):
+            export(N(), (t,), strict=strict)
+
+        class M_v2(torch.nn.Module):
+            def forward(self, t):
+                items = [t[i].item() for i in range(t.numel())]
+                r = torch.randn([items[0], items[1]])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                torch._check(items[2] != -1)
+                # Could not guard on data-dependent expression u2 >= 0
+                torch._check(items[2] >= 0)
+                # Could not guard on data-dependent expression Eq(u1, u2)
+                return r.view(items[0], items[2])
+
+        M = M_v2
+        with self.assertRaisesRegex(
+            error_type,
+            "User code(.*\n)+"
+            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
+            "Suggested fixes.*:\n"
+            f".*{re.escape('torch._check(items[2] == r.shape[1])')}.*\n"
+            f".*{re.escape('torch._check(items[2] != r.shape[1])')}",
+        ):
+            export(N(), (t,), strict=strict)
+
+        class M_v3(torch.nn.Module):
+            def forward(self, t):
+                items = [t[i].item() for i in range(t.numel())]
+                r = torch.randn([items[0], items[1]])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                torch._check(items[2] != -1)
+                # Could not guard on data-dependent expression u2 >= 0
+                torch._check(items[2] >= 0)
+                # Could not guard on data-dependent expression Eq(u1, u2)
+                torch._check(items[2] == r.shape[1])
+                return r.view(items[0], items[2])
+
+        M = M_v3
+        export(N(), (t,), strict=strict)
+
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?
+    @testing.expectedFailureSerDer  # T195866111
+    def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
+        # suggested fixes for data-dependent errors only work in non-strict mode
+        strict = False
+        error_type = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+
+        def retry_export(m, inp, fixes):
+            # API that applies a series of fixes, retrying export after applying each fix,
+            # and asserting the applied fix was suggested in the previous try.
+            # Using this API avoids the need to define multiple versions of the same test
+            # module, as in `test_suggested_fixes_for_data_dependent_errors_basic` above.
+            import re
+
+            def code(snippets):
+                return f"[{', '.join(snippets)}]"
+
+            for i in range(len(fixes)):
+                with self.assertRaisesRegex(error_type, re.escape(fixes[i])):
+                    export(m, (*inp, code(fixes[:i])), strict=strict)
+            export(m, (*inp, code(fixes)), strict=strict)
+
+        # The following examples are lifted from @ezyang's "Data-dependent shape puzzlers"
+        # notebook at https://www.internalfb.com/intern/anp/view/?id=5330476
+
+        # These test modules are written in a way that works well with retry_export above.
+        # Specifically, they take an extra `fixes` argument and `eval` it at the location
+        # that is expected to raise errors.
+
+        class cf_implicitsize(torch.nn.Module):
+            def forward(self, x, y, fixes):
+                i = x.item()
+                eval(fixes)
+                # instead of y[i]
+                return y.narrow(0, i, 1).squeeze()
+
+        retry_export(
+            cf_implicitsize(),
+            (torch.tensor(2), torch.randn(10)),
+            fixes=[
+                # Could not guard on data-dependent expression u0 < 0
+                "torch._check(i >= 0)",
+            ],
+        )
+
+        class cf_nomemo(torch.nn.Module):
+            def forward(self, x, y, fixes):
+                i = y[0].item()
+                eval(fixes)
+                return x.unsqueeze(1).expand(-1, i)
+
+        retry_export(
+            cf_nomemo(),
+            (torch.randn(8), torch.tensor([2])),
+            fixes=[
+                # Could not guard on data-dependent expression Eq(u0, 1)
+                "torch._check(i != 1)",
+                # Could not guard on data-dependent expression Ne(u0, -1)
+                "torch._check(i != (-1))",
+            ],
+        )
+
+        class cf_changevar(torch.nn.Module):
+            def forward(self, x, fixes):
+                i = x.item()
+                eval(fixes)
+                r = torch.arange(i // 2)
+                return r + r
+
+        retry_export(
+            cf_changevar(),
+            (torch.tensor(20),),
+            fixes=[
+                # Could not guard on data-dependent expression Eq((u0//2), 0)
+                "torch._check(((i//2)) != 0)",
+                # Could not guard on data-dependent expression Eq((u0//2), 1)
+                "torch._check(((i//2)) != 1)",
+            ],
+        )
+
+        class cf_stacklist(torch.nn.Module):
+            def forward(self, xs, y, fixes):
+                i = y.item()
+                eval(fixes)
+                # instead of xs[i]
+                return torch.stack(xs, 0).narrow(0, i, 1).squeeze()
+
+        retry_export(
+            cf_stacklist(),
+            ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
+            fixes=[
+                # Could not guard on data-dependent expression u0 < 0
+                "torch._check(i >= 0)",
+            ],
+        )
+
+        class cf_tensorsplit(torch.nn.Module):
+            def forward(self, x, offsets_t, fixes):
+                lengths = torch.diff(offsets_t).tolist()
+                rs = []
+                start = 0
+                for length in lengths:
+                    eval(fixes)
+                    rs.append(x.narrow(0, start, length))
+                    start += length
+                return rs
+
+        retry_export(
+            cf_tensorsplit(),
+            (torch.arange(10), torch.tensor([0, 2, 5, 7, 10])),
+            fixes=[],  # nothing to fix!
+        )
 
     def test_if_functional(self):
         class Module(torch.nn.Module):
@@ -5273,27 +5510,39 @@ def forward(self, x, b_t, y):
             def forward(self, x):
                 return self.foo + x
 
+        class MyOuterModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = MyModule()
+
+            def forward(self, x):
+                return self.inner(x)
+
         inp = torch.rand(2, 3)
-        m = MyModule()
-        ep = export(m, (inp,), {})
 
-        self.assertEqual(ep.module()(inp), m(inp))
-        # Non-persistent buffers should not show up in the state dict
-        self.assertNotIn("foo", ep.state_dict)
-        named_buffers = {name: buffer for (name, buffer) in ep.named_buffers()}
-        # But they should show up in named_buffers()
-        self.assertIn("foo", named_buffers)
-        self.assertIn("foo", ep.constants)
-        self.assertEqual(len(ep.constants), 1)
+        def _test(m, non_persistent_buffer):
+            ep = export(m, (inp,), {})
 
-        # Check the same properties of the unlifted module
-        mod = ep.module()
-        self.assertNotIn("foo", mod.state_dict())
-        mod_named_buffers = {name: buffer for (name, buffer) in mod.named_buffers()}
-        self.assertIn("foo", mod_named_buffers)
-        self.assertIn("foo", ep.constants)
-        self.assertEqual(len(ep.constants), 1)
-        self.assertEqual(mod(inp), m(inp))
+            self.assertEqual(ep.module()(inp), m(inp))
+            # Non-persistent buffers should not show up in the state dict
+            self.assertNotIn(non_persistent_buffer, ep.state_dict)
+            named_buffers = {name: buffer for (name, buffer) in ep.named_buffers()}
+            # But they should show up in named_buffers()
+            self.assertIn(non_persistent_buffer, named_buffers)
+            self.assertIn(non_persistent_buffer, ep.constants)
+            self.assertEqual(len(ep.constants), 1)
+
+            # Check the same properties of the unlifted module
+            mod = ep.module()
+            self.assertNotIn(non_persistent_buffer, mod.state_dict())
+            mod_named_buffers = {name: buffer for (name, buffer) in mod.named_buffers()}
+            self.assertIn(non_persistent_buffer, mod_named_buffers)
+            self.assertIn(non_persistent_buffer, ep.constants)
+            self.assertEqual(len(ep.constants), 1)
+            self.assertEqual(mod(inp), m(inp))
+
+        _test(MyModule(), "foo")
+        _test(MyOuterModule(), "inner.foo")
 
     def test_export_as_backend(self):
         def f(x, y):

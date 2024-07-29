@@ -21,6 +21,7 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, 
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
+from torch.utils._triton import has_triton_package
 
 
 if HAS_GPU:
@@ -2303,6 +2304,49 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         code = "\n".join(codes[0])
         self.assertNotIn(libname, code)
         self.assertNotIn(opname, code)
+
+    @unittest.skipIf(not has_triton_package(), "requires triton")
+    def test_capture_triton_meta(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        @torch._library.triton_op("mylib::add", mutates_args=())
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            return output
+
+        def f(x, y):
+            return add(x, y)
+
+        x = torch.randn(3, device="meta")
+        y = torch.randn(3, device="meta")
+
+        out = f(x, y)
+        expected = torch.empty_like(x)
+        self.assertEqual(out, expected)
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)
