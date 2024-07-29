@@ -4,6 +4,7 @@ import collections
 import functools
 import inspect
 import itertools
+import os
 import types
 from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
@@ -19,6 +20,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
     check_constant_args,
+    check_unspec_or_constant_args,
     identity,
     is_wrapper_or_member_descriptor,
     istype,
@@ -363,6 +365,17 @@ class UserMethodVariable(UserFunctionVariable):
         ):
             return variables.TorchCtxManagerClassVariable(self.fn).call_function(
                 tx, (self.obj, *args), kwargs
+            )
+        elif (
+            isinstance(self.obj, variables.UserDefinedObjectVariable)
+            and self.obj.value is os.environ
+            and check_unspec_or_constant_args(args, kwargs)
+        ):
+            return ConstantVariable.create(
+                self.fn(
+                    *([self.obj.value] + [x.as_python_constant() for x in args]),
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
             )
         if self.is_constant:
             fn = getattr(self.obj.value, self.fn.__name__)

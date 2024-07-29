@@ -6,6 +6,7 @@ import inspect
 import itertools
 import math
 import operator
+import os
 import random
 import sys
 import unittest
@@ -1006,6 +1007,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return torch.sin(x + 1), list(
             itertools.zip_longest(list1, list2, list3, fillvalue=None)
         )
+
+    @make_test
+    def test_os_environ_get(x):
+        if os.environ.get("DYNAMO_OS_ENVIRON_TEST") != "1":
+            return x + 1
+        else:
+            return x - 1
 
     def test_dict_param_keys(self):
         a_param = torch.nn.Parameter(torch.ones([4, 4]))
