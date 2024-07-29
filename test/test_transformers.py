@@ -3023,7 +3023,7 @@ class TestSDPACudaOnly(NNTestCase):
                     query_ref, key_ref, value_ref, is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)
                 # Low Precision Math Reference
                 out_lp_ref = F.scaled_dot_product_attention(
-                    query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)
+                    query, key, value, is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)
         else:
             # Problem: We pad sizes in the composite region of the top level SDPA. But we need the
             # Debug mask when have dropout. So I am going to manualy pad up here when testing dropout
@@ -3054,7 +3054,7 @@ class TestSDPACudaOnly(NNTestCase):
                 scale=scale, dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
+                query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
                 dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
