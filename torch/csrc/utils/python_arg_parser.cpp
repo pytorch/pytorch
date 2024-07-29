@@ -95,7 +95,8 @@ bool should_allow_numbers_as_tensors(const std::string& name) {
       "subtract",     "subtract_",     "subtract_out", // alias of sub
       "true_divide",  "true_divide_",  "true_divide_out",
       "to",           "_to_copy",      "copy_",
-      "floor_divide", "floor_divide_", "floor_divide_out"};
+      "floor_divide", "floor_divide_", "floor_divide_out",
+      "_conj"}; // _conj needed because mul.Tensor backward calls it
   return allowed.find(name) != allowed.end();
 }
 
@@ -262,15 +263,13 @@ static PyObject* get_type_of_overloaded_arg(PyObject* obj_or_type) {
 static py::object maybe_get_registered_torch_dispatch_rule(
     PyObject* torch_api_function,
     const py::object& torch_dispatch_object) {
-  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object>
-      storage;
-  py::object find_torch_dispatch_rule =
-      storage
-          .call_once_and_store_result([]() -> py::object {
-            return py::module_::import("torch._library.simple_registry")
-                .attr("find_torch_dispatch_rule");
-          })
-          .get_stored();
+  // This is a static object, so we must leak the Python object
+  // "release()" is used here to preserve 1 refcount on the
+  // object, preventing it from ever being de-allocated by CPython.
+  static const py::handle find_torch_dispatch_rule =
+      py::object(py::module_::import("torch._library.simple_registry")
+                     .attr("find_torch_dispatch_rule"))
+          .release();
   auto result = find_torch_dispatch_rule(
       py::reinterpret_borrow<py::object>(torch_api_function),
       torch_dispatch_object.get_type());
@@ -789,7 +788,7 @@ static bool is_scalar_list(PyObject* obj) {
 bool is_tensor_list_and_append_overloaded(
     PyObject* obj,
     std::vector<PyObject*>* overloaded_args,
-    int argnum,
+    size_t argnum,
     bool throw_error) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {

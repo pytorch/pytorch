@@ -7,6 +7,8 @@ on:
       - release/*
     tags:
       - ciflow/inductor/*
+  schedule:
+    - cron: 29 8 * * * # about 1:29am PDT, for mem leak check and rerun disabled tests
   workflow_dispatch:
 
 concurrency:
@@ -164,6 +166,13 @@ jobs:
           { config: "cpu_aot_inductor_torchbench_freezing", shard: 1, num_shards: 2, runner: "linux.12xlarge" },
           { config: "cpu_aot_inductor_torchbench_freezing", shard: 2, num_shards: 2, runner: "linux.12xlarge" },
           { config: "inductor_torchbench_cpu_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.24xl.spr-metal" },
+          { config: "inductor_avx2", shard: 1, num_shards: 2, runner: "linux.10xlarge.avx2" },
+          { config: "inductor_avx2", shard: 2, num_shards: 2, runner: "linux.10xlarge.avx2" },
+          { config: "cpu_inductor_huggingface_freezing_avx2", shard: 1, num_shards: 1, runner: "linux.10xlarge.avx2" },
+          { config: "cpu_inductor_torchbench_freezing_avx2", shard: 1, num_shards: 2, runner: "linux.10xlarge.avx2" },
+          { config: "cpu_inductor_torchbench_freezing_avx2", shard: 2, num_shards: 2, runner: "linux.10xlarge.avx2" },
+          { config: "cpu_inductor_timm_freezing_avx2", shard: 1, num_shards: 2, runner: "linux.10xlarge.avx2" },
+          { config: "cpu_inductor_timm_freezing_avx2", shard: 2, num_shards: 2, runner: "linux.10xlarge.avx2" },
         ]}
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}

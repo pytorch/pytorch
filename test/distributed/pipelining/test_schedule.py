@@ -7,7 +7,6 @@ from torch.distributed.pipelining import (
     ScheduleFlexibleInterleaved1F1B,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
-    ZeroBubbleAlgorithm,
 )
 from torch.distributed.pipelining.schedules import (
     _format_pipeline_order,
@@ -128,21 +127,14 @@ class TestSchedulePlan(TestCase):
                 warmup_ops = warmups_ops_last_stage + 2 * (group_size - 1)
                 warmup_ops = min(warmup_ops, num_microbatches * num_local_stages)
 
-                zero_bubble_algorithms = [
-                    None,
-                    ZeroBubbleAlgorithm.ZB1P,
-                    ZeroBubbleAlgorithm.ZB2P,
-                ]
-                for i in range(len(zero_bubble_algorithms)):
+                for i in range(2):
                     num_stages = num_local_stages * group_size
                     stages = [
                         MockPipelineStage(group_size=group_size, num_stages=num_stages)
                         for i in range(num_local_stages)
                     ]
                     schedule = ScheduleClass(
-                        stages,
-                        num_microbatches,
-                        zero_bubble_algorithm=zero_bubble_algorithms[i],
+                        stages, num_microbatches, enable_zero_bubble=(i == 0)
                     )
                     formatted_pipeline_order = _format_pipeline_order(
                         schedule.pipeline_order
@@ -152,7 +144,7 @@ class TestSchedulePlan(TestCase):
                         schedule.pipeline_order,
                         num_microbatches,
                         num_stages,
-                        enable_zero_bubble=(zero_bubble_algorithms[i] is not None),
+                        enable_zero_bubble=(i == 0),
                     )
 
 
