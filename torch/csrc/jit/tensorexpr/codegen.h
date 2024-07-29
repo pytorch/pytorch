@@ -62,8 +62,9 @@ class TORCH_API CodeGen {
 
   // This function returns the generated code as
   // a string.
-  virtual std::string getCodeText(const std::string& attr = "") {
-    return ("");
+  virtual std::string getCodeText(
+      const std::string& attr [[maybe_unused]] = "") {
+    return "";
   }
 
   // TODO: Figure out how to unify these call interfaces.

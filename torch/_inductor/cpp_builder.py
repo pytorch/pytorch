@@ -356,6 +356,12 @@ def _get_warning_all_cflag(warning_all: bool = True) -> List[str]:
 
 def _get_cpp_std_cflag(std_num: str = "c++17") -> List[str]:
     if _IS_WINDOWS:
+        """
+        On Windows, only c++20 can support `std::enable_if_t`.
+        Ref: https://learn.microsoft.com/en-us/cpp/overview/cpp-conformance-improvements-2019?view=msvc-170#checking-for-abstract-class-types # noqa: B950
+        TODO: discuss upgrade pytorch to c++20.
+        """
+        std_num = "c++20"
         return [f"std:{std_num}"]
     else:
         return [f"std={std_num}"]

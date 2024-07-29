@@ -550,7 +550,7 @@ class ProcessGroupNCCL(Backend):
         min_ctas: int
         max_ctas: int
 
-    class Options:
+    class Options(ProcessGroup.Options):
         config: ProcessGroupNCCL.NCCLConfig
         is_high_priority_stream: bool
         split_from: ProcessGroupNCCL
@@ -621,6 +621,7 @@ def _register_process_group(
     process_group: ProcessGroup,
 ) -> None: ...
 def _resolve_process_group(group_name: str) -> ProcessGroup: ...
+def _register_work(tensor: torch.Tensor, work: Work) -> ProcessGroup: ...
 def _unregister_all_process_groups() -> None: ...
 def _unregister_process_group(group_name: str) -> None: ...
 
