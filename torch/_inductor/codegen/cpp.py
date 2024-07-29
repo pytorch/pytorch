@@ -2373,9 +2373,10 @@ class CppVecKernel(CppKernel):
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
             if is_welford_reduction(reduction_type):
-                assert (
-                    self._get_num_vectors(dtype) in [1, 2]
-                ), "Welford reduction does not support VectorizedN (N>2)"
+                assert self._get_num_vectors(dtype) in [
+                    1,
+                    2,
+                ], "Welford reduction does not support VectorizedN (N>2)"
                 next_value = f"welford_vec_reduce_all({acc_vec})"
             else:
                 reduce_all_body = (
@@ -2402,7 +2403,11 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         var = self.args.output(name)
         out_dtype = V.graph.get_dtype(name)
-        dtype = (out_dtype if out_dtype == torch.double else torch.float) if out_dtype.is_floating_point else torch.int64
+        dtype = (
+            (out_dtype if out_dtype == torch.double else torch.float)
+            if out_dtype.is_floating_point
+            else torch.int64
+        )
         code = IndentedBuffer()
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
