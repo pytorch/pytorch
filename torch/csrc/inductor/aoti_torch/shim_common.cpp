@@ -110,6 +110,7 @@ int32_t aoti_torch_layout__mkldnn() {
     });                                                        \
   }
 
+AOTI_TORCH_ITEM_IMPL(float16, c10::Half)
 AOTI_TORCH_ITEM_IMPL(float32, float)
 AOTI_TORCH_ITEM_IMPL(float64, double)
 AOTI_TORCH_ITEM_IMPL(uint8, uint8_t)
@@ -121,6 +122,7 @@ AOTI_TORCH_ITEM_IMPL(int16, int16_t)
 AOTI_TORCH_ITEM_IMPL(int32, int32_t)
 AOTI_TORCH_ITEM_IMPL(int64, int64_t)
 AOTI_TORCH_ITEM_IMPL(bool, bool)
+AOTI_TORCH_ITEM_IMPL(bfloat16, c10::BFloat16)
 #undef AOTI_TORCH_ITEM_IMPL
 
 #define AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(dtype, ctype, ttype)                  \
@@ -872,7 +874,7 @@ AOTITorchError aoti_torch_index_put_out(
     AtenTensorHandle self,
     const AtenTensorHandle* indices,
     const uint32_t num_indices,
-    const AtenTensorHandle values,
+    const AtenTensorHandle& values,
     bool accumulate) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::List<std::optional<at::Tensor>> indices_;

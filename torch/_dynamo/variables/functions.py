@@ -291,6 +291,19 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def export_freevars(self, parent, child):
         pass
 
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        source = AttrSource(self.source, name) if self.source else None
+        try:
+            subobj = inspect.getattr_static(self.fn, name)
+        except AttributeError:
+            options = {"source": source}
+            return variables.GetAttrVariable(self, name, **options)
+        if source:
+            return variables.LazyVariableTracker.create(subobj, source)
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create(tx, subobj)
+
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         result = hasattr(self.fn, name)
         return variables.ConstantVariable.create(result)
