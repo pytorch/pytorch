@@ -352,7 +352,7 @@ def cat(
         return aten.cat.default(filtered_tensors, dim)
 
     # optimization, avoid concat for single, repeated input
-    if len(filtered_tensors) >= 1 and all(
+    if len(filtered_tensors) > 1 and all(
         t is filtered_tensors[0] for t in filtered_tensors
     ):
         inp = filtered_tensors[0]
