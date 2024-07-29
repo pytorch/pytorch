@@ -26,6 +26,8 @@ struct C10_API SafePyObject {
   SafePyObject(SafePyObject&& other) noexcept
       : data_(std::exchange(other.data_, nullptr)),
         pyinterpreter_(other.pyinterpreter_) {}
+  // For now it's not used, so we just disallow it.
+  SafePyObject& operator=(SafePyObject&&) = delete;
 
   SafePyObject(SafePyObject const& other)
       : data_(other.data_), pyinterpreter_(other.pyinterpreter_) {

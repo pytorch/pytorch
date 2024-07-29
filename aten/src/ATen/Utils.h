@@ -29,7 +29,7 @@ TORCH_API int _crash_if_asan(int);
 // Converts a TensorList (i.e. ArrayRef<Tensor> to vector of TensorImpl*)
 // NB: This is ONLY used by legacy TH bindings, and ONLY used by cat.
 // Once cat is ported entirely to ATen this can be deleted!
-static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(
+inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(
     ArrayRef<Tensor> tensors,
     const char* name,
     int pos,

@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 from worker.main import WorkerTimerArgs
 
+
 if TYPE_CHECKING:
     # Benchmark utils are only partially strict compliant, so MyPy won't follow
     # imports using the public namespace. (Due to an exclusion rule in
