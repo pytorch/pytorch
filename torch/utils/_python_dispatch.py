@@ -70,11 +70,20 @@ class TorchDispatchMode:
 
         self.old_dispatch_mode_flags: Deque[bool] = deque()
 
+    def _lazy_init_old_dispatch_mode_flags(self):
+        if not hasattr(self, "old_dispatch_mode_flags"):
+            self.old_dispatch_mode_flags: Deque[bool] = deque() # type: ignore[no-redef]
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError
 
     def __enter__(self):
         global _is_in_torch_dispatch_mode
+        # Previously, there wasn't any state in this class' constructor
+        # super calls were added to existing modes, but for any new modes
+        # this will replicate the previous behavior of not strictly needing
+        # to call super().__init__()
+        self._lazy_init_old_dispatch_mode_flags()
         self.old_dispatch_mode_flags.append(_is_in_torch_dispatch_mode)
         _is_in_torch_dispatch_mode = True
         _push_mode(self)
