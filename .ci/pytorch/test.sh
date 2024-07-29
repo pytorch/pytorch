@@ -25,7 +25,7 @@ if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
   # shellcheck disable=SC2064
   trap_add cleanup_workspace EXIT
   sudo chown -R jenkins /var/lib/jenkins/workspace
-  git config --global --add safe.directo /var/lib/jenkins/workspace
+  git config --global --add safe.directory /var/lib/jenkins/workspace
 fi
 
 echo "Environment variables:"
