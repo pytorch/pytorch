@@ -85,7 +85,6 @@ from .source import (
     GlobalStateSource,
     GlobalWeakRefSource,
     GradSource,
-    is_unspecialized_builtin_nnmodule_attr,
     LocalSource,
     NNModuleSource,
     NumpyTensorSource,
@@ -96,7 +95,6 @@ from .source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
     TypeSource,
-    UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     WeakRefCallSource,
 )
@@ -135,7 +133,7 @@ dict_version = torch._C._dynamo.guards.dict_version
 
 RootGuardManager = torch._C._dynamo.guards.RootGuardManager
 DictGuardManager = torch._C._dynamo.guards.DictGuardManager
-install_tensor_aliasing_guard = torch._C._dynamo.guards.install_tensor_aliasing_guard
+install_object_aliasing_guard = torch._C._dynamo.guards.install_object_aliasing_guard
 install_no_tensor_aliasing_guard = (
     torch._C._dynamo.guards.install_no_tensor_aliasing_guard
 )
@@ -867,7 +865,6 @@ class GuardBuilder(GuardBuilderBase):
                 NNModuleSource,
                 UnspecializedNNModuleSource,
                 FSDPNNModuleSource,
-                UnspecializedBuiltinNNModuleSource,
             ),
         ):
             assert base_guard_manager  # to make mypy happy
@@ -1616,7 +1613,7 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
         if config.enable_cpp_guard_manager:
-            install_tensor_aliasing_guard(
+            install_object_aliasing_guard(
                 self.get_guard_manager(guard),
                 self.get_guard_manager_from_source(source_b),
                 get_verbose_code_parts(code, guard),
@@ -1683,6 +1680,13 @@ class GuardBuilder(GuardBuilderBase):
                 self.guard_on_dict_keys_and_ignore_order(value, guard)
         else:
             self._produce_guard_code(guard, code)
+
+    def EMPTY_NN_MODULE_HOOKS_DICT(self, guard):
+        """Special guard to skip guards on empty hooks. This is controlled by skip_nnmodule_hook_guards"""
+        if config.skip_nnmodule_hook_guards:
+            # This is unsafe if you add/remove a hook on nn module variable
+            return
+        self.SEQUENCE_LENGTH(guard)
 
     def OBJECT_MUTATION(self, guard: Guard):
         mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
@@ -2112,22 +2116,6 @@ class DeletedGuardFn:
     pass
 
 
-def is_nn_module_hook(source: Source) -> bool:
-    # Note that we only skip guards on builtin nn modules like Conv2D etc. But still this is a soundness issue if one
-    # adds/removes a hook after the model is compiled.
-    return (
-        is_unspecialized_builtin_nnmodule_attr(source)
-        and isinstance(source, AttrSource)
-        and source.member
-        in (
-            "_backward_hooks",
-            "_backward_pre_hooks",
-            "_forward_hooks",
-            "_forward_pre_hooks",
-        )
-    )
-
-
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -2188,11 +2176,6 @@ class CheckFunctionManager:
             ):
                 continue
 
-            # This is unsafe if you add/remove a hook on unspecialized nn module variable
-            if config.skip_nnmodule_hook_guards and is_nn_module_hook(
-                guard.originating_source
-            ):
-                continue
             guard.create(builder)
 
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
@@ -2376,7 +2359,7 @@ class CheckFunctionManager:
                 source_b = guard.input_source_b
                 code_part = f"{source_a.name()} is {source_b.name()}"
                 if config.enable_cpp_guard_manager:
-                    install_tensor_aliasing_guard(
+                    install_object_aliasing_guard(
                         builder.get_guard_manager_from_source(source_a),
                         builder.get_guard_manager_from_source(source_b),
                         [code_part],

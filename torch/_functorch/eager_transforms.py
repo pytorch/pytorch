@@ -1086,7 +1086,6 @@ def jvp(
     )
 
 
-@doesnt_support_saved_tensors_hooks
 def _jvp_with_argnums(
     func: Callable,
     primals: Any,
@@ -1675,7 +1674,6 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
             " replaced with their non-aliasing counterparts, {view}_copy.\n"
         )
 
-    @doesnt_support_saved_tensors_hooks
     @wraps(func)
     def wrapped(*args, **kwargs):
         try:

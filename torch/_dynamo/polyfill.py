@@ -24,7 +24,7 @@ def any(iterator):
 
 
 def index(iterator, item, start=0, end=None):
-    for i, elem in enumerate(list(iterator))[start:end]:
+    for i, elem in enumerate(list(iterator)[start:end], start):
         if item == elem:
             return i
     # This will not run in dynamo
@@ -97,8 +97,37 @@ def dropwhile(predicate, iterable):
     yield from iterable
 
 
+def zip_longest(*iterables, fillvalue=None):
+    # Create a list of iterators from the input iterables
+    iterators = [iter(it) for it in iterables]
+    result = []
+    while True:
+        row = []
+        active = False
+        for it in iterators:
+            try:
+                # Try to get the next item from the iterator
+                value = next(it)
+                row.append(value)
+                active = True
+            except StopIteration:
+                # If the iterator is exhausted, use the fillvalue
+                row.append(fillvalue)
+        if not active:
+            break
+        result.append(tuple(row))
+    return result
+
+
 def getattr_and_trace(*args, **kwargs):
     wrapper_obj = args[0]
     attr_name = args[1]
     fn = getattr(wrapper_obj, attr_name)
     return fn(*args[2:], **kwargs)
+
+
+def enumerate(iterable, start=0):
+    n = start
+    for elem in iterable:
+        yield n, elem
+        n += 1
