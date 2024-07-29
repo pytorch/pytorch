@@ -14,7 +14,6 @@ from typing import Dict, NamedTuple, Tuple
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.nn.functional as F
@@ -24,6 +23,7 @@ from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.testing import expectedFailureDynamic, same
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
+
 
 try:
     from . import test_functions
@@ -2757,7 +2757,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         fn(inp, mod)
         self.assertEqual(num_compiles, 2)
 
-    def test_no_guard_on_torch_nn_modules(self):
+    @patch.object(torch._dynamo.config, "guard_nn_modules", True)
+    def test_guard_on_torch_nn_modules(self):
         # https://github.com/pytorch/pytorch/issues/110048
 
         class MockModule(torch.nn.Module):

@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import builtins
 import logging
 import operator
 import warnings
@@ -102,6 +103,8 @@ def get_dtype_as_int(tensor):
 # of TS2FXGraphConverter with name convert_<namespace>_<opname>().
 # Please check __init__ for method population implementations.
 kind_to_standard_operators = {
+    "prim::max": builtins.max,
+    "prim::min": builtins.min,
     "prim::TupleIndex": operator.getitem,
     "aten::__is__": operator.is_,
     "aten::__isnot__": operator.is_not,
@@ -775,6 +778,11 @@ class TS2FXGraphConverter:
         if node.outputsSize() == 1:
             output_name = node.output().debugName()
             self.name_to_node[output_name] = cond_node
+        elif node.outputsSize() > 1:
+            for i, output in enumerate(node.outputs()):
+                output_name = output.debugName()
+                getitem = self.fx_graph.call_function(operator.getitem, (cond_node, i))
+                self.name_to_node[output_name] = getitem
 
     def convert_aten_Bool(self, node: torch._C.Node):
         self._convert_as_noop(node)
@@ -846,7 +854,7 @@ class TS2FXGraphConverter:
         # the entire logic here, we simply keep first line from node string (getting rid
         # of sub-blocks IR prints).
         node_str = "".join(str(node).split("\n")[:1])
-        log.debug(f"[{handler_func.__name__}] converts [{node_str}]")  # noqa: G004
+        log.debug("[%s] converts [%s]", handler_func.__name__, node_str)
         try:
             handler_func(node)
         except Exception as e:
@@ -978,7 +986,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
 
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
-        log.info("TorchScript graph\n\n%s\n", self.ts_graph)  # noqa: G004
+        log.info("TorchScript graph\n\n%s\n", self.ts_graph)
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
@@ -1017,14 +1025,12 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
             self.name_to_non_tensor_attributes,
         )
         gm = graph_converter.convert()
-        log.info(
-            "Converted graph, before retracing:\n\n%s\n",
-            gm.print_readable(print_output=False),
-        )
+        log.info("GraphModule: %s", gm.print_readable(print_output=False))
+
         ep = self.retrace_as_exported_program(
             gm, graph_converter.name_to_tensor_constants
         )
-        log.info(f"{ep}")  # noqa: G004
+        log.info("%s", ep)
 
         # Post-processing step to ensure ExportedProgram has the same state_dict as
         # the original TorchScript model. Throw warnings for additionally populated
