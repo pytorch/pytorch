@@ -9,7 +9,6 @@ set -ex
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-
 # Do not change workspace permissions for ROCm CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
 if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
@@ -393,22 +392,51 @@ test_inductor_cpp_wrapper_abi_compatible() {
 DYNAMO_BENCHMARK_FLAGS=()
 
 pr_time_benchmarks() {
-
-  pip install cirron
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
-  echo "benchmark results on current PR: "
-  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
-  git checkout HEAD~1
 
-  # we can try firt to run develop alone, and if it worked then we do not need to run clean->develop.
-  # another suggestion was to use historical stored data insetad of building Head~1
-  python setup.py clean
-  python setup.py develop
-  source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
-  echo "benchmark results on main: "
+  # run the benchmarks on the current commit.
+  python benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.py "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
+  echo "content before"
   cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
+
+  # build torch at the base commit to
+  if [[ "${BASE_SHA}" == "${SHA1}" ]]; then
+    echo "On trunk, we should compare schemas with torch built from the parent commit"
+    SHA_TO_COMPARE=$(git rev-parse "${SHA1}"^)
+  else
+    echo "On pull, we should compare schemas with torch built from the merge base"
+    SHA_TO_COMPARE=$(git merge-base "${SHA1}" "${BASE_SHA}")
+  fi
+  export SHA_TO_COMPARE
+
+  python -m venv venv
+  # shellcheck disable=SC1091
+  . venv/bin/activate
+
+  git reset --hard "${SHA_TO_COMPARE}"
+  git submodule sync && git submodule update --init --recursive
+  echo "::group::Installing Torch From Base Commit"
+  pip install -r requirements.txt
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+  python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist"
+  python -mpip install base_dist/*.whl
+  echo "::endgroup::"
+
+  pip show torch
+
+  # run the benchmarks on parent.
+  python ./benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.py "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
+  echo "content after:"
+  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
+
+  # resetting the original code
+  git reset --hard "${SHA1}"
+  git submodule sync && git submodule update --init --recursive
+  deactivate
+  rm -r "${REPO_DIR}/venv" "${REPO_DIR}/base_dist"
+  pip show torch
 }
 
 if [[ "${TEST_CONFIG}" == *pr_time_benchmarks* ]]; then
