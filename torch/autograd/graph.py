@@ -483,6 +483,8 @@ def register_multi_grad_hook(
         >>>
     """
     supported_modes = ("all", "any")
+    lock = threading.Lock()
+
     if mode not in supported_modes:
         raise ValueError(f"Expects mode to be one of {supported_modes} but got {mode}")
 
@@ -504,14 +506,19 @@ def register_multi_grad_hook(
                 count[id] = count.get(id, 0)
                 buffer[id] = buffer.get(id, [None] * len_tensors)
 
-                if count[id] == 0:
-                    # On the first call, compute the actual nb_calls and buffer
-                    nb_calls = sum(map(torch._C._will_engine_execute_node, grad_fns))
+                with lock:
+                    curr_count, count[id] = count[id], count[id] + 1
+
+                    if curr_count == 0:
+                        # On the first call, compute the actual nb_calls and buffer
+                        nb_calls = sum(
+                            map(torch._C._will_engine_execute_node, grad_fns)
+                        )
 
                 buffer[id][idx] = grad
-                count[id] += 1
 
-                if count[id] == nb_calls:
+                assert nb_calls is not None
+                if curr_count == nb_calls - 1:
                     fn = cast(Callable[[Sequence[Optional[torch.Tensor]]], None], fn)
                     fn(buffer[id])
                     del count[id]
@@ -524,7 +531,6 @@ def register_multi_grad_hook(
         )
     elif mode == "any":
         fn = cast(Callable[[torch.Tensor], None], fn)
-        lock = threading.Lock()
         ran_hook: Dict[int, bool] = defaultdict(bool)
 
         @functools.wraps(fn)
