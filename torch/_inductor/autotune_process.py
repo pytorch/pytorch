@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
-from .runtime.benchmarking import benchmarker, do_bench
+from .runtime.benchmarking import benchmarker, do_bench, LazyBenchmark
 from .virtualized import V
 
 
@@ -582,7 +582,7 @@ class GPUDeviceBenchmarkRequest(BenchmarkRequest):
         fn,
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
-    ) -> float:
+    ) -> Union[LazyBenchmark, float]:
         device_idx_set = {
             tensor.device.index
             for tensor in [*input_tensors, output_tensor]

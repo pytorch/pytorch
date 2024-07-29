@@ -568,9 +568,9 @@ class Benchmarker:
         # before each kernel call to make sure that the L2
         # doesn't contain any input data before the run
         if fast_flush:
-            cache = torch.empty(256e6 // 4, dtype=torch.int, device="cuda")
+            cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
         else:
-            cache = torch.empty(256e6, dtype=torch.int8, device="cuda")
+            cache = torch.empty(int(256e6), dtype=torch.int8, device="cuda")
 
         # Estimate the runtime of the function
         start_event = torch.cuda.Event(enable_timing=True)
@@ -696,7 +696,7 @@ class Benchmarker:
                     cpu_launch_overhead_ms_per_iter / len(callables)
                 )
                 target_timing_ms = min(estimated_timings_ms) * pruning_factor
-                callables_to_benchmark = []
+                callables_to_benchmark: List[Callable[[], Any]] = []
                 for _callable, timing_ms in sorted(
                     callable_to_timing_ms.items(), key=lambda x: x[1]
                 ):
