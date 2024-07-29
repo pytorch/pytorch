@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
@@ -42,9 +40,12 @@ from .higher_order_ops import (
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
+    EnumerateVariable,
     IteratorVariable,
     ItertoolsVariable,
+    MapVariable,
     RepeatIteratorVariable,
+    ZipVariable,
 )
 from .lazy import LazyVariableTracker
 from .lists import (
@@ -73,18 +74,13 @@ from .misc import (
     NumpyVariable,
     PythonModuleVariable,
     RegexPatternVariable,
-    StopIterationVariable,
     StringFormatVariable,
     SuperVariable,
     TorchVersionVariable,
     TypingVariable,
     UnknownVariable,
 )
-from .nn_module import (
-    NNModuleVariable,
-    UnspecializedBuiltinNNModuleVariable,
-    UnspecializedNNModuleVariable,
-)
+from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
@@ -150,7 +146,6 @@ __all__ = [
     "SDPAParamsVariable",
     "SkipFunctionVariable",
     "SliceVariable",
-    "StopIterationVariable",
     "StringFormatVariable",
     "SuperVariable",
     "TensorVariable",
@@ -160,7 +155,6 @@ __all__ = [
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",
-    "UnspecializedBuiltinNNModuleVariable",
     "UnspecializedPythonVariable",
     "UntypedStorageVariable",
     "UserDefinedClassVariable",

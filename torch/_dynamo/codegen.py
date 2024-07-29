@@ -287,7 +287,8 @@ class PyCodegen:
 
     def create_load_closure(self, name) -> Instruction:
         assert name in self.cell_and_freevars()
-        return create_instruction("LOAD_CLOSURE", argval=name)
+        inst_name = "LOAD_FAST" if sys.version_info >= (3, 13) else "LOAD_CLOSURE"
+        return create_instruction(inst_name, argval=name)
 
     def create_store(self, name) -> Instruction:
         if name in self.cell_and_freevars():
@@ -408,12 +409,23 @@ class PyCodegen:
         def gen_fn():
             for var in freevars:
                 assert var in self.cell_and_freevars()
-                output.append(create_instruction("LOAD_CLOSURE", argval=var))
+                inst_name = (
+                    "LOAD_FAST" if sys.version_info >= (3, 13) else "LOAD_CLOSURE"
+                )
+                output.append(create_instruction(inst_name, argval=var))
             output.append(create_instruction("BUILD_TUPLE", arg=len(freevars)))
             output.append(self.create_load_const(code))
             if sys.version_info < (3, 11):
                 output.append(self.create_load_const(fn_name))
-            output.append(create_instruction("MAKE_FUNCTION", arg=0x08))
+            if sys.version_info >= (3, 13):
+                output.extend(
+                    [
+                        create_instruction("MAKE_FUNCTION"),
+                        create_instruction("SET_FUNCTION_ATTRIBUTE", arg=0x08),
+                    ]
+                )
+            else:
+                output.append(create_instruction("MAKE_FUNCTION", arg=0x08))
 
         if push_null and sys.version_info >= (3, 11):
             self.add_push_null(gen_fn)
@@ -463,7 +475,13 @@ class PyCodegen:
         self(AttrSource(self.tx.import_source(module_name), object_name))
 
     def create_call_function_kw(self, nargs, kw_names, push_null) -> List[Instruction]:
-        if sys.version_info >= (3, 11):
+        if sys.version_info >= (3, 13):
+            output = create_call_function(nargs, push_null)
+            assert output[-1].opname == "CALL"
+            output.insert(-1, self.create_load_const(kw_names))
+            output[-1] = create_instruction("CALL_KW", arg=nargs)
+            return output
+        elif sys.version_info >= (3, 11):
             output = create_call_function(nargs, push_null)
             if sys.version_info >= (3, 12):
                 idx = -1
