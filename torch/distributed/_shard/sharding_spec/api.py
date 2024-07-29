@@ -1,27 +1,28 @@
 # mypy: allow-untyped-defs
+import functools
+import operator
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-import functools
 from typing import Callable, Dict, List, TYPE_CHECKING
 
 import torch
+import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta
+from torch.distributed._shard.metadata import ShardMetadata
+from torch.distributed._shard.op_registry_utils import _decorator_func
 
 from ._internals import (
     check_tensor,
     get_chunked_dim_size,
     get_split_size,
-    validate_non_overlapping_shards_metadata
+    validate_non_overlapping_shards_metadata,
 )
-from torch.distributed._shard.metadata import ShardMetadata
 
-import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta
-from torch.distributed._shard.op_registry_utils import _decorator_func
-import operator
 
 if TYPE_CHECKING:
     # Only include ShardedTensor when do type checking, exclude it
     # from run-time to resolve circular dependency.
     from torch.distributed._shard.sharded_tensor import ShardedTensor
+
 
 class PlacementSpec(ABC):  # noqa: B024
     """
@@ -29,6 +30,7 @@ class PlacementSpec(ABC):  # noqa: B024
     class can be used to specify customized placements which might not be
     covered by existing APIs.
     """
+
     pass
 
 
@@ -47,15 +49,18 @@ class DevicePlacementSpec(PlacementSpec):
         if not isinstance(self.device, torch.distributed._remote_device):
             self.device = torch.distributed._remote_device(self.device)
 
+
 class ShardingSpec(ABC):
     """
     Base class representing sharding specifications.
     """
+
     @abstractmethod
-    def build_metadata(self,
-                       tensor_sizes: torch.Size,
-                       tensor_properties: sharded_tensor_meta.TensorProperties,
-                       ) -> sharded_tensor_meta.ShardedTensorMetadata:
+    def build_metadata(
+        self,
+        tensor_sizes: torch.Size,
+        tensor_properties: sharded_tensor_meta.TensorProperties,
+    ) -> sharded_tensor_meta.ShardedTensorMetadata:
         """
         Given a global tensor size, define how to shard a tensor like this shape
         across ranks, return ShardedTensorMetadata
@@ -71,7 +76,9 @@ class ShardingSpec(ABC):
         """
 
     @abstractmethod
-    def shard(self, tensor: torch.Tensor, src_rank: int = 0, process_group=None) -> "ShardedTensor":
+    def shard(
+        self, tensor: torch.Tensor, src_rank: int = 0, process_group=None
+    ) -> "ShardedTensor":
         """
         Given a global tensor on src_rank, shard this tensor
         across ranks within the process group, return a ShardedTensor.
@@ -88,25 +95,34 @@ class ShardingSpec(ABC):
             A :class:`ShardedTensor` sharded from the given tensor.
         """
 
+
 # Ops customized for a particular ShardingSpec.
 _CUSTOM_SHARDING_SPEC_OPS: Dict[str, Dict[Callable, Callable]] = {}
+
 
 def _has_custom_op(sharding_spec, op):
     """
     Returns whether or not the ShardingSpec has a custom op implementation.
     """
     class_name = type(sharding_spec).__qualname__
-    return class_name in _CUSTOM_SHARDING_SPEC_OPS and op in _CUSTOM_SHARDING_SPEC_OPS[class_name]
+    return (
+        class_name in _CUSTOM_SHARDING_SPEC_OPS
+        and op in _CUSTOM_SHARDING_SPEC_OPS[class_name]
+    )
 
-def _dispatch_custom_op(sharding_spec, op: Callable, types, args, kwargs, process_group):
+
+def _dispatch_custom_op(
+    sharding_spec, op: Callable, types, args, kwargs, process_group
+):
     """
     Calls the custom op for this ShardingSpec if it exists.
     """
     class_name = type(sharding_spec).__qualname__
     if not _has_custom_op(sharding_spec, op):
-        raise RuntimeError(f'Custom op: {op} not registered for {class_name}')
+        raise RuntimeError(f"Custom op: {op} not registered for {class_name}")
     func = _CUSTOM_SHARDING_SPEC_OPS[class_name][op]
     return func(types, args, kwargs, process_group)
+
 
 def custom_sharding_spec_op(sharding_spec_class, func):
     """
@@ -119,9 +135,7 @@ def custom_sharding_spec_op(sharding_spec_class, func):
     if class_name not in _CUSTOM_SHARDING_SPEC_OPS:
         _CUSTOM_SHARDING_SPEC_OPS[class_name] = {}
     return functools.partial(
-        _decorator_func,
-        op=func,
-        op_table=_CUSTOM_SHARDING_SPEC_OPS[class_name]
+        _decorator_func, op=func, op_table=_CUSTOM_SHARDING_SPEC_OPS[class_name]
     )
 
 
@@ -140,30 +154,33 @@ class EnumerableShardingSpec(ShardingSpec):
 
     def __post_init__(self):
         if len(self.shards) == 0:
-            raise ValueError(f'Empty shard list provided: {self.shards}')
+            raise ValueError(f"Empty shard list provided: {self.shards}")
 
         # Validate each shard has same rank.
         rank = -1
         for shard in self.shards:
             if rank != -1 and rank != len(shard.shard_offsets):
-                raise ValueError(f'Found inconsistent ranks for shards: {rank} and {len(shard.shard_offsets)}')
+                raise ValueError(
+                    f"Found inconsistent ranks for shards: {rank} and {len(shard.shard_offsets)}"
+                )
             rank = len(shard.shard_offsets)
 
         validate_non_overlapping_shards_metadata(self.shards)
 
-    def build_metadata(self,
-                       tensor_sizes: torch.Size,
-                       tensor_properties: sharded_tensor_meta.TensorProperties,
-                       ) -> sharded_tensor_meta.ShardedTensorMetadata:
+    def build_metadata(
+        self,
+        tensor_sizes: torch.Size,
+        tensor_properties: sharded_tensor_meta.TensorProperties,
+    ) -> sharded_tensor_meta.ShardedTensorMetadata:
         # check if shards form a valid tensor
         check_tensor(self.shards, tensor_sizes)
         return sharded_tensor_meta.ShardedTensorMetadata(
-            self.shards,
-            tensor_sizes,
-            tensor_properties
+            self.shards, tensor_sizes, tensor_properties
         )
 
-    def shard(self, tensor: torch.Tensor, src_rank: int = 0, process_group=None) -> "ShardedTensor":
+    def shard(
+        self, tensor: torch.Tensor, src_rank: int = 0, process_group=None
+    ) -> "ShardedTensor":
         # TODO: figure out a generic and efficient way to scatter the shards for EnumerableShardingSpec
         raise NotImplementedError("EnumerableShardingSpec.shard not implemented yet!")
 
@@ -216,10 +233,14 @@ def _infer_sharding_spec_from_shards_metadata(shards_metadata):
     if chunk_sharding_dim is not None:
         # Ensure we infer the correct placement order from offsets
         placements = [
-            x for _, x in sorted(zip(chunk_offset_list, placements), key=operator.itemgetter(0))
+            x
+            for _, x in sorted(
+                zip(chunk_offset_list, placements), key=operator.itemgetter(0)
+            )
         ]
 
         from .chunk_sharding_spec import ChunkShardingSpec
+
         chunk_spec = ChunkShardingSpec(
             dim=chunk_sharding_dim,
             placements=placements,

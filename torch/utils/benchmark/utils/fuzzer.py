@@ -3,7 +3,6 @@ import functools
 import itertools as it
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-import numpy as np
 import torch
 
 
@@ -103,6 +102,7 @@ class FuzzedParameter:
         return distribution
 
     def _loguniform(self, state):
+        import numpy as np
         output = int(2 ** state.uniform(
             low=np.log2(self._minval) if self._minval is not None else None,
             high=np.log2(self._maxval) if self._maxval is not None else None,
@@ -119,6 +119,7 @@ class FuzzedParameter:
         return state.uniform(low=self._minval, high=self._maxval)
 
     def _custom_distribution(self, state):
+        import numpy as np
         # If we directly pass the keys to `choice`, numpy will convert
         # them to numpy dtypes.
         index = state.choice(
@@ -266,6 +267,7 @@ class FuzzedTensor:
             return torch.randint(1, 127, size=size, dtype=dtype, device="cpu")
 
     def _make_tensor(self, params, state):
+        import numpy as np
         size, steps, allocation_size = self._get_size_and_steps(params)
         constructor = (
             self._tensor_constructor or
@@ -369,6 +371,7 @@ class Fuzzer:
                 also be used to set the PyTorch random seed so that random
                 ops will create reproducible Tensors.
         """
+        import numpy as np
         if seed is None:
             seed = np.random.RandomState().randint(0, 2 ** 32 - 1, dtype=np.int64)
         self._seed = seed
@@ -392,6 +395,7 @@ class Fuzzer:
         ))
 
     def take(self, n):
+        import numpy as np
         state = np.random.RandomState(self._seed)
         torch.manual_seed(state.randint(low=0, high=2 ** 63, dtype=np.int64))
         for _ in range(n):

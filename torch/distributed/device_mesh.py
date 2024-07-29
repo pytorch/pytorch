@@ -6,10 +6,9 @@ import threading
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-
 from torch.distributed import is_available
+from torch.utils._typing_utils import not_none
 
-from ..utils._typing_utils import not_none
 
 __all__ = ["init_device_mesh", "DeviceMesh"]
 
@@ -39,6 +38,7 @@ else:
         _find_pg_by_ranks_and_tag,
         _get_default_group,
         _get_group_tag,
+        get_backend,
         get_process_group_ranks,
         get_rank,
         get_world_size,
@@ -106,9 +106,8 @@ else:
                 if cur_rank in mesh_nd:
                     res_submesh = submesh
 
-            res_submesh._parent_mesh = parent_mesh  # type: ignore[possibly-undefined]
-            res_submesh._dim_group_infos = [
-                parent_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims  # type: ignore[possibly-undefined]
+            res_submesh._dim_group_infos = [  # type: ignore[possibly-undefined]
+                parent_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims
             ]
             self.child_to_parent_mapping[res_submesh] = parent_mesh
 
@@ -242,8 +241,7 @@ else:
 
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
-            self._parent_mesh: Optional[DeviceMesh] = None
-            self._thread_id = threading.get_ident()
+            self._thread_id = None
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
@@ -254,6 +252,9 @@ else:
                 if _init_backend:
                     self._get_or_create_default_group()
                     self._init_process_groups()
+
+                if is_initialized() and get_backend() == "threaded":
+                    self._thread_id = threading.get_ident()
 
                 # calculate the coordinates of the current global rank on the mesh
                 rank_coords = (self.mesh == get_rank()).nonzero()
@@ -347,7 +348,7 @@ else:
                         if self.get_rank() in subgroup_ranks:
                             if len(dim_group_infos) > dim:
                                 raise RuntimeError(
-                                    f"Each device mesh dimension should get only one process group, but got {self.get_rank} "
+                                    f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
                                     f"in {subgroup_ranks}!"
                                 )
                             dim_group_infos.append(
@@ -387,7 +388,6 @@ else:
                         self.mesh.shape,
                         self.device_type,
                         self.mesh_dim_names,
-                        self._parent_mesh,
                         self._thread_id,
                     )
                 )
@@ -404,7 +404,6 @@ else:
                     and self.mesh.shape == other.mesh.shape
                     and self.device_type == other.device_type
                     and self.mesh_dim_names == other.mesh_dim_names
-                    and self._parent_mesh == other._parent_mesh
                     and self._thread_id == other._thread_id
                 )
 

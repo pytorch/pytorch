@@ -65,6 +65,9 @@ jobs:
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11
             runner: linux.arm64.2xlarge
+          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks
+            runner: linux.arm64.m7g.4xlarge
+            timeout-minutes: 600
     runs-on: [self-hosted, "${{ matrix.runner }}"]
     env:
       DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}
@@ -79,21 +82,21 @@ jobs:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required for git merge-base
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.4
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
       - name: Build docker image
         id: build-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.4
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
           push: true
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.4
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
@@ -121,9 +124,9 @@ jobs:
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
         with:
-          ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/${{ (matrix.runner == 'linux.arm64.2xlarge') && 'arm64v8' || 'tool' }}/alpine
+          ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/${{ contains(matrix.runner, 'arm64') && 'arm64v8' || 'tool' }}/alpine
         if: always()
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.4
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()

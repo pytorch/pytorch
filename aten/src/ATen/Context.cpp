@@ -56,6 +56,14 @@ void Context::setDeterministicCuDNN(bool b) {
   deterministic_cudnn = b;
 }
 
+bool Context::deterministicMkldnn() const {
+  return deterministic_mkldnn;
+}
+
+void Context::setDeterministicMkldnn(bool b) {
+  deterministic_mkldnn = b;
+}
+
 bool Context::deterministicAlgorithms() const {
   return _deterministic_algorithms;
 }
@@ -145,6 +153,13 @@ void Context::setSDPUseCuDNN(bool e) {
   enabled_cudnnSDP = e;
 }
 
+void Context::setSDPUseOverrideable(bool e) {
+  enabled_overrideable = e;
+}
+
+bool Context::userEnabledOverrideableSDP() const {
+  return enabled_overrideable;
+}
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
@@ -263,7 +278,24 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
   }
 }
 
-at::BlasBackend Context::blasPreferredBackend() const {
+at::BlasBackend Context::blasPreferredBackend() {
+#ifdef USE_ROCM
+  if (blas_preferred_backend == at::BlasBackend::Cublaslt) {
+    static const bool hipblaslt_unsupported = []() {
+      static const std::vector<std::string> archs = {"gfx90a", "gfx940", "gfx941", "gfx942"};
+      for (auto index: c10::irange(getNumGPUs())) {
+        if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
+          TORCH_WARN_ONCE(
+            "Attempting to use hipBLASLt on an unsupported architecture! "
+            "Overriding blas backend to hipblas");
+          return true;
+        }
+      }
+      return false;
+    }();
+    if (hipblaslt_unsupported) blas_preferred_backend = at::BlasBackend::Cublas;
+  }
+#endif
   return blas_preferred_backend;
 }
 

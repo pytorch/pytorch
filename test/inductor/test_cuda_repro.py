@@ -18,7 +18,10 @@ from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    SM80OrLater,
+)
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
@@ -26,6 +29,8 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ASAN,
 )
+from torch.testing._internal.inductor_utils import skipCUDAIf
+
 
 try:
     try:
@@ -51,6 +56,7 @@ aten = torch.ops.aten
 
 
 class CudaReproTests(TestCase):
+    device = "cuda"
     common = check_model_cuda
 
     def test_index_put_issue(self):
@@ -688,6 +694,22 @@ class CudaReproTests(TestCase):
         ref = torch.compile(fn, fullgraph=True)(*args)
         assert same(ref, correct)
 
+    def test_scatter_index_not_wrapped(self):
+        src = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], device=self.device)
+        index = torch.tensor([0, 1, 0, 1, 2, 0], device=self.device)
+        input = torch.tensor([1.0, 2.0, 3.0, 4.0], device=self.device)
+        compiled_sr = torch.compile(torch.scatter_reduce)
+
+        input_orig = input.clone()
+        out, code = run_and_get_code(compiled_sr, input, 0, index, src, "sum")
+        # tmp0 - not wrapping of negative numbers
+        FileCheck().check("tl.device_assert(((0 <= tmp0) & (tmp0 < 4))").check_next(
+            "atomic_add"
+        ).run(code[0])
+        self.assertEqual(
+            out, torch.scatter_reduce(input_orig.clone(), 0, index, src, "sum")
+        )
+
     def test_embedding_var_mean(self):
         def forward(arg0_1):
             full = torch.ops.aten.full.default(
@@ -1023,7 +1045,10 @@ class CudaReproTests(TestCase):
         model = torch.compile(model, backend=cnts, dynamic=True)
 
         with torch.backends.cuda.sdp_kernel(
-            enable_flash=True, enable_math=False, enable_mem_efficient=False
+            enable_flash=True,
+            enable_math=False,
+            enable_mem_efficient=False,
+            enable_cudnn=False,
         ):
             input1 = torch.rand(5, 512, 1024, device="cuda", dtype=torch.float16)
             input2 = torch.rand(5, 513, 1024, device="cuda", dtype=torch.float16)
@@ -1182,6 +1207,21 @@ class CudaReproTests(TestCase):
         self.assertEqual(outer_reduce(a), out)
         self.assertTrue("for roffset" not in code)
 
+    def test_non_contiguous_unaligned_input_indices(self):
+        from torch._inductor.compile_fx import remove_unaligned_input_idxs
+
+        inputs = [torch.ones(2, 2, device="cuda"), torch.ones(2, 2, device="cuda")[1:]]
+        idxs = remove_unaligned_input_idxs(inputs, [1])
+        self.assertEqual(idxs, [])
+
+        inputs = [
+            torch.ones(2, 2, device="cuda"),
+            torch.ones(2, 2, device="cuda"),
+            torch.ones(2, 2, device="cuda")[1:],
+        ]
+        idxs = remove_unaligned_input_idxs(inputs, [0, 2])
+        self.assertEqual(idxs, [0])
+
     def test_epilogue_fusion_with_view(self):
         class ToyModel(torch.nn.Module):
             def __init__(self):
@@ -1238,6 +1278,47 @@ def triton_(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
     tmp2 = tmp0 + tmp1
     tl.store(out_ptr0 + (x3), tmp2, xmask)""",  # noqa: B950
         )
+
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_int64_index_intermediate(self):
+        def foo(inp):
+            view_23 = torch.ops.aten.view.default(inp, [-1, 8192, 8192])
+            split_1 = torch.ops.aten.split.Tensor(view_23, 1024, 1)
+            view_23 = None
+            getitem_17 = split_1[0]
+            getitem_18 = split_1[1]
+            getitem_19 = split_1[2]
+            getitem_20 = split_1[3]
+            getitem_21 = split_1[4]
+            getitem_22 = split_1[5]
+            getitem_23 = split_1[6]
+            getitem_24 = split_1[7]
+            split_1 = None
+            cat_1 = torch.ops.aten.cat.default(
+                [
+                    getitem_17,
+                    getitem_18,
+                    getitem_19,
+                    getitem_20,
+                    getitem_21,
+                    getitem_22,
+                    getitem_23,
+                    getitem_24,
+                ]
+            )
+            getitem_17 = (
+                getitem_18
+            ) = (
+                getitem_19
+            ) = getitem_20 = getitem_21 = getitem_22 = getitem_23 = getitem_24 = None
+            return cat_1
+
+        for mark_dynamic in [False, True]:
+            inp = torch.rand((65536, 8192), dtype=torch.bfloat16, device="cuda")
+            if mark_dynamic:
+                torch._dynamo.mark_dynamic(inp, 0)
+            foo_c = torch.compile(foo)
+            torch.testing.assert_allclose(foo(inp), foo_c(inp))
 
 
 if __name__ == "__main__":

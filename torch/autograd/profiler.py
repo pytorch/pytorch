@@ -118,7 +118,7 @@ class profile:
 
         use_device (str, optional): Enables timing of device events.
             Adds approximately 4us of overhead to each tensor operation when use cuda.
-            The valid devices options are 'cuda', 'xpu' and 'privateuseone'.
+            The valid devices options are 'cuda', 'xpu', 'mtia' and 'privateuseone'.
 
         record_shapes (bool, optional): If shapes recording is set, information
             about input dimensions will be collected. This allows one to see which
@@ -205,7 +205,6 @@ class profile:
         with_modules=False,
         use_kineto=False,
         use_cpu=True,
-        use_mtia=False,
         experimental_config=None,
     ):
         self.enabled: bool = enabled
@@ -231,7 +230,6 @@ class profile:
         self.with_stack = with_stack
         self.with_modules = with_modules
         self.use_cpu = use_cpu
-        self.use_mtia = use_mtia
         if experimental_config is None:
             experimental_config = _ExperimentalConfig()
         self.experimental_config = experimental_config
@@ -246,7 +244,7 @@ class profile:
             ), "Device-only events supported only with Kineto (use_kineto=True)"
 
         if self.use_device is not None:
-            VALID_DEVICE_OPTIONS = ["cuda", "xpu"]
+            VALID_DEVICE_OPTIONS = ["cuda", "xpu", "mtia"]
             if _get_privateuse1_backend_name() != "privateuseone":
                 VALID_DEVICE_OPTIONS.append(_get_privateuse1_backend_name())
             if self.use_device not in VALID_DEVICE_OPTIONS:
@@ -265,8 +263,6 @@ class profile:
         self.kineto_activities = set()
         if self.use_cpu:
             self.kineto_activities.add(ProfilerActivity.CPU)
-        if self.use_mtia:
-            self.kineto_activities.add(ProfilerActivity.MTIA)
 
         self.profiler_kind = ProfilerState.KINETO
         if self.use_device == "cuda":
@@ -280,6 +276,11 @@ class profile:
                 use_kineto and ProfilerActivity.XPU in _supported_activities()
             ), "Legacy XPU profiling is not supported. Requires use_kineto=True on XPU devices."
             self.kineto_activities.add(ProfilerActivity.XPU)
+        elif self.use_device == "mtia":
+            assert (
+                use_kineto and ProfilerActivity.MTIA in _supported_activities()
+            ), "Legacy MTIA profiling is not supported. Requires use_kineto=True on MTIA devices."
+            self.kineto_activities.add(ProfilerActivity.MTIA)
         elif self.use_device is not None and self.use_device != "privateuseone":
             if (
                 not use_kineto
@@ -502,8 +503,8 @@ class profile:
             if _filter_name(kineto_event.name()):
                 continue
             rel_start_ns = kineto_event.start_ns() - trace_start_ns
-            rel_end_ns = rel_start_ns + kineto_event.duration_ns()
-            abs_end_ns = kineto_event.start_ns() + kineto_event.duration_ns()
+            rel_end_ns = kineto_event.end_ns() - trace_start_ns
+            abs_end_ns = kineto_event.end_ns()
 
             cpu_memory_usage = 0
             device_memory_usage = 0
@@ -530,6 +531,7 @@ class profile:
                 fwd_thread=kineto_event.fwd_thread_id(),
                 input_shapes=kineto_event.shapes(),
                 concrete_inputs=kineto_event.concrete_inputs(),
+                kwinputs=kineto_event.kwinputs(),
                 stack=[
                     entry
                     for entry in kineto_event.stack()
@@ -545,6 +547,7 @@ class profile:
                 device_index=kineto_event.device_index(),
                 device_resource_id=kineto_event.device_resource_id(),
                 flops=kineto_event.flops(),
+                is_user_annotation=kineto_event.is_user_annotation(),
             )
             max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:
@@ -638,6 +641,7 @@ class profile:
 
 class record_function(_ContextDecorator):
     """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
+    Label will only appear if CPU activity tracing is enabled.
 
     It is useful when tracing the code profile.
 

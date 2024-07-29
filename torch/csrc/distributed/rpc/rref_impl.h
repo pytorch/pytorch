@@ -3,16 +3,14 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/rref_interface.h>
 #include <c10/core/Event.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/types.h>
+#include <optional>
 
 #include <atomic>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 class RRef;
 class RRefContext;
@@ -415,6 +413,4 @@ inline TORCH_API c10::intrusive_ptr<c10::RRefInterface> fromOwnerRRef(
   return c10::static_intrusive_pointer_cast<c10::RRefInterface>(ownerRRef);
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
