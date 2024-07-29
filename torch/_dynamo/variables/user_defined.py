@@ -966,9 +966,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.__func__, self.var_getattr(tx, "__class__"), source=source
             )
-        elif inspect.ismethoddescriptor(subobj) and not is_wrapper_or_member_descriptor(
-            subobj.__get__
-        ):
+        elif inspect.ismethoddescriptor(subobj):
+            if is_wrapper_or_member_descriptor(subobj.__get__):
+                unimplemented(
+                    f"UserDefinedObjectVariable with a C/C++ descriptor function - {name}"
+                )
+
             # Attribute has a __get__ method. Create a user defined object vt
             # for the subobj, and then trace the __get__ method.
             descriptor_var = UserDefinedObjectVariable(subobj, source=source)
