@@ -2,11 +2,9 @@
 import functools
 import itertools
 import unittest
-
 from functools import partial
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
@@ -18,7 +16,6 @@ from torch._dynamo.testing import normalize_gm
 from torch._functorch._aot_autograd.utils import make_boxed_compiler
 from torch._functorch.compilers import min_cut_rematerialization_partition
 from torch._higher_order_ops.wrap import wrap
-
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     ShapeEnv,
