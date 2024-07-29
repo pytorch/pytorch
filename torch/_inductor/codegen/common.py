@@ -38,6 +38,7 @@ from ..utils import (
     DeferredLineBase,
     generate_assert,
     IndentedBuffer,
+    PlaceHolderLine,
     sympy_dot,
     sympy_subs,
     unique,
@@ -1143,7 +1144,11 @@ class DeferredLine(DeferredLineBase):
                 V.kernel.inplaced_to_remove,
             )
         ):
-            return self.line
+            if isinstance(self.line, PlaceHolderLine):
+                line = self.line()
+            else:
+                line = self.line
+            return line
         return None
 
     def _new_line(self, line):
