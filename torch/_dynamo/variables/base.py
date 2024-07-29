@@ -2,7 +2,7 @@
 
 import collections
 from enum import Enum
-from typing import Any, Callable, Dict, List, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
@@ -142,9 +142,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def visit(
         cls,
         fn: Callable[["VariableTracker"], None],
-        value,
-        cache=None,
-    ):
+        value: Any,
+        cache: Optional[Dict[int, Any]] = None,
+    ) -> None:
         """
         Walk value and call fn on all the VariableTracker instances
         """
