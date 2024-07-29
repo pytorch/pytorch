@@ -1294,7 +1294,7 @@ class GuardBuilder(GuardBuilderBase):
                 if weak_id is not None:
                     self.id_matched_objs[local_name] = weak_id
 
-    def NOT_NONE_MATCH(self, guard: Guard, value=None):
+    def NOT_NONE_MATCH(self, guard: Guard, value=None, is_buffer=False):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         assert isinstance(val, torch.Tensor)
