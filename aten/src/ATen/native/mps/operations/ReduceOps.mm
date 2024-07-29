@@ -713,7 +713,7 @@ static void min_max_out_mps(const Tensor& input_t,
                                                                      axis:(NSInteger)dim_
                                                                      name:nil];
       } else if (reduction_type == MPSReductionType::MIN) {
-        outputTensor = [mpsGraph reductionMinimumPropagateNanWithTensor:castInputTensor
+        outputTensor = [mpsGraph reductionMinimumPropagateNaNWithTensor:castInputTensor
                                                                      axis:(NSInteger)dim_
                                                                      name:nil];
       }
