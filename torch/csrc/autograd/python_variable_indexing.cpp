@@ -100,7 +100,7 @@ static inline Variable sequenceToVariable(
     c10::TensorOptions options,
     PyObject* seq) {
   return torch::utils::indexing_tensor_from_data(
-      options, kLong, c10::nullopt, seq);
+      options, kLong, std::nullopt, seq);
 }
 
 inline Variable valueToTensor(
@@ -201,7 +201,7 @@ static inline Variable applySlicing(
     // as null may need to be changed after we reach a better solution for
     // nested tensor size
     std::optional<SymIntArrayRef> result_sizes = result.is_nested()
-        ? std::optional<SymIntArrayRef>(c10::nullopt)
+        ? std::optional<SymIntArrayRef>(std::nullopt)
         : std::optional<SymIntArrayRef>(result.sym_sizes());
     result = at::indexing::handleDimInMultiDimIndexing(
         /*prev_dim_result=*/result,

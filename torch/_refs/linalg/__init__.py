@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from functools import partial
 
 from typing import List, Optional, Tuple, Union
@@ -286,7 +287,7 @@ def norm(
     else:
         if ord is None:
             ord = 2.0
-        return vector_norm(A, ord, dim, keepdim, dtype=dtype)
+        return vector_norm(A, ord, dim, keepdim, dtype=dtype)  # type: ignore[arg-type]
 
 
 # CompositeImplicitAutograd

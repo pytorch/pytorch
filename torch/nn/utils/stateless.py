@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 from collections import defaultdict
 from typing import Any, Dict, Iterator, Optional, Set, Tuple, Union
@@ -6,6 +7,7 @@ from typing_extensions import deprecated
 import torch
 from torch import Tensor
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
+
 
 __all__ = ["functional_call"]
 

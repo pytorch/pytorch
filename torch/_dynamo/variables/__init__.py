@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
@@ -9,6 +7,7 @@ from .ctx_manager import (
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     DualLevelContextManager,
+    FSDPParamGroupUseTrainingStateVariable,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
@@ -23,7 +22,6 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
-    DataClassVariable,
     DefaultDictVariable,
     SetVariable,
 )
@@ -42,9 +40,12 @@ from .higher_order_ops import (
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
+    EnumerateVariable,
     IteratorVariable,
     ItertoolsVariable,
+    MapVariable,
     RepeatIteratorVariable,
+    ZipVariable,
 )
 from .lazy import LazyVariableTracker
 from .lists import (
@@ -63,6 +64,7 @@ from .misc import (
     AutogradFunctionVariable,
     ClosureVariable,
     DeletedVariable,
+    ExceptionVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
@@ -72,7 +74,6 @@ from .misc import (
     NumpyVariable,
     PythonModuleVariable,
     RegexPatternVariable,
-    StopIterationVariable,
     StringFormatVariable,
     SuperVariable,
     TorchVersionVariable,
@@ -96,6 +97,7 @@ from .user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
+    WeakRefVariable,
 )
 
 __all__ = [
@@ -112,7 +114,6 @@ __all__ = [
     "CountIteratorVariable",
     "CustomizedDictVariable",
     "CycleIteratorVariable",
-    "DataClassVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",
@@ -145,7 +146,6 @@ __all__ = [
     "SDPAParamsVariable",
     "SkipFunctionVariable",
     "SliceVariable",
-    "StopIterationVariable",
     "StringFormatVariable",
     "SuperVariable",
     "TensorVariable",

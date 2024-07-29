@@ -20,8 +20,8 @@ struct TORCH_API FaultyTensorPipeRpcBackendOptions
       int num_fail_sends = 0)
       : TensorPipeRpcBackendOptions(
             num_worker_threads,
-            optional<std::vector<std::string>>(),
-            optional<std::vector<std::string>>(),
+            std::optional<std::vector<std::string>>(),
+            std::optional<std::vector<std::string>>(),
             rpc_timeout,
             std::move(init_method)),
         messagesToFail(std::move(messages_to_fail)),

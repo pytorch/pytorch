@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Optional, Tuple
 
 import torch
@@ -245,6 +246,18 @@ def register_run_with_rng_state_op():
         # And it does not matter for the fake tensor mode.
         with mode:
             return op(*args, **kwargs)
+
+    @run_with_rng_state.py_functionalize_impl
+    def impl_functional(ctx, rng_state, op, *args, **kwargs):
+        unwrapped_rng_state = ctx.unwrap_tensors(rng_state)
+        unwrapped_args = ctx.unwrap_tensors(args)
+        unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+
+        with ctx.redispatch_to_next():
+            out = run_with_rng_state(
+                unwrapped_rng_state, op, *unwrapped_args, **unwrapped_kwargs
+            )
+            return ctx.wrap_tensors(out)
 
     return run_with_rng_state
 

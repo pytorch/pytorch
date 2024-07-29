@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Owner(s): ["oncall: distributed"]
 import collections
 import itertools
@@ -35,6 +36,7 @@ from torch.distributed._spmd.iter_graph_module import IterGraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_unflatten
+
 
 logger: logging.Logger = logging.getLogger("graph_optimization")
 aten = torch.ops.aten

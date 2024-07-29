@@ -208,7 +208,6 @@ endif()
 include(CMakeDependentOption)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
 option(BUILD_BINARY "Build C++ binaries" OFF)
-option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF
        "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
@@ -242,8 +241,7 @@ option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
-cmake_dependent_option(USE_XPU "Use XPU. Only available on Linux." ON "LINUX"
-                       OFF)
+option(USE_XPU "Use XPU" ON)
 cmake_dependent_option(
   BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON
   "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
@@ -362,9 +360,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
-option(USE_TBB "Use TBB (Deprecated)" OFF)
-cmake_dependent_option(
-    USE_SYSTEM_TBB "Use system-provided Intel TBB." OFF "USE_TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG
@@ -483,9 +478,6 @@ if(USE_SYSTEM_LIBS)
   if(USE_NCCL)
     set(USE_SYSTEM_NCCL ON)
   endif()
-  if(USE_TBB)
-    set(USE_SYSTEM_TBB ON)
-  endif()
 endif()
 
 # Used when building Caffe2 through setup.py
@@ -546,6 +538,8 @@ option(BUILD_EXECUTORCH "Master flag to build Executorch" ON)
 if(LINUX)
   set(CMAKE_SHARED_LINKER_FLAGS
       "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-as-needed")
+  set(CMAKE_SHARED_LINKER_FLAGS
+      "${CMAKE_SHARED_LINKER_FLAGS} $ENV{LDFLAGS}")
 endif()
 
 if(MSVC)
@@ -755,7 +749,6 @@ if(NOT TORCH_BUILD_VERSION)
       CACHE STRING "Torch build version" FORCE)
 endif()
 caffe2_parse_version_str(TORCH ${TORCH_BUILD_VERSION})
-caffe2_parse_version_str(CAFFE2 ${TORCH_BUILD_VERSION})
 set(TORCH_SOVERSION "${TORCH_VERSION_MAJOR}.${TORCH_VERSION_MINOR}")
 
 # ---[ CMake scripts + modules
@@ -862,7 +855,7 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform"
   ON
-  "USE_CUDA OR USE_ROCM;NOT MSVC"
+  "USE_CUDA OR USE_ROCM; NOT MSVC OR CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0"
   OFF)
 
 # We are currenlty not using alibi attention for Flash So we disable this
@@ -870,12 +863,13 @@ cmake_dependent_option(
 # Suspect users building from source will need this
 add_definitions(-DFLASHATTENTION_DISABLE_ALIBI)
 
-# CAVEAT: Again, do not check USE_ROCM here Flash Attention2 will error while
-# building for sm52 while Mem Eff Attention won't
+# CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
+# Eff Attention won't
 cmake_dependent_option(
   USE_MEM_EFF_ATTENTION
   "Enable memory-efficient attention for scaled dot product attention.\
-  Will be disabled if not supported by the platform" ON "USE_CUDA" OFF)
+  Will be disabled if not supported by the platform" ON
+  "USE_CUDA OR USE_ROCM" OFF)
 
 if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
@@ -898,6 +892,14 @@ endif()
 
 if(USE_SLEEF_FOR_ARM_VEC256)
   string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
+  add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
+endif()
+
+# Enable sleef on macOS with Apple silicon by default
+if((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") AND ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "arm64"))
+  message(STATUS "Running on macOS with Apple silicon")
+  string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
+  add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
 endif()
 
 if(USE_XNNPACK)
@@ -979,8 +981,6 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-array-bounds" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unknown-pragmas" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-parameter" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-unused-function" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-unused-result" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-overflow" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-stringop-overflow" CMAKE_CXX_FLAGS)
@@ -1030,10 +1030,6 @@ if(NOT MSVC)
 
   append_cxx_flag_if_supported("-Wno-error=pedantic" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-error=inconsistent-missing-override"
-                               CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported(
-    "-Wno-error=inconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-invalid-partial-specialization"
                                CMAKE_CXX_FLAGS)
@@ -1169,6 +1165,10 @@ if(APPLE)
   append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
 endif()
 
+if(USE_XPU)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_XPU")
+endif()
+
 if(EMSCRIPTEN)
   string(
     APPEND
@@ -1218,45 +1218,6 @@ endif()
 # ---[ Main build
 add_subdirectory(c10)
 add_subdirectory(caffe2)
-
-# --[ Documentation
-if(BUILD_DOCS)
-  # check if Doxygen is installed
-  find_package(Doxygen)
-  if(DOXYGEN_FOUND)
-    message("Generating documentation")
-
-    set(DOXYGEN_C_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/.Doxyfile-c)
-    set(DOXYGEN_C_OUT ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/Doxyfile-c)
-    set(DOXYGEN_P_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/.Doxyfile-python)
-    set(DOXYGEN_P_OUT ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/Doxyfile-python)
-
-    if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/docs)
-      file(REMOVE_RECURSE ${CMAKE_CURRENT_BINARY_DIR}/docs)
-    endif()
-
-    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/docs)
-    configure_file(${DOXYGEN_C_IN} ${DOXYGEN_C_OUT} @ONLY)
-    configure_file(${DOXYGEN_P_IN} ${DOXYGEN_P_OUT} @ONLY)
-
-    add_custom_target(
-      doc_doxygen_c ALL
-      COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_C_OUT}
-      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-      COMMENT "Generating C++ API documentation with Doxygen"
-      VERBATIM)
-
-    add_custom_target(
-      doc_doxygen_python ALL
-      COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_P_OUT}
-      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-      COMMENT "Generating Python API documentation with Doxygen"
-      VERBATIM)
-  else()
-    message(
-      FATAL_ERROR "Doxygen needs to be installed to generate the documentation")
-  endif()
-endif()
 
 # ---[ CMake related files Uninistall option.
 if(NOT TARGET caffe2_uninstall)

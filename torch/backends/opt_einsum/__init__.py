@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import sys
 import warnings
 from contextlib import contextmanager

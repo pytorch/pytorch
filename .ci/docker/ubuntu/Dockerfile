@@ -155,6 +155,14 @@ COPY ci_commit_pins/executorch.txt executorch.txt
 RUN if [ -n "${EXECUTORCH}" ]; then bash ./install_executorch.sh; fi
 RUN rm install_executorch.sh common_utils.sh executorch.txt
 
+ARG HALIDE
+# Build and install halide
+COPY ./common/install_halide.sh install_halide.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/halide.txt halide.txt
+RUN if [ -n "${HALIDE}" ]; then bash ./install_halide.sh; fi
+RUN rm install_halide.sh common_utils.sh halide.txt
+
 ARG ONNX
 # Install ONNX dependencies
 COPY ./common/install_onnx.sh ./common/common_utils.sh ./

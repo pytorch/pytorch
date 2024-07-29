@@ -20,7 +20,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests  # noqa: TCH001
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms as base_with_comms,
@@ -46,7 +46,7 @@ class TraceDeviceMeshTestBase:
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
 
         # check all dim groups
-        dim_to_subgroups = mesh.get_group()
+        dim_to_subgroups = mesh.get_all_groups()
         for dim, dim_group in enumerate(dim_to_subgroups):
             dim_group_size = get_world_size(dim_group)
             global_ranks = [

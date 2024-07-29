@@ -27,9 +27,7 @@
 
 using namespace torch::autograd::profiler;
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 namespace {
 void processRemoteProfiledEvents(
     autograd::RpcWithProfilingResp& rpcWithProfilingResp) {
@@ -389,7 +387,7 @@ std::string wireSerialize(
       // out of scope of this loop.
       auto writeableTensorData = jit::getWriteableTensorData(tensorData[i]);
       entries.push_back(
-          {c10::to_string(i),
+          {std::to_string(i),
            writeableTensorData.data(),
            writeableTensorData.sizeInBytes()});
     }
@@ -401,7 +399,7 @@ std::string wireSerialize(
     tot += e.size;
     header.append(e.name)
         .append(" ")
-        .append(c10::to_string(e.size))
+        .append(std::to_string(e.size))
         .append("\n");
   }
   header.push_back('\n');
@@ -579,6 +577,4 @@ void populateRemoteProfiledEvents(
   }
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
