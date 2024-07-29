@@ -10,7 +10,7 @@ fi
 if [ $# -eq 1 ]
 then
     echo "Please provide the directory of Python programs as an argument"
-    exit 1
+    return
 fi
 
 # Set the output file
@@ -21,5 +21,5 @@ python_programs_dir=$2
 for file in $python_programs_dir/*.py
 do
     # Execute the Python program and append the output to the output file
-   sudo env PATH="$PATH" python $file >> $output_file
+   sudo env PATH="$PATH" python $file $output_file
 done
