@@ -28,10 +28,8 @@ import numpy as np
 
 import torch
 import torch._dynamo.testing
-
 import torch._inductor.test_case
 import torch.onnx.operators
-
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from torch import Tensor
@@ -84,6 +82,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
+
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
