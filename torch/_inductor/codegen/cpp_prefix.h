@@ -194,10 +194,9 @@ struct IndexValueVec {
 
 template <typename T, int NV, int NI,
           typename std::enable_if_t<at::vec::is_floating_point_v<T>, int> = 0>
-void inline get_mask_for_argmin_argmax(
-  at::vec::VecMask<int64_t, NI>& final_mask,
+at::vec::VecMask<int64_t, NI> inline get_mask_for_argmin_argmax(
   const at::vec::VecMask<T, NV>& vmask,
-  IndexValueVec<T, NV, NI>& a,
+  const IndexValueVec<T, NV, NI>& a,
   const at::vec::VectorizedN<T, NV>& value,
   const at::vec::VectorizedN<int64_t, NI>& index
 ){
@@ -231,15 +230,15 @@ void inline get_mask_for_argmin_argmax(
   i_t imask(a.index < index);
   i_t iv_mask = i_t::blendv(vmask_itype, imask, all_nan_or_equal);
   i_t isnan_a_notnan_b = isnan_a_itype & (~isnan_b_type);
-  final_mask = iv_mask | isnan_a_notnan_b;
+  return iv_mask | isnan_a_notnan_b;
 }
 
 template <typename T, int NV, int NI,
           typename std::enable_if_t<!at::vec::is_floating_point_v<T>, int> = 0>
-void inline get_mask_for_argmin_argmax(
+at::vec::VecMask<int64_t, NI> inline get_mask_for_argmin_argmax(
   at::vec::VecMask<int64_t, NI>& final_mask,
   const at::vec::VecMask<T, NV>& vmask,
-  IndexValueVec<T, NV, NI>& a,
+  const IndexValueVec<T, NV, NI>& a,
   const at::vec::VectorizedN<T, NV>& value,
   const at::vec::VectorizedN<int64_t, NI>& index
 ){
@@ -248,15 +247,14 @@ void inline get_mask_for_argmin_argmax(
   i_t vmask_itype = vmask.template cast<int64_t, NI>();
   v_t equal_mask = (a.value == value);
   i_t imask(a.index < index);
-  final_mask = i_t::blendv(vmask_itype, imask, equal_mask);
+  return i_t::blendv(vmask_itype, imask, equal_mask);
 }
 
 
 template <typename T, int NV, int NI>
 inline IndexValueVec<T, NV, NI>& argmin_vec_impl(IndexValueVec<T, NV, NI>& a,  at::vec::VectorizedN<T, NV> value, at::vec::VectorizedN<int64_t, NI> index){
   at::vec::VecMask<T, NV> vmask(a.value < value);
-  at::vec::VecMask<int64_t, NI> final_mask;
-  get_mask_for_argmin_argmax<T, NV, NI>(final_mask, vmask, a, value, index);
+  at::vec::VecMask<int64_t, NI> final_mask = get_mask_for_argmin_argmax<T, NV, NI>(vmask, a, value, index);
   a.value = at::vec::minimum(a.value, value);
   a.index = at::vec::VecMask<int64_t, NI>::blendv(index, a.index, final_mask);
   return a;
@@ -265,8 +263,7 @@ inline IndexValueVec<T, NV, NI>& argmin_vec_impl(IndexValueVec<T, NV, NI>& a,  a
 template <typename T, int NV, int NI>
 inline IndexValueVec<T, NV, NI>& argmax_vec_impl(IndexValueVec<T, NV, NI>& a,  at::vec::VectorizedN<T, NV> value, at::vec::VectorizedN<int64_t, NI> index){
   at::vec::VecMask<T, NV> vmask(a.value > value);
-  at::vec::VecMask<int64_t, NI> final_mask;
-  get_mask_for_argmin_argmax<T, NV, NI>(final_mask, vmask, a, value, index);
+  at::vec::VecMask<int64_t, NI> final_mask = get_mask_for_argmin_argmax<T, NV, NI>(vmask, a, value, index);
   a.value = at::vec::maximum(a.value, value);
   a.index = at::vec::VecMask<int64_t, NI>::blendv(index, a.index, final_mask);
   return a;
@@ -275,7 +272,7 @@ inline IndexValueVec<T, NV, NI>& argmax_vec_impl(IndexValueVec<T, NV, NI>& a,  a
 template <typename T, int NI, bool horizontal>
 inline at::vec::VectorizedN<int64_t, NI> create_index(int64_t next_index){
   at::vec::VectorizedN<int64_t, NI> next_idx;
-  if (horizontal) {
+  if constexpr (horizontal) {
     next_idx = at::vec::VectorizedN<int64_t, NI>::arange(next_index, 1);
   } else {
     next_idx = at::vec::VectorizedN<int64_t, NI>(next_index);
