@@ -2346,6 +2346,7 @@ class TestMPS(TestCaseMPS):
         x_cpu_strided.masked_fill_(mask_cpu.T, float("-inf"))
 
         self.assertEqual(x_mps_strided, x_cpu_strided)
+        self.assertFalse((x_mps_strided == float("-inf")).any())
 
     def test_nhwc_operation(self):
         def helper(shape, channels_last=False):
