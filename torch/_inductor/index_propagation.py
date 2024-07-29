@@ -31,8 +31,8 @@ import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
-from .utils import generate_assert
 
+from .utils import generate_assert
 from .virtualized import V
 
 
@@ -329,7 +329,11 @@ class IndexPropagation:
         return bool(evaluated)
 
     def indirect_indexing(
-        self, index: Union[Any, IndexPropVar], size: Any, check: bool = True
+        self,
+        index: Union[Any, IndexPropVar],
+        size: Any,
+        check: bool = True,
+        wrap_neg=True,
     ) -> Any:
         if isinstance(index, IndexPropVar) and index.is_symbolic:
             # If we find something we can convert into a direct indexing we do so
@@ -354,7 +358,8 @@ class IndexPropagation:
                 -size <= expr
             )
             can_prove_upper = self.statically_true(expr < size)
-            expr = wrap_expr(expr)
+            if wrap_neg:
+                expr = wrap_expr(expr)
             if generate_assert(check):
                 self.fallback(
                     "check_bounds",
@@ -364,6 +369,6 @@ class IndexPropagation:
             return expr
 
         indirect_var = self.fallback(
-            "indirect_indexing", (index, size, check), {}
+            "indirect_indexing", (index, size, check, wrap_neg), {}
         ).value
         return indirect_var
