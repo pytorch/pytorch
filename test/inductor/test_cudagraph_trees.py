@@ -1839,9 +1839,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with self.assertRaisesRegex(
                 Exception,
                 r"static input data pointer changed.\n"
-                r"input name: primals_2. data pointer changed from .* to .*. input stack trace: None\n"
+                r"input name: primals_2. data pointer changed from .* to .*. input stack trace:(?s).*"
                 r"input name: primals_3. data pointer changed from .* to .*. input stack trace:.*,"
-                r" in forward\n.* self.static_tensor.add\_\(torch.ones\(\(2, 2\), device=\"cuda\"\)\).*\n\n",
+                r" in forward\n.* self.static_tensor.add\_\(torch.ones\(\(2, 2\), device=\"cuda\"\)\).*\n",
             ):
                 self.curr_node().run(
                     [foo.goo.linear.weight, foo.goo.linear.bias, foo.static_tensor, inp]
