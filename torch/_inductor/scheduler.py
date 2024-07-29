@@ -428,6 +428,7 @@ class BaseSchedulerNode:
                         )
                         and buffer_reuse_key(input_buf.node)
                         == buffer_reuse_key(buf.node)
+                        and buf.get_name() not in V.graph.removed_buffers
                     ):
                         # if there isn't a triton kernel, then we don't need to call triton-specific things.
                         # but TODO this might be a convenient place to signal to the Collective kernels to inplace
