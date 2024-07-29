@@ -155,7 +155,9 @@ class ProfileEvent:
     count: float
 
 
-def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns, device_name):
+def parse_profile_event_list(
+    benchmark_name, event_list, wall_time_ms, nruns, device_name
+):
     def get_self_device_time(ev):
         """
         ev.self_device_time_total is in microsecond. Convert to millisecond.
@@ -209,7 +211,13 @@ def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns, de
         )
         print(
             tabulate(
-                rows, headers=["Kernel", f"Self {device_name.upper()} TIME (ms)", "Count", "Percent"]
+                rows,
+                headers=[
+                    "Kernel",
+                    f"Self {device_name.upper()} TIME (ms)",
+                    "Count",
+                    "Percent",
+                ],
             )
         )
         return total_time
@@ -235,7 +243,9 @@ def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns, de
                 total_device_ms += _time
 
         device_busy_percent = f"{total_device_ms / wall_time_ms * 100:.2f}%"
-        print(f"\nPercent of time when {device_name.upper()} is busy: {device_busy_percent}")
+        print(
+            f"\nPercent of time when {device_name.upper()} is busy: {device_busy_percent}"
+        )
         print(f"Total wall time {wall_time_ms:.3f} ms")
 
         # output such a line so we can gather such line from all compiled modules from all
