@@ -397,18 +397,18 @@ pr_time_benchmarks() {
   pip install cirron
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
+  source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on current PR: "
-  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
+  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
   git checkout HEAD~1
 
   # we can try firt to run develop alone, and if it worked then we do not need to run clean->develop.
   # another suggestion was to use historical stored data insetad of building Head~1
   python setup.py clean
   python setup.py develop
-  python ./benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.py "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
+  python ./benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.py "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on main: "
-  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
+  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
 }
 
 if [[ "${TEST_CONFIG}" == *pr_time_benchmarks* ]]; then
