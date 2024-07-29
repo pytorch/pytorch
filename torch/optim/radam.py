@@ -11,6 +11,7 @@ from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
+    _dispatch_sqrt,
     _foreach_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
@@ -504,13 +505,12 @@ def _multi_tensor_radam(
             del bias_correction1
         else:
             rect = [
-                (
+                _dispatch_sqrt(
                     (rho_t - 4)  # type: ignore[arg-type]
                     * (rho_t - 2)
                     * rho_inf
                     / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
                 )
-                ** 0.5
                 if rho_t > 5
                 else 0
                 for rho_t in rho_t_list
@@ -524,7 +524,7 @@ def _multi_tensor_radam(
                 (lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)
             ]
             bias_correction2 = [
-                ((1 - beta2 ** _get_value(step)) ** 0.5) * (lr * rect / bc) * -1
+                _dispatch_sqrt(1 - beta2 ** _get_value(step)) * (lr * rect / bc) * -1
                 for step, rect, bc in zip(grouped_state_steps, rect, bias_correction1)
             ]
 
