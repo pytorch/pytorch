@@ -1549,6 +1549,8 @@ class FakeTensorPropTest(TestCase):
             def __init__(self):
                 super().__init__()
                 self.fc1 = torch.nn.Linear(5, 10)
+                self.weight = self.fc1.weight
+                self.weight_view = torch.nn.Parameter(self.fc1.weight.view(-1))
 
             def forward(self, x):
                 return self.fc1(x)
@@ -1560,8 +1562,10 @@ class FakeTensorPropTest(TestCase):
 
             fake_mode = FakeTensorMode()
             with fake_mode:
-                torch.load(state_dict_file)  # scenario 1
-                torch.load(state_dict_file, map_location="cpu")  # scenario 2
+                for kwargs in ({}, {"map_location": "cpu"}):
+                    sd = torch.load(state_dict_file, **kwargs)
+                    self.assertTrue(sd['weight'].untyped_storage() == sd['fc1.weight'].untyped_storage())
+                    self.assertTrue(sd['weight_view'].untyped_storage() == sd['fc1.weight'].untyped_storage())
 
 
 make_propagate_real_tensors_cls(FakeTensorPropTest)

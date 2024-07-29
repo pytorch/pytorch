@@ -1684,8 +1684,7 @@ def _load(
             _internal=True,
         )
 
-        if typed_storage._data_ptr() != 0:
-            loaded_storages[key] = typed_storage
+        loaded_storages[key] = typed_storage
 
         return typed_storage
 
