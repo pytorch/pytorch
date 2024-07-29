@@ -29,8 +29,8 @@ inline bool isTensorType(DynamicArgType arg_type) {
       arg_type == DynamicArgType::ListOptionalTensorType;
 }
 
-struct DynamicArg {
-  DynamicArg(
+struct OSSDynamicArg {
+  OSSDynamicArg(
       int arg_index,
       DynamicArgType arg_type,
       int length,
@@ -45,14 +45,14 @@ struct DynamicArg {
   nlohmann::json serialized_arg_val;
 };
 
-struct OpKernel {
-  OpKernel(const std::string& target, const c10::OperatorHandle& op_handle)
+struct OSSOpKernel {
+  OSSOpKernel(const std::string& target, const c10::OperatorHandle& op_handle)
       : target_(target), op_handle_(op_handle) {}
 
   std::string target_;
   c10::OperatorHandle op_handle_;
-  std::vector<DynamicArg> dynamic_args_;
-  std::vector<DynamicArg> outputs_;
+  std::vector<OSSDynamicArg> dynamic_args_;
+  std::vector<OSSDynamicArg> outputs_;
   std::vector<c10::IValue> stack_;
 
   int num_output_tensors() const {
@@ -82,19 +82,19 @@ class OSSProxyExecutor : public ProxyExecutor {
       int index,
       at::TypePtr schema_arg_type,
       const nlohmann::json& thrift_arg,
-      OpKernel& op_kernel);
+      OSSOpKernel& op_kernel);
 
   void get_input_info_from_serialized(
       const std::vector<c10::Argument>& schema_args,
       const nlohmann::json& serialized_node,
-      OpKernel& op_kernel);
+      OSSOpKernel& op_kernel);
 
   void get_output_info_from_serialized(
       const std::vector<c10::Argument>& schema_returns,
       const nlohmann::json& serialized_node,
-      OpKernel& op_kernel);
+      OSSOpKernel& op_kernel);
 
-  std::vector<OpKernel> op_kernels_;
+  std::vector<OSSOpKernel> op_kernels_;
   std::unique_ptr<c10::Device> device_;
 };
 
