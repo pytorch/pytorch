@@ -67,32 +67,36 @@ def should_generic(
 
 
 should_fallback_to_original_benchmarking = partial(
-    should_generic(
-        "fallback_to_original_benchmarking",
-        False,
-        False,
-        True,
-        "fallback_to_original_benchmarking_version",
-    )
+    should_generic,
+    "fallback_to_original_benchmarking",
+    False,
+    False,
+    True,
+    "fallback_to_original_benchmarking_version",
 )
 should_enable_lazy_benchmarking = partial(
-    should_generic(
-        "enable_lazy_benchmarking",
-        True,
-        False,
-        True,
-        "enable_lazy_benchmarking_version",
-    )
+    should_generic,
+    "enable_lazy_benchmarking",
+    True,
+    False,
+    True,
+    "enable_lazy_benchmarking_version",
 )
 should_enable_early_ranking = partial(
-    should_generic(
-        "enable_early_ranking", True, False, True, "enable_early_ranking_verison"
-    )
+    should_generic,
+    "enable_early_ranking",
+    True,
+    False,
+    True,
+    "enable_early_ranking_verison",
 )
 should_enable_early_pruning = partial(
-    should_generic(
-        "enable_early_pruning", True, False, True, "enable_early_pruning_verison"
-    )
+    should_generic,
+    "enable_early_pruning",
+    True,
+    False,
+    True,
+    "enable_early_pruning_verison",
 )
 
 
