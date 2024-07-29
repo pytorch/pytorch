@@ -448,6 +448,16 @@ def make_pointwise(
                 other.get_size()
             ), f"ndim mismatch {fn} {ranges} {other.get_size()}"
 
+        # in tracing, we will annotate pointwise nodes that correspond to the output of
+        # a pointwise node that would have been run in eager. intermediary pointwise nodes
+        # during decompositions are not annotated.
+        emulate_precision_casts = (
+            V.graph is not None
+            and getattr(V.graph, "current_node", None) is not None
+            and V.graph.current_node.meta is not None
+            and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
+        )
+
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
             if dtype == torch.bool and override_fn_when_input_bool is not None:
@@ -455,7 +465,13 @@ def make_pointwise(
             elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
                 return override_fn_when_cuda_float64(*[load(index) for load in loaders])
             else:
-                return fn(*[load(index) for load in loaders])
+                out = fn(*[load(index) for load in loaders])
+                if emulate_precision_casts and dtype in (torch.bfloat16, torch.float16):
+                    # fp16/bf16 kernels are computed in fp32. Casting down to fp16/bf16 here,
+                    # then upcasting again, to emulate casts that eager would do.
+                    downcast = ops.to_dtype(out, dtype, use_compute_types=False)
+                    return ops.to_dtype(downcast, dtype)
+                return out
 
         if not override_device:
             device = None
