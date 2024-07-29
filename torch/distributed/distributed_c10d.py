@@ -1327,12 +1327,11 @@ def _get_backends_for_timeout_set(group: ProcessGroup) -> Set[c10d_Backend]:
     return backends  # type: ignore[return-value]
 
 
-def _extend_timeout_all_pgs(timeout: timedelta) -> None:
+def _extend_timeout_until_first_done_all_pgs(timeout: timedelta) -> None:
     """
     This API extends the timeout for all PGs locally on one rank.
-    If user sets a very large negative timeout, we will set the timeout
-    to be the negative value.
-    NOTE: We only support to set timeout for cuda and gloo backends.
+    The timeout gets reset when the first collective finished.
+    NOTE: We only support to set timeout for cuda backends for now.
 
     Args:
         timeout (timedelta): The delta of timeout to extend.
@@ -1340,21 +1339,11 @@ def _extend_timeout_all_pgs(timeout: timedelta) -> None:
     Returns:
         None.
     """
-    zero_delta = timedelta()
     for pg in _world.pg_map.keys():
         backends = _get_backends_for_timeout_set(pg)
         for backend in backends:
-            current_timeout = backend.options._timeout
-            if timeout + current_timeout > zero_delta:
-                backend._set_default_timeout(timeout + current_timeout)
-            else:
-                reset_timeout = (
-                    default_pg_nccl_timeout
-                    if torch.device("cuda") in pg._device_types
-                    and default_pg_nccl_timeout
-                    else default_pg_timeout
-                )
-                backend._set_default_timeout(reset_timeout)
+            if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+                backend._extend_timeout_until_first_done(timeout)
 
 
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:

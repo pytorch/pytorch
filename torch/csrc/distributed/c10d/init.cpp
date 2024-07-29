@@ -43,6 +43,7 @@
 #include <torch/csrc/distributed/c10d/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
+#include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
@@ -2703,6 +2704,14 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
                  std::chrono::milliseconds timeout) {
                 self->getOptions()->timeout = timeout;
+              },
+              py::arg("timeout"),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_extend_timeout_until_first_done",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+                 const std::chrono::milliseconds& timeout) {
+                self->extendTimeoutUntilFirstDone(timeout);
               },
               py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>())

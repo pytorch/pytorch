@@ -1602,7 +1602,7 @@ const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
   return options_->global_ranks_in_group;
 }
 
-void ProcessGroupNCCL::extendTimeOutUntilFirstDone(
+void ProcessGroupNCCL::extendTimeoutUntilFirstDone(
     const std::chrono::milliseconds& timeout) {
   std::unique_lock<std::mutex> lock(mtxTimeoutExtension_);
   extendedTimeout_ += timeout;
