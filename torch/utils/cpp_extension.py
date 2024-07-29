@@ -2510,19 +2510,19 @@ def _is_c_file(path: str) -> bool:
 
 def _get_sycl_root() -> Optional[str]:
     # TODO: Need to decouple with toolchain env scripts
-    sycl_root = os.getenv("CMPLR_ROOT")
+    sycl_root = os.getenv("CMPLR_ROOT", "")
     return sycl_root
 
 
 def _get_onemkl_root() -> Optional[str]:
     # TODO: Need to decouple with toolchain env scripts
-    path = os.getenv("MKLROOT")
+    path = os.getenv("MKLROOT", "")
     return path
 
 
 def _get_onednn_root() -> Optional[str]:
     # TODO: Need to decouple with toolchain env scripts
-    path = os.getenv("DNNLROOT")
+    path = os.getenv("DNNLROOT", "")
     return path
 
 def _prepare_sycl_compile_flags(extra_compile_args):
@@ -2538,9 +2538,9 @@ def _prepare_sycl_compile_flags(extra_compile_args):
 
 class _one_api_help:
     def __init__(self):
-        self.__sycl_root: Optional[str] = _get_sycl_root()
-        self.__onemkl_root: Optional[str] = _get_onemkl_root()
-        self.__onednn_root: Optional[str] = _get_onednn_root()
+        self.__sycl_root: str = _get_sycl_root()
+        self.__onemkl_root: str = _get_onemkl_root()
+        self.__onednn_root: str = _get_onednn_root()
 
         CUR_DIR = os.path.dirname(__file__)
         self.__default_root: str = os.path.dirname(CUR_DIR)
@@ -2548,16 +2548,13 @@ class _one_api_help:
         self.check_onednn_cfg()
         self.check_sycl_cfg()
         self.check_onemkl_cfg()
-        assert type(self.__sycl_root) == str
-        assert type(self.__onemkl_root) == str
-        assert type(self.__onednn_root) == str
 
     def check_onemkl_cfg(self):
-        if self.__onemkl_root is None:
+        if not self.__onemkl_root:
             raise RuntimeError("Didn't detect mkl root. Please source <oneapi_dir>/mkl/<version>/env/vars.sh ")
 
     def check_onednn_cfg(self):
-        if self.__onednn_root is None:
+        if not self.__onednn_root:
             raise RuntimeError("Didn't detect dnnl root. Please source <oneapi_dir>/dnnl/<version>/env/vars.sh ")
         else:
             warnings.warn(
@@ -2566,7 +2563,7 @@ class _one_api_help:
             )
 
     def check_sycl_cfg(self):
-        if self.__sycl_root is None:
+        if not self.__sycl_root:
             raise RuntimeError("Didn't detect sycl root. Please source <oneapi_dir>/compiler/<version>/env/vars.sh ")
 
     def get_default_include_dir(self) -> List[str]:
