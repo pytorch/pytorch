@@ -6322,11 +6322,7 @@ expand_copy = _make_copy_from_view(aten.expand)
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(aten.narrow)
 t_copy = _make_copy_from_view(aten.t)
-<<<<<<< HEAD
-=======
 squeeze_copy = _make_copy_from_view(aten.squeeze)
-unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
->>>>>>> 53fe1640a56 (Add decomposition for unsqueeze_copy)
 view_copy = _make_copy_from_view(aten.view)
 
 
