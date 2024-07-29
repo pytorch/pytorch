@@ -256,10 +256,18 @@ class CommDebugMode(TorchDispatchMode):
     def generate_json_dump(self, file_name="comm_mode_log.json", noise_level=3):
         """
         Creates json file used to build browser visual
+        0. prints module-level collective counts
+        1. prints dTensor operations not included in trivial operations
+        2. prints operations not included in trivial operations
+        3. prints all operations
         """
 
+        include_DTensor_ops = False
         include_ops = False
         include_trivial_ops = False
+
+        if noise_level > 0:
+            include_DTensor_ops = True
 
         if noise_level > 1:
             include_ops = True
@@ -313,7 +321,8 @@ class CommDebugMode(TorchDispatchMode):
             backward_operations = []
             checkpointing_operations = []
 
-            if include_ops:
+            # only get operations if the minimum operation noise level is set to true
+            if include_DTensor_ops:
                 if fqn in self.comm_module_operation_counts:
                     forward_operations = [
                         op
@@ -337,6 +346,19 @@ class CommDebugMode(TorchDispatchMode):
                         if op["is_activation_checkpointing"]
                     ]
 
+            # remove all operations who don't have DTensor inputs
+            if not include_ops:
+                forward_operations = [
+                    op for op in forward_operations if len(op["input_sharding"])
+                ]
+                backward_operations = [
+                    op for op in backward_operations if len(op["input_sharding"])
+                ]
+                checkpointing_operations = [
+                    op for op in checkpointing_operations if len(op["input_sharding"])
+                ]
+
+            # remove all operations in trivial operations set
             if not include_trivial_ops:
                 forward_operations = [
                     op
@@ -404,12 +426,20 @@ class CommDebugMode(TorchDispatchMode):
         Generates detailed table displaying operations and collective tracing information
         on a module level. Amount of information is dependent on noise_level
 
-        1. prints module-level collective counts
+        0. prints module-level collective counts
+        1. prints dTensor operations not included in trivial operations, module information
         2. prints operations not included in trivial operations
         3. prints all operations
         """
+
+        include_DTensor_ops = False
         include_ops = False
         include_trivial_ops = False
+        include_module_data = False
+
+        if noise_level > 0:
+            include_DTensor_ops = True
+            include_module_data = True
 
         if noise_level > 1:
             include_ops = True
@@ -425,7 +455,7 @@ class CommDebugMode(TorchDispatchMode):
             )
             table += f"{indent}{fqn}\n"
 
-            if include_ops:
+            if include_module_data:
                 if (
                     "module_type"
                     in self.advanced_module_tracker.module_helper_dict[fqn]
@@ -464,7 +494,7 @@ class CommDebugMode(TorchDispatchMode):
             backward_operations = []
             checkpointing_operations = []
 
-            if include_ops:
+            if include_DTensor_ops:
                 if fqn in self.comm_module_operation_counts:
                     forward_operations = [
                         op
@@ -488,29 +518,58 @@ class CommDebugMode(TorchDispatchMode):
                         if op["is_activation_checkpointing"]
                     ]
 
-            # adds tracing information for module's forward or backward
             def add_tracing_information(table, collectives_dict, operation_list):
+                """
+                adds tracing information for module's forward or backward
+                """
                 for collective, count in collectives_dict.items():
                     table += (
                         f"\033[1;33m{collective_indent}*{collective}: {count}\033[0m\n"
                     )
 
+                def add_operations(
+                    table, operation, collective_indent, operation_indent
+                ):
+                    """
+                    adds operation information to the table
+                    """
+                    table += f"\033[1;33m{collective_indent}**{operation_name}\033[0m\n"
+
+                    if len(operation["input_shape"]):
+                        operation_shape = operation["input_shape"]
+                        operation_sharding = operation["input_sharding"]
+                        operation_device_mesh = operation["device_mesh"]
+
+                        table += f"\033[1;31m{operation_indent}shape: {operation_shape}\033[0m\n"
+                        table += f"\033[1;31m{operation_indent}sharding: {operation_sharding}\033[0m\n"
+                        table += f"\033[1;31m{operation_indent}device mesh: {operation_device_mesh}\033[0m\n"
+
+                    return table
+
                 for operation in operation_list:
                     operation_name = str(operation["name"])
 
-                    if operation_name not in trivial_ops or include_trivial_ops:
-                        table += (
-                            f"\033[1;33m{collective_indent}**{operation_name}\033[0m\n"
+                    # include all operations
+                    if include_trivial_ops:
+                        table = add_operations(
+                            table, operation, collective_indent, operation_indent
                         )
 
-                        if len(operation["input_shape"]):
-                            operation_shape = operation["input_shape"]
-                            operation_sharding = operation["input_sharding"]
-                            operation_device_mesh = operation["device_mesh"]
+                    # include all operations not in trivial operations
+                    elif include_ops and operation_name not in trivial_ops:
+                        table = add_operations(
+                            table, operation, collective_indent, operation_indent
+                        )
 
-                            table += f"\033[1;31m{operation_indent}shape: {operation_shape}\033[0m\n"
-                            table += f"\033[1;31m{operation_indent}sharding: {operation_sharding}\033[0m\n"
-                            table += f"\033[1;31m{operation_indent}device mesh: {operation_device_mesh}\033[0m\n"
+                    # only include dTensor operations not in trivial set
+                    elif (
+                        include_DTensor_ops
+                        and (operation_name not in trivial_ops)
+                        and len(operation["input_shape"])
+                    ):
+                        table = add_operations(
+                            table, operation, collective_indent, operation_indent
+                        )
 
                 return table
 
