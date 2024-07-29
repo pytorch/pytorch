@@ -635,9 +635,9 @@ class Benchmarker:
         torch.cuda._sleep(int(1 / self.gpu_time_ms_per_gpu_clock_cycle))
         start_time_s = perf_counter()
         for event_pairs in interleaved_event_pairs:
-            for _callable, (start_event, end_event) in shuffle(
-                list(zip(callables, event_pairs))
-            ):
+            callables_and_event_pairs = list(zip(callables, event_pairs))
+            shuffle(callables_and_event_pairs)
+            for _callable, (start_event, end_event) in callables_and_event_pairs:
                 buffer.zero_()
                 start_event.record()
                 _callable()
@@ -745,9 +745,11 @@ class Benchmarker:
             for _ in range(memory_warmup_iters_per_block):
                 buffer.zero_()
             for event_pairs in interleaved_event_pairs[block_start:block_end]:
-                for _callable, (start_event, end_event) in shuffle(
-                    list(zip(callables_to_benchmark, event_pairs))
-                ):
+                callables_and_event_pairs = list(
+                    zip(callables_to_benchmark, event_pairs)
+                )
+                shuffle(callables_and_event_pairs)
+                for _callable, (start_event, end_event) in callables_and_event_pairs:
                     buffer.zero_()
                     start_event.record()
                     _callable()
