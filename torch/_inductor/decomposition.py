@@ -350,6 +350,15 @@ def cat(
     elif 1 < len(filtered_tensors) < len(tensors):
         # on the first call, when we remove empty tensors, we redispatch recursively
         return aten.cat.default(filtered_tensors, dim)
+
+    # optimization, avoid concat for single, repeated input
+    if all(t is filtered_tensors[0] for t in filtered_tensors):
+        inp = filtered_tensors[0]
+        dim = dim + len(inp) if dim < 0 else dim
+        shape = list(inp.shape)
+        shape.insert(dim, len(filtered_tensors))
+        return inp.unsqueeze(dim).expand(*shape).flatten(dim, dim + 1).clone()
+
     # when no 'filtering' has occurred, we raise to prevent infinite recursion (no more decomposition needed)
     return NotImplemented
 

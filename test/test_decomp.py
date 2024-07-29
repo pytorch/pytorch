@@ -9,6 +9,7 @@ from functools import partial
 
 import torch.autograd
 from torch import Tensor
+import torch._inductor.decomposition
 from torch._decomp import core_aten_decompositions, decomposition_table
 from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import DispatchKey
@@ -606,6 +607,16 @@ class TestDecomp(TestCase):
         xs_two[0] = x
 
         self.assertEqual(xs, xs_two)
+
+    def test_cat_single_input(self, device):
+        decomp_table = torch._inductor.decomposition.select_decomp_table()
+        cat_inductor = decomp_table[torch.ops.aten.cat.default]
+
+        inp = torch.rand([2048, 2048], device=device)
+        inps = [inp for _ in range(10)]
+
+        for dim in (-1, 0, 1):
+            self.assertEqual(torch.cat(inps, dim), cat_inductor(inps, dim))
 
     def test_rrelu_with_noise(self, device):
         # rrelu_with_noise behavior depends on a) whether elements in the input
