@@ -1793,7 +1793,7 @@ class GuardBuilder(GuardBuilderBase):
             for shape_guard in guards:
                 self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
-    def TENSOR_MATCH(self, guard: Guard, value=None):
+    def TENSOR_MATCH(self, guard: Guard, value=None, is_buffer=False):
         # For FSDP modules, we can skip guards on nn module tensors because FSDP
         # eager assumes that the params are unchanged once the model is wrapped.
         if guard.is_fsdp_module():
@@ -1915,7 +1915,7 @@ class GuardBuilder(GuardBuilderBase):
             #
             assert guard.source is not None
             static, reason = tensor_always_has_static_shape(
-                value, is_tensor=True, guard_source=guard.source
+                value, is_tensor=True, is_buffer=is_buffer, guard_source=guard.source
             )
 
             if not static:

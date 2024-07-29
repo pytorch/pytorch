@@ -95,6 +95,7 @@ from ..utils import (
     is_lru_cache_wrapped_function,
     is_namedtuple,
     is_parameter_freezing,
+    is_torch_nn_buffer,
     is_typing,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -1141,7 +1142,9 @@ class VariableBuilder:
                 ].__dict__.copy()
 
                 guard = functools.partial(
-                    GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
+                    GuardBuilder.TENSOR_MATCH,
+                    value=TensorWeakRef(value[i]),
+                    is_buffer=is_torch_nn_buffer(self.tx, value[i]),
                 )
                 guards.append(source_i.make_guard(guard))
 
@@ -1469,6 +1472,7 @@ class VariableBuilder:
                     if isinstance(source, NumpyTensorSource)
                     else TensorWeakRef(value)
                 ),
+                is_buffer=is_torch_nn_buffer(self.tx, value),
             )
         )
 
@@ -2528,8 +2532,10 @@ def wrap_to_fake_tensor_and_record(
         or is_traceable_wrapper_subclass(e)
     ):
         assert source is not None
+
+        is_buffer = is_torch_nn_buffer(tx, source)
         static_shapes, reason = tensor_always_has_static_shape(
-            e, is_tensor, guard_source=source.guard_source()
+            e, is_tensor, is_buffer, guard_source=source.guard_source()
         )
 
         if not parent_context:

@@ -2153,9 +2153,30 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
     raise AssertionError(f"Illegal reason {reason}")
 
 
+def is_torch_nn_buffer(tx, source):
+    # No easy way to test if a tensor is a buffer. Rely on source and f_locals to identify a buffer.
+    # mod._buffers["x"] translates to
+    # GetItemSource(AttrSource(LocalSource("mod"), "_buffers"), "x")
+    from .source import AttrSource, GetItemSource, LocalSource
+
+    if isinstance(source, GetItemSource):
+        if isinstance(source.base, AttrSource):
+            mod_source = source.base.base
+            if source.base.member != "_buffers":
+                return False
+            if isinstance(mod_source, LocalSource):
+                mod_name = mod_source.local_name
+                if mod_name in tx.f_locals:
+                    mod = tx.f_locals[mod_name]
+                    if isinstance(mod, torch.nn.Module):
+                        return True
+    return False
+
+
 def tensor_always_has_static_shape(
     tensor: Union[torch.Tensor, Any],
     is_tensor: bool,
+    is_buffer: bool,
     guard_source: "torch._guards.GuardSource",
 ) -> Tuple[bool, Optional[TensorStaticReason]]:
     """
@@ -2171,7 +2192,9 @@ def tensor_always_has_static_shape(
     """
     if guard_source.is_nn_module() and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
-    if type(tensor) is torch.nn.Parameter and config.force_parameter_static_shapes:
+    if (
+        type(tensor) is torch.nn.Parameter or is_buffer
+    ) and config.force_parameter_static_shapes:
         return True, TensorStaticReason.PARAMETER
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
