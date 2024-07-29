@@ -3425,7 +3425,13 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 
     @classmethod
     def _run(
-        cls, parent_conn, rank: int, test_name: str, file_name: str, parent_pipe
+        cls,
+        parent_conn,
+        rank: int,
+        test_name: str,
+        file_name: str,
+        parent_pipe,
+        **kwargs,
     ) -> None:
         cls.parent = parent_conn
         super()._run(rank, test_name, file_name, parent_pipe)
