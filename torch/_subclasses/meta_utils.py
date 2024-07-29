@@ -1581,7 +1581,9 @@ class MetaConverter:
 
             # See Note: [Creating symbolic nested int]
             if t.nested_int is not None and not r.has_nested_int():
-                r.set_nested_int(r.fake_mode.create_symbolic_nested_int(hint=t.nested_int))
+                r.set_nested_int(
+                    r.fake_mode.create_symbolic_nested_int(hint=t.nested_int)
+                )
 
             self.set_tensor_memo(t, r)
 

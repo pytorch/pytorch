@@ -459,7 +459,7 @@ def to_copy_default(func, *args, **kwargs):
 
     if isinstance(new_offsets, (FakeTensor, FunctionalTensor)):
         # Temporary hack until we have the union find
-        return new_offsets.set_nested_int(inp._offsets.get_nested_int())
+        new_offsets.set_nested_int(inp._offsets.get_nested_int())
     else:
         _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
     inp_kwargs = extract_kwargs(inp)

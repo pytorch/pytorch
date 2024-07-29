@@ -247,8 +247,9 @@ class FunctionalTensor(torch.Tensor):
         return inner.get_nested_int(coeff=coeff)
 
     def set_nested_int(self, val):
-        self._nested_int_memo = val
-        self._nested_int_memo_vc = self._version
+        inner = torch._from_functional_tensor(self.elem)
+        assert isinstance(inner, torch._subclasses.FakeTensor)
+        inner.set_nested_int(val)
 
     def tolist(self) -> Any:
         if self.elem.dim() == 0:
