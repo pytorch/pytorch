@@ -21,11 +21,10 @@ from sympy import Expr
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import bound_sympy, IntInfinity, ValueRanges
+from torch.utils._sympy.value_ranges import bound_sympy
 
 from .runtime.runtime_utils import is_power_of_2
 from .utils import (
-    has_free_symbols,
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
     sympy_subs,
@@ -119,18 +118,9 @@ class SizeVarAllocator:
 
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
-        value_ranges = {
-            k: ValueRanges(
-                0, max(0, v - 1) if not has_free_symbols([v]) else IntInfinity()
-            )
-            for k, v in var_ranges.items()
-        }
 
         def remove_zero_terms(base, divisor):
             """Symbols smaller than the divisor are zero"""
-            if not (bound_sympy(base, value_ranges).lower >= 0):
-                return base
-
             for v in base.free_symbols:
                 if v in var_ranges:
                     # var smaller than divisor can be removed
@@ -149,17 +139,25 @@ class SizeVarAllocator:
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
-
-            max_value = modulus * divisor - 1
-            can_remove_mod = (
-                self.statically_known_geq(base, 0)
-                and self.statically_known_lt(base, max_value)
-            ) or (
-                not has_free_symbols([max_value])
-                and bound_sympy(base, value_ranges) in ValueRanges(0, max_value)
-            )
-
-            if can_remove_mod:
+            base_pos = True
+            if isinstance(base, ModularIndexing):
+                # for modular indexing, biggest values from the ranges don't necessarily result in
+                # the biggest result, the biggest result is modulus - 1
+                base_s = base.args[2] - 1
+            elif not base.has(ModularIndexing):
+                # actual iteration range is to size-1
+                iter_ranges_zero = {k: 0 for k, v in var_ranges.items()}
+                base_lowest = sympy_subs(base, iter_ranges_zero)
+                if self.statically_known_leq(0, base_lowest):  # type: ignore[arg-type]
+                    # can't replace with indexing div if base can be negative
+                    base_pos = True
+                else:
+                    base_pos = False
+                iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
+                base_s = sympy_subs(base, iter_ranges)
+            else:
+                base_s = base
+            if self.statically_known_lt(base_s, modulus * divisor) and base_pos:
                 return FloorDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
