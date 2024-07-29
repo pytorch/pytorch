@@ -479,16 +479,6 @@ def narrow_copy(
     return torch.narrow(self, dim, start, length).clone()
 
 
-@register_decomposition([aten.expand_copy])
-def expand_copy(
-    self: torch.Tensor,
-    size: List[Union[int, torch.SymInt]],
-    *,
-    implicit: bool = False,
-) -> torch.Tensor:
-    return aten.expand(self, size, implicit=implicit).clone()
-
-
 @register_decomposition([aten.view_copy.default])
 def view_copy_default(
     self: torch.Tensor,
