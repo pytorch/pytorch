@@ -12,7 +12,7 @@ It does so by:
 """
 
 import warnings
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from functools import wraps
 from typing import Any, Callable, List, Tuple, Union
 from unittest.mock import patch
@@ -53,6 +53,7 @@ from .schemas import (
 )
 from .subclass_utils import (
     create_subclass_meta,
+    remap_unwrapped_subclass_arg_indices,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
@@ -329,6 +330,19 @@ def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True) -> Any:
         return traced_forward, (*args, fwd_seed, fwd_base_offset)
 
 
+@contextmanager
+def set_partitioner_tag(tag: str):
+    meta_key = "partitioner_tag"
+    assert fx_traceback.has_preserved_node_meta()
+
+    original_val = fx_traceback.current_meta.get(meta_key, None)
+    fx_traceback.current_meta[meta_key] = tag
+    try:
+        yield
+    finally:
+        fx_traceback.current_meta[meta_key] = original_val
+
+
 # This creates the final function that we want to trace using make_fx(),
 # in both aot_dispatch_autograd and aot_dispatch_base.
 # Preconditions:
@@ -443,7 +457,11 @@ def create_functionalized_fn(
                 ):
                     # Not banning here mutations on inpt_info.requires_grad -
                     # we'll check at runtime and fail only when backward is under torch.is_grad_enabled (create_graph)
-                    before.copy_(after)
+                    # Add node meta for copy_ for partitioner that this node should be in backward graph.
+                    with torch.fx.traceback.preserve_node_meta(), set_partitioner_tag(
+                        "must_be_in_backward"
+                    ):
+                        before.copy_(after)
                     meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
                         idx
                     )
@@ -702,6 +720,9 @@ def aot_dispatch_subclass(
     args_unwrapped = unwrap_tensor_subclasses(
         args, is_joint_structure=is_joint_structure
     )
+    remapped_static_indices = remap_unwrapped_subclass_arg_indices(
+        args, meta.static_input_indices
+    )
 
     if is_joint_structure:
         primals_unwrapped = args_unwrapped[0]
@@ -729,6 +750,7 @@ def aot_dispatch_subclass(
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
     meta_updated = run_functionalized_fw_and_collect_metadata(
         metadata_fn,
+        static_input_indices=remapped_static_indices,
         keep_input_mutations=meta.keep_input_mutations,
         is_train=meta.is_train,
     )(*primals_unwrapped)

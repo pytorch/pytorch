@@ -51,7 +51,6 @@ struct TensorMetadata {
 
   TensorMetadata()
       : is_symbolic_(false),
-        dtype_(c10::ScalarType::Undefined),
         device_(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES),
         sizes_({}),
         strides_({}) {}
@@ -89,13 +88,19 @@ enum ParameterTag {
   TENSOR_LIST,
   TENSOR_LIST_OPTIONAL,
   SCALAR,
+  STRING,
+  DEVICE,
   INVALID,
 };
 
 // ParameterMetadataValue is to represent the value of the input parameters of a
 // aten operation.
-using ParameterMetadataValue =
-    std::variant<TensorMetadata, std::vector<TensorMetadata>, c10::Scalar>;
+using ParameterMetadataValue = std::variant<
+    TensorMetadata,
+    std::vector<TensorMetadata>,
+    c10::Scalar,
+    std::string,
+    c10::Device>;
 
 // ParameterMetadata is to represent the metadata of the input parameters of a
 // aten operation. It includes the tag of the parameter, the value of the
@@ -110,7 +115,7 @@ struct ParameterMetadata {
   // same tag. For example, an operation with two input tensors, the first
   // tensor is a optional tensor and the second tensor is a tensor. The first
   // tensor will have the order 0 and the second tensor will have the order 1.
-  uint64_t order_;
+  uint64_t order_{};
 
   ParameterMetadata() : tag_(INVALID) {}
   ParameterMetadata(TensorMetadata tensor_metadata, uint64_t input_order);
@@ -122,6 +127,8 @@ struct ParameterMetadata {
       const std::vector<TensorMetadata>& tensor_metadata_list,
       uint64_t input_order);
   ParameterMetadata(const c10::Scalar& scalar, uint64_t input_order);
+  ParameterMetadata(const std::string& string_value, uint64_t input_order);
+  ParameterMetadata(const c10::Device& device, uint64_t input_order);
 
   bool operator==(const ParameterMetadata& other) const;
 
