@@ -429,7 +429,6 @@ test_perf_for_dashboard() {
   local targets=(accuracy performance)
 
   local device=cuda
-  local taskset=""
   if [[ "${TEST_CONFIG}" == *cpu* ]]; then
     if [[ "${TEST_CONFIG}" == *cpu_x86* ]]; then
       device=cpu_x86
@@ -437,8 +436,6 @@ test_perf_for_dashboard() {
       device=cpu_aarch64
     fi
     test_inductor_set_cpu_affinity
-    end_core=$(( $(test_inductor_get_core_number)-1 ))
-    taskset="taskset -c 0-$end_core"
   elif [[ "${TEST_CONFIG}" == *cuda_a10g* ]]; then
     device=cuda_a10g
   fi
@@ -458,43 +455,43 @@ test_perf_for_dashboard() {
       fi
 
       if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
-        $taskset python "benchmarks/dynamo/$suite.py" \
+        $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cudagraphs-true* ]]; then
-        $taskset python "benchmarks/dynamo/$suite.py" \
+        $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *dynamic-true* ]]; then
-        $taskset python "benchmarks/dynamo/$suite.py" \
+        $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
             --dynamic-batch-only "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
-        TORCHINDUCTOR_CPP_WRAPPER=1 $taskset python "benchmarks/dynamo/$suite.py" \
+        TORCHINDUCTOR_CPP_WRAPPER=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *freezing_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
-        $taskset python "benchmarks/dynamo/$suite.py" \
+        $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *freeze_autotune_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
-        TORCHINDUCTOR_MAX_AUTOTUNE=1 $taskset python "benchmarks/dynamo/$suite.py" \
+        TORCHINDUCTOR_MAX_AUTOTUNE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *aotinductor-true* ]] && [[ "$mode" == "inference" ]]; then
-        TORCHINDUCTOR_ABI_COMPATIBLE=1 $taskset python "benchmarks/dynamo/$suite.py" \
+        TORCHINDUCTOR_ABI_COMPATIBLE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --export-aot-inductor --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *maxautotune-true* ]]; then
-        TORCHINDUCTOR_MAX_AUTOTUNE=1 $taskset python "benchmarks/dynamo/$suite.py" \
+        TORCHINDUCTOR_MAX_AUTOTUNE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
@@ -502,7 +499,7 @@ test_perf_for_dashboard() {
         # TODO: This has a new dtype called quant and the benchmarks script needs to be updated to support this.
         # The tentative command is as follows. It doesn't work now, but it's ok because we only need mock data
         # to fill the dashboard.
-        $taskset python "benchmarks/dynamo/$suite.py" \
+        $TASKSET python "benchmarks/dynamo/$suite.py" \
           "${target_flag[@]}" --"$mode" --quant --backend "$backend" "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_${device}_${target}.csv" || true
         # Copy cudagraph results as mock data, easiest choice?
@@ -664,13 +661,16 @@ test_inductor_torchbench_smoketest_perf() {
 }
 
 test_inductor_get_core_number() {
-  # aarch64 server needs a different way to query core number
-  echo $(($(lscpu | grep 'Socket(s):' | awk '{print $2}') * $(lscpu | grep 'Core(s) per socket:' | awk '{print $4}')))
+  if [[ "${TEST_CONFIG}" == *aarch64 ]]; then
+    echo "$(($(lscpu | grep 'Cluster(s):' | awk '{print $2}') * $(lscpu | grep 'Core(s) per cluster:' | awk '{print $4}')))"
+  elif [[ "${TEST_CONFIG}" == *x86 ]]; then
+    echo "$(($(lscpu | grep 'Socket(s):' | awk '{print $2}') * $(lscpu | grep 'Core(s) per socket:' | awk '{print $4}')))"
+  fi
 }
 
 test_inductor_set_cpu_affinity(){
   #set jemalloc
-  JEMALLOC_LIB="/usr/lib/x86_64-linux-gnu/libjemalloc.so.2"
+  JEMALLOC_LIB="$(find /usr/lib -name libjemalloc.so.2)"
   IOMP_LIB="$(dirname "$(which python)")/../lib/libiomp5.so"
   export LD_PRELOAD="$JEMALLOC_LIB":"$IOMP_LIB":"$LD_PRELOAD"
   export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
@@ -678,6 +678,8 @@ test_inductor_set_cpu_affinity(){
   export KMP_BLOCKTIME=1
   cores=$(test_inductor_get_core_number)
   export OMP_NUM_THREADS=$cores
+  end_core=$((cores-1))
+  export TASKSET="taskset -c 0-$end_core"
 }
 
 test_inductor_torchbench_cpu_smoketest_perf(){
@@ -685,7 +687,6 @@ test_inductor_torchbench_cpu_smoketest_perf(){
   mkdir -p "$TEST_REPORTS_DIR"
 
   test_inductor_set_cpu_affinity
-  end_core=$(( $(test_inductor_get_core_number)-1 ))
   MODELS_SPEEDUP_TARGET=benchmarks/dynamo/expected_ci_speedup_inductor_torchbench_cpu.csv
 
   grep -v '^ *#' < "$MODELS_SPEEDUP_TARGET" | while IFS=',' read -r -a model_cfg
@@ -702,11 +703,11 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     local output_name="$TEST_REPORTS_DIR/inductor_inference_${model_cfg[0]}_${model_cfg[1]}_${model_cfg[2]}_${model_cfg[3]}_cpu_smoketest.csv"
 
     if [[ ${model_cfg[3]} == "dynamic" ]]; then
-      taskset -c 0-"$end_core" python benchmarks/dynamo/torchbench.py \
+      $TASKSET python benchmarks/dynamo/torchbench.py \
         --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" --dynamic-shapes \
         --dynamic-batch-only --freezing --timeout 9000 --"$backend" --output "$output_name"
     else
-      taskset -c 0-"$end_core" python benchmarks/dynamo/torchbench.py \
+      $TASKSET python benchmarks/dynamo/torchbench.py \
         --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" \
         --freezing --timeout 9000 --"$backend" --output "$output_name"
     fi
