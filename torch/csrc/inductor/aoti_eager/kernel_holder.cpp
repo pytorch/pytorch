@@ -59,49 +59,14 @@ inline void unpack_optional_tensor_list_ivalue(
   }
 }
 
-inline void unpack_scalar_ivalue(
-    const c10::IValue& ivalue,
-    const c10::Device& device,
-    std::vector<at::Tensor>& inputs) {
-  inputs.push_back(at::scalar_tensor(
-      ivalue.toScalar(),
-      c10::TensorOptions().device(device).dtype(ivalue.toScalar().type())));
-}
-
-bool unpack_ivalue(
-    const c10::Argument& argument,
-    const c10::IValue& ivalue,
-    const c10::Device& device,
-    std::vector<at::Tensor>& inputs) {
-  if (ivalue.isTensor()) {
-    unpack_tensor_ivalue(ivalue, device, inputs);
-  } else if (ivalue.isTensorList()) {
-    unpack_tensor_list_ivalue(ivalue, device, inputs);
-  } else if (ivalue.isOptionalTensorList()) {
-    unpack_optional_tensor_list_ivalue(ivalue, device, inputs);
-  } else if (ivalue.isScalar()) {
-    // ivalue is scalar
-    unpack_scalar_ivalue(ivalue, device, inputs);
-  } else if (
-      *argument.real_type() == *c10::getTypePtr<std::optional<at::Tensor>>()) {
-    // ivalue is std::optional<at::Tensor>
-    unpack_optional_tensor_ivalue(ivalue, device, inputs);
-  } else {
-    // Unsupport IValue type.
-    return false;
-  }
-
-  return true;
-}
-
 std::vector<at::Tensor> unpack_tensors(
     const std::vector<c10::Argument>& arguments,
     const torch::jit::Stack& stack,
     const c10::Device& device) {
   std::vector<at::Tensor> inputs;
   for (size_t idx = 0; idx < stack.size(); idx++) {
-    auto ivalue = stack[idx];
-    auto ivalue_arg = arguments[idx];
+    const auto& ivalue = stack[idx];
+    const auto& ivalue_arg = arguments[idx];
     if (ivalue.isTensor()) {
       unpack_tensor_ivalue(ivalue, device, inputs);
     } else if (ivalue.isTensorList()) {
@@ -153,12 +118,10 @@ std::vector<ParameterMetadata> unpack_input_parameters(
     if (stack[idx].isScalar()) {
       // Beyond c10::Scalar, the floating value and interger value are also
       // represented as Scalar.
-      inputs_metadata.push_back(
-          ParameterMetadata(stack[idx].toScalar(), arg_order));
+      inputs_metadata.emplace_back(stack[idx].toScalar(), arg_order);
     } else if (stack[idx].isTensorList()) {
       // tensor list
-      inputs_metadata.push_back(
-          ParameterMetadata(stack[idx].toTensorList().vec(), arg_order));
+      inputs_metadata.emplace_back(stack[idx].toTensorList().vec(), arg_order);
     } else if (stack[idx].isOptionalTensorList()) {
       // optional tensor list: std::vector<std::optional<at::Tensor>>
       std::vector<at::Tensor> tensor_list;
@@ -167,27 +130,23 @@ std::vector<ParameterMetadata> unpack_input_parameters(
           tensor_list.push_back(item.toOptional<at::Tensor>().value());
         }
       }
-      inputs_metadata.push_back(ParameterMetadata(tensor_list, arg_order));
+      inputs_metadata.emplace_back(tensor_list, arg_order);
     } else if (
         *arguments[idx].real_type() ==
         *c10::getTypePtr<std::optional<at::Tensor>>()) {
       // optional tensor
       if (stack[idx].toOptional<at::Tensor>().has_value()) {
-        inputs_metadata.push_back(ParameterMetadata(
-            stack[idx].toOptional<at::Tensor>().value(), arg_order));
+        inputs_metadata.emplace_back(
+            stack[idx].toOptional<at::Tensor>().value(), arg_order);
       }
     } else if (stack[idx].isTensor()) {
-      inputs_metadata.push_back(
-          ParameterMetadata(stack[idx].toTensor(), arg_order));
+      inputs_metadata.emplace_back(stack[idx].toTensor(), arg_order);
     } else if (stack[idx].isString()) {
-      inputs_metadata.push_back(
-          ParameterMetadata(stack[idx].toStringRef(), arg_order));
+      inputs_metadata.emplace_back(stack[idx].toStringRef(), arg_order);
     } else if (stack[idx].isBool()) {
-      inputs_metadata.push_back(
-          ParameterMetadata(c10::Scalar(stack[idx].toBool()), arg_order));
+      inputs_metadata.emplace_back(c10::Scalar(stack[idx].toBool()), arg_order);
     } else if (stack[idx].isDevice()) {
-      inputs_metadata.push_back(
-          ParameterMetadata(stack[idx].toDevice(), arg_order));
+      inputs_metadata.emplace_back(stack[idx].toDevice(), arg_order);
     } else {
       TORCH_CHECK_NOT_IMPLEMENTED(
           false,
@@ -268,7 +227,7 @@ void AOTIPythonKernelHolder::cache_hit(
 
   auto outputs = aoti_kernel_metadata.kernel_runner_->run(inputs);
   for (auto& output : outputs) {
-    stack->push_back(output);
+    stack->emplace_back(output);
   }
 }
 
@@ -372,8 +331,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
           auto tensor_metadata = build_tensor_metadata(metadata);
           test_list_metadata.push_back(tensor_metadata);
         }
-        parameter_metadata_list.push_back(
-            ParameterMetadata(test_list_metadata, arg_idx));
+        parameter_metadata_list.emplace_back(test_list_metadata, arg_idx);
       } else if (is_scalar) {
         // Scalar
         auto metadata = item_metadata.cast<py::dict>();
@@ -396,14 +354,12 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
               dtype_value);
         }
 
-        parameter_metadata_list.push_back(
-            ParameterMetadata(c10::Scalar(scalar), arg_idx));
+        parameter_metadata_list.emplace_back(c10::Scalar(scalar), arg_idx);
       } else if (is_string) {
         // String
         auto metadata = item_metadata.cast<py::dict>();
         auto str_value = metadata["string_value"].cast<std::string>();
-        parameter_metadata_list.push_back(
-            ParameterMetadata(str_value, arg_idx));
+        parameter_metadata_list.emplace_back(str_value, arg_idx);
       } else if (is_dtype) {
         // Dtype
         auto metadata = item_metadata.cast<py::dict>();
@@ -411,8 +367,8 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
         TORCH_INTERNAL_ASSERT(THPDtype_Check(dtype_value_obj.ptr()));
         auto dtype_value =
             reinterpret_cast<THPDtype*>(dtype_value_obj.ptr())->scalar_type;
-        parameter_metadata_list.push_back(ParameterMetadata(
-            c10::Scalar(static_cast<int>(dtype_value)), arg_idx));
+        parameter_metadata_list.emplace_back(
+            c10::Scalar(static_cast<int>(dtype_value)), arg_idx);
       } else if (is_device) {
         // Device
         auto metadata = item_metadata.cast<py::dict>();
@@ -424,21 +380,20 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
               metadata["device_index_value"].cast<c10::DeviceIndex>();
           device.set_index(device_index_value);
         }
-        parameter_metadata_list.push_back(ParameterMetadata(device, arg_idx));
+        parameter_metadata_list.emplace_back(device, arg_idx);
       } else if (is_layout) {
         auto metadata = item_metadata.cast<py::dict>();
         auto layout_value_obj = metadata["layout_value"].cast<py::object>();
         TORCH_INTERNAL_ASSERT(THPLayout_Check(layout_value_obj.ptr()));
         auto layout_value =
             reinterpret_cast<THPLayout*>(layout_value_obj.ptr())->layout;
-        parameter_metadata_list.push_back(ParameterMetadata(
-            c10::Scalar(static_cast<int>(layout_value)), arg_idx));
+        parameter_metadata_list.emplace_back(
+            c10::Scalar(static_cast<int>(layout_value)), arg_idx);
       } else {
         // Tensor
         auto metadata = item_metadata.cast<py::dict>();
         auto tensor_metadata = build_tensor_metadata(metadata);
-        parameter_metadata_list.push_back(
-            ParameterMetadata(tensor_metadata, arg_idx));
+        parameter_metadata_list.emplace_back(tensor_metadata, arg_idx);
       }
     }
 
@@ -508,9 +463,12 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       schema.overload_name().empty() ? "default" : schema.overload_name();
   auto pos = qualified_name.find("::");
   TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
-  std::string ns_str(qualified_name.begin(), qualified_name.begin() + pos);
+  std::string ns_str(
+      qualified_name.begin(),
+      qualified_name.begin() + static_cast<ptrdiff_t>(pos));
   std::string func_name(
-      qualified_name.begin() + pos + strlen("::"), qualified_name.end());
+      qualified_name.begin() + static_cast<ptrdiff_t>(pos + strlen("::")),
+      qualified_name.end());
 
   py::gil_scoped_acquire gil;
   py::handle op_py_func = op.getPythonOp(pyinterpreter_, [&]() -> PyObject* {

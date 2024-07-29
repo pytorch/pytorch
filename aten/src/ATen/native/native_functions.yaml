@@ -8457,21 +8457,21 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: __lshift__
+    CPU, CUDA, MPS: __lshift__
   tags: pointwise
 
 - func: __lshift__.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: __lshift__
+    CPU, CUDA, MPS: __lshift__
   tags: pointwise
 
 - func: __ilshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: __ilshift__
+    CPU, CUDA, MPS: __ilshift__
   autogen: __lshift__.Scalar_out
   tags: pointwise
 
@@ -8479,7 +8479,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: __ilshift__
+    CPU, CUDA, MPS: __ilshift__
   autogen: __lshift__.Tensor_out
   tags: pointwise
 
@@ -8500,7 +8500,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: bitwise_left_shift_out
+    CPU, CUDA, MPS: bitwise_left_shift_out
   tags: pointwise
 
 - func: bitwise_left_shift.Tensor_Scalar(Tensor self, Scalar other) -> Tensor
@@ -8536,7 +8536,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: __rshift__
+    CPU, CUDA, MPS: __rshift__
   tags: pointwise
 
 - func: __rshift__.Tensor(Tensor self, Tensor other) -> Tensor
@@ -8550,14 +8550,14 @@
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: __irshift__
+    CPU, CUDA, MPS: __irshift__
   autogen: __rshift__.Scalar_out
 
 - func: __irshift__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: __irshift__
+    CPU, CUDA, MPS: __irshift__
   autogen: __rshift__.Tensor_out
 
 - func: bitwise_right_shift.Tensor(Tensor self, Tensor other) -> Tensor
@@ -8577,7 +8577,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: bitwise_right_shift_out
+    CPU, CUDA, MPS: bitwise_right_shift_out
   tags: pointwise
 
 - func: bitwise_right_shift.Tensor_Scalar(Tensor self, Scalar other) -> Tensor
