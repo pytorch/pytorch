@@ -2419,8 +2419,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     @testing.expectedFailureSerDer  # we don't save placeholder metadata
     @testing.expectedFailureNonStrict
-    @testing.expectedFailureTrainingIRToRunDecomp  # source_fn_stack failure
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # source_fn_stack failure
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
