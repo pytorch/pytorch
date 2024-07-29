@@ -430,14 +430,7 @@ def run_test(
             )
         )
         unittest_args.extend(test_module.get_pytest_args())
-        replacement = {"-f": "-x"}
-        unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
-
-    if options.showlocals:
-        if options.pytest:
-            unittest_args.extend(["--showlocals", "--tb=long", "--color=yes"])
-        else:
-            unittest_args.append("--locals")
+        unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
 
     # NB: These features are not available for C++ tests, but there is little incentive
     # to implement it because we have never seen a flaky C++ test before.
@@ -1125,21 +1118,6 @@ def parse_args():
         default=0,
         help="Print verbose information and test-by-test results",
     )
-    if sys.version_info >= (3, 9):
-        parser.add_argument(
-            "--showlocals",
-            action=argparse.BooleanOptionalAction,
-            default=True,
-            help="Show local variables in tracebacks (default: True)",
-        )
-    else:
-        parser.add_argument(
-            "--showlocals",
-            action="store_true",
-            default=True,
-            help="Show local variables in tracebacks (default: True)",
-        )
-        parser.add_argument("--no-showlocals", dest="showlocals", action="store_false")
     parser.add_argument("--jit", "--jit", action="store_true", help="run all jit tests")
     parser.add_argument(
         "--distributed-tests",

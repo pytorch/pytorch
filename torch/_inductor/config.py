@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -275,6 +275,14 @@ force_same_precision = (
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
+
+# As above, specify candidate backends for conv autotune.
+# NB: in some cases for 1x1 convs we emit as matmul,
+# which will use the backends of `max_autotune_gemm_backends`
+max_autotune_conv_backends = os.environ.get(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
+).upper()
+
 
 # Specify the size of the search space for GEMM autotuning.
 # DEFAULT     - balance between compile time overhead and performance
@@ -625,12 +633,6 @@ decompose_mem_bound_mm: bool = False
 # In the common case, most inputs will be aligned.
 assume_aligned_inputs: bool = False
 
-# For the user-written Triton kernels compiled with the model, ignore the unsupported
-# arguments passed to the @triton.autotune in the user's code; this is unsafe, as
-# ignoring the unsupported args may lead to unexpected autotuning behavior: don't
-# set unless you know what you're doing.
-unsafe_ignore_unsupported_triton_autotune_args: bool = False
-
 
 # config specific to codegen/cpp.py
 class cpp:
@@ -738,6 +740,10 @@ class triton:
     # i.e., allow num_recording <= cudagraph_unexpected_rerecord_limit
     # note: we are conservative here and choose a large limit.
     cudagraph_unexpected_rerecord_limit = 128
+
+    # Warn loudly when the number of cudagraphs due to dynamic shape
+    # exceeds this limit
+    cudagraph_dynamic_shape_warn_limit: Optional[int] = 50
 
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
@@ -945,7 +951,8 @@ class rocm:
 
     # Enable for CDNA3 only for now
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    supported_arch: Set[str] = {"gfx940", "gfx941", "gfx942"}
+    # Keep it ordered, unordered set can cause spurious inductor cache misses
+    supported_arch: List[str] = ["gfx940", "gfx941", "gfx942"]
 
     # Optimization level, use to balance compilation speed and runtime performance
     compile_opt_level = "-O2"
