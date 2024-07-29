@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
@@ -42,9 +40,12 @@ from .higher_order_ops import (
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
+    EnumerateVariable,
     IteratorVariable,
     ItertoolsVariable,
+    MapVariable,
     RepeatIteratorVariable,
+    ZipVariable,
 )
 from .lazy import LazyVariableTracker
 from .lists import (
@@ -73,7 +74,6 @@ from .misc import (
     NumpyVariable,
     PythonModuleVariable,
     RegexPatternVariable,
-    StopIterationVariable,
     StringFormatVariable,
     SuperVariable,
     TorchVersionVariable,
@@ -146,7 +146,6 @@ __all__ = [
     "SDPAParamsVariable",
     "SkipFunctionVariable",
     "SliceVariable",
-    "StopIterationVariable",
     "StringFormatVariable",
     "SuperVariable",
     "TensorVariable",
