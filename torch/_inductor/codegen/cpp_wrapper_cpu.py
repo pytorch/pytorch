@@ -2187,8 +2187,12 @@ if (custom_op_wrapper.get() == NULL) {
     def generate_py_arg(self, py_args_var, idx, raw_arg, arg_type):
         def generate_py_arg_inner(raw_arg, arg_type):
             if isinstance(arg_type, torch.TensorType):
-                # Store AtenTensorHandle as void*
-                return f"PyCapsule_New(reinterpret_cast<void*>({raw_arg.codegen_reference()}.get()), NULL, NULL)"
+                if isinstance(raw_arg, int):
+                    # In the case of broadcasting, raw_arg is int
+                    return f"PyLong_FromLongLong({raw_arg})"
+                else:
+                    # Store AtenTensorHandle as void*
+                    return f"PyCapsule_New(reinterpret_cast<void*>({raw_arg.codegen_reference()}.get()), NULL, NULL)"
             elif isinstance(arg_type, torch.IntType):
                 # int
                 return f"PyLong_FromLongLong({raw_arg})"
@@ -2210,6 +2214,8 @@ if (custom_op_wrapper.get() == NULL) {
                 )
 
         lines = ""
+        if raw_arg is None:
+            return lines
         if isinstance(arg_type, torch.ListType):
             assert isinstance(raw_arg, (list, tuple)), str(raw_arg) + " is not a list"
             lines += f"PyObject* {py_args_var}_{idx} = PyList_New({len(raw_arg)});\n"
@@ -2255,11 +2261,13 @@ if (custom_op_wrapper.get() == NULL) {
             self.load_custom_op_wrapper()
 
             assert output_args is not None, "output_args should not be None"
-            num_args = len(raw_args)
+            # raw arg may be None
+            valid_raw_args = [arg for arg in raw_args if arg is not None]
+            num_valid_args = len(valid_raw_args)
             py_args_var = f"py_args_{next(self.arg_var_id)}"
             # First arg is always the python op name
             lines = f"""
-RAIIPyObject {py_args_var}(PyTuple_New({num_args+1}));
+RAIIPyObject {py_args_var}(PyTuple_New({num_valid_args+1}));
 if ({py_args_var}.get() == NULL) {{
     throw std::runtime_error("PyTuple_New {py_args_var} failed");
 }}
