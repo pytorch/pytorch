@@ -571,6 +571,15 @@ class TestAutograd(TestCase):
                 x = torch.randn(3, 3, requires_grad=True)
                 x.sin().sum().backward()
 
+        # Clean up
+        for i in range(10):
+            ctx_1.__exit__()
+
+        # Validate there are no more hooks on the stack
+        a = torch.tensor(1., requires_grad=True)
+        y = a.exp()
+        y.grad_fn._raw_saved_result.register_hooks(lambda x: x, lambda x: x)
+
     def test_saved_tensor_hooks_extra_enter_during_bw_no_leak(self):
         # This usage of saved tensor is not supported, but should not leak
         def scope():
