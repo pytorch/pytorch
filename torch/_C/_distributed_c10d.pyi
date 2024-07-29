@@ -524,7 +524,12 @@ def _round_robin_process_groups(
 
 class ProcessGroupGloo(Backend):
     class Device: ...
-    class Options: ...
+
+    class Options(ProcessGroup.Options):
+        devices: list[ProcessGroupGloo.Device]
+        threads: int
+
+        def __init__(self): ...
 
     def __init__(
         self,
