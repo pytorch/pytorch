@@ -924,14 +924,27 @@ class CppWrapperCpu(WrapperCodeGen):
         ), "codegen_tensor_item is only used for the ABI-compatible mode"
         dtype_str = str(dtype).split(".")[-1]
         writer = indented_buffer or self
-        writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
 
-        # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
-        tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+        if dtype == torch.float16 or dtype == torch.bfloat16:
+            scalar_tmp = f"{scalar}_tmp"
+            writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar_tmp};")
 
-        writer.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
-        )
+            # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
+            tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+
+            writer.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar_tmp}));"
+            )
+            writer.writeline(f"float {scalar} = float({scalar_tmp});")
+        else:
+            writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
+
+            # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
+            tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+
+            writer.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
+            )
 
     @cache_on_self
     def get_output_refs(self):

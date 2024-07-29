@@ -162,6 +162,7 @@ class TestEnvironment:
         # export flag globally for convenience
         assert name not in globals(), f"duplicate definition of flag '{name}'"
         globals()[name] = enabled
+        return enabled
 
     # Defines a setting usable throughout the test suite, determining its value by querying
     # the specified environment variable. This differs from a flag in that it's not restricted
@@ -196,6 +197,7 @@ class TestEnvironment:
         # export setting globally for convenience
         assert name not in globals(), f"duplicate definition of setting '{name}'"
         globals()[name] = value
+        return value
 
     # Returns a string prefix usable to set environment variables for any test
     # settings that should be explicitly set to match this instantiation of the
@@ -219,35 +221,51 @@ if sys.platform == 'win32':
 #   CI=1, CI="true", CI=0, etc. all set the flag to be true.
 #   CI= and an unset CI set the flag to be false.
 # GitHub sets the value to CI="true" to enable it.
-TestEnvironment.def_flag("IS_CI", env_var="CI", include_in_repro=False,
-                         enabled_fn=lambda env_var_value, _: bool(env_var_value))
-TestEnvironment.def_flag(
+IS_CI: bool = TestEnvironment.def_flag(
+    "IS_CI",
+    env_var="CI",
+    include_in_repro=False,
+    enabled_fn=lambda env_var_value, _: bool(env_var_value),
+)
+IS_SANDCASTLE: bool = TestEnvironment.def_flag(
     "IS_SANDCASTLE",
     env_var="SANDCASTLE",
     implied_by_fn=lambda: os.getenv("TW_JOB_USER") == "sandcastle",
-    include_in_repro=False)
+    include_in_repro=False,
+)
 
 _is_fbcode_default = (
     hasattr(torch._utils_internal, "IS_FBSOURCE") and
     torch._utils_internal.IS_FBSOURCE
 )
 
-TestEnvironment.def_flag("IS_FBCODE", env_var="PYTORCH_TEST_FBCODE",
-                         default=_is_fbcode_default,
-                         include_in_repro=False)
-TestEnvironment.def_flag("IS_REMOTE_GPU", env_var="PYTORCH_TEST_REMOTE_GPU",
-                         include_in_repro=False)
+IS_FBCODE: bool = TestEnvironment.def_flag(
+    "IS_FBCODE",
+    env_var="PYTORCH_TEST_FBCODE",
+    default=_is_fbcode_default,
+    include_in_repro=False,
+)
+IS_REMOTE_GPU: bool = TestEnvironment.def_flag(
+    "IS_REMOTE_GPU",
+    env_var="PYTORCH_TEST_REMOTE_GPU",
+    include_in_repro=False,
+)
 
-TestEnvironment.def_flag(
+DISABLE_RUNNING_SCRIPT_CHK: bool = TestEnvironment.def_flag(
     "DISABLE_RUNNING_SCRIPT_CHK",
     env_var="PYTORCH_DISABLE_RUNNING_SCRIPT_CHK",
-    include_in_repro=False)
+    include_in_repro=False,
+)
 # NB: enabled by default unless in an fbcode context.
-TestEnvironment.def_flag("PRINT_REPRO_ON_FAILURE", env_var="PYTORCH_PRINT_REPRO_ON_FAILURE",
-                         default=(not IS_FBCODE), include_in_repro=False)  # noqa: F821
+PRINT_REPRO_ON_FAILURE: bool = TestEnvironment.def_flag(
+    "PRINT_REPRO_ON_FAILURE",
+    env_var="PYTORCH_PRINT_REPRO_ON_FAILURE",
+    default=(not IS_FBCODE),
+    include_in_repro=False,
+)
 
 # possibly restrict OpInfo tests to a single sample input
-TestEnvironment.def_setting(
+OPINFO_SAMPLE_INPUT_INDEX: Optional[int] = TestEnvironment.def_setting(
     "OPINFO_SAMPLE_INPUT_INDEX",
     env_var="PYTORCH_OPINFO_SAMPLE_INPUT_INDEX",
     default=None,
@@ -833,7 +851,7 @@ parser.add_argument('--test-bailouts', '--test_bailouts', action='store_true')
 parser.add_argument('--use-pytest', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
                     const=_get_test_report_path(),
-                    default=_get_test_report_path() if IS_CI else None)  # noqa: F821
+                    default=_get_test_report_path() if IS_CI else None)
 parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
@@ -841,11 +859,6 @@ parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SL
 parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
 parser.add_argument('--rerun-disabled-tests', action='store_true')
 parser.add_argument('--pytest-single-test', type=str, nargs=1)
-if sys.version_info >= (3, 9):
-    parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=True)
-else:
-    parser.add_argument('--showlocals', action='store_true', default=True)
-    parser.add_argument('--no-showlocals', dest='showlocals', action='store_false')
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
 def run_unittest_help(argv):
@@ -881,7 +894,6 @@ TEST_IN_SUBPROCESS = args.subprocess
 TEST_SAVE_XML = args.save_xml
 REPEAT_COUNT = args.repeat
 SEED = args.seed
-SHOW_LOCALS = args.showlocals
 if not getattr(expecttest, "ACCEPT", False):
     expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
@@ -1119,13 +1131,6 @@ def run_tests(argv=UNITTEST_ARGS):
     if not lint_test_case_extension(suite):
         sys.exit(1)
 
-    if SHOW_LOCALS:
-        argv = [
-            argv[0],
-            *(["--showlocals", "--tb=long", "--color=yes"] if USE_PYTEST else ["--locals"]),
-            *argv[1:],
-        ]
-
     if TEST_IN_SUBPROCESS:
         other_args = []
         if DISABLED_TESTS_FILE:
@@ -1339,24 +1344,48 @@ skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
 
 
 # Python 2.7 doesn't have spawn
-TestEnvironment.def_flag("NO_MULTIPROCESSING_SPAWN", env_var="NO_MULTIPROCESSING_SPAWN")
-TestEnvironment.def_flag("TEST_WITH_ASAN", env_var="PYTORCH_TEST_WITH_ASAN")
-TestEnvironment.def_flag("TEST_WITH_DEV_DBG_ASAN", env_var="PYTORCH_TEST_WITH_DEV_DBG_ASAN")
-TestEnvironment.def_flag("TEST_WITH_TSAN", env_var="PYTORCH_TEST_WITH_TSAN")
-TestEnvironment.def_flag("TEST_WITH_UBSAN", env_var="PYTORCH_TEST_WITH_UBSAN")
-TestEnvironment.def_flag("TEST_WITH_ROCM", env_var="PYTORCH_TEST_WITH_ROCM")
+NO_MULTIPROCESSING_SPAWN: bool = TestEnvironment.def_flag(
+    "NO_MULTIPROCESSING_SPAWN",
+    env_var="NO_MULTIPROCESSING_SPAWN",
+)
+TEST_WITH_ASAN: bool = TestEnvironment.def_flag(
+    "TEST_WITH_ASAN",
+    env_var="PYTORCH_TEST_WITH_ASAN",
+)
+TEST_WITH_DEV_DBG_ASAN: bool = TestEnvironment.def_flag(
+    "TEST_WITH_DEV_DBG_ASAN",
+    env_var="PYTORCH_TEST_WITH_DEV_DBG_ASAN",
+)
+TEST_WITH_TSAN: bool = TestEnvironment.def_flag(
+    "TEST_WITH_TSAN",
+    env_var="PYTORCH_TEST_WITH_TSAN",
+)
+TEST_WITH_UBSAN: bool = TestEnvironment.def_flag(
+    "TEST_WITH_UBSAN",
+    env_var="PYTORCH_TEST_WITH_UBSAN",
+)
+TEST_WITH_ROCM: bool = TestEnvironment.def_flag(
+    "TEST_WITH_ROCM",
+    env_var="PYTORCH_TEST_WITH_ROCM",
+)
 
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
-TestEnvironment.def_flag("TEST_WITH_SLOW", env_var="PYTORCH_TEST_WITH_SLOW")
+TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
+    "TEST_WITH_SLOW",
+    env_var="PYTORCH_TEST_WITH_SLOW",
+)
 
 # Disables non-slow tests (these tests enabled by default)
 # This is usually used in conjunction with TEST_WITH_SLOW to
 # run *only* slow tests.  (I could have done an enum, but
 # it felt a little awkward.
-TestEnvironment.def_flag("TEST_SKIP_FAST", env_var="PYTORCH_TEST_SKIP_FAST")
+TEST_SKIP_FAST: bool = TestEnvironment.def_flag(
+    "TEST_SKIP_FAST",
+    env_var="PYTORCH_TEST_SKIP_FAST",
+)
 
 # Enables crossref tests, in addition to standard tests which
 # are being run.  crossref tests work by installing a torch
@@ -1365,10 +1394,16 @@ TestEnvironment.def_flag("TEST_SKIP_FAST", env_var="PYTORCH_TEST_SKIP_FAST")
 # are done, we cross-reference them (thus the name) to check for
 # correction, before throwing out the extra compute and proceeding
 # as we had before.  By default, we don't run these tests.
-TestEnvironment.def_flag("TEST_WITH_CROSSREF", env_var="PYTORCH_TEST_WITH_CROSSREF")
+TEST_WITH_CROSSREF: bool = TestEnvironment.def_flag(
+    "TEST_WITH_CROSSREF",
+    env_var="PYTORCH_TEST_WITH_CROSSREF",
+)
 
-TestEnvironment.def_flag("TEST_SKIP_CUDAGRAPH", env_var="PYTORCH_TEST_SKIP_CUDAGRAPH")
-TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (  # noqa: F821
+TEST_SKIP_CUDAGRAPH: bool = TestEnvironment.def_flag(
+    "TEST_SKIP_CUDAGRAPH",
+    env_var="PYTORCH_TEST_SKIP_CUDAGRAPH",
+)
+TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
     (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 11) or
     (torch.version.hip and float(".".join(torch.version.hip.split(".")[0:2])) >= 5.3)
 )
@@ -1384,9 +1419,11 @@ def allocator_option_enabled_fn(allocator_config, _, option):
     else:
         return False
 
-TestEnvironment.def_flag("EXPANDABLE_SEGMENTS",
-                         env_var="PYTORCH_CUDA_ALLOC_CONF",
-                         enabled_fn=functools.partial(allocator_option_enabled_fn, option='expandable_segments'))
+EXPANDABLE_SEGMENTS: bool = TestEnvironment.def_flag(
+    "EXPANDABLE_SEGMENTS",
+    env_var="PYTORCH_CUDA_ALLOC_CONF",
+    enabled_fn=functools.partial(allocator_option_enabled_fn, option='expandable_segments'),
+)
 
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
@@ -1399,7 +1436,7 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
 def skipIfCrossRef(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if TEST_WITH_CROSSREF:  # noqa: F821
+        if TEST_WITH_CROSSREF:
             raise unittest.SkipTest("test doesn't currently with crossref")
         else:
             fn(*args, **kwargs)
@@ -1412,29 +1449,38 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
         return r
 
 # Run PyTorch tests with TorchDynamo
-TestEnvironment.def_flag("TEST_WITH_TORCHINDUCTOR", env_var="PYTORCH_TEST_WITH_INDUCTOR")
+TEST_WITH_TORCHINDUCTOR: bool = TestEnvironment.def_flag(
+    "TEST_WITH_TORCHINDUCTOR",
+    env_var="PYTORCH_TEST_WITH_INDUCTOR",
+)
 # AOT_EAGER not tested in ci, useful for debugging
-TestEnvironment.def_flag("TEST_WITH_AOT_EAGER", env_var="PYTORCH_TEST_WITH_AOT_EAGER")
-TestEnvironment.def_flag("TEST_WITH_TORCHDYNAMO", env_var="PYTORCH_TEST_WITH_DYNAMO",
-                         implied_by_fn=lambda: TEST_WITH_TORCHINDUCTOR or TEST_WITH_AOT_EAGER)  # noqa: F821
+TEST_WITH_AOT_EAGER: bool = TestEnvironment.def_flag(
+    "TEST_WITH_AOT_EAGER",
+    env_var="PYTORCH_TEST_WITH_AOT_EAGER",
+)
+TEST_WITH_TORCHDYNAMO: bool = TestEnvironment.def_flag(
+    "TEST_WITH_TORCHDYNAMO",
+    env_var="PYTORCH_TEST_WITH_DYNAMO",
+    implied_by_fn=lambda: TEST_WITH_TORCHINDUCTOR or TEST_WITH_AOT_EAGER,
+)
 
-if TEST_WITH_TORCHDYNAMO:  # noqa: F821
+if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.accumulated_cache_size_limit = 64
     # Do not log compilation metrics from unit tests
     torch._dynamo.config.log_compilation_metrics = False
-    if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
+    if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
 
 
 def xpassIfTorchDynamo(func):
-    return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)  # noqa: F821
+    return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
 
 
 def xfailIfTorchDynamo(func):
-    return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func  # noqa: F821
+    return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
@@ -1450,14 +1496,14 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
         if not isinstance(fn, type):
             @wraps(fn)
             def wrapper(*args, **kwargs):
-                if TEST_WITH_TORCHDYNAMO:  # noqa: F821
+                if TEST_WITH_TORCHDYNAMO:
                     raise unittest.SkipTest(msg)
                 else:
                     fn(*args, **kwargs)
             return wrapper
 
         assert isinstance(fn, type)
-        if TEST_WITH_TORCHDYNAMO:  # noqa: F821
+        if TEST_WITH_TORCHDYNAMO:
             fn.__unittest_skip__ = True
             fn.__unittest_skip_why__ = msg
 
@@ -1466,7 +1512,7 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
     return decorator
 
 def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
-                        condition=TEST_WITH_TORCHINDUCTOR):  # noqa: F821
+                        condition=TEST_WITH_TORCHINDUCTOR):
     def decorator(fn):
         if not isinstance(fn, type):
             @wraps(fn)
@@ -1538,7 +1584,7 @@ def markDynamoStrictTest(cls_or_func=None, nopython=False):
 
 
 def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor on the ROCm stack"):
-    return skipIfTorchInductor(msg=msg, condition=TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)  # noqa: F821
+    return skipIfTorchInductor(msg=msg, condition=TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)
 
 def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT executor"):
     def decorator(fn):
@@ -1587,7 +1633,10 @@ def disable_translation_validation_if_dynamic_shapes(fn):
 # If this is True then CUDA memory leak checks are skipped. If this is false
 #   then CUDA memory leak checks are performed.
 # See: https://github.com/pytorch/pytorch/pull/59402#issuecomment-858811135
-TestEnvironment.def_flag("TEST_CUDA_MEM_LEAK_CHECK", env_var="PYTORCH_TEST_CUDA_MEM_LEAK_CHECK")
+TEST_CUDA_MEM_LEAK_CHECK: bool = TestEnvironment.def_flag(
+    "TEST_CUDA_MEM_LEAK_CHECK",
+    env_var="PYTORCH_TEST_CUDA_MEM_LEAK_CHECK",
+)
 
 
 # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
@@ -1644,7 +1693,7 @@ torch_to_numpy_dtype_dict.update({
 def skipIfNNModuleInlined(
     msg="test doesn't currently work with nn module inlining",
     condition=torch._dynamo.config.inline_inbuilt_nn_modules,
-):  # noqa: F821
+):
     def decorator(fn):
         if not isinstance(fn, type):
 
@@ -1672,7 +1721,7 @@ def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"
 
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            if TEST_WITH_ROCM:  # noqa: F821
+            if TEST_WITH_ROCM:
                 raise unittest.SkipTest(reason)
             else:
                 return fn(*args, **kwargs)
@@ -1684,7 +1733,7 @@ def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"
 def runOnRocm(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if TEST_WITH_ROCM:  # noqa: F821
+        if TEST_WITH_ROCM:
             fn(*args, **kwargs)
         else:
             raise unittest.SkipTest("test currently only works on the ROCm stack")
@@ -1728,7 +1777,7 @@ def skipIfRocmVersionLessThan(version=None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
-            if TEST_WITH_ROCM:  # noqa: F821
+            if TEST_WITH_ROCM:
                 rocm_version = str(torch.version.hip)
                 rocm_version = rocm_version.split("-")[0]    # ignore git sha
                 rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
@@ -1748,6 +1797,20 @@ def skipIfNotMiopenSuggestNHWC(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows stack"):
+    def dec_fn(fn):
+        reason = f"skipIfWindows: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if IS_WINDOWS:  # noqa: F821
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
 
 # Reverts the linalg backend back to default to make sure potential failures in one
 # test do not affect other tests
@@ -1999,7 +2062,7 @@ def skip_if_pytest(fn):
 def slowTest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if not TEST_WITH_SLOW:  # noqa: F821
+        if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
         else:
             fn(*args, **kwargs)
@@ -2339,7 +2402,7 @@ try:
             verbosity=hypothesis.Verbosity.verbose))
 
     hypothesis.settings.load_profile(
-        "pytorch_ci" if IS_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')  # noqa: F821
+        "pytorch_ci" if IS_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
     )
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
@@ -2380,10 +2443,10 @@ def check_if_enable(test: unittest.TestCase):
 
     if any(matches_test(x) for x in slow_tests_dict.keys()):
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
-        if not TEST_WITH_SLOW:  # noqa: F821
+        if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
 
-    if not IS_SANDCASTLE:  # noqa: F821
+    if not IS_SANDCASTLE:
         should_skip = False
         skip_msg = ""
 
@@ -2395,12 +2458,12 @@ def check_if_enable(test: unittest.TestCase):
                     "win": IS_WINDOWS,
                     "windows": IS_WINDOWS,
                     "linux": IS_LINUX,
-                    "rocm": TEST_WITH_ROCM,  # noqa: F821
-                    "xpu": TEST_XPU,  # noqa: F821
-                    "asan": TEST_WITH_ASAN,  # noqa: F821
-                    "dynamo": TEST_WITH_TORCHDYNAMO,  # noqa: F821
-                    "inductor": TEST_WITH_TORCHINDUCTOR,  # noqa: F821
-                    "slow": TEST_WITH_SLOW,  # noqa: F821
+                    "rocm": TEST_WITH_ROCM,
+                    "xpu": TEST_XPU,
+                    "asan": TEST_WITH_ASAN,
+                    "dynamo": TEST_WITH_TORCHDYNAMO,
+                    "inductor": TEST_WITH_TORCHINDUCTOR,
+                    "slow": TEST_WITH_SLOW,
                 }
 
                 invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
@@ -2433,7 +2496,7 @@ def check_if_enable(test: unittest.TestCase):
                 " disabled tests are run"
             raise unittest.SkipTest(skip_msg)
 
-    if TEST_SKIP_FAST:  # noqa: F821
+    if TEST_SKIP_FAST:
         if hasattr(test, test._testMethodName) and not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
 
@@ -2732,7 +2795,7 @@ class TestCase(expecttest.TestCase):
         test_method = getattr(self, method_name, None)
         if test_method is not None:
             # Wraps the tested method if we should do CUDA memory check.
-            if TEST_CUDA_MEM_LEAK_CHECK:  # noqa: F821
+            if TEST_CUDA_MEM_LEAK_CHECK:
                 self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
                 # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
                 if self._do_cuda_memory_leak_check and not IS_WINDOWS:
@@ -2746,7 +2809,7 @@ class TestCase(expecttest.TestCase):
             if self._ignore_not_implemented_error:
                 self.wrap_with_policy(method_name, lambda: skip_exception_type(NotImplementedError))
 
-            if PRINT_REPRO_ON_FAILURE:  # noqa: F821
+            if PRINT_REPRO_ON_FAILURE:
                 try:
                     def _get_rel_test_path(abs_test_path):
                         # Attempt to get relative path based on the "test" dir.
@@ -2852,9 +2915,10 @@ class TestCase(expecttest.TestCase):
         test_cls = super_run.__self__
 
         # Are we compiling?
-        compiled = TEST_WITH_TORCHDYNAMO or TEST_WITH_AOT_EAGER or TEST_WITH_TORCHINDUCTOR  # noqa: F821
+        compiled = TEST_WITH_TORCHDYNAMO or TEST_WITH_AOT_EAGER or TEST_WITH_TORCHINDUCTOR
         # Is the class strict and compiling?
         strict_default = False
+        should_reset_dynamo = False
         if compiled:
             try:
                 path = inspect.getfile(type(test_cls))
@@ -2862,9 +2926,12 @@ class TestCase(expecttest.TestCase):
                 match = re.match(r".*/test/(.*).py", full_path)
                 if match is not None:
                     filename = match.group(1)
-                    if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
+                    if TEST_WITH_TORCHINDUCTOR:
                         from .dynamo_test_failures import FIXME_inductor_non_strict
                         strict_default = filename not in FIXME_inductor_non_strict
+
+                        from .dynamo_test_failures import FIXME_inductor_dont_reset_dynamo
+                        should_reset_dynamo = filename not in FIXME_inductor_dont_reset_dynamo
                     else:
                         strict_default = True
             # inspect.getfile can fail with these
@@ -2885,7 +2952,7 @@ class TestCase(expecttest.TestCase):
                 strict_mode = strict_default
         nopython = getattr(test_cls, "dynamo_strict_nopython", False) and compiled
 
-        if strict_mode:
+        if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
 
         # TODO: Remove this; this is grandfathered in because we suppressed errors
@@ -2896,11 +2963,11 @@ class TestCase(expecttest.TestCase):
         else:
             suppress_errors = torch._dynamo.config.suppress_errors
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors):
-            if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
+            if TEST_WITH_TORCHINDUCTOR:
                 super_run = torch._dynamo.optimize("inductor")(super_run)
-            elif TEST_WITH_AOT_EAGER:  # noqa: F821
+            elif TEST_WITH_AOT_EAGER:
                 super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
-            elif TEST_WITH_TORCHDYNAMO:  # noqa: F821
+            elif TEST_WITH_TORCHDYNAMO:
                 # TorchDynamo optimize annotation
                 # Assume eager-generated GraphModules will not error out.
                 # If we do, this is probably a Dynamo bug!
@@ -2942,7 +3009,7 @@ class TestCase(expecttest.TestCase):
 
             super_run(result=result)
 
-        if strict_mode:
+        if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
 
         # Early terminate test if necessary.  If using pytest, use the -x flag instead
@@ -2966,7 +3033,7 @@ class TestCase(expecttest.TestCase):
 
     def run(self, result=None):
         with contextlib.ExitStack() as stack:
-            if TEST_WITH_CROSSREF:  # noqa: F821
+            if TEST_WITH_CROSSREF:
                 stack.enter_context(CrossRefMode())
             self._run_custom(
                 result=result,
@@ -4544,7 +4611,7 @@ def load_tests(loader, tests, pattern):
     set_running_script_path()
     test_suite = unittest.TestSuite()
     for test_group in tests:
-        if not DISABLE_RUNNING_SCRIPT_CHK:  # noqa: F821
+        if not DISABLE_RUNNING_SCRIPT_CHK:
             for test in test_group:
                 check_test_defined_in_running_script(test)
         if test_group._tests:
@@ -4566,12 +4633,16 @@ class BytesIOContext(io.BytesIO):
 # For more information see https://github.com/pytorch/pytorch/issues/56202
 GRADCHECK_NONDET_TOL = 1e-12
 
-TestEnvironment.def_flag("TEST_WITH_SLOW_GRADCHECK", env_var="PYTORCH_TEST_WITH_SLOW_GRADCHECK")
+TEST_WITH_SLOW_GRADCHECK: bool = TestEnvironment.def_flag(
+    "TEST_WITH_SLOW_GRADCHECK",
+    env_var="PYTORCH_TEST_WITH_SLOW_GRADCHECK",
+)
 
 skipIfSlowGradcheckEnv = unittest.skipIf(
-    TEST_WITH_SLOW_GRADCHECK,  # noqa: F821
-    "Tests that don't use gradcheck don't need to run on slow_gradcheck CI"
+    TEST_WITH_SLOW_GRADCHECK,
+    "Tests that don't use gradcheck don't need to run on slow_gradcheck CI",
 )
+
 
 def gradcheck(fn, inputs, **kwargs):
     # Wrapper around gradcheck that enables certain keys by default.
@@ -4585,7 +4656,7 @@ def gradcheck(fn, inputs, **kwargs):
         "fast_mode": True,
     }
 
-    if TEST_WITH_SLOW_GRADCHECK:  # noqa: F821
+    if TEST_WITH_SLOW_GRADCHECK:
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
@@ -4605,7 +4676,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
         "fast_mode": True,
     }
 
-    if TEST_WITH_SLOW_GRADCHECK:  # noqa: F821
+    if TEST_WITH_SLOW_GRADCHECK:
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
@@ -4700,7 +4771,7 @@ def skip_but_pass_in_sandcastle(reason):
     skipping continuously.
     """
     def decorator(func):
-        if not IS_SANDCASTLE:  # noqa: F821
+        if not IS_SANDCASTLE:
             func.__unittest_skip__ = True
             func.__unittest_skip_why__ = reason
             return func
@@ -4808,7 +4879,7 @@ def skip_but_pass_in_sandcastle_if(condition, reason):
     """
     def decorator(func):
         if condition:
-            if IS_SANDCASTLE:  # noqa: F821
+            if IS_SANDCASTLE:
                 @wraps(func)
                 def wrapper(*args, **kwargs):
                     print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
@@ -4841,6 +4912,7 @@ dtype_abbrs = {
     torch.bool: 'b8',
     torch.uint8: 'u8',
 }
+
 
 
 @functools.lru_cache
@@ -4954,7 +5026,7 @@ class TestGradients(TestCase):
         include_conjugated_inputs = op.test_conjugated_samples and dtype.is_complex
 
         samples = op.sample_inputs(device, dtype, requires_grad=True, include_conjugated_inputs=include_conjugated_inputs,
-                                   small_inputs_only=TEST_WITH_SLOW_GRADCHECK)  # noqa: F821
+                                   small_inputs_only=TEST_WITH_SLOW_GRADCHECK)
 
         for sample in samples:
             if sample.broadcasts_input and is_inplace(variant):

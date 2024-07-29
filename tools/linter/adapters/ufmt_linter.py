@@ -40,7 +40,6 @@ ISORT_SKIPLIST = re.compile(
                     "test/[a-c]*/**",
                     # test/d*/**
                     # test/dy*/**
-                    "test/dy*/**",
                     # test/[e-h]*/**
                     # test/i*/**
                     # test/j*/**
