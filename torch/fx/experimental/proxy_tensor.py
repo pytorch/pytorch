@@ -1124,7 +1124,11 @@ class ProxySymDispatchMode(SymDispatchMode):
         # were symbolic) and it is no longer necessary to trace the
         # computation.  This could occur if func triggered some guards.
         if isinstance(out, py_sym_types):
-            # Delays tracing out the proxies on this op until we actually need it
+            # Force arguments to avoid thunk chain...
+            for a in args:
+                if isinstance(a, py_sym_types):
+                    get_proxy_slot(a, self.tracer)()
+            # ...but delay tracing out the proxies on this op until we actually need it
             p_out_thunk = thunkify(self._compute_proxy, func=func, args=args, out=out)
             set_proxy_slot(out, self.tracer, p_out_thunk)
 
