@@ -664,6 +664,7 @@ test_inductor_torchbench_smoketest_perf() {
 }
 
 test_inductor_get_core_number() {
+  # aarch64 server needs a different way to query core number
   echo $(($(lscpu | grep 'Socket(s):' | awk '{print $2}') * $(lscpu | grep 'Core(s) per socket:' | awk '{print $4}')))
 }
 
