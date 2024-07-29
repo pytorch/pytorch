@@ -645,6 +645,7 @@ def is_function(value):
         (
             types.FunctionType,
             types.BuiltinFunctionType,
+            types.BuiltinMethodType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
         ),
