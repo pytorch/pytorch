@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import inspect
 
 from torch._custom_op.impl import (

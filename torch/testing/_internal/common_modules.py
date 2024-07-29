@@ -24,7 +24,7 @@ from torch.testing._internal.common_nn import (
     marginrankingloss_reference, multimarginloss_reference, multilabelmarginloss_reference,
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
+    freeze_rng_state, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
     skipIfTorchDynamo)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
@@ -215,6 +215,7 @@ class ModuleInfo:
                  decorators=None,  # Additional decorators to apply to generated tests
                  dtypes=floating_types(),  # dtypes this function is expected to work with
                  dtypesIfMPS=(torch.float16, torch.float32,),  # dtypes this function is expected to work with on MPS
+                 dtypesIfHpu=(torch.bfloat16, torch.float32,),
                  supports_gradgrad=True,  # whether the op supports second order gradients
                  gradcheck_nondet_tol=0.0,  # tolerance for nondeterminism while performing gradcheck
                  module_memformat_affects_out=False,  # whether converting module to channels last will generate
@@ -227,6 +228,7 @@ class ModuleInfo:
         self.decorators = (*(decorators if decorators else []), *(skips if skips else []))
         self.dtypes = dtypes
         self.dtypesIfMPS = dtypesIfMPS
+        self.dtypesIfHpu = dtypesIfHpu
         self.supports_gradgrad = supports_gradgrad
         self.gradcheck_nondet_tol = gradcheck_nondet_tol
         self.module_memformat_affects_out = module_memformat_affects_out
@@ -235,7 +237,7 @@ class ModuleInfo:
         self.is_lazy = issubclass(module_cls, torch.nn.modules.lazy.LazyModuleMixin)
 
     def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
-        result = [set_single_threaded_if_parallel_tbb]
+        result = []
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
                 if decorator.is_active(test_class, test_name, device, dtype, param_kwargs):
@@ -247,6 +249,8 @@ class ModuleInfo:
     def supported_dtypes(self, device_type):
         if device_type == 'mps':
             return self.dtypesIfMPS
+        elif device_type == 'hpu':
+            return self.dtypesIfHpu
         else:
             return self.dtypes
 
@@ -2448,7 +2452,7 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
                 make_input((2, 3, 4))
             ),
             desc='no_bias'
-        ),]
+        ), ]
 
     # Samples below are for validating the no-batch-dim support.
     key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))

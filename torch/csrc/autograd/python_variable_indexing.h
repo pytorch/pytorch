@@ -15,7 +15,7 @@ struct UnpackedSlice {
 };
 
 // This mirrors Cpython's PySlice_Unpack method
-static inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
+inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
   PySliceObject* r = (PySliceObject*)_r;
   /* this is harder to get right than you might think */
 
@@ -41,7 +41,7 @@ static inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
     step_sym = c10::SymInt(1);
   } else {
     if (torch::is_symint(r->step)) {
-      auto step_sym = py::handle(r->step).cast<c10::SymInt>();
+      step_sym = py::handle(r->step).cast<c10::SymInt>();
     } else {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Py_ssize_t step;

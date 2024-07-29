@@ -914,12 +914,16 @@ Vectorized<BFloat16> inline clamp_min(const Vectorized<BFloat16>& a, const Vecto
 template <>
 inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<BFloat16>::size()); i += Vectorized<BFloat16>::size()) {
     auto vsrc = _mm512_loadu_si512(reinterpret_cast<__m512i*>((void*)(src + i)));
     _mm512_storeu_si512(reinterpret_cast<__m512i*>((void*)(dst + i)), vsrc);
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = src[i];
   }
@@ -986,7 +990,9 @@ static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
   // j0-j15  n0-n15
   // k0-k15  o0-o15
   // l0-l15  p0-p15
+#ifndef __msvc_cl__
 #pragma unroll(4)
+#endif
   for (int i = 0; i < 4; i++) {
     r[i] = _mm512_inserti64x4(_mm512_castsi256_si512(t[i]), t[i + 4], 0x01);
     r[i + 4] = _mm512_inserti64x4(_mm512_castsi256_si512(t[i + 8]), t[i + 12], 0x01);
@@ -998,7 +1004,9 @@ static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
   // u3: c4c5 d4b5 c6c7 d6b7 c12c13 d12d13 c14c15 d14d15   g4g5 h4h5 g6g7 h6h7 g12g13 h12h13 g14g15 h14h15
   // i j  m n
   // k l  o p
+#ifndef __msvc_cl__
 #pragma unroll(4)
+#endif
   for (int i = 0; i < 8; i += 2) {
     u[i] = _mm512_unpacklo_epi32(r[i], r[i + 1]);
     u[i + 1] = _mm512_unpackhi_epi32(r[i], r[i + 1]);
@@ -1061,7 +1069,9 @@ static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
   // 12-- 13--
   // 6-- 7--
   // 14-- 15--
+#ifndef __msvc_cl__
 #pragma unroll(4)
+#endif
   for (int i = 0; i < 4; i++) {
     u[i] = _mm512_permutex2var_epi16(r[i], const1, r[i + 4]);
     u[i + 4] = _mm512_permutex2var_epi16(r[i], const2, r[i + 4]);
@@ -1095,7 +1105,9 @@ inline void transpose_mxn<BFloat16, 16, 16>(
   // n: n0  n1  n2  n3  n4  n5  n6  n7  n8  n9  n10 n11 n12 n13 n14 n15
   // o: o0  o1  o2  o3  o4  o5  o6  o7  o8  o9  o10 o11 o12 o13 o14 o15
   // p: p0  p1  p2  p3  p4  p5  p6  p7  p8  p9  p10 p11 p12 p13 p14 p15
+#ifndef __msvc_cl__
 #pragma unroll(16)
+#endif
   for (int i = 0; i < 16; i++) {
     t[i] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i * ld_src));
   }
@@ -1103,7 +1115,9 @@ inline void transpose_mxn<BFloat16, 16, 16>(
   __m512i u[8];
   _transpose_mxn_half_16_16(t, u);
 
+#ifndef __msvc_cl__
 #pragma unroll(8)
+#endif
   for (int i = 0; i < 8; i++) {
     _mm256_storeu_si256(
       reinterpret_cast<__m256i*>(dst + (i * 2) * ld_dst),
@@ -1125,7 +1139,9 @@ inline void transpose_mxn<Half, 16, 16>(
   __m256i t[16];
   // load from src to registers
   // Same matrix indices as above transpose_mxn<BFloat16, 16, 16>
+#ifndef __msvc_cl__
 #pragma unroll(16)
+#endif
   for (int i = 0; i < 16; i++) {
     t[i] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i * ld_src));
   }
@@ -1133,7 +1149,9 @@ inline void transpose_mxn<Half, 16, 16>(
   __m512i u[8];
   _transpose_mxn_half_16_16(t, u);
 
+#ifndef __msvc_cl__
 #pragma unroll(8)
+#endif
   for (int i = 0; i < 8; i++) {
     _mm256_storeu_si256(
       reinterpret_cast<__m256i*>(dst + (i * 2) * ld_dst),
@@ -1164,7 +1182,9 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
   // t[16]: 512 544 513 545 514 546 515 547 520 552 521 553 522 554 523 555 528 ... 571
   // ...
   // t[31]: 964 996 965 997 966 998 967 999 972 1004 973 1005 974 1006 975 1007 980 ... 1023
+#ifndef __msvc_cl__
 #pragma unroll(16)
+#endif
   for (int i = 0; i < 16; ++i) {
     d[i * 2] = _mm512_unpacklo_epi16(r[i * 2], r[i * 2 + 1]);
     d[i * 2 + 1] = _mm512_unpackhi_epi16(r[i * 2], r[i * 2 + 1]);
@@ -1189,7 +1209,9 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
   // t[16]: 512 544 576 608 513 545 577 609 520 552 584 616 521 553 585 617 528 ... 633
   // ...
   // t[31]: 902 934 966 998 903 935 967 999 910 942 974 1006 911 943 975 1007 918 ... 1023
+#ifndef __msvc_cl__
 #pragma unroll(8)
+#endif
   for (int i = 0; i < 8; ++i) {
     r[i * 4] = _mm512_unpacklo_epi32(d[i * 4], d[i * 4 + 2]);
     r[i * 4 + 1] = _mm512_unpackhi_epi32(d[i * 4], d[i * 4 + 2]);
@@ -1216,7 +1238,9 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
   // t[16]: 512 544 576 608 640 672 704 736 520 552 584 616 648 680 712 744 528 ... 760
   // ...
   // t[31]: 775 807 839 871 903 935 967 999 783 815 847 879 911 943 975 1007 791 ... 1023
+#ifndef __msvc_cl__
 #pragma unroll(4)
+#endif
   for (int i = 0; i < 4; ++i) {
     d[i * 8] = _mm512_unpacklo_epi64(r[i * 8], r[i * 8 + 4]);
     d[i * 8 + 1] = _mm512_unpackhi_epi64(r[i * 8], r[i * 8 + 4]);
@@ -1265,7 +1289,9 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
       0x000000000000000a,
       0x0000000000000003,
       0x0000000000000002);
+#ifndef __msvc_cl__
 #pragma unroll(8)
+#endif
   for (int i = 0; i < 8; ++i) {
     r[i] = _mm512_permutex2var_epi64(d[i], /*idx*/const1, d[i + 8]);
     r[i + 8] = _mm512_permutex2var_epi64(d[i], /*idx*/const2, d[i + 8]);
@@ -1310,7 +1336,9 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
       0x0000000000000006,
       0x0000000000000005,
       0x0000000000000004);
+#ifndef __msvc_cl__
 #pragma unroll(16)
+#endif
   for (int i = 0; i < 16; ++i) {
     d[i] = _mm512_permutex2var_epi64(r[i], /*idx*/const3, r[i + 16]);
     d[i + 16] = _mm512_permutex2var_epi64(r[i], /*idx*/const4, r[i + 16]);
@@ -1327,7 +1355,9 @@ inline void transpose_mxn<BFloat16, 32, 32>(
     int64_t ld_dst) {
   // Load from memory
   __m512i r[32];
+#ifndef __msvc_cl__
 #pragma unroll(32)
+#endif
   for (int i = 0; i < 32; ++i) {
     r[i] = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + i* ld_src));
   }
@@ -1336,7 +1366,9 @@ inline void transpose_mxn<BFloat16, 32, 32>(
   _transpose_mxn_half_32_32(r, d);
 
   // Store to dst
+#ifndef __msvc_cl__
 #pragma unroll(32)
+#endif
   for (int i = 0; i < 32; ++i) {
     _mm512_storeu_si512(dst + i* ld_dst, d[i]);
   }
@@ -1350,7 +1382,9 @@ inline void transpose_mxn<Half, 32, 32>(
     int64_t ld_dst) {
   // Load from memory
   __m512i r[32];
+#ifndef __msvc_cl__
 #pragma unroll(32)
+#endif
   for (int i = 0; i < 32; ++i) {
     r[i] = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + i* ld_src));
   }
@@ -1359,7 +1393,9 @@ inline void transpose_mxn<Half, 32, 32>(
   _transpose_mxn_half_32_32(r, d);
 
   // Store to dst
+#ifndef __msvc_cl__
 #pragma unroll(32)
+#endif
   for (int i = 0; i < 32; ++i) {
     _mm512_storeu_si512(dst + i* ld_dst, d[i]);
   }
@@ -1514,12 +1550,16 @@ Vectorized<Half> inline clamp_min(const Vectorized<Half>& a, const Vectorized<Ha
 template <>
 inline void convert(const Half* src, Half* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<Half>::size()); i += Vectorized<Half>::size()) {
     auto vsrc = _mm512_loadu_si512(reinterpret_cast<__m512i*>((void*)(src + i)));
     _mm512_storeu_si512(reinterpret_cast<__m512i*>((void*)(dst + i)), vsrc);
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = src[i];
   }

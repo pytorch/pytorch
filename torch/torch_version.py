@@ -1,9 +1,8 @@
-# mypy: ignore-errors
-
 from typing import Any, Iterable
 
-from ._vendor.packaging.version import InvalidVersion, Version
-from .version import __version__ as internal_version
+from torch._vendor.packaging.version import InvalidVersion, Version
+from torch.version import __version__ as internal_version
+
 
 __all__ = ["TorchVersion"]
 

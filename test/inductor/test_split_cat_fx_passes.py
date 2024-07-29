@@ -1,15 +1,13 @@
 # Owner(s): ["module: inductor"]
 
-import unittest
 
 import torch
 from torch._dynamo.utils import counters, optimus_scuba_log
 from torch._inductor.fx_passes.misc_patterns import numpy_compat_normalization
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA
-
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.triton_utils import requires_gpu
 
 
 def patch(f):
@@ -1205,12 +1203,12 @@ class TestSplitCatFxPasses(TestCase):
                 self.assertTrue(k not in {"x", "x1", "x2", "a", "axis", "keepdims"})
 
     @patch
-    @requires_cuda
+    @requires_gpu
     def test_stack_normalization_axis_kwarg(self):
         def fn(x, y):
             return torch.stack([x, y], axis=1)
 
-        x, y = (torch.rand((4, 4), device="cuda") for _ in range(2))
+        x, y = (torch.rand((4, 4), device=GPU_TYPE) for _ in range(2))
         expected = fn(x, y)
         actual = torch.compile(fn)(x, y)
 
@@ -1218,5 +1216,5 @@ class TestSplitCatFxPasses(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
+    if IS_LINUX and HAS_GPU:
         run_tests()

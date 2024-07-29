@@ -84,6 +84,8 @@ def reset() -> None:
         convert_frame.FRAME_COMPILE_COUNTER.clear()
         callback_handler.clear()
         GenerationTracker.clear()
+        torch._dynamo.utils.warn_once_cache.clear()
+        torch._C._autograd._saved_tensors_hooks_set_tracing(False)
 
 
 def reset_code_caches() -> None:

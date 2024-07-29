@@ -2,10 +2,10 @@
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter
+
 
 _variable = 0
 _variable_2 = 0
@@ -170,6 +170,8 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         global _variable, _variable_2
 
         for mode in range(1, 7):
+            torch._dynamo.reset()
+
             _variable = 0
             _variable_2 = 0
 

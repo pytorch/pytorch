@@ -28,6 +28,7 @@ struct LocalState {
 
   LocalState()
       : dispatch_modifier(c10::impl::tls_local_dispatch_key_set()),
+        override_dispatch_key_set(c10::BackendComponent::InvalidBit),
         grad_mode_enabled(at::GradMode::is_enabled()) {}
 
   void overrideDispatchKeySet(c10::DispatchKeySet ks) {
@@ -47,13 +48,22 @@ class TensorCheck {
   TensorCheck(
       const LocalState& state,
       PyTypeObject* pt,
-      uint64_t dispatch_key,
+      c10::DispatchKeySet dispatch_key_set,
       at::ScalarType dtype,
       at::DeviceIndex device_index,
+      bool requires_grad,
       std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
       std::vector<std::optional<c10::SymInt>> dynamic_dims_strides);
 
   bool check(const LocalState& state, const at::Tensor& v);
+  bool check(
+      const LocalState& state,
+      const c10::DispatchKeySet& dispatch_key_set,
+      const at::ScalarType& dtype,
+      const c10::Device& device,
+      const c10::SymIntArrayRef& dynamic_dims_sizes,
+      const c10::SymIntArrayRef& dynamic_dims_strides,
+      const bool& requires_grad);
   std::string check_verbose(
       const LocalState& state,
       const at::Tensor& v,

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 from .graph_module import GraphModule
 from .graph import Graph
 from .node import Node
@@ -70,8 +71,8 @@ def _replace_attributes(gm: GraphModule, replacement: torch.nn.Module) -> None:
             # CASE 3: The target doesn't exist as an attribute in `gm`
             # or `replacement`
             else:
-                raise RuntimeError("Attempted to create a \"", node.op,
-                                   "\" node during subgraph rewriting "
+                raise RuntimeError('Attempted to create a "', node.op,
+                                   '" node during subgraph rewriting '
                                    f"with target {node.target}, but "
                                    "the referenced attribute does not "
                                    "exist in the replacement GraphModule")

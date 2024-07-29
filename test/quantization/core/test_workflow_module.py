@@ -371,18 +371,6 @@ class TestObserver(QuantizationTestCase):
         x2 = torch.tensor([2.0, 3.0])
         obser(x2)
 
-    def test_histogram_observer_handle_OOM_due_to_large_upsample_rate(self):
-        # a large upsample rate leads to OOM due to the allocation of histogram tensor
-        # during _combine_histograms(). With sanity check on the size of histogram tensor,
-        # we expect the histogram observer can still work by resetting the histogram
-        obser = HistogramObserver.with_args(upsample_rate=(8000**2), reduce_range=False)()
-
-        x1 = torch.tensor([0, 1.0])
-        obser(x1)
-
-        x2 = torch.tensor([2, 2 + 1e-9])
-        obser(x2)
-
     def test_histogram_observer_save_load_state_dict(self):
         """
         Smoke test on saving/loading state_dict
@@ -748,7 +736,8 @@ class TestHistogramObserver(QuantizationTestCase):
         self.assertEqual(qparams[1].item(), 0)
 
     def test_histogram_observer_same_inputs(self):
-        myobs = HistogramObserver(bins=3, dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
+        myobs = HistogramObserver(bins=3, dtype=torch.qint8, qscheme=torch.per_tensor_symmetric,
+                                  reduce_range=False)
         w = torch.ones(4, requires_grad=True)
         x = torch.zeros(4, requires_grad=True)
         y = torch.tensor([2.0, 3.0, 4.0, 5.0], requires_grad=True)
@@ -759,9 +748,9 @@ class TestHistogramObserver(QuantizationTestCase):
         myobs(y)
         myobs(z)
         qparams = myobs.calculate_qparams()
-        self.assertEqual(myobs.min_val, 2.0)
+        self.assertEqual(myobs.min_val, 0.0)
         self.assertEqual(myobs.max_val, 8.0)
-        self.assertEqual(myobs.histogram, [2., 3., 3.])
+        self.assertEqual(myobs.histogram, [13.25, 3.75, 3.])
 
     @skipIfTorchDynamo("too slow")
     @given(N=st.sampled_from([10, 1000]),
@@ -813,6 +802,33 @@ class TestHistogramObserver(QuantizationTestCase):
             obs(torch.randn(i, i))
             self.assertEqual(obs.histogram.sum().item(), i**2)
 
+    def test_histogram_observer_single_inputs(self):
+        # Make sure that if we pass single valued tensors to the observer, the code runs
+        observer = HistogramObserver(bins=10)
+        a = torch.FloatTensor([1])
+        b = torch.FloatTensor([3])
+        c = torch.FloatTensor([2])
+        d = torch.FloatTensor([4])
+
+        observer(a)
+        observer(b)
+        observer(c)
+        observer(d)
+
+        self.assertEqual(observer.min_val, 1)
+        self.assertEqual(observer.max_val, 4)
+        self.assertEqual(torch.sum(observer.histogram), 4)
+
+    def test_histogram_observer_update_within_range_succeeds(self):
+        # test if an update within the existing range actually updates
+        myobs = HistogramObserver(bins=10)
+        x = torch.tensor([0.0, 3.0, 4.0, 9.0])
+        y = torch.tensor([2.0, 3.0, 7.0, 8.0])
+        myobs(x)
+        myobs(y)
+        self.assertEqual(myobs.min_val, 0.0)
+        self.assertEqual(myobs.max_val, 9.0)
+        self.assertEqual(myobs.histogram, [1., 0., 1., 2., 1., 0., 0., 1., 1., 1.])
 
 class TestFakeQuantize(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),

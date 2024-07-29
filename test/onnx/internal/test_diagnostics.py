@@ -6,7 +6,6 @@ import dataclasses
 import io
 import logging
 import typing
-import unittest
 from typing import AbstractSet, Protocol, Tuple
 
 import torch
@@ -16,6 +15,9 @@ from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
 from torch.onnx._internal.fx import diagnostics as fx_diagnostics
 from torch.testing._internal import common_utils, logging_utils
+
+if typing.TYPE_CHECKING:
+    import unittest
 
 
 class _SarifLogBuilder(Protocol):
