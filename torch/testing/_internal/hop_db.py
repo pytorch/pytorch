@@ -11,7 +11,7 @@ from torch.testing._internal.opinfo.core import (
 )
 from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.opinfo.core import DecorateInfo
-from torch.nn.attention._flex_attention import flex_attention, _create_empty_block_mask
+from torch.nn.attention.flex_attention import flex_attention, _create_empty_block_mask
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
@@ -91,13 +91,13 @@ def foo_impl_abstract(x, z):
 
 def sample_inputs_cond(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
-        make_tensor, device=device, dtype=dtype, requires_grad=False
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
     )
     yield SampleInput(make_arg(2, 2, 2, low=0.1, high=2))
 
 
 def simple_cond(x):
-    return torch.cond(x.shape[0] > 2, lambda x: x.cos(), lambda x: x.sin(), [x])
+    return torch.cond(x.sum() > 2, lambda x: (x.cos(),), lambda x: (x.sin(),), [x])
 
 
 def sample_inputs_auto_functionalize(opinfo, device, dtype, requires_grad, **kwargs):
@@ -120,7 +120,7 @@ def sample_inputs_flex_attention(opinfo, device, dtype, requires_grad, **kwargs)
         return score + h
 
     q, k, v = (make_arg(2, 2, 128, 8, low=0.1, high=2) for _ in range(3))
-    block_mask = _create_empty_block_mask(q, k, v)
+    block_mask = _create_empty_block_mask(q, k)
     yield SampleInput(
         q,
         k,
@@ -196,7 +196,9 @@ hop_db = [
         check_batched_gradgrad=False,
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
-        supports_autograd=False,
+        supports_autograd=True,
+        # "torch.compile with aot_autograd does not currently support double backward."
+        supports_gradgrad=False,
     ),
     OpInfo(
         name="while_loop",

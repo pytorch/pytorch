@@ -85,10 +85,8 @@ class TestContract(TestCase):
 
         model = ToyModel()
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "wrap_module should not change the module structure",
-        ):
+        regex = "Checking parameters: Composable distributed API implementations cannot modify FQNs."
+        with self.assertRaisesRegex(RuntimeError, regex):
             wrap_module(model.seq1)
 
     @skipIfTorchDynamo("Dynamo does not support the state key")

@@ -45,7 +45,6 @@ from github_utils import (
     gh_update_pr_state,
     GitHubComment,
 )
-
 from gitutils import (
     are_ghstack_branches_in_sync,
     get_git_remote_name,
@@ -61,6 +60,7 @@ from label_utils import (
     LABEL_ERR_MSG,
 )
 from trymerge_explainer import get_revert_message, TryMergeExplainer
+
 
 # labels
 MERGE_IN_PROGRESS_LABEL = "merging"
@@ -1459,7 +1459,7 @@ def find_matching_merge_rule(
 
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError(
-                "This PR has internal changes and must be landed via Phabricator"
+                "This PR has internal changes and must be landed via Phabricator! Please try reimporting/rexporting the PR!"
             )
 
         # Categorize all checks when skip_mandatory_checks (force merge) is set. Do it here

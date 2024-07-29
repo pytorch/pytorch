@@ -3031,7 +3031,6 @@ class TestSparse(TestSparseBase):
 
     def _test_resize_shape(self, x_i, x_v, x_size, y_i, y_v, y_size, dtype, device):
         x_v_numel = torch.zeros(x_v).numel()
-        y_v_numel = torch.zeros(y_v).numel()
         x = torch.sparse_coo_tensor(torch.zeros(x_i),
                                     torch.arange(x_v_numel).resize_(x_v).to(torch.float),
                                     torch.Size(x_size), dtype=dtype, device=device)
@@ -4267,7 +4266,7 @@ class TestSparseMeta(TestCase):
         self.assertEqual(r.indices(), torch.empty(2, 0, device='meta', dtype=torch.int64))
         self.assertEqual(r.values(), torch.empty(0, 4, device='meta', dtype=dtype))
 
-    def _test_meta_sparse_compressed(self, dtype, index_dtype, layout, batchsize, densesize):
+    def _test_meta_sparse_compressed(self, dtype, layout, batchsize, densesize):
         index_dtype = torch.int64
         blocksize = (2, 3) if layout in {torch.sparse_bsr, torch.sparse_bsc} else ()
         sparsesize = (4, 6)
@@ -4323,9 +4322,8 @@ class TestSparseMeta(TestCase):
         if layout is torch.sparse_coo:
             self._test_meta_sparse_coo(dtype)
         else:
-            index_dtype = torch.int64
             for batchsize, densesize in itertools.product([(), (2,)], [(), (3,)]):
-                self._test_meta_sparse_compressed(dtype, index_dtype, layout, batchsize, densesize)
+                self._test_meta_sparse_compressed(dtype, layout, batchsize, densesize)
 
     def _test_print_meta_data(self, dtype, layout, batchsize, sparsesize, densesize):
         index_dtype = torch.int64
