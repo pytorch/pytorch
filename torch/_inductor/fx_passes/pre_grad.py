@@ -298,17 +298,6 @@ def fetch_attr(target: str, mod):
     return attr_itr
 
 
-def set_attr(target: str, mod, value):
-    target_atoms = target.split(".")
-    attr_itr = mod
-    for i, atom in enumerate(target_atoms):
-        if not hasattr(attr_itr, atom):
-            raise RuntimeError(
-                f"Node referenced nonexistant target {'.'.join(target_atoms[:i])}"
-            )
-        setattr(attr_itr, atom, value)
-
-
 def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
     Removes all identity layers from the module.
