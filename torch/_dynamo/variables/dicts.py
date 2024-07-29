@@ -239,7 +239,6 @@ class ConstDictVariable(VariableTracker):
             ListIteratorVariable,
             ListVariable,
             TupleVariable,
-            UserDefinedObjectVariable,
         )
 
         Hashable = ConstDictVariable._HashableTracker
@@ -305,7 +304,6 @@ class ConstDictVariable(VariableTracker):
                     TupleVariable,
                     ListIteratorVariable,
                     variables.IteratorVariable,
-                    UserDefinedObjectVariable,
                 ),
             )
             and self.mutable_local
