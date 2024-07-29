@@ -2817,7 +2817,8 @@ class CPUReproTests(TestCase):
             check_metrics_vec_kernel_count(1)
 
     @unittest.skipIf(
-        sys.platform != "linux", "cpp kernel profile only support linux now"
+        sys.platform not in ["linux", "win32"],
+        "cpp kernel profile only support linux now",
     )
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch({"cpp.enable_kernel_profile": True})
