@@ -514,7 +514,10 @@ class FSDPParamGroup:
             self._run_multi_grad_hook = True
             # Only need to register once since the unsharded parameter objects
             # are preserved from iteration to iteration in eager
-            if self._multi_grad_hook_handle is None:
+            if (
+                not ca.compiled_autograd_enabled
+                and self._multi_grad_hook_handle is None
+            ):
                 tensors = [
                     fsdp_param.unsharded_param for fsdp_param in self.fsdp_params
                 ]
