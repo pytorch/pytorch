@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # mypy: disable-error-code=arg-type
 import importlib
