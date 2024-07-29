@@ -459,20 +459,20 @@ void initPythonIRBindings(PyObject* module_) {
       .def("setInsertPoint", [](Graph& g, Block* n) { g.setInsertPoint(n); })
       .def(
           "insertGraph",
-          [](Graph& g, Graph& callee, std::vector<Value*> inputs) {
+          [](Graph& g, Graph& callee, const std::vector<Value*>& inputs) {
             return insertGraph(g, callee, inputs);
           })
       .def(
           "insertGraph",
           [](Graph& g,
              Graph& callee,
-             std::vector<Value*> inputs,
+             const std::vector<Value*>& inputs,
              std::unordered_map<Value*, Value*> value_map) {
             return insertGraph(g, callee, inputs, value_map);
           })
       .def(
           "insert",
-          [](Graph& g, Symbol opname, std::vector<Value*> args) {
+          [](Graph& g, Symbol opname, const std::vector<Value*>& args) {
             std::vector<NamedValue> args_named;
             args_named.reserve(args.size());
             for (Value* v : args) {
@@ -485,7 +485,9 @@ void initPythonIRBindings(PyObject* module_) {
           [](Graph& g) {
             auto tup = g.createTuple(g.outputs());
             tup->insertBefore(g.return_node());
-            for (int64_t i = g.outputs().size() - 1; i >= 0; i--) {
+            for (int64_t i = static_cast<int64_t>(g.outputs().size()) - 1;
+                 i >= 0;
+                 i--) {
               g.eraseOutput(0);
             }
             g.registerOutput(tup->output());
@@ -1034,7 +1036,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init(
           [](const std::vector<TypePtr>& a) { return UnionType::create(a); }));
   py::class_<ListType, Type, ListTypePtr>(m, "ListType")
-      .def(py::init([](TypePtr a) { return ListType::create(a); }))
+      .def(py::init([](const TypePtr& a) { return ListType::create(a); }))
       .def_static("ofInts", &ListType::ofInts)
       .def_static("ofTensors", &ListType::ofTensors)
       .def_static("ofFloats", &ListType::ofFloats)
@@ -1049,7 +1051,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("getKeyType", &DictType::getKeyType)
       .def("getValueType", &DictType::getValueType);
   py::class_<OptionalType, Type, OptionalTypePtr>(m, "OptionalType")
-      .def(py::init([](TypePtr a) { return OptionalType::create(a); }))
+      .def(py::init([](const TypePtr& a) { return OptionalType::create(a); }))
       .def_static("ofTensor", &OptionalType::ofTensor)
       .def("getElementType", &OptionalType::getElementType);
   py::class_<RRefType, Type, RRefTypePtr>(m, "RRefType")
