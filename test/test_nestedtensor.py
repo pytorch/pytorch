@@ -5590,6 +5590,27 @@ class TestNestedTensorSubclass(TestCase):
                 nt.values()[nt.offsets()[i] : (nt.offsets()[i] + nt.lengths()[i])],
             )
 
+    def test_njt_cat(self, device):
+        offsets = torch.tensor([0, 2, 3], device=device, dtype=torch.int64)
+        values_1 = torch.randn(
+            3, 2, dtype=torch.float64, device=device, requires_grad=True
+        )
+        values_2 = torch.randn(
+            3, 4, dtype=torch.float64, device=device, requires_grad=True
+        )
+
+        def grad_test_func(values_1, values_2, offsets):
+            nt_1 = torch.nested.nested_tensor_from_jagged(values_1, offsets)
+            nt_2 = torch.nested.nested_tensor_from_jagged(values_2, offsets)
+            nt_3 = torch.cat([nt_1, nt_2], dim=-1)
+            return nt_3.values()
+
+        assert gradcheck(
+            grad_test_func,
+            inputs=(values_1, values_2, offsets),
+            check_batched_grad=False,
+        )
+
     def test_is_contiguous(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
