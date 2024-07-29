@@ -616,18 +616,6 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     }
 
     {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
-    auto load_B_row = [&]({{input2_t}}* src, {{input_t}}* dst) {
-        {{kernel.unroll_pragma(2)}}
-        for (int i = 0; i < 2; i++) {
-            auto b32 = at::vec::convert_to_int32<int8_t>(src + i * 16);
-            auto b_bf16 = at::vec::convert<{{input_t}}>(b32);
-            b_bf16.store(dst + i * 16);
-         }
-    };
-
-    int num_b_rows = (last_k_offset > 0) ? 16 : (tail_k_size * sizeof({{input_t}})) / 4;
-    int b_tile_ptr_stride = ldb * {{vnni_size}};
-
     // create a buffer for tiles of B.
     // To make things simpler, use the stack instead of calling a memory allocator.
     // allocating an array of size 1024 + 64, and then using an address that's 64 bytes aligned.
@@ -641,6 +629,29 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
             ? bf16_weights_buf
             : ({{input_t}}*)((uintptr_t)((void*)bf16_weights_buf) + 64 - bf16_weights_buf_ptr_mod);
     memset(bf16_weights_buf_ptr, 0, 1024);
+
+    int num_b_rows = (last_k_offset > 0) ? 16 : (tail_k_size * sizeof({{input_t}})) / 4;
+    int b_tile_ptr_stride = ldb * {{vnni_size}};
+
+    // TODO: verify whether or not these lambdas inline
+    auto load_B_row = [&]({{input2_t}}* src, {{input_t}}* dst) {
+        {{kernel.unroll_pragma(2)}}
+        for (int i = 0; i < 2; i++) {
+            auto b32 = at::vec::convert_to_int32<int8_t>(src + i * 16);
+            auto b_bf16 = at::vec::convert<{{input_t}}>(b32);
+            b_bf16.store(dst + i * 16);
+         }
+    };
+
+    auto load_B_in_buf = [&]({{input2_t}}* B_ptr) {
+        {{kernel.unroll_pragma(8)}}
+        for (int i = 0; i < num_b_rows; i++) {
+            load_B_row(
+                B_ptr + i * b_tile_ptr_stride,
+                bf16_weights_buf_ptr + i * 32
+            );
+        }
+    };
     {%- endif %}
 
     auto compute = [&](int k) {
@@ -656,14 +667,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         {%- endif %}
         {%- if tile_row == 0 %}
         {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
-        // load int8 weights and convert them to BF16, store in bf16_weights_buf and then load tile
-        {{kernel.unroll_pragma(8)}}
-        for (int i = 0; i < num_b_rows; i++) {
-            load_B_row(
-                const_cast<{{input2_t}}*>(B) + k * ldb + {{tile_col * 16 * vnni_size}} + i * b_tile_ptr_stride,
-                bf16_weights_buf_ptr + i * 32
-            );
-        }
+        load_B_in_buf(const_cast<{{input2_t}}*>(B) + k * ldb + {{tile_col * 16 * vnni_size}});
         _tile_loadd({{tile_idx_b}}, bf16_weights_buf_ptr, 64);
         {%- else %}
         _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
