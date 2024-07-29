@@ -22,6 +22,7 @@ from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
+from torch.utils._contextlib import clone_wraps
 from torch.utils._pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
@@ -297,7 +298,7 @@ class DebugContext:
 
     @staticmethod
     def wrap(fn):
-        @functools.wraps(fn)
+        @clone_wraps(fn)
         def inner(*args, **kwargs):
             with DebugContext():
                 return fn(*args, **kwargs)

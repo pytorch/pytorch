@@ -26,7 +26,7 @@ import typing
 import warnings
 import weakref
 from contextlib import contextmanager
-from functools import lru_cache, wraps
+from functools import lru_cache
 from types import MethodWrapperType
 from typing import (
     Any,
@@ -51,6 +51,8 @@ from typing import (
     ValuesView,
 )
 from typing_extensions import Literal, ParamSpec, TypeGuard
+
+from torch.utils._contextlib import clone_contextmanager, clone_wraps
 
 from ..utils.hooks import RemovableHandle
 
@@ -257,7 +259,7 @@ def dynamo_timed(
     fwd_only: bool = True,
 ):
     def dynamo_timed_inner(func: Callable[_P, T]) -> Callable[_P, T]:
-        @wraps(func)
+        @clone_wraps(func)  # type: ignore[misc]
         def time_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> T:
             key = func.__qualname__
             if key not in compilation_time_metrics:
@@ -972,7 +974,7 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor):
         ) from e
 
 
-@contextmanager
+@clone_contextmanager
 def preserve_rng_state():
     disable_functorch = torch._C._DisableFuncTorch
     disable_current_modes = torch.utils._python_dispatch._disable_current_modes

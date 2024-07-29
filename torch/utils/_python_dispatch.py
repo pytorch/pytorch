@@ -17,6 +17,8 @@ from torch._C import (
     DispatchKey,
 )
 
+from torch.utils._contextlib import clone_contextmanager
+
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
 # - We need a better user-facing api for _DisableTorchDispatch that
@@ -199,7 +201,7 @@ def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
         _push_mode(old)
 
 
-@contextlib.contextmanager
+@clone_contextmanager
 def _disable_current_modes():
     from torch._ops import (
         _len_torch_dispatch_stack_pre_dispatch,

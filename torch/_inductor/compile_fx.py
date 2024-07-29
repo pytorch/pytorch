@@ -55,6 +55,7 @@ from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+from torch.utils._contextlib import clone_wraps
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx._lazy_graph_module import _use_lazy_graph_module  # type: ignore[attr-defined]
@@ -427,7 +428,7 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
 
 
 def with_fresh_cache_if_config(fn):
-    @functools.wraps(fn)
+    @clone_wraps(fn)
     def wrapper(*args, **kwargs):
         if config.force_disable_caches:
             # Don't delete the cache dir because it has to survive beyond the

@@ -9,6 +9,7 @@ from torch.fx.graph_module import (
     reduce_package_graph_module,
 )
 from torch.package import PackageExporter, sys_importer
+from torch.utils._contextlib import clone_contextmanager
 from ._compatibility import compatibility
 
 _use_lazy_graph_module_flag = False
@@ -35,7 +36,7 @@ def _force_skip_lazy_graph_module():
 
 
 @compatibility(is_backward_compatible=False)
-@contextmanager
+@clone_contextmanager
 def _use_lazy_graph_module(should_use: bool):
     try:
         global _use_lazy_graph_module_flag

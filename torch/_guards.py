@@ -27,6 +27,7 @@ from typing import (
 )
 
 from torch.utils import _pytree as pytree
+from torch.utils._contextlib import clone_contextmanager
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakTensorKeyDictionary
 
@@ -687,7 +688,7 @@ class TracingContext:
     # Call this when you want to call into some code that isn't necessarily
     # associated with the current frame state
     @staticmethod
-    @contextlib.contextmanager
+    @clone_contextmanager
     def clear_frame():
         tc = TracingContext.get()
         with unittest.mock.patch.object(

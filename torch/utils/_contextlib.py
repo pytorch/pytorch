@@ -2,11 +2,16 @@
 # Extra utilities for working with context managers that should have been
 # in the standard library but are not
 
+from __future__ import annotations
+
+import contextlib
 import functools
 import inspect
 import warnings
 import sys
 from typing import Any, Callable, TypeVar, cast
+import types
+from types import FunctionType
 
 # Used for annotating the decorator usage of _DecoratorContextManager (e.g.,
 # 'no_grad' and 'enable_grad').
@@ -155,3 +160,109 @@ class _NoParamDecoratorContextManager(_DecoratorContextManager):
         if orig_func is None:
             return super().__new__(cls)
         return cls()(orig_func)
+
+
+def clone_contextmanager(func):
+    """Like @contextlib.contextmanager, but we generate a copy of the
+    inner function upon wrapping so that it gets a separate profile
+    entry.
+    """
+    @functools.wraps(func)
+    def helper(*args, **kwds):
+        return _CloningGeneratorContextManager(func, args, kwds)
+    return helper
+
+def clone_wraps(wrapped):
+    """Like @functools.wraps, but we generate a copy of the wrapper function
+    after wrapping so it gets a separate profile entry.
+    """
+    def inner(wrapper):
+        r = functools.wraps(wrapped)(wrapper)
+        return clone_function(r, wrapped)  # type: ignore[arg-type]
+    return inner
+
+
+def clone_function(f: FunctionType, inner_f: FunctionType) -> FunctionType:
+    c = f.__code__
+    inner_c = inner_f.__code__
+    if inner_c.co_name not in c.co_name:
+        fname = f"{c.co_name}_{inner_c.co_name}"
+    else:
+        fname = c.co_name
+
+    co_args: tuple
+    if hasattr(c, "co_qualname"):
+        # Python-3.11+ code signature
+        co_args = (
+            c.co_argcount,
+            c.co_posonlyargcount,
+            c.co_kwonlyargcount,
+            c.co_nlocals,
+            c.co_stacksize,
+            c.co_flags,
+            c.co_code,
+            c.co_consts,
+            c.co_names,
+            c.co_varnames,
+            inner_c.co_filename,
+            fname,
+            c.co_qualname,  # TODO: probably overwrite this  # type: ignore[attr-defined]
+            inner_c.co_firstlineno,
+            c.co_lnotab,
+            c.co_exceptiontable,  # type: ignore[attr-defined]
+            c.co_freevars,
+            c.co_cellvars
+        )
+    elif hasattr(c, "co_posonlyargcount"):
+        co_args = (
+            c.co_argcount,
+            c.co_posonlyargcount,
+            c.co_kwonlyargcount,
+            c.co_nlocals,
+            c.co_stacksize,
+            c.co_flags,
+            c.co_code,
+            c.co_consts,
+            c.co_names,
+            c.co_varnames,
+            inner_c.co_filename,
+            fname,
+            inner_c.co_firstlineno,
+            c.co_lnotab,
+            c.co_freevars,
+            c.co_cellvars
+        )
+    else:
+        co_args = (
+            c.co_argcount,
+            c.co_kwonlyargcount,
+            c.co_nlocals,
+            c.co_stacksize,
+            c.co_flags,
+            c.co_code,
+            c.co_consts,
+            c.co_names,
+            c.co_varnames,
+            inner_c.co_filename,
+            fname,
+            inner_c.co_firstlineno,
+            c.co_lnotab,
+            c.co_freevars,
+            c.co_cellvars
+        )
+
+    new_code = types.CodeType(*co_args)  # type: ignore[arg-type]
+    return FunctionType(
+        new_code, f.__globals__, fname,
+        argdefs=f.__defaults__, closure=f.__closure__)
+
+
+# NB: This is technically private API, figure out something robust
+# TODO: Slight improvement would be to also name the context manager this is for
+class _CloningGeneratorContextManager(contextlib._GeneratorContextManager):
+    def __call__(self, func):
+        @clone_wraps(func)
+        def inner(*args, **kwds):
+            with self._recreate_cm():  # type: ignore[attr-defined]
+                return func(*args, **kwds)
+        return inner
