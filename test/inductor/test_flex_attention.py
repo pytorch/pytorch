@@ -1506,6 +1506,17 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
 
     @supported_platform
+    def test_block_mask_device_change(self):
+        offset = torch.zeros(8, device="cuda")
+
+        def causal_mask(b, h, q, kv):
+            return (q + (offset[b] * 128)) >= kv
+
+        block_mask = create_block_mask(causal_mask, 1, 1, 512, 512)
+        block_mask = block_mask.to("cpu")
+        block_mask = block_mask.to("cuda")
+
+    @supported_platform
     def test_block_mask_viz(self):
         def causal_mask(b, h, q, kv):
             return q >= kv
