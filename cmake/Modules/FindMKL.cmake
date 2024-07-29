@@ -4,7 +4,7 @@
 #  MKL_FOUND - set to true if a library implementing the CBLAS interface is found
 #  MKL_VERSION - best guess of the found mkl version
 #  MKL_INCLUDE_DIR - path to include dir.
-#  MKL_LIBRARIES - list of libraries for base mkl
+#  ONEMKL_LIBRARIES - list of libraries for base mkl
 #  MKL_OPENMP_TYPE - OpenMP flavor that the found mkl uses: GNU or Intel
 #  MKL_OPENMP_LIBRARY - path to the OpenMP library the found mkl uses
 #  MKL_LAPACK_LIBRARIES - list of libraries to add for lapack
@@ -17,7 +17,7 @@ IF (NOT MKL_FOUND)
 
 SET(MKL_VERSION)
 SET(MKL_INCLUDE_DIR)
-SET(MKL_LIBRARIES)
+SET(ONEMKL_LIBRARIES)
 SET(MKL_OPENMP_TYPE)
 SET(MKL_OPENMP_LIBRARY)
 SET(MKL_LAPACK_LIBRARIES)
@@ -339,9 +339,9 @@ ELSE(UNIX AND NOT APPLE)
 ENDIF(UNIX AND NOT APPLE)
 
 # Check for version 10/11
-IF (NOT MKL_LIBRARIES)
+IF (NOT ONEMKL_LIBRARIES)
   SET(MKL_VERSION 1011)
-ENDIF (NOT MKL_LIBRARIES)
+ENDIF (NOT ONEMKL_LIBRARIES)
 
 # First: search for parallelized ones with intel thread lib
 IF (NOT "${MKL_THREADING}" STREQUAL "SEQ")
@@ -349,11 +349,11 @@ IF (NOT "${MKL_THREADING}" STREQUAL "SEQ")
     FOREACH(mkliface ${mklifaces})
       FOREACH(mkl64 ${mkl64s} "")
         FOREACH(mklthread ${mklthreads})
-          IF (NOT MKL_LIBRARIES)
+          IF (NOT ONEMKL_LIBRARIES)
             GET_MKL_LIB_NAMES(mkl_lib_names "${mkliface}" "${mkl64}" THREAD "${mklthread}")
-            CHECK_ALL_LIBRARIES(MKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
+            CHECK_ALL_LIBRARIES(ONEMKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
               "${mkl_lib_names};${mklrtl};${mkl_pthread};${mkl_m};${mkl_dl}" "")
-          ENDIF (NOT MKL_LIBRARIES)
+          ENDIF (NOT ONEMKL_LIBRARIES)
         ENDFOREACH(mklthread)
       ENDFOREACH(mkl64)
     ENDFOREACH(mkliface)
@@ -363,14 +363,14 @@ ENDIF (NOT "${MKL_THREADING}" STREQUAL "SEQ")
 # Second: search for sequential ones
 FOREACH(mkliface ${mklifaces})
   FOREACH(mkl64 ${mkl64s} "")
-    IF (NOT MKL_LIBRARIES)
+    IF (NOT ONEMKL_LIBRARIES)
       GET_MKL_LIB_NAMES(mkl_lib_names "${mkliface}" "${mkl64}" THREAD "mkl_sequential")
-      CHECK_ALL_LIBRARIES(MKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
+      CHECK_ALL_LIBRARIES(ONEMKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
         "${mkl_lib_names};${mkl_m};${mkl_dl}" "")
-      IF (MKL_LIBRARIES)
+      IF (ONEMKL_LIBRARIES)
         SET(mklseq "_sequential")
-      ENDIF (MKL_LIBRARIES)
-    ENDIF (NOT MKL_LIBRARIES)
+      ENDIF (ONEMKL_LIBRARIES)
+    ENDIF (NOT ONEMKL_LIBRARIES)
   ENDFOREACH(mkl64)
 ENDFOREACH(mkliface)
 
@@ -378,17 +378,17 @@ ENDFOREACH(mkliface)
 FOREACH(mklrtl ${mklrtls} "")
   FOREACH(mkliface ${mklifaces})
     FOREACH(mkl64 ${mkl64s} "")
-      IF (NOT MKL_LIBRARIES)
+      IF (NOT ONEMKL_LIBRARIES)
         GET_MKL_LIB_NAMES(mkl_lib_names "${mkliface}" "${mkl64}" THREAD "${mklthread}")
-        CHECK_ALL_LIBRARIES(MKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
+        CHECK_ALL_LIBRARIES(ONEMKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
           "${mkl_lib_names};${mklrtl};pthread;${mkl_m};${mkl_dl}" "")
-      ENDIF (NOT MKL_LIBRARIES)
+      ENDIF (NOT ONEMKL_LIBRARIES)
     ENDFOREACH(mkl64)
   ENDFOREACH(mkliface)
 ENDFOREACH(mklrtl)
 
-IF (MKL_LIBRARIES)
-  SET(CMAKE_REQUIRED_LIBRARIES ${MKL_LIBRARIES})
+IF (ONEMKL_LIBRARIES)
+  SET(CMAKE_REQUIRED_LIBRARIES ${ONEMKL_LIBRARIES})
   check_function_exists("cblas_gemm_bf16bf16f32" MKL_HAS_SBGEMM)
   check_function_exists("cblas_gemm_f16f16f32" MKL_HAS_SHGEMM)
   set(CMAKE_REQUIRED_LIBRARIES)
@@ -398,26 +398,26 @@ IF (MKL_LIBRARIES)
   IF(MKL_HAS_SHGEMM)
     add_compile_options(-DMKL_HAS_SHGEMM)
   ENDIF(MKL_HAS_SHGEMM)
-ENDIF (MKL_LIBRARIES)
+ENDIF (ONEMKL_LIBRARIES)
 
 # Check for older versions
-IF (NOT MKL_LIBRARIES)
+IF (NOT ONEMKL_LIBRARIES)
   SET(MKL_VERSION 900)
   if (USE_STATIC_MKL)
       message(WARNING "Ignoring USE_STATIC_MKL")
   endif()
-  CHECK_ALL_LIBRARIES(MKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
+  CHECK_ALL_LIBRARIES(ONEMKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
     "mkl;guide;pthread;m" "")
-ENDIF (NOT MKL_LIBRARIES)
+ENDIF (NOT ONEMKL_LIBRARIES)
 
 # Include files
-IF (MKL_LIBRARIES)
+IF (ONEMKL_LIBRARIES)
   FIND_PATH(MKL_INCLUDE_DIR NAMES "mkl_cblas.h" PATHS "/usr/include/mkl")
   MARK_AS_ADVANCED(MKL_INCLUDE_DIR)
-ENDIF (MKL_LIBRARIES)
+ENDIF (ONEMKL_LIBRARIES)
 
 # Other libraries
-IF (MKL_LIBRARIES)
+IF (ONEMKL_LIBRARIES)
   FOREACH(mkl64 ${mkl64s} "_core" "")
     FOREACH(mkls ${mklseq} "")
       IF (NOT MKL_LAPACK_LIBRARIES)
@@ -442,15 +442,15 @@ IF (MKL_LIBRARIES)
       ENDIF (NOT MKL_CDFT_LIBRARIES)
     ENDFOREACH(mkls)
   ENDFOREACH(mkl64)
-ENDIF (MKL_LIBRARIES)
+ENDIF (ONEMKL_LIBRARIES)
 
 # Final
 SET(CMAKE_LIBRARY_PATH ${saved_CMAKE_LIBRARY_PATH})
 SET(CMAKE_INCLUDE_PATH ${saved_CMAKE_INCLUDE_PATH})
-IF (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
+IF (ONEMKL_LIBRARIES AND MKL_INCLUDE_DIR)
   SET(MKL_FOUND TRUE)
-ELSE (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
-  if (MKL_LIBRARIES AND NOT MKL_INCLUDE_DIR)
+ELSE (ONEMKL_LIBRARIES AND MKL_INCLUDE_DIR)
+  if (ONEMKL_LIBRARIES AND NOT MKL_INCLUDE_DIR)
     MESSAGE(WARNING "MKL libraries files are found, but MKL header files are \
       not. You can get them by `conda install mkl-include` if using conda (if \
       it is missing, run `conda upgrade -n root conda` first), and \
@@ -460,7 +460,7 @@ ELSE (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
   endif()
   SET(MKL_FOUND FALSE)
   SET(MKL_VERSION)  # clear MKL_VERSION
-ENDIF (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
+ENDIF (ONEMKL_LIBRARIES AND MKL_INCLUDE_DIR)
 
 # Standard termination
 IF(NOT MKL_FOUND AND MKL_FIND_REQUIRED)
