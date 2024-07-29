@@ -409,11 +409,14 @@ pr_time_benchmarks() {
   source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on main: "
   cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
+
+  echo "looking for regressions:"
+  python compare_results.py "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
+
 }
 
 if [[ "${TEST_CONFIG}" == *pr_time_benchmarks* ]]; then
   pr_time_benchmarks
-  exit 0
 elif [[ "${TEST_CONFIG}" == *dynamo_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend eager)
 elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
