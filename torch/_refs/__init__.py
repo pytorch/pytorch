@@ -261,6 +261,7 @@ __all__ = [
     "dstack",
     "expand",
     "expand_as",
+    "expand_copy",
     "flatten",
     "flip",
     "fliplr",
@@ -6315,6 +6316,7 @@ zero_ = _make_inplace(zero)
 alias_copy = _make_copy_from_view(aten.alias)
 as_strided_copy = _make_copy_from_view(aten.as_strided)
 diagonal_copy = _make_copy_from_view(aten.diagonal)
+expand_copy = _make_copy_from_view(aten.expand)
 # TODO: This must return a sparse tensor if the input is sparse, but refs have
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(aten.narrow)

@@ -150,6 +150,7 @@ dtensor_fails = {
     xfail("empty_strided"),
     xfail("empty_like"),
     xfail("empty_permuted"),
+    xfail("expand_copy"),
     xfail("exponential"),
     xfail("equal"),
     xfail("eye"),

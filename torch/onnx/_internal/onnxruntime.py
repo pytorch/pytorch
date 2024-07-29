@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import dataclasses
 import importlib
@@ -646,7 +647,7 @@ Examples::
 """
 
 
-@dataclasses.dataclass(frozen=True)  # type: ignore[arg-type]
+@dataclasses.dataclass(frozen=True)
 @compatibility(is_backward_compatible=False)
 class OrtBackendOptions:
     """Options for constructing an ``OrtBackend``, the ONNX Runtime

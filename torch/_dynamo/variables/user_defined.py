@@ -61,12 +61,35 @@ from ..utils import (
     unpatched_nn_module_getattr,
 )
 from .base import MutableLocal, VariableTracker
-from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
 from .dicts import DefaultDictVariable
 
 
 def is_standard_setattr(val):
     return val in (object.__setattr__,)
+
+
+def is_forbidden_context_manager(ctx):
+    f_ctxs = []
+
+    try:
+        from _pytest.python_api import RaisesContext
+        from _pytest.recwarn import WarningsChecker
+
+        f_ctxs.append(RaisesContext)
+        f_ctxs.append(WarningsChecker)
+    except ImportError:
+        pass
+
+    try:
+        from torch.testing._internal.jit_utils import (
+            _AssertRaisesRegexWithHighlightContext,
+        )
+
+        f_ctxs.append(_AssertRaisesRegexWithHighlightContext)
+    except ImportError:
+        pass
+
+    return ctx in f_ctxs
 
 
 class UserDefinedVariable(VariableTracker):
@@ -308,6 +331,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is torch.nn.CrossEntropyLoss:
             return self._call_cross_entropy_loss(tx, args, kwargs)
         elif self.value is contextlib.nullcontext:
+            # import here to avoid circular dependency
+            from .ctx_manager import NullContextVariable
+
             return NullContextVariable()
         elif self.value is collections.OrderedDict:
             return BuiltinVariable.call_custom_dict(
@@ -353,15 +379,19 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and hasattr(
                 self.value, "__exit__"
             )  # TODO(voz): These can invoke user code!
-            and check_constant_args(args, kwargs)
-            and self.value.__init__ == object.__init__
-            and len(kwargs) == 0  # TODO(ybliang): support kwargs
+            and self.value.__new__ == object.__new__
+            and SideEffects.cls_supports_mutation_side_effects(self.value)
+            and self.source is not None
+            and not is_forbidden_context_manager(self.value)
         ):
-            unwrapped_args = [x.as_python_constant() for x in args]
-            return GenericContextWrappingVariable(
-                unwrapped_args,
-                cm_obj=self.value(*unwrapped_args),
+            # import here to avoid an unfortunate circular dependency.
+            from .ctx_manager import GenericContextWrappingVariable
+
+            cm_obj = tx.output.side_effects.track_object_new(
+                self.source, self.value, GenericContextWrappingVariable, {}
             )
+            cm_obj.call_method(tx, "__init__", args, kwargs)
+            return cm_obj
 
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
@@ -509,6 +539,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ]:
             inner = str(getattr(self.value, "__name__", None))
         return f"{self.__class__.__name__}({inner})"
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.value_type.__name__})"
 
     def python_type(self):
         return self.value_type
