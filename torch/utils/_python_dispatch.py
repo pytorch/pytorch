@@ -3,7 +3,7 @@ import contextlib
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload
+from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload, Deque
 from typing_extensions import TypeGuard
 from collections import deque
 
@@ -68,7 +68,7 @@ class TorchDispatchMode:
             assert isinstance(_dispatch_key, torch._C.DispatchKey)
             self.__dict__["_dispatch_key"] = _dispatch_key
 
-        self.old_dispatch_mode_flags = deque()
+        self.old_dispatch_mode_flags: Deque[bool] = deque()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError
