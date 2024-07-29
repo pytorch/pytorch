@@ -18,7 +18,7 @@ from typing import (
 import sympy
 from sympy import Expr
 
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, free_unbacked_symbols
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, ShapeEnv
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy
@@ -300,7 +300,9 @@ class SizeVarAllocator:
 
         return False
 
-    def statically_known_equals(self, left: Expr, right: Union[Expr, int]) -> bool:
+    def statically_known_equals(
+        self, left: Union[Expr, int], right: Union[Expr, int]
+    ) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """

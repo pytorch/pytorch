@@ -50,11 +50,12 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import TypeGuard
+from typing_extensions import Literal, ParamSpec, TypeGuard
 
 from ..utils.hooks import RemovableHandle
 
 T = TypeVar("T")
+_P = ParamSpec("_P")
 
 try:
     import numpy as np
@@ -131,7 +132,10 @@ frame_phase_timing: Dict[str, Dict[str, float]] = collections.defaultdict(
 timer_counter = itertools.count()
 
 
-def tabulate(rows, headers):
+def tabulate(
+    rows: Union[List[Tuple[str, object]], List[List[object]]],
+    headers: Union[Tuple[str, ...], List[str]],
+) -> str:
     try:
         import tabulate
 
@@ -146,13 +150,13 @@ curr_frame = 0
 
 
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
-def increment_frame():
+def increment_frame() -> None:
     global curr_frame
     curr_frame = curr_frame + 1
 
 
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
-def reset_frame_count():
+def reset_frame_count() -> None:
     global curr_frame
     frame_phase_timing.clear()
     compilation_time_metrics.clear()
@@ -162,14 +166,14 @@ def reset_frame_count():
 op_count = 0
 
 
-def increment_op_count(cnt):
+def increment_op_count(cnt: int) -> None:
     global op_count
     op_count += cnt
 
 
 # Calculate total time spent so far for each phase
 # For example, {'entire_frame_compile':8.574629999999999, 'backend_compile':5.26806}
-def calculate_time_spent():
+def calculate_time_spent() -> Dict[str, float]:
     total_wall_time = 0.0
     total_by_key = {}
     for timings in frame_phase_timing.values():
@@ -194,7 +198,7 @@ def calculate_time_spent():
 # TIMING:
 # entire_frame_compile:8.574629999999999
 # backend_compile:5.26806
-def print_time_report():
+def print_time_report() -> None:
     total_by_key = calculate_time_spent()
 
     out = "TIMING:"
@@ -204,7 +208,7 @@ def print_time_report():
     print(out)
 
 
-def _add_time_spent(key, phase_name, time_spent):
+def _add_time_spent(key: str, phase_name: str, time_spent: float) -> None:
     frame_phase_timing[key][phase_name] += time_spent
 
 
@@ -229,10 +233,32 @@ def _add_time_spent(key, phase_name, time_spent):
 # The other phases (`inductor_compile` and `code_gen`) are called for both fwd and bwd graphs.
 
 
-def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
-    def dynamo_timed_inner(func):
+@overload
+def dynamo_timed(
+    original_function: Callable[_P, T],
+    phase_name: Optional[str] = None,
+    fwd_only: bool = True,
+) -> Callable[_P, T]:
+    ...
+
+
+@overload
+def dynamo_timed(
+    original_function: Literal[None] = None,
+    phase_name: Optional[str] = None,
+    fwd_only: bool = True,
+) -> Callable[[Callable[_P, T]], Callable[_P, T]]:
+    ...
+
+
+def dynamo_timed(
+    original_function: Optional[Callable[_P, T]] = None,
+    phase_name: Optional[str] = None,
+    fwd_only: bool = True,
+):
+    def dynamo_timed_inner(func: Callable[_P, T]) -> Callable[_P, T]:
         @wraps(func)
-        def time_wrapper(*args, **kwargs):
+        def time_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> T:
             key = func.__qualname__
             if key not in compilation_time_metrics:
                 compilation_time_metrics[key] = []
@@ -309,7 +335,19 @@ def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
     return dynamo_timed_inner
 
 
-def compile_times(repr="str", aggregate=False):
+@overload
+def compile_times(repr: Literal["str"], aggregate: bool = False) -> str:
+    ...
+
+
+@overload
+def compile_times(
+    repr: Literal["csv"], aggregate: bool = False
+) -> Tuple[List[str], List[object]]:
+    ...
+
+
+def compile_times(repr="str", aggregate: bool = False):
     """
     Get metrics about torchdynamo frontend/backend compilation times.
 
@@ -343,10 +381,11 @@ def compile_times(repr="str", aggregate=False):
         ]
         headers = list(compilation_time_metrics.keys())
         return headers, values
+    return None
 
 
 @atexit.register
-def dump_compile_times():
+def dump_compile_times() -> None:
     log.info(compile_times(repr="str", aggregate=True))
 
 
@@ -365,14 +404,14 @@ tensortype_to_dtype = {
 
 
 class DuplicateWarningChecker:
-    def __init__(self, maxsize=4096):
+    def __init__(self, maxsize: int = 4096) -> None:
         self.maxsize = maxsize
         self.reset()
 
     def reset(self):
         self.set = collections.OrderedDict()
 
-    def add(self, key):
+    def add(self, key: Union[str, Tuple[object, object]]) -> bool:
         if key in self.set:
             self.set.move_to_end(key, last=True)
             if not config.verbose:
@@ -396,7 +435,7 @@ def setup_compile_debug():
     return contextlib.ExitStack()
 
 
-def reset_graph_break_dup_checker():
+def reset_graph_break_dup_checker() -> None:
     graph_break_dup_warning_checker.reset()
 
 
@@ -425,12 +464,12 @@ def setup_log_file():
     return exitstack
 
 
-def gen_record_file_name(exc, code):
+def gen_record_file_name(exc, code) -> str:
     return f"{get_debug_dir()}/error_recordings/\
 {code.co_name}_{type(exc).__name__}_{code.co_firstlineno}.rec"
 
 
-def write_record_to_file(filename, exec_record):
+def write_record_to_file(filename: str, exec_record) -> None:
     try:
         if os.path.exists(filename):
             log.warning(
@@ -444,7 +483,7 @@ def write_record_to_file(filename, exec_record):
         log.exception("Unable to write execution record %s", filename)
 
 
-def count_calls(g: fx.Graph):
+def count_calls(g: fx.Graph) -> int:
     c = 0
     for n in g.nodes:
         if "call" in n.op:
