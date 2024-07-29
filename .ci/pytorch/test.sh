@@ -397,9 +397,9 @@ pr_time_benchmarks() {
   pip install cirron
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
+  source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on current PR: "
-  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
+  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
 
 }
 
