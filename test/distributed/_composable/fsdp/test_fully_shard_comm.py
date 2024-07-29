@@ -922,11 +922,14 @@ class TestFullyShardPrefetch(FSDPTest):
                 for param in self.lin2.parameters():
                     param.requires_grad_(False)
 
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
+            def forward(self, x: torch.Tensor, train_mlp_inp: bool) -> torch.Tensor:
                 y1 = self.lin1(x)  # grad flows through z
                 y2 = self.lin2(x)  # no grad (frozen)
-                y2.requires_grad_(False)
-                z = self.mlp(y2) + y1  # mlp input does not require gradient
+                if not train_mlp_inp:
+                    y2.requires_grad_(False)
+                else:
+                    y2.requires_grad_(True)
+                z = self.mlp(y2) + y1
                 return z
 
         dim = 8
@@ -965,8 +968,9 @@ class TestFullyShardPrefetch(FSDPTest):
             all_reduce_with_record
         ):
             # Run multiple iterations to ensure hook runs once per backward
-            for _ in range(5):
-                loss = model(inp).sum()
+            # and to alternate whether the module input requires grad
+            for iter_idx in range(5):
+                loss = model(inp, train_mlp_inp=(iter_idx % 2 == 1)).sum()
                 self.assertEqual(events, [])
                 loss.backward()
                 expected_events = [
@@ -983,10 +987,11 @@ class TestFullyShardPrefetch(FSDPTest):
 
         # Check correctness
         optim.zero_grad()
-        for _ in range(5):
-            ref_loss = ref_model(inp).sum()
+        for iter_idx in range(5):
+            train_mlp_inp = iter_idx % 2 == 1
+            ref_loss = ref_model(inp, train_mlp_inp=train_mlp_inp).sum()
             ref_loss.backward()
-            loss = model(inp).sum()
+            loss = model(inp, train_mlp_inp=train_mlp_inp).sum()
             loss.backward()
             ref_optim.step()
             with implicit_replication():
