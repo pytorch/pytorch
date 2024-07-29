@@ -483,12 +483,19 @@ static void cumulative_op_impl(const Tensor& self,
         } else if (cumulativeOpType == MPSCumulativeOpType::CUMPROD) {
           rc = [mpsGraph cumulativeProductWithTensor:inputTensor axis:dim name:nil];
         } else if (cumulativeOpType == MPSCumulativeOpType::LOGCUMSUMEXP) {
-          MPSGraphTensor* max = [mpsGraph reductionMaximumPropagateNaNWithTensor:inputTensor axes:nil name:nil];
-          MPSGraphTensor* stableInputTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor secondaryTensor:max name:nil];
+          MPSGraphTensor* cumMaxTensor = [mpsGraph cumulativeMaximumWithTensor:inputTensor
+                                           axis:dim
+                                      exclusive:false
+                                        reverse:false
+                                           name:nil];
+//          std::cout<<[[inputTensor debugDescription] UTF8String]<<std::endl;
+//          std::cout<<[[cumMaxTensor debugDescription] UTF8String]<<std::endl;
+          MPSGraphTensor* stableInputTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor secondaryTensor:cumMaxTensor name:nil];
           MPSGraphTensor* expTensor = [mpsGraph exponentWithTensor:stableInputTensor name:nil];
+          MPSGraphTensor* addTensor = [mpsGraph additionWithPrimaryTensor:expTensor secondaryTensor:[mpsGraph constantWithScalar:1.0 dataType:[expTensor dataType]] name:nil];
           MPSGraphTensor* sumTensor = [mpsGraph cumulativeSumWithTensor:expTensor axis:dim name:nil];
           MPSGraphTensor* logTensor = [mpsGraph logarithmWithTensor:sumTensor name:nil];
-          rc = [mpsGraph additionWithPrimaryTensor:logTensor secondaryTensor:max name:nil];
+          rc = [mpsGraph additionWithPrimaryTensor:logTensor secondaryTensor:cumMaxTensor name:nil];
         }
         if ((mps::getMPSDataType(result) != [rc dataType]) || castInputData) {
           return mps::castMPSTensor(mpsGraph, rc, result.scalar_type());
