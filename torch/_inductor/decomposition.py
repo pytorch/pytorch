@@ -963,7 +963,7 @@ def associative_scan_op_decomp(
 ) -> List[torch.Tensor]:
     # This will handle the fallback to eager in case any
     # of the leaves is on a non-CUDA device
-    if not all([l.device.type == "cuda" for l in leaves]):
+    if not all(l.device.type == "cuda" for l in leaves):
         # Decompose into generic_associative_scan
         return generic_associative_scan(combine_fn, leaves, dim, lifted_args)
 

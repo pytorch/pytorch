@@ -1041,6 +1041,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ),
                 ),
                 kwargs={
+                    "dtype": SourcelessBuilder.create(tx, leaf.dtype),
                     "requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad)
                 },
             )

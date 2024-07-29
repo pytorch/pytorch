@@ -69,10 +69,8 @@ def check_args(combine_fn, leaves, tree, dim):
 
     out_leaves, tree_out = pytree.tree_flatten(out)
     if tree.num_nodes != tree_out.num_nodes or any(
-        [
-            o.shape != i.shape or o.dtype != i.dtype or o.device != i.device
-            for o, i in zip(out_leaves, leaves)
-        ]
+        o.shape != i.shape or o.dtype != i.dtype or o.device != i.device
+        for o, i in zip(out_leaves, leaves)
     ):
         raise ValueError(
             "The pytree of the output of the operator needs to match the input pytree"
@@ -346,8 +344,9 @@ def associative_scan_functionalize(ctx, combine_fn, input, dim, lifted_args):
     unwrapped_input = ctx.unwrap_tensors(input)
     unwrapped_lifted_args = ctx.unwrap_tensors(lifted_args)
     with ctx.redispatch_to_next() as m:
+        functional_combine_fn = ctx.functionalize(combine_fn)
         ret = associative_scan_op(
-            combine_fn, unwrapped_input, dim, unwrapped_lifted_args
+            functional_combine_fn, unwrapped_input, dim, unwrapped_lifted_args
         )
     return ctx.wrap_tensors(ret)
 
