@@ -4913,6 +4913,11 @@ class TestNestedTensorSubclass(TestCase):
                 else:
                     out = torch.nn.functional.softmax(nt_with_holes, dim=reduce_dim)
 
+    @skipIfTorchDynamo(
+        "ragged_size = nt_with_holes.shape[nt_with_holes._ragged_idx] does not currently work "
+        + "with dynamo tests and throws this error: `AssertionError: SymInts must use SymNodeVariable. "
+        + "If the underlying value is static, we will create a ConstantVariable and specialize.`"
+    )
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
@@ -4927,12 +4932,6 @@ class TestNestedTensorSubclass(TestCase):
         Layer normalization on NestedTensor fails when trying to operate on a nested tensor with lengths,
         i.e. a nested tensor with holes, if operating on the ragged dimension.
         """
-
-        # requires_grad = False does not currently work with dynamo tests and throws this error:
-        # AssertionError: SymInts must use SymNodeVariable. If the underlying value is static,
-        # we will create a ConstantVariable and specialize.
-        if torch._dynamo.is_compiling():
-            return
 
         # create components for nested tensor
         lengths = torch.randint(5, 10, (20,), device=device)
