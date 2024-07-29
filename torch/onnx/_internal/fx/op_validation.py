@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, List, Sequence, Tuple, Union
+from typing import Any, Callable, Sequence
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator  # type: ignore[import]
@@ -26,7 +26,7 @@ def _op_level_debug_message_formatter(
     fn: Callable,
     self,
     node: torch.fx.Node,
-    symbolic_fn: Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction],
+    symbolic_fn: onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction,
     *args,
     **kwargs,
 ) -> str:
@@ -43,9 +43,9 @@ def _op_level_debug_message_formatter(
 def validate_op_between_ort_torch(
     diagnostic_context: diagnostics.DiagnosticContext,
     node: torch.fx.Node,
-    symbolic_fn: Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction],
-    fx_args: List[fx_type_utils.Argument],
-    fx_kwargs: Dict[str, fx_type_utils.Argument],
+    symbolic_fn: onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction,
+    fx_args: list[fx_type_utils.Argument],
+    fx_kwargs: dict[str, fx_type_utils.Argument],
     fx_graph_module: torch.fx.GraphModule,
 ):
     """Validate the op between ONNX Runtime and PyTorch.
@@ -235,10 +235,10 @@ def generate_random_tensors(shape: torch.Size, dtype: torch.dtype):
 
 
 def _fx_args_to_torch_args(
-    fx_args: List[fx_type_utils.Argument], fx_graph_module: torch.fx.GraphModule
-) -> List[fx_type_utils.Argument]:
+    fx_args: list[fx_type_utils.Argument], fx_graph_module: torch.fx.GraphModule
+) -> list[fx_type_utils.Argument]:
     """Recursively convert fx args to torch args"""
-    wrapped_args: List[fx_type_utils.Argument] = []
+    wrapped_args: list[fx_type_utils.Argument] = []
     for arg in fx_args:
         if isinstance(arg, torch.fx.Node):
             fake_tensor = arg.meta.get("val")
@@ -277,14 +277,14 @@ def _fx_args_to_torch_args(
 
 
 def _wrap_fx_args_as_torch_args(
-    fx_args: List[fx_type_utils.Argument],
-    fx_kwargs: Dict[str, fx_type_utils.Argument],
+    fx_args: list[fx_type_utils.Argument],
+    fx_kwargs: dict[str, fx_type_utils.Argument],
     fx_graph_module: torch.fx.GraphModule,
-) -> Tuple[List[fx_type_utils.Argument], Dict[str, fx_type_utils.Argument]]:
+) -> tuple[list[fx_type_utils.Argument], dict[str, fx_type_utils.Argument]]:
     """Prepare torch format args and kwargs for op-level validation by using fake tensor to create real tensor to feed in ops"""
 
     # NOTE: This function only supports FakeTensor with concrete shapes
-    torch_args: List[fx_type_utils.Argument] = _fx_args_to_torch_args(
+    torch_args: list[fx_type_utils.Argument] = _fx_args_to_torch_args(
         fx_args, fx_graph_module
     )
     return torch_args, fx_kwargs
@@ -293,10 +293,10 @@ def _wrap_fx_args_as_torch_args(
 # NOTE: Referenced from onnxscript internal function: _tag_arguments_with_param_schemas.
 def _convert_torch_args_to_onnxfunction_args(
     param_schemas: Sequence[onnxscript.values.ParamSchema],
-    args: List[fx_type_utils.Argument],
-    kwargs: Dict[str, fx_type_utils.Argument],
+    args: list[fx_type_utils.Argument],
+    kwargs: dict[str, fx_type_utils.Argument],
     allow_extra_kwargs: bool = False,
-) -> Tuple[List[Any], Dict[str, Any],]:
+) -> tuple[list[Any], dict[str, Any],]:
     """Convert Python args and kwargs to OnnxFunction acceptable with matching ONNX ParamSchema.
 
     NOTE: This is different from the param_schema separating in dispatcher, since at this point

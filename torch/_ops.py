@@ -336,10 +336,10 @@ class HigherOrderOperator(OperatorBase):
                         # TODO(rzou): we should support torch_dispatch calling convention too.
                         result = handler(mode, *args, **kwargs)
                 else:
-                    with _pop_mode_temporarily() as mode:
-                        result = curr_mode.__torch_dispatch__(
-                            self_, overloaded_types, args, kwargs
-                        )
+                    raise NotImplementedError(
+                        "There was no rule registered for HOP {self._name} and mode {curr_mode}. "
+                        "We recommend filing an issue."
+                    )
                 if result is not NotImplemented:
                     return result
 
@@ -357,8 +357,9 @@ class HigherOrderOperator(OperatorBase):
                     # TODO(rzou): we should support torch_dispatch calling convention too.
                     result = handler(*args, **kwargs)
                 else:
-                    result = subclass_type.__torch_dispatch__(
-                        self_, overloaded_types, args, kwargs
+                    raise NotImplementedError(
+                        "There was no rule registered for HOP {self._name} and subclass {subclass_type}. "
+                        "We recommend filing an issue."
                     )
                 if result is not NotImplemented:
                     return result
@@ -1085,9 +1086,15 @@ class OpOverloadPacket:
             # This is ok since we are guaranteed that an overload name for an aten op can't be 'default'
             use_key = "" if key == "default" else key
             # TODO: disallow access to overloads registered by JIT
-            op_, op_dk_, tags = torch._C._get_operation_overload(
+            op_dk_tags = torch._C._get_operation_overload(
                 self._qualified_op_name, use_key
             )
+            if op_dk_tags is None:
+                raise AttributeError(
+                    f"The underlying op of '{str(self)}' has no overload name '{key}'"
+                )
+
+            op_, op_dk_, tags = op_dk_tags
             schema = torch._C._get_schema(self._qualified_op_name, use_key)
             overload = (
                 OpOverload(self, op_, op_dk_, schema, tags)

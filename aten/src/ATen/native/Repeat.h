@@ -28,7 +28,7 @@ static inline Tensor repeat_interleave_common(
   }
   Tensor repeats_ = repeats.contiguous();
   Tensor cumsum = repeats.cumsum(0);
-  int64_t total;
+  int64_t total = 0;
   if (output_size.has_value()) {
     total = output_size.value();
   } else {
