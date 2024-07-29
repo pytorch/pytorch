@@ -417,11 +417,13 @@ def _create_cpu_state_dict(
                     ), f"Unpinning shared memory failed with error-code: {succ}"
 
                 weakref.finalize(t, unpin_memory, t)
-                succ = int(torch.cuda.cudart().cudaHostRegister(
-                    t.data_ptr(),
-                    t.numel() * t.element_size(),
-                    1,  # lines up with 'cudaHostRegisterPortable'
-                ))
+                succ = int(
+                    torch.cuda.cudart().cudaHostRegister(
+                        t.data_ptr(),
+                        t.numel() * t.element_size(),
+                        1,  # lines up with 'cudaHostRegisterPortable'
+                    )
+                )
                 assert (
                     succ == 0
                 ), f"Pinning shared memory failed with error-code: {succ}"
