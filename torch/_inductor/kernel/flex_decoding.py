@@ -313,8 +313,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
         mask_mod_other_buffers,
     ) = args
     (
-        sparse_kv_num_blocks,
-        sparse_kv_indices,
+        kv_num_blocks,
+        kv_indices,
         full_kv_num_blocks,  # full_kv_num_blocks,
         full_kv_indices,  # full_kv_indices,
         _,  # q_num_blocks
@@ -346,8 +346,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
         query,
         key,
         value,
-        sparse_kv_num_blocks,
-        sparse_kv_indices,
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
     ]:
         buf.realize()
     choices: List[Any] = []
@@ -435,8 +437,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
                 value,
                 buf_M,
                 buf_L,
-                sparse_kv_num_blocks,
-                sparse_kv_indices,
+                kv_num_blocks,
+                kv_indices,
                 full_kv_num_blocks,
                 full_kv_indices,
             ],
@@ -474,8 +476,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
             value,
             buf_M,
             buf_L,
-            sparse_kv_num_blocks,
-            sparse_kv_indices,
+            kv_num_blocks,
+            kv_indices,
             full_kv_num_blocks,
             full_kv_indices,
         ]
