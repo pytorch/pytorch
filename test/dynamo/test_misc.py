@@ -6618,7 +6618,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_symnode_as_device_kwarg(self):
+    def test_symint_as_device_kwarg(self):
         def f(rank):
             # -2 to make device id 0 for easier testing on CI
             return torch.ones(10, device=rank.size(0) - 2)
@@ -6629,7 +6629,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(out, opt_out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
-    def test_symnode_as_device_kwarg_multi_gpu(self):
+    def test_symint_as_device_kwarg_multi_gpu(self):
         def fn(rank):
             # -2 to make device id smaller for easier testing on CI
             return torch.ones(10, device=rank.size(0) - 2)
@@ -6656,7 +6656,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_symnode_as_device_kwarg_non_strict_export(self):
+    def test_symint_as_device_kwarg_non_strict_export(self):
         class Mod(torch.nn.Module):
             def forward(self, x):
                 # -2 to make device id 0 for easier testing on CI
