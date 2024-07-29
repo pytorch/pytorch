@@ -6,22 +6,8 @@ import re
 import sys
 import traceback
 import weakref
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Literal,
-    Optional,
-    overload,
-    Sequence,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
-from typing_extensions import deprecated, ParamSpec
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing_extensions import deprecated
 
 import torch
 import torch._library as _library
@@ -47,9 +33,6 @@ __all__ = [
     "custom_op",
     "infer_schema",
 ]
-
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
@@ -518,101 +501,39 @@ def _(lib: Library, schema, alias_analysis=""):
     return wrap
 
 
-if TYPE_CHECKING:
+@functools.singledispatch
+def impl(qualname, types, func=None, *, lib=None):
+    """Register an implementation for a device type for this operator.
 
-    @overload
-    def impl(
-        qualname: str,
-        types: Union[str, Sequence[str]],
-        func: Literal[None] = None,
-        *,
-        lib: Optional[Library] = None,
-    ) -> Callable[[Callable[_P, _T]], None]:
-        ...
+    You may pass "default" for ``types`` to register this implementation as the
+    default implementation for ALL device types.
+    Please only use this if the implementation truly supports all device types;
+    for example, this is true if it is a composition of built-in PyTorch operators.
 
-    @overload
-    def impl(
-        qualname: str,
-        types: Union[str, Sequence[str]],
-        func: Callable[_P, _T],
-        *,
-        lib: Optional[Library] = None,
-    ) -> Callable[_P, _T]:
-        ...
+    Some valid types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
 
-    @overload
-    def impl(
-        lib: Library,
-        name: str,
-        dispatch_key: str,
-    ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
-        ...
+    Args:
+        qualname (str): Should be a string that looks like "namespace::operator_name".
+        types (str | Sequence[str]): The device types to register an impl to.
+        lib (Optional[Library]): If provided, the lifetime of this registration
+            will be tied to the lifetime of the Library object.
 
-    def impl(*args, **kwargs):
-        pass
-
-else:
-
-    @functools.singledispatch
-    def impl(
-        qualname: str,
-        types: Union[str, Sequence[str]],
-        func: Optional[Callable[_P, _T]] = None,
-        *,
-        lib: Optional[Library] = None,
-    ):
-        """Register an implementation for a device type for this operator.
-
-        You may pass "default" for ``types`` to register this implementation as the
-        default implementation for ALL device types.
-        Please only use this if the implementation truly supports all device types;
-        for example, this is true if it is a composition of built-in PyTorch operators.
-
-        Some valid types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
-
-        Args:
-            qualname (str): Should be a string that looks like "namespace::operator_name".
-            types (str | Sequence[str]): The device types to register an impl to.
-            lib (Optional[Library]): If provided, the lifetime of this registration
-                will be tied to the lifetime of the Library object.
-
-        Examples:
-            >>> import torch
-            >>> import numpy as np
-            >>>
-            >>> # Define the operator
-            >>> torch.library.define("mylib::mysin", "(Tensor x) -> Tensor")
-            >>>
-            >>> # Add implementations for the cpu device
-            >>> @torch.library.impl("mylib::mysin", "cpu")
-            >>> def f(x):
-            >>>     return torch.from_numpy(np.sin(x.numpy()))
-            >>>
-            >>> x = torch.randn(3)
-            >>> y = torch.ops.mylib.mysin(x)
-            >>> assert torch.allclose(y, x.sin())
-        """
-        return _impl_str(qualname, types, func, lib=lib)
-
-    @impl.register
-    def _(lib: Library, name: str, dispatch_key: str = ""):
-        """Legacy torch.library.impl API. Kept around for BC"""
-
-        def wrap(f):
-            lib.impl(name, f, dispatch_key)
-            return f
-
-        return wrap
-
-
-def _impl_str(
-    qualname: str,
-    types: Union[str, Sequence[str]],
-    func: Optional[Callable[_P, _T]] = None,
-    *,
-    lib: Optional[Library] = None,
-) -> Optional[Callable[[Callable[_P, _T]], None]]:
-    # See impl()
+    Examples:
+        >>> import torch
+        >>> import numpy as np
+        >>>
+        >>> # Define the operator
+        >>> torch.library.define("mylib::mysin", "(Tensor x) -> Tensor")
+        >>>
+        >>> # Add implementations for the cpu device
+        >>> @torch.library.impl("mylib::mysin", "cpu")
+        >>> def f(x):
+        >>>     return torch.from_numpy(np.sin(x.numpy()))
+        >>>
+        >>> x = torch.randn(3)
+        >>> y = torch.ops.mylib.mysin(x)
+        >>> assert torch.allclose(y, x.sin())
+    """
     if isinstance(types, str):
         types = (types,)
     keys = set({})
@@ -629,7 +550,7 @@ def _impl_str(
         else:
             keys.add(_device_type_to_key(typ))
 
-    def register_(func: Callable[_P, _T]) -> None:
+    def register(func):
         namespace, _ = torch._library.utils.parse_namespace(qualname)
         if lib is None:
             use_lib = Library(namespace, "FRAGMENT")
@@ -640,10 +561,9 @@ def _impl_str(
             use_lib.impl(qualname, func, key)
 
     if func is None:
-        return register_
+        return register
     else:
-        register_(func)
-        return None
+        register(func)
 
 
 def _device_type_to_key(device_type: str) -> str:
@@ -654,6 +574,17 @@ def _device_type_to_key(device_type: str) -> str:
         # device_type. I don't really care that much about the difference.
         return "CompositeExplicitAutograd"
     return torch._C._dispatch_key_for_device(device_type)
+
+
+@impl.register
+def _(lib: Library, name, dispatch_key=""):
+    """Legacy torch.library.impl API. Kept around for BC"""
+
+    def wrap(f):
+        lib.impl(name, f, dispatch_key)
+        return f
+
+    return wrap
 
 
 @deprecated(
