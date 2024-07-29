@@ -3489,6 +3489,7 @@ class TestNestedTensorSubclass(TestCase):
         include_list_of_lists=True,
         include_requires_grad=True,
         include_inner_dim_size_1=False,
+        include_2d_tensor=False,
     ):
         def _make_tensor(
             *shape, include_requires_grad=include_requires_grad, requires_grad=True
@@ -3553,6 +3554,16 @@ class TestNestedTensorSubclass(TestCase):
                     _make_tensor(4, 5, 1, requires_grad=False),
                     _make_tensor(6, 5, 1),
                 ]  # (B, *, 5, 1)
+            )
+
+        if include_2d_tensor:
+            example_lists.append(
+                [
+                    _make_tensor(2),
+                    _make_tensor(3, requires_grad=False),
+                    _make_tensor(4, requires_grad=False),
+                    _make_tensor(6),
+                ]  # (B, *)
             )
 
         return example_lists
@@ -4130,7 +4141,7 @@ class TestNestedTensorSubclass(TestCase):
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
-    def test_jagged_softmax_dim(
+    def test_softmax_dim(
         self,
         device,
         dtype,
@@ -4203,7 +4214,7 @@ class TestNestedTensorSubclass(TestCase):
     @parametrize("keepdim", [False, True])
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
-    def test_jagged_op_dim_reduce_ragged_idx_1_different_output_shape(
+    def test_op_dim_reduce_ragged_idx_1_different_output_shape(
         self, device, dtype, keepdim, requires_grad, components_require_grad, func
     ):
         """
@@ -4245,7 +4256,7 @@ class TestNestedTensorSubclass(TestCase):
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
-    def test_jagged_softmax_dim_reduce_ragged_idx_1_same_output_shape(
+    def test_softmax_dim_reduce_ragged_idx_1(
         self, device, dtype, requires_grad, components_require_grad
     ):
         """
@@ -4313,6 +4324,133 @@ class TestNestedTensorSubclass(TestCase):
                 out = torch.nn.functional.softmax(nt, dim=reduce_dim)
 
     @dtypes(torch.float32)
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_layer_norm_reduce_ragged_idx_1(
+        self, device, dtype, requires_grad, components_require_grad
+    ):
+        """
+        Layer normalization on NestedTensor passes when trying to normalize across ragged dimension, where ragged_idx == 1.
+        """
+
+        # requires_grad = False does not currently work with dynamo tests and throws this error:
+        #   AssertionError: SymInts must use SymNodeVariable.
+        #   If the underlying value is static, we will create a ConstantVariable and specialize.
+        if torch._dynamo.is_compiling() and not requires_grad:
+            return
+
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False,
+            include_requires_grad=components_require_grad,
+            include_inner_dim_size_1=True,  # (B, *, 1)
+        )
+
+        for tensor_list in tensor_lists:
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            if (
+                nt.dim() >= 3
+            ):  # layer norm only works for tensors with 3 or more dimensions
+                normalized_shape = nt.shape[nt._ragged_idx :]
+
+                out_actual = torch.nn.functional.layer_norm(
+                    nt, normalized_shape=normalized_shape
+                )
+                out_expected = torch.cat(
+                    [
+                        torch.nn.functional.layer_norm(t, normalized_shape=t.shape)
+                        for t in nt.unbind()
+                    ]
+                )  # e.g. in 3D tensor (B, *, M), performs layer normalization on B 2D tensors (*, M)
+
+                self.assertTrue(
+                    out_actual.is_nested,
+                    "layer_norm(): the result of reducing a nested tensor along the ragged dimension is a nested tensor",
+                )  # output is a nested tensor
+                self.assertEqual(out_actual._values.shape, out_expected.shape)
+                self.assertTrue(torch.allclose(out_actual.values(), out_expected))
+
+    @dtypes(torch.float32)
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_layer_norm_2d_input(
+        self,
+        device,
+        dtype,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Layer normalization on NestedTensor fails when trying to operate on a 2-dimensional tensor
+        """
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False,
+            include_requires_grad=components_require_grad,
+            include_inner_dim_size_1=True,  # (B, *, 1)
+            include_2d_tensor=True,  # (B, *)
+        )
+
+        for tensor_list in tensor_lists:
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            if nt.dim() <= 2:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "not supported for NestedTensor objects with 2 or fewer dimensions",
+                ):
+                    out = torch.nn.functional.layer_norm(
+                        nt, normalized_shape=(nt.shape[nt._ragged_idx],)
+                    )
+
+    @dtypes(torch.float32)
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_layer_norm_operate_on_batch_dim(
+        self,
+        device,
+        dtype,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Layer normalization on NestedTensor fails when trying to operate on the batch dimension
+        """
+        tensor_lists = self._get_example_tensor_lists(
+            include_list_of_lists=False,
+            include_requires_grad=components_require_grad,
+            include_inner_dim_size_1=True,  # (B, *, 1)
+            include_2d_tensor=True,  # (B, *)
+        )
+
+        for tensor_list in tensor_lists:
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad,
+            )
+
+            if nt.dim() > 2:  # cannot perform layer normalization on 2D tensors
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "not supported when normalizing over the batch dimension for NestedTensor",
+                ):
+                    out = torch.nn.functional.layer_norm(nt, normalized_shape=nt.shape)
+
+    @dtypes(torch.float32)
     @parametrize(
         "func",
         [torch.ops.aten.sum.dim_IntList, torch.ops.aten.mean.dim],
@@ -4324,7 +4462,7 @@ class TestNestedTensorSubclass(TestCase):
     @parametrize("keepdim", [False, True])
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
-    def test_jagged_op_dim_reduce_ragged_idx_greater_than_1_different_output_shape(
+    def test_op_dim_reduce_ragged_idx_greater_than_1_different_output_shape(
         self,
         device,
         dtype,
@@ -4384,7 +4522,7 @@ class TestNestedTensorSubclass(TestCase):
     )  # [transpose consecutive dimensions, transpose nonconsecutive dimensions]
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
-    def test_jagged_softmax_dim_reduce_ragged_idx_greater_than_1_same_output_shape(
+    def test_softmax_dim_reduce_ragged_idx_greater_than_1_same_output_shape(
         self,
         device,
         dtype,
@@ -4432,7 +4570,7 @@ class TestNestedTensorSubclass(TestCase):
     @parametrize("keepdim", [False, True])
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
-    def test_jagged_op_dim_transpose_non_ragged_dim_different_output_shape(
+    def test_op_dim_transpose_non_ragged_dim_different_output_shape(
         self, device, dtype, keepdim, requires_grad, components_require_grad, func
     ):
         """
@@ -4501,7 +4639,7 @@ class TestNestedTensorSubclass(TestCase):
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
-    def test_jagged_softmax_dim_transpose_non_ragged_dim(
+    def test_softmax_dim_transpose_non_ragged_dim(
         self,
         device,
         dtype,
@@ -4553,7 +4691,7 @@ class TestNestedTensorSubclass(TestCase):
     @parametrize("keepdim", [False, True])
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
-    def test_jagged_sum_dim_reduce_ragged_and_non_batch(
+    def test_sum_dim_reduce_ragged_and_non_batch(
         self,
         device,
         dtype,
@@ -4592,7 +4730,7 @@ class TestNestedTensorSubclass(TestCase):
     @parametrize("keepdim", [False, True])
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
-    def test_jagged_sum_dim_reduce_batch_and_non_batch(
+    def test_sum_dim_reduce_batch_and_non_batch(
         self,
         device,
         dtype,
@@ -4636,7 +4774,7 @@ class TestNestedTensorSubclass(TestCase):
     @parametrize("keepdim", [False, True])
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
-    def test_jagged_op_dim_reduce_batch_only_different_output_shape(
+    def test_op_dim_reduce_batch_only_different_output_shape(
         self, device, dtype, keepdim, requires_grad, components_require_grad, func
     ):
         """
@@ -4674,7 +4812,7 @@ class TestNestedTensorSubclass(TestCase):
     @parametrize("keepdim", [False, True])
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
-    def test_jagged_op_dim_with_lengths_different_output_shape(
+    def test_op_dim_with_lengths_different_output_shape(
         self,
         device,
         dtype,
@@ -4729,7 +4867,7 @@ class TestNestedTensorSubclass(TestCase):
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
-    def test_jagged_softmax_dim_with_lengths(
+    def test_softmax_dim_with_lengths(
         self,
         device,
         dtype,
@@ -4775,11 +4913,69 @@ class TestNestedTensorSubclass(TestCase):
                 else:
                     out = torch.nn.functional.softmax(nt_with_holes, dim=reduce_dim)
 
+    @skipIfTorchDynamo(
+        "ragged_size = nt_with_holes.shape[nt_with_holes._ragged_idx] does not currently work "
+        + "with dynamo tests and throws this error: `AssertionError: SymInts must use SymNodeVariable. "
+        + "If the underlying value is static, we will create a ConstantVariable and specialize.`"
+    )
+    @dtypes(torch.float32)
+    @parametrize("requires_grad", [False, True])
+    @parametrize("components_require_grad", [False, True])
+    def test_layer_norm_with_lengths(
+        self,
+        device,
+        dtype,
+        requires_grad,
+        components_require_grad,
+    ):
+        """
+        Layer normalization on NestedTensor fails when trying to operate on a nested tensor with lengths,
+        i.e. a nested tensor with holes, if operating on the ragged dimension.
+        """
+
+        # create components for nested tensor
+        lengths = torch.randint(5, 10, (20,), device=device)
+        offsets = torch.zeros((21,), device=device, dtype=torch.int)
+        torch.cumsum(lengths, dim=0, out=offsets[1:])
+        values = torch.randn(
+            (offsets[-1].item(), 10, 30),
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+
+        nt_with_holes = torch.nested.nested_tensor_from_jagged(
+            values,
+            offsets,
+            lengths=offsets.diff() - 2,  # arbitrary subtraction to create holes
+        )
+
+        ragged_size = nt_with_holes.shape[nt_with_holes._ragged_idx]
+
+        normalized_shapes = (
+            (10, 30),  # normalization on non-ragged dimension passes
+            (ragged_size, 10, 30),  # normalization on ragged dimension fails
+        )
+
+        for normalized_shape in normalized_shapes:
+            if ragged_size in normalized_shape:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "not supported where lengths is not None if operating on the ragged dimension for NestedTensor",
+                ):
+                    out = torch.nn.functional.layer_norm(
+                        nt_with_holes, normalized_shape=normalized_shape
+                    )
+            else:
+                out = torch.nn.functional.layer_norm(
+                    nt_with_holes, normalized_shape=normalized_shape
+                )
+
     @dtypes(torch.float32)
     @parametrize("keepdim", [True])
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
-    def test_jagged_mean_dim_reduce_multiple_dims(
+    def test_mean_dim_reduce_multiple_dims(
         self,
         device,
         dtype,
@@ -4819,7 +5015,7 @@ class TestNestedTensorSubclass(TestCase):
     @parametrize("keepdim", [False, True])
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
-    def test_jagged_mean_dim_keepdim_False(
+    def test_mean_dim_keepdim_False(
         self,
         device,
         dtype,
@@ -5540,29 +5736,6 @@ class TestNestedTensorSubclass(TestCase):
             r"unbind\(\): nested tensor.*out of bounds",
             lambda: nt.unbind(),
         )
-
-    @xfailIfTorchDynamo
-    def test_layer_norm_2(self, device):
-        test_tensor_list = self._get_list_for_jagged_tensor(
-            ((2, 3, 4), 3), device=device, requires_grad=True
-        )
-        bias = torch.randn(3, requires_grad=False, dtype=torch.float64, device=device)
-
-        def grad_test_func(a, b, c, bias):
-            nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
-            out = torch.nn.functional.layer_norm(nt, (nt.shape[-1],), bias=bias)
-            return out.values()
-
-        gradcheck(
-            grad_test_func, inputs=(*test_tensor_list, bias), check_batched_grad=False
-        )
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"layer_norm\(\): normalizing over ragged dim not supported for nested tensors",
-        ):
-            nt = torch.nested.as_nested_tensor(test_tensor_list, layout=torch.jagged)
-            _ = torch.nn.functional.layer_norm(nt, (nt.shape[-2], nt.shape[-1]))
 
     def test_narrow(self, device):
         starts = torch.tensor([0, 1, 2, 3, 4], device=device, dtype=torch.int64)
