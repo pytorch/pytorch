@@ -393,7 +393,8 @@ test_inductor_cpp_wrapper_abi_compatible() {
 DYNAMO_BENCHMARK_FLAGS=()
 
 pr_time_benchmarks() {
-  pip install cirron
+
+  pip install cirron~=0.3
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
@@ -422,15 +423,12 @@ pr_time_benchmarks() {
   pip install -r requirements.txt
   # shellcheck source=./common-build.sh
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-  python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist"
+  python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist" &> "$TEST_REPORTS_DIR/base_build_logs"
   python -mpip install base_dist/*.whl
   echo "::endgroup::"
 
   pip show torch
 
-  # run the benchmarks on parent
-  python setup.py clean
-  python setup.py develop
   source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on main: "
   cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
