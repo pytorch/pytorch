@@ -16,7 +16,7 @@
 #endif
 
 #if defined(USE_CUDSS)
-#include <cuDSS.h>
+#include <cudss.h>
 #endif
 
 #if defined(USE_ROCM)
