@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Callable, cast, Dict, List, Optional, TYPE_CHECKING, Union
 
 from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
 from ...utils import sympy_product
@@ -247,7 +247,7 @@ class ROCmTemplateCaller(ChoiceCaller):
 
     def benchmark(self, *args, out, lazy=False) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        return cast(float, self.bmreq.benchmark(*args, output_tensor=out))
 
     def __str__(self):
         return f"ROCmTemplateCaller(source_file={self.bmreq.source_file}, {self.info_dict()})"

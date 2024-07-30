@@ -558,11 +558,13 @@ def should_pad_bench(
                 return ah_should_pad
 
         if ori_time is None:
-            ori_time, pad_time = benchmarker.benchmark_many_gpu([orig_bench_fn, pad_bench_fn])
+            ori_time, pad_time = benchmarker.benchmark_many_gpu(
+                [orig_bench_fn, pad_bench_fn]
+            )
             set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
         else:
             pad_time = benchmarker.benchmark_gpu(pad_bench_fn)
-        
+
         return should_pad(key, ori_time, pad_time)
 
 

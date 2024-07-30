@@ -956,7 +956,7 @@ class ExternKernelCaller(ChoiceCaller):
                 return benchmarker.lazy_benchmark(
                     algo, args, {}, pruning_key="max-autotune-gemm"
                 )
-            
+
             return benchmarker.benchmark(algo, args, {})
 
     def to_callable(self):
@@ -1471,7 +1471,7 @@ class AlgorithmSelectorCache(PersistentCache):
         ):
             out.zero_()
             # we can't postpone benchmarking if we need to verify the results
-            lazy = not((VERIFY != {}) and (expected is not None))
+            lazy = not ((VERIFY != {}) and (expected is not None))
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
                 result = choice.benchmark(
@@ -1486,20 +1486,21 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def benchmark_in_current_process(choices):
             inputs = get_inputs()
-            example_inputs, _, out, _, _ = inputs
-            timings = {}
+            choice_to_timing_ms, choice_to_maybe_lazy_benchmark = {}, {}
             for choice in choices:
                 try:
-                    timing = benchmark_choice_in_current_process(choice, *inputs)
+                    choice_to_maybe_lazy_benchmark[
+                        choice
+                    ] = benchmark_choice_in_current_process(choice, *inputs)
                 except CUDACompileError as e:
                     log.error(
                         "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
                         str(e),
                     )
-                    timing = float("inf")
+                    choice_to_timing_ms[choice] = float("inf")
                 except NotImplementedError as e:
                     log.warning("Not yet implemented: %s", e)
-                    timing = float("inf")
+                    choice_to_timing_ms[choice] = float("inf")
                 except RuntimeError as e:
                     msg = str(e)
                     if "invalid argument" in msg:
@@ -1511,7 +1512,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
                         msg,
                     )
-                    timing = float("inf")
+                    choice_to_timing_ms[choice] = float("inf")
                 except AssertionError as e:
                     raise AssertionError(  # noqa: B904
                         f"Incorrect result from choice {choice}\n\n{e}"
@@ -1522,15 +1523,19 @@ class AlgorithmSelectorCache(PersistentCache):
 
                         if isinstance(e, OutOfResources):
                             log.warning(e)
-                            timing = float("inf")
+                            choice_to_timing_ms[choice] = float("inf")
                         else:
                             raise e
                     except ImportError:
                         raise e from None
 
-                timings[choice] = timing
-
-            return timings
+            choice_to_timing_ms.update(
+                {
+                    choice: float(maybe_lazy_benchmark)
+                    for choice, maybe_lazy_benchmark in choice_to_maybe_lazy_benchmark.items()
+                }
+            )
+            return choice_to_timing_ms
 
         def benchmark_in_sub_process(choices):
             from . import autotune_process

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, Dict, List, Optional, TYPE_CHECKING, Union
 
 from ...autotune_process import CUDABenchmarkRequest
 from ...ir import (
@@ -345,9 +345,12 @@ class CUDATemplateCaller(ChoiceCaller):
 
     def benchmark(self, *args, out, lazy=False) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(
-            *args, output_tensor=out
-        )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
+        return cast(
+            float,
+            self.bmreq.benchmark(
+                *args, output_tensor=out
+            )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
+        )
 
     def __str__(self):
         return f"CUDATemplateCaller(source_file={self.bmreq.source_file})"

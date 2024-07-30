@@ -511,7 +511,7 @@ class BenchmarkRequest:
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
         lazy: bool = False,
-    ) -> float:
+    ) -> Union[LazyBenchmark, float]:
         raise NotImplementedError
 
     def benchmark(
@@ -519,7 +519,7 @@ class BenchmarkRequest:
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
         lazy: bool = False,
-    ) -> float:
+    ) -> Union[LazyBenchmark, float]:
         debug = log.isEnabledFor(logging.DEBUG)
         if debug:
             start_ts = time.time()
@@ -569,7 +569,10 @@ class TestBenchmarkRequest(BenchmarkRequest):
         self.value = value
 
     def benchmark(
-        self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
+        self,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+        lazy=False,
     ) -> float:
         if self.value is None:
             raise Exception("Failed to run")  # noqa: TRY002

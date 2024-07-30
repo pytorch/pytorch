@@ -160,6 +160,18 @@ class TestLazyBenchmark(TestCase):
         self.is_not_finalized()
 
 
+def cpu_patches(fn):
+    @config.patch({"benchmarking.fallback_to_original_benchmarking": False})
+    @config.patch({"benchmarking.enable_lazy_benchmarking": True})
+    @functools.wraps(fn)
+    def wrapped(self):
+        counters.clear()
+        torch.manual_seed(12345)
+        return fn(self, Benchmarker(), self.get_various_kernels())
+
+    return wrapped
+
+
 class TestBenchmarking(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -249,32 +261,21 @@ class TestBenchmarkingCPU(TestBenchmarking):
         for gpu_property in gpu_properties:
             self.assertEqual(gpu_property, 0)
 
-    def patches(fn):
-        @config.patch({"benchmarking.fallback_to_original_benchmarking": False})
-        @config.patch({"benchmarking.enable_lazy_benchmarking": True})
-        @functools.wraps(fn)
-        def wrapped(self):
-            counters.clear()
-            torch.manual_seed(12345)
-            return fn(self, Benchmarker(), self.get_various_kernels())
-
-        return wrapped
-
-    @patches
+    @cpu_patches
     def test_benchmark_smoke(self, benchmarker, kernels):
         for fn, args, kwargs, _callable in kernels:
             timing_ms = benchmarker.benchmark(fn, args, kwargs)
             self.sanity_check(_callable, timing_ms)
         self.gpu_properties_are_not_initialized()
 
-    @patches
+    @cpu_patches
     def test_benchmark_cpu_smoke(self, benchmarker, kernels):
         for _, _, _, _callable in kernels:
             timing_ms = benchmarker.benchmark_cpu(_callable)
             self.sanity_check(_callable, timing_ms)
         self.gpu_properties_are_not_initialized()
 
-    @patches
+    @cpu_patches
     def test_benchmark_many_cpu_smoke(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
         timings_ms = benchmarker.benchmark_many_cpu(callables)
@@ -282,7 +283,7 @@ class TestBenchmarkingCPU(TestBenchmarking):
             self.sanity_check(_callable, timing_ms)
         self.gpu_properties_are_not_initialized()
 
-    @patches
+    @cpu_patches
     def test_lazy_benchmark_smoke(self, benchmarker, kernels):
         fn_args_kwargs_list = [(fn, args, kwargs) for fn, args, kwargs, _ in kernels]
         timings_ms = [
@@ -295,7 +296,7 @@ class TestBenchmarkingCPU(TestBenchmarking):
             self.sanity_check(_callable, timing_ms)
         self.gpu_properties_are_not_initialized()
 
-    @patches
+    @cpu_patches
     def test_lazy_benchmark_cpu_smoke(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
         timings_ms = [
@@ -305,6 +306,21 @@ class TestBenchmarkingCPU(TestBenchmarking):
         for _callable, timing_ms in zip(callables, timings_ms):
             self.sanity_check(_callable, timing_ms)
         self.gpu_properties_are_not_initialized()
+
+
+def gpu_patches(fn):
+    @requires_gpu()
+    @config.patch({"benchmarking.fallback_to_original_benchmarking": False})
+    @config.patch({"benchmarking.enable_lazy_benchmarking": True})
+    @config.patch({"benchmarking.enable_early_ranking": True})
+    @config.patch({"benchmarking.enable_early_pruning": True})
+    @functools.wraps(fn)
+    def wrapped(self):
+        counters.clear()
+        torch.manual_seed(12345)
+        return fn(self, Benchmarker(), self.get_various_kernels())
+
+    return wrapped
 
 
 class TestBenchmarkingGPU(TestBenchmarking):
@@ -326,40 +342,26 @@ class TestBenchmarkingGPU(TestBenchmarking):
         roofline_timing_ms = start_event.elapsed_time(end_event) / 10
         self.assertEqual(timing_ms <= roofline_timing_ms, True)
 
-    def patches(fn):
-        @requires_gpu()
-        @config.patch({"benchmarking.fallback_to_original_benchmarking": False})
-        @config.patch({"benchmarking.enable_lazy_benchmarking": True})
-        @config.patch({"benchmarking.enable_early_ranking": True})
-        @config.patch({"benchmarking.enable_early_pruning": True})
-        @functools.wraps(fn)
-        def wrapped(self):
-            counters.clear()
-            torch.manual_seed(12345)
-            return fn(self, Benchmarker(), self.get_various_kernels())
-
-        return wrapped
-
-    @patches
+    @gpu_patches
     def test_benchmark_smoke(self, benchmarker, kernels):
         for fn, args, kwargs, _callable in kernels:
             timing_ms = benchmarker.benchmark(fn, args, kwargs)
             self.sanity_check(_callable, timing_ms)
 
-    @patches
+    @gpu_patches
     def test_benchmark_gpu_smoke(self, benchmarker, kernels):
         for _, _, _, _callable in kernels:
             timing_ms = benchmarker.benchmark_gpu(_callable)
             self.sanity_check(_callable, timing_ms)
 
-    @patches
+    @gpu_patches
     def test_benchmark_many_gpu_smoke(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
         timings_ms = benchmarker.benchmark_many_gpu(callables)
         for _callable, timing_ms in zip(callables, timings_ms):
             self.sanity_check(_callable, timing_ms)
 
-    @patches
+    @gpu_patches
     def test_lazy_benchmark_smoke(self, benchmarker, kernels):
         fn_args_kwargs_list = [(fn, args, kwargs) for fn, args, kwargs, _ in kernels]
         timings_ms = [
@@ -372,7 +374,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
             self.sanity_check(_callable, timing_ms)
         self.gpu_properties_are_not_initialized()
 
-    @patches
+    @gpu_patches
     def test_lazy_benchmark_gpu_smoke(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
         timings_ms = [
@@ -382,39 +384,39 @@ class TestBenchmarkingGPU(TestBenchmarking):
         for _callable, timing_ms in zip(callables, timings_ms):
             self.sanity_check(_callable, timing_ms)
 
-    @patches
+    @gpu_patches
     def test_benchmark_many_gpu_single_callable(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels][:1]
         timing_ms = benchmarker.benchmark_many_gpu(callables)[0]
         self.sanity_check(callables[0], timing_ms)
 
-    @patches
+    @gpu_patches
     def test_benchmark_many_gpu_early_ranking(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
         _ = benchmarker.benchmark_many_gpu(callables, ranking_key="test")
         self.assertEqual(self.counter_benchmarking_early_ranking(), 1)
 
-    @patches
+    @gpu_patches
     @config.patch({"benchmarking.enable_early_ranking": False})
     def test_benchmark_many_gpu_early_ranking_disabled(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
         _ = benchmarker.benchmark_many_gpu(callables, ranking_key="test")
         self.assertEqual(self.counter_benchmarking_early_ranking(), 0)
 
-    @patches
+    @gpu_patches
     def test_benchmark_many_gpu_early_pruning(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
         _ = benchmarker.benchmark_many_gpu(callables, pruning_key="test")
         self.assertEqual(self.counter_benchmarking_early_pruning() >= 1, True)
 
-    @patches
+    @gpu_patches
     @config.patch({"benchmarking.enable_early_pruning": False})
     def test_benchmark_many_gpu_early_pruning_disabled(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
         _ = benchmarker.benchmark_many_gpu(callables, pruning_key="test")
         self.assertEqual(self.counter_benchmarking_early_pruning(), 0)
 
-    @patches
+    @gpu_patches
     @config.patch({"benchmarking.enable_lazy_benchmarking": False})
     def test_lazy_benchmark_gpu_disabled(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
@@ -427,35 +429,35 @@ class TestBenchmarkingGPU(TestBenchmarking):
             self.counter_fallback_to_non_lazy_benchmarking(), len(callables)
         )
 
-    @patches
+    @gpu_patches
     @config.patch({"benchmarking.fallback_to_original_benchmarking": True})
     def test_benchmark_fallback(self, benchmarker, kernels):
         for fn, args, kwargs, _ in kernels:
             _ = benchmarker.benchmark(fn, args, kwargs)
         self.assertEqual(self.counter_fallback_to_original_benchmarking(), len(kernels))
 
-    @patches
+    @gpu_patches
     @config.patch({"benchmarking.fallback_to_original_benchmarking": True})
     def test_benchmark_gpu_fallback(self, benchmarker, kernels):
         for _, _, _, _callable in kernels:
             _ = benchmarker.benchmark_gpu(_callable)
         self.assertEqual(self.counter_fallback_to_original_benchmarking(), len(kernels))
 
-    @patches
+    @gpu_patches
     @config.patch({"benchmarking.fallback_to_original_benchmarking": True})
     def test_benchmark_many_gpu_fallback(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
         _ = benchmarker.benchmark_many_gpu(callables)
         self.assertEqual(self.counter_fallback_to_original_benchmarking(), len(kernels))
 
-    @patches
+    @gpu_patches
     @config.patch({"benchmarking.fallback_to_original_benchmarking": True})
     def test_lazy_benchmark_gpu_fallback(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
         _ = [benchmarker.lazy_benchmark_gpu(_callable) for _callable in callables]
         self.assertEqual(self.counter_fallback_to_original_benchmarking(), len(kernels))
 
-    @patches
+    @gpu_patches
     def test_lazy_benchmark_gpu_same_callable_no_memory_leak(
         self, benchmarker, kernels
     ):
@@ -466,7 +468,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
         _ = float(timings_ms[0])
         self.assertEqual(benchmarker.kwargs_hash_to_futures_gpu, {})
 
-    @patches
+    @gpu_patches
     def test_lazy_benchmark_gpu_group_by_kwargs(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
         _ = [
@@ -475,11 +477,11 @@ class TestBenchmarkingGPU(TestBenchmarking):
         ]
         self.assertEqual(len(benchmarker.kwargs_hash_to_futures_gpu), len(kernels))
 
-    @patches
+    @gpu_patches
     def test_L2_cache_size(self, benchmarker, *args):
         self.assertEqual(benchmarker.L2_cache_size > 0, True)
 
-    @patches
+    @gpu_patches
     def test_gpu_queue_limit(self, benchmarker, *args):
         gpu_queue_limit = benchmarker.gpu_queue_limit
         torch.cuda.synchronize()
@@ -500,7 +502,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
         torch.cuda.synchronize()
         self.assertEqual(elapsed_time_ms > 1)
 
-    @patches
+    @gpu_patches
     def test_cpu_launch_overhead_ms_per_event_record(self, benchmarker, *args):
         torch.cuda.synchronize()
         start_time_s = time.perf_counter()
@@ -515,7 +517,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
             rtol=0.25,
         )
 
-    @patches
+    @gpu_patches
     def test_cpu_launch_overhead_ms_per_gpu_cache_clear(self, benchmarker, *args):
         buffer = torch.empty(
             int(self.L2_cache_size // 4), dtype=torch.int, device="cuda"
@@ -533,7 +535,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
             rtol=0.25,
         )
 
-    @patches
+    @gpu_patches
     def test_gpu_time_ms_per_gpu_cache_clear(self, benchmarker, *args):
         buffer = torch.empty(
             int(self.L2_cache_size // 4), dtype=torch.int, device="cuda"
@@ -559,7 +561,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
             rtol=0.25,
         )
 
-    @patches
+    @gpu_patches
     def test_gpu_time_ms_per_gpu_clock_cycle(self, benchmarker, *args):
         gpu_clock_cycles_to_sleep = int(
             100 / benchmarker.gpu_time_ms_per_gpu_clock_cycle

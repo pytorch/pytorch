@@ -3897,7 +3897,7 @@ class ChoiceCaller:
             return benchmarker.lazy_benchmark(
                 algo, args, {"out": out}, pruning_key="max-autotune-gemm"
             )
-        
+
         return benchmarker.benchmark(algo, args, {"out": out})
 
     def call_name(self) -> str:

@@ -1070,17 +1070,18 @@ class trace:
     log_autotuning_results: bool = False
 
 
+def get_config_value(name: str) -> Optional[bool]:
+    value = os.environ.get(name, None)
+    if value is None:
+        return None
+    return value == "1"
+
+
 # configs for the benchmarking module:
 # 0: Force disable
 # 1: Force enable
 # None: Enable in OSS (expect for fallbacks), JK-based for internal
 class benchmarking:
-    def get_config_value(name: str) -> Optional[bool]:
-        value = os.environ.get(name, None)
-        if value is None:
-            return None
-        return value == "1"
-
     # emergency fallback to original implementation of benchmarking
     fallback_to_original_benchmarking: Optional[bool] = get_config_value(
         "TORCHINDUCTOR_FALLBACK_TO_ORIGINAL_BENCHMARKING"

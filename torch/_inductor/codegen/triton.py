@@ -3068,13 +3068,17 @@ class TritonScheduling(SIMDScheduling):
         else:
             # We have to clone the inplace updated arguments to avoid earlier calls
             # generating out of range indices for later calls.
-            kernel_callable = lambda: call(wrapped_jit_function.clone_args(*args)[0])
+            kernel_callable = lambda: call(  # noqa: E731
+                wrapped_jit_function.clone_args(*args)[0]
+            )
 
             # overhead of cloning args gives bias for fusing the kernel
             # in the case of mutating/in-placeable second fusion
             # TODO - would be better as a hook in triton do_bench that reset
             # the input values between benchmarking
-            overhead_callable = lambda: wrapped_jit_function.clone_args(*args)
+            overhead_callable = lambda: wrapped_jit_function.clone_args(  # noqa: E731
+                *args
+            )
 
             kernel_timing_ms, overhead_timing_ms = benchmarker.benchmark_many_gpu(
                 [kernel_callable, overhead_callable]
