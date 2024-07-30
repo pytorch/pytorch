@@ -1577,11 +1577,34 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
   return retrieveDesyncReport(store_, "NCCL", rank_, size_);
 }
 
+// We want to have both PG ID and PG name for the logging prefix.
+// The reason why we have this two is because PG ID records how many
+// ProcessGroupNCCL objects were created on a specific rank and this
+// is useful for folks to know how many NCCL-PGs created on a certain
+// rank and what parallelism which PG might belong to in debugging.
+// while PG name (or group name) is set in `setGroupName` by the passed in
+// `group_name` in `ProcessGroupNCCL::Options`.
+// The `group_name` is created in `_process_group_name` it will either be
+// a hash of all the ranks in the group or a counter of how many times
+// `_process_group_name` is called, essentially it means how many times we
+// have initialized PG in python layer. Before using split_group, even if
+// we are creating a new sub-PG, all ranks have to call the API at the same
+// time, and this makes `group_name` a unique identifier for a group (PG)
+// which makes it useful for debugging as well.
 std::string ProcessGroupNCCL::createLogPrefix() const {
   if (!pg_desc_.empty() && pg_desc_ != "undefined") {
-    return c10::str("[PG ", uid_, " (", pg_desc_, ") Rank ", rank_, "] ");
+    return c10::str(
+        "[PG ID ",
+        uid_,
+        "PG Name ",
+        pg_name_,
+        "(",
+        pg_desc_,
+        ") Rank ",
+        rank_,
+        "] ");
   }
-  return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
+  return c10::str("[PG ID ", uid_, "PG Name ", pg_name_, " Rank ", rank_, "] ");
 }
 
 const std::string& ProcessGroupNCCL::logPrefix() const {
@@ -4485,3 +4508,4 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
+   
