@@ -711,7 +711,6 @@ def sample_inputs_equal(op, device, dtype, requires_grad, **kwargs):
             yield SampleInput(lhs, args=(lhs.clone().detach_(),))
 
 
-
 def sample_inputs_jiterator(op, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -4443,14 +4442,32 @@ def sample_inputs_safe_softmax(opinfo, device, dtype, requires_grad, **kwargs):
         # Edge case: tensor with one dimension of size 1
         generate_input_from_mask((1, 5, 5), dim=1),
         # Testing with all elements masked
-        SampleInput(with_requires_grad(make_arg((3, 3)) + convert_to_float_mask(torch.zeros((3, 3), dtype=torch.bool, device=device))),
-                    kwargs={'dim': 1}),
+        SampleInput(
+            with_requires_grad(
+                make_arg((3, 3))
+                + convert_to_float_mask(
+                    torch.zeros((3, 3), dtype=torch.bool, device=device)
+                )
+            ),
+            kwargs={"dim": 1},
+        ),
         # Testing with no elements masked
-        SampleInput(with_requires_grad(make_arg((3, 3)) + convert_to_float_mask(torch.ones((3, 3), dtype=torch.bool, device=device))),
-                    kwargs={'dim': 1}),
+        SampleInput(
+            with_requires_grad(
+                make_arg((3, 3))
+                + convert_to_float_mask(
+                    torch.ones((3, 3), dtype=torch.bool, device=device)
+                )
+            ),
+            kwargs={"dim": 1},
+        ),
         # Testing with two rows masked
-        SampleInput(with_requires_grad(make_arg((6, 3)) + convert_to_float_mask(mask_two_rows(6, 3))),
-                    kwargs={'dim': 1}),
+        SampleInput(
+            with_requires_grad(
+                make_arg((6, 3)) + convert_to_float_mask(mask_two_rows(6, 3))
+            ),
+            kwargs={"dim": 1},
+        ),
     ]
     yield from samples
 
