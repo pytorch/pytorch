@@ -5367,6 +5367,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
     
     # https://github.com/pytorch/pytorch/issues/131019
     def test_tensor_uniform(self):
+        # added test
         def uniform_op(tensor, params):
             res = tensor.uniform_(**params)
             return res
