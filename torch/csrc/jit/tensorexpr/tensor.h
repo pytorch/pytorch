@@ -158,8 +158,8 @@ Tensor Reduce(
   // copy
   if (reduce_vars.empty()) {
     ExprHandle body = Reducer::getReduceBody(body_func, vars);
-    BufHandle func_result = Buf::make(
-        func_name, dims, body.dtype(), std::nullopt, strides);
+    BufHandle func_result =
+        Buf::make(func_name, dims, body.dtype(), std::nullopt, strides);
     return Tensor(std::move(func_result), vars, std::move(body));
   }
 

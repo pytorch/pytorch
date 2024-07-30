@@ -40,7 +40,10 @@ class ScopedVarName {
     mapping->insert(std::make_pair(var, name));
   }
 
-  ScopedVarName(UniqueNameManager* manager, const VarPtr& var, const std::string& name)
+  ScopedVarName(
+      UniqueNameManager* manager,
+      const VarPtr& var,
+      const std::string& name)
       : ScopedVarName(&manager->unique_name_mapping_, var, name) {}
 
   ScopedVarName(const ScopedVarName&) = delete;

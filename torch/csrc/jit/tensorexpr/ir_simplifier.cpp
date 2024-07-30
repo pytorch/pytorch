@@ -100,15 +100,18 @@ void Term::sort() {
     throw std::logic_error("reordering FP ops");
   }
   std::unordered_map<ExprPtr, std::string> str_repr_cache;
-  std::sort(variables_.begin(), variables_.end(), [&](const ExprPtr& a, const ExprPtr& b) {
-    if (!str_repr_cache.count(a)) {
-      str_repr_cache[a] = std::to_string(a);
-    }
-    if (!str_repr_cache.count(b)) {
-      str_repr_cache[b] = std::to_string(b);
-    }
-    return str_repr_cache.at(a) < str_repr_cache.at(b);
-  });
+  std::sort(
+      variables_.begin(),
+      variables_.end(),
+      [&](const ExprPtr& a, const ExprPtr& b) {
+        if (!str_repr_cache.count(a)) {
+          str_repr_cache[a] = std::to_string(a);
+        }
+        if (!str_repr_cache.count(b)) {
+          str_repr_cache[b] = std::to_string(b);
+        }
+        return str_repr_cache.at(a) < str_repr_cache.at(b);
+      });
 }
 
 SimplifierHashType Polynomial::hashVars() const {
@@ -124,61 +127,80 @@ void Polynomial::sort() {
     throw std::logic_error("reordering FP ops");
   }
   std::unordered_map<ExprPtr, std::string> str_repr_cache;
-  std::sort(variables_.begin(), variables_.end(), [&](const ExprPtr& a, const ExprPtr& b) {
-    if (!str_repr_cache.count(a)) {
-      str_repr_cache[a] = std::to_string(a);
-    }
-    if (!str_repr_cache.count(b)) {
-      str_repr_cache[b] = std::to_string(b);
-    }
-    return str_repr_cache.at(a) < str_repr_cache.at(b);
-  });
+  std::sort(
+      variables_.begin(),
+      variables_.end(),
+      [&](const ExprPtr& a, const ExprPtr& b) {
+        if (!str_repr_cache.count(a)) {
+          str_repr_cache[a] = std::to_string(a);
+        }
+        if (!str_repr_cache.count(b)) {
+          str_repr_cache[b] = std::to_string(b);
+        }
+        return str_repr_cache.at(a) < str_repr_cache.at(b);
+      });
 }
 
 void MaxTerm::uniquefy() {
-  std::sort(variables_.begin(), variables_.end(), [&](const ExprPtr& a, const ExprPtr& b) {
-    return hasher_.hash(a) < hasher_.hash(b);
-  });
+  std::sort(
+      variables_.begin(),
+      variables_.end(),
+      [&](const ExprPtr& a, const ExprPtr& b) {
+        return hasher_.hash(a) < hasher_.hash(b);
+      });
   auto it = std::unique(
-      variables_.begin(), variables_.end(), [&](const ExprPtr& a, const ExprPtr& b) {
+      variables_.begin(),
+      variables_.end(),
+      [&](const ExprPtr& a, const ExprPtr& b) {
         return hasher_.hash(a) == hasher_.hash(b);
       });
   variables_.resize(std::distance(variables_.begin(), it));
 
   // Once we removed duplicates, sort terms alphabetically for stability.
   std::unordered_map<ExprPtr, std::string> str_repr_cache;
-  std::sort(variables_.begin(), variables_.end(), [&](const ExprPtr& a, const ExprPtr& b) {
-    if (!str_repr_cache.count(a)) {
-      str_repr_cache[a] = std::to_string(a);
-    }
-    if (!str_repr_cache.count(b)) {
-      str_repr_cache[b] = std::to_string(b);
-    }
-    return str_repr_cache.at(a) < str_repr_cache.at(b);
-  });
+  std::sort(
+      variables_.begin(),
+      variables_.end(),
+      [&](const ExprPtr& a, const ExprPtr& b) {
+        if (!str_repr_cache.count(a)) {
+          str_repr_cache[a] = std::to_string(a);
+        }
+        if (!str_repr_cache.count(b)) {
+          str_repr_cache[b] = std::to_string(b);
+        }
+        return str_repr_cache.at(a) < str_repr_cache.at(b);
+      });
 }
 
 void MinTerm::uniquefy() {
-  std::sort(variables_.begin(), variables_.end(), [&](const ExprPtr& a, const ExprPtr& b) {
-    return hasher_.hash(a) < hasher_.hash(b);
-  });
+  std::sort(
+      variables_.begin(),
+      variables_.end(),
+      [&](const ExprPtr& a, const ExprPtr& b) {
+        return hasher_.hash(a) < hasher_.hash(b);
+      });
   auto it = std::unique(
-      variables_.begin(), variables_.end(), [&](const ExprPtr& a, const ExprPtr& b) {
+      variables_.begin(),
+      variables_.end(),
+      [&](const ExprPtr& a, const ExprPtr& b) {
         return hasher_.hash(a) == hasher_.hash(b);
       });
   variables_.resize(std::distance(variables_.begin(), it));
 
   // Once we removed duplicates, sort terms alphabetically for stability.
   std::unordered_map<ExprPtr, std::string> str_repr_cache;
-  std::sort(variables_.begin(), variables_.end(), [&](const ExprPtr& a, const ExprPtr& b) {
-    if (!str_repr_cache.count(a)) {
-      str_repr_cache[a] = std::to_string(a);
-    }
-    if (!str_repr_cache.count(b)) {
-      str_repr_cache[b] = std::to_string(b);
-    }
-    return str_repr_cache.at(a) < str_repr_cache.at(b);
-  });
+  std::sort(
+      variables_.begin(),
+      variables_.end(),
+      [&](const ExprPtr& a, const ExprPtr& b) {
+        if (!str_repr_cache.count(a)) {
+          str_repr_cache[a] = std::to_string(a);
+        }
+        if (!str_repr_cache.count(b)) {
+          str_repr_cache[b] = std::to_string(b);
+        }
+        return str_repr_cache.at(a) < str_repr_cache.at(b);
+      });
 }
 
 // Handles optimization cases for Broadcast/Ramp +/- Broadcast/Ramp
@@ -323,7 +345,9 @@ ExprPtr PolynomialTransformer::addPolynomials(
 
 // Insert a new Term into the provided polynomial. If the new term has common
 // variables to an existing term it is combined.
-ExprPtr PolynomialTransformer::insertTerm(const PolynomialPtr& poly, const TermPtr& term) {
+ExprPtr PolynomialTransformer::insertTerm(
+    const PolynomialPtr& poly,
+    const TermPtr& term) {
   SimplifierHashType tHash = term->hashVars();
   std::vector<TermPtr> newVars;
 
@@ -720,7 +744,9 @@ ExprPtr PolynomialTransformer::mutate(SubPtr v) {
 
 // Multiply two terms together, usually creating a new term with the variable
 // lists concatenated.
-TermPtr PolynomialTransformer::mulTerms(const TermPtr& lhs, const TermPtr& rhs) {
+TermPtr PolynomialTransformer::mulTerms(
+    const TermPtr& lhs,
+    const TermPtr& rhs) {
   ExprPtr scalar = evaluateOp(alloc<Mul>(lhs->scalar(), rhs->scalar()));
   if (immediateEquals(scalar, 0)) {
     return nullptr;
@@ -767,7 +793,9 @@ TermPtr PolynomialTransformer::mulTerms(const TermPtr& lhs, const TermPtr& rhs) 
 }
 
 // Multiply a Polynomial by a Term.
-ExprPtr PolynomialTransformer::polyByTerm(const PolynomialPtr& poly, const TermPtr& term) {
+ExprPtr PolynomialTransformer::polyByTerm(
+    const PolynomialPtr& poly,
+    const TermPtr& term) {
   // poly * term
   //    = (poly_terms + poly_scalar) * term
   //    = poly_terms * term + poly_scalar * term
@@ -803,7 +831,9 @@ ExprPtr PolynomialTransformer::polyByTerm(const PolynomialPtr& poly, const TermP
 
 // Does multiplying these two expressions make a Rounding Off operation.
 // e.g. LHS = (x/y),  RHS = y => (x / y) * y => RoundOff(x, y).
-ExprPtr PolynomialTransformer::isRoundOff(const ExprPtr& lhs, const ExprPtr& rhs) {
+ExprPtr PolynomialTransformer::isRoundOff(
+    const ExprPtr& lhs,
+    const ExprPtr& rhs) {
   DivPtr div{nullptr};
   ExprPtr other{nullptr};
 
@@ -846,7 +876,9 @@ ExprPtr PolynomialTransformer::isRoundOff(const ExprPtr& lhs, const ExprPtr& rhs
 }
 
 // Inserts a new component into a term, looking for opportunities to simplify.
-ExprPtr PolynomialTransformer::insertIntoTerm(const TermPtr& term, const ExprPtr& expr) {
+ExprPtr PolynomialTransformer::insertIntoTerm(
+    const TermPtr& term,
+    const ExprPtr& expr) {
   std::vector<ExprPtr> vars;
 
   // Search for RoundOffs.
@@ -1593,7 +1625,9 @@ StmtPtr PolynomialBase::mutate(CondPtr v) {
   return v;
 }
 
-static StmtPtr handleForCondReordering(const ForPtr& loop, const CondPtr& cond) {
+static StmtPtr handleForCondReordering(
+    const ForPtr& loop,
+    const CondPtr& cond) {
   if (cond->false_stmt()) {
     return nullptr;
   }

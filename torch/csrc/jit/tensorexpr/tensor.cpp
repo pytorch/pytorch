@@ -4,8 +4,6 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
-#include <utility>
-
 namespace torch::jit::tensorexpr {
 
 StmtPtr Tensor::constructStmt(
@@ -105,8 +103,7 @@ Tensor Compute(
     const std::function<ExprHandle(const std::vector<VarHandle>&)>& body_func) {
   std::vector<VarHandle> args = create_index_vars(dims);
   ExprHandle body = body_func(args);
-  BufHandle buf =
-      Buf::make(name, dims, body.dtype(), std::nullopt, strides);
+  BufHandle buf = Buf::make(name, dims, body.dtype(), std::nullopt, strides);
   return Tensor(buf, args, body);
 }
 Tensor Compute(
@@ -127,8 +124,7 @@ Tensor Compute(
 
   std::vector<VarHandle> args = create_index_vars(dims);
   ExprHandle body = body_func(args[0]);
-  BufHandle buf =
-      Buf::make(name, dims, body.dtype(), std::nullopt, strides);
+  BufHandle buf = Buf::make(name, dims, body.dtype(), std::nullopt, strides);
   return Tensor(buf, args, body);
 }
 Tensor Compute(
@@ -149,8 +145,7 @@ Tensor Compute(
   }
   std::vector<VarHandle> args = create_index_vars(dims);
   ExprHandle body = body_func(args[0], args[1]);
-  BufHandle buf =
-      Buf::make(name, dims, body.dtype(), std::nullopt, strides);
+  BufHandle buf = Buf::make(name, dims, body.dtype(), std::nullopt, strides);
   return Tensor(buf, args, body);
 }
 Tensor Compute(
@@ -173,8 +168,7 @@ Tensor Compute(
   }
   std::vector<VarHandle> args = create_index_vars(dims);
   ExprHandle body = body_func(args[0], args[1], args[2]);
-  BufHandle buf =
-      Buf::make(name, dims, body.dtype(), std::nullopt, strides);
+  BufHandle buf = Buf::make(name, dims, body.dtype(), std::nullopt, strides);
   return Tensor(buf, args, body);
 }
 Tensor Compute(
@@ -200,8 +194,7 @@ Tensor Compute(
   }
   std::vector<VarHandle> args = create_index_vars(dims);
   ExprHandle body = body_func(args[0], args[1], args[2], args[3]);
-  BufHandle buf =
-      Buf::make(name, dims, body.dtype(), std::nullopt, strides);
+  BufHandle buf = Buf::make(name, dims, body.dtype(), std::nullopt, strides);
   return Tensor(buf, args, body);
 }
 Tensor Compute(
@@ -260,8 +253,7 @@ Tensor Reduce(
     const Reducer& reducer,
     const Tensor& tensor,
     const std::vector<ExprHandle>& reduce_dims) {
-  return Reduce(
-      name, dims, std::nullopt, reducer, tensor, reduce_dims);
+  return Reduce(name, dims, std::nullopt, reducer, tensor, reduce_dims);
 }
 
 } // namespace torch::jit::tensorexpr
