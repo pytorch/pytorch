@@ -70,4 +70,7 @@ The torch.special module, modeled after SciPy's [special](https://docs.scipy.org
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta
+.. autofunction:: beta
+.. autofunction:: betaln
+.. autofunction:: betainc
 ```
