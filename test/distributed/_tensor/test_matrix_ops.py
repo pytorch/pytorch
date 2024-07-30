@@ -6,7 +6,7 @@ from typing import cast, List, Optional
 
 import torch
 import torch.nn.functional as F
-from torch.distributed._tensor import DeviceMesh, distribute_tensor
+from torch.distributed._tensor import distribute_tensor
 from torch.distributed._tensor.api import DTensor
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import (
@@ -15,6 +15,7 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -338,6 +339,45 @@ class DistMatrixOpsTest(DTensorTestBase):
                     self.assertTrue(dist_value.grad.placements[0].is_shard(dim=1))
                     self.assertEqual(dist_value.grad.full_tensor(), value.grad)
 
+    @property
+    def world_size(self):
+        return 4
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_tensordot(self):
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        local_a = torch.randn(3, 5, 4, 6)
+        local_b = torch.randn(6, 4, 5, 3)
+        dims = ([2, 1, 3], [1, 2, 0])
+        local_result = torch.tensordot(local_a, local_b, dims=dims)
+
+        # No sharding. Simply replicate the tensor on each rank.
+        dist_a = distribute_tensor(local_a, device_mesh, [Replicate()])
+        dist_b = distribute_tensor(local_b, device_mesh, [Replicate()])
+        dist_result = torch.tensordot(dist_a, dist_b, dims=dims)
+        self.assertEqual(local_result, dist_result.to_local())
+
+        # LHS shards on tensor dim 0.
+        dist_a = distribute_tensor(local_a, device_mesh, [Shard(0)])
+        dist_b = distribute_tensor(local_b, device_mesh, [Replicate()])
+        dist_result = torch.tensordot(dist_a, dist_b, dims=dims)
+        self.assertEqual(local_result, dist_result.to_local())
+
+        # RHS shards on tensor dim 1.
+        dist_a = distribute_tensor(local_a, device_mesh, [Replicate()])
+        dist_b = distribute_tensor(local_b, device_mesh, [Shard(1)])
+        dist_result = torch.tensordot(dist_a, dist_b, dims=dims)
+        dist_result_full = dist_result.full_tensor()
+        self.assertEqual(local_result, dist_result_full)
+
+        # LHS shards on tensor dim 0, RHS shards on tensor dim 1.
+        dist_a = distribute_tensor(local_a, device_mesh, [Shard(0)])
+        dist_b = distribute_tensor(local_b, device_mesh, [Shard(1)])
+        dist_result = torch.tensordot(dist_a, dist_b, dims=dims)
+        dist_result_full = dist_result.full_tensor()
+        self.assertEqual(local_result, dist_result_full)
 
 if __name__ == "__main__":
     run_tests()
