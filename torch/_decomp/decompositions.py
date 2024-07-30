@@ -421,31 +421,14 @@ def mse_loss_backward(
 
 
 @register_decomposition(aten._safe_softmax)
-def _safe_softmax(self, mask, dim, dtype=None):
-    # Helper function to convert boolean attention mask
-    def convert_boolean_attn_mask(attn_mask, dtype):
-        return torch.where(
-            torch.logical_not(attn_mask),
-            torch.tensor(-float("inf"), dtype=dtype, device=attn_mask.device),
-            torch.tensor(0.0, dtype=dtype, device=attn_mask.device),
-        )
-
+def _safe_softmax(self, dim, dtype=None):
     torch._check(
         self.is_floating_point(),
         lambda: f"Expected softmax matrix to be floating point, but got {self.dtype}",
     )
-    torch._check(
-        mask.dtype == torch.bool,
-        lambda: f"Expected mask to be boolean, but got {mask.dtype}",
-    )
-    # Convert boolean attention mask to float mask
-    attn_mask_float = convert_boolean_attn_mask(mask, self.dtype)
-    # Apply softmax with the mask
-    out = torch.softmax(self + attn_mask_float, dim, dtype)
-    # Create a scalar tensor with same dtype and device as output
-    zero_tensor = torch.tensor(0.0, dtype=out.dtype, device=out.device)
-    # Apply the mask to the output
-    return torch.where(torch.logical_not(mask), zero_tensor, out)
+    out = torch.softmax(self, dim, dtype)
+    out = torch.nan_to_num(out)
+    return out
 
 
 @register_decomposition(aten.smooth_l1_loss)
