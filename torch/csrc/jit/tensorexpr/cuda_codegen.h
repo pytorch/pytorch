@@ -192,15 +192,14 @@ class CudaPrinter : public IRPrinter {
   VarPtr rand_func_;
   const CudaAnalysis* cuda_analysis_;
 
-  void print_flat_alloc(AllocatePtr alloc);
+  void print_flat_alloc(const AllocatePtr& alloc);
 };
 
-// Construct Cuda C from the buffer and tensor input, and invoke the kernel
-// when real arguments are provided.
+// Construct Cuda C from the buffer and tensor input, and invoke the
+// kernel when real arguments are provided.
 class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
  public:
   template <typename... Ts>
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CudaCodeGen(StmtPtr stmt, Ts... ts)
       : CodeGen(
             stmt,
@@ -272,7 +271,7 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
   std::unique_ptr<GPUMetaVarRewriter> metavar_rewriter_;
   std::unordered_set<std::string> taken_func_names;
   std::mutex eval_lock_;
-  CUfunction function_;
+  CUfunction function_{nullptr};
   bool has_random_ = false;
   int thread_block_size_ = -1;
 

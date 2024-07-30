@@ -48,9 +48,9 @@ class TORCH_API Reducer {
       const std::vector<VarPtr>& inner) const;
 
   ExprHandle operator()(
-      BufHandle result_buf,
+      const BufHandle& result_buf,
       BufHandle acc_buf,
-      ExprHandle body,
+      const ExprHandle& body,
       const std::vector<ExprHandle>& output,
       const std::vector<VarHandle>& inner) const;
 
@@ -171,12 +171,12 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
 
   static ExprHandle make(
       ExprHandle body,
-      std::vector<VarHandle> reduce_args,
+      const std::vector<VarHandle>& reduce_args,
       const Reducer& reducer);
 
   static ExprHandle make(
       ExprHandle body,
-      std::vector<VarHandle> reduce_args,
+      const std::vector<VarHandle>& reduce_args,
       BufHandle result_buf,
       BufHandle acc_buf,
       ExprHandle ri_operand,
@@ -283,15 +283,15 @@ class Minimum : public Reducer {
       : Reducer(
             maximumVal(dtype.scalar_type()),
             [](ExprHandle a, ExprHandle b) { return Min::make(a, b, true); }) {}
-  Minimum(ExprHandle initializer)
-      : Reducer(initializer, [](ExprHandle a, ExprHandle b) {
+  Minimum(const ExprHandle& initializer)
+      : Reducer(initializer, [](const ExprHandle& a, const ExprHandle& b) {
           return Min::make(a, b, true);
         }) {}
 };
 
 class ReductionExpander : public IRMutator {
  public:
-  StmtPtr expand(StmtPtr s) {
+  StmtPtr expand(const StmtPtr& s) {
     return s->accept_mutator(this);
   }
 

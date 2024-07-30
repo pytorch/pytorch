@@ -14,7 +14,6 @@ inline ExprPtr newBinaryOpOfType(
     ExprPtr rhs,
     bool option) {
   switch (expr_type) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
     case IRNodeType::kAdd:
       return alloc<Add>(lhs, rhs);
     case IRNodeType::kSub:
@@ -82,7 +81,7 @@ T gcd(T a, T b) {
 
 // Helper for determining if an Expr is a multi-lane primitive (e.g. Broadcast
 // or Ramp).
-static bool isMultilanePrimitive(ExprPtr e) {
+static bool isMultilanePrimitive(const ExprPtr& e) {
   return to<Broadcast>(e) || to<Ramp>(e);
 }
 
@@ -565,14 +564,12 @@ ExprPtr PolynomialTransformer::mutate(SubPtr v) {
   // Multilane folding.
   if (isMultilanePrimitive(lhs_new)) {
     if (auto ret = combineMultilane<Sub>(lhs_new, rhs_new)) {
-      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       return ret->accept_mutator(this);
     }
   }
 
   if (rhs_new->isConstant() && immediateEquals(rhs_new, 0)) {
     auto c = alloc<Cast>(v->dtype(), lhs_new);
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return c->accept_mutator(this);
   }
 
@@ -886,7 +883,6 @@ ExprPtr PolynomialTransformer::mutate(MulPtr v) {
   // Multilane folding.
   if (isMultilanePrimitive(lhs_new)) {
     if (auto ret = mulMultilane(lhs_new, rhs_new)) {
-      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       return ret->accept_mutator(this);
     }
   }
@@ -906,7 +902,6 @@ ExprPtr PolynomialTransformer::mutate(MulPtr v) {
   // it's Nan/Inf.
   if (scalar && immediateEquals(scalar, 1)) {
     auto c = alloc<Cast>(v->dtype(), variable);
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return c->accept_mutator(this);
   }
 
@@ -1070,7 +1065,6 @@ ExprPtr PolynomialTransformer::mutate(DivPtr v) {
 
   // If the numerator is zero, so is the result.
   if (lhs_new->isConstant() && immediateEquals(lhs_new, 0)) {
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return lhs_new;
   }
 
@@ -1086,7 +1080,6 @@ ExprPtr PolynomialTransformer::mutate(DivPtr v) {
   // }
 
   if (auto ret = factorizeDivision(lhs_new, rhs_new)) {
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return ret->accept_mutator(this);
   }
 
@@ -1104,13 +1097,11 @@ ExprPtr PolynomialTransformer::mutate(ModPtr v) {
 
   // 0 % x => 0.
   if (lhs_new->isConstant() && immediateEquals(lhs_new, 0)) {
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return lhs_new;
   }
 
   // x % 1 == 0.
   if (rhs_new->isConstant() && immediateEquals(rhs_new, 1)) {
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return immLike(v, 0);
   }
 
@@ -1221,7 +1212,6 @@ ExprPtr combineMinMaxTerms(
       scalar = opterm->scalar();
       variables = opterm->variables();
     }
-    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     if (expr->isConstant()) {
       scalar = combine_scalars(scalar, expr);
     } else {
@@ -1301,7 +1291,6 @@ bool simplifyNestedMinMax(
           rhs_opterm->variables().size() == 2) {
         auto rhs_v1 = rhs_opterm->variables()[0];
         auto rhs_v2 = rhs_opterm->variables()[1];
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         ExprPtr new_op_lhs;
         if (isOperandInMinMaxTerm<OtherOpTerm>(
                 lhs_opterm, rhs_v1, hasher, &new_op_lhs)) {
@@ -1347,7 +1336,6 @@ ExprPtr PolynomialTransformer::mutate(MaxPtr v) {
   }
 
   // Max(Min(x, y), Min(x, z)) => Min(x, Max(y, z))
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ExprPtr new_op;
   if (simplifyNestedMinMax<MaxTerm, MinTerm>(
           lhs_new, rhs_new, v->propagate_nans(), hasher_, &new_op)) {
@@ -1378,7 +1366,6 @@ ExprPtr PolynomialTransformer::mutate(MinPtr v) {
   }
 
   // Min(Max(x, y), Max(x, z)) => Max(x, Min(y, z))
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ExprPtr new_op;
   if (simplifyNestedMinMax<MinTerm, MaxTerm>(
           lhs_new, rhs_new, v->propagate_nans(), hasher_, &new_op)) {
@@ -1425,14 +1412,12 @@ ExprPtr PolynomialTransformer::mutate(CompareSelectPtr v) {
   ExprPtr diff = alloc<Sub>(rhs_new, lhs_new);
   diff = diff->accept_mutator(this);
 
-  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   if (!diff->isConstant()) {
     return alloc<CompareSelect>(
         lhs_new,
         rhs_new,
         true_branch,
         false_branch,
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         v->compare_select_op(),
         v->bias());
   }
@@ -1576,10 +1561,8 @@ StmtPtr PolynomialBase::mutate(CondPtr v) {
   // If the condition is constant then we can choose the right branch now.
   if (cond_new->isConstant()) {
     if (!immediateEquals(cond_new, 0)) {
-      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       return true_new;
     } else {
-      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       return false_new;
     }
   }
@@ -1910,7 +1893,6 @@ static std::optional<class ModRound> isModRound(TermPtr e) {
   multiplier = IRSimplifier::simplify(multiplier);
 
   if (!mod) {
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return std::nullopt;
   }
 
@@ -1950,7 +1932,6 @@ static std::optional<class ModRound> isModRound(TermPtr e) {
         // divisor=multiplier=2, denom=t/7.
         ExprPtr c = evaluateOp(alloc<Div>(divisor, multiplier));
         divisor = multiplier;
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         denom = IRSimplifier::simplify(alloc<Div>(other, c));
       } else {
         return std::nullopt;
@@ -1997,7 +1978,6 @@ static ExprPtr simplifyRoundModPattern(PolynomialPtr poly) {
 
     if (to<RoundOff>(e)) {
       rounds.push_back(c);
-      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     } else if (e->expr_type() == IRNodeType::kMod) {
       if (auto a = isModRound(c)) {
         mod_rounds.push_back(c);

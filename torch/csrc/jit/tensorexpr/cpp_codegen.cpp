@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/cpp_codegen.h>
@@ -47,75 +48,75 @@ CppPrinter::CppPrinter(std::ostream* os) : IRPrinter(*os), lane_(0) {}
 CppPrinter::~CppPrinter() = default;
 
 void CppPrinter::printPrologue() {
-  os() << "#include <cassert>" << std::endl;
-  os() << "#include <cmath>" << std::endl;
-  os() << "#include <algorithm>" << std::endl;
-  os() << "#include <type_traits>" << std::endl;
-  os() << std::endl;
+  os() << "#include <cassert>" << '\n';
+  os() << "#include <cmath>" << '\n';
+  os() << "#include <algorithm>" << '\n';
+  os() << "#include <type_traits>" << '\n';
+  os() << '\n';
 
-  os() << "#define POS_INFINITY INFINITY" << std::endl;
-  os() << "#define NEG_INFINITY -INFINITY" << std::endl;
-  os() << std::endl;
+  os() << "#define POS_INFINITY INFINITY" << '\n';
+  os() << "#define NEG_INFINITY -INFINITY" << '\n';
+  os() << '\n';
 
-  os() << cpp_intrinsics_definition << std::endl;
-  os() << std::endl;
+  os() << cpp_intrinsics_definition << '\n';
+  os() << '\n';
 
-  os() << "namespace torch {" << std::endl;
-  os() << "namespace jit {" << std::endl;
-  os() << "namespace tensorexpr {" << std::endl;
+  os() << "namespace torch {" << '\n';
+  os() << "namespace jit {" << '\n';
+  os() << "namespace tensorexpr {" << '\n';
   for (auto const& it : getNNCFunctionRegistry()) {
-    os() << declareExternalFunction(it.first) << std::endl;
+    os() << declareExternalFunction(it.first) << '\n';
   }
-  os() << "} // namespace tensorexpr" << std::endl;
-  os() << "} // namespace jit" << std::endl;
-  os() << "} // namespace torch" << std::endl;
-  os() << std::endl;
+  os() << "} // namespace tensorexpr" << '\n';
+  os() << "} // namespace jit" << '\n';
+  os() << "} // namespace torch" << '\n';
+  os() << '\n';
 
-  os() << "using namespace torch::jit::tensorexpr;" << std::endl;
-  os() << std::endl;
+  os() << "using namespace torch::jit::tensorexpr;" << '\n';
+  os() << '\n';
 }
 
 template <typename T>
-inline typename std::enable_if<!std::is_floating_point<T>::value, void>::type
-visit_mod(std::ostream& os, const ExprPtr lhs, const ExprPtr rhs) {
+inline std::enable_if_t<!std::is_floating_point_v<T>, void> visit_mod(
+    std::ostream& os,
+    const ExprPtr lhs,
+    const ExprPtr rhs) {
   os << *lhs << " % " << *rhs;
 }
 
 template <typename T>
-inline typename std::enable_if<std::is_floating_point<T>::value, void>::type
-visit_mod(std::ostream& os, const ExprPtr lhs, const ExprPtr rhs) {
+inline std::enable_if_t<std::is_floating_point_v<T>, void> visit_mod(
+    std::ostream& os,
+    const ExprPtr lhs,
+    const ExprPtr rhs) {
   os << "std::fmod(" << *lhs << ", " << *rhs << ")";
 }
 
 template <typename T>
-inline typename std::enable_if<
-    std::is_floating_point<T>::value || std::is_integral<T>::value,
-    void>::type
-visit_max(std::ostream& os, const ExprPtr lhs, const ExprPtr rhs) {
+inline std::
+    enable_if_t<std::is_floating_point_v<T> || std::is_integral_v<T>, void>
+    visit_max(std::ostream& os, const ExprPtr lhs, const ExprPtr rhs) {
   os << "std::max(" << *lhs << ", " << *rhs << ")";
 }
 
 template <typename T>
-inline typename std::enable_if<
-    !std::is_floating_point<T>::value && !std::is_integral<T>::value,
-    void>::type
-visit_max(std::ostream& os, const ExprPtr lhs, const ExprPtr rhs) {
+inline std::
+    enable_if_t<!std::is_floating_point_v<T> && !std::is_integral_v<T>, void>
+    visit_max(std::ostream& os, const ExprPtr lhs, const ExprPtr rhs) {
   os << "(" << *lhs << " < " << *rhs << ") ? " << *rhs << " : " << *lhs;
 }
 
 template <typename T>
-inline typename std::enable_if<
-    std::is_floating_point<T>::value || std::is_integral<T>::value,
-    void>::type
-visit_min(std::ostream& os, const ExprPtr lhs, const ExprPtr rhs) {
+inline std::
+    enable_if_t<std::is_floating_point_v<T> || std::is_integral_v<T>, void>
+    visit_min(std::ostream& os, const ExprPtr lhs, const ExprPtr rhs) {
   os << "std::min(" << *lhs << ", " << *rhs << ")";
 }
 
 template <typename T>
-inline typename std::enable_if<
-    !std::is_floating_point<T>::value && !std::is_integral<T>::value,
-    void>::type
-visit_min(std::ostream& os, const ExprPtr lhs, const ExprPtr rhs) {
+inline std::
+    enable_if_t<!std::is_floating_point_v<T> && !std::is_integral_v<T>, void>
+    visit_min(std::ostream& os, const ExprPtr lhs, const ExprPtr rhs) {
   os << *lhs << " < " << *rhs << " ? " << *lhs << " : " << *rhs;
 }
 
@@ -199,12 +200,12 @@ void CppPrinter::visit(AllocatePtr v) {
   emitIndent();
   os() << v->dtype().ToCppString() << "* " << (*v->buffer_var())
        << " = static_cast<" << v->dtype().ToCppString() << "*>(malloc(" << size
-       << "));" << std::endl;
+       << "));" << '\n';
 }
 
 void CppPrinter::visit(FreePtr v) {
   emitIndent();
-  os() << "free(" << *v->buffer_var() << ");" << std::endl;
+  os() << "free(" << *v->buffer_var() << ");" << '\n';
 }
 
 void CppPrinter::visit(LoadPtr v) {
@@ -221,7 +222,7 @@ void CppPrinter::visit(StorePtr v) {
     lane_ = lane;
     emitIndent();
     os() << *v->base_handle() << "[" << *flat_idx << "] = " << *v->value()
-         << ";" << std::endl;
+         << ";" << '\n';
   }
 }
 
@@ -271,22 +272,22 @@ void CppPrinter::visit(ExternalCallPtr v) {
   };
 
   emitIndent();
-  os() << "{" << std::endl;
+  os() << "{" << '\n';
   indent_++;
 
   emitIndent();
   os() << "void* buf_ptrs[]{";
-  for_buf([&](const BufPtr b) { os() << *b->base_handle(); });
-  os() << "};" << std::endl;
+  for_buf([&](const BufPtr& b) { os() << *b->base_handle(); });
+  os() << "};" << '\n';
 
   emitIndent();
   os() << "int64_t buf_ranks[]{";
-  for_buf([&](const BufPtr b) { os() << b->ndim(); });
-  os() << "};" << std::endl;
+  for_buf([&](const BufPtr& b) { os() << b->ndim(); });
+  os() << "};" << '\n';
 
   emitIndent();
   os() << "int64_t buf_dims[]{";
-  for_buf([&](const BufPtr buf) {
+  for_buf([&](const BufPtr& buf) {
     for (size_t i = 0; i < buf->ndim(); i++) {
       if (i > 0) {
         os() << ", ";
@@ -294,14 +295,14 @@ void CppPrinter::visit(ExternalCallPtr v) {
       os() << *buf->dim(i);
     }
   });
-  os() << "};" << std::endl;
+  os() << "};" << '\n';
 
   emitIndent();
   os() << "int8_t buf_dtypes[]{";
-  for_buf([&](const BufPtr buf) {
+  for_buf([&](const BufPtr& buf) {
     os() << static_cast<int>(buf->dtype().scalar_type());
   });
-  os() << "};" << std::endl;
+  os() << "};" << '\n';
 
   emitIndent();
   os() << "int64_t extra_args[]{";
@@ -311,35 +312,35 @@ void CppPrinter::visit(ExternalCallPtr v) {
     }
     os() << *v->args()[i];
   }
-  os() << "};" << std::endl;
+  os() << "};" << '\n';
 
   emitIndent();
-  os() << v->func_name() << "(" << std::endl;
+  os() << v->func_name() << "(" << '\n';
   emitIndent();
-  os() << "    " << bufs.size() << "," << std::endl;
+  os() << "    " << bufs.size() << "," << '\n';
   emitIndent();
-  os() << "    buf_ptrs," << std::endl;
+  os() << "    buf_ptrs," << '\n';
   emitIndent();
-  os() << "    buf_ranks," << std::endl;
+  os() << "    buf_ranks," << '\n';
   emitIndent();
-  os() << "    buf_dims," << std::endl;
+  os() << "    buf_dims," << '\n';
   emitIndent();
-  os() << "    buf_dtypes," << std::endl;
+  os() << "    buf_dtypes," << '\n';
   emitIndent();
-  os() << "    " << v->args().size() << "," << std::endl;
+  os() << "    " << v->args().size() << "," << '\n';
   emitIndent();
-  os() << "    extra_args);" << std::endl;
+  os() << "    extra_args);" << '\n';
 
   indent_--;
   emitIndent();
-  os() << "}" << std::endl;
+  os() << "}" << '\n';
 }
 
 void CppPrinter::visit(LetPtr v) {
   if (v->var()->dtype().lanes() == 1) {
     emitIndent();
     os() << v->var()->dtype().ToCppString() << " " << *v->var() << " = "
-         << *v->value() << ";" << std::endl;
+         << *v->value() << ";" << '\n';
   } else {
     vector_vars_[v->var()] = v->value();
   }
@@ -358,7 +359,7 @@ CppCodeGen::CppCodeGen(
     const std::vector<BufferArg>& buffer_args,
     at::Device device,
     const std::string& kernel_func_name)
-    : CodeGen(stmt, buffer_args, device, kernel_func_name) {
+    : CodeGen(std::move(stmt), buffer_args, device, kernel_func_name) {
   init();
 }
 
@@ -382,7 +383,7 @@ void CppCodeGen::init() {
   }
   os() << ")";
   stmt()->accept(printer_.get());
-  os() << std::endl;
+  os() << '\n';
 }
 
 CppCodeGen::~CppCodeGen() = default;
@@ -390,13 +391,13 @@ CppCodeGen::~CppCodeGen() = default;
 void CppCodeGen::call(const std::vector<CallArg>& args) {
   // TODO: compile the generated C++ kernel into a library,
   // and call the library here.
-  os() << "int main() {}" << std::endl;
+  os() << "int main() {}" << '\n';
 }
 
 void CppCodeGen::call_raw(const std::vector<void*>& args) {
   // TODO: compile the generated C++ kernel into a library,
   // and call the library here.
-  os() << "int main() {}" << std::endl;
+  os() << "int main() {}" << '\n';
 }
 
 RegisterCodeGen<CppCodeGen> cpp_codegen_reg("cpp_codegen");

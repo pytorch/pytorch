@@ -208,7 +208,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
       const std::vector<ExprHandle>& dims,
       Dtype dtype,
       std::optional<ExprHandle> initializer = std::nullopt,
-      std::optional<std::vector<ExprHandle>> strides = std::nullopt,
+      const std::optional<std::vector<ExprHandle>>& strides = std::nullopt,
       std::optional<ExprHandle> qscale = std::nullopt,
       std::optional<ExprHandle> qzero = std::nullopt);
 

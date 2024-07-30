@@ -3,7 +3,6 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 
-#include <sstream>
 #include <stdexcept>
 
 // Forward declarations of types
