@@ -393,7 +393,8 @@ test_inductor_cpp_wrapper_abi_compatible() {
 DYNAMO_BENCHMARK_FLAGS=()
 
 pr_time_benchmarks() {
-  pip install cirron
+
+  pip install cirron~=0.3
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
