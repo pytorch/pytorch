@@ -216,12 +216,12 @@ class ExprEval {
   void call(const std::vector<CallArg>& call_args) {
     std::vector<CallArg> call_args_extended = call_args;
     switch (dtype_.scalar_type()) {
-#define TYPE_CASE(Type, Name)                           \
-  case ScalarType::Name: {                              \
-    std::vector<Type> ret_val_arg(1);                   \
-    call_args_extended.emplace_back(ret_val_arg);       \
-    codegen_->call(call_args_extended);                 \
-    ret_value_ = InterpValue(ret_val_arg[0]);           \
+#define TYPE_CASE(Type, Name)                     \
+  case ScalarType::Name: {                        \
+    std::vector<Type> ret_val_arg(1);             \
+    call_args_extended.emplace_back(ret_val_arg); \
+    codegen_->call(call_args_extended);           \
+    ret_value_ = InterpValue(ret_val_arg[0]);     \
   } break;
       AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
       TYPE_CASE(c10::quint8, QUInt8);

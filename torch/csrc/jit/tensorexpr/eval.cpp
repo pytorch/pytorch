@@ -24,15 +24,14 @@ int64_t InterpValue::intValue() const {
 }
 
 template <typename T>
-inline std::enable_if_t<std::is_integral_v<T>, T>mod_value(
-    T lhs,
-    T rhs) {
+inline std::enable_if_t<std::is_integral_v<T>, T> mod_value(T lhs, T rhs) {
   return lhs % rhs;
 }
 
 template <typename T>
-inline std::enable_if_t<std::is_floating_point_v<T>, T>
-mod_value(T lhs, T rhs) {
+inline std::enable_if_t<std::is_floating_point_v<T>, T> mod_value(
+    T lhs,
+    T rhs) {
   return std::fmod(lhs, rhs);
 }
 
@@ -41,16 +40,14 @@ inline bool mod_value(bool lhs, bool rhs) {
 }
 
 template <typename T>
-inline std::enable_if_t<std::is_integral_v<T>, T>div_value(
-    T lhs,
-    T rhs) {
+inline std::enable_if_t<std::is_integral_v<T>, T> div_value(T lhs, T rhs) {
   TORCH_CHECK(rhs != 0, "Division by zero");
   return lhs / rhs;
 }
 
 template <typename T>
-inline std::enable_if_t<std::is_floating_point_v<T>, T>__ubsan_ignore_float_divide_by_zero__
-    div_value(T lhs, T rhs) {
+inline std::enable_if_t<std::is_floating_point_v<T>, T>
+    __ubsan_ignore_float_divide_by_zero__ div_value(T lhs, T rhs) {
   return lhs / rhs;
 }
 
@@ -1190,10 +1187,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kAbs: {
         // internal tool complains about calling `abs` on unsigned, the
         // following makes the tool happy
-        using X =
-            std::conditional_t<std::is_unsigned_v<TInput>, int, TInput>;
-        return std::is_unsigned_v<TInput> ? v
-                                               : std::abs(static_cast<X>(v));
+        using X = std::conditional_t<std::is_unsigned_v<TInput>, int, TInput>;
+        return std::is_unsigned_v<TInput> ? v : std::abs(static_cast<X>(v));
       }
       default:
         throw std::runtime_error(
