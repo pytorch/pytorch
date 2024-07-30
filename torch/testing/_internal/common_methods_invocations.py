@@ -16959,6 +16959,19 @@ op_db: List[OpInfo] = [
            supports_varargs=True,
            sample_inputs_func=sample_inputs_permute,
            reference_inputs_func=reference_inputs_permute),
+    OpInfo('permute_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           supports_out=True,
+           assert_autodiffed=True,
+           assert_jit_shape_analysis=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_varargs=False,  # torch.permute is also not varargs
+           sample_inputs_func=sample_inputs_permute,
+           reference_inputs_func=reference_inputs_permute,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+           )),
     BinaryUfuncInfo('pow',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                     dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
@@ -23842,6 +23855,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.permute",
         torch_opinfo_name="permute",
+    ),
+    PythonRefInfo(
+        "_refs.permute_copy",
+        torch_opinfo_name="permute_copy",
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.rad2deg",

@@ -198,6 +198,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "nansum",
     "transpose",
     "permute",
+    "permute_copy",
     "squeeze",
     "unsqueeze",
     "unsqueeze_copy",

@@ -275,6 +275,7 @@ __all__ = [
     "native_group_norm",
     "native_layer_norm",
     "permute",
+    "permute_copy",
     "ravel",
     "repeat",
     "reshape",
@@ -6321,6 +6322,7 @@ expand_copy = _make_copy_from_view(aten.expand)
 # TODO: This must return a sparse tensor if the input is sparse, but refs have
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(aten.narrow)
+permute_copy = _make_copy_from_view(aten.permute)
 t_copy = _make_copy_from_view(aten.t)
 unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
 view_copy = _make_copy_from_view(aten.view)
