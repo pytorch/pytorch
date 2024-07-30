@@ -509,7 +509,10 @@ class FunctionalTensorMode(TorchDispatchMode):
         ):
             return outs_wrapped
         # for metadata mutations, need to manually mutate the metadata of the FunctionalTensor wrapper
-        if torch.Tag.inplace_view in func.tags:
+        if (
+            torch.Tag.inplace_view in func.tags
+            and func is not torch.ops.aten.set_.source_Tensor
+        ):
             with torch.utils._mode_utils.no_dispatch():
                 func(*args, **kwargs)
         # Wrapper tensor subclasses do not have correct aliasing info! Use this util to manually correct the output aliasing.
