@@ -148,10 +148,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     @pytorch_test_common.skip_dynamic_fx_test(
         "sympy operation tests don't need dynamic shape"
     )
-    @pytorch_test_common.xfail(
-        error_message="does not match expected type (tensor(float))",
-        reason=".item() returns a float64 by default. https://github.com/pytorch/pytorch/pull/131775",
-    )
     def test_sympy_operatons_return_numeric(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
