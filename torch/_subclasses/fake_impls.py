@@ -171,8 +171,9 @@ def constructors(fake_mode, func, *args, **kwargs):
     out_device = new_kwargs.pop("device", None)
     out_device = out_device if out_device is not None else default_device
     new_kwargs["device"] = torch.device("meta")
-    if "s" in new_kwargs and isinstance(new_kwargs["s"], torch.SymFloat):
-        new_kwargs["dtype"] = torch.float64
+    # to save discussions in github. will remove it before the final commit.
+    # if "s" in new_kwargs and isinstance(new_kwargs["s"], torch.SymFloat):
+    #     new_kwargs["dtype"] = torch.float64
     # _like constructors have fake tensor inputs (maybe this causes the non-like
     # to fail? hmmm)
     with in_kernel_invocation_manager(fake_mode):
