@@ -434,7 +434,7 @@ def register_multi_grad_hook(
     ],
     *,
     mode: Literal["all", "any"] = "all",
-) -> _MultiHandle:
+) -> RemovableHandle:
     r"""Register a multi-grad backward hook.
 
     There are two supported modes: ``"all"`` and ``"any"``.
