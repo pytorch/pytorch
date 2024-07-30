@@ -5763,8 +5763,6 @@ def argmax_argmin_meta(self, dim=None, keepdim=False):
 
 @register_meta(aten.scalar_tensor.default)
 def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
-    if dtype is None and isinstance(s, torch.SymFloat):
-        dtype = torch.float64
     return torch.empty(
         (), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
