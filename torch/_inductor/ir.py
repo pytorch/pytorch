@@ -4339,31 +4339,28 @@ class ExternKernel(InputsKernel):
         raise NotImplementedError
 
     def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None):
-        if cpp_kernel_name is not None:
-            self.cpp_kernel_name = cpp_kernel_name
-            return
-
+        self.cpp_kernel_name = cpp_kernel_name
         if not V.graph.cpp_wrapper or not isinstance(
             self.op_overload, torch._ops.OpOverload
         ):
-            self.cpp_kernel_name = None
             return
 
-        # If cpp_kernel_name is None, we will try to construct it from op_overload
         kernel = self.op_overload
-        if kernel.namespace == "aten":
-            # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-            # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=std::nullopt)
-            # repeat_interleave(const at::Tensor & self, int64_t repeats,
-            #       c10::optional<int64_t> dim=std::nullopt, c10::optional<int64_t> output_size=std::nullopt)
-            opname = (
-                kernel.__name__.split(".")[0]
-                if kernel._overloadname == "default"
-                else kernel.__name__.replace(".", "_")
-            )
-            self.cpp_kernel_name = f"at::_ops::{opname}::call"
-        else:
-            self.cpp_kernel_name = kernel._schema.name
+        if self.cpp_kernel_name is None:
+            # Try to construct cpp_kernel_name from op_overload
+            if kernel.namespace == "aten":
+                # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+                # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=std::nullopt)
+                # repeat_interleave(const at::Tensor & self, int64_t repeats,
+                #       c10::optional<int64_t> dim=std::nullopt, c10::optional<int64_t> output_size=std::nullopt)
+                opname = (
+                    kernel.__name__.split(".")[0]
+                    if kernel._overloadname == "default"
+                    else kernel.__name__.replace(".", "_")
+                )
+                self.cpp_kernel_name = f"at::_ops::{opname}::call"
+            else:
+                self.cpp_kernel_name = kernel._schema.name
 
         # Set up info for runtime schema lookup
         # TODO: The logics here may be further simplified.
