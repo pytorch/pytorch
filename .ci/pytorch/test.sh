@@ -429,9 +429,6 @@ pr_time_benchmarks() {
 
   pip show torch
 
-  # run the benchmarks on parent
-  python setup.py clean
-  python setup.py develop
   source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on main: "
   cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
