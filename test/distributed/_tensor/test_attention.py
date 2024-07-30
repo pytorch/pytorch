@@ -76,10 +76,6 @@ class RingAttentionTest(DTensorTestBase):
             torch.bfloat16 if backend == SDPBackend.FLASH_ATTENTION else torch.float32
         )
 
-        if is_causal and compiled:
-            # TODO: remove this after we fix the wait_tensor being removed issue.
-            return
-
         q = torch.rand(
             (bs, nheads, self.world_size * query_tokens, dim),
             device=self.device_type,
