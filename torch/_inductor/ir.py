@@ -19,17 +19,21 @@ from typing import (
     Dict,
     Iterable,
     List,
+    Literal,
     Optional,
+    overload,
     Sequence,
     Set,
     Tuple,
     TYPE_CHECKING,
+    TypeVar,
     Union,
 )
+from typing_extensions import TypeAlias
 from unittest.mock import patch
 
 import sympy
-from sympy import Expr, Integer
+from sympy import Expr, Integer, Symbol
 
 import torch._export.serde.schema as export_schema
 import torch._logging
@@ -40,6 +44,7 @@ from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
+from torch._ops import OpOverload
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -87,11 +92,17 @@ from .utils import (
     sympy_product,
     sympy_subs,
 )
-from .virtualized import ops, V
+from .virtualized import ops, OpsValue, V
 
 
 if TYPE_CHECKING:
     from .graph import GraphLowering
+
+_T = TypeVar("_T")
+_U = TypeVar("_U")
+_V = TypeVar("_V")
+
+_IntLike: TypeAlias = Union[int, Expr]
 
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
@@ -139,8 +150,20 @@ e.g. it may be a graph input or compile time constant.
 """
 
 
-def validate_ir(node_or_nodes):
-    def _check_tensorbox(nodes):
+_NodeOrNodes: TypeAlias = Union[
+    int,
+    "TensorBox",
+    Dict[str, "TensorBox"],
+    "Symbol",
+    "IRNode",
+    Sequence[
+        Optional[Union[int, Dict[str, "TensorBox"], "TensorBox", "Symbol", "IRNode"]]
+    ],
+]
+
+
+def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
+    def _check_tensorbox(nodes: Optional[_NodeOrNodes]) -> None:
         # Could expand this to check deeper properties
         # (e.g. TensorBox points to View or StorageBox)
         if nodes is None:
@@ -170,35 +193,38 @@ def validate_ir(node_or_nodes):
     _check_tensorbox(node_or_nodes)
 
 
-def ops_wrapper(name):
+def ops_wrapper(name: str) -> Callable[..., OpsValue]:
     assert isinstance(name, str)
 
-    def fn(*args, **kwargs):
+    def fn(*args: object, **kwargs: object) -> OpsValue:
         return getattr(ops, name)(*args, **kwargs)
 
     return fn
 
 
-def inverse_reorder(order):
+def inverse_reorder(order: Sequence[int]) -> Callable[[Sequence[_T]], Sequence[_T]]:
     inv_order = dict(zip(order, range(len(order))))
 
-    def reindex(index):
+    def reindex(index: Sequence[_T]) -> Sequence[_T]:
         assert len(index) == len(inv_order)
         return [index[inv_order[i]] for i in range(len(index))]
 
     return reindex
 
 
-def same_reorder(order):
-    def reindex(index):
+def same_reorder(order: Sequence[int]) -> Callable[[Sequence[_T]], Sequence[_T]]:
+    def reindex(index: Sequence[_T]) -> Sequence[_T]:
         assert len(index) == len(order)
         return [index[order[i]] for i in range(len(index))]
 
     return reindex
 
 
-def fuse_reindexing(reindex1, reindex2):
-    def reindex(index):
+def fuse_reindexing(
+    reindex1: Callable[[Sequence[_U]], Sequence[_V]],
+    reindex2: Callable[[Sequence[_T]], Sequence[_U]],
+) -> Callable[[Sequence[_T]], Sequence[_V]]:
+    def reindex(index: Sequence[_T]) -> Sequence[_V]:
         return reindex1(reindex2(index))
 
     return reindex
@@ -208,7 +234,9 @@ NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
 
-def stride_order2fill_order(order):
+def stride_order2fill_order(
+    order: Sequence[Union[int, Integer]]
+) -> Sequence[Union[int, Integer]]:
     """
     Convert stride order to fill order
     For channel last format,
@@ -220,7 +248,7 @@ def stride_order2fill_order(order):
     return fill_order
 
 
-def get_stride_order(seq: Sequence[int]) -> List[int]:
+def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[int]:
     """
     Convert strides to stride order
     """
@@ -231,11 +259,23 @@ def get_stride_order(seq: Sequence[int]) -> List[int]:
     return out
 
 
-def ir_node_to_tensor(x, guard_shape=True):
+@overload
+def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None:
+    ...
+
+
+@overload
+def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor:
+    ...
+
+
+def ir_node_to_tensor(
+    x: Optional[IRNode], guard_shape: bool = True
+) -> Optional[torch.Tensor]:
     if x is None:
         return None
 
-    shape_fn: Callable[[Expr], Union[int, Expr]]
+    shape_fn: Callable[[Union[int, Expr]], Union[int, Expr]]
     if not guard_shape:
         shape_fn = V.graph.sizevars.size_hint
     else:
@@ -243,9 +283,9 @@ def ir_node_to_tensor(x, guard_shape=True):
     size = [shape_fn(s) for s in x.get_size()]
     stride: StrideType
     if is_storage_and_layout(x):
-        stride = [shape_fn(s) for s in x.get_layout().stride]  # type: ignore[misc]
+        stride = [shape_fn(s) for s in x.get_layout().stride]  # type: ignore[misc, union-attr]
     else:
-        stride = FlexibleLayout.contiguous_strides(size)  # type: ignore[arg-type]
+        stride = FlexibleLayout.contiguous_strides(size)  # type: ignore[assignment]
     dtype = x.get_dtype()
     device = x.get_device()
     size = convert_shape_to_symint(size)
@@ -257,7 +297,9 @@ def ir_node_to_tensor(x, guard_shape=True):
     return t
 
 
-def may_convert_to_optional(value):
+def may_convert_to_optional(
+    value: Optional[Sequence[_T]],
+) -> Optional[Sequence[Optional[_T]]]:
     if isinstance(value, list) and not value:
         # [None] makes sure the cpp wrapper codegen will generate something like
         # {std::nullopt} instead of {}
@@ -265,19 +307,20 @@ def may_convert_to_optional(value):
     return value
 
 
-def get_device_type(x):
-    if getattr(x, "get_device", None):
-        return get_device_type(x.get_device())
+def get_device_type(x: object) -> Optional[str]:
+    if get_device := getattr(x, "get_device", None):
+        return get_device_type(get_device())
     if isinstance(x, torch.device):
         return x.type
     return None
 
 
-def is_triton(x):
-    return is_gpu(get_device_type(x))
+def is_triton(x: object) -> bool:
+    dtype = get_device_type(x)
+    return bool(dtype and is_gpu(dtype))
 
 
-def is_cpu(x):
+def is_cpu(x: object) -> bool:
     return get_device_type(x) == "cpu"
 
 
@@ -570,7 +613,7 @@ class Loops(IRNode):
         )
 
 
-def nop_loader_fn(idx, *, dtype):
+def nop_loader_fn(idx: Union[Expr, Sequence[Expr]], *, dtype: torch.dtype) -> OpsValue:
     if dtype.is_floating_point:
         return ops.constant(float("nan"), dtype)
     else:
@@ -630,7 +673,7 @@ class Scatter(Pointwise):
         )
 
 
-REDUCTION_COMBINE_FN = {
+REDUCTION_COMBINE_FN: Dict[str, Callable[..., OpsValue]] = {
     "any": ops_wrapper("logical_or"),
     "max": ops_wrapper("maximum"),
     "min": ops_wrapper("minimum"),
@@ -640,12 +683,17 @@ REDUCTION_COMBINE_FN = {
 }
 
 
-def get_reduction_combine_fn(reduction_type, dtype, arg_break_ties_left=True):
+def get_reduction_combine_fn(
+    reduction_type: str, dtype: torch.dtype, arg_break_ties_left: bool = True
+) -> Callable[..., object]:
     if reduction_type in REDUCTION_COMBINE_FN:
-        combine_fn = REDUCTION_COMBINE_FN[reduction_type]
+        return REDUCTION_COMBINE_FN[reduction_type]
+
     elif reduction_type in {"argmax", "argmin"}:
 
-        def combine_fn(a, b):
+        def argmax_combine_fn(
+            a: Tuple[object, object], b: Tuple[object, object]
+        ) -> Tuple[OpsValue, OpsValue]:
             a_value, a_index = a
             b_value, b_index = b
 
@@ -672,9 +720,14 @@ def get_reduction_combine_fn(reduction_type, dtype, arg_break_ties_left=True):
                 ops.where(mask, a_index, b_index),
             )
 
+        return argmax_combine_fn
+
     elif reduction_type == "welford_combine":
 
-        def combine_fn(a, b):
+        def welford_combine_fn(
+            a: Tuple[OpsValue, OpsValue, OpsValue],
+            b: Tuple[OpsValue, OpsValue, OpsValue],
+        ) -> Tuple[OpsValue, OpsValue, OpsValue]:
             a_mean, a_m2, a_weight = a
             b_mean, b_m2, b_weight = b
 
@@ -687,10 +740,10 @@ def get_reduction_combine_fn(reduction_type, dtype, arg_break_ties_left=True):
                 new_weight,
             )
 
+        return welford_combine_fn
+
     else:
         raise NotImplementedError(f"unknown reduction_type={reduction_type}")
-
-    return combine_fn
 
 
 @dataclasses.dataclass
@@ -790,7 +843,7 @@ class Reduction(Loops):
         if not should_split:
             return ReductionHint.DEFAULT, 1
 
-        device_interface = get_interface_for_device(get_device_type(device))
+        device_interface = get_interface_for_device(get_device_type(device))  # type: ignore[arg-type] # next PR
         device_properties = device_interface.Worker.get_device_properties(device)
         if get_device_type(device) == "xpu":
             num_sm = device_properties.gpu_subslice_count
@@ -1419,7 +1472,7 @@ class Reduction(Loops):
         )
 
 
-def num_reduction_outputs(reduction_type):
+def num_reduction_outputs(reduction_type: Set[str]) -> int:
     return 3 if "welford" in reduction_type else 1
 
 
@@ -2011,7 +2064,7 @@ class Sort(Loops):
         return results
 
 
-def is_storage_and_layout(x):
+def is_storage_and_layout(x: IRNode) -> bool:
     try:
         as_storage_and_layout(x, freeze=False)
         return True
@@ -2019,7 +2072,7 @@ def is_storage_and_layout(x):
         return False
 
 
-def is_contiguous_storage_and_layout(x):
+def is_contiguous_storage_and_layout(x: IRNode) -> bool:
     try:
         buffer, layout = as_storage_and_layout(x, freeze=False)
         # pad the stride here so we will NOT claim an tensor as contiguous
@@ -2032,8 +2085,12 @@ def is_contiguous_storage_and_layout(x):
 
 
 def as_storage_and_layout(
-    x, freeze=True, want_contiguous=False, stride_order=None, allow_padding=False
-):
+    x: IRNode,
+    freeze: bool = True,
+    want_contiguous: bool = False,
+    stride_order: Optional[Sequence[Union[int, Integer]]] = None,
+    allow_padding: bool = False,
+) -> Tuple[StorageBox, Layout]:
     """
     Try to simplify x into a StorageBox and a Layout.
 
@@ -2076,7 +2133,9 @@ as_contiguous_storage_and_layout = functools.partial(
 )
 
 
-def is_stride_order_storage_and_layout(x, stride_order):
+def is_stride_order_storage_and_layout(
+    x: IRNode, stride_order: Sequence[Union[int, Integer]]
+) -> bool:
     try:
         buffer, layout = as_storage_and_layout(x, freeze=False)
         return layout.is_stride_ordered(stride_order)
@@ -2782,7 +2841,9 @@ class IndexingConstant(BaseConstant):
         return IndexingConstant(self.index, self.dtype, device)
 
 
-def is_contiguous_strides_for_shape(stride, shape):
+def is_contiguous_strides_for_shape(
+    stride: Sequence[_IntLike], shape: Sequence[_IntLike]
+) -> bool:
     return all(
         size == 1 or left == right
         for left, right, size in zip(
@@ -2791,7 +2852,7 @@ def is_contiguous_strides_for_shape(stride, shape):
     )
 
 
-def get_align_for_dtype(dtype):
+def get_align_for_dtype(dtype: torch.dtype) -> int:
     """
     CUDA max memory transaction size is 128 bytes for a warp.
     We pick `128 // dtype.itemsize` as alighment so GPU can do coalesced
@@ -4199,12 +4260,12 @@ class ConcatKernel(NopKernel):
         return True
 
 
-def get_aten_cpp_kernel_name(kernel):
+def get_aten_cpp_kernel_name(kernel: object) -> Optional[str]:
     # Calling with the default kernel name can lead to ambiguous behavior like the following example.
     # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=std::nullopt)
     # repeat_interleave(const at::Tensor & self, int64_t repeats,
     #       c10::optional<int64_t> dim=std::nullopt, c10::optional<int64_t> output_size=std::nullopt)
-    if not isinstance(kernel, torch._ops.OpOverload) or kernel.namespace != "aten":
+    if not isinstance(kernel, OpOverload) or kernel.namespace != "aten":
         return None
     opname = (
         kernel.__name__.split(".")[0]
@@ -6259,7 +6320,7 @@ class Subgraph(IRNode):
     graph: Optional[GraphLowering] = None
 
 
-def _has_aliased_buffers(buffers):
+def _has_aliased_buffers(buffers: Sequence[IRNode]) -> bool:
     buffers = [
         buffer.unwrap_view() if isinstance(buffer, ReinterpretView) else buffer
         for buffer in buffers
@@ -7082,8 +7143,8 @@ class _WaitKernel(_CollectiveKernel):
 # NB: recursive structure here reflects val_to_arg_str, avoid
 # calling free_unbacked_symbols on "exotic" types that don't get pexpr
 # treatment
-def maybe_free_unbacked_symbols(s):
-    if isinstance(s, (SymTypes, sympy.Expr)):
+def maybe_free_unbacked_symbols(s: object) -> Set[Symbol]:
+    if isinstance(s, (SymTypes, Expr)):
         # This branch should be impossible in return position
         return free_unbacked_symbols(s)
     elif isinstance(s, (tuple, list)):
