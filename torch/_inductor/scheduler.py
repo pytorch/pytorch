@@ -389,6 +389,7 @@ class BaseSchedulerNode:
                 not buf_node.should_allocate()
                 or buf_node.get_inputs_that_alias_output()
                 or buf_node.get_mutation_names()
+                or buf.get_name() in V.graph.removed_buffers
             ):
                 continue
 
@@ -428,7 +429,6 @@ class BaseSchedulerNode:
                         )
                         and buffer_reuse_key(input_buf.node)
                         == buffer_reuse_key(buf.node)
-                        and buf.get_name() not in V.graph.removed_buffers
                     ):
                         # if there isn't a triton kernel, then we don't need to call triton-specific things.
                         # but TODO this might be a convenient place to signal to the Collective kernels to inplace
