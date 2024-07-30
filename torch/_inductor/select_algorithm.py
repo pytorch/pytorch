@@ -1470,18 +1470,18 @@ class AlgorithmSelectorCache(PersistentCache):
             choice, example_inputs, example_inputs_extern, out, out_extern, expected
         ):
             out.zero_()
+            # we can't postpone benchmarking if we need to verify the results
+            lazy = not((VERIFY != {}) and (expected is not None))
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
                 result = choice.benchmark(
-                    *example_inputs_extern, out=out_extern, lazy=True
+                    *example_inputs_extern, out=out_extern, lazy=lazy
                 )
             else:
                 # triton templates want the base pointer for sliced tensors
-                result = choice.benchmark(*example_inputs, out=out, lazy=True)
-            # if VERIFY and expected is not None:
-            #     torch.testing.assert_close(out_extern, expected, **VERIFY)
-            # if torch.cuda.is_available():
-            #     torch.cuda.synchronize()  # shake out any CUDA errors
+                result = choice.benchmark(*example_inputs, out=out, lazy=lazy)
+            if VERIFY and expected is not None:
+                torch.testing.assert_close(out_extern, expected, **VERIFY)
             return result
 
         def benchmark_in_current_process(choices):
