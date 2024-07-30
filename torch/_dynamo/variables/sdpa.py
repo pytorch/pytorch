@@ -33,9 +33,6 @@ class SDPAParamsVariable(VariableTracker):
         is_causal_var = VariableBuilder(tx, AttrSource(source, "is_causal"))(
             value.is_causal
         )
-        enable_gqa_var = VariableBuilder(tx, AttrSource(source, "enable_gqa"))(
-            value.enable_gqa
-        )
         param_vars = [
             query_var,
             key_var,
@@ -43,7 +40,6 @@ class SDPAParamsVariable(VariableTracker):
             attn_mask_var,
             dropout_var,
             is_causal_var,
-            enable_gqa_var,
         ]
         return TorchInGraphFunctionVariable(SDPAParams).call_function(
             tx, param_vars, {}
