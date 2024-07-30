@@ -1537,9 +1537,7 @@ def _reduction_configs(
     tiny_config = triton_config_reduction(
         size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, MAX_RBLOCK)
     )
-    import pdb
 
-    pdb.set_trace()
     if inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise"):
         pass  # skip all these cases
     elif reduction_hint == ReductionHint.INNER:
