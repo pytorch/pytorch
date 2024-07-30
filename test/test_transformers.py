@@ -371,6 +371,22 @@ class TestTransformers(NNTestCase):
             out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
             mha.eval()  # enable fast path
             out_fp, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
+
+            self.assertFalse(torch.isnan(out).any())
+            if torch.isnan(out_fp).any():
+                row_sums = attn_mask.sum(dim=-1)
+                masked_out_rows = (row_sums == 0)
+                masked_out_rows = masked_out_rows.expand(out.shape[:-1])
+                # Slice out the fully masked rows from fastpath and non fastpath
+                out_ref_masked_out = out[masked_out_rows]
+                out_fp_masked_out = out_fp[masked_out_rows]
+
+                out_ref_all_zero = (out_ref_masked_out.abs().sum() == 0)
+                out_all_nan = torch.isnan(out_fp_masked_out).all()
+                self.assertTrue(out_ref_all_zero)
+                self.assertTrue(out_all_nan)
+                out_fp = torch.nan_to_num(out_fp, nan=0.0)
+
             self.assertEqual(out, out_fp)
 
     @parametrize("nhead", [1, 4, 8])
