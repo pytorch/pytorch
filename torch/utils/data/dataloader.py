@@ -185,6 +185,11 @@ class DataLoader(Generic[_T_co]):
             maintain the workers `Dataset` instances alive. (default: ``False``)
         pin_memory_device (str, optional): the device to :attr:`pin_memory` to if ``pin_memory`` is
             ``True``.
+        exact_ordering (bool, optional): If ``True``, the data loader will return data
+            in the exact order specified by the sampler including maintaining ordering within batches.
+            If ``False``, the data loader may return data out-of-order based on whatever data is
+            available when ``next()`` is called. Setting ordering to ``False`` may improve performance
+            particularly where there are samples that are slow to load. (default: ``True``)
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -226,6 +231,7 @@ class DataLoader(Generic[_T_co]):
     sampler: Union[Sampler, Iterable]
     pin_memory_device: str
     prefetch_factor: Optional[int]
+    exact_ordering: bool
     _iterator: Optional["_BaseDataLoaderIter"]
     __initialized = False
 
@@ -248,6 +254,7 @@ class DataLoader(Generic[_T_co]):
         prefetch_factor: Optional[int] = None,
         persistent_workers: bool = False,
         pin_memory_device: str = "",
+        exact_ordering: bool = True,
     ):
         torch._C._log_api_usage_once("python.data_loader")
 
@@ -281,6 +288,7 @@ class DataLoader(Generic[_T_co]):
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
         self.multiprocessing_context = multiprocessing_context
+        self.exact_ordering = exact_ordering
 
         # Adds forward compatibilities so classic DataLoader can work with DataPipes:
         #   _DataPipeSerializationWrapper container makes it easier to serialize without redefining pickler
@@ -1074,6 +1082,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         super().__init__(loader)
 
         self._prefetch_factor = loader.prefetch_factor
+        self._exact_ordering = loader.exact_ordering
 
         assert self._num_workers > 0
         assert self._prefetch_factor > 0
@@ -1437,10 +1446,12 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     self._shutdown_workers()
                 raise StopIteration
 
-            # Now `self._rcvd_idx` is the batch index we want to fetch
+            # If exact_order is True, `self._rcvd_idx` is the batch index
+            # we want to fetch
 
             # Check if the next sample has already been generated
-            if len(self._task_info[self._rcvd_idx]) == 2:
+            # if exact_ordering is False, we will never have any out-of-order samples
+            if self._exact_ordering and len(self._task_info[self._rcvd_idx]) == 2:
                 data = self._task_info.pop(self._rcvd_idx)[1]
                 return self._process_data(data)
 
@@ -1457,7 +1468,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     self._try_put_index()
                     continue
 
-            if idx != self._rcvd_idx:
+            # If exact_ordering check if the sample we received is out-of-order
+            # if so, store it and continue processing in the for loop for the queue.
+            # If exact_ordering is False, we can immediately return the sample.
+            if self._exact_ordering and idx != self._rcvd_idx:
                 # store out-of-order samples
                 self._task_info[idx] += (data,)
             else:
