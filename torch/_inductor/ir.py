@@ -29,7 +29,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import TypeAlias, TypeIs
+from typing_extensions import TypeAlias
 from unittest.mock import patch
 
 import sympy
@@ -2064,11 +2064,12 @@ class Sort(Loops):
         return results
 
 
-def is_storage_and_layout(x: IRNode) -> TypeIs[Union[TensorBox, ReinterpretView, StorageBox]]:
-    return (
-        isinstance(x, (TensorBox, ReinterpretView))
-        or isinstance(x, StorageBox) and isinstance(x.data, Buffer)
-    )
+def is_storage_and_layout(x: IRNode) -> bool:
+    try:
+        as_storage_and_layout(x, freeze=False)
+        return True
+    except NotImplementedError:
+        return False
 
 
 def is_contiguous_storage_and_layout(x: IRNode) -> bool:
