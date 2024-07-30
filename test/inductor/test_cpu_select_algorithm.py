@@ -402,6 +402,103 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
+    @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
+    @patches
+    @torch.no_grad
+    @parametrize("batch_size", (2,))
+    @parametrize("in_features", (16,))
+    @parametrize("seq_lens", (128,))
+    @parametrize("out_features", (32,))
+    @parametrize("bias", (True,))
+    @dtypes(torch.bfloat16)
+    def test_linear_with_indirect_indexing(
+        self, batch_size, in_features, seq_lens, out_features, bias, dtype
+    ):
+        # Reproducer from the GPT2ForSequenceClassification model in HuggingFace
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.wte = torch.nn.Embedding(128, seq_lens)
+                self.wpe = torch.nn.Embedding(in_features, seq_lens)
+                self.linear1 = torch.nn.Linear(seq_lens, out_features, bias)
+                self.linear2 = torch.nn.Linear(out_features, seq_lens, bias)
+                self.ln = torch.nn.LayerNorm(seq_lens)
+
+            def forward(self, add_6, input_ids, view_9):
+                inputs_embeds = self.wte(input_ids)
+
+                position_ids = torch.arange(0, in_features, dtype=torch.long)
+                position_ids = position_ids.unsqueeze(0)
+
+                position_embeds = self.wpe(position_ids)
+                add = inputs_embeds + position_embeds
+                add_4 = view_9 + add
+
+                arg149_1 = add_6.size(0)
+                view_10 = torch.ops.aten.reshape.default(add_6, [-1, seq_lens])
+                add_6 = None
+                convert_element_type_13 = torch.ops.prims.convert_element_type.default(
+                    view_10, torch.bfloat16
+                )
+                view_10 = None
+                _linear_pointwise_default_46 = self.linear1(convert_element_type_13)
+
+                view_11 = torch.ops.aten.reshape.default(
+                    _linear_pointwise_default_46, [arg149_1, in_features, out_features]
+                )
+                _linear_pointwise_default_46 = None
+
+                mul_4 = torch.ops.aten.mul.Tensor(view_11, 0.5)
+                pow_1 = torch.ops.aten.pow.Tensor_Scalar(view_11, 3.0)
+                mul_5 = torch.ops.aten.mul.Tensor(pow_1, 0.044715)
+                pow_1 = None
+                add_7 = torch.ops.aten.add.Tensor(view_11, mul_5)
+                view_11 = mul_5 = None
+                mul_6 = torch.ops.aten.mul.Tensor(add_7, 0.7978845608028654)
+                add_7 = None
+                tanh = torch.ops.aten.tanh.default(mul_6)
+                mul_6 = None
+                add_8 = torch.ops.aten.add.Tensor(tanh, 1.0)
+                tanh = None
+                mul_7 = torch.ops.aten.mul.Tensor(mul_4, add_8)
+                mul_4 = add_8 = None
+
+                view_12 = torch.ops.aten.reshape.default(mul_7, [-1, out_features])
+                mul_7 = None
+                _linear_pointwise_default_45 = self.linear2(view_12)
+
+                view_13 = torch.ops.aten.reshape.default(
+                    _linear_pointwise_default_45, [arg149_1, in_features, seq_lens]
+                )
+                _linear_pointwise_default_45 = None
+                add_9 = torch.ops.aten.add.Tensor(add_4, view_13)
+                add_4 = view_13 = None
+
+                out = self.ln(add_9)
+                return out
+
+        x = torch.randn(batch_size, in_features, seq_lens)
+        input_ids = torch.randint(0, 128, (batch_size, in_features))
+        view_9 = torch.randn(batch_size, in_features, seq_lens)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(input_ids, 0)
+        torch._dynamo.mark_dynamic(view_9, 0)
+        mod = M(bias=bias).eval()
+        with verify(dtype) as (atol, rtol), torch.cpu.amp.autocast():
+            self.common(
+                mod,
+                (
+                    x,
+                    input_ids,
+                    view_9,
+                ),
+                atol=atol,
+                rtol=rtol,
+            )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
+
+    @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
