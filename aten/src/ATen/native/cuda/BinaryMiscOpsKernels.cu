@@ -72,7 +72,7 @@ void xlog1py_kernel_cuda(TensorIteratorBase& iter) {
 
 void betainc_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "betainc_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t x, scalar_t a, scalar_t b) -> scalar_t {
+    gpu_kernel_with_scalars_ternary(iter, []GPU_LAMBDA(scalar_t x, scalar_t a, scalar_t b) -> scalar_t {
         return calc_betainc(x, a, b);
     });
   });
