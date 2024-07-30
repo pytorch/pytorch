@@ -23,6 +23,7 @@ from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
     DefaultDictVariable,
+    OSEnvironVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable

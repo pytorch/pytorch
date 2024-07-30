@@ -1307,6 +1307,63 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
         # Make sure we just call "list(dict.keys())" once
         self.assertEqual(pycode.count("keys"), 1)
 
+    # TODO: Remove the python guard fallback after fixing the cpp guard bug
+    @patch.object(torch._dynamo.config, "enable_cpp_guard_manager", False)
+    def test_os_environ_get(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x):
+            if os.environ.get("OS_ENVIRON_TEST") == "1":
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.ones(2, 3)
+        try:
+            if os.environ.get("OS_ENVIRON_TEST", None) != None:
+                del os.environ["OS_ENVIRON_TEST"]
+
+            res1 = fn(x)
+            self.assertEqual(res1, x - 1)
+            self.assertEqual(cnts.frame_count, 1)
+            os.environ["OS_ENVIRON_TEST"] = "1"
+            res2 = fn(x)
+            self.assertEqual(res2, x + 1)
+            # Ensure re-compile if os.environ items updated
+            self.assertEqual(cnts.frame_count, 2)
+        finally:
+            if os.environ.get("OS_ENVIRON_TEST", None) != None:
+                del os.environ["OS_ENVIRON_TEST"]
+
+    @patch.object(torch._dynamo.config, "enable_cpp_guard_manager", False)
+    def test_os_environ_set(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x):
+            if os.environ.get("OS_ENVIRON_TEST") != "1":
+                os.environ["OS_ENVIRON_TEST"] = "1"
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.ones(2, 3)
+        try:
+            if os.environ.get("OS_ENVIRON_TEST", None) != None:
+                del os.environ["OS_ENVIRON_TEST"]
+
+            res1 = fn(x)
+            self.assertEqual(res1, x + 1)
+            self.assertEqual(os.environ["OS_ENVIRON_TEST"], "1")
+            # Ensure os.environ.__setitem__ setup guard correctly
+            res2 = fn(x)
+            self.assertEqual(res2, x - 1)
+            self.assertEqual(cnts.frame_count, 2)
+        finally:
+            if os.environ.get("OS_ENVIRON_TEST", None) != None:
+                del os.environ["OS_ENVIRON_TEST"]
+
     def test_sys_modules(self):
         def fn(x, y):
             mod_a = sys.modules.get("aaaaaaaa")

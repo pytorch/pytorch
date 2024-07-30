@@ -11,6 +11,7 @@ import itertools
 import logging
 import math
 import operator
+import os
 import re
 import sys
 import types
@@ -125,6 +126,7 @@ from .dicts import (
     CustomizedDictVariable,
     DefaultDictVariable,
     HFPretrainedConfigVariable,
+    OSEnvironVariable,
     PythonSysModulesVariable,
     SetVariable,
 )
@@ -533,6 +535,9 @@ class VariableBuilder:
         elif value is sys.modules:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonSysModulesVariable(source=self.source)
+        elif isinstance(value, os._Environ):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return OSEnvironVariable(value, source=self.source)
         elif CustomizedDictVariable.is_matching_cls_hf(type(value)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = CustomizedDictVariable.wrap(self, value)

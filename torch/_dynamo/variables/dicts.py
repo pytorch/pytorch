@@ -4,6 +4,7 @@ import collections
 import dataclasses
 import functools
 import inspect
+import os
 import sys
 from typing import Dict, List, Optional, TYPE_CHECKING
 
@@ -952,3 +953,83 @@ class PythonSysModulesVariable(VariableTracker):
             tx,
             GetItemSource(self.source, k),
         )(sys.modules[k])
+
+
+class OSEnvironVariable(VariableTracker):
+    """represents os.environ"""
+
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def python_type(self):
+        return os._Environ
+
+    def as_python_constant(self):
+        return self.value
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "__getitem__":
+            return self.call_getitem(tx, *args, **kwargs)
+        elif name == "get":
+            return self.call_get(tx, *args, **kwargs)
+        elif name == "__contains__":
+            return self.call_contains(tx, *args, **kwargs)
+        elif name == "__setitem__":
+            assert not kwargs and len(args) == 2
+            tx.output.side_effects.mutation(self)
+            self.value.__setitem__(
+                args[0].as_python_constant(), args[1].as_python_constant()
+            )
+        else:
+            return super().call_method(tx, name, args, kwargs)
+
+    def _contains_helper(self, tx: "InstructionTranslator", key: VariableTracker):
+        k = key.as_python_constant()
+        has_key = k in self.value
+        install_guard(
+            self.make_guard(
+                functools.partial(GuardBuilder.DICT_CONTAINS, key=k, invert=not has_key)
+            )
+        )
+        return k, has_key
+
+    def call_contains(self, tx: "InstructionTranslator", key: VariableTracker):
+        k, has_key = self._contains_helper(tx, key)
+        return ConstantVariable.create(value=has_key)
+
+    def call_get(
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        default: Optional[VariableTracker] = None,
+    ):
+        from .builder import VariableBuilder
+
+        k, has_key = self._contains_helper(tx, key)
+
+        if has_key:
+            return VariableBuilder(
+                tx,
+                GetItemSource(self.source, k),
+            )(self.value[k])
+
+        if default is not None:
+            return default
+
+        return ConstantVariable.create(value=None)
+
+    def call_getitem(self, tx: "InstructionTranslator", key: VariableTracker):
+        from .builder import VariableBuilder
+
+        k, has_key = self._contains_helper(tx, key)
+        return VariableBuilder(
+            tx,
+            GetItemSource(self.source, k),
+        )(self.value[k])
