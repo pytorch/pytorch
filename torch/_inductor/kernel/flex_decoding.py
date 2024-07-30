@@ -6,6 +6,7 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from .. import ir
 
 from ..ir import FixedLayout, FlexibleLayout
 from ..lowering import empty, empty_strided, lowerings
@@ -410,6 +411,25 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     V.graph.sizevars.guard_leq(m * gqa_shared_heads, sympy.Integer(BLOCK_M))
 
+    print(type(query))
+    print("->", type(query.data))
+    if not isinstance(query.data, ir.Buffer):
+        print("->", type(query.data.data))
+        if not isinstance(query.data.data, ir.Buffer):
+            print("->", type(query.data.data))
+
+    query = ir.ExternKernel.realize_input(query)
+
+    q_stride = query.get_stride()
+
+    print(type(query))
+    print("->", type(query.data))
+    if not isinstance(query.data, ir.Buffer):
+        print("->", type(query.data.data))
+
+    print(q_stride)
+    print(query.get_size())
+
     # Reshape query for GQA: [B, Hq, Mq, D] -> [B, Hkv, G, Mq, D]
     gqa_query_shape = (
         query.get_size()[:1]
@@ -417,9 +437,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         + query.get_size()[2:]
     )
     gqa_query_stride = (
-        query.get_stride()[:1]
-        + [query.get_stride()[1] * gqa_shared_heads, query.get_stride()[1]]
-        + query.get_stride()[2:]
+        q_stride[:1] + [q_stride[1] * gqa_shared_heads, q_stride[1]] + q_stride[2:]
     )
     query = lowerings[aten.as_strided](query, gqa_query_shape, gqa_query_stride)
 
