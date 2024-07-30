@@ -510,6 +510,7 @@ class BenchmarkRequest:
         fn,
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
+        lazy: bool = False,
     ) -> float:
         raise NotImplementedError
 
@@ -517,6 +518,7 @@ class BenchmarkRequest:
         self,
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
+        lazy: bool = False,
     ) -> float:
         debug = log.isEnabledFor(logging.DEBUG)
         if debug:
@@ -542,7 +544,7 @@ class BenchmarkRequest:
             load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
-        out = self.do_bench(fn, *input_tensors, output_tensor)
+        out = self.do_bench(fn, *input_tensors, output_tensor, lazy=lazy)
 
         if debug:
             bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
@@ -597,7 +599,9 @@ class GPUDeviceBenchmarkRequest(BenchmarkRequest):
 
         with torch.cuda.device(device_idx):
             if lazy:
-                out = benchmarker.lazy_benchmark_gpu(fn, pruning_key="max-autotune-gemm")
+                out = benchmarker.lazy_benchmark_gpu(
+                    fn, pruning_key="max-autotune-gemm"
+                )
             else:
                 out = benchmarker.benchmark_gpu(fn)
 
@@ -803,6 +807,7 @@ class CPUDeviceBenchmarkRequest(BenchmarkRequest):
         fn,
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
+        lazy: bool = False,
     ) -> float:
         return benchmarker.benchmark_cpu(fn)
 

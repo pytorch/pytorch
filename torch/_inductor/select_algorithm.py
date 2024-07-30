@@ -867,9 +867,9 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         )
         self.mutated_inputs = mutated_inputs
 
-    def benchmark(self, *args, out):
+    def benchmark(self, *args, out, lazy=False):
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        return self.bmreq.benchmark(*args, output_tensor=out, lazy=lazy)
 
     def precompile(self):
         assert self.bmreq is not None
@@ -939,7 +939,7 @@ class ExternKernelCaller(ChoiceCaller):
     def __str__(self):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
-    def benchmark(self, *args, out):
+    def benchmark(self, *args, out, lazy=False):
         if out.numel() == 0:
             # no need to run the kerrnel of do benchmarking
             return 0.0
@@ -952,9 +952,12 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
-            return benchmarker.lazy_benchmark(
-                algo, args, {}, pruning_key="max-autotune-gemm"
-            )
+            if lazy:
+                return benchmarker.lazy_benchmark(
+                    algo, args, {}, pruning_key="max-autotune-gemm"
+                )
+            else:
+                return benchmarker.benchmark(algo, args, {})
 
     def to_callable(self):
         fn = self.choice.to_callable()
@@ -1053,7 +1056,7 @@ class DataProcessorChoiceCallerWrapper:
     def __getattr__(self, name):
         return getattr(self._wrapped, name)
 
-    def benchmark(self, *args, out) -> float:
+    def benchmark(self, *args, out, lazy=False) -> float:
         new_args, new_out = self._preprocessor(args, out)
         result = self._wrapped.benchmark(*new_args, out=new_out)
         new_out = self._postprocessor(new_out)
@@ -1469,10 +1472,12 @@ class AlgorithmSelectorCache(PersistentCache):
             out.zero_()
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
-                result = choice.benchmark(*example_inputs_extern, out=out_extern)
+                result = choice.benchmark(
+                    *example_inputs_extern, out=out_extern, lazy=True
+                )
             else:
                 # triton templates want the base pointer for sliced tensors
-                result = choice.benchmark(*example_inputs, out=out)
+                result = choice.benchmark(*example_inputs, out=out, lazy=True)
             # if VERIFY and expected is not None:
             #     torch.testing.assert_close(out_extern, expected, **VERIFY)
             # if torch.cuda.is_available():
