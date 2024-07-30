@@ -12,6 +12,7 @@ static std::string blockDtypeCppString(const Dtype& dtype) {
   switch (dtype.scalar_type()) {
     case ScalarType::Bool:
       return "1";
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case ScalarType::Half:
       return "2";
     case ScalarType::BFloat16:
@@ -84,8 +85,8 @@ void BlockAnalysis::visit(ForPtr v) {
 }
 
 // For both Add, Mul we only print out the opening
-// paranthesis. This behavior is to handle blocks add Op
-// where c=a+b becomes add(a, b, c). The closing paran is
+// parenthesis. This behavior is to handle blocks add Op
+// where c=a+b becomes add(a, b, c). The closing parenthesis is
 // added in the store statement.
 // TODO: When handling fused ops d = a + b + c, the correct
 // way would be to mutate the expression to Block version and print.

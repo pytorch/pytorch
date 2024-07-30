@@ -33,18 +33,18 @@ class BlockAnalysis : public IRVisitor {
     return store_targets_;
   }
 
-  int block_size() const {
+  int64_t block_size() const {
     return block_size_;
   }
 
   bool areBufsInMap(const std::unordered_set<BufPtr>& bufs) const;
 
-  BufPtr getMulticonst DimBuf&(BufPtr buf) const;
+  BufPtr getMultiDimBuf(const BufPtr& buf) const;
 
-  std::string getInpconst utName&(BufPtr buf) const;
+  std::string getInputName(const BufPtr& buf) const;
 
-  std::string getFlatInputName(BufPtr buf) const {
-    return getInputName(std::move(buf)) + "_flat";
+  std::string getFlatInputName(const BufPtr& buf) const {
+    return getInputName(buf) + "_flat";
   }
 
   std::unordered_map<std::string, BufPtr> getBufferMap() const {
@@ -59,7 +59,7 @@ class BlockAnalysis : public IRVisitor {
   std::unordered_map<std::string, BufPtr> map_input_to_tensor_bufs_;
   std::unordered_set<BufPtr> store_targets_;
   std::unordered_set<BufPtr> loads_;
-  int block_size_ = 32;
+  int64_t block_size_ = 32;
 };
 
 // A class that overrides the underlying IRPrinter to produce Block.
