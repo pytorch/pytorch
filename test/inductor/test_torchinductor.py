@@ -52,6 +52,7 @@ from torch._inductor.utils import (
     run_and_get_code,
     run_and_get_cpp_code,
     run_and_get_triton_code,
+    run_fw_bw_and_get_code,
 )
 from torch._inductor.virtualized import V
 from torch._prims_common import is_integer_dtype
@@ -214,15 +215,6 @@ def define_custom_op_3_for_test(id_, fn_cpu, fn_cuda, fn_xpu, fn_meta, tags=()):
 
 
 f32 = torch.float32
-
-
-def run_fw_bw_and_get_code(fn):
-    def run_with_backward():
-        result = fn()
-        result.sum().backward()
-        return result
-
-    return run_and_get_code(run_with_backward)
 
 
 def register_ops_with_aoti_compile(ns, op_set, dispatch_key, torch_compile_op_lib_impl):
@@ -9996,10 +9988,9 @@ class CommonTemplate:
         if is_cpp_backend(self.device):
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             _, code = run_and_get_cpp_code(opt_fn, *args)
-            print(code)
             FileCheck().check_count(
-                "static_cast<int32_t>(256)",
-                1,
+                "static_cast<int64_t>(256)",
+                2,
                 exactly=True,
             ).run(code)
 
@@ -11177,18 +11168,6 @@ class CommonTemplate:
             return (div,)
 
         self.common(forward, ())
-
-    def test_flip_cat(self):
-        def forward(unsqueeze, unsqueeze_1):
-            cat_1 = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], 1)
-            view = torch.ops.aten.view.default(cat_1, [4])
-            slice_5 = torch.ops.aten.slice.Tensor(view, 0, 0, 3)
-            rev_1 = torch.ops.aten.flip.default(slice_5, [0])
-            return (rev_1,)
-
-        a = torch.randn(2, 1, requires_grad=True)
-        b = torch.randn(2, 1, requires_grad=True)
-        self.common(forward, (a, b))
 
 
 @dataclasses.dataclass

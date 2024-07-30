@@ -233,7 +233,7 @@ exclude_patterns = [
     'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*',
     'torch/csrc/dynamo/eval_frame.h',
-    'torch/csrc/inductor/**/*',
+    'torch/csrc/inductor/aoti_torch/c/shim.h',
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/lazy/**/*',
@@ -1538,7 +1538,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.5.2',
+    'ruff==0.5.5',
 ]
 is_formatter = true
 
