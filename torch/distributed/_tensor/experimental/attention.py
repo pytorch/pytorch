@@ -33,10 +33,7 @@ from torch.distributed.tensor.parallel.style import ParallelStyle
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
-_rerun_forward = False
-_merge_per_step = True
 _convert_to_f32 = True
-_enable_load_balance = True
 
 
 class _CausalBehavior(Enum):
@@ -65,53 +62,38 @@ def _is_causal_behavior(
         return _CausalBehavior.SKIP
 
 
-class SDPAMerger:
-    def __init__(self, merge_per_step: bool, convert_to_f32: bool):
-        self._merge_per_step = merge_per_step
-        self._chunks: List[torch.Tensor] = []
-        self._logsumexps: List[torch.Tensor] = []
+def _maybe_wait(tensor: torch.Tensor) -> torch.Tensor:
+    """
+    When tracing the code, the result tensor is not an AsyncCollectiveTensor,
+    so we cannot call ``wait()``.
+    """
+    if isinstance(tensor, ft_c.AsyncCollectiveTensor):
+        return tensor.wait()
+    return tensor
+
+
+class _SDPAMerger:
+    """A class to help to merge the local SDPA result."""
+
+    def __init__(self, convert_to_f32: bool):
         self._out: Optional[torch.Tensor] = None
-        self._softmax_lse: Optional[torch.Tensor] = None
+        self._lse: Optional[torch.Tensor] = None
         self._convert_to_f32 = convert_to_f32
         self._out_dtype = None
         self._lse_dtype = None
 
-    def _merge_one(self, out: torch.Tensor, lse: torch.Tensor) -> None:
-        lse = lse.unsqueeze(dim=-1)
-        if self._softmax_lse is None:
-            self._softmax_lse = lse
-            self._out = out
+    def _merge_one(self, block_out: torch.Tensor, block_lse: torch.Tensor) -> None:
+        block_lse = block_lse.unsqueeze(dim=-1)
+        if self._lse is None:
+            self._lse = block_lse
+            self._out = block_out
         else:
-            new_lse = self._softmax_lse + torch.log(
-                1 + torch.exp(lse - self._softmax_lse)
-            )
+            new_lse = self._lse + torch.log(1 + torch.exp(block_lse - self._lse))
             self._out = (
-                torch.exp(self._softmax_lse - new_lse) * self._out
-                + torch.exp(lse - new_lse) * out
+                torch.exp(self._lse - new_lse) * self._out
+                + torch.exp(block_lse - new_lse) * block_out
             )
-            self._softmax_lse = new_lse
-
-    def _merge_all(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        assert len(self._chunks) == len(self._logsumexps)
-
-        # LSE may be padded in the sequence dimension such as with
-        # memory efficient attention.
-        seq_len = self._chunks[0].size(2)
-        logsumexps = [lse[:, :, :seq_len] for lse in self._logsumexps]
-        softmax_lse = logsumexps[0]
-        for lse in logsumexps[1:]:
-            max_scale = torch.max(softmax_lse, lse)
-            min_scale = torch.min(softmax_lse, lse)
-            softmax_lse = max_scale + torch.log(1 + torch.exp(min_scale - max_scale))
-        softmax_lse = torch.stack([lse.exp() for lse in logsumexps]).sum(dim=0).log_()
-
-        out = []
-        for chunk, chunk_lse in zip(self._chunks, logsumexps):
-            softmax_lse_corrected = torch.exp(chunk_lse - softmax_lse)
-            out_corrected = chunk * softmax_lse_corrected.unsqueeze(-1)
-            out.append(out_corrected)
-        out = torch.stack(out).sum(dim=0)
-        return out, softmax_lse
+            self._lse = new_lse
 
     def step(self, out: torch.Tensor, lse: torch.Tensor) -> None:
         self._out_dtype = out.dtype
@@ -121,19 +103,11 @@ class SDPAMerger:
             out = out.to(torch.float32)
             lse = lse.to(torch.float32)
 
-        if self._merge_per_step:
-            self._merge_one(out, lse)
-        else:
-            self._chunks.append(out)
-            self._logsumexps.append(lse)
+        self._merge_one(out, lse)
 
     def results(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        if self._merge_per_step:
-            out, softmax_lse = self._out, self._softmax_lse.squeeze(-1)
-        else:
-            out, softmax_lse = self._merge_all()
-
-        return out.to(self._out_dtype), softmax_lse.to(self._lse_dtype)
+        out, lse = self._out, self._lse.squeeze(-1)
+        return out.to(self._out_dtype), lse.to(self._lse_dtype)
 
 
 def _scaled_dot_product_ring_flash_attention(
@@ -168,9 +142,9 @@ def _scaled_dot_product_ring_efficient_attention(
     key: torch.Tensor,
     value: torch.Tensor,
     attn_bias: Optional[torch.Tensor] = None,
+    compute_log_sumexp: bool = True,
     dropout_p: float = 0.0,
     is_causal: bool = False,
-    compute_log_sumexp: bool = True,
     *,
     scale: Optional[float] = None,
 ) -> Tuple[torch.Tensor, ...]:
@@ -190,34 +164,6 @@ def _scaled_dot_product_ring_efficient_attention(
         dropout_p=dropout_p,
         scale=scale,
         compute_log_sumexp=compute_log_sumexp,
-    )
-
-
-def _scaled_dot_product_ring_cudnn_attention(
-    mesh: DeviceMesh,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    attn_bias: Optional[torch.Tensor] = None,
-    dropout_p: float = 0.0,
-    is_causal: bool = False,
-    return_debug_mask: bool = True,
-    *,
-    scale: Optional[float] = None,
-) -> Tuple[torch.Tensor, ...]:
-    if not return_debug_mask:
-        raise NotImplementedError("return_debug_mask must be set")
-
-    return _templated_ring_attention(
-        mesh,
-        aten._scaled_dot_product_cudnn_attention,
-        query=query,
-        key=key,
-        value=value,
-        is_causal=is_causal,
-        dropout_p=dropout_p,
-        return_debug_mask=return_debug_mask,
-        scale=scale,
     )
 
 
@@ -296,14 +242,14 @@ def _templated_ring_attention(
     key = key.contiguous()
     value = value.contiguous()
 
-    sdpa_merger = SDPAMerger(_merge_per_step, _convert_to_f32)
+    sdpa_merger = _SDPAMerger(_convert_to_f32)
 
     rest: Tuple[Any, ...] = tuple()
 
     for i in range(size):
         # overlap communication with compute
         if next_kv is not None:
-            next_kv = next_kv.wait()
+            next_kv = _maybe_wait(next_kv)
             key = next_kv[: key.numel()].reshape(key.shape)
             value = next_kv[key.numel() :].reshape(value.shape)
 
@@ -350,6 +296,12 @@ def sdpa_handler(
             *op_info.local_args,  # type: ignore[arg-type]
             **op_info.local_kwargs,  # type: ignore[arg-type]
         )
+    elif op_call == aten._scaled_dot_product_efficient_attention.default:
+        local_results = _scaled_dot_product_ring_efficient_attention(
+            op_info.mesh,
+            *op_info.local_args,  # type: ignore[arg-type]
+            **op_info.local_kwargs,  # type: ignore[arg-type]
+        )
     else:
         raise NotImplementedError
 
@@ -363,8 +315,8 @@ def sdpa_backward_handler(
 ) -> object:
     # Redistribute grad_output tensor to the same placement as output tensor
     args = list(args)
-    assert isinstance(args[0], DTensor) and isinstance(args[4], DTensor)
-    args[0] = args[0].redistribute(args[4].device_mesh, args[4].placements)
+    # assert isinstance(args[0], DTensor) and isinstance(args[4], DTensor)
+    # args[0] = args[0].redistribute(args[4].device_mesh, args[4].placements)
     args = tuple(args)
 
     # extract local tensor and sharding infos to a OpInfo
@@ -377,40 +329,29 @@ def sdpa_backward_handler(
     assert output_sharding is not None, "output sharding should not be None"
     assert not output_sharding.needs_redistribute, "inputs need to be redistributed"
 
-    local_results = _scaled_dot_product_ring_flash_attention_backward(
-        op_info.mesh,
-        *op_info.local_args,  # type: ignore[arg-type]
-        **op_info.local_kwargs,  # type: ignore[arg-type]
-    )
+    if op_call == aten._scaled_dot_product_flash_attention_backward.default:
+        local_results = _scaled_dot_product_ring_flash_attention_backward(
+            op_info.mesh,
+            *op_info.local_args,  # type: ignore[arg-type]
+            **op_info.local_kwargs,  # type: ignore[arg-type]
+        )
+    elif op_call == aten._scaled_dot_product_efficient_attention_backward.default:
+        local_results = _scaled_dot_product_ring_efficient_attention_backward(
+            op_info.mesh,
+            *op_info.local_args,  # type: ignore[arg-type]
+            **op_info.local_kwargs,  # type: ignore[arg-type]
+        )
+    else:
+        raise NotImplementedError(f"{op_call=}")
 
     return DTensor._op_dispatcher.wrap(local_results, output_sharding.output_spec)
-
-
-def _get_rerun_gradients(
-    grad_out: torch.Tensor,
-    logsumexp: torch.Tensor,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    dropout_p: float,
-    is_causal: bool,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    # Keep this implementation for verification purpose.
-    # TODO(chienchin): remove this implementation after more E2E
-    # verification.
-    rest: Tuple[Any, ...] = tuple()
-    output, logsumexp_, *rest = aten._scaled_dot_product_flash_attention(
-        query, key, value, dropout_p=dropout_p, is_causal=is_causal
-    )
-    softmax_lse_corrected = torch.exp(logsumexp_ - logsumexp)
-    grad_out_ = grad_out * softmax_lse_corrected.conj().unsqueeze(-1).to(grad_out.dtype)
-    return grad_out_, logsumexp_, output
 
 
 def _templated_ring_attention_backward(
     mesh: DeviceMesh,
     op: AttentionOp,
     grad_out: torch.Tensor,
+    grad_out_name: str,
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -440,26 +381,13 @@ def _templated_ring_attention_backward(
         )
 
         if is_causal_behavior != _CausalBehavior.SKIP:
-            if _rerun_forward:
-                grad_out_, logsumexp_, output = _get_rerun_gradients(
-                    grad_out,
-                    logsumexp,
-                    query,
-                    key,
-                    value,
-                    kwargs["dropout_p"],
-                    is_causal_behavior.value,
-                )
-            else:
-                grad_out_, logsumexp_, output = (grad_out, logsumexp, out)
-
+            kwargs[grad_out_name] = grad_out
             grad_query_, grad_key_, grad_value_, *rest = op(
-                grad_out=grad_out_,
                 query=query,
                 key=key,
                 value=value,
-                out=output,
-                logsumexp=logsumexp_,
+                out=out,
+                logsumexp=logsumexp,
                 is_causal=is_causal_behavior.value,
                 **kwargs,
             )
@@ -469,7 +397,7 @@ def _templated_ring_attention_backward(
             grad_value_ = torch.zeros_like(value)
 
         buffer = next_kv if i == 0 else next_grad_kv
-        buffer = buffer.wait()
+        buffer = _maybe_wait(buffer)
         pointer = 0
 
         # Get the new key and value for the (i + 1) round.
@@ -511,7 +439,7 @@ def _templated_ring_attention_backward(
         grad_query += grad_query_
 
     grad_query = grad_query.to(query.dtype)
-    next_grad_kv = next_grad_kv.wait()
+    next_grad_kv = _maybe_wait(next_grad_kv)
     grad_key = next_grad_kv[: grad_key_.numel()].reshape(grad_key.shape)
     grad_value = next_grad_kv[grad_value_.numel() :].reshape(grad_value.shape)
     return (
@@ -545,6 +473,7 @@ def _scaled_dot_product_ring_flash_attention_backward(
         mesh,
         aten._scaled_dot_product_flash_attention_backward.default,
         grad_out=grad_out,
+        grad_out_name="grad_out",
         query=query,
         key=key,
         value=value,
@@ -562,13 +491,52 @@ def _scaled_dot_product_ring_flash_attention_backward(
     )
 
 
+def _scaled_dot_product_ring_efficient_attention_backward(
+    mesh: DeviceMesh,
+    grad_out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    bias: torch.Tensor,
+    out: torch.Tensor,
+    logsumexp: torch.Tensor,
+    philox_seed: torch.Tensor,
+    philox_offset: torch.Tensor,
+    dropout_p: float,
+    grad_input_mask: Tuple[bool, ...],
+    is_causal: bool = False,
+    *,
+    scale: Optional[float] = None,
+) -> Tuple[torch.Tensor, ...]:
+    return _templated_ring_attention_backward(
+        mesh,
+        aten._scaled_dot_product_efficient_attention_backward.default,
+        grad_out=grad_out,
+        grad_out_name="grad_out_",
+        query=query,
+        key=key,
+        value=value,
+        attn_bias=bias,
+        out=out,
+        logsumexp=logsumexp,
+        philox_seed=philox_seed,
+        philox_offset=philox_offset,
+        dropout_p=dropout_p,
+        grad_input_mask=grad_input_mask,
+        is_causal=is_causal,
+        scale=scale,
+    )
+
+
 customized_ops = {
     aten._scaled_dot_product_flash_attention.default: sdpa_handler,
     aten._scaled_dot_product_flash_attention_backward.default: sdpa_backward_handler,
+    aten._scaled_dot_product_efficient_attention.default: sdpa_handler,
+    aten._scaled_dot_product_efficient_attention_backward.default: sdpa_backward_handler,
 }
 
 
-# Following APIs are experimental to allow users to enable CP.
+# Following experimental APIs allow users to enable CP.
 
 
 @contextlib.contextmanager
@@ -777,14 +745,10 @@ def _distribute_function(
                 setattr_(fn_caller_module, obj_name, obj, wrapper_func)
 
 
-_function_cm: weakref.WeakKeyDictionary[Callable, Any] = weakref.WeakKeyDictionary()
-
-
 def enable_context_parallel(
     seq_dim: int,
     callers: List[nn.Module],
     device_mesh: DeviceMesh,
-    enable_load_balance: bool = True,
 ) -> None:
     """
     This is an experimental API to enable context parallelism for
@@ -819,16 +783,10 @@ def enable_context_parallel(
 
         new_args = tuple(all_args[0 : len(args)])
         new_kwargs = dict(zip(kwargs.keys(), all_args[len(args) :]))
-        if not _function_cm:
-            _function_cm[attention_input_fn] = attention_context_parallel()
-            manager = _function_cm[attention_input_fn]
-            manager.__enter__()
-
         return new_args, new_kwargs
 
     def attention_output_fn(device_mesh, outputs):
         new_outputs = []
-        # TODO: Convert to 1D DTensor if 2D is applied.
         for output in [outputs] if isinstance(outputs, torch.Tensor) else outputs:
             output = output.to_local() if isinstance(output, DTensor) else output
             new_outputs.append(output)
@@ -838,6 +796,8 @@ def enable_context_parallel(
 
         return tuple(new_outputs)
 
+    old_handlers = DTensor._op_dispatcher._custom_op_handlers
+    DTensor._op_dispatcher._custom_op_handlers = {**old_handlers, **customized_ops}
     _distribute_function(
         F.scaled_dot_product_attention,
         F,
@@ -848,6 +808,15 @@ def enable_context_parallel(
     )
 
 
+def _get_sequence_shard(
+    src_buffer: torch.Tensor,
+    cp_rank: int,
+    cp_world_size: int,
+    seq_dim: int,
+):
+    return src_buffer.chunk(cp_world_size, dim=seq_dim)[cp_rank]
+
+
 @contextlib.contextmanager
 @torch.no_grad()
 def context_parallel_buffers(
@@ -855,42 +824,36 @@ def context_parallel_buffers(
     cp_world_size: int,
     buffers: List[torch.Tensor],
     seq_dims: List[int],
-    keep_orig_buffers: List[bool],
-):
+    restore_funcs: Optional[Tuple[Optional[Callable]]] = None,
+) -> List[torch.Tensor]:
     if cp_world_size == 1:
-        yield
+        yield buffers
         return
 
-    for buffer, seq_dim, keep_orig_buffer in zip(buffers, seq_dims, keep_orig_buffers):
-        if keep_orig_buffer:
-            orig_buffer = getattr(buffer, "_orig_buffer", None)
-            if orig_buffer is None:
-                orig_buffer = buffer.clone()
-                buffer._orig_buffer = orig_buffer
-        else:
-            orig_buffer = buffer.clone()
+    restore_funcs_tuple = (
+        [None for _ in buffers] if restore_funcs is None else restore_funcs
+    )
+    original_buffers = []
 
-        shape = buffer.shape
-        seq_len = shape[seq_dim]
-        chunk_seq_len = seq_len // cp_world_size
-        view_slices = tuple(
-            slice(0, shape[i])
-            if i != seq_dim
-            else slice(cp_rank * chunk_seq_len, (cp_rank + 1) * chunk_seq_len)
-            for i in range(len(shape))
+    if len(buffers) != len(seq_dims):
+        raise ValueError(
+            "`seq_dims` must have the same number of elements as `buffers`."
         )
-        buffer_view = orig_buffer[view_slices]
-        buffer.resize_(buffer_view.shape)
-        buffer.copy_(buffer_view)
-        if not keep_orig_buffer:
-            del buffer_view
-            del orig_buffer
 
-    yield
+    if len(restore_funcs_tuple) != len(buffers):
+        raise ValueError(
+            "`restore_funcs_tuple` must be either None or have the same "
+            "number of as `buffers`."
+        )
 
-    for buffer, seq_dim, keep_orig_buffer in zip(buffers, seq_dims, keep_orig_buffers):
-        if not keep_orig_buffer:
-            continue
+    new_buffers = []
+    for buffer, seq_dim, restore_func in zip(buffers, seq_dims, restore_funcs_tuple):
+        original_buffers.append(buffer if restore_func else None)
+        new_buffers.append(_get_sequence_shard(buffer, cp_rank, cp_world_size, seq_dim))
 
-        buffer.resize_(buffer._orig_buffer.shape)
-        buffer.copy_(buffer._orig_buffer)
+    yield new_buffers
+
+    for original_buffer, restore_func in zip(original_buffers, restore_funcs_tuple):
+        if original_buffer is not None:
+            assert restore_func is not None
+            restore_func(original_buffer)

@@ -359,6 +359,20 @@ def scaled_dot_product_efficient_attention_strategy(
     ]
     if has_attn_bias:
         all_replicate.append(Replicate())  # attn bias
+
+    # Context Parallelism: shards on the sequence dim
+    single_mesh_dim_strategies.append(
+        [
+            Shard(2),  # output
+            Shard(2),  # logsumexp
+            None,  # philox_seed
+            None,  # philox_offset
+            Shard(2),  # q
+            Shard(2),  # k
+            Shard(2),  # v
+        ]
+    )
+
     single_mesh_dim_strategies.append(all_replicate)
 
     # second we can accept the sharding pattern of tensor parallelism, which
@@ -451,6 +465,27 @@ def scaled_dot_product_efficient_attention_backward_strategy(
     # namely philox_seed and philox_offset
     num_heads_dim_sharding.extend([Replicate(), Replicate()])
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # Context Parallelism: shards on the sequence dim
+    seq_dim_sharding: PlacementList = [
+        Shard(2),  # grad_q
+        Shard(2),  # grad_k
+        Shard(2),  # grad_v
+        Shard(1) if has_attn_bias else None,  # grad_bias
+        Shard(2),  # grad_output
+        Shard(2),  # q
+        Shard(2),  # k
+        Shard(2),  # v
+        Shard(2),  # output
+        Shard(2),  # logsumexp
+    ]
+    # accept replicate on the rest tensor inputs, potentially
+    # cum_seq_q, cum_seq_k, philox_seed, philox_offset
+    # at indices 6, 7, 12, 13, respectively
+    if has_attn_bias:
+        num_heads_dim_sharding.insert(8, Shard(1))
+    seq_dim_sharding.extend([Replicate(), Replicate()])
+    single_mesh_dim_strategies.append(seq_dim_sharding)
 
     return expand_to_full_mesh_op_strategy(
         mesh,
