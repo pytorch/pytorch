@@ -4369,15 +4369,12 @@ class ExternKernel(InputsKernel):
         # TODO: The logics here may be further simplified.
         from .codegen.wrapper import get_cpp_op_schema
 
-        # These checks are here because ops that return aliasing tensors will
-        # return type Tensor& instead of Tensor, but codegen will always write
-        # type Tensor on the LHS.
-        def is_not_write(arg):
-            return arg.alias_info is None or not arg.alias_info.is_write
-
         self.cpp_kernel_overload_name = kernel._schema.overload_name
         self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
-        self.cpp_op_schema = get_cpp_op_schema(kernel)
+        try:
+            self.cpp_op_schema = get_cpp_op_schema(kernel)
+        except Exception:
+            self.cpp_op_schema = ""
 
     def get_kernel_name(self):
         return (
