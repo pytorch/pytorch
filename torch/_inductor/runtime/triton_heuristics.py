@@ -1332,11 +1332,13 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
     num_warps = next_power_of_2(min(max(num_warps, min_num_warps), default_num_warps))
 
     # Check if maxGridSize is exceeded - if so then must scale XBLOCK further
-    max_grid_x = 4294967295 if torch.version.hip else 2147483647
-    warp_size = 64 if torch.version.hip else 32
+    max_grid_x = 2147483647
+    warp_size = (
+        64 if torch.version.hip else 32
+    )  # TODO: query warp size once #129663 is merged
     num_blocks = (size_hints[0] + x - 1) // x
+
     while (num_blocks * num_warps * warp_size) > max_grid_x and x < size_hints[0]:
-        assert x <= TRITON_MAX_BLOCK["X"], f"increase TRITON_MAX_BLOCK['X'] to {x}"    
         x *= 2  # Scale up XBLOCK if grid exceeds limits
         num_blocks = num_blocks // 2
     while conditional_product(x, r) > target:
@@ -1346,7 +1348,11 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
     check_config(cfg, xnumel=size_hints[0])
+    assert x <= TRITON_MAX_BLOCK["X"], f"increase TRITON_MAX_BLOCK['X'] to {x}"
     assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
+    assert (
+        num_blocks * num_warps * warp_size
+    ) <= max_grid_x, "Reduction config exceeds cudaDeviceProp maxGridSize. Please raise a pytorch issue"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -1531,6 +1537,9 @@ def _reduction_configs(
     tiny_config = triton_config_reduction(
         size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, MAX_RBLOCK)
     )
+    import pdb
+
+    pdb.set_trace()
     if inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise"):
         pass  # skip all these cases
     elif reduction_hint == ReductionHint.INNER:
