@@ -274,7 +274,7 @@ const Tensor& resize__symint(
   return _resize_(self, size, optional_memory_format);
 }
 
-void resize_bytes_nocuda(const Storage& storage, c10::SymInt newsize) {
+void resize_bytes_nocuda(const Storage& storage, const c10::SymInt& newsize) {
   // handles all devices except cuda (which needs to be in a different .so)
   c10::DeviceType device_type = storage.device_type();
   if (device_type == at::kCPU) {

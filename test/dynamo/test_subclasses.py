@@ -2,11 +2,9 @@
 import functools
 import itertools
 import unittest
-
 from functools import partial
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
@@ -14,7 +12,6 @@ import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
-
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     ShapeEnv,
@@ -1377,6 +1374,15 @@ s1 > 3""",
         x3 = CtxSubclassTensor(torch.ones(2), 4)
         _check_recompiles(self, lambda x: x * x, (x,), (x2,), False)
         _check_recompiles(self, lambda x: x * x, (x,), (x3,), True)
+
+    def test_tensor_subclass_ctx_recursive_guards(self):
+        x0 = torch.ones(2, 2)
+        x1 = CtxSubclassTensor(x0.clone(), 2)
+        x2 = CtxSubclassTensor(x0.clone(), 3)
+        tt0 = TwoTensor(x0.clone(), x1)
+        tt1 = TwoTensor(x0.clone(), x2)
+
+        _check_recompiles(self, lambda x: x * x, (tt0,), (tt1,), True)
 
     def test_tensor_subclass_ctx_custom_guards_override(self):
         class CtxSubclassTensorCustomGuardFn(CtxSubclassTensor):
