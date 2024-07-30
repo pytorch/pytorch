@@ -295,8 +295,8 @@ class RingAttentionTest(DTensorTestBase):
             },
         )
 
-
-instantiate_parametrized_tests(RingAttentionTest)
+if backends:
+    instantiate_parametrized_tests(RingAttentionTest)
 
 if __name__ == "__main__":
     run_tests()
