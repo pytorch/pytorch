@@ -19729,6 +19729,24 @@ op_db: List[OpInfo] = [
            # vmap does not support inplace views
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_transpose_swapdims),
+    OpInfo('transpose_copy',
+           assert_jit_shape_analysis=True,
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
+           supports_out=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # vmap does not support inplace views
+           check_inplace_batched_forward_grad=False,
+           sample_inputs_func=sample_inputs_transpose_swapdims,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
+               DecorateInfo(
+                   unittest.expectedFailure,
+                   'TestJit',
+                   'test_variant_consistency_jit',
+                   dtypes=(torch.float32,)
+               ),
+           )),
     OpInfo('T',
            op=lambda x: x.T,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
@@ -23941,6 +23959,15 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.transpose",
         torch_opinfo_name="transpose",
+    ),
+    PythonRefInfo(
+        "_refs.transpose_copy",
+        torch_opinfo_name="transpose_copy",
+        skips=(
+            # RuntimeError: no _refs support for torch.Tensor.is_conj
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+        ),
+        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.t",

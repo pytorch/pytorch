@@ -4335,6 +4335,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("resize_as_"),
                 xfail("take"),
                 xfail("tensor_split"),
+                xfail("transpose_copy"),
                 xfail("to_sparse"),
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),

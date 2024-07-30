@@ -197,6 +197,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "nanmean",
     "nansum",
     "transpose",
+    "transpose_copy",
     "permute",
     "squeeze",
     "unsqueeze",
