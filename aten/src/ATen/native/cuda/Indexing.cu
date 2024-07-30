@@ -1334,7 +1334,7 @@ tensorInfoLegacyIfScalar(cuda::detail::TensorInfo<T, IndexType> ti) {
   return ti;
 }
 
-uint64_t getDefaultMaxThreadsPerBlock() {
+constexpr uint64_t getDefaultMaxThreadsPerBlock() {
 #ifndef USE_ROCM
   return 128;
 #else
