@@ -129,9 +129,7 @@ def custom_op(
         import torch
 
         if schema is None:
-            import torch._custom_op.impl
-
-            schema_str = torch._custom_op.impl.infer_schema(fn, mutates_args)
+            schema_str = torch.library.infer_schema(fn, mutates_args=mutates_args)
         else:
             schema_str = schema
 

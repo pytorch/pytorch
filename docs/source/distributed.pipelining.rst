@@ -489,8 +489,6 @@ Pipeline Schedules
 
 .. autoclass:: ScheduleLoopedBFS
 
-.. autoclass:: ZeroBubbleAlgorithm
-
 .. autoclass:: PipelineScheduleSingle
   :members:
 
