@@ -159,24 +159,6 @@ struct VecConvert<int16_t, 1, uint8_t, 1> {
   }
 };
 
-template <>
-struct VecConvert<float, 1, uint8_t, 1> {
-  static inline VectorizedN<float, 1> apply(
-      const VectorizedN<uint8_t, 1>& src) {
-    return VecConvert<float, 1, int32_t, 1>::apply(
-        VecConvert<int32_t, 1, uint8_t, 1>::apply(src));
-  }
-};
-
-template <>
-struct VecConvert<int8_t, 1, float, 1> {
-  static inline VectorizedN<int8_t, 1> apply(
-      const VectorizedN<float, 1>& src) {
-    return VecConvert<int8_t, 1, int32_t, 1>::apply(
-        VecConvert<int32_t, 1, float, 1>::apply(src));
-  }
-};
-
 template <typename dst_t, typename src_t>
 struct VecConvert<
     dst_t,
