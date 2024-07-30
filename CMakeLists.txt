@@ -541,6 +541,7 @@ if(LINUX)
 
   set(ENV_LDFLAGS "$ENV{LDFLAGS}")
   string(STRIP "${ENV_LDFLAGS}" ENV_LDFLAGS)
+  # Do not append linker flags passed via env var if they already there
   if(NOT ${CMAKE_SHARED_LINKER_FLAGS} MATCHES "${ENV_LDFLAGS}")
      set(CMAKE_SHARED_LINKER_FLAGS
          "${CMAKE_SHARED_LINKER_FLAGS} ${ENV_LDFLAGS}")
