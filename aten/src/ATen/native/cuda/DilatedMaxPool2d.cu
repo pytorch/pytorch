@@ -41,7 +41,7 @@ static __device__ inline int p_end(int size, int pad, int pooled_size, int strid
 }
 
 // kernels borrowed from Caffe
-template <typename scalar_t, typename accscalar_t>
+template <typename scalar_t>
 __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom_data,
     const int64_t channels, const int64_t height,
     const int64_t width, const int pooled_height, const int pooled_width,
@@ -62,24 +62,24 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
       hstart += dilation_h;
     while(wstart < 0)
       wstart += dilation_w;
-    accscalar_t maxval = at::numeric_limits<accscalar_t>::lower_bound(); // -Infinity
+    scalar_t maxval = at::numeric_limits<scalar_t>::lower_bound(); // -Infinity
     int maxidx = hstart * width + wstart;
     const scalar_t* btm_data = bottom_data + (n * channels + c) * height * width;
     for (int h = hstart; h < hend; h += dilation_h) {
       for (int w = wstart; w < wend; w += dilation_w) {
         scalar_t val = btm_data[h * width + w];
-        if ((static_cast<accscalar_t>(val) > maxval) || at::_isnan(val)) {
+        if ((val > maxval) || at::_isnan(val)) {
           maxidx = h * width + w;
-          maxval = static_cast<accscalar_t>(val);
+          maxval = val;
         }
       }
     }
-    top_data[index] = static_cast<accscalar_t>(maxval);
+    top_data[index] = maxval;
     top_mask[index] = maxidx;
   }
 }
 
-template <typename scalar_t, typename accscalar_t>
+template <typename scalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
 __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nbatch,
                                    const int64_t channels, const int64_t height,
@@ -142,8 +142,8 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
           const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
           for(int c = channel_offset; c < channels; c+= blockDim.x*kernel_stride_C) {
             scalar_t val = ptr_input[c*in_stride_c];
-            if ((static_cast<accscalar_t>(val) > out_cached[cached_index]) || at::_isnan(val)) {
-              out_cached[cached_index] = static_cast<accscalar_t>(val);
+            if ((val > out_cached[cached_index]) || at::_isnan(val)) {
+              out_cached[cached_index] = val;
               out_mask_cached[cached_index] = ih * width + iw;
             }
             cached_index += blockDim.x;
@@ -384,7 +384,7 @@ const Tensor& indices) {
           size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * (sizeof(int) + sizeof(scalar_t));
           AT_ASSERT(shmem_size <= at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock);
 
-          max_pool_forward_nhwc<scalar_t, scalar_t>
+          max_pool_forward_nhwc<scalar_t>
           <<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>>(
               input_data, nbatch,
                   nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
@@ -399,7 +399,7 @@ const Tensor& indices) {
         case MemoryFormat::Contiguous: {
           const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
                                             BLOCK_THREADS);
-          max_pool_forward_nchw<scalar_t, scalar_t>
+          max_pool_forward_nchw<scalar_t>
               <<<ceil_div(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
               count, input_data,
                   nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,

@@ -160,9 +160,7 @@ static value_list sortReverseTopological(ArrayRef<Value*> inputs, Block* b) {
 }
 
 static void debugDumpFusionGroup(const std::string& msg, Node* n) {
-  // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
   GRAPH_DEBUG(msg, *n);
-  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   if (n->kind() == prim::StaticSubgraph) {
     GRAPH_DEBUG(*n->g(attr::Subgraph));
   }

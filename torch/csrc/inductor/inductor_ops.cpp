@@ -10,9 +10,19 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 
-namespace torch {
-namespace inductor {
+namespace torch::inductor {
 using namespace at;
+
+Tensor _mm_plus_mm_out(
+    Tensor& out,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& c,
+    const Tensor& d) {
+  at::mm_out(out, a, b);
+  out.addmm_(c, d);
+  return out;
+}
 
 Tensor _mm_plus_mm(
     const Tensor& a,
@@ -20,9 +30,7 @@ Tensor _mm_plus_mm(
     const Tensor& c,
     const Tensor& d,
     Tensor& out) {
-  at::mm_out(out, a, b);
-  out.addmm_(c, d);
-  return out;
+  return _mm_plus_mm_out(out, a, b, c, d);
 }
 
 Tensor _alloc_from_pool(
@@ -101,5 +109,4 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
       {at::Tag::pt2_compliant_tag});
 }
 
-} // namespace inductor
-} // namespace torch
+} // namespace torch::inductor

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
 import copy
@@ -55,7 +56,6 @@ from torch.fx.passes.infra.pass_manager import PassManager
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 from .graph_signature import (  # noqa: F401
-    _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
     CustomObjArgument,
@@ -328,14 +328,13 @@ def _decompose_and_get_gm_with_new_signature_constants(
     _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
-    from torch._export.non_strict_utils import make_fake_params_buffers
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
     from torch._functorch.aot_autograd import aot_export_module
     from torch._guards import detect_fake_mode
 
     from torch.export._trace import (
         _export_to_aten_ir,
-        _get_params_buffers,
+        _fakify_params_buffers,
         _ignore_backend_decomps,
         _verify_nn_module_stack,
         _verify_placeholder_names,
@@ -394,9 +393,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
             constant_attrs.add(value, name)
 
         # get params & buffers after excluding constants
-        fake_params_buffers = make_fake_params_buffers(
-            fake_mode, _get_params_buffers(mod)
-        )
+        fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
         aten_export_artifact = _export_to_aten_ir(
             mod,
             # this requires empty kwargs, but not in pytree.flattened format
@@ -618,7 +615,6 @@ def _decompose_exported_program(
     new_range_constraints = _get_updated_range_constraints(
         gm,
         ep.range_constraints,
-        _is_executorch=False,
     )
 
     exported_program = ExportedProgram(
@@ -659,10 +655,6 @@ class ExportedProgram:
         range_constraints: "Dict[sympy.Symbol, Any]",
         module_call_graph: List[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
-        verifier: Optional[Type[Any]] = None,  # TODO Deprecate this.
-        tensor_constants: Optional[
-            Dict[str, torch.Tensor]
-        ] = None,  # TODO: deprecate this
         constants: Optional[
             Dict[str, Union[torch.Tensor, FakeScriptObject, torch._C.ScriptObject]]
         ] = None,
@@ -682,16 +674,9 @@ class ExportedProgram:
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
 
-        self._constants = tensor_constants or constants or {}
-        assert self._constants is not None
+        self._constants = constants or {}
 
-        # TODO Clean up this after we bump executorch's pin.
-        assert verifier is None or verifiers is None
-        if verifiers is None:
-            if verifier is None:
-                verifiers = [Verifier]
-            else:
-                verifiers = [verifier]
+        verifiers = verifiers or [Verifier]
         assert all(issubclass(v, Verifier) for v in verifiers)
         self._verifiers = verifiers
         # Validate should be always the last step of the constructor.
@@ -941,7 +926,7 @@ class ExportedProgram:
 
     def __str__(self) -> str:
         graph_module = self.graph_module.print_readable(
-            print_output=False, colored=True
+            print_output=False, colored=False
         ).replace("\n", "\n    ")
         string = (
             "ExportedProgram:\n"
@@ -1087,12 +1072,11 @@ class ExportedProgram:
             range_constraints=_get_updated_range_constraints(
                 transformed_gm,
                 self.range_constraints,
-                _is_executorch=False,
             ),
             module_call_graph=copy.deepcopy(self._module_call_graph),
             example_inputs=self.example_inputs,
-            verifier=self.verifier,
             constants=self.constants,
+            verifiers=self.verifiers,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
@@ -1131,8 +1115,8 @@ class ExportedProgram:
             range_constraints=copy.deepcopy(self.range_constraints),
             module_call_graph=copy.deepcopy(self._module_call_graph),
             example_inputs=self.example_inputs,
-            verifiers=verifiers if verifiers is not None else self.verifiers,
             constants=self.constants,
+            verifiers=verifiers if verifiers is not None else self.verifiers,
         )
 
 
@@ -1155,27 +1139,7 @@ def _get_shape_env(gm):
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
     old_range_constraints: "Optional[Dict[sympy.Symbol, Any]]" = None,
-    _is_executorch: bool = True,
 ) -> "Dict[sympy.Symbol, Any]":
-    # FIXME(tmanlaibaatar) Remove this whole branch once https://github.com/pytorch/pytorch/pull/123764
-    if _is_executorch:
-        assert old_range_constraints is None
-        shape_env = _get_shape_env(gm)
-        if shape_env is None:
-            return {}
-        range_constraints = {
-            k: v
-            for k, v in shape_env.var_to_range.items()
-            if k not in shape_env.replacements
-        }
-        # Only when we have an unbacked symint, and it's used as constructor inputs,
-        # runtime_var_to_range will make a difference compated to var_to_range.
-        # e.g. [2, oo) -> [0, oo)
-        for k, v in shape_env.var_to_range.items():
-            if k not in shape_env.replacements:
-                range_constraints[k] = v
-        return range_constraints
-
     assert old_range_constraints is not None
 
     shape_env = _get_shape_env(gm)

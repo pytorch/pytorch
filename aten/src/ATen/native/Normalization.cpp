@@ -87,12 +87,12 @@ DEFINE_DISPATCH(batch_norm_cpu_backward_stub);
 DEFINE_DISPATCH(renorm_scale_factor_stub);
 
 namespace {
-  void check_dims_match_num_input_features(const char* arg_name, SymInt expected, SymInt actual){
+  void check_dims_match_num_input_features(const char* arg_name, const SymInt& expected, const SymInt& actual){
     TORCH_CHECK(actual == expected,
              arg_name, " should contain ", expected, " elements not ", actual);
   }
 
-  static inline Tensor repeat_if_defined(const Tensor& t, SymInt repeat) {
+  static inline Tensor repeat_if_defined(const Tensor& t, const SymInt& repeat) {
     if (t.defined()) {
       return t.repeat_symint(repeat);
     }
@@ -173,7 +173,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
       return 1 / at::sqrt(running_var + eps);
     }
   }());
-  constexpr bool mixed_type = !std::is_same<scalar_t, param_t>::value;
+  constexpr bool mixed_type = !std::is_same_v<scalar_t, param_t>;
   const auto dtype = mixed_type ? kFloat : input.scalar_type();
   auto w = weight.defined() ? as_nd(weight) :
       at::detail::scalar_tensor_static(1, dtype, kCPU);
@@ -208,7 +208,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   int64_t n = input.numel() / n_input;
 
   bool all_contiguous = is_contiguous(input);
-  constexpr bool mixed_type = !std::is_same<scalar_t, param_t>::value;
+  constexpr bool mixed_type = !std::is_same_v<scalar_t, param_t>;
   const auto dtype = mixed_type ? kFloat : input.scalar_type();
 
   auto save_mean_a = save_mean.accessor<param_t, 1>();
@@ -292,7 +292,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     reduce_dims[i - 1] = i;
   }
 
-  constexpr bool mixed_type = !std::is_same<scalar_t, param_t>::value;
+  constexpr bool mixed_type = !std::is_same_v<scalar_t, param_t>;
   const auto dtype = mixed_type ? kFloat : input.scalar_type();
   Tensor save_mean = is_contiguous(input) ? at::empty({n_input}, input.options().dtype(dtype)) : at::mean(input, /*dim=*/reduce_dims, /*keepdim=*/false, dtype);
   Tensor save_var_transform = at::empty({n_input}, input.options().dtype(dtype));
@@ -307,7 +307,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
 
   using accscalar_t = at::acc_type<scalar_t, false>;
 
-  constexpr bool mixed_type = !std::is_same<scalar_t, param_t>::value;
+  constexpr bool mixed_type = !std::is_same_v<scalar_t, param_t>;
   const auto dtype = mixed_type ? kFloat : input.scalar_type();
 
   Tensor grad_input;
@@ -360,7 +360,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
     reduce_dims[i - 1] = i;
   }
 
-  auto sum = at::sum(grad_out_, /*dims=*/reduce_dims);
+  auto sum = at::sum(grad_out_, /*dim=*/reduce_dims);
   auto sum_a = sum.accessor<scalar_t, 1>();
 
   auto reduce_iter = TensorIteratorConfig()
@@ -406,7 +406,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
       for (const auto f : c10::irange(b_begin, b_end)) {
         param_t w = weight.defined() ? weight_a[f] : param_t(1);
 
-        param_t mean, invstd;
+        param_t mean{}, invstd{};
         if (train) {
           mean = save_mean_a[f];
           invstd = save_invstd_a[f];

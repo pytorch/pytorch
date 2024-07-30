@@ -2,7 +2,6 @@
 from typing import List
 
 from torch.ao.quantization.pt2e.utils import _is_sym_size_node
-
 from torch.ao.quantization.quantizer.quantizer import QuantizationAnnotation
 from torch.fx import Node
 

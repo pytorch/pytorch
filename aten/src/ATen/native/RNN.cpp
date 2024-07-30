@@ -209,7 +209,7 @@ struct CellParams : public CellParamsBase {
     TORCH_INTERNAL_ASSERT(false, "Not yet implemented");
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
-      CellParamsSerializationType state) {
+      const CellParamsSerializationType& state) {
     TORCH_INTERNAL_ASSERT(false, "Not yet implemented");
   }
 };
@@ -289,9 +289,9 @@ struct QuantizedCellParams : public CellParamsBase {
                                                zero_point_hh.toLong()};
     return CellParamsSerializationType(
         "quantized",
-        std::move(tensors_to_serialize),
-        std::move(doubles_to_serialize),
-        std::move(longs_to_serialize),
+        tensors_to_serialize,
+        doubles_to_serialize,
+        longs_to_serialize,
         {});
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
@@ -355,10 +355,10 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params(
       /*packed_hh=*/std::move(packed_hh),
       /*col_offsets_ih=*/std::move(col_offsets_ih),
       /*col_offsets_hh=*/std::move(col_offsets_hh),
-      /*scale_ih=*/std::move(scale_ih),
-      /*scale_hh=*/std::move(scale_hh),
-      /*zero_point_ih=*/std::move(zero_point_ih),
-      /*zero_point_hh=*/std::move(zero_point_hh));
+      /*scale_ih=*/scale_ih,
+      /*scale_hh=*/scale_hh,
+      /*zero_point_ih=*/zero_point_ih,
+      /*zero_point_hh=*/zero_point_hh);
 }
 
 // QuantizedCellParams vs. QuantizedCellParamsDynamic
@@ -431,10 +431,10 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     // reduce_range parameter is serialized along with the int field values.
     return CellParamsSerializationType(
         "quantized_dynamic",
-        std::move(tensors_to_serialize),
+        tensors_to_serialize,
         {},
         {reduce_range_},
-        std::move(packed_params_to_serialize));
+        packed_params_to_serialize);
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
@@ -507,7 +507,7 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
         packed_params_to_serialize{packed_ih, packed_hh};
 
     return CellParamsSerializationType(
-        "quantized_fp16", {}, {}, {}, std::move(packed_params_to_serialize));
+        "quantized_fp16", {}, {}, {}, packed_params_to_serialize);
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
@@ -667,13 +667,13 @@ tpair_of<Tensor> hidden_slice(const tpair_of<Tensor>& t, int64_t start, int64_t 
 // It's a struct only because functional programming in C++ is a pain, and it's easier
 // to pass around "vtable pointers" than actual function pointers.
 
-void check_rnn_cell_forward_input(const Tensor& input, c10::SymInt input_size) {
+void check_rnn_cell_forward_input(const Tensor& input, const c10::SymInt& input_size) {
   TORCH_CHECK(
     input.sym_size(1) == input_size,
     "input has inconsistent input_size: got ", input.sym_size(1), " expected ", input_size);
 }
 
-void check_rnn_cell_forward_hidden(const Tensor& input, const Tensor& hx, c10::SymInt hidden_size, c10::SymInt hidden_label) {
+void check_rnn_cell_forward_hidden(const Tensor& input, const Tensor& hx, const c10::SymInt& hidden_size, const c10::SymInt& hidden_label) {
   TORCH_CHECK(
     input.sym_size(0) == hx.sym_size(0),
     "Input batch size ", input.sym_size(0), " doesn't match hidden", hidden_label, " batch size ", hx.sym_size(0));
@@ -1711,23 +1711,9 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
           result_dtype == at::kHalf,
       "dtype is not supported");
 
-  std::tuple<Tensor, Tensor, Tensor> results;
-  if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (use_dynamic) {
-      results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
-    } else {
-      results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
-    }
-  } else {
-    results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
+  auto results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
         input, params, hx[0], hx[1], num_layers,
         dropout_p, train, bidirectional);
-  }
 
   if (batch_first) {
     std::get<0>(results) = std::get<0>(results).transpose(0, 1);
@@ -1759,8 +1745,8 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
 static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
     const Tensor& data,
     const Tensor& batch_sizes,
-    c10::List<at::Tensor> hx_,
-    c10::List<c10::intrusive_ptr<CellParamsBase>> _params_,
+    const c10::List<at::Tensor>& hx_,
+    const c10::List<c10::intrusive_ptr<CellParamsBase>>& _params_,
     bool has_biases,
     int64_t num_layers,
     double dropout_p,
@@ -1777,26 +1763,10 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   TORCH_CHECK(hx[0].size(2) == hx[1].size(2), "quantized LSTM with projections is not supported");
 
-  auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
-
   PackedSequence input { data, batch_sizes };
-  std::tuple<PackedSequence, Tensor, Tensor> results;
-  if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (use_dynamic) {
-      results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
-    } else {
-      results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
-    }
-  } else {
-    results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
+  auto results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
         input, params, hx[0], hx[1], num_layers,
         dropout_p, train, bidirectional);
-  }
   auto & packed_output = std::get<0>(results);
   return std::make_tuple(std::move(packed_output.data),
                          std::move(std::get<1>(results)),

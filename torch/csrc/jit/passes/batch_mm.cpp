@@ -16,8 +16,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
@@ -490,5 +489,4 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
   PeepholeOptimize(graph, /*disable_shape_peepholes*/ true);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

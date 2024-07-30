@@ -14013,6 +14013,31 @@ class TestAutogradMultipleDispatch(TestCase):
         TestFn.apply(inp, None).sum().backward()
         self.assertEqual(local.my_obj[10], 5)
 
+    def test_is_retain_graph(self):
+        retain_graph_set = False
+
+        class TestFn(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                nonlocal retain_graph_set
+                retain_graph_set = (
+                    torch._C._autograd._get_current_graph_task_keep_graph()
+                )
+                return gO, None
+
+        inp = torch.rand(10, requires_grad=True)
+
+        out = TestFn.apply(inp)
+        self.assertFalse(retain_graph_set)
+        out.sum().backward(retain_graph=True)
+        self.assertTrue(retain_graph_set)
+        out.sum().backward(retain_graph=False)
+        self.assertFalse(retain_graph_set)
+
     def test_set_sequence_nr(self):
         x = torch.randn((10,), dtype=torch.float32, requires_grad=True)
         y = torch.randn((10,), dtype=torch.float32, requires_grad=True)

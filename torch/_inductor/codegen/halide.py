@@ -237,7 +237,12 @@ def halide_acc_type(dtype):
 
 class HalideOverrides(OpOverrides):
     @staticmethod
-    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
+    def to_dtype(
+        x,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types=True,
+    ):
         if dtype == torch.bool:
             return f"({x} != 0)"
         return f"hl.cast({halide_type(dtype)}, {x})"
@@ -518,7 +523,7 @@ class HalideOverrides(OpOverrides):
         return var
 
     @classmethod
-    def indirect_indexing(cls, index_var, size, check=True):
+    def indirect_indexing(cls, index_var, size, check=True, wrap_neg=True):
         # TODO(jansel): Halide only supports 32-bit indexing, we should error on overflow
         index_var = ops.to_dtype(index_var, torch.int32)
         index_var = ops.halide_clamp(index_var, size, check)

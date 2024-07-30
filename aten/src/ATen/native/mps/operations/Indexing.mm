@@ -643,6 +643,14 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
 
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
 
+  bool needs_output_copy = false;
+
+  Tensor output;
+  if (needsGather(self)) {
+    output = at::empty(self.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
+    needs_output_copy = true;
+  }
+
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* inputTensor_ = nil;
@@ -692,8 +700,11 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
         Placeholder(cachedGraph->inputTensor_, self, /*mpsShape*/ nil, /*gatherTensorData=*/true, inputDataType);
     Placeholder maskPlaceholder =
         Placeholder(cachedGraph->maskTensor_, *b_mask, /*mpsShape*/ nil, /*gatherTensorData=*/true, maskDataType);
-    Placeholder outputPlaceholder =
-        Placeholder(cachedGraph->outputTensor_, self, /*mpsShape*/ nil, /*gatherTensorData=*/false, inputDataType);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
+                                                needs_output_copy ? output : self,
+                                                /*mpsShape*/ nil,
+                                                /*gatherTensorData=*/false,
+                                                inputDataType);
 
     // Create dictionary of inputs and outputs
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
@@ -704,6 +715,11 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
+
+  if (needs_output_copy) {
+    self.copy_(output);
+  }
+
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }

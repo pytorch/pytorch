@@ -1,5 +1,6 @@
 #include <c10/util/irange.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <torch/csrc/distributed/c10d/Backoff.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
@@ -202,12 +203,12 @@ std::unique_ptr<TCPClient> TCPClient::connect(
     const SocketAddress& addr,
     const TCPStoreOptions& opts,
     std::shared_ptr<Backoff> backoff) {
-  auto timeout = std::chrono::duration_cast<std::chrono::seconds>(opts.timeout);
   Socket socket = Socket::connect(
       addr.host,
       addr.port,
-      SocketOptions{}.connect_timeout(timeout).connect_backoff(
-          std::move(backoff)));
+      SocketOptions{}
+          .connect_timeout(opts.timeout)
+          .connect_backoff(std::move(backoff)));
 
   return std::make_unique<TCPClient>(std::move(socket));
 }
@@ -632,7 +633,12 @@ void TCPStore::doWait(
       TORCH_CHECK(false, "wait_canceled response is expected");
     }
   }
-  C10_THROW_ERROR(DistStoreError, "Socket Timeout");
+  C10_THROW_ERROR(
+      DistStoreError,
+      fmt::format(
+          "wait timeout after {}ms, keys: {}",
+          timeout.count(),
+          fmt::join(keys, ", ")));
 }
 
 void TCPStore::append(

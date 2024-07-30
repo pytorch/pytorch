@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // propagate autograd zero information through a gradient graph and
 // remove grad_of blocks if present.
@@ -17,5 +16,4 @@ struct ProfilingRecord;
 
 TORCH_API void InsertProfileNodesForSpecializeAutogradZero(ProfilingRecord* pr);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

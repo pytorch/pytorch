@@ -110,9 +110,7 @@ class TestNumericDebugger(TestCase):
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
 
-    @unittest.skip(
-        "reexport is not fully supported yet, need to add support for output node"
-    )
+    @unittest.skip("All nodes' meta are preserved but get_attr nodes' meta are wrong.")
     def test_re_export_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()

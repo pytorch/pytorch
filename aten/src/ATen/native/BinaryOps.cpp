@@ -1417,7 +1417,7 @@ Tensor& comparison_op_(Tensor& self, const Scalar& other, OutImpl& out_impl) {
 
 // We need explicit cast to OutFunc because each *_out func is overloaded twice. Without An explicit cast, merely
 // referring to *_out function is ambiguous.
-using OutFunc = std::add_const<Tensor&(&)(Tensor&, const Tensor&, const Tensor&)>::type;
+using OutFunc = std::add_const_t<Tensor&(&)(Tensor&, const Tensor&, const Tensor&)>;
 
 // less, alias for torch.lt
 Tensor& less_out(const Tensor& self, const Tensor& other, Tensor& result) { return at::lt_out(result, self, other); }

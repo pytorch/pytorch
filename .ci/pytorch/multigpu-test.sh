@@ -55,6 +55,9 @@ time python test/run_test.py --verbose -i distributed/_composable/fsdp/test_full
 # Pipelining composability tests
 time python test/run_test.py --verbose -i distributed/pipelining/test_composability.py
 
+# ND composability tests
+time python test/run_test.py --verbose -i distributed/_composable/test_composability/test_2d_composability
+
 # Other tests
 time python test/run_test.py --verbose -i test_cuda_primary_ctx
 time python test/run_test.py --verbose -i test_optim -- -k test_forloop_goes_right_direction_multigpu

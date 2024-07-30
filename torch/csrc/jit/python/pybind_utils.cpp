@@ -14,6 +14,7 @@
 
 #include <limits>
 #include <optional>
+#include <utility>
 
 namespace torch::jit {
 
@@ -268,7 +269,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       auto thp_stream = reinterpret_cast<THPStream*>(obj.ptr());
       auto stream = c10::Stream::unpack3(
           thp_stream->stream_id,
-          thp_stream->device_index,
+          static_cast<c10::DeviceIndex>(thp_stream->device_index),
           static_cast<c10::DeviceType>(thp_stream->device_type));
       return stream;
     }
@@ -788,11 +789,11 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
 // schema.
 bool checkSchemaAllowFakeScriptObject(
     const FunctionSchema& schema,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs) {
   bool match = false;
   try {
-    match = matchSchemaAllowFakeScriptObject(schema, std::move(args), kwargs);
+    match = matchSchemaAllowFakeScriptObject(schema, args, kwargs);
   } catch (schema_match_error& error) {
     throw std::runtime_error(error.what());
   }
@@ -804,7 +805,7 @@ py::object invokeOperatorFromPython(
     py::args args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk) {
-  auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
+  auto [found_op, stack] = getOpWithStack(operations, std::move(args), kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
     if (dk) {
@@ -822,7 +823,7 @@ std::optional<py::object> _maybe_handle_torch_function(
     const std::string& method_name,
     const std::string& overload_name,
     bool is_overload,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs) {
   std::vector<PyObject*> overloaded_args;
   size_t total_arg_num = args.size() + kwargs.size();
@@ -877,7 +878,7 @@ std::optional<py::object> _maybe_handle_torch_function(
 py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,
     Symbol symbol,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs,
     bool is_overload,
     std::optional<c10::DispatchKey> dk) {

@@ -8,7 +8,7 @@ import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Dict, List, Set, Tuple, TYPE_CHECKING, Union
+from typing import Dict, List, Set, Tuple, TYPE_CHECKING
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
@@ -16,12 +16,7 @@ from torch._inductor.utils import get_benchmark_name
 
 # Prevent circular import
 if TYPE_CHECKING:
-    from torch._inductor.scheduler import (
-        BaseSchedulerNode,
-        ExternKernelSchedulerNode,
-        NopKernelSchedulerNode,
-        SchedulerNode,
-    )
+    from torch._inductor.scheduler import BaseSchedulerNode
 
 # counter for tracking how many kernels have been generated
 generated_kernel_count = 0
@@ -29,7 +24,7 @@ generated_cpp_vec_kernel_count = 0
 num_bytes_accessed = 0
 nodes_num_elem: List[
     Tuple[
-        Union[NopKernelSchedulerNode, SchedulerNode, ExternKernelSchedulerNode],
+        BaseSchedulerNode,
         int,
     ]
 ] = []

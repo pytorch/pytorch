@@ -318,11 +318,11 @@ class GraphModule(torch.nn.Module):
         l_y_ = L_y_
         l_x_ = L_x_
 
-        detach: "f32[2, 2]" = l_y_.detach()
+        _get_data_attr: "f32[2, 2]" = torch._C._autograd._get_data_attr(l_y_)
 
         _set_grad_enabled = torch._C._set_grad_enabled(False)
 
-        set_: "f32[2, 2]" = torch_Tensor_set_(l_x_, detach);  detach = None
+        set_: "f32[2, 2]" = torch_Tensor_set_(l_x_, _get_data_attr);  _get_data_attr = None
 
         _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
 

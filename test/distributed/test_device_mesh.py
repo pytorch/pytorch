@@ -313,7 +313,6 @@ class DeviceMeshTestNDim(DTensorTestBase):
         self.assertEqual(mesh_2d["TP"].device_type, ep_mesh.device_type)
         self.assertNotEqual(mesh_2d["TP"].mesh_dim_names, ep_mesh.mesh_dim_names)
         self.assertEqual(mesh_2d["TP"]._thread_id, ep_mesh._thread_id)
-        self.assertNotEqual(mesh_2d["TP"]._parent_mesh, ep_mesh._parent_mesh)
         self.assertNotEqual(hash(mesh_2d["TP"]), hash(ep_mesh))
         self.assertNotEqual(mesh_2d["TP"], ep_mesh)
 
@@ -329,7 +328,6 @@ class DeviceMeshTestNDim(DTensorTestBase):
         self.assertEqual(ep_mesh.device_type, another_mesh.device_type)
         self.assertEqual(ep_mesh.mesh_dim_names, another_mesh.mesh_dim_names)
         self.assertEqual(ep_mesh._thread_id, another_mesh._thread_id)
-        self.assertEqual(ep_mesh._parent_mesh, another_mesh._parent_mesh)
         self.assertEqual(hash(ep_mesh), hash(another_mesh))
         self.assertEqual(ep_mesh, another_mesh)
 

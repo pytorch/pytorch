@@ -49,14 +49,33 @@ inline C10_HOST_DEVICE BFloat16::operator float() const {
 #endif
 }
 
-#if defined(__CUDACC__) && !defined(USE_ROCM)
+#if defined(__CUDACC__)
+#if !defined(USE_ROCM)
 inline C10_HOST_DEVICE BFloat16::BFloat16(const __nv_bfloat16& value) {
   x = *reinterpret_cast<const unsigned short*>(&value);
 }
 inline C10_HOST_DEVICE BFloat16::operator __nv_bfloat16() const {
   return *reinterpret_cast<const __nv_bfloat16*>(&x);
 }
-#endif
+#else // defined(USE_ROCM)
+// 6.2.0 introduced __hip_bfloat16_raw
+#if defined(__BF16_HOST_DEVICE__)
+inline C10_HOST_DEVICE BFloat16::BFloat16(const __hip_bfloat16& value) {
+  x = __hip_bfloat16_raw(value).x;
+}
+inline C10_HOST_DEVICE BFloat16::operator __hip_bfloat16() const {
+  return __hip_bfloat16(__hip_bfloat16_raw{x});
+}
+#else // __BF16_HOST_DEVICE__
+inline C10_HOST_DEVICE BFloat16::BFloat16(const __hip_bfloat16& value) {
+  x = value.data;
+}
+inline C10_HOST_DEVICE BFloat16::operator __hip_bfloat16() const {
+  return __hip_bfloat16{x};
+}
+#endif // !__BF16_HOST_DEVICE__
+#endif // defined(USE_ROCM)
+#endif // defined(__CUDACC__)
 
 #if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
 inline C10_HOST_DEVICE BFloat16::BFloat16(

@@ -21,8 +21,7 @@
 #include <memory>
 #include <stdexcept>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -336,5 +335,4 @@ bool DtypePropagation(std::shared_ptr<Graph>& graph) {
   return changed;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

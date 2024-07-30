@@ -306,7 +306,6 @@ def _load_global_deps() -> None:
             "cuda_runtime": "libcudart.so.*[0-9]",
             "cuda_cupti": "libcupti.so.*[0-9]",
             "cufft": "libcufft.so.*[0-9]",
-            "cufile": "libcufile.so.*[0-9]",
             "curand": "libcurand.so.*[0-9]",
             "nvjitlink": "libnvJitLink.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",
@@ -2349,7 +2348,7 @@ def compile(
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
 
         - To register an out-of-tree custom backend:
-       https://pytorch.org/docs/main/torch.compiler_custom_backends.html#registering-custom-backends
+          https://pytorch.org/docs/main/torch.compiler_custom_backends.html#registering-custom-backends
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
 
         - "default" is the default mode, which is a good balance between performance and overhead

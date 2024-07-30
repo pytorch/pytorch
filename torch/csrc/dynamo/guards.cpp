@@ -851,6 +851,12 @@ bool is_immutable_object(py::handle example_value) {
       PyUnicode_Check(example_value.ptr()) ||
       THPVariable_Check(example_value.ptr());
 }
+
+bool is_parameter(py::handle tensor) {
+  py::object parameter = py::module::import("torch.nn").attr("Parameter");
+  return py::isinstance(tensor, parameter);
+}
+
 /**
  * Stores relevant guard debug information, e.g., failure str for a LeafGuard
  * failure. The data structure is also accessible in Python.
@@ -1320,11 +1326,11 @@ class RelationalGuard : public LeafGuard {
 };
 
 /**
- * Checks that tensor x is tensor y.
+ * Checks that object x is object y.
  */
-class TENSOR_ALIASING : public RelationalGuard {
+class OBJECT_ALIASING : public RelationalGuard {
  public:
-  TENSOR_ALIASING(py::object verbose_code_parts)
+  OBJECT_ALIASING(py::object verbose_code_parts)
       : RelationalGuard(std::move(verbose_code_parts)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -1788,6 +1794,12 @@ class GuardManager {
     _inserted_leaf_guards.insert(guard_name);
   }
 
+  void add_permitted_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
+    // Selectively called for permitted guards. This is used by DictGuardManager
+    // which overrides the add_leaf_guard manager to throw runtime error.
+    GuardManager::add_leaf_guard(std::move(leaf_guard));
+  }
+
  protected:
   // Keeps a count of how many times this guard manager check function returns
   // False. This is used for sorting optimization.
@@ -2204,11 +2216,6 @@ class DictGuardManager : public GuardManager {
     throw std::runtime_error("DictGuardManager does not support a leaf_guard");
   }
 
-  void add_permitted_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
-    // Selectively called for permitted guards.
-    GuardManager::add_leaf_guard(std::move(leaf_guard));
-  }
-
   // Debug helper - Returning raw pointers because we can't return unique_ptr
   // and pybind does not accept a unique_ptr reference return type.
   std::unordered_map<Py_ssize_t, std::pair<GuardManager*, GuardManager*>>
@@ -2539,6 +2546,12 @@ class TENSOR_MATCH : public LeafGuard {
         _tensor_name);
 
     if (!fail_reason.empty()) {
+      if (is_parameter(py::handle(value))) {
+        fail_reason += ". Guard failed on a parameter, consider using ";
+        fail_reason +=
+            "torch._dynamo.config.force_parameter_static_shapes = False ";
+        fail_reason += "to allow dynamism on parameters.";
+      }
       return GuardDebugInfo(false, fail_reason, 0);
     }
     return GuardDebugInfo(true, 1);
@@ -3386,20 +3399,23 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
   py::object _accessor_fn;
 };
 
-void install_tensor_aliasing_guard(
+void install_object_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
     py::object verbose_code_parts) {
   // Adds tensor X is tensor Y guard. This is a an example of relational guard.
   // There is one guard object that is shared between two guard managers.
   std::shared_ptr<RelationalGuard> guard =
-      std::make_shared<TENSOR_ALIASING>(std::move(verbose_code_parts));
+      std::make_shared<OBJECT_ALIASING>(std::move(verbose_code_parts));
 
   // Register the resetter on the toor guard mananger, so that it can reset
   // the newly added relational guard when the guard eval fails.
   x->get_root()->add_relational_guard_resetter(guard);
-  x->add_leaf_guard(guard);
-  y->add_leaf_guard(guard);
+
+  // In case the guard is a DictGuardManager, OBJECT_ALIASING guard is a
+  // permitted guard.
+  x->add_permitted_leaf_guard(guard);
+  y->add_permitted_leaf_guard(guard);
 }
 
 void install_no_tensor_aliasing_guard(
@@ -3586,8 +3602,8 @@ PyObject* torch_c_dynamo_guards_init() {
            py::list>())
       .def("__call__", &TENSOR_MATCH::check);
   // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<TENSOR_ALIASING, LeafGuard, std::shared_ptr<TENSOR_ALIASING>>(
-      py_m, "TENSOR_ALIASING");
+  py::class_<OBJECT_ALIASING, LeafGuard, std::shared_ptr<OBJECT_ALIASING>>(
+      py_m, "OBJECT_ALIASING");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       NO_TENSOR_ALIASING,
@@ -4199,7 +4215,7 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(attr_name), std::move(verbose_code_parts)));
           });
 
-  py_m.def("install_tensor_aliasing_guard", install_tensor_aliasing_guard);
+  py_m.def("install_object_aliasing_guard", install_object_aliasing_guard);
   py_m.def(
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
 

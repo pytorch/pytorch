@@ -10,8 +10,7 @@
 #include <optional>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -67,7 +66,7 @@ bool returnSecondArgDeviceRule(Node* n) {
   return setReturnsToDevice(n, tensor_type->device());
 }
 
-bool isZerodimCPUTensor(std::shared_ptr<TensorType> tensor_type) {
+bool isZerodimCPUTensor(const std::shared_ptr<TensorType>& tensor_type) {
   // CPU devices on zerodim tensors are the only device that can be
   // overwritten by another device. Therefore, to be conservative
   // assume that it is not a zerodim cpu tensor if something is not known.
@@ -149,7 +148,7 @@ bool defaultDeviceProp(Node* n) {
 
 struct DeviceTypePropagationPass : public PropertyPropBase {
   explicit DeviceTypePropagationPass(std::shared_ptr<Graph> graph)
-      : PropertyPropBase(graph) {
+      : PropertyPropBase(std::move(graph)) {
     buildRuleRegistry();
   }
 
@@ -261,5 +260,4 @@ bool DeviceTypePropagation(std::shared_ptr<Graph>& graph) {
   return changed;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

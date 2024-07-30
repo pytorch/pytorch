@@ -237,6 +237,9 @@ BaseArgumentTypes = Union[
     torch.memory_format,
     torch.layout,
     torch._ops.OpOverload,
+    torch.SymInt,
+    torch.SymFloat,
+    torch.SymBool,
 ]
 Argument = Optional[
     Union[

@@ -5,8 +5,7 @@
 
 #include <ATen/core/function_schema.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Try to match a list of inputs and keyword 'attributes' to this
 // schema. Return the flat list of positional inputs to the call or
@@ -66,5 +65,4 @@ TORCH_API Value* tryConvertToType(
     const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions);
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

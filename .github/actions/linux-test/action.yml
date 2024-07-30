@@ -167,6 +167,7 @@ runs:
         REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
         CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
         VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
+        TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
         NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
         NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
         TD_DISTRIBUTED: ${{ steps.keep-going.outputs.ci-td-distributed }}

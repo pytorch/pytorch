@@ -409,6 +409,18 @@ class TestKernelBenchmark(TestCase):
         # 20000 * 5000 * 4 = 200MB for a
         self.check_bandwidth(compiled_module, "0.200")
 
+    def test_split_scan(self):
+        @torch.compile
+        def f(a):
+            return a.cumsum(-1)
+
+        a = torch.rand(10000, 5000, device=GPU_TYPE)
+        f(a.reshape(-1))
+        compiled_module = self.get_compiled_module()
+        # 10000 * 5000 * 4 = 200 MB for a
+        # Double that for output as well
+        self.check_bandwidth(compiled_module, "0.400")
+
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)
     @config.patch(compile_threads=1)

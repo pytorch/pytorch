@@ -43,6 +43,8 @@ class CppWrapperCuda(CppWrapperCpu):
         super().write_header()
 
         self.header.splice("#include <filesystem>")
+        self.header.splice("typedef at::Half half;")
+        self.header.splice("typedef at::BFloat16 bfloat16;")
         if config.abi_compatible:
             self.header.splice(
                 "#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>"
@@ -154,7 +156,18 @@ class CppWrapperCuda(CppWrapperCpu):
                             var_name,
                         )
                     else:
-                        self.writeline(f"{ctype} {var_name} = {arg}.item<{ctype}>();")
+                        from torch import bfloat16, float16
+
+                        if arg_type in (float16, bfloat16):
+                            var_name_tmp = f"{var_name}_tmp"
+                            self.writeline(
+                                f"{ctype} {var_name_tmp} = {arg}.item<{ctype}>();"
+                            )
+                            self.writeline(f"float {var_name} = float({var_name_tmp});")
+                        else:
+                            self.writeline(
+                                f"{ctype} {var_name} = {arg}.item<{ctype}>();"
+                            )
                 else:
                     if config.abi_compatible:
                         self.writeline(

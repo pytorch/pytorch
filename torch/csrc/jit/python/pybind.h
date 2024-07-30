@@ -31,9 +31,9 @@ namespace torch::jit {
 template <typename T>
 class unwrapping_shared_ptr {
   static_assert(
-      std::is_same<T, torch::jit::Value>::value ||
-          std::is_same<T, torch::jit::Node>::value ||
-          std::is_same<T, torch::jit::Block>::value,
+      std::is_same_v<T, torch::jit::Value> ||
+          std::is_same_v<T, torch::jit::Node> ||
+          std::is_same_v<T, torch::jit::Block>,
       "unwrapping type only defined for Graph object types");
 
  private:
@@ -90,7 +90,7 @@ namespace pybind11::detail {
    protected:                                                                             \
     friend class type_caster_generic;                                                     \
                                                                                           \
-    bool load_value(value_and_holder&& v_h) {                                             \
+    bool load_value(const value_and_holder& v_h) {                                        \
       if (v_h.holder_constructed()) {                                                     \
         value = v_h.template holder<holder_type>().get();                                 \
         return true;                                                                      \

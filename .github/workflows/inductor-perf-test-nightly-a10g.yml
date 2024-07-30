@@ -1,0 +1,125 @@
+name: inductor-perf-nightly-A10g
+
+on:
+  schedule:
+    # - cron: 0 7 * * 1-6
+    # - cron: 0 7 * * 0
+    # Do not perform weekly max-autotune run for now.
+    - cron: 0 7 * * *
+  # NB: GitHub has an upper limit of 10 inputs here, so before we can sort it
+  # out, let try to run torchao cudagraphs_low_precision as part of cudagraphs
+  workflow_dispatch:
+    inputs:
+      training:
+        description: Run training (on by default)?
+        required: false
+        type: boolean
+        default: true
+      inference:
+        description: Run inference (off by default)?
+        required: false
+        type: boolean
+        default: false
+      default:
+        description: Run inductor_default?
+        required: false
+        type: boolean
+        default: false
+      dynamic:
+        description: Run inductor_dynamic_shapes?
+        required: false
+        type: boolean
+        default: false
+      cudagraphs:
+        description: Run inductor_cudagraphs?
+        required: false
+        type: boolean
+        default: true
+      freezing_cudagraphs:
+        description: Run inductor_cudagraphs with freezing for inference?
+        required: false
+        type: boolean
+        default: false
+      freeze_autotune_cudagraphs:
+        description: Run inductor_cudagraphs with freezing and max autotune for inference?
+        required: false
+        type: boolean
+        default: false
+      aotinductor:
+        description: Run aot_inductor for inference?
+        required: false
+        type: boolean
+        default: false
+      maxautotune:
+        description: Run inductor_max_autotune?
+        required: false
+        type: boolean
+        default: false
+      benchmark_configs:
+        description: The list of configs used the benchmark
+        required: false
+        type: string
+        default: inductor_huggingface_perf_cuda_a10g,inductor_timm_perf_cuda_a10g,inductor_torchbench_perf_cuda_a10g
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
+    name: cuda12.1-py3.10-gcc9-sm80
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks
+      cuda-arch-list: '8.0'
+      test-matrix: |
+        { include: [
+          { config: "inductor_huggingface_perf_cuda_a10g", shard: 1, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_huggingface_perf_cuda_a10g", shard: 2, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_huggingface_perf_cuda_a10g", shard: 3, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_timm_perf_cuda_a10g", shard: 1, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_timm_perf_cuda_a10g", shard: 2, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_timm_perf_cuda_a10g", shard: 3, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_timm_perf_cuda_a10g", shard: 4, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_timm_perf_cuda_a10g", shard: 5, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_torchbench_perf_cuda_a10g", shard: 1, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_torchbench_perf_cuda_a10g", shard: 2, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_torchbench_perf_cuda_a10g", shard: 3, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_torchbench_perf_cuda_a10g", shard: 4, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+      selected-test-configs: ${{ inputs.benchmark_configs }}
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+
+  linux-focal-cuda12_1-py3_10-gcc9-inductor-test-nightly:
+    name: cuda12.1-py3.10-gcc9-sm80
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-build
+    if: github.event.schedule == '0 7 * * *'
+    with:
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      use-gha: anything-non-empty-to-use-gha
+      timeout-minutes: 720
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+
+  linux-focal-cuda12_1-py3_10-gcc9-inductor-test:
+    name: cuda12.1-py3.10-gcc9-sm80
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-build
+    if: github.event_name == 'workflow_dispatch'
+    with:
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs }}
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      use-gha: anything-non-empty-to-use-gha
+      timeout-minutes: 720
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}

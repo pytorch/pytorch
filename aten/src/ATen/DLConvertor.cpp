@@ -295,7 +295,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
 }
 
 Tensor fromDLPack(DLManagedTensor* src) {
-  auto deleter = [src](void* self) {
+  auto deleter = [src](void* self [[maybe_unused]]) {
     if (src->deleter) {
       src->deleter(src);
     }

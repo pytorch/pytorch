@@ -41,6 +41,9 @@ outputs:
   ci-verbose-test-logs:
     description: True if ci-verbose-test-logs label was on PR or [ci-verbose-test-logs] in PR body.
     value: ${{ steps.filter.outputs.ci-verbose-test-logs }}
+  ci-test-showlocals:
+    description: True if ci-test-showlocals label was on PR or [ci-test-showlocals] in PR body.
+    value: ${{ steps.filter.outputs.ci-test-showlocals }}
   ci-no-test-timeout:
     description: True if ci-no-test-timeout label was on PR or [ci-no-test-timeout] in PR body.
     value: ${{ steps.filter.outputs.ci-no-test-timeout }}

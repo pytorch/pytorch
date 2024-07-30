@@ -64,11 +64,12 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       const std::string& field) override;
 
   Value* asValue(const SourceRange& loc, GraphFunction& m) override {
-    throw ErrorReport(loc)
+    throw(
+        ErrorReport(loc)
         << kind() << " cannot be used as a value. "
         << "Perhaps it is a closed over global variable? If so, please "
         << "consider passing it in as an argument or use a local varible "
-        << "instead.";
+        << "instead.");
   }
 
  protected:
@@ -139,13 +140,14 @@ struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
     if (!args.empty() || !kwargs.empty()) {
-      throw ErrorReport(loc)
-          << name_ << " method does not accept any arguments";
+      throw(
+          ErrorReport(loc) << name_ << " method does not accept any arguments");
     }
     return iterable_;
   }
 
   SugaredValuePtr iterable_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::string name_;
 };
 

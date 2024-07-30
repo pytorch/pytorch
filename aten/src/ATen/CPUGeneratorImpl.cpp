@@ -98,7 +98,7 @@ void CPUGeneratorImpl::set_current_seed(uint64_t seed) {
  * Sets the offset of RNG state.
  * See Note [Acquire lock when using random generators]
  */
-void CPUGeneratorImpl::set_offset(uint64_t offset) {
+void CPUGeneratorImpl::set_offset(uint64_t offset [[maybe_unused]]) {
   TORCH_CHECK(false, "CPU Generator does not use offset");
 }
 

@@ -14,7 +14,6 @@ namespace tensorexpr {
 
 class TORCH_API Tensor {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Tensor(BufPtr buf, const std::vector<VarPtr>& args, ExprPtr body)
       : buf_(std::move(buf)) {
     stmt_ = constructStmt(args, std::move(body), {}, {});
@@ -22,7 +21,6 @@ class TORCH_API Tensor {
   Tensor(BufHandle buf, const std::vector<VarHandle>& args, ExprHandle body)
       : Tensor(buf.node(), VarHandleVectorToVarVector(args), body.node()) {}
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Tensor(
       BufPtr buf,
       const std::vector<VarPtr>& args,
@@ -226,7 +224,9 @@ Tensor Reduce(
       dims,
       strides,
       reducer,
-      [&](ParameterList p) { return ExprHandle(reducer.initializer()); },
+      [&](ParameterList p [[maybe_unused]]) {
+        return ExprHandle(reducer.initializer());
+      },
       body_func,
       reduce_dims);
 }

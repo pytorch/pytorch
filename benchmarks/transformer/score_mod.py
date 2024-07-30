@@ -11,7 +11,11 @@ from tqdm import tqdm
 
 import torch
 import torch.nn.functional as F
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.nn.attention.flex_attention import (
+    _create_empty_block_mask,
+    create_block_mask,
+    flex_attention,
+)
 
 
 torch._dynamo.config.automatic_dynamic_shapes = False
@@ -151,7 +155,7 @@ def run_single_experiment(
             score_mod, 1, 1, q_seq_len * (q_heads // kv_heads), kv_seq_len, query.device
         )
     else:
-        block_mask = None
+        block_mask = _create_empty_block_mask(query, key, value)
 
     forward_eager_time = benchmark_torch_function_in_microseconds(
         eager_sdpa, query, key, value, score_mod

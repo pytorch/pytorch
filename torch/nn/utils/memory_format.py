@@ -134,7 +134,7 @@ def convert_conv3d_weight_memory_format(module, memory_format):
         >>>     nn.Conv3d(8, 4, 3)).cuda().half()
         >>> # This is identical to:
         >>> # nn.utils.convert_conv3d_weight_memory_format(model, torch.channels_last)
-        >>> model = nn.utils.convert_conv3d_weight_memory_format(model, torch.channels_last)
+        >>> model = nn.utils.convert_conv3d_weight_memory_format(model, torch.channels_last_3d)
         >>> out = model(input)
     """
 

@@ -298,6 +298,12 @@ def _create_runtime_wrapper(
         # stash a ref to each input tensor we plan to use after the compiled function
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
 
+        if keep_input_mutations:
+            for i in runtime_metadata.mutated_graph_handled_indices_seen_by_autograd:
+                arg = args[i]
+                if not arg.is_inference():  # inference tensors have no VC
+                    torch.autograd.graph.increment_version(arg)
+
         if trace_joint:
             args_ = list(args)
             # See Note [Detaching inputs that never need gradients]
@@ -328,14 +334,6 @@ def _create_runtime_wrapper(
 
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
         num_intermediate_bases = runtime_metadata.num_intermediate_bases
-
-        if keep_input_mutations and trace_joint:
-            num_input_mutations_handled_by_autograd = (
-                runtime_metadata.num_mutated_graph_handled_indices_seen_by_autograd
-            )
-            # autograd.Function requires us to return the mutated inputs as extra outputs to the autograd.Function.forward
-            if num_input_mutations_handled_by_autograd > 0:
-                all_outs = all_outs[:-num_input_mutations_handled_by_autograd]
 
         assert (
             len(all_outs)
@@ -1493,18 +1491,13 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     assert isinstance(bw_state, BackwardState)
                     ctx._compiled_autograd_backward_state = bw_state
 
-                marked_dirty_inps = []
-                for i in fw_metadata.mutated_graph_handled_indices_seen_by_autograd:
-                    arg = deduped_flat_tensor_args[i]
-                    if not (arg.requires_grad and arg.is_leaf):  # would error
-                        ctx.mark_dirty(arg)
-                    marked_dirty_inps.append(arg)
-
                 # There is a pretty complicated calling convention around what the compiled fw returns.
                 # The full list of outputs and their relative order is:
                 # (*tokens, *mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
                 # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
                 #   of the original view, and not the synthetic base
+                # - Note that donated buffer logic requires (*saved_tensors, *saved_symints) showing up last
+                #   in the fw output order.
                 fw_outs = call_func_at_runtime_with_args(
                     CompiledFunction.compiled_fw,
                     args,
@@ -1614,7 +1607,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 ]
                 ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
                 ctx._materialize_non_diff_grads = False
-                return tuple(raw_returns) + tuple(marked_dirty_inps)
+                return tuple(raw_returns)
 
             @staticmethod
             def backward(ctx, *flat_args):
@@ -1629,9 +1622,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # and we filter them out here before passing the remaining grad_outputs into the compiled backward.
                 num_intermediate_bases = (
                     CompiledFunction.metadata.num_intermediate_bases
-                )
-                num_graph_handled_inputs = (
-                    CompiledFunction.metadata.num_mutated_graph_handled_indices_seen_by_autograd
                 )
                 num_mutated_runtime_inps = (
                     CompiledFunction.metadata.num_mutated_inp_runtime_indices
@@ -1656,8 +1646,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         ),
                     )
 
-                if num_graph_handled_inputs > 0:
-                    flat_args = flat_args[:-num_graph_handled_inputs]
                 assert len(flat_args) == expected_grad_outs
                 out_info = CompiledFunction.metadata.output_info
 
@@ -1724,6 +1712,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     # Add the seed and offset to args
                     rng_args = CUDARngStateHelper.get_torch_state_as_tuple()
 
+                # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors) showing up first
+                #   in the bw output order.
                 all_args = [
                     *ctx.symints,
                     *ctx.saved_tensors,
@@ -1892,8 +1882,31 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         not backward_state_indices
                     ), "BackwardState requires CompiledAutograd"
                     ctx.maybe_clear_saved_tensors()
+
+                    saved_tensors_use_once = (
+                        not torch._C._autograd._get_current_graph_task_keep_graph()
+                    )
+
                     if CompiledFunction.compiled_bw is None:
                         assert lazy_backward_info is not None
+
+                        if not saved_tensors_use_once:
+                            fw_metadata.bw_donated_idxs = []
+                            # Update bw_donated_idxs if using lazy_backward_info from `aot_dispatch_autograd`
+                            if (
+                                hasattr(lazy_backward_info, "saved_context")
+                                and hasattr(
+                                    lazy_backward_info.saved_context, "fw_metadata"
+                                )
+                                and hasattr(
+                                    lazy_backward_info.saved_context.fw_metadata,  # type: ignore[union-attr]
+                                    "bw_donated_idxs",
+                                )
+                            ):
+                                lazy_backward_info.saved_context.fw_metadata.bw_donated_idxs = (  # type: ignore[union-attr]
+                                    []
+                                )
+
                         bw_module = lazy_backward_info.bw_module
                         placeholder_list = lazy_backward_info.placeholder_list
                         saved_context = lazy_backward_info.saved_context
@@ -1910,7 +1923,26 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             )
                             # Maybe save cache entry
                             if try_save_cache_entry is not None:
-                                try_save_cache_entry(CompiledFunction.compiled_bw)
+                                try_save_cache_entry(
+                                    CompiledFunction.compiled_bw, fw_metadata
+                                )
+
+                    if (
+                        torch._functorch.config.donated_buffer
+                        and not saved_tensors_use_once
+                        and fw_metadata.bw_donated_idxs != []
+                    ):
+                        torch._check(
+                            False,
+                            lambda: (
+                                "This backward function was compiled with non-empty donated "
+                                "buffers which requires create_graph=False and retain_graph=False. "
+                                "Please keep backward(create_graph=False, retain_graph=False) "
+                                "across all backward() function calls, or set "
+                                "torch._functorch.config.donated_buffer=False to disable "
+                                "donated buffer."
+                            ),
+                        )
 
                     out = call_func_at_runtime_with_args(
                         CompiledFunction.compiled_bw,

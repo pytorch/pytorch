@@ -3,11 +3,11 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <utility>
 
 #include <c10/macros/Export.h>
 
-namespace c10d {
-namespace control_plane {
+namespace c10d::control_plane {
 
 // Request represents a request to the handler. This conceptually maps to an
 // HTTP request but could be called via other transports.
@@ -56,7 +56,7 @@ TORCH_API std::vector<std::string> getHandlerNames();
 class TORCH_API RegisterHandler {
  public:
   RegisterHandler(const std::string& name, HandlerFunc f) {
-    registerHandler(name, f);
+    registerHandler(name, std::move(f));
   }
 
   // disable move, copy
@@ -66,5 +66,4 @@ class TORCH_API RegisterHandler {
   RegisterHandler& operator=(RegisterHandler&&) = delete;
 };
 
-} // namespace control_plane
-} // namespace c10d
+} // namespace c10d::control_plane

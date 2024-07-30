@@ -8,9 +8,7 @@ import tempfile
 import unittest
 
 import torch._dynamo.test_case
-
 from torch._dynamo.repro.after_aot import InputReader, InputWriter, save_graph_repro
-
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import IS_FBCODE
 from torch.utils._traceback import report_compile_source_on_error

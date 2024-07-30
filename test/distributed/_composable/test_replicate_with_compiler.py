@@ -13,6 +13,7 @@ from torch import _inductor as inductor, nn
 from torch._C import FileCheck
 from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import counters
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.distributed._composable.replicate import replicate
 from torch.distributed.algorithms.ddp_comm_hooks import (
@@ -69,7 +70,16 @@ def compiler_fn(no_inductor=False):
     return _compiler_fn
 
 
-class ReplicateTest(MultiProcessTestCase):
+class MultiProcessInductorTestCase(MultiProcessTestCase, InductorTestCase):
+    """
+    A version of MultiProcessTestCase that derives from the Inductor TestCase
+    to handle isolation of the inductor cache dir.
+    """
+
+    pass
+
+
+class ReplicateTest(MultiProcessInductorTestCase):
     @property
     def world_size(self) -> int:
         return min(2, torch.cuda.device_count())
@@ -359,7 +369,7 @@ class ReplicateTest(MultiProcessTestCase):
         fc.run(code)
 
 
-class DDP_TP_Test(MultiProcessTestCase):
+class DDP_TP_Test(MultiProcessInductorTestCase):
     @property
     def world_size(self) -> int:
         return min(4, torch.cuda.device_count())

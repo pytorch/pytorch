@@ -150,7 +150,8 @@ struct C10_API PyInterpreterVTable {
       c10::DispatchKey,
       c10::DispatchKeySet keyset,
       torch::jit::Stack* stack,
-      bool with_keyset) const = 0;
+      bool with_keyset,
+      bool with_op) const = 0;
 
   virtual void throw_abstract_impl_not_imported_error(
       std::string opname,

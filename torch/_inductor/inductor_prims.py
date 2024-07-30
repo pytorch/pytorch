@@ -108,7 +108,61 @@ def _low_memory_max_pool2d_with_offsets_aten(
     vals, indices = torch.ops.aten.max_pool2d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode
     )
-    return vals, indices.to(torch.int8)
+
+    input_width = self.shape[-1]
+    kernel_width = kernel_size[1]
+
+    bh_shape = [1] * self.ndim
+    bh_shape[-2] = -1
+    bh = torch.arange(indices.shape[-2], dtype=torch.int64, device=self.device).view(
+        bh_shape
+    )
+
+    bw_shape = [1] * self.ndim
+    bw_shape[-1] = -1
+    bw = torch.arange(indices.shape[-1], dtype=torch.int64, device=self.device).view(
+        bw_shape
+    )
+
+    hbase = bh * stride[0] - padding[0]
+    wbase = bw * stride[1] - padding[1]
+
+    ih = indices // input_width
+    iw = indices - (ih * input_width)
+
+    h_inc = ih - hbase
+    w_inc = iw - wbase
+
+    offsets = h_inc * kernel_width + w_inc
+
+    return vals, offsets.to(torch.int8)
+
+
+def _low_memory_max_pool2d_offsets_to_indices_aten(
+    offsets, kernel_width, input_width, stride, padding
+):
+    offsets = offsets.to(torch.int64)
+    h_inc = offsets // kernel_width
+    w_inc = offsets - (h_inc * kernel_width)
+
+    bh_shape = [1] * offsets.ndim
+    bh_shape[-2] = -1
+    bh = torch.arange(offsets.shape[-2], dtype=torch.int64, device=offsets.device).view(
+        bh_shape
+    )
+
+    bw_shape = [1] * offsets.ndim
+    bw_shape[-1] = -1
+    bw = torch.arange(offsets.shape[-1], dtype=torch.int64, device=offsets.device).view(
+        bw_shape
+    )
+
+    hbase = bh * stride[0] - padding[0]
+    wbase = bw * stride[1] - padding[1]
+
+    ih = hbase + h_inc
+    iw = wbase + w_inc
+    return ih * input_width + iw
 
 
 _low_memory_max_pool2d_with_offsets = make_prim(
@@ -120,6 +174,6 @@ _low_memory_max_pool2d_with_offsets = make_prim(
 
 _low_memory_max_pool2d_offsets_to_indices = make_prim(
     "_low_memory_max_pool2d_offsets_to_indices(Tensor self, SymInt kernel_w, SymInt input_w, SymInt[2] stride, SymInt[2] padding) -> Tensor",  # noqa: B950
-    lambda self, *args: self.to(torch.int64),
+    _low_memory_max_pool2d_offsets_to_indices_aten,
     doc="Convert small int offsets to regular indices.",
 )

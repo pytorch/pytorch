@@ -14,7 +14,7 @@ AOTIModelContainerRunnerCuda::AOTIModelContainerRunnerCuda(
           device_str,
           cubin_dir) {}
 
-AOTIModelContainerRunnerCuda::~AOTIModelContainerRunnerCuda() {}
+AOTIModelContainerRunnerCuda::~AOTIModelContainerRunnerCuda() = default;
 
 std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run(
     std::vector<at::Tensor>& inputs) {

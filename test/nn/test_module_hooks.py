@@ -588,21 +588,28 @@ class TestStateDictHooks(TestCase):
             hook_called += 1
 
         hook_called = 0
+        # Test private API since this sets with_module=False which diverges from public API
         m_load._register_load_state_dict_pre_hook(hook_without_module)
         m_load.load_state_dict(m_state_dict)
         self.assertEqual(1, hook_called)
 
         hook_called = 0
-        m_load._register_load_state_dict_pre_hook(hook_with_module, True)
+        m_load.register_load_state_dict_pre_hook(hook_with_module)
         m_load.load_state_dict(m_state_dict)
         self.assertEqual(2, hook_called)
+
+        # Test private API with with_module=True
+        hook_called = 0
+        m_load._register_load_state_dict_pre_hook(hook_with_module, True)
+        m_load.load_state_dict(m_state_dict)
+        self.assertEqual(3, hook_called)
 
     def test_no_extra_ref_to_module(self):
         try:
             gc.disable()
             m = nn.Linear(10, 10)
 
-            m._register_load_state_dict_pre_hook(_hook_to_pickle, True)
+            m.register_load_state_dict_pre_hook(_hook_to_pickle)
             weak_m = weakref.ref(m)
             del m
 
@@ -612,7 +619,7 @@ class TestStateDictHooks(TestCase):
 
     def test_pickled_hook(self):
         m = nn.Linear(10, 10)
-        m._register_load_state_dict_pre_hook(_hook_to_pickle, True)
+        m.register_load_state_dict_pre_hook(_hook_to_pickle)
         pickle.loads(pickle.dumps(m))
 
     @swap([True, False])
@@ -678,14 +685,13 @@ class TestStateDictHooks(TestCase):
                 mod = m
 
             hook_called = 0
+            # Test private API since this sets with_module=False which diverges from public API
             mod._register_load_state_dict_pre_hook(mod.my_pre_load_hook)
             m.load_state_dict(state_dict)
             self.assertEqual(1, hook_called)
 
             hook_called = 0
-            mod._register_load_state_dict_pre_hook(
-                mod.my_pre_load_hook_with_module, True
-            )
+            mod.register_load_state_dict_pre_hook(mod.my_pre_load_hook_with_module)
             m.load_state_dict(state_dict)
             self.assertEqual(2, hook_called)
 
@@ -858,6 +864,63 @@ class TestStateDictHooks(TestCase):
         m.register_state_dict_pre_hook(my_state_dict_pre_hook)
         _ = m.state_dict()
         self.assertTrue(called)
+
+    @parametrize_test("private", [True, False])
+    def test_register_state_dict_post_hook(self, private):
+        m = nn.Transformer(
+            d_model=4, nhead=2, num_encoder_layers=2, num_decoder_layers=2
+        )
+
+        def linear_state_dict_post_hook(module, state_dict, prefix, local_metadata):
+            for name, param in module.named_parameters(recurse=False):
+                state_dict[prefix + name] = torch.nn.Parameter(
+                    state_dict[prefix + name]
+                )
+
+        def register_linear_hook(module):
+            if isinstance(module, nn.Linear):
+                hook_registration_fn = (
+                    module._register_state_dict_hook
+                    if private
+                    else module.register_state_dict_post_hook
+                )
+                hook_registration_fn(linear_state_dict_post_hook)
+
+        def _check_sd(state_dict):
+            for k, v in m.state_dict().items():
+                if "linear" in k or "out_proj" in k:
+                    self.assertTrue(isinstance(v, torch.nn.Parameter))
+                else:
+                    self.assertFalse(isinstance(v, torch.nn.Parameter))
+
+        # verify that return type of hook registered on child submodules has no effect
+        # regardless of whether using public or private API
+        m.apply(register_linear_hook)
+        _check_sd(m.state_dict())
+
+        # verify that return type of hook registered root module has no effect
+        # for public API but has effect for private API
+        hook_registration_fn = (
+            m._register_state_dict_hook if private else m.register_state_dict_post_hook
+        )
+
+        def fn(m, s, p, l):
+            return OrderedDict()
+
+        handle = hook_registration_fn(fn)
+        if private:
+            self.assertFalse(hasattr(fn, "_from_public_api"))
+            self.assertTrue(len(m.state_dict()) == 0)
+        else:
+            self.assertTrue(hasattr(fn, "_from_public_api"))
+            with self.assertRaisesRegex(
+                RuntimeError, "state_dict post-hook must return None"
+            ):
+                sd = m.state_dict()
+            with self.assertRaisesRegex(
+                RuntimeError, "previously registered via register_state_dict_post_hook"
+            ):
+                m._register_state_dict_hook(fn)
 
 
 class TestModuleGlobalHooks(TestCase):

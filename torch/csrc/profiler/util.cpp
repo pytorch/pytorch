@@ -376,8 +376,8 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
     return map;
   }
 
-  map.emplace(
-      kCommsName, fmt::format("\"{}\"", debugInfo->getCollectiveName()));
+  auto& collective_name = debugInfo->getCollectiveName();
+  map.emplace(kCommsName, fmt::format("\"{}\"", collective_name));
   map.emplace(
       kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
   map.emplace(kInMsgNelems, std::to_string(debugInfo->getInMessageNelems()));
@@ -411,6 +411,16 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
 
   auto rank = debugInfo->getRank();
   map.emplace(kRank, std::to_string(rank));
+  int nRanks = static_cast<int>(groupRanks.size());
+  if (collective_name == "send") {
+    if (rank >= 0 && rank < nRanks) {
+      map.emplace(kP2pDst, std::to_string(groupRanks[rank]));
+    }
+  } else if (collective_name == "recv") {
+    if (rank >= 0 && rank < nRanks) {
+      map.emplace(kP2pSrc, std::to_string(groupRanks[rank]));
+    }
+  }
 #endif // USE_DISTRIBUTED
   return map;
 }

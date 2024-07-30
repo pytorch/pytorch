@@ -14,7 +14,6 @@ from typing import Dict, NamedTuple, Tuple
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.nn.functional as F
@@ -24,6 +23,7 @@ from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.testing import expectedFailureDynamic, same
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
+
 
 try:
     from . import test_functions
@@ -1921,6 +1921,30 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             else:
                 self.assertEqual(cnts.frame_count, num_submodules)
 
+    @patch.object(torch._dynamo.config, "accumulated_cache_size_limit", 2)
+    @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", False)
+    def test_recompile_limit_on_freed_module(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        def fn(x, mod):
+            return mod(x)
+
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        opt_mod = torch.compile(fn, backend=cnts)
+        for i in range(8):
+            mod = Mod()
+            opt_mod(torch.randn(5, 5), mod)
+
+        # fn compiles twice, and forward twice
+        # (since forward is inlined when fn is compiled)
+        self.assertEqual(cnts.frame_count, 4)
+
     @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
     def test_inline_inbuilt_nn_modules(self):
         size = (10, 10)
@@ -2733,7 +2757,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         fn(inp, mod)
         self.assertEqual(num_compiles, 2)
 
-    def test_no_guard_on_torch_nn_modules(self):
+    @patch.object(torch._dynamo.config, "guard_nn_modules", True)
+    def test_guard_on_torch_nn_modules(self):
         # https://github.com/pytorch/pytorch/issues/110048
 
         class MockModule(torch.nn.Module):

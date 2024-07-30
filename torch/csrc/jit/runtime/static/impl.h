@@ -405,7 +405,7 @@ class BlockInfo {
 class TORCH_API StaticModule {
  public:
   explicit StaticModule(
-      std::shared_ptr<torch::jit::Graph> g,
+      const std::shared_ptr<torch::jit::Graph>& g,
       const StaticModuleOptions& opts = StaticModuleOptions(),
       std::vector<IValue> sample_inputs = {});
 

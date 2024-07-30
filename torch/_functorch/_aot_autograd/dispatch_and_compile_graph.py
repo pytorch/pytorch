@@ -267,12 +267,6 @@ def aot_dispatch_autograd_graph(
         torch.Tensor, lambda t: t.detach(), updated_joint_inputs
     )
     maybe_subclass_meta = subclass_tracing_info.maybe_subclass_meta
-    aot_graphs_log.info(
-        "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
-        str(aot_config.aot_id),
-        str(fw_metadata),
-        str(maybe_subclass_meta),
-    )
 
     fx_g = _create_graph(joint_fn_to_trace, updated_joint_inputs, aot_config=aot_config)
 

@@ -96,6 +96,7 @@ _COPY_META_FIELDS = [
     "from_node",
     "quantization_tag",
     "_numeric_debug_handle",
+    "partitioner_tag"
 ]
 
 

@@ -4,8 +4,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/utils/variadic.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Value;
 
@@ -22,8 +21,7 @@ struct NamedValue {
   NamedValue(const std::string& name, Value* value)
       : name_(name), value_(value) {}
 
-  /* implicit */ NamedValue(IValue value)
-      : value_(nullptr), ivalue_(std::move(value)) {}
+  /* implicit */ NamedValue(IValue value) : ivalue_(std::move(value)) {}
 
   NamedValue(const std::string& name, IValue value)
       : name_(name), ivalue_(std::move(value)) {}
@@ -80,5 +78,4 @@ struct NamedValue {
   IValue ivalue_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

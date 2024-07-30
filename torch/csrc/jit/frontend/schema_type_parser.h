@@ -6,8 +6,7 @@
 #include <c10/util/FunctionRef.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using TypePtr = c10::TypePtr;
 
@@ -42,5 +41,4 @@ struct TORCH_API SchemaTypeParser {
   size_t next_id = 0;
   bool allow_typevars_;
 };
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

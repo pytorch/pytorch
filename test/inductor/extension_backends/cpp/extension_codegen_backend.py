@@ -4,13 +4,13 @@ from torch._inductor.virtualized import V
 
 
 class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 
 class ExtensionCppWrapperCodegen(cpp_wrapper_cpu.CppWrapperCpu):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 
 class ExtensionScheduling(BaseScheduling):

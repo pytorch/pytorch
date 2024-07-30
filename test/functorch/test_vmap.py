@@ -68,6 +68,7 @@ from torch.testing._internal.common_utils import (
     unMarkDynamoStrictTest,
     xfailIfTorchDynamo,
 )
+from torch.testing._internal.custom_op_db import custom_op_db
 from torch.utils import _pytree as pytree
 
 
@@ -3937,10 +3938,17 @@ def discover_variants(opinfo):
 @unMarkDynamoStrictTest
 class TestVmapOperatorsOpInfo(TestCase):
     def vmap_outplace_test(
-        self, func, args, kwargs, in_dims, check_shape_only=False, postprocess_fn=None
+        self,
+        func,
+        args,
+        kwargs,
+        in_dims,
+        check_shape_only=False,
+        postprocess_fn=None,
+        out_dim=0,
     ):
         for vmap_out, loop_out in compute_quantities_for_vmap_test(
-            func, args, kwargs, in_dims
+            func, args, kwargs, in_dims, out_dim=out_dim
         ):
             if postprocess_fn is not None:
                 loop_out = postprocess_fn(loop_out)
@@ -3950,7 +3958,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                 continue
             self.assertEqual(vmap_out, loop_out)
 
-    def vmap_inplace_test(self, func, args, kwargs, in_dims, postprocess_fn=None):
+    def vmap_inplace_test(
+        self, func, args, kwargs, in_dims, postprocess_fn=None, out_dim=0
+    ):
         # NB: This test assumes that the first argument is being modified.
         # This is OK because it's what every other OpInfo-based test assumes,
         # but it is going to need a more robust solution eventually.
@@ -3963,13 +3973,19 @@ class TestVmapOperatorsOpInfo(TestCase):
                     args,
                     kwargs,
                     in_dims,
+                    out_dim=out_dim,
                     compute_loop_out=False,
                     clone_inputs=True,
                 ):
                     pass
             return
         for vmap_out, loop_out in compute_quantities_for_vmap_test(
-            func, args, kwargs, in_dims, clone_inputs=True
+            func,
+            args,
+            kwargs,
+            in_dims,
+            clone_inputs=True,
+            out_dim=out_dim,
         ):
             if postprocess_fn is not None:
                 loop_out = postprocess_fn(loop_out)
@@ -4027,6 +4043,13 @@ class TestVmapOperatorsOpInfo(TestCase):
                     continue
                 kwargs = sample_input.kwargs
                 is_batch_norm_and_training = is_batch_norm_training(op.name, kwargs)
+                out_dim = 0
+                if op.name == "NumpySplitCopyWithIntCustomOp":
+                    # special case for this custom op
+                    def sample_vmap_out_dim_numpy_split_copy_with_int(x, splits, dim):
+                        return [0 for _ in range(len(splits) + 1)], None
+
+                    out_dim = sample_vmap_out_dim_numpy_split_copy_with_int(*args)
                 for batched_args, in_dims, _ in generate_vmap_inputs(
                     args, {}, is_batch_norm_and_training=is_batch_norm_and_training
                 ):
@@ -4038,6 +4061,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                             in_dims,
                             check_shape_only,
                             postprocess_fn,
+                            out_dim=out_dim,
                         )
                     if op.name in skip_inplace:
                         continue
@@ -4109,6 +4133,9 @@ class TestVmapOperatorsOpInfo(TestCase):
             "linalg.eigh", ""
         ),  # not always return the same result for the same input, see test_linalg_eigh for manual test
         skip("to"),  # RuntimeError: required rank 4 tensor to use channels_last format
+        # UnimplementedError: data-dependent operators cannot be vmapped
+        xfail("NumpyNonzeroCustomOp"),
+        xfail("NumpyNMSCustomOp"),
         # ----------------------------------------------------------------------
         # ---------------------------- BUGS ------------------------------------
         # entries in here don't work and need to be fixed.
@@ -4187,7 +4214,10 @@ class TestVmapOperatorsOpInfo(TestCase):
     }
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db + autograd_function_db, dtypes=OpDTypes.any_one)
+    @ops(
+        op_db + additional_op_db + autograd_function_db + custom_op_db,
+        dtypes=OpDTypes.any_one,
+    )
     @opsToleranceOverride(
         "TestVmapOperatorsOpInfo",
         "test_vmap_exhaustive",
@@ -4248,7 +4278,10 @@ class TestVmapOperatorsOpInfo(TestCase):
         )
 
     @with_tf32_off
-    @ops(op_db + additional_op_db + autograd_function_db, dtypes=OpDTypes.any_one)
+    @ops(
+        op_db + additional_op_db + autograd_function_db + custom_op_db,
+        dtypes=OpDTypes.any_one,
+    )
     @opsToleranceOverride(
         "TestVmapOperatorsOpInfo",
         "test_op_has_batch_rule",
@@ -4329,6 +4362,8 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("histc"),
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
+                xfail("t_copy"),
+                xfail("unsqueeze_copy"),
                 xfail("istft"),
                 xfail("nonzero"),
                 xfail("nn.functional.fractional_max_pool2d"),

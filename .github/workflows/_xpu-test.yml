@@ -143,6 +143,7 @@ jobs:
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
           NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
@@ -189,6 +190,7 @@ jobs:
             -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             -e CONTINUE_THROUGH_ERROR \
             -e VERBOSE_TEST_LOGS \
+            -e TEST_SHOWLOCALS \
             -e NO_TEST_TIMEOUT \
             -e NO_TD \
             -e MAX_JOBS="$(nproc --ignore=2)" \

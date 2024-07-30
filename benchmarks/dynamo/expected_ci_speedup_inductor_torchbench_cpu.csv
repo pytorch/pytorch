@@ -21,5 +21,5 @@ timm_regnet,inductor,amp,static,cpp,1.157188305
 lennard_jones,inductor,amp,static,cpp,2.240104485
 #hf_T5_generate,inductor,amp,dynamic,cpp,1.29339502
 timm_vovnet,inductor,amp,dynamic,cpp,1.07856471
-mobilenet_v2,inductor,amp,dynamic,cpp,2.27774577
+#mobilenet_v2,inductor,amp,dynamic,cpp,2.27774577   # https://github.com/pytorch/pytorch/issues/131693
 hf_GPT2,export-aot-inductor,amp,static,default,1.23103356

@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
+#include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
@@ -109,6 +110,7 @@ int32_t aoti_torch_layout__mkldnn() {
     });                                                        \
   }
 
+AOTI_TORCH_ITEM_IMPL(float16, c10::Half)
 AOTI_TORCH_ITEM_IMPL(float32, float)
 AOTI_TORCH_ITEM_IMPL(float64, double)
 AOTI_TORCH_ITEM_IMPL(uint8, uint8_t)
@@ -120,6 +122,7 @@ AOTI_TORCH_ITEM_IMPL(int16, int16_t)
 AOTI_TORCH_ITEM_IMPL(int32, int32_t)
 AOTI_TORCH_ITEM_IMPL(int64, int64_t)
 AOTI_TORCH_ITEM_IMPL(bool, bool)
+AOTI_TORCH_ITEM_IMPL(bfloat16, c10::BFloat16)
 #undef AOTI_TORCH_ITEM_IMPL
 
 #define AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(dtype, ctype, ttype)                  \
@@ -753,6 +756,23 @@ AOTITorchError aoti_torch_mm_out(
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__mm_plus_mm_out(
+    AtenTensorHandle out,
+    AtenTensorHandle a,
+    AtenTensorHandle b,
+    AtenTensorHandle c,
+    AtenTensorHandle d) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* out_tensor = tensor_handle_to_tensor_pointer(out);
+    at::Tensor* a_tensor = tensor_handle_to_tensor_pointer(a);
+    at::Tensor* b_tensor = tensor_handle_to_tensor_pointer(b);
+    at::Tensor* c_tensor = tensor_handle_to_tensor_pointer(c);
+    at::Tensor* d_tensor = tensor_handle_to_tensor_pointer(d);
+    torch::inductor::_mm_plus_mm_out(
+        *out_tensor, *a_tensor, *b_tensor, *c_tensor, *d_tensor);
+  });
+}
+
 AOTITorchError aoti_torch_cpu_wrapped_fbgemm_pack_gemm_matrix_fp16(
     AtenTensorHandle weight,
     AtenTensorHandle* out) {
@@ -854,7 +874,7 @@ AOTITorchError aoti_torch_index_put_out(
     AtenTensorHandle self,
     const AtenTensorHandle* indices,
     const uint32_t num_indices,
-    const AtenTensorHandle values,
+    const AtenTensorHandle& values,
     bool accumulate) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::List<std::optional<at::Tensor>> indices_;

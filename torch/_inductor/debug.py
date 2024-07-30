@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import collections
 import contextlib
 import dataclasses
@@ -11,7 +10,7 @@ import pickle
 import pstats
 import shutil
 import subprocess
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, IO, Iterator, List, Optional, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -51,7 +50,11 @@ def has_dot() -> bool:
         return False
 
 
-def draw_buffers(nodes: List[BaseSchedulerNode], print_graph=False, fname=None):
+def draw_buffers(
+    nodes: List[BaseSchedulerNode],
+    print_graph: bool = False,
+    fname: Optional[str] = None,
+) -> None:
     """
     Draw a graph in fname.svg.
     """
@@ -98,8 +101,8 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     Creates a FX Graph from a list of SchedulerNode objects.
     """
 
-    def get_fake_func(name):
-        def func1(*args):
+    def get_fake_func(name: str) -> Callable[..., int]:
+        def func1(*args: Any) -> int:
             return 0
 
         func1.__name__ = name
@@ -143,10 +146,14 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
             kwargs = {"device": snode.get_device()}
         fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)
 
-        def in_output(snode):
+        def in_output(snode: Union[BaseSchedulerNode, FusedSchedulerNode]) -> bool:
             if isinstance(snode, FusedSchedulerNode):
                 return any(in_output(x) for x in snode.snodes)
-            return any(isinstance(user.node, OutputNode) for user in snode.users)
+            return any(
+                isinstance(user.node, OutputNode)
+                for buf in snode.get_outputs()
+                for user in buf.users
+            )
 
         if in_output(snode):
             outputs.append(fx_node)
@@ -186,11 +193,11 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
 
 def update_orig_fx_node_name_to_buf_name(
-    nodes: SchedulerNodeList,
+    nodes: Optional[SchedulerNodeList],
     node_name_to_buf_name: Dict[str, str],
     parent_buf_name: Optional[str] = None,
     n_origins: int = 0,
-):
+) -> None:
     if nodes is None:
         return
     for node in nodes:
@@ -220,7 +227,9 @@ def update_orig_fx_node_name_to_buf_name(
                 )
 
 
-def get_node_name_to_buf_meta(node_name_to_buf_name: Dict[str, str]):
+def get_node_name_to_buf_meta(
+    node_name_to_buf_name: Dict[str, str]
+) -> Dict[str, BufMeta]:
     buf_name_to_n_node = {}
     for node_name, buf_name in node_name_to_buf_name.items():
         if buf_name not in buf_name_to_n_node:
@@ -236,7 +245,8 @@ def get_node_name_to_buf_meta(node_name_to_buf_name: Dict[str, str]):
 
 
 def annotate_orig_fx_with_snodes(
-    gm: torch.fx.GraphModule, snodes: SchedulerNodeList
+    gm: torch.fx.GraphModule,
+    snodes: SchedulerNodeList,
 ) -> None:
     """
     Creates a FX Graph from a list of SchedulerNode objects.
@@ -252,7 +262,7 @@ def annotate_orig_fx_with_snodes(
 
 
 @contextlib.contextmanager
-def enable_aot_logging():
+def enable_aot_logging() -> Iterator[None]:
     compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     import torch._functorch.aot_autograd
@@ -296,9 +306,9 @@ class DebugContext:
     _counter = itertools.count()
 
     @staticmethod
-    def wrap(fn):
+    def wrap(fn: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(fn)
-        def inner(*args, **kwargs):
+        def inner(*args: Any, **kwargs: Any) -> Any:
             with DebugContext():
                 return fn(*args, **kwargs)
 
@@ -318,12 +328,12 @@ class DebugContext:
                 return dirname
         return None
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._prof = None
         self._path = None
         self._stack = contextlib.ExitStack()
 
-    def copy(self, new_path: str):
+    def copy(self, new_path: str) -> None:
         if not self._path:
             return
         assert new_path.endswith(".debug"), new_path
@@ -339,21 +349,33 @@ class DebugContext:
                 "Failed to copy debug files from %s to %s", self._path, new_path
             )
 
-    def fopen(self, filename: str, write_mode: str = "w", *args, **kwargs):
+    def fopen(
+        self,
+        filename: str,
+        write_mode: str = "w",
+        *args: Any,
+        **kwargs: Any,
+    ) -> IO[Any]:
         assert self._path
         return open(os.path.join(self._path, filename), write_mode, *args, **kwargs)
 
     @contextlib.contextmanager
-    def fopen_context(self, filename: str, write_mode: str = "w", *args, **kwargs):
+    def fopen_context(
+        self,
+        filename: str,
+        write_mode: str = "w",
+        *args: Any,
+        **kwargs: Any,
+    ) -> Iterator[IO[Any]]:
         assert self._path
         with open(os.path.join(self._path, filename), write_mode, *args, **kwargs) as f:
             yield f
 
-    def filename(self, suffix: str):
+    def filename(self, suffix: str) -> str:
         assert self._path
         return os.path.join(self._path, suffix)
 
-    def upload_tar(self):
+    def upload_tar(self) -> None:
         if config.trace.upload_tar is not None:
             import tarfile
 
@@ -365,13 +387,13 @@ class DebugContext:
                 tar.add(self._path, arcname=os.path.basename(self._path))
             config.trace.upload_tar(tar_file)
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         if config.debug:
             log = logging.getLogger("torch._dynamo")
             prev_level = log.level
             log.setLevel(logging.DEBUG)
 
-            def reset_log_level(level):
+            def reset_log_level(level: Any) -> None:
                 log.setLevel(level)
 
             self._stack.callback(reset_log_level, prev_level)
@@ -381,14 +403,18 @@ class DebugContext:
         if not config.trace.enabled:
             return
 
-        self._path = self.create_debug_dir(get_aot_graph_name())
+        self._path = self.create_debug_dir(get_aot_graph_name())  # type: ignore[assignment]
 
         if config.trace.debug_log:
             self._setup_log_capture("debug.log", logging.DEBUG)
         if config.trace.info_log:
             self._setup_log_capture("info.log", logging.INFO)
 
-    def _setup_log_capture(self, filename: str, level: int):
+    def _setup_log_capture(
+        self,
+        filename: str,
+        level: int,
+    ) -> None:
         log = logging.getLogger("torch._inductor")
         fd = self._stack.enter_context(self.fopen(filename))
         ch = logging.StreamHandler(fd)
@@ -400,7 +426,12 @@ class DebugContext:
         log.setLevel(min(log.level, level))
         self._stack.callback(log.removeHandler, ch)
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[Any],
+    ) -> None:
         if self._prof:
             self._prof.disable()
             self._save_profile_data()
@@ -410,7 +441,7 @@ class DebugContext:
             log.warning("%s debug trace: %s", get_graph_being_compiled(), self._path)
         self._stack.close()
 
-    def _save_profile_data(self):
+    def _save_profile_data(self) -> None:
         assert self._prof
         self._prof.dump_stats(self.filename("compile.prof"))
         with self.fopen("compile.stats") as fd:
@@ -421,28 +452,33 @@ class DebugContext:
             stats.sort_stats("tottime")
             stats.print_stats(100)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Optional[Callable[..., None]]:
         if config.trace.enabled and getattr(config.trace, name):
             try:
                 return getattr(DebugFormatter(self), name)
             except Exception:
                 log.warning("Ignoring exception in debug code", exc_info=True)
+                return None
         else:
 
-            def ignored(*args, **kwargs):
+            def ignored(*args: Any, **kwargs: Any) -> None:
                 pass
 
             return ignored
 
 
 class DebugFormatter:
-    def __init__(self, handler):
+    def __init__(self, handler: DebugContext) -> None:
         self.fopen = handler.fopen
         self.fopen_context = handler.fopen_context
         self.filename = handler.filename
         self.handler = handler
 
-    def fx_graph(self, gm: torch.fx.GraphModule, inputs: List[torch.Tensor]):
+    def fx_graph(
+        self,
+        gm: torch.fx.GraphModule,
+        inputs: List[torch.Tensor],
+    ) -> None:
         with self.fopen("fx_graph_runnable.py") as fd:
             save_graph_repro(fd, gm, inputs, "inductor")
 
@@ -450,28 +486,38 @@ class DebugFormatter:
             fd.write(gm.print_readable(print_output=False))
 
     def fx_graph_transformed(
-        self, gm: torch.fx.GraphModule, inputs: List[torch.Tensor]
-    ):
+        self,
+        gm: torch.fx.GraphModule,
+        inputs: List[torch.Tensor],
+    ) -> None:
         with self.fopen("fx_graph_transformed.py") as fd:
             fd.write(gm.print_readable(print_output=False))
 
-    def ir_pre_fusion(self, nodes: SchedulerNodeList):
+    def ir_pre_fusion(self, nodes: SchedulerNodeList) -> None:
         self._write_ir("ir_pre_fusion.txt", nodes)
 
-    def ir_post_fusion(self, nodes: SchedulerNodeList):
+    def ir_post_fusion(self, nodes: SchedulerNodeList) -> None:
         self._write_ir("ir_post_fusion.txt", nodes)
 
-    def _write_ir(self, filename: str, nodes: SchedulerNodeList):
+    def _write_ir(
+        self,
+        filename: str,
+        nodes: SchedulerNodeList,
+    ) -> None:
         with self.fopen(filename) as fd:
             log.info("Writing debug ir to  %s", fd.name)
             for node in nodes:
                 fd.write(node.debug_str())
                 fd.write("\n\n\n")
 
-    def graph_diagram(self, nodes: SchedulerNodeList):
+    def graph_diagram(self, nodes: SchedulerNodeList) -> None:
         draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))
 
-    def draw_orig_fx_graph(self, gm: torch.fx.GraphModule, nodes: SchedulerNodeList):
+    def draw_orig_fx_graph(
+        self,
+        gm: torch.fx.GraphModule,
+        nodes: SchedulerNodeList,
+    ) -> None:
         annotate_orig_fx_with_snodes(gm, nodes)
         draw_graph(
             gm,
@@ -482,7 +528,7 @@ class DebugFormatter:
             dot_graph_shape=config.trace.dot_graph_shape,
         )
 
-    def output_code(self, filename):
+    def output_code(self, filename: str) -> None:
         shutil.copy(filename, self.filename("output_code.py"))
 
     def log_autotuning_results(
@@ -492,12 +538,12 @@ class DebugFormatter:
         timings: Dict["ChoiceCaller", float],  # type: ignore[name-defined] # noqa: F821
         elapse: float,
         precompile_elapse: float,
-    ):
+    ) -> None:
         import json
 
         from .ir import FixedLayout
 
-        def build_node_info(node: ir.IRNode):
+        def build_node_info(node: ir.IRNode) -> Dict[str, str]:
             if hasattr(node, "name"):
                 node_name = node.name
             else:
@@ -585,7 +631,7 @@ class TensorMetadataHolder:
 save_args_cnt = itertools.count()
 
 
-def save_args_for_compile_fx_inner(*args, **kwargs):
+def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
     """
     This function is used to save arguments for a compile_fx_inner function call
     to the file system.  Later on one can replay the compile_fx_inner call
@@ -596,7 +642,7 @@ def save_args_for_compile_fx_inner(*args, **kwargs):
     if not os.path.exists(folder):
         os.mkdir(folder)
 
-    def handle_tensor(x):
+    def handle_tensor(x: Any) -> Any:
         """
         Pickle FakeTensor will result in error:
         AttributeError: Can't pickle local object 'WeakValueDictionary.__init__.<locals>.remove'
@@ -631,13 +677,13 @@ load_args_and_run_compile_fx_inner({path!r})
         print(message)
 
 
-def load_args_and_run_compile_fx_inner(path: str):
+def load_args_and_run_compile_fx_inner(path: str) -> Any:
     from torch._inductor.compile_fx import compile_fx_inner
 
     with open(path, "rb") as f:
         args, kwargs = pickle.load(f)
 
-    def handle_tensor(x):
+    def handle_tensor(x: Any) -> Any:
         if isinstance(x, TensorMetadataHolder):
             return torch._dynamo.testing.rand_strided(
                 x.tensor_metadata.shape,

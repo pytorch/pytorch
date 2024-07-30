@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 # If you need to modify this file to make this test pass, please also apply same edits accordingly to
 # https://github.com/pytorch/examples/blob/master/distributed/rpc/rl/main.py

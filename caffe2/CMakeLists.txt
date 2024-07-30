@@ -928,10 +928,6 @@ elseif(USE_CUDA)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
 
-  if(USE_CUFILE)
-    target_link_libraries(torch_cuda PRIVATE torch::cufile)
-    target_compile_definitions(torch_cuda PRIVATE USE_CUFILE)
-  endif()
   if(USE_CUSPARSELT)
       target_link_libraries(torch_cuda PRIVATE torch::cusparselt)
       target_compile_definitions(torch_cuda PRIVATE USE_CUSPARSELT)
@@ -1217,6 +1213,7 @@ if(BUILD_TEST)
     )
   else()
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+    add_subdirectory(${TORCH_ROOT}/test/inductor ${CMAKE_BINARY_DIR}/test_inductor)
     add_subdirectory(
       ${TORCH_ROOT}/test/cpp/tensorexpr
       ${CMAKE_BINARY_DIR}/test_tensorexpr

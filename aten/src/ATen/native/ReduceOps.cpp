@@ -250,7 +250,7 @@ static void meta_func_cum_ops(
   maybe_wrap_dim(dim, self.dim());
 
   const auto& result = meta.maybe_get_output();
-  ScalarType out_dtype;
+  ScalarType out_dtype{};
 
   if (result.defined()) {
     out_dtype = dtype.value_or(result.scalar_type());
@@ -1639,7 +1639,7 @@ Tensor allany_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool kee
     return out;
   }
 
-  if (dim->size() == 0) {
+  if (dim->empty()) {
     if (self.scalar_type() == kByte) {
       // Convert to a 1 or 0 mask
       auto out = at::empty_like(self);

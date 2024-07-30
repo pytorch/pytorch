@@ -9,6 +9,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.comptime import comptime
 
+
 # Because we don't support free variables in comptime at the moment,
 # we have to communicate via globals.  This also means these tests cannot
 # be run in parallel in a single process (not that you'd... ever want

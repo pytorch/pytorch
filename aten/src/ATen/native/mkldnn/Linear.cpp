@@ -268,6 +268,8 @@ static Tensor mkldnn_linear_pointwise_binary(
   check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
 
   auto input = input_t.contiguous();
+  // Make sure input has default contiguous strides if it's contiguous tensors for better performance.
+  input = may_convert_to_default_contiguous_strides(input);
 
   auto it_binary = fusion_binary_alg_map().find(attr);
   TORCH_CHECK(
@@ -286,6 +288,7 @@ static Tensor mkldnn_linear_pointwise_binary(
     return output;
   }
   auto other_reshaped = other_t.contiguous();
+  other_reshaped = may_convert_to_default_contiguous_strides(other_reshaped);
 
   if (dim != 2) {
     std::vector<int64_t> output_size_reshaped = {
