@@ -10,9 +10,21 @@ import warnings
 
 
 try:
-    from .common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+    from .common import (
+        BenchmarkRunner,
+        download_retry_decorator,
+        load_yaml_file,
+        main,
+        reset_rng_state,
+    )
 except ImportError:
-    from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+    from common import (
+        BenchmarkRunner,
+        download_retry_decorator,
+        load_yaml_file,
+        main,
+        reset_rng_state,
+    )
 
 import torch
 from torch._dynamo.testing import collect_results
@@ -91,6 +103,7 @@ finally:
 BATCH_SIZE_KNOWN_MODELS = {}
 
 
+# TODO(sdym): use batch-size-file parameter of common.main, like torchbench.py
 # Get the list of models and their batch sizes
 MODELS_FILENAME = os.path.join(os.path.dirname(__file__), "huggingface_models_list.txt")
 assert os.path.exists(MODELS_FILENAME)
@@ -102,117 +115,6 @@ with open(MODELS_FILENAME, "r") as fh:
         batch_size = int(batch_size)
         BATCH_SIZE_KNOWN_MODELS[model_name] = batch_size
 assert len(BATCH_SIZE_KNOWN_MODELS)
-
-
-SKIP = {
-    # Difficult to setup accuracy test because .eval() not supported
-    "Reformer",
-    # Fails deepcopy
-    "BlenderbotForConditionalGeneration",
-    "GPTNeoForCausalLM",
-    "GPTNeoForSequenceClassification",
-    # Fails with even batch size = 1
-    "GPTJForCausalLM",
-    "GPTJForQuestionAnswering",
-}
-
-# TODO - Fails even after fake tensors
-BATCH_SIZE_DIVISORS = {
-    "AlbertForMaskedLM": 2,
-    "AlbertForQuestionAnswering": 2,
-    "AllenaiLongformerBase": 2,
-    "BartForCausalLM": 2,
-    "BartForConditionalGeneration": 2,
-    "BertForMaskedLM": 2,
-    "BertForQuestionAnswering": 2,
-    "BlenderbotForCausalLM": 8,
-    # "BlenderbotForConditionalGeneration" : 16,
-    "BlenderbotSmallForCausalLM": 4,
-    "BlenderbotSmallForConditionalGeneration": 2,
-    "CamemBert": 2,
-    "DebertaForMaskedLM": 4,
-    "DebertaForQuestionAnswering": 2,
-    "DebertaV2ForMaskedLM": 4,
-    "DebertaV2ForQuestionAnswering": 8,
-    "DistilBertForMaskedLM": 2,
-    "DistilBertForQuestionAnswering": 2,
-    "DistillGPT2": 2,
-    "ElectraForCausalLM": 2,
-    "ElectraForQuestionAnswering": 2,
-    "GPT2ForSequenceClassification": 2,
-    # "GPTJForCausalLM" : 2,
-    # "GPTJForQuestionAnswering" : 2,
-    # "GPTNeoForCausalLM" : 32,
-    # "GPTNeoForSequenceClassification" : 2,
-    "GoogleFnet": 2,
-    "LayoutLMForMaskedLM": 2,
-    "LayoutLMForSequenceClassification": 2,
-    "M2M100ForConditionalGeneration": 4,
-    "MBartForCausalLM": 2,
-    "MBartForConditionalGeneration": 2,
-    "MT5ForConditionalGeneration": 2,
-    "MegatronBertForCausalLM": 4,
-    "MegatronBertForQuestionAnswering": 2,
-    "MobileBertForMaskedLM": 2,
-    "MobileBertForQuestionAnswering": 2,
-    "OPTForCausalLM": 2,
-    "PLBartForCausalLM": 2,
-    "PLBartForConditionalGeneration": 2,
-    "PegasusForCausalLM": 4,
-    "PegasusForConditionalGeneration": 2,
-    "RobertaForCausalLM": 2,
-    "RobertaForQuestionAnswering": 2,
-    "Speech2Text2ForCausalLM": 4,
-    "T5ForConditionalGeneration": 2,
-    "T5Small": 2,
-    "TrOCRForCausalLM": 2,
-    "XGLMForCausalLM": 4,
-    "XLNetLMHeadModel": 2,
-    "YituTechConvBert": 2,
-}
-
-SKIP_ACCURACY_CHECK_MODELS = {
-    # Models too large to have eager, dynamo and fp64_numbers simultaneosuly
-    # even for 40 GB machine.
-    "DebertaV2ForMaskedLM",
-    "BlenderbotForCausalLM",
-}
-
-SKIP_DUE_TO_CONTROL_FLOW = {"AllenaiLongformerBase"}
-
-
-REQUIRE_HIGHER_TOLERANCE_TRAINING = {
-    "MT5ForConditionalGeneration",
-    # AlbertForQuestionAnswering fails in CI GCP A100 but error does not seem
-    # harmful.
-    "AlbertForQuestionAnswering",
-}
-
-REQUIRE_HIGHER_TOLERANCE_MAX_AUTOTUNE_TRAINING = {
-    # DebertaForQuestionAnswering needs higher tolerance in Max-Autotune mode
-    "DebertaForQuestionAnswering",
-}
-
-REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
-    "GPT2ForSequenceClassification",
-    "RobertaForQuestionAnswering",
-}
-REQUIRE_HIGHER_TOLERANCE_INFERENCE_CPU_ONLY = {
-    "LayoutLMForSequenceClassification",
-}
-
-
-SKIP_FOR_CPU = {
-    "OPTForCausalLM",  # OOMs
-}
-
-ONLY_EVAL_MODE = {
-    "M2M100ForConditionalGeneration",  # Fails with dynamo for train mode
-}
-
-FP32_ONLY_MODELS = {
-    "GoogleFnet",
-}
 
 
 def get_module_cls_by_model_name(model_cls_name):
@@ -435,16 +337,32 @@ class HuggingfaceRunner(BenchmarkRunner):
         self.suite_name = "huggingface"
 
     @property
+    def _config(self):
+        return load_yaml_file("huggingface.yaml")
+
+    @property
+    def _skip(self):
+        return self._config["skip"]
+
+    @property
+    def _accuracy(self):
+        return self._config["accuracy"]
+
+    @property
+    def skip_models(self):
+        return self._skip["all"]
+
+    @property
     def skip_models_for_cpu(self):
-        return SKIP_FOR_CPU
+        return self._skip["device"]["cpu"]
 
     @property
     def fp32_only_models(self):
-        return FP32_ONLY_MODELS
+        return self._config["only_fp32"]
 
     @property
     def skip_models_due_to_control_flow(self):
-        return SKIP_DUE_TO_CONTROL_FLOW
+        return self._skip["control_flow"]
 
     def _get_model_cls_and_config(self, model_name):
         if model_name not in EXTRA_MODELS:
@@ -506,8 +424,9 @@ class HuggingfaceRunner(BenchmarkRunner):
 
         if batch_size is None:
             batch_size = batch_size_default
-            if model_name in BATCH_SIZE_DIVISORS:
-                batch_size = max(int(batch_size / BATCH_SIZE_DIVISORS[model_name]), 1)
+            batch_size_divisors = self._config["batch_size"]["divisors"]
+            if model_name in batch_size_divisors:
+                batch_size = max(int(batch_size / batch_size_divisors[model_name]), 1)
                 log.info(
                     f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"
                 )
@@ -524,7 +443,9 @@ class HuggingfaceRunner(BenchmarkRunner):
         if (
             is_training
             and not use_eval_mode
-            and not (self.args.accuracy and model_name in ONLY_EVAL_MODE)
+            and not (
+                self.args.accuracy and model_name in self._config["only_inference"]
+            )
         ):
             model.train()
         else:
@@ -546,7 +467,7 @@ class HuggingfaceRunner(BenchmarkRunner):
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
                 or model_name in args.exclude_exact
-                or model_name in SKIP
+                or model_name in self.skip_models
             ):
                 continue
             yield model_name
@@ -554,7 +475,7 @@ class HuggingfaceRunner(BenchmarkRunner):
     @property
     def skip_accuracy_checks_large_models_dashboard(self):
         if self.args.dashboard or self.args.accuracy:
-            return SKIP_ACCURACY_CHECK_MODELS
+            return self._accuracy["skip"]["large_models"]
         return set()
 
     @property
@@ -572,19 +493,19 @@ class HuggingfaceRunner(BenchmarkRunner):
         if is_training:
             from torch._inductor import config as inductor_config
 
-            if (name in REQUIRE_HIGHER_TOLERANCE_TRAINING) or (
+            if (name in self._config["tolerance"]["higher_training"]) or (
                 inductor_config.max_autotune
-                and name in REQUIRE_HIGHER_TOLERANCE_MAX_AUTOTUNE_TRAINING
+                and name in self._config["tolerance"]["higher_max_autotune_training"]
             ):
                 return 2e-2, cosine
             else:
                 return 1e-2, cosine
         else:
-            if name in REQUIRE_HIGHER_TOLERANCE_INFERENCE:
+            if name in self._config["tolerance"]["higher_inference"]:
                 return 4e-3, cosine
             if (
                 current_device == "cpu"
-                and name in REQUIRE_HIGHER_TOLERANCE_INFERENCE_CPU_ONLY
+                and name in self._config["tolerance"]["higher_inference"]
             ):
                 return 4e-3, cosine
         return 1e-3, cosine

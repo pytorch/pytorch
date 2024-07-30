@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
 import copy
@@ -55,7 +56,6 @@ from torch.fx.passes.infra.pass_manager import PassManager
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 from .graph_signature import (  # noqa: F401
-    _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
     CustomObjArgument,
@@ -206,14 +206,6 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
                     f"{op_overload} is a TorchScript op, we can't preserve it as is"
                 )
 
-            if not torch._C._dispatch_has_kernel_for_dispatch_key(
-                op_overload.name(), torch._C.DispatchKey.CompositeImplicitAutograd
-            ):
-                raise RuntimeError(
-                    f"{op_overload} is not CompositeImplicitAutograd op, so we will preserve "
-                    "it as long as there is no python decomposition"
-                )
-
             return True
 
         # If we didn't error, it means we can go ahead
@@ -221,6 +213,7 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
 
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
+
         for override_dispatch_key in _AUTOGRAD_ALIAS_BACKEND_KEYS_TO_OVERRIDE:
             if override_dispatch_key not in op_overload.py_kernels:
                 # TODO (tmanlaibaatar)https://github.com/pytorch/pytorch/issues/129430
@@ -242,10 +235,6 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
             )
 
         if op_overload in decomp_table:
-            warnings.warn(
-                f"Deleting decomposition registered for operator `{op_overload}`, "
-                "which was sepecified in the `preserve_ops` list."
-            )
             removed_decomps[op_overload] = decomp_table[op_overload]
             del decomp_table[op_overload]
 
@@ -339,14 +328,13 @@ def _decompose_and_get_gm_with_new_signature_constants(
     _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
-    from torch._export.non_strict_utils import make_fake_params_buffers
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
     from torch._functorch.aot_autograd import aot_export_module
     from torch._guards import detect_fake_mode
 
     from torch.export._trace import (
         _export_to_aten_ir,
-        _get_params_buffers,
+        _fakify_params_buffers,
         _ignore_backend_decomps,
         _verify_nn_module_stack,
         _verify_placeholder_names,
@@ -405,9 +393,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
             constant_attrs.add(value, name)
 
         # get params & buffers after excluding constants
-        fake_params_buffers = make_fake_params_buffers(
-            fake_mode, _get_params_buffers(mod)
-        )
+        fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
         aten_export_artifact = _export_to_aten_ir(
             mod,
             # this requires empty kwargs, but not in pytree.flattened format
@@ -502,14 +488,13 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     # Run this pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
     # Overwrite output specs afterwards.
-    from torch._dynamo import config as _dynamo_config
     from torch._export.passes._node_metadata_hook import (
         _node_metadata_hook,
         _set_node_metadata_hook,
     )
     from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
 
-    if not _dynamo_config.do_not_emit_runtime_asserts:
+    if not torch._dynamo.config.do_not_emit_runtime_asserts:
         stack_trace = (
             'File "torch/fx/passes/runtime_assert.py", line 24, '
             "in insert_deferred_runtime_asserts"
@@ -630,7 +615,6 @@ def _decompose_exported_program(
     new_range_constraints = _get_updated_range_constraints(
         gm,
         ep.range_constraints,
-        _is_executorch=False,
     )
 
     exported_program = ExportedProgram(
@@ -671,10 +655,6 @@ class ExportedProgram:
         range_constraints: "Dict[sympy.Symbol, Any]",
         module_call_graph: List[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
-        verifier: Optional[Type[Any]] = None,  # TODO Deprecate this.
-        tensor_constants: Optional[
-            Dict[str, torch.Tensor]
-        ] = None,  # TODO: deprecate this
         constants: Optional[
             Dict[str, Union[torch.Tensor, FakeScriptObject, torch._C.ScriptObject]]
         ] = None,
@@ -694,16 +674,9 @@ class ExportedProgram:
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
 
-        self._constants = tensor_constants or constants or {}
-        assert self._constants is not None
+        self._constants = constants or {}
 
-        # TODO Clean up this after we bump executorch's pin.
-        assert verifier is None or verifiers is None
-        if verifiers is None:
-            if verifier is None:
-                verifiers = [Verifier]
-            else:
-                verifiers = [verifier]
+        verifiers = verifiers or [Verifier]
         assert all(issubclass(v, Verifier) for v in verifiers)
         self._verifiers = verifiers
         # Validate should be always the last step of the constructor.
@@ -953,7 +926,7 @@ class ExportedProgram:
 
     def __str__(self) -> str:
         graph_module = self.graph_module.print_readable(
-            print_output=False, colored=True
+            print_output=False, colored=False
         ).replace("\n", "\n    ")
         string = (
             "ExportedProgram:\n"
@@ -1099,12 +1072,11 @@ class ExportedProgram:
             range_constraints=_get_updated_range_constraints(
                 transformed_gm,
                 self.range_constraints,
-                _is_executorch=False,
             ),
             module_call_graph=copy.deepcopy(self._module_call_graph),
             example_inputs=self.example_inputs,
-            verifier=self.verifier,
             constants=self.constants,
+            verifiers=self.verifiers,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
@@ -1125,23 +1097,26 @@ class ExportedProgram:
 
     @final
     def _validate(self):
+        assert (
+            len(self.verifiers) > 0
+        ), "ExportedProgram must have at least one verifier."
         for v in self.verifiers:
             v().check(self)
 
     # TODO(zhxchen17) Formalize this.
     def _update(
-        self, graph_module, graph_signature, state_dict=None
+        self, graph_module, graph_signature, *, state_dict=None, verifiers=None
     ) -> "ExportedProgram":
         return ExportedProgram(
             root=graph_module,
             graph=graph_module.graph,
             graph_signature=graph_signature,
-            state_dict=state_dict or self.state_dict,
+            state_dict=state_dict if state_dict is not None else self.state_dict,
             range_constraints=copy.deepcopy(self.range_constraints),
             module_call_graph=copy.deepcopy(self._module_call_graph),
             example_inputs=self.example_inputs,
-            verifier=self.verifier,
-            tensor_constants=self.tensor_constants,
+            constants=self.constants,
+            verifiers=verifiers if verifiers is not None else self.verifiers,
         )
 
 
@@ -1164,27 +1139,7 @@ def _get_shape_env(gm):
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
     old_range_constraints: "Optional[Dict[sympy.Symbol, Any]]" = None,
-    _is_executorch: bool = True,
 ) -> "Dict[sympy.Symbol, Any]":
-    # FIXME(tmanlaibaatar) Remove this whole branch once https://github.com/pytorch/pytorch/pull/123764
-    if _is_executorch:
-        assert old_range_constraints is None
-        shape_env = _get_shape_env(gm)
-        if shape_env is None:
-            return {}
-        range_constraints = {
-            k: v
-            for k, v in shape_env.var_to_range.items()
-            if k not in shape_env.replacements
-        }
-        # Only when we have an unbacked symint, and it's used as constructor inputs,
-        # runtime_var_to_range will make a difference compated to var_to_range.
-        # e.g. [2, oo) -> [0, oo)
-        for k, v in shape_env.var_to_range.items():
-            if k not in shape_env.replacements:
-                range_constraints[k] = v
-        return range_constraints
-
     assert old_range_constraints is not None
 
     shape_env = _get_shape_env(gm)

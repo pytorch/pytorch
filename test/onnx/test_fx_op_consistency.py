@@ -240,6 +240,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "alias_copy",
+        dtypes=(torch.int8, torch.uint8, torch.int16, torch.float64),
         reason="OnnxExporterError: Failed to export model",
     ),
     xfail(
@@ -1261,6 +1262,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         "unravel_index",
         dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_script_does_not_support("Floor", "bool, int"),
+    ),
+    xfail(
+        "unsqueeze_copy",
+        reason="OnnxExporterError: Failed to export model",
+        dtypes=(torch.int8, torch.uint8, torch.int16),
     ),
     xfail(
         "where",

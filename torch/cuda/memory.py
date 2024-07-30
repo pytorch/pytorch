@@ -643,8 +643,12 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
             return "amdsmi driver can't be loaded, is ROCm installed?"
 
         device = _get_amdsmi_device_index(device)
-        handle = amdsmi.amdsmi_get_processor_handles()[device]  # type: ignore[attr-defined]
-        procs = amdsmi.amdsmi_get_gpu_process_list(handle)  # type: ignore[attr-defined]
+
+        try:
+            handle = amdsmi.amdsmi_get_processor_handles()[device]  # type: ignore[attr-defined]
+            procs = amdsmi.amdsmi_get_gpu_process_list(handle)  # type: ignore[attr-defined]
+        except amdsmi.AmdSmiException:  # type: ignore[attr-defined]
+            return "amdsmi cannot list processes from other users"
 
     lines = []
     lines.append(f"GPU:{device}")

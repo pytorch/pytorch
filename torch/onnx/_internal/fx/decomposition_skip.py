@@ -16,7 +16,7 @@ from __future__ import annotations
 import abc
 import contextlib
 
-from typing import Callable, Sequence, Type
+from typing import Callable, Sequence
 
 from onnxscript.function_libs.torch_lib.ops import (  # type: ignore[import-not-found]
     core as torchlib_core,
@@ -221,7 +221,7 @@ _DEFAULT_SKIP_LIST = [
 @contextlib.contextmanager
 def enable_decomposition_skips(
     export_options: torch.onnx.ExportOptions,
-    skips: Sequence[Type[DecompSkip]] = _DEFAULT_SKIP_LIST,
+    skips: Sequence[type[DecompSkip]] = _DEFAULT_SKIP_LIST,
 ):
     """A context manager that enables the decomposition skips.
 

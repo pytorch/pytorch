@@ -282,7 +282,7 @@ Tensor& nan_to_num_sparse_(
   return nan_to_num_sparse_out(self, nan, posinf, neginf, self);
 }
 
-bool is_pinned_sparse(const Tensor& self, std::optional<Device> device) {
+bool is_pinned_sparse(const Tensor& self, std::optional<c10::Device> device) {
   if (device.has_value()) {
     TORCH_WARN_DEPRECATION(
         "The argument 'device' of Tensor.is_pinned() ",
@@ -293,7 +293,7 @@ bool is_pinned_sparse(const Tensor& self, std::optional<Device> device) {
   return false;
 }
 
-Tensor _pin_memory_sparse(const Tensor& self, std::optional<Device> device) {
+Tensor _pin_memory_sparse(const Tensor& self, std::optional<c10::Device> device) {
   // Here, we throw an error rather than return self tensor. This
   // is because we always return the pinned memory tensor, while
   // giving unpinned tensor might mislead users.

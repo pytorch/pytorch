@@ -8,16 +8,16 @@
 
 #include <c10/core/Allocator.h>
 
+#include <c10/util/python_stub.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
 #include <string>
-
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 class Context;
 }
 
 namespace at {
-
 constexpr const char* MTIA_HELP =
     "The MTIA backend requires MTIA extension for PyTorch;"
     "this error has occurred because you are trying "
@@ -99,6 +99,11 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return nullptr;
   }
+
+  virtual PyObject* memoryStats(DeviceIndex device) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return nullptr;
+  }
 };
 
 struct TORCH_API MTIAHooksArgs {};
@@ -112,3 +117,4 @@ TORCH_API const MTIAHooksInterface& getMTIAHooks();
 TORCH_API bool isMTIAHooksBuilt();
 } // namespace detail
 } // namespace at
+C10_DIAGNOSTIC_POP()

@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TemporaryFileName,
     TEST_CUDA,
+    TEST_XPU,
 )
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
@@ -68,6 +69,7 @@ def generate_faked_module():
 
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
+@unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionOpenRgistration(common.TestCase):
     """Tests Open Device Registration with C++ extensions."""
@@ -191,7 +193,8 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         ):
             self.module.register_generator_second()
 
-        self.module.register_hook()
+        if self.module.is_register_hook() is False:
+            self.module.register_hook()
         default_gen = self.module.default_generator(0)
         self.assertTrue(
             default_gen.device.type == torch._C._get_privateuse1_backend_name()
@@ -529,6 +532,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         z = torch._foreach_add(x, y)
         self.assertEqual(z_cpu, z[0])
         self.assertEqual(z_cpu, z[1])
+
+        # call _fused_adamw_ with undefined tensor.
+        self.module.fallback_with_undefined_tensor()
 
     def test_open_device_numpy_serialization_map_location(self):
         torch.utils.rename_privateuse1_backend("foo")
