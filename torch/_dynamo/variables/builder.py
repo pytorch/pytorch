@@ -536,7 +536,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonSysModulesVariable(source=self.source)
         elif isinstance(value, os._Environ):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             return OSEnvironVariable(value, source=self.source)
         elif CustomizedDictVariable.is_matching_cls_hf(type(value)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
