@@ -343,12 +343,12 @@ def split_const_gm(
 
 def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
     aten = torch.ops.aten
-    tf32_ops = {
+    tf32_ops = (
         aten.mm.default,
         aten.addmm.default,
         aten.bmm.default,
         aten.baddbmm.default,
-    }
+    )
     for target in tf32_ops:
         for node in gm.graph.find_nodes(op="call_function", target=target):
             if (

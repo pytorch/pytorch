@@ -587,7 +587,7 @@ class TritonCSEVariable(CSEVariable):
                 # most of the time index vars don't need masks associated with them
                 # however, when index vars are used to compute indices for indirect reads
                 # those reads should subsequently be masked,
-                self.mask_vars.update({f"{arg.name[0]}mask"})
+                self.mask_vars.update([f"{arg.name[0]}mask"])
 
 
 class TritonOverrides(OpOverrides):
@@ -1189,7 +1189,7 @@ class TritonKernel(SIMDKernel):
         self.helper_functions = HelperFunctions()
 
         # A set of autotuning hints to pass as part of triton_meta
-        self.autotune_hints: Set[AutotuneHint] = OrderedSet()
+        self.autotune_hints: OrderedSet[AutotuneHint] = OrderedSet()
         self.triton_meta: Optional[Dict[str, object]] = None
         self.optimize_mask: bool = optimize_mask
 
@@ -1527,7 +1527,7 @@ class TritonKernel(SIMDKernel):
                 range_trees = self.active_range_trees(reorder=True)
 
                 # Match each range tree separately.
-                range_symbols = {tree.symbol() for tree in range_trees}
+                range_symbols = OrderedSet(tree.symbol() for tree in range_trees)
                 index_terms = sympy.Add.make_args(index_relative_to_xyr_index)
                 block_params = BlockParameters()
                 for tree in range_trees:
@@ -1901,9 +1901,9 @@ class TritonKernel(SIMDKernel):
         root_op: str
 
         def final_reduction(value):
-            use_helper = reduction_type in {"any", "max", "min", "prod"}
+            use_helper = reduction_type in ("any", "max", "min", "prod")
             module = "triton_helpers" if use_helper else "tl"
-            if reduction_type in {"max", "min"}:
+            if reduction_type in ("max", "min"):
                 return self.reduction_resize(
                     f"{module}.{reduction_type}2({value}, {dim})"
                 )
@@ -1944,7 +1944,7 @@ class TritonKernel(SIMDKernel):
             else:
                 masked_value = _mask_value(value, default)
 
-            if reduction_type in {"argmax", "argmin"}:
+            if reduction_type in ("argmax", "argmin"):
                 accumulator_index = str(
                     self.cse.generate(
                         self.compute,
@@ -1983,7 +1983,7 @@ class TritonKernel(SIMDKernel):
                     f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
                 )
 
-            if reduction_type in {"argmax", "argmin"}:
+            if reduction_type in ("argmax", "argmin"):
                 accumulator_index = f"_{result_var}_index"
                 long_max = torch.iinfo(torch.int64).max
                 self.body.writeline(
@@ -2607,7 +2607,7 @@ class TritonKernel(SIMDKernel):
         }
 
         inductor_meta = {
-            "autotune_hints": set(self.autotune_hints),
+            "autotune_hints": set(self.autotune_hints),  # noqa: SETUSAGE
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "no_x_dim": self.no_x_dim,
@@ -3037,7 +3037,7 @@ class TritonScheduling(SIMDScheduling):
 
         log.debug(
             "kernel src code for %s written to: %s",
-            {n.get_name() for n in nodes},
+            {n.get_name() for n in nodes},  # noqa: SETUSAGE
             mod.__file__,
         )
         ms = load_cache()
@@ -3055,7 +3055,7 @@ class TritonScheduling(SIMDScheduling):
             log.debug(
                 "Exception (%s) in compiling fused nodes %s",
                 e,
-                {n.get_name() for n in nodes},
+                {n.get_name() for n in nodes},  # noqa: SETUSAGE
             )
             ms = float("inf")
             store_cache()
@@ -3079,7 +3079,7 @@ class TritonScheduling(SIMDScheduling):
 
         log.debug(
             "The fused kernel for %s took %.3f ms to run",
-            {n.get_name() for n in nodes},
+            {n.get_name() for n in nodes},  # noqa: SETUSAGE
             ms,
         )
         store_cache()

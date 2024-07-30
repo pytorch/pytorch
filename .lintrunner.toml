@@ -337,6 +337,72 @@ init_command = [
 is_formatter = true
 
 [[linter]]
+code = 'SETUSAGE'
+include_patterns = ['torch/_inductor/*.py']
+exclude_patterns = [
+    'torch/_inductor/fx_passes/**',
+    'torch/_inductor/fx_passes/mkldnn_fusion.py',
+    'torch/_inductor/async_compile.py',
+    'torch/_inductor/fx_passes/misc_patterns.py',
+    'torch/_inductor/fx_passes/joint_graph.py',
+    'torch/_inductor/codegen/wrapper.py',
+    'torch/_inductor/codegen/cuda/cutlass_utils.py',
+    'torch/_inductor/codegen/cpp_gemm_template.py',
+    'torch/_inductor/fx_passes/micro_pipeline_tp.py',
+    'torch/_inductor/codegen/halide.py',
+    'torch/_inductor/runtime/hints.py',
+    'torch/_inductor/codegen/rocm/rocm_benchmark_request.py',
+    'torch/_inductor/comms.py',
+    'torch/_inductor/constant_folding.py',
+    'torch/_inductor/cudagraph_trees.py',
+    'torch/_inductor/codegen/cpp.py',
+    'torch/_inductor/pattern_matcher.py',
+    'torch/_inductor/codegen/multi_kernel.py',
+    'torch/_inductor/wrapper_benchmark.py',
+    'torch/_inductor/fx_passes/post_grad.py',
+    'torch/_inductor/codegen/memory_planning.py',
+    'torch/_inductor/codegen/cuda/gemm_template.py',
+    'torch/_inductor/select_algorithm.py',
+    'torch/_inductor/codegen/cpp_wrapper_cpu.py',
+    'torch/_inductor/fx_passes/reinplace.py',
+    'torch/_inductor/kernel/mm_common.py',
+    'torch/_inductor/fx_passes/pre_grad.py',
+    'torch/_inductor/codecache.py',
+    'torch/_inductor/codegen/cuda/cuda_template.py',
+    'torch/_inductor/utils.py',
+    'torch/_inductor/debug.py',
+    'torch/_inductor/fx_passes/dedupe_symint_uses.py',
+    'torch/_inductor/fx_passes/ddp_fusion.py',
+    'torch/_inductor/codegen/simd.py',
+    'torch/_inductor/cudagraph_utils.py',
+    'torch/_inductor/fx_passes/numeric_utils.py',
+    'torch/_inductor/fx_passes/group_batch_fusion.py',
+    'torch/_inductor/fx_passes/b2b_gemm.py',
+    'torch/_inductor/sizevars.py',
+    'torch/_inductor/runtime/triton_heuristics.py',
+    'torch/_inductor/virtualized.py',
+    'torch/_inductor/codegen/cpp_utils.py',
+    'torch/_inductor/codegen/triton_split_scan.py',
+    'torch/_inductor/fx_passes/split_cat.py',
+    'torch/_inductor/codegen/triton_combo_kernel.py',
+    'torch/_inductor/fx_utils.py',
+    'torch/_inductor/autotune_process.py',
+    'torch/_inductor/metrics.py',
+    'torch/_inductor/codegen/cpp_template_kernel.py',
+    'torch/_inductor/lowering.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/nondeterministic_set_linter.py',
+    '--filenames',
+    '{{PATHSFILE}}',
+]
+init_command = [
+    'python3',
+    '--dry-run={{DRYRUN}}',
+]
+
+[[linter]]
 code = 'NEWLINE'
 include_patterns=['**']
 exclude_patterns=[

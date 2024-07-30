@@ -128,7 +128,7 @@ else:
 
 
 def supported_dtype_of_cpp_wrapper(dtype: torch.device, cuda: bool) -> bool:
-    supported_dtype = {
+    supported_dtype = {  # noqa: SETUSAGE
         torch.float32,
         torch.float64,
         torch.int64,
@@ -171,8 +171,7 @@ def may_get_constant_buffer_dtype(constant_buffer: sympy.Expr) -> Optional[torch
 
 
 def is_magic_method(op: Any) -> bool:
-    magic_ops = {method_to_operator(m) for m in magic_methods}
-    return op in magic_ops
+    return op in (method_to_operator(m) for m in magic_methods)
 
 
 def getattr_recursive(
@@ -200,12 +199,12 @@ def mark_nodes_dislike_padding(g: Graph) -> None:
     """
     if not config.comprehensive_padding:
         return
-    ops_dislike_padding = {
+    ops_dislike_padding = {  # noqa: SETUSAGE
         aten.convolution,
         aten.convolution_backward,
     }
     # what's a better way to collect the reduction ops?
-    ops_like_padding = {
+    ops_like_padding = {  # noqa: SETUSAGE
         aten.var_mean,
         aten.sum,
         aten.mean,
@@ -418,7 +417,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.find_nodes_prefer_channels_last() if self.layout_opt else OrderedSet()
         )
         mark_nodes_dislike_padding(gm.graph)
-        self._warned_fallback = {"aten.convolution_backward"}
+        self._warned_fallback = {"aten.convolution_backward"}  # noqa: SETUSAGE
         self.user_visible_outputs = (
             user_visible_outputs if user_visible_outputs is not None else {}
         )
@@ -1240,7 +1239,7 @@ class GraphLowering(torch.fx.Interpreter):
         buffer_watermark = len(self.buffers)
         operation_watermark = len(self.operations)
 
-        origins = {n}
+        origins = {n}  # noqa: SETUSAGE
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
