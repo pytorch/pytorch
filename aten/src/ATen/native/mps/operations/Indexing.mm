@@ -246,7 +246,7 @@ static Tensor nonzero_fallback(const Tensor& self) {
 
 Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
   if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS)) {
-    TORCH_WARN_ONCE("MPS: nonzero op is supported natively starting from macOS 13.0. ",
+    TORCH_WARN_ONCE("MPS: nonzero op is supported natively starting from macOS 14.0. ",
                     "Falling back on CPU. This may have performance implications.");
     Tensor out_fallback = nonzero_fallback(self);
     at::native::resize_output(out_, out_fallback.sizes());

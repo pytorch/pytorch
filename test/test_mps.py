@@ -10586,6 +10586,7 @@ class TestAdvancedIndexing(TestCaseMPS):
     supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
     supported_np_dtypes = [np.float32, np.float16, np.int64, np.int32, np.int16, np.uint8]
 
+    @unittest.skipIf(product_version < 14.0, "Skipped on macOS < 14")
     def test_nonzero_no_warning(self):
         device = "mps"
         t = torch.randn((2, 2), device=device)
