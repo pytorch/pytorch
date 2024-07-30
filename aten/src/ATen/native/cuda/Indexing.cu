@@ -1338,13 +1338,8 @@ uint64_t getDefaultMaxThreadsPerBlock() {
 #ifndef USE_ROCM
   return 128;
 #else
-  hipDeviceProp_t* prop = at::cuda::getCurrentDeviceProperties();
-  // MI300x optimization
-  if (std::string(prop->gcnArchName).find("gfx94") != std::string::npos) {
-    return 1024;
-  }
   // bigger default
-  return 256;
+  return 512;
 #endif
 }
 
