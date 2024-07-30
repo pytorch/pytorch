@@ -333,12 +333,8 @@ class PersistentCache(CacheBase):
                 and benchmark is not None
             ):
                 try:
-                    # re-benchmark everything to try to get consistent numbers from the same machine,
-                    # convert possible LazyBenchmarks to floats immediately to trigger benchmark
-                    timings = {
-                        choice: float(timing)
-                        for choice, timing in benchmark(choices).items()
-                    }
+                    # re-benchmark everything to try to get consistent numbers from the same machine
+                    timings = benchmark(choices)
                     assert all(choice in timings for choice in choices)
                     local_cache.setdefault(op, {})
                     local_cache[op].setdefault(inputs, {}).setdefault(precision, {})

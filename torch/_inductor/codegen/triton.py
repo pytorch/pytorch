@@ -2462,14 +2462,12 @@ class TritonKernel(SIMDKernel):
 
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])
         with result.indent():
-            result.writeline(
-                "from torch._inductor.runtime.benchmarking import benchmarker"
-            )
+            result.writeline("from triton.testing import do_bench")
             result.writeline("")
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = benchmarker.benchmark(lambda: call(args), (), {}, rep=40, fast_flush=True)"
+                "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -3070,17 +3068,18 @@ class TritonScheduling(SIMDScheduling):
         else:
             # We have to clone the inplace updated arguments to avoid earlier calls
             # generating out of range indices for later calls.
-            ms = benchmarker.lazy_benchmark_gpu(
-                lambda: call(wrapped_jit_function.clone_args(*args)[0])
-            )
+            kernel_callable = lambda: call(wrapped_jit_function.clone_args(*args)[0])
 
             # overhead of cloning args gives bias for fusing the kernel
             # in the case of mutating/in-placeable second fusion
             # TODO - would be better as a hook in triton do_bench that reset
             # the input values between benchmarking
-            ms = ms - benchmarker.lazy_benchmark_gpu(
-                lambda: wrapped_jit_function.clone_args(*args)
+            overhead_callable = lambda: wrapped_jit_function.clone_args(*args)
+
+            kernel_timing_ms, overhead_timing_ms = benchmarker.benchmark_many_gpu(
+                [kernel_callable, overhead_callable]
             )
+            ms = kernel_timing_ms - overhead_timing_ms
 
         log.debug(
             "The fused kernel for %s took %.3f ms to run",
