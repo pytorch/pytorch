@@ -384,9 +384,15 @@ class GraphLowering(torch.fx.Interpreter):
         self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
         self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
-        self.extern_node_serializer: Optional[
-            Callable[[List[ir.ExternKernelNode]], Any]
-        ] = extern_node_serializer
+
+        from torch._inductor.extern_node_serializer import extern_node_json_serializer
+
+        self.extern_node_serializer: Callable[[List[ir.ExternKernelNode]], Any] = (
+            extern_node_serializer
+            if config.is_fbcode() and extern_node_serializer
+            else extern_node_json_serializer
+        )
+
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: OrderedSet[str] = OrderedSet()
@@ -916,6 +922,8 @@ class GraphLowering(torch.fx.Interpreter):
             expr = sympy.sympify(example)
             self.graph_inputs[target] = expr
             return expr
+        elif example is None:
+            return None
         if isinstance(example, BackwardState):
             # Ignored arg, must be unused
             # Alternately we could filter this out in AotAutograd
@@ -1540,10 +1548,10 @@ class GraphLowering(torch.fx.Interpreter):
             # end up needing to test equalities on the symbols, and a fresh
             # symbol is likely to hit lots of GuardOnDataDependent errors that
             # we already know facts for.
-            renamed_unbacked_bindings = {
+            renamed_unbacked_bindings = OrderedSet(
                 V.fake_mode.shape_env.unbacked_renamings.get(s, s)
                 for s in unbacked_bindings.keys()
-            }
+            )
             assert new_unbacked_defs >= renamed_unbacked_bindings, (
                 f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
                 f"fx node is: {n.format_node()}\n"
@@ -1622,7 +1630,9 @@ class GraphLowering(torch.fx.Interpreter):
                 def materialize(
                     x: Union[torch.SymInt, torch.SymFloat, torch.Tensor]
                 ) -> Union[int, float, torch.Tensor]:
-                    if isinstance(x, (torch.SymInt, torch.SymFloat)):
+                    if x is None:
+                        return None
+                    elif isinstance(x, (torch.SymInt, torch.SymFloat)):
                         # Need concrete value to run dynamic shapes and tune the result
                         return x.node.hint
                     elif isinstance(x, FakeTensor):
@@ -1814,11 +1824,7 @@ class GraphLowering(torch.fx.Interpreter):
             output_code_log.debug("Output code: \n%s", code)
 
             serialized_extern_kernel_nodes = None
-            if (
-                config.is_fbcode()
-                and self.extern_kernel_nodes
-                and self.extern_node_serializer
-            ):
+            if self.extern_kernel_nodes:
                 serialized_extern_kernel_nodes = self.extern_node_serializer(
                     self.extern_kernel_nodes
                 )

@@ -17,7 +17,6 @@ from typing import (
     List,
     NamedTuple,
     Optional,
-    Set,
     Tuple,
     Union,
 )
@@ -1474,7 +1473,7 @@ class CSE:
         self.invalidated_stores = OrderedSet()  # type: ignore[var-annotated]
         self.varname_map = varname_map or {}
 
-    def invalidate(self, keep_vars: Set[str]):
+    def invalidate(self, keep_vars: OrderedSet[str]):
         for name, tmp in list(self.store_cache.items()):
             if tmp not in keep_vars:
                 del self.store_cache[name]
@@ -1835,7 +1834,10 @@ class Kernel(CodeGen):
 
             @staticmethod
             def indirect_indexing(
-                var: CSEVariable, size: Union[sympy.Expr, int], check: bool = True
+                var: CSEVariable,
+                size: Union[sympy.Expr, int],
+                check: bool = True,
+                wrap_neg=True,
             ):
                 if isinstance(size, int):
                     size = sympy.Integer(size)
@@ -1843,11 +1845,14 @@ class Kernel(CodeGen):
                 # Skip CSE since this doesn't return an expression
 
                 if var.bounds.lower < 0:  # type: ignore[operator]
-                    stm = ops.add(var, ops.index_expr(size, torch.long))
-                    # Mixed negative and non-negative
-                    if var.bounds.upper >= 0:  # type: ignore[operator]
-                        lt = ops.lt(var, 0)
-                        stm = ops.where(lt, stm, var)
+                    if wrap_neg:
+                        stm = ops.add(var, ops.index_expr(size, torch.long))
+                        # Mixed negative and non-negative
+                        if var.bounds.upper >= 0:  # type: ignore[operator]
+                            lt = ops.lt(var, 0)
+                            stm = ops.where(lt, stm, var)
+                    else:
+                        stm = var
 
                     # Propagate bounds as we know how to compute them properly
                     new_bounds = ValueRanges.unknown()
