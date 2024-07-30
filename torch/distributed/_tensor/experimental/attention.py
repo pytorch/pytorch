@@ -11,6 +11,7 @@ from enum import Enum
 from typing import (
     Any,
     Callable,
+    DefaultDict,
     Dict,
     Generator,
     List,
@@ -79,8 +80,8 @@ class _SDPAMerger:
         self._out: Optional[torch.Tensor] = None
         self._lse: Optional[torch.Tensor] = None
         self._convert_to_f32 = convert_to_f32
-        self._out_dtype = None
-        self._lse_dtype = None
+        self._out_dtype = torch.float32
+        self._lse_dtype = torch.float32
 
     def _merge_one(self, block_out: torch.Tensor, block_lse: torch.Tensor) -> None:
         block_lse = block_lse.unsqueeze(dim=-1)
@@ -106,6 +107,8 @@ class _SDPAMerger:
         self._merge_one(out, lse)
 
     def results(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        assert self._out is not None
+        assert self._lse is not None
         out, lse = self._out, self._lse.squeeze(-1)
         return out.to(self._out_dtype), lse.to(self._lse_dtype)
 
@@ -233,9 +236,6 @@ def _templated_ring_attention(
 
     next_kv = None
 
-    chunks = []
-    logsumexps = []
-
     # Without making key and value contiguous(), the lose curve is bad.
     # TODO(fegin): figure out why this is a requirement since SDPA does not have
     # this requirement.
@@ -244,7 +244,9 @@ def _templated_ring_attention(
 
     sdpa_merger = _SDPAMerger(_convert_to_f32)
 
-    rest: Tuple[Any, ...] = tuple()
+    rest: List[Any]
+    out: torch.Tensor
+    logsumexp: torch.Tensor
 
     for i in range(size):
         # overlap communication with compute
@@ -366,15 +368,15 @@ def _templated_ring_attention_backward(
     size = dist.get_world_size(pg)
     next_kv = None
     next_grad_kv = None
-    rest: Tuple[Any, ...] = tuple()
+    rest: List[Any]
+    grad_query, grad_key, grad_value = None, None, None
+    grad_query_, grad_key_, grad_value_ = None, None, None
 
     for i in range(size):
         if i == 0:
             next_kv = torch.cat([key.flatten(), value.flatten()])
             next_kv = _ring_rotate(next_kv, pg, send_to_next=True)
-            grad_query = torch.zeros_like(query).to(torch.float32)
-            grad_key = None
-            grad_value = None
+            grad_query = torch.zeros_like(query, dtype=torch.float32)
 
         is_causal_behavior = _is_causal_behavior(
             rank=rank, world_size=size, i=i, is_causal=is_causal
@@ -397,6 +399,7 @@ def _templated_ring_attention_backward(
             grad_value_ = torch.zeros_like(value)
 
         buffer = next_kv if i == 0 else next_grad_kv
+        assert buffer is not None
         buffer = _maybe_wait(buffer)
         pointer = 0
 
@@ -438,6 +441,12 @@ def _templated_ring_attention_backward(
         next_grad_kv = _ring_rotate(next_grad_kv, pg, send_to_next=True)
         grad_query += grad_query_
 
+    assert grad_query is not None
+    assert grad_key is not None
+    assert grad_value is not None
+    assert next_grad_kv is not None
+    assert grad_key_ is not None
+    assert grad_value_ is not None
     grad_query = grad_query.to(query.dtype)
     next_grad_kv = _maybe_wait(next_grad_kv)
     grad_key = next_grad_kv[: grad_key_.numel()].reshape(grad_key.shape)
@@ -667,7 +676,7 @@ class AttentionContextParallel(ParallelStyle):
 
 _original_functions: Dict[Callable, Callable] = {}
 _wrapper_functions: Dict[Callable, Callable] = {}
-_replaced_objs: collections.defaultdict[
+_replaced_objs: DefaultDict[
     Callable, Set[Tuple[types.ModuleType, str]]
 ] = collections.defaultdict(set)
 
@@ -708,8 +717,10 @@ def _distribute_function(
             arguments of ``fn``.
     """
 
-    def wrapper(target_fn, input_fn, output_fn):
-        def inner_fn(*args, **kwargs):
+    def wrapper(
+        target_fn: Callable, input_fn: Optional[Callable], output_fn: Optional[Callable]
+    ) -> Callable:
+        def inner_fn(*args: Tuple[Any, ...], **kwargs: Dict[str, Any]) -> Any:
             if input_fn is not None:
                 args, kwargs = input_fn(device_mesh, *args, **kwargs)
             output = target_fn(*args, **kwargs)
@@ -719,7 +730,9 @@ def _distribute_function(
 
         return inner_fn
 
-    def setattr_(module, obj_name, obj, new_obj):
+    def setattr_(
+        module: types.ModuleType, obj_name: str, obj: Any, new_obj: Any
+    ) -> None:
         setattr(module, obj_name, new_obj)
         global _replaced_objs
         _replaced_objs[obj].add((module, obj_name))
@@ -771,7 +784,9 @@ def enable_context_parallel(
             parallelism.
     """
 
-    def attention_input_fn(device_mesh: DeviceMesh, *args, **kwargs):
+    def attention_input_fn(
+        device_mesh: DeviceMesh, *args: Tuple[Any, ...], **kwargs: Dict[str, Any]
+    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         placement = [Shard(seq_dim)]
         all_args = []
 
@@ -785,7 +800,7 @@ def enable_context_parallel(
         new_kwargs = dict(zip(kwargs.keys(), all_args[len(args) :]))
         return new_args, new_kwargs
 
-    def attention_output_fn(device_mesh, outputs):
+    def attention_output_fn(device_mesh: DeviceMesh, outputs: Any) -> Any:
         new_outputs = []
         for output in [outputs] if isinstance(outputs, torch.Tensor) else outputs:
             output = output.to_local() if isinstance(output, DTensor) else output
@@ -813,7 +828,7 @@ def _get_sequence_shard(
     cp_rank: int,
     cp_world_size: int,
     seq_dim: int,
-):
+) -> torch.Tensor:
     return src_buffer.chunk(cp_world_size, dim=seq_dim)[cp_rank]
 
 
@@ -825,7 +840,7 @@ def context_parallel_buffers(
     buffers: List[torch.Tensor],
     seq_dims: List[int],
     restore_funcs: Optional[Tuple[Optional[Callable]]] = None,
-) -> List[torch.Tensor]:
+) -> Generator[List[torch.Tensor], None, None]:
     if cp_world_size == 1:
         yield buffers
         return
