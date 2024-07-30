@@ -7,8 +7,7 @@
 #include <ATen/native/cuda/Resize.h>
 #endif
 
-namespace torch {
-namespace inductor {
+namespace torch::inductor {
 using namespace at;
 
 static void resize_storage_bytes_(const Tensor& variable, SymInt new_size) {
@@ -61,5 +60,4 @@ TORCH_LIBRARY_IMPL(inductor, Functionalize, m) {
       "resize_storage_bytes_", TORCH_FN(resize_storage_bytes__functionalize));
 }
 
-} // namespace inductor
-} // namespace torch
+} // namespace torch::inductor

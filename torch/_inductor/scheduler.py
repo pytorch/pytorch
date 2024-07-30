@@ -563,7 +563,7 @@ class BaseSchedulerNode:
             else:
                 continue
 
-            def get_buf_elems(buf: Optional[Union[ir.Buffer, ir.TensorBox]]) -> int:
+            def get_buf_bytes(buf: Optional[Union[ir.Buffer, ir.TensorBox]]) -> int:
                 if not buf:
                     return 0
                 # Kind of a lazy way to get the MultiOutput nodes corresponding to
@@ -574,20 +574,26 @@ class BaseSchedulerNode:
                     for user in users:
                         assert isinstance(user.node, BaseSchedulerNode)
                         if isinstance(user.node.node, MultiOutput):
-                            tot += get_buf_elems(user.node.node)
+                            for sched_buf in user.node.get_outputs():
+                                tot += get_buf_bytes(sched_buf.node)
                         else:
                             # Buf is a MultiOutputLayout but not all of its
                             # users are MultiOutputs...
                             # TODO: Figure out what's going on
                             return 0
                     return tot
+                elif isinstance(buf.layout, ir.NoneLayout):
+                    return sum(
+                        get_buf_bytes(V.graph.get_buffer(mut_name))
+                        for mut_name in buf.get_mutation_names()
+                    )
                 else:
-                    return try_size_hint(sympy_product(buf.get_size()))
+                    buf_elems = try_size_hint(sympy_product(buf.get_size()))
+                    return get_dtype_size(buf.get_dtype()) * min(
+                        buf_accessed_elems, buf_elems
+                    )
 
-            buf_elems = get_buf_elems(buf)
-            node_bytes += min(buf_elems, buf_accessed_elems) * get_dtype_size(
-                buf.get_dtype()
-            )
+            node_bytes += get_buf_bytes(buf)
 
         return node_bytes
 
