@@ -86,8 +86,14 @@ class StructuredTraceTestingFormatter(logging.Formatter):
             metadata["describe_source"]["describer_id"] = "ID"
 
         if "dump_file" in metadata:
-            metadata["dump_file"]["name"] = metadata["dump_file"]["name"].split(" ")[0]
-            return json.dumps(metadata) + "\n" + record.payload
+            # Don't include the actually key number, that's sensitive to other
+            # test runs
+            metadata["dump_file"]["name"] = "<eval_with_key>"
+            return (
+                json.dumps(metadata)
+                + "\n"
+                + "\n".join(l.rstrip() for l in record.payload.splitlines())
+            )
 
         return json.dumps(metadata)
 
@@ -549,7 +555,7 @@ class StructuredTraceTest(TestCase):
             self.buffer.getvalue(),
             """\
 {"dynamo_start": {"stack": "STACK"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
-{"dump_file": {"name": "<eval_with_key>.0"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"dump_file": {"name": "<eval_with_key>"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 
 
 
