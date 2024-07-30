@@ -2561,6 +2561,16 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
     return ret / (length_h * length_w)
 
 
+@register_decomposition(aten.index.Tensor)
+def index_tensor(input, indices: List[torch.Tensor]):
+    assert len(indices) == 1
+    indices0 = indices[0]
+    indices0_1d = indices0.reshape(-1)
+    selected_1d = input.index_select(0, indices0_1d)
+    selected = selected_1d.reshape(*indices0.shape, -1)
+    return selected
+
+
 @register_decomposition(aten.index_add_)
 def index_add_(
     x: TensorLike,
