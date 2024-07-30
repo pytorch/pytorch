@@ -466,7 +466,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
   //   - checks that the common dtype can safely cast to each output, if requested
   //   - creates temporaries for CPU operations, if needed and requested
   common_device_ = common_device;
-  int max_cpu_scalars_on_non_cpu = config.allow_cpu_scalars_ ? 1 : 0;
+  int max_cpu_scalars_on_non_cpu = config.allow_cpu_scalars_ ? config.num_inputs_ - 1 : 0;
   int current_cpu_scalars_on_non_cpu = 0;
   for (auto& op : operands_) {
     bool is_type_defined = op.is_type_defined();
