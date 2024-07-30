@@ -25,7 +25,8 @@ struct TORCH_API TensorAccessBoundsInfo {
 using BoundsInfo =
     std::unordered_map<BufPtr, std::vector<TensorAccessBoundsInfo>>;
 
-TORCH_API BoundsInfo inferBounds(const StmtPtr& s, bool distinctAccessKinds = true);
+TORCH_API BoundsInfo
+inferBounds(const StmtPtr& s, bool distinctAccessKinds = true);
 
 // Bounds inference caching the analysis. The MemDependencyChecker must already
 // have been run.

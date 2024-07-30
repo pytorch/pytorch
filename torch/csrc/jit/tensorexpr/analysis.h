@@ -47,7 +47,7 @@ class NodeFinder : public IRVisitor {
     return nf.nodes;
   }
 
-  static std::vector<NodePtr<Op>> find(const ExprPtr & e) {
+  static std::vector<NodePtr<Op>> find(const ExprPtr& e) {
     NodeFinder<Op> nf;
     e->accept(&nf);
     return nf.nodes;
@@ -70,7 +70,7 @@ class VarFinder : public IRVisitor {
     return nf.vars();
   }
 
-  static std::unordered_set<VarPtr> find(const ExprPtr & e) {
+  static std::unordered_set<VarPtr> find(const ExprPtr& e) {
     VarFinder nf;
     e->accept(&nf);
     return nf.vars();
@@ -97,7 +97,7 @@ class BufFinder : public IRVisitor {
     return nf.bufs();
   }
 
-  static std::unordered_set<BufPtr> find(const ExprPtr & e) {
+  static std::unordered_set<BufPtr> find(const ExprPtr& e) {
     BufFinder nf;
     e->accept(&nf);
     return nf.bufs();
@@ -212,7 +212,7 @@ class ExternalAllocBufFinder : public IRVisitor {
     return f.bufs();
   }
 
-  static std::unordered_set<BufPtr> find(const ExprPtr & e) {
+  static std::unordered_set<BufPtr> find(const ExprPtr& e) {
     ExternalAllocBufFinder f;
     e->accept(&f);
     return f.bufs();
