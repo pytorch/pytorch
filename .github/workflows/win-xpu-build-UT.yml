@@ -1,0 +1,106 @@
+name: Win-xpu-build-UT
+on:
+    workflow_dispatch:
+      inputs:
+        win_runner:
+            description: Where to run the GHA job?
+            type: choice
+            options:
+            - "icx-4434"
+        working_commit:
+            description: 'Working commit to pass to xpu.txt'
+            required: true
+            type: string
+
+env:
+    home_dir: '%CD%\torch'
+    conda_env: torch_venv
+    conda_path: C:\Users\nrvalgo_jenkinsadm\miniforge3
+    python_version: '3.10'
+    node_proxy: 'http://proxy-us.intel.com:911'
+    USE_XPU: 1
+    VS2022INSTALLDIR: 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools'
+    ACTIONS_RUNNER_DEBUG: true
+
+jobs:
+  build-and-test:
+    runs-on: ["${{ inputs.win_runner }}"]
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.WORKFLOW_TOKEN }}
+        ref: main
+        fetch-depth: 0
+        path: ${{ env.home_dir }}//actionrepo
+
+    - name: Set conda environment
+      run: |
+        echo Activating base conda environment at %conda_path%\Scripts\activate.bat
+        call %conda_path%\Scripts\activate.bat
+        
+        conda list
+
+        echo Removing existing conda environment %conda_env%
+        conda remove -n %conda_env% --all -y
+
+        echo Creating new conda environment %conda_env% with python version %python_version%
+        conda create -n %conda_env% python=%python_version% -y
+
+        echo Activating the newly created conda environment %conda_env%
+        call %conda_path%\condabin\conda.bat activate %conda_env%
+        
+        echo Removing ucrt (if exists)
+        conda remove ucrt -y || echo ucrt not found
+
+        echo Installing cmake version 3.26.4
+        conda install cmake==3.26.4 --force -y
+
+        echo Listing installed conda packages
+        conda list
+
+    - name: Activate Intel Basekit
+      shell: cmd
+      run: |
+        set "basekit_path=C:\Program Files (x86)\Intel\oneAPI"
+        echo "%basekit_path%\setvars.bat"
+        call "%basekit_path%\setvars.bat"
+
+    - name: Build Torch
+      run: |
+        rmdir /S "%home_dir%\vision"
+        git clone https://github.com/pytorch/pytorch.git %home_dir%\pytorch
+        cd %home_dir%\pytorch
+        echo ${{ inputs.working_commit }} > third_party/xpu.txt
+        python -u setup.py bdist_wheel
+
+    - name: Build TorchVision
+      run: |
+        git clone https://github.com/pytorch/vision.git %home_dir%\vision
+        cd %home_dir%\vision
+        pip install -r docs/requirements.txt
+        if [ -e %home_dir%\pytorch\dist\torch-*.whl ]; then
+            pip install %home_dir%\pytorch\dist\torch-*.whl --force-reinstall
+        else
+            echo "No torch whl found."
+            exit
+        fi
+
+        python setup.py bdist_wheel
+
+        if [ -e %home_dir%\vision\dist\torchvision-*.whl ]; then
+            pip install %home_dir%\vision\dist\torchvision-*.whl --force-reinstall
+        else
+            echo "No torchvision whl found."
+            exit
+        fi
+
+    - name: Run Unit Tests
+      run: |
+        rmdir /S "%home_dir%\xpurepo"
+        git clone https://github.com/intel/torch-xpu-ops.git %home_dir%\xpurepo
+        cd %home_dir%\xpurepo\examples
+        pip install pytest expecttest
+        python -m pytest -v | tee "C:\Users\nrvalgo_jenkinsadm\mtl-bundle-uts.log"
+
