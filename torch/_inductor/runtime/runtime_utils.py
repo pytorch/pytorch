@@ -4,7 +4,6 @@ from __future__ import annotations
 import functools
 import getpass
 import inspect
-import math
 import operator
 import os
 import re
