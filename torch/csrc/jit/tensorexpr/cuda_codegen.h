@@ -1,6 +1,5 @@
 #pragma once
 
-#include <unordered_map>
 #include <unordered_set>
 
 #include <ATen/ATen.h>
@@ -29,7 +28,7 @@ class CudaAnalysis : public IRVisitor {
     gpu_thread_extents_ = {
         alloc<IntImm>(1), alloc<IntImm>(1), alloc<IntImm>(1)};
   }
-  bool is_buf_store_target(BufPtr buf) const {
+  bool is_buf_store_target(const BufPtr& buf) const {
     return store_targets_.count(buf) > 0;
   }
 
@@ -114,7 +113,6 @@ class GPUMetaVarRewriter : public IRMutator {
 
  private:
   // When processing a block, stores the contents of each sub-segment.
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   class Segment {
    public:
     void reset(bool mask) {
@@ -217,7 +215,7 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
       const std::vector<BufferArg>& buffer_args,
       at::Device device = at::Device(at::kCUDA, at::cuda::current_device()),
       const std::string& kernel_func_name = "func")
-      : CodeGen(stmt, buffer_args, device, kernel_func_name) {
+      : CodeGen(std::move(stmt), buffer_args, device, kernel_func_name) {
     Initialize();
   }
 
