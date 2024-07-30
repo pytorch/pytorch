@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
+import io
 import itertools
 import logging
 import os
@@ -799,6 +800,23 @@ def fx_codegen_and_compile(
         f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
         f"graph {graph_id}",
     )
+
+    def log_graph_runnable():
+        fd = io.StringIO()
+        torch._dynamo.repro.after_aot.save_graph_repro(
+            fd, gm, example_inputs, "inductor", save_dir=None
+        )
+        return fd.getvalue()
+
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "fx_graph_runnable",
+            "encoding": "string",
+        },
+        payload_fn=lambda: log_graph_runnable(),
+    )
+
     V.debug.fx_graph(gm, example_inputs)
     # TODO: Should we actually dump this?  It should be redundant with the aot
     # structured logs...
