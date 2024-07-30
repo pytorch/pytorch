@@ -349,7 +349,7 @@ class CUDATemplateCaller(ChoiceCaller):
             float,
             self.bmreq.benchmark(
                 *args, output_tensor=out
-            )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
+            ),  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
         )
 
     def __str__(self):
