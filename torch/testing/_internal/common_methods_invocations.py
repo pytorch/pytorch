@@ -30,11 +30,11 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FUSED_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN, _get_torch_cuda_version,
-    _get_torch_rocm_version,
+    _get_torch_rocm_version, CDNA2OrLater
 )
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
-    TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
+    TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR
@@ -9278,6 +9278,11 @@ def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_g
 
         yield SampleInput(q, args=sample_args, kwargs=sample_kwargs)
 
+def sample_inputs__convert_weight_to_int4pack(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    test_list = [((64, 32), 2), ((64, 48), 2), ((64, 64), 2), ((256, 128), 4), ((256, 128), 8)]
+    for shape, innerKTiles in test_list:
+        yield SampleInput(make_arg(shape, low=0, high=16), innerKTiles=innerKTiles,)
 
 # Includes some values such that N * N won't be a multiple of 4,
 # which should ensure we test the vectorized and non-vectorized
@@ -21544,6 +21549,31 @@ op_db: List[OpInfo] = [
             ),
         ),
     ),
+    OpInfo('_convert_weight_to_int4pack',
+        dtypes=_dispatch_dtypes((torch.uint8,)),
+        supports_autograd=False,
+        sample_inputs_func=sample_inputs__convert_weight_to_int4pack,
+        supports_fwgrad_bwgrad=False,
+        supports_forward_ad=False,
+        supports_out=False,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                'TestMeta',
+                'test_dispatch_meta_outplace',
+                active_if=IS_WINDOWS or (IS_FBCODE and IS_REMOTE_GPU)),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                'TestMeta',
+                'test_dispatch_meta_outplace',
+                device_type='cuda',
+                active_if=not SM80OrLater),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                'TestMeta',
+                'test_dispatch_meta_outplace',
+                active_if=TEST_WITH_ROCM and not CDNA2OrLater()),
+        )),
 ]
 op_db += opinfo.definitions.op_db
 
