@@ -135,13 +135,6 @@ def reduction_reference(op, sample):
     return unbind_reference(op, sample)
 
 
-def sample_inputs_njt_general(op_info, device, dtype, requires_grad, **kwargs):
-    for njt in _sample_njts(
-        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
-    ):
-        yield SampleInput(njt)
-
-
 def sample_inputs_elementwise_njt_unary(
     op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
 ):
@@ -164,6 +157,7 @@ def sample_inputs_elementwise_njt_binary(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
     ):
         # TODO: account for non-contiguous NJTs here
+        # TODO: provide sample inputs for broadcasting cases and mixed (NT, T), (T, NT) inputs
         njt2 = torch.randn_like(njt1)
         yield SampleInput(njt1, args=(njt2,), kwargs=dict(op_kwargs))
 
