@@ -58,13 +58,18 @@ from torch.utils._sympy.functions import (
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+
 from . import config
 from .runtime.runtime_utils import ceildiv as runtime_ceildiv
+
+_IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
+InputType = Union[torch.Tensor, int]
+
 
 GPU_ALIGN_BYTES = 16
 
@@ -307,7 +312,15 @@ def is_view(op: torch._ops.OpOverload):
     return any(a.alias_info is not None for a in op._schema.arguments)
 
 
-def is_pointwise_use(use):
+def is_pointwise_use(
+    use, is_pointwise_fn: Optional[Callable[[torch._ops.OpOverload], bool]] = None
+):
+    """
+    Do all uses of this op have torch.Tag.pointwise or return True for optional `is_pointwise_fn`
+
+    Uses in views ops will follow the views uses
+    """
+
     if not use.op == "call_function":
         return False
 
@@ -317,9 +330,11 @@ def is_pointwise_use(use):
         return False
 
     if use.target is operator.getitem or is_view(use.target):
-        return all(is_pointwise_use(u) for u in use.users)
+        return all(is_pointwise_use(u, is_pointwise_fn) for u in use.users)
 
-    return torch.Tag.pointwise in use.target.tags
+    return torch.Tag.pointwise in use.target.tags or (
+        is_pointwise_fn is not None and is_pointwise_fn(use.target)
+    )
 
 
 def gen_gm_and_inputs(target, args, kwargs):
@@ -765,8 +780,13 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
         if delete:
             shutil.rmtree(inductor_cache_dir)
     except Exception:
-        log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
-        raise
+        if not _IS_WINDOWS:
+            """
+            Windows can't delete the loaded modules, because the modules binaries are opened.
+            TODO: discuss if have better solution to handle this issue.
+            """
+            log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
+            raise
     finally:
         clear_inductor_caches()
 
@@ -1006,6 +1026,12 @@ def _use_autotune_backend(backend: str) -> bool:
     ]
 
 
+def _use_conv_autotune_backend(backend: str) -> bool:
+    return backend.upper() in [
+        x.strip() for x in config.max_autotune_conv_backends.upper().split(",")
+    ]
+
+
 def use_triton_template(layout, *, enable_int32=False):
     from .codegen.common import BackendFeature, has_backend_feature
 
@@ -1171,11 +1197,9 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
     )
-    # TODO(jgong5): support n % n_block_size != 0
     return (
         layout.dtype in layout_dtypes
         and micro_gemm is not None
-        and n % micro_gemm.register_blocking[1] == 0
         and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and mat2.is_module_buffer()
@@ -1517,16 +1541,94 @@ def pass_execution_and_save(func, gm, inp, msg):
         )
 
 
-def is_collective(node):
+def is_collective(node, op=None):
     from . import ir
 
-    return type(node) == ir._CollectiveKernel
+    return type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
 
 
 def is_wait(node):
     from . import ir
 
     return type(node) == ir._WaitKernel
+
+
+def contains_collective(snode):
+    from torch._inductor.scheduler import BaseSchedulerNode, GroupedSchedulerNode
+
+    assert isinstance(snode, BaseSchedulerNode)
+    if isinstance(snode, GroupedSchedulerNode):
+        return any(contains_collective(x) for x in snode.snodes)
+    else:
+        return is_collective(snode.node)
+
+
+def contains_wait(snode):
+    from torch._inductor.scheduler import BaseSchedulerNode, GroupedSchedulerNode
+
+    assert isinstance(snode, BaseSchedulerNode)
+    if isinstance(snode, GroupedSchedulerNode):
+        return any(contains_wait(x) for x in snode.snodes)
+    else:
+        return is_wait(snode.node)
+
+
+def is_fallback_op(node, op):
+    from . import ir
+
+    if isinstance(op, torch._ops.OpOverload):
+        op = {op}
+    return isinstance(node, ir.FallbackKernel) and node.op_overload in op
+
+
+def buf_name_to_fused_snode(buf_name, name_to_buf, name_to_fused_node):
+    return name_to_fused_node[name_to_buf[buf_name].defining_op.get_name()]
+
+
+def find_recursive_deps_of_node(
+    snode, collected_node_set, name_to_buf, name_to_fused_node, criteria_cb=None
+):
+    if criteria_cb and criteria_cb(snode):
+        return
+    collected_node_set.add(snode)
+    for dep in snode.unmet_dependencies:
+        defining_op_for_dep = buf_name_to_fused_snode(
+            dep.name, name_to_buf, name_to_fused_node
+        )
+        if defining_op_for_dep in collected_node_set:
+            continue
+        find_recursive_deps_of_node(
+            defining_op_for_dep,
+            collected_node_set,
+            name_to_buf,
+            name_to_fused_node,
+            criteria_cb=criteria_cb,
+        )
+
+
+def find_recursive_users_of_node(
+    snode, collected_node_set, name_to_buf, name_to_fused_node, criteria_cb=None
+):
+    if criteria_cb and criteria_cb(snode):
+        return
+    collected_node_set.add(snode)
+    for o in snode.get_outputs():
+        for user in o.users:
+            assert user.node is not None
+            if user.node.get_name() == "OUTPUT":
+                continue
+            if user.node.get_name() not in name_to_fused_node:
+                continue
+            user_op = name_to_fused_node[user.node.get_name()]
+            if user_op in collected_node_set:
+                continue
+            find_recursive_users_of_node(
+                user_op,
+                collected_node_set,
+                name_to_buf,
+                name_to_fused_node,
+                criteria_cb=criteria_cb,
+            )
 
 
 def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int):
