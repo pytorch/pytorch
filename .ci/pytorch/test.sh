@@ -439,7 +439,6 @@ pr_time_benchmarks() {
   git reset --hard "${SHA1}"
   git submodule sync && git submodule update --init --recursive
   deactivate
-  rm -r "${REPO_DIR}/venv" "${REPO_DIR}/base_dist"
   pip show torch
 }
 
