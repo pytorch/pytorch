@@ -1,16 +1,15 @@
-# mypy: allow-untyped-defs
 import os  # noqa: C101
 import sys
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
 
-def is_fbcode():
+def is_fbcode() -> bool:
     return not hasattr(torch.version, "git_version")
 
 
-def fx_graph_remote_cache_default():
+def fx_graph_remote_cache_default() -> Optional[bool]:
     if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1":
         return True
     if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "0":
@@ -28,7 +27,9 @@ disable_progress = True
 verbose_progress = False
 
 # use fx aot graph codegen cache
-fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
+fx_graph_cache = (
+    os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE", "0" if is_fbcode() else "1") == "1"
+)
 
 # use remote fx aot graph codegen cache
 # False: Disables the cache
@@ -277,6 +278,14 @@ max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
+# As above, specify candidate backends for conv autotune.
+# NB: in some cases for 1x1 convs we emit as matmul,
+# which will use the backends of `max_autotune_gemm_backends`
+max_autotune_conv_backends = os.environ.get(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
+).upper()
+
+
 # Specify the size of the search space for GEMM autotuning.
 # DEFAULT     - balance between compile time overhead and performance
 # EXHAUSTIVE  - maximize performance
@@ -331,15 +340,15 @@ autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", ""
 autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "")
 
 
-def run_autoheuristic(name):
+def run_autoheuristic(name: str) -> bool:
     return collect_autoheuristic(name) or use_autoheuristic(name)
 
 
-def collect_autoheuristic(name):
+def collect_autoheuristic(name: str) -> bool:
     return name in torch._inductor.config.autoheuristic_collect.split(",")
 
 
-def use_autoheuristic(name):
+def use_autoheuristic(name: str) -> bool:
     return name in torch._inductor.config.autoheuristic_use.split(",")
 
 
@@ -462,7 +471,7 @@ optimize_scatter_upon_const_tensor = (
 
 # The multiprocessing start method to use for inductor workers in the codecache.
 # Can be "subprocess" or "fork".
-def decide_worker_start_method():
+def decide_worker_start_method() -> str:
     start_method = os.environ.get(
         "TORCHINDUCTOR_WORKER_START", "fork" if is_fbcode() else "subprocess"
     )
@@ -501,7 +510,7 @@ _fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
 _micro_pipeline_tp: bool = False
 
 
-def decide_compile_threads():
+def decide_compile_threads() -> int:
     """
     Here are the precedence to decide compile_threads
     1. User can override it by TORCHINDUCTOR_COMPILE_THREADS.  One may want to disable async compiling by
@@ -698,6 +707,13 @@ class cpp:
         == "1"
     )
 
+    # Maximal allowed number of slices on K-dim for a GEMM kernel. This controls
+    # the maximal parallelism of K-slicing. Since K-slicing requires extra thread
+    # synchronization and buffers,  the maximal number of slices is limited to
+    # mitigate the sync overhead and memory usage.
+    # When set to 0, the number of slices is unlimited.
+    gemm_max_k_slices = int(os.environ.get("TORCHINDUCTOR_CPP_GEMM_MAX_K_SLICES", "1"))
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -726,6 +742,10 @@ class triton:
     # i.e., allow num_recording <= cudagraph_unexpected_rerecord_limit
     # note: we are conservative here and choose a large limit.
     cudagraph_unexpected_rerecord_limit = 128
+
+    # Warn loudly when the number of cudagraphs due to dynamic shape
+    # exceeds this limit
+    cudagraph_dynamic_shape_warn_limit: Optional[int] = 50
 
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
@@ -933,7 +953,8 @@ class rocm:
 
     # Enable for CDNA3 only for now
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    supported_arch: Set[str] = {"gfx940", "gfx941", "gfx942"}
+    # Keep it ordered, unordered set can cause spurious inductor cache misses
+    supported_arch: List[str] = ["gfx940", "gfx941", "gfx942"]
 
     # Optimization level, use to balance compilation speed and runtime performance
     compile_opt_level = "-O2"
