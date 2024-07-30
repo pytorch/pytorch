@@ -35,7 +35,7 @@ from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash
 from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
-from ..ir import TritonTemplateBuffer
+from ..ir import IRNode, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.hints import ReductionHint
 from ..runtime.runtime_utils import green_text, yellow_text
@@ -732,6 +732,12 @@ class SIMDKernel(Kernel):
                 self.range_tree_nodes[sym].codegen()  # type: ignore[index]
         return expr
 
+    def codegen_nan_check(self) -> None:
+        raise NotImplementedError("NYI: codegen_nan_check")
+
+    def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:
+        raise NotImplementedError("NYI: call_kernel")
+
     @contextlib.contextmanager
     def mask_loads(self, mask, value):
         """Context manager to add an additional mask to tl.load/store"""
@@ -1350,16 +1356,7 @@ class SIMDScheduling(BaseScheduling):
         )
         kernel.buf_accesses = buf_accesses
 
-        self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-
-        with V.set_kernel_handler(kernel):
-            src_code = kernel.codegen_kernel()
-
-        kernel_name = self.define_kernel(src_code, node_schedule, kernel)
-        log.debug("Generating kernel code with kernel_name: %s", kernel_name)
-        kernel.kernel_name = kernel_name
-        kernel.code_hash = code_hash(src_code)
-
+        kernel2: Optional[SIMDKernel] = None
         if kernel.persistent_reduction and config.triton.multi_kernel and not has_sort:
             kernel2 = self.kernel_type(
                 *kernel_args,
@@ -1373,9 +1370,21 @@ class SIMDScheduling(BaseScheduling):
             kernel2.kernel_name = kernel_name2
             kernel2.code_hash = code_hash(src_code2)
 
-            final_kernel = MultiKernel([kernel, kernel2])
-        else:
-            final_kernel = kernel  # type: ignore[assignment]
+            # Keep buffers needed by the non-persistent reduction so both
+            # kernels have the same arguments
+            kernel.must_keep_buffers = set(kernel2.must_keep_buffers)
+
+        self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+
+        with V.set_kernel_handler(kernel):
+            src_code = kernel.codegen_kernel()
+
+        kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+        log.debug("Generating kernel code with kernel_name: %s", kernel_name)
+        kernel.kernel_name = kernel_name
+        kernel.code_hash = code_hash(src_code)
+
+        final_kernel = MultiKernel([kernel, kernel2]) if kernel2 is not None else kernel
 
         with V.set_kernel_handler(final_kernel):
             for node in node_schedule:
@@ -1514,87 +1523,43 @@ class SIMDScheduling(BaseScheduling):
     def codegen_sync(self):
         V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
 
-    def generate_combo_kernel_code(
-        self,
-        subkernel_nodes: List[BaseSchedulerNode],
-        custom_part_algorithm: bool,
-        enable_autotune: bool,
-        only_gen_src_code: bool = False,
-    ) -> List[Tuple[str, Any, Any]]:
-        from .triton_combo_kernel import ComboKernel
+    def codegen_foreach(self, foreach_node):
+        from .triton_foreach import ForeachKernel
 
-        fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
-        subkernel_map, node_schedule_map = {}, {}
-        for pn, nodes in zip(subkernel_nodes, fused_node_lists):
-            _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
-            node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-            tiled_groups = self.select_tiling(node_schedule, numel, rnumel)
-            node_schedule_map[pn] = node_schedule, tiled_groups, numel, rnumel
-            (
-                reduction_hint_val,
-                mutations,
-                index_dtype,
-            ) = self.get_kernel_args(node_schedule, numel, rnumel)
-            subkernel_map[pn] = ComboKernel.create_triton_kernel(
-                *tiled_groups,
-                reduction_hint=reduction_hint_val,
-                mutations=mutations,
-                index_dtype=index_dtype,
-            )
+        for partitions_with_metadata in ForeachKernel.horizontal_partition(
+            foreach_node.get_subkernel_nodes(), self
+        ):
+            kernel = ForeachKernel()
+            for nodes, tiled_groups, numel, rnumel in partitions_with_metadata:
+                node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
+                (
+                    reduction_hint_val,
+                    mutations,
+                    index_dtype,
+                ) = self.get_kernel_args(node_schedule, numel, rnumel)
 
-        partitions = ComboKernel.horizontal_partition(
-            nodes=subkernel_nodes,
-            triton_scheduling=self,
-            custom_algorithm=custom_part_algorithm,
-            kernel_map=subkernel_map,
-            node_info_map=node_schedule_map,
-        )
-        log.debug(
-            "ComboKernels: %d nodes partitioned into %s groups",
-            len(subkernel_nodes),
-            [len(p) for p in partitions],
-        )
-        kernel_code_list = []
-        for node_group in partitions:
-            fused_node_lists = [node.get_nodes() for node in node_group]
-            kernel = ComboKernel(enable_autotune=enable_autotune)
-
-            for pn, nodes in zip(node_group, fused_node_lists):
-                if only_gen_src_code:
-                    # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
-                    for n in nodes:
-                        n.last_usage = set()
-                self.codegen_node_schedule_with_kernel(
-                    node_schedule_map[pn][0],
-                    kernel.create_sub_kernel(subkernel_map[pn]),
+                subkernel = kernel.create_sub_kernel(
+                    *tiled_groups,
+                    reduction_hint=reduction_hint_val,
+                    mutations=mutations,
+                    index_dtype=index_dtype,
                 )
-                subkernel = subkernel_map[pn]
-                node_schedule = node_schedule_map[pn][0]
-                if not only_gen_src_code:
-                    with V.set_kernel_handler(subkernel):  # type: ignore[call-arg]
-                        for node in node_schedule:
-                            if node not in (EnableReduction, DisableReduction):
-                                node.mark_run()
+
+                self.codegen_node_schedule_with_kernel(
+                    node_schedule,
+                    subkernel,
+                )
+
+                with V.set_kernel_handler(subkernel):
+                    for node in node_schedule:
+                        if node not in (EnableReduction, DisableReduction):
+                            node.mark_run()
                 V.graph.removed_buffers |= subkernel.removed_buffers
                 V.graph.inplaced_to_remove |= subkernel.inplaced_to_remove
 
             src_code = kernel.codegen_kernel()
-            kernel_code_list.append((src_code, kernel, node_group))
-        return kernel_code_list
-
-    def codegen_combo_kernel(self, combo_kernel_node):
-        subkernel_nodes = combo_kernel_node.get_subkernel_nodes()
-        custom_part_algorithm = combo_kernel_node.use_custom_partition_algo
-        enable_autotune = combo_kernel_node.enable_autotune
-
-        kernel_code_list = self.generate_combo_kernel_code(
-            subkernel_nodes, custom_part_algorithm, enable_autotune
-        )
-
-        for src_code, kernel, _ in kernel_code_list:
-            kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
-            self.codegen_comment([combo_kernel_node])
-            log.debug("ComboKernels: generated kernel %s.", kernel_name)
+            kernel_name = self.define_kernel(src_code, [foreach_node], kernel)
+            self.codegen_comment([foreach_node])
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
         self.scheduler.free_buffers()
