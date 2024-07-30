@@ -1059,11 +1059,13 @@ class SymNodeVariable(VariableTracker):
         if self._tensor_var is None:
             from .builder import SourcelessBuilder
 
+            if hasattr(self, "sym_num") and isinstance(self.sym_num, torch.SymFloat):
+                kwargs = {"dtype": ConstantVariable.create(torch.float64)}
+            else:
+                kwargs = {}
             self._tensor_var = SourcelessBuilder.create(
                 tx, torch.scalar_tensor
-            ).call_function(
-                tx, [self], {"dtype": ConstantVariable.create(torch.float64)}
-            )
+            ).call_function(tx, [self], kwargs)
         return self._tensor_var
 
     def evaluate_expr(self, output_graph=None):
