@@ -2822,7 +2822,8 @@ class CPUReproTests(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
-        sys.platform != "linux", "cpp kernel profile only support linux now"
+        sys.platform not in ["linux", "win32"],
+        "cpp kernel profile only support linux now",
     )
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch({"cpp.enable_kernel_profile": True})
