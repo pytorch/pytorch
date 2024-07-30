@@ -144,6 +144,8 @@
 #include <ATen/ops/xlogy.h>
 #include <ATen/ops/xlogy_native.h>
 #include <ATen/ops/xor_native.h>
+#include <ATen/ops/special_betainc.h>
+#include <ATen/ops/special_betainc_native.h>
 
 #endif
 
