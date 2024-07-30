@@ -169,8 +169,7 @@ TEST(AutodiffTest, ADFormulas) {
     // Get outputs from the interpreter
     auto tensors_in = fmap(vars_in, cast);
     auto tensor_grads_in = fmap(var_grads_in, cast);
-    tensor_list tensors_out, tensor_grads_out;
-    std::tie(tensors_out, tensor_grads_out) =
+    auto [tensors_out, tensor_grads_out] =
         runGradient(grad_spec, tensors_in, tensor_grads_in);
 
     // Compare results
