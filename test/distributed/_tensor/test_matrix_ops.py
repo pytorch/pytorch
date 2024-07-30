@@ -339,10 +339,6 @@ class DistMatrixOpsTest(DTensorTestBase):
                     self.assertTrue(dist_value.grad.placements[0].is_shard(dim=1))
                     self.assertEqual(dist_value.grad.full_tensor(), value.grad)
 
-    @property
-    def world_size(self):
-        return 4
-
     @with_comms
     @skip_unless_torch_gpu
     def test_tensordot(self):
@@ -359,25 +355,23 @@ class DistMatrixOpsTest(DTensorTestBase):
         dist_result = torch.tensordot(dist_a, dist_b, dims=dims)
         self.assertEqual(local_result, dist_result.to_local())
 
-        # LHS shards on tensor dim 0.
         dist_a = distribute_tensor(local_a, device_mesh, [Shard(0)])
         dist_b = distribute_tensor(local_b, device_mesh, [Replicate()])
         dist_result = torch.tensordot(dist_a, dist_b, dims=dims)
         self.assertEqual(local_result, dist_result.to_local())
 
-        # RHS shards on tensor dim 1.
         dist_a = distribute_tensor(local_a, device_mesh, [Replicate()])
         dist_b = distribute_tensor(local_b, device_mesh, [Shard(1)])
         dist_result = torch.tensordot(dist_a, dist_b, dims=dims)
         dist_result_full = dist_result.full_tensor()
         self.assertEqual(local_result, dist_result_full)
 
-        # LHS shards on tensor dim 0, RHS shards on tensor dim 1.
         dist_a = distribute_tensor(local_a, device_mesh, [Shard(0)])
         dist_b = distribute_tensor(local_b, device_mesh, [Shard(1)])
         dist_result = torch.tensordot(dist_a, dist_b, dims=dims)
         dist_result_full = dist_result.full_tensor()
         self.assertEqual(local_result, dist_result_full)
+
 
 if __name__ == "__main__":
     run_tests()
