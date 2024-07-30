@@ -5540,6 +5540,29 @@ class ShapeEnv:
             log.info("constrain_symbol_range %s [%s, %s]", s, new_vr.lower, new_vr.upper)
 
 
+def evaluate_expr(
+    shape_env: ShapeEnv,
+    expr: Union[sympy.Basic, bool],
+    axioms: Optional[Tuple[sympy.Expr]] = None,
+    var_to_range: Optional[Tuple[Tuple[sympy.Symbol, ValueRanges]]] = None,
+) -> bool:
+    if expr in (True, False):
+        return bool(expr)
+
+    try:
+        simplified = shape_env._maybe_evaluate_static(
+            expr,
+            axioms=axioms,
+            var_to_range=var_to_range,
+        )
+        if simplified is not None:
+            return bool(simplified)
+    except Exception:
+        log.debug("Could not simplified %s", expr)
+
+    return False
+
+
 def _is_int(expr):
     return isinstance(expr, SymInt) and expr.node.expr.is_number
 
