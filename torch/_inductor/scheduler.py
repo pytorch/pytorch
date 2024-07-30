@@ -3057,7 +3057,7 @@ class Scheduler:
 class BaseScheduling:
     @classmethod
     def get_backend_features(cls, device: torch.device) -> Sequence[BackendFeature]:
-        """Return a OrderedSet of .codegen.common.BackendFeature()"""
+        """Return a set of .codegen.common.BackendFeature()"""
         return ()
 
     def can_fuse_vertical(
