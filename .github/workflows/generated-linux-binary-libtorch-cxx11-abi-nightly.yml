@@ -334,7 +334,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         name: Download Build Artifacts
         with:
           name: libtorch-rocm6_0-shared-with-deps-cxx11-abi
@@ -440,7 +440,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         name: Download Build Artifacts
         with:
           name: libtorch-rocm6_1-shared-with-deps-cxx11-abi
