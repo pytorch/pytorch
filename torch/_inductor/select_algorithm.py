@@ -956,8 +956,8 @@ class ExternKernelCaller(ChoiceCaller):
                 return benchmarker.lazy_benchmark(
                     algo, args, {}, pruning_key="max-autotune-gemm"
                 )
-            else:
-                return benchmarker.benchmark(algo, args, {})
+            
+            return benchmarker.benchmark(algo, args, {})
 
     def to_callable(self):
         fn = self.choice.to_callable()

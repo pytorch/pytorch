@@ -696,11 +696,13 @@ class CachingAutotuner(KernelInterface):
 
     @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
-        lazy_benchmarks = {
-            launcher: self.bench(launcher, *args, **kwargs)
-            for launcher in self.launchers
+        lazy_benchmarks = [
+            self.bench(launcher, *args, **kwargs) for launcher in self.launchers
+        ]
+        timings = {
+            launcher: float(timing)
+            for launcher, timing in zip(self.launchers, lazy_benchmarks)
         }
-        timings = {launcher: float(timing) for launcher, timing in lazy_benchmarks.items()}
 
         for k, v in timings.items():
             self.coordesc_tuner.cache_benchmark_result(k.config, v)
