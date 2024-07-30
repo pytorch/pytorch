@@ -73,7 +73,7 @@ def custom_op(
                 f"is passed to `custom_op`"
             )
 
-        schema = infer_schema(func) if manual_schema is None else manual_schema
+        schema = infer_schema(func, mutates_args=()) if manual_schema is None else manual_schema
         schema_str = f"{name}{schema}"
         function_schema = FunctionSchema.parse(schema_str)
         validate_schema(function_schema)
