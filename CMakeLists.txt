@@ -981,8 +981,6 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-array-bounds" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unknown-pragmas" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-parameter" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-unused-function" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-unused-result" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-overflow" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-stringop-overflow" CMAKE_CXX_FLAGS)
@@ -1032,10 +1030,6 @@ if(NOT MSVC)
 
   append_cxx_flag_if_supported("-Wno-error=pedantic" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-error=inconsistent-missing-override"
-                               CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported(
-    "-Wno-error=inconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-invalid-partial-specialization"
                                CMAKE_CXX_FLAGS)
@@ -1169,6 +1163,10 @@ if(APPLE)
   endif()
   append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
+endif()
+
+if(USE_XPU)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_XPU")
 endif()
 
 if(EMSCRIPTEN)

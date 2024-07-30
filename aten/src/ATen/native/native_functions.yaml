@@ -8457,21 +8457,21 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: __lshift__
+    CPU, CUDA, MPS: __lshift__
   tags: pointwise
 
 - func: __lshift__.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: __lshift__
+    CPU, CUDA, MPS: __lshift__
   tags: pointwise
 
 - func: __ilshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: __ilshift__
+    CPU, CUDA, MPS: __ilshift__
   autogen: __lshift__.Scalar_out
   tags: pointwise
 
@@ -8479,7 +8479,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: __ilshift__
+    CPU, CUDA, MPS: __ilshift__
   autogen: __lshift__.Tensor_out
   tags: pointwise
 
@@ -8500,7 +8500,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: bitwise_left_shift_out
+    CPU, CUDA, MPS: bitwise_left_shift_out
   tags: pointwise
 
 - func: bitwise_left_shift.Tensor_Scalar(Tensor self, Scalar other) -> Tensor
@@ -8536,7 +8536,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: __rshift__
+    CPU, CUDA, MPS: __rshift__
   tags: pointwise
 
 - func: __rshift__.Tensor(Tensor self, Tensor other) -> Tensor
@@ -8550,14 +8550,14 @@
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: __irshift__
+    CPU, CUDA, MPS: __irshift__
   autogen: __rshift__.Scalar_out
 
 - func: __irshift__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: __irshift__
+    CPU, CUDA, MPS: __irshift__
   autogen: __rshift__.Tensor_out
 
 - func: bitwise_right_shift.Tensor(Tensor self, Tensor other) -> Tensor
@@ -8577,7 +8577,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: bitwise_right_shift_out
+    CPU, CUDA, MPS: bitwise_right_shift_out
   tags: pointwise
 
 - func: bitwise_right_shift.Tensor_Scalar(Tensor self, Scalar other) -> Tensor
@@ -14709,22 +14709,27 @@
     CUDA, NestedTensorCUDA: native_multi_head_attention_cuda
   autogen: _native_multi_head_attention.out
 
-- func: scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> Tensor
+- func: scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, *, float? scale=None, bool enable_gqa=False) -> Tensor
   python_module: nn
   variants: function
   autogen: scaled_dot_product_attention.out
   tags: nondeterministic_seeded
 
 # This aten function is kept so that we can test the choice function from Python
-- func: _fused_sdp_choice(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> int
+- func: _fused_sdp_choice(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, *, float? scale=None, bool enable_gqa=False) -> int
   dispatch:
     Meta: _fused_sdp_choice_meta
     CPU, NestedTensorCPU: _fused_sdp_choice_cpp
     CUDA, NestedTensorCUDA: _fused_sdp_choice_cuda
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_attention_math(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, Tensor? dropout_mask=None, *, float? scale=None) -> (Tensor, Tensor)
+- func: _scaled_dot_product_attention_math(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, Tensor? dropout_mask=None, *, float? scale=None, bool enable_gqa=False) -> (Tensor, Tensor)
   variants: function
+  tags: nondeterministic_seeded
+
+- func: _scaled_dot_product_attention_math_for_mps(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, Tensor? dropout_mask=None, *, float? scale=None) -> (Tensor, Tensor)
+  dispatch:
+    MPS: _scaled_dot_product_attention_math_mps
   tags: nondeterministic_seeded
 
 - func: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)

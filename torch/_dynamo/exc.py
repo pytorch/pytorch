@@ -53,6 +53,10 @@ class UnspecializeRestartAnalysis(RestartAnalysis):
     pass
 
 
+class CompileCollectiveRestartAnalysis(RestartAnalysis):
+    pass
+
+
 class SkipFrame(TorchDynamoException):
     pass
 
@@ -163,19 +167,6 @@ class UserError(Unsupported):
         self.message = msg
 
 
-class UserStopIteration(TorchDynamoException):
-    value: Optional[Any]
-
-    # Reference `StopIteration_init` in CPython
-    # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
-    def __init__(self, *args, **kwargs):
-        super().__init__("unhandled `raise StopIteration`")
-        if len(args) > 0:
-            self.value = args[0]
-        else:
-            self.value = None
-
-
 class UnsafeScriptObjectError(TorchDynamoException):
     pass
 
@@ -189,7 +180,60 @@ class IncorrectUsage(Exception):
 
 
 class ObservedException(TorchDynamoException):
+    # An exception observed during the tracing. This exception is used by Dynamo to handle exceptions.
     pass
+
+
+class ObservedUserStopIteration(ObservedException):
+    # An UserStopIteraion exception observed during the Dynamo tracing (e.g Dynamo tracing __next__)
+    value: Optional[Any]
+
+    # Reference `StopIteration_init` in CPython
+    # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
+    def __init__(self, *args, **kwargs):
+        super().__init__("unhandled `raise StopIteration`")
+        if len(args) > 0:
+            self.value = args[0]
+        else:
+            self.value = None
+
+
+def raise_observed_user_stop_iteration(vt, tx):
+    from .variables import BuiltinVariable
+
+    # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
+    # stack and raise the exception.
+    exception_vt = BuiltinVariable(StopIteration).call_function(vt, [], {})
+    tx.exn_vt_stack.append(exception_vt)
+    raise ObservedUserStopIteration
+
+
+def handle_observed_user_stop_iteration(tx):
+    # This is essentially exception handling code, equivalent of this pseudo code
+    #
+    # try:
+    #     ... somebody raising StopIteration
+    # except StopIteration
+    #     pass
+    #
+    # If this was going through the python code, we would have called exception_handler method, but FOR_ITER
+    # handles the exception completely in CPython. For example for 3.11, the resulting bytecode is
+    #
+    #
+    #   6          46 LOAD_GLOBAL              2 (StopIteration)
+    #              58 RAISE_VARARGS            1
+    #         >>   60 PUSH_EXC_INFO
+
+    #   7          62 LOAD_GLOBAL              2 (StopIteration)
+    #              74 CHECK_EXC_MATCH
+    #              76 POP_JUMP_FORWARD_IF_FALSE     3 (to 84)
+    #              78 POP_TOP
+
+    #   8          80 POP_EXCEPT
+    #
+
+    # Fortunately this translates to a simple pop from the exn_vt_stack
+    tx.exn_vt_stack.pop()
 
 
 # These exceptions are ok to fallback to eager/graph_break.
