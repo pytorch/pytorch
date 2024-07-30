@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -223,7 +224,7 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     )
 
 
-@register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[no-untyped-def]
+@register_lowering(aten._scaled_mm.default, type_promotion_kind=None)
 def tuned_scaled_mm(
     mat_a: TensorBox,
     mat_b: TensorBox,
