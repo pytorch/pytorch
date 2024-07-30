@@ -53,6 +53,7 @@ class TestRegisterSharding(DTensorTestBase):
         schema_info = DTensor._op_dispatcher.sharding_propagator.op_to_schema_info[
             aten._softmax.default
         ]
+        self.assertEqual(schema_info.static_argnum, 1)
 
         device_mesh = self.build_device_mesh()
 
