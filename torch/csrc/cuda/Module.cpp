@@ -1539,7 +1539,8 @@ PyObject* THCPModule_cuda_record_untuned_enable(
       THPUtils_checkBool(arg),
       "cuda_record_untuned_enable expects a bool, but got ",
       THPUtils_typename(arg));
-  at::cuda::tunable::getTuningContext()->EnableRecordUntuned(THPUtils_unpackBool(arg));
+  at::cuda::tunable::getTuningContext()->EnableRecordUntuned(
+      THPUtils_unpackBool(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

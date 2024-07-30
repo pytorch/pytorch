@@ -268,6 +268,7 @@ def tune_gemm_in_file(filename: str) -> None:
                 transA = True if layout[0] == 'T'  else False
                 transB = True if layout[1] == 'T'  else False
 
+                dtype = torch.half
                 if data_type == "float":
                     dtype = torch.float32
                 elif data_type == "double":
@@ -295,9 +296,10 @@ def tune_gemm_in_file(filename: str) -> None:
                     matB = torch.rand(n,k, dtype=dtype, device='cuda').t() if transA else torch.rand(k,n, dtype=dtype, device='cuda')
                     torch.mm(matA, matB)
                 elif op_sig == "GemmStridedBatchedTunableOp":
-                    [n,m,k,_,b] = untuned_gemm[1].split('_')[1:]
-                    matA = torch.rand(int(b),int(k),int(m), dtype=dtype, device='cuda') if transB else torch.rand(int(b),int(m),int(k), dtype=dtype, device='cuda')
-                    matB = torch.rand(int(b),int(n),int(k), dtype=dtype, device='cuda') if transA else torch.rand(int(b),int(k),int(n), dtype=dtype, device='cuda')
+                    [n,m,k] = [int(g) for g in untuned_gemm[1].split('_')[1:4]]
+                    [b] = [int(g) for g in untuned_gemm[1].split('_')[5:6]]
+                    matA = torch.rand(b,k,m, dtype=dtype, device='cuda') if transB else torch.rand(b,m,k, dtype=dtype, device='cuda')
+                    matB = torch.rand(b,n,k, dtype=dtype, device='cuda') if transA else torch.rand(b,k,n, dtype=dtype, device='cuda')
                     matA = matA.transpose(1,2) if transB else matA
                     matB = matB.transpose(1,2) if transA else matB
                     torch.bmm(matA, matB)

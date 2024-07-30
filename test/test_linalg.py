@@ -4602,7 +4602,7 @@ class TestLinalg(TestCase):
         assert len(torch.cuda.tunable.get_validators()) > 0
         assert len(torch.cuda.tunable.get_results()) > 0
         assert torch.cuda.tunable.write_file()
-        
+
         result_filename = f"tunableop_results{ordinal}.csv"
         assert os.path.exists(result_filename)
 
