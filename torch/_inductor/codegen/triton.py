@@ -1189,7 +1189,7 @@ class TritonKernel(SIMDKernel):
         self.helper_functions = HelperFunctions()
 
         # A set of autotuning hints to pass as part of triton_meta
-        self.autotune_hints: OrderedSet[AutotuneHint] = OrderedSet()
+        self.autotune_hints: Set[AutotuneHint] = OrderedSet()
         self.triton_meta: Optional[Dict[str, object]] = None
         self.optimize_mask: bool = optimize_mask
 
@@ -2607,7 +2607,7 @@ class TritonKernel(SIMDKernel):
         }
 
         inductor_meta = {
-            "autotune_hints": OrderedSet(self.autotune_hints),
+            "autotune_hints": set(self.autotune_hints),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "no_x_dim": self.no_x_dim,
