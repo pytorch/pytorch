@@ -8,13 +8,13 @@
 namespace c10 {
 
 enum struct MinCutStatus {
-  SUCCESS,
-  UNBOUNDED,
-  OVERFLOW,
-  INVALID,
+  SUCCESS = 0,
+  UNBOUNDED = 1,
+  OVERFLOW = 2,
+  INVALID = 3,
 };
 
-struct C10_API MinCutResult {
+struct MinCutResult {
   MinCutStatus status;
   int64_t max_flow;
   std::vector<std::string> reachable;
