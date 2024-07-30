@@ -55,7 +55,6 @@ CUDAPtr RAII_cudaMalloc(size_t num_bytes) {
 
 } // anonymous namespace
 
-
 namespace torch::aot_inductor {
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
@@ -620,4 +619,3 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
 };
 
 } // namespace torch::aot_inductor
-
