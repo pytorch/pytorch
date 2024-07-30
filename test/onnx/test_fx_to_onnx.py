@@ -171,13 +171,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                     torch.argmax(input, dim=1, keepdim=True),
                 )
 
-        # NOTE: KeyError: dim raised in optimizer
-        with self.assertWarnsOnceRegex(
-            UserWarning, "ONNXScript optimizer failed. Skipping optimization."
-        ):
-            _ = dynamo_export(
-                ArgminArgmaxModel(), model_input, export_options=self.export_options
-            )
+        _ = dynamo_export(
+            ArgminArgmaxModel(), model_input, export_options=self.export_options
+        )
 
     def test_multiple_outputs_op_with_evaluator(self):
         class TopKModel(torch.nn.Module):

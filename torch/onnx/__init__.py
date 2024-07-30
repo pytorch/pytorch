@@ -1,12 +1,7 @@
 # mypy: allow-untyped-defs
 from torch import _C
 from torch._C import _onnx as _C_onnx
-from torch._C._onnx import (
-    _CAFFE2_ATEN_FALLBACK,
-    OperatorExportTypes,
-    TensorProtoDataType,
-    TrainingMode,
-)
+from torch._C._onnx import OperatorExportTypes, TensorProtoDataType, TrainingMode
 
 from . import (  # usort:skip. Keep the order instead of sorting lexicographically
     _deprecation,

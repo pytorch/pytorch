@@ -28,8 +28,6 @@
 
 #include <c10/macros/Macros.h>
 
-#include "c10/util/string_utils.h"
-
 namespace caffe2 {
 
 // Using statements for common classes that we refer to in caffe2 very often.

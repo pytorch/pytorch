@@ -11,11 +11,11 @@ import torch.nn.functional as F
 from torch._dynamo.utils import count_calls, counters
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
-
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
     gen_pattern,
+    is_mutation_op,
     KeywordArg,
     Match,
     PatternMatcherPass,
@@ -24,18 +24,13 @@ from torch._inductor.pattern_matcher import (
     stable_topological_sort,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import get_gpu_shared_memory, run_and_get_code
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import IS_LINUX, LazyVal, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
+from torch.testing._internal.inductor_utils import HAS_CUDA, IS_A100
 from torch.utils import _pytree as pytree
-
-
-is_A100 = LazyVal(
-    lambda: torch.cuda.is_available() and get_gpu_shared_memory() == 166912
-)
 
 
 class TestPatternMatcher(TestCase):
@@ -281,7 +276,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @unittest.skipIf(not is_A100, "heuristic only run on A100")
+    @unittest.skipIf(not IS_A100, "heuristic only run on Linux A100")
     @inductor_config.patch(mixed_mm_choice="heuristic")
     def test_mixed_mm_heuristic_no(self):
         def fn(a, b):
@@ -289,6 +284,8 @@ class TestPatternMatcher(TestCase):
 
         # examples that should not be selected by heuristic
         mat1_dtype = torch.float16
+        dyn_tensor = torch.randn(4, 4096, dtype=mat1_dtype, device="cuda")
+        torch._dynamo.mark_dynamic(dyn_tensor, 0)
         args_list = [
             (
                 torch.randn(1, 4097, dtype=mat1_dtype, device="cuda"),
@@ -322,13 +319,17 @@ class TestPatternMatcher(TestCase):
                 torch.randn(1, 4096, dtype=torch.float32, device="cuda"),
                 torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
             ),
+            (
+                dyn_tensor,
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+            ),
         ]
 
         for args in args_list:
             self._test_mixed_impl(fn, args, True, True)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @unittest.skipIf(not is_A100, "heuristic only run on A100")
+    @unittest.skipIf(not IS_A100, "heuristic only run on Linux A100")
     @inductor_config.patch(mixed_mm_choice="heuristic")
     def test_mixed_mm_heuristic_yes(self):
         def fn(a, b):
@@ -442,7 +443,15 @@ class TestPatternMatcher(TestCase):
                 .sub(8),
             )
 
-        args_list = [
+        def check_uint4x2_mixed_mm(args, expect_mixed_mm):
+            torch._dynamo.reset()
+            counters.clear()
+            ref = fn(*args)
+            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(ref, test)
+            self.assertEqual("uint4x2_mixed_mm" in code, expect_mixed_mm)
+
+        args_expect_mixed_mm = [
             (
                 torch.randn(8, 8, device="cuda"),
                 torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda"),
@@ -454,6 +463,13 @@ class TestPatternMatcher(TestCase):
                 .contiguous()
                 .t(),
             ),
+        ]
+
+        for args in args_expect_mixed_mm:
+            check_uint4x2_mixed_mm(args, True)
+
+        # mixed mm is only enabled when casting from a lower-bitwidth dtype to a higher one
+        args_expect_no_mixed_mm = [
             (
                 torch.randn(8, 8, device="cuda"),
                 torch.randint(0, 255, (4, 8), dtype=torch.int32, device="cuda"),
@@ -464,13 +480,8 @@ class TestPatternMatcher(TestCase):
             ),
         ]
 
-        for args in args_list:
-            torch._dynamo.reset()
-            counters.clear()
-            ref = fn(*args)
-            test, (code,) = run_and_get_code(torch.compile(fn), *args)
-            torch.testing.assert_close(ref, test)
-            self.assertTrue("uint4x2_mixed_mm" in code)
+        for args in args_expect_no_mixed_mm:
+            check_uint4x2_mixed_mm(args, False)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(use_mixed_mm=True)
@@ -982,9 +993,7 @@ class TestPatternMatcher(TestCase):
 
     def test_match_with_mutation(self):
         counter = 0
-        test_pass = PatternMatcherPass(
-            prevent_match_across_mutations=True, pass_name="test"
-        )
+        test_pass = PatternMatcherPass(pass_name="test")
 
         @register_graph_pattern(
             CallFunction(
@@ -1141,7 +1150,7 @@ class TestPatternMatcher(TestCase):
 
     def test_match_equivalent_function_invocations1(self):
         counter = 0
-        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+        test_pass = PatternMatcherPass()
 
         args = [
             torch.randn(20, device="cuda"),
@@ -1197,7 +1206,7 @@ class TestPatternMatcher(TestCase):
 
     def test_match_equivalent_function_invocations2(self):
         counter = 0
-        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+        test_pass = PatternMatcherPass()
 
         args = [
             torch.randn(20, device="cuda"),
@@ -1242,7 +1251,7 @@ class TestPatternMatcher(TestCase):
 
     def test_match_equivalent_function_invocations3(self):
         counter = 0
-        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+        test_pass = PatternMatcherPass()
 
         args = [
             torch.randn(20, device="cuda"),
@@ -1352,6 +1361,61 @@ class TestPatternMatcher(TestCase):
         self.common(mul_softmax, (x, scale), 0, 0)
         self.common(mul_softmax, (scale, x), 0, 0)
         self.common(div_softmax, (x, scale), 0, 0)
+
+    def test_mutation_op_matching(self):
+        def check(type, func_name, args, kwargs, expect=True):
+            assert type in ["call_function", "call_method"]
+            graph = torch.fx.Graph()
+            getattr(graph, type)(func_name, args, kwargs)
+            res = is_mutation_op(next(iter(graph.nodes)))
+            if expect:
+                self.assertTrue(res)
+            else:
+                self.assertFalse(res)
+
+        t = torch.randn(1)
+        check("call_function", torch._C._set_grad_enabled, (False,), {})
+        check("call_method", "copy_", (t, t), {})
+        check("call_method", "relu_", (t,), {})
+        check("call_function", torch.manual_seed, (0,), {})
+        check("call_function", torch.ops.aten.set_.source_Tensor, (t, t), {})
+        check(
+            "call_function",
+            torch.amp.autocast_mode._enter_autocast,
+            ("cuda", None, True, None),
+            {},
+        )
+        check("call_function", torch.amp.autocast_mode._exit_autocast, (None,), {})
+        check(
+            "call_function",
+            torch.ops._c10d_functional.all_gather_into_tensor_out,
+            (t, 2, "0"),
+            {"out": t},
+        )
+        check("call_function", torch.ops.inductor.resize_storage_bytes_, (t, 0), {})
+        check(
+            "call_function",
+            torch.ops.inductor.resize_storage_bytes_.default,
+            (t, 0),
+            {},
+        )
+        check(
+            "call_function",
+            torch.ops.fsdp.split_with_sizes_copy,
+            (t, [64, 128, 8, 8]),
+            {"dim": 1, "out": [t, t, t, t]},
+        )
+        check("call_function", torch.ops.fsdp.set_, (t, t), {})
+        check(
+            "call_function", torch.ops.aten.__rshift__.Scalar, (t, 2), {}, expect=False
+        )
+        check(
+            "call_function",
+            torch.ops._c10d_functional.all_gather_into_tensor,
+            (t, 2, "0"),
+            {},
+            expect=False,
+        )
 
 
 if __name__ == "__main__":

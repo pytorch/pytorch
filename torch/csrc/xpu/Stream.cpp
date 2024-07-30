@@ -67,12 +67,6 @@ static void THXPStream_dealloc(THXPStream* self) {
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static PyObject* THXPStream_get_device(THXPStream* self, void* unused) {
-  HANDLE_TH_ERRORS
-  return THPDevice_New(self->xpu_stream.device());
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject* THXPStream_get_sycl_queue(THXPStream* self, void* unused) {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(&self->xpu_stream.queue());

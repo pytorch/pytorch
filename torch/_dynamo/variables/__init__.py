@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
@@ -9,6 +7,7 @@ from .ctx_manager import (
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     DualLevelContextManager,
+    FSDPParamGroupUseTrainingStateVariable,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
@@ -35,15 +34,19 @@ from .functions import (
     UserMethodVariable,
 )
 from .higher_order_ops import (
+    FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     TorchHigherOrderOperatorVariable,
 )
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
+    EnumerateVariable,
     IteratorVariable,
     ItertoolsVariable,
+    MapVariable,
     RepeatIteratorVariable,
+    ZipVariable,
 )
 from .lazy import LazyVariableTracker
 from .lists import (
@@ -72,7 +75,6 @@ from .misc import (
     NumpyVariable,
     PythonModuleVariable,
     RegexPatternVariable,
-    StopIterationVariable,
     StringFormatVariable,
     SuperVariable,
     TorchVersionVariable,
@@ -96,6 +98,7 @@ from .user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
+    WeakRefVariable,
 )
 
 __all__ = [
@@ -144,7 +147,6 @@ __all__ = [
     "SDPAParamsVariable",
     "SkipFunctionVariable",
     "SliceVariable",
-    "StopIterationVariable",
     "StringFormatVariable",
     "SuperVariable",
     "TensorVariable",

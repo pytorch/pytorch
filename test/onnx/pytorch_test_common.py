@@ -340,8 +340,8 @@ def xfail(error_message: str, reason: Optional[str] = None):
 
 
 # skips tests for opset_versions listed in unsupported_opset_versions.
-# if the caffe2 test cannot be run for a specific version, add this wrapper
-# (for example, an op was modified but the change is not supported in caffe2)
+# if the PyTorch test cannot be run for a specific version, add this wrapper
+# (for example, an op was modified but the change is not supported in PyTorch)
 def skipIfUnsupportedOpsetVersion(unsupported_opset_versions):
     def skip_dec(func):
         @functools.wraps(func)

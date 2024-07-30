@@ -794,12 +794,16 @@ Vectorized<BFloat16> inline clamp_min(const Vectorized<BFloat16>& a, const Vecto
 template <>
 inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<BFloat16>::size()); i += Vectorized<BFloat16>::size()) {
     auto vsrc = _mm256_loadu_si256(reinterpret_cast<__m256i*>((void*)(src + i)));
     _mm256_storeu_si256(reinterpret_cast<__m256i*>((void*)(dst + i)), vsrc);
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = src[i];
   }
@@ -992,12 +996,16 @@ Vectorized<Half> inline clamp_min(const Vectorized<Half>& a, const Vectorized<Ha
 template <>
 inline void convert(const Half* src, Half* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<Half>::size()); i += Vectorized<Half>::size()) {
     auto vsrc = _mm256_loadu_si256(reinterpret_cast<__m256i*>((void*)(src + i)));
     _mm256_storeu_si256(reinterpret_cast<__m256i*>((void*)(dst + i)), vsrc);
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = src[i];
   }

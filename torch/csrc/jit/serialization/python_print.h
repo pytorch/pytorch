@@ -4,8 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Method;
 struct Module;
@@ -54,5 +53,4 @@ TORCH_API void jitModuleToPythonCodeAndConstants(
     std::vector<IValue>* constants // output
 );
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
