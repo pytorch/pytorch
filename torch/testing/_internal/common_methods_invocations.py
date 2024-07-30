@@ -8661,20 +8661,27 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
 def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
     make_mat_e4m3 = partial(make_tensor, device=device, dtype=torch.float8_e4m3fn, requires_grad=requires_grad)
     make_mat_e5m2 = partial(make_tensor, device=device, dtype=torch.float8_e5m2, requires_grad=requires_grad)
+    make_scale = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
     M, N, K = 15, 32, 16
     samples = []
     # two e4m3
     mat1 = make_mat_e4m3((M, K))
     mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
-    samples.append(SampleInput(mat1, mat2))
+    scale1 = make_scale((1,))
+    scale2 = make_scale((1,))
+    samples.append(SampleInput(mat1, mat2, scale1, scale2))
     # mat1 e4m3 mat2 e5m2
     mat1 = make_mat_e4m3((M, K))
     mat2 = make_mat_e5m2((K, N)).t().contiguous().t()
-    samples.append(SampleInput(mat1, mat2))
+    scale1 = make_scale((1,))
+    scale2 = make_scale((1,))
+    samples.append(SampleInput(mat1, mat2, scale1, scale2))
     # mat1 e5m2 mat2 e4m3
     mat1 = make_mat_e5m2((M, K))
     mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
-    samples.append(SampleInput(mat1, mat2))
+    scale1 = make_scale((1,))
+    scale2 = make_scale((1,))
+    samples.append(SampleInput(mat1, mat2, scale1, scale2))
 
     yield from samples
 
@@ -13165,7 +13172,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),),
            ),
     OpInfo('expand_copy',
-           # op=lambda self, shape: self.expand(shape),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_expand,
            supports_forward_ad=True,
@@ -16954,12 +16960,9 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_permute,
            reference_inputs_func=reference_inputs_permute),
     OpInfo('permute_copy',
-           ref=np.transpose,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=True,
            assert_autodiffed=True,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -18395,7 +18398,7 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs__unsafe_masked_index_put_accumulate,
            skips=(
-               DecorateInfo(slowTest, 'TestDecomp', 'test_quick_core_backward', device_type='cpu',
+               DecorateInfo(slowTest, 'TestDecomp', 'test_quick_core_backward',
                             dtypes=(torch.float64,), active_if=IS_WINDOWS),
            ),),
     OpInfo('__getitem__',
@@ -19535,29 +19538,6 @@ op_db: List[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_squeeze_multiple),
-    OpInfo('squeeze_copy',
-           ref=_squeeze_ref,
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           supports_out=True,
-           assert_autodiffed=True,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
-           assert_jit_shape_analysis=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           # vmap does not support inplace views
-           check_inplace_batched_forward_grad=False,
-           # https://github.com/pytorch/pytorch/issues/66357
-           check_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_squeeze,
-           skips=(
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestJit',
-                   'test_variant_consistency_jit',
-                   dtypes=(torch.float32,),
-               ),
-           )),
     UnaryUfuncInfo(
         'fill',
         ref=_fill_np,
@@ -19762,26 +19742,6 @@ op_db: List[OpInfo] = [
            # vmap does not support inplace views
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_transpose_swapdims),
-    OpInfo('transpose_copy',
-           aliases=('swapdims', 'swapaxes'),
-           assert_jit_shape_analysis=True,
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
-           supports_out=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           # vmap does not support inplace views
-           check_inplace_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_transpose_swapdims,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestJit',
-                   'test_variant_consistency_jit',
-                   dtypes=(torch.float32,)
-               ),
-           )),
     OpInfo('T',
            op=lambda x: x.T,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
@@ -21366,18 +21326,15 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.channel_shuffle",
         sample_inputs_func=sample_inputs_channel_shuffle,
-        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-        backward_dtypes=integral_types_and(torch.bool),
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=False,
-        supports_autograd=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         allow_cow_input_materialize_forward=[0],
+        allow_cow_input_materialize_backward=[0, 'output grad 0'],
         skips=(
             # Skip due to NotImplementedError for MPS device.
             DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
-            # vmap: calling random operator not supported
-            DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-            DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
-            DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
             DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
         ),
@@ -22704,6 +22661,11 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.celu",
         supports_out=True,
     ),
+    PythonRefInfo(
+        "_refs.nn.functional.channel_shuffle",
+        torch_opinfo_name="nn.functional.channel_shuffle",
+        supports_out=True,
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.threshold",
         torch_opinfo_name="nn.functional.threshold",
@@ -23950,11 +23912,6 @@ python_ref_db = [
         torch_opinfo_name="squeeze",
     ),
     PythonRefInfo(
-        "_refs.squeeze_copy",
-        torch_opinfo_name="squeeze_copy",
-        supports_out=True,
-    ),
-    PythonRefInfo(
         "_refs.squeeze",
         torch_opinfo_name="squeeze",
         torch_opinfo_variant_name="multiple",
@@ -24002,15 +23959,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.transpose",
         torch_opinfo_name="transpose",
-    ),
-    PythonRefInfo(
-        "_refs.transpose_copy",
-        torch_opinfo_name="transpose_copy",
-        skips=(
-            # RuntimeError: no _refs support for torch.Tensor.is_conj
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-        ),
-        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.t",

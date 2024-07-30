@@ -1429,9 +1429,7 @@ class TestOperators(TestCase):
                 xfail("masked.cumprod", ""),
                 xfail("permute_copy"),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
-                xfail("squeeze_copy"),
                 xfail("t_copy"),
-                xfail("transpose_copy"),
                 xfail("unsqueeze_copy"),
             }
         ),
@@ -1509,7 +1507,6 @@ class TestOperators(TestCase):
                 ),  # aten::scatter_reduce.two hit the vmap fallback
                 xfail("quantile"),
                 xfail("renorm"),
-                xfail("squeeze_copy"),
                 xfail("take"),
                 xfail("tensor_split"),
                 xfail("to_sparse"),
@@ -1571,9 +1568,7 @@ class TestOperators(TestCase):
                 xfail(
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
-                xfail("squeeze_copy"),
                 xfail("t_copy"),
-                xfail("transpose_copy"),
                 xfail("unsqueeze_copy"),
             }
         ),
