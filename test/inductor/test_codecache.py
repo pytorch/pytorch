@@ -412,7 +412,7 @@ class TestFxGraphCache(TestCase):
 
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-        self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_bypass: higher-order op"], 0)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
