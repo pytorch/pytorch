@@ -1063,6 +1063,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
         return proxy_call(self, func, self.pre_dispatch, args, kwargs)
 
+    @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
+
 
 class ProxySymDispatchMode(SymDispatchMode):
     def __init__(self, tracer: _ProxyTracer) -> None:

@@ -1233,6 +1233,10 @@ class FakeTensorMode(TorchDispatchMode):
                 torch._C._set_only_lift_cpu_tensors(maybe_prev_only_lift_cpu_tensors)
 
     @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
+
+    @classmethod
     def cache_info(cls) -> DispatchCacheInfo:
         """
         Query the state of the dispatch cache.

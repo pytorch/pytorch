@@ -515,6 +515,10 @@ class FunctionalTensorMode(TorchDispatchMode):
         # If none of our inputs were wrapped, then we have no FunctionalTensor outputs that we need to fix up storages for.
         return return_and_correct_aliasing(func, args, kwargs, outs_wrapped)
 
+    @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
+
 
 @contextlib.contextmanager
 def disable_functional_mode():
