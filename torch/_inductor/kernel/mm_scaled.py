@@ -223,7 +223,7 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     )
 
 
-@register_lowering(aten._scaled_mm.default, type_promotion_kind=None)
+@register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[no-untyped-def]
 def tuned_scaled_mm(
     mat_a: TensorBox,
     mat_b: TensorBox,
