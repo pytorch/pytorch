@@ -119,6 +119,16 @@ class OutputSpec:
         ), self.arg
 
 
+def _immutable_dict(items):
+    """
+    Creates a mapping where items cannot be added, deleted, or updated.
+    NOTE: The immutability is shallow (like tuple is an immutable collection).
+    """
+    from types import MappingProxyType
+
+    return MappingProxyType(dict(items))
+
+
 def _sig_to_specs(
     *,
     user_inputs: Set[str],
@@ -134,6 +144,7 @@ def _sig_to_specs(
     outputs: List[ArgumentSpec],
     input_tokens: List[str],
     output_tokens: List[str],
+    non_persistent_buffers: Set[str],
 ) -> Tuple[List[InputSpec], List[OutputSpec]]:
     def to_input_spec(inp: ArgumentSpec) -> InputSpec:
         if isinstance(inp, TokenArgument):
@@ -155,11 +166,7 @@ def _sig_to_specs(
                 kind=InputKind.BUFFER,
                 arg=inp,
                 target=inputs_to_buffers[name],
-                # Mark as True for now; we will fix this up to distinguish
-                # persistent from non-persistent later in tracing.
-                # See: rewrite_non_persistent_buffers()
-                # TODO(suo): this is horrible.
-                persistent=True,
+                persistent=(inputs_to_buffers[name] not in non_persistent_buffers),
             )
         else:
             raise AssertionError(f"Unknown tensor input kind: {name}")
@@ -298,55 +305,51 @@ class ExportGraphSignature:
     # A list of parameters uniquely identified by mangled fully qualified name
     @property
     def parameters(self) -> Collection[str]:
-        # TODO Make this tuple.
-        return [
+        return tuple(
             s.target
             for s in self.input_specs
             if s.kind == InputKind.PARAMETER
             if isinstance(s.target, str)
-        ]
+        )
 
     # A list of buffers uniquely identified by mangled fully qualified name
     @property
     def buffers(self) -> Collection[str]:
-        # TODO Make this tuple.
-        return [
+        return tuple(
             s.target
             for s in self.input_specs
             if s.kind == InputKind.BUFFER
             if isinstance(s.target, str)
-        ]
+        )
 
     @property
     def non_persistent_buffers(self) -> Collection[str]:
-        return [
+        return tuple(
             s.target
             for s in self.input_specs
             if s.kind == InputKind.BUFFER
             if s.persistent is False
             if isinstance(s.target, str)
-        ]
+        )
 
     # A list of lifted constant tensors
     @property
     def lifted_tensor_constants(self) -> Collection[str]:
-        # TODO Make this tuple.
-        return [
+        return tuple(
             s.target
             for s in self.input_specs
             if s.kind == InputKind.CONSTANT_TENSOR
             if isinstance(s.target, str)
-        ]
+        )
 
     @property
     def lifted_custom_objs(self) -> Collection[str]:
-        # TODO Make this tuple.
-        return [
+        return tuple(
             s.target
             for s in self.input_specs
             if s.kind == InputKind.CUSTOM_OBJ
             if isinstance(s.target, str)
-        ]
+        )
 
     # Graph node names of pytree-flattened inputs of original program
     @property
@@ -386,68 +389,68 @@ class ExportGraphSignature:
     # name is found in this dictionary, it is guranteed to be a lifted parameter.
     @property
     def inputs_to_parameters(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target
+        return _immutable_dict(
+            (s.arg.name, s.target)
             for s in self.input_specs
             if s.kind == InputKind.PARAMETER
             and isinstance(s.arg, TensorArgument)
             and isinstance(s.target, str)
-        }
+        )
 
     # A dictionary mapping graph input node names to buffers. If a graph input
     # name is found in this dictionary, it is guranteed to be a lifted buffer.
     @property
     def inputs_to_buffers(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target  # type: ignore[union-attr, misc]
+        return _immutable_dict(
+            (s.arg.name, s.target)  # type: ignore[union-attr, misc]
             for s in self.input_specs
             if s.kind == InputKind.BUFFER
             and isinstance(s.arg, TensorArgument)
             and isinstance(s.target, str)
-        }
+        )
 
     # A dictionary mapping graph output node names to buffers that are mutated in the
     # original program. Buffers that are not mutated will not be found in this dictionary.
     @property
     def buffers_to_mutate(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target
+        return _immutable_dict(
+            (s.arg.name, s.target)
             for s in self.output_specs
             if s.kind == OutputKind.BUFFER_MUTATION
             and isinstance(s.arg, TensorArgument)
             and isinstance(s.target, str)
-        }
+        )
 
     @property
     def user_inputs_to_mutate(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target
+        return _immutable_dict(
+            (s.arg.name, s.target)
             for s in self.output_specs
             if s.kind == OutputKind.USER_INPUT_MUTATION
             and isinstance(s.arg, TensorArgument)
             and isinstance(s.target, str)
-        }
+        )
 
     # A dictionary mapping graph input node names to lifted tensor constants.
     @property
     def inputs_to_lifted_tensor_constants(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target
+        return _immutable_dict(
+            (s.arg.name, s.target)
             for s in self.input_specs
             if s.kind == InputKind.CONSTANT_TENSOR
             and isinstance(s.arg, TensorArgument)
             and isinstance(s.target, str)
-        }
+        )
 
     @property
     def inputs_to_lifted_custom_objs(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target
+        return _immutable_dict(
+            (s.arg.name, s.target)
             for s in self.input_specs
             if s.kind == InputKind.CUSTOM_OBJ
             and isinstance(s.arg, CustomObjArgument)
             and isinstance(s.target, str)
-        }
+        )
 
     @property
     def backward_signature(self) -> Optional[ExportBackwardSignature]:
@@ -485,22 +488,22 @@ class ExportGraphSignature:
         return None
 
     @property
-    def input_tokens(self) -> List[str]:
+    def input_tokens(self) -> Collection[str]:
         input_tokens = []
         for s in self.input_specs:
             if s.kind == InputKind.TOKEN:
                 assert isinstance(s.arg, TokenArgument)
                 input_tokens.append(s.arg.name)
-        return input_tokens
+        return tuple(input_tokens)
 
     @property
-    def output_tokens(self) -> List[str]:
+    def output_tokens(self) -> Collection[str]:
         output_tokens = []
         for s in self.output_specs:
             if s.kind == OutputKind.TOKEN:
                 assert isinstance(s.arg, TokenArgument)
                 output_tokens.append(s.arg.name)
-        return output_tokens
+        return tuple(output_tokens)
 
     def __post_init__(self) -> None:
         assertion_dep_token = self.assertion_dep_token
