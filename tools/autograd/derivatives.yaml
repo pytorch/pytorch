@@ -1031,6 +1031,22 @@
 - name: special_zeta.other_scalar(Tensor self, Scalar other) -> Tensor
   self: not_implemented("zeta")
 
+- name: special_betainc(Tensor self, Tensor a, Tensor b) -> Tensor
+  self: self.pow(a - 1) * (1 - self).pow(b - 1) / at::exp(at::lgamma(a) + at::lgamma(b) - at::lgamma(a + b))
+  a: not_implemented("special_betainc a")
+  b: not_implemented("special_betainc b")
+
+- name: special_betainc.a_scalar(Tensor self, Scalar a, Tensor b) -> Tensor
+  self: grad * self.pow(at::scalar_to_tensor(a) - 1) * (1 - self).pow(b - 1) / at::exp(at::lgamma(at::scalar_to_tensor(a)) + at::lgamma(b) - at::lgamma(at::scalar_to_tensor(a) + b))
+  b: not_implemented("special_betainc b")
+
+- name: special_betainc.b_scalar(Tensor self, Tensor a, Scalar b) -> Tensor
+  self: grad * self.pow(a - 1) * (1 - self).pow(at::scalar_to_tensor(b) - 1) / at::exp(at::lgamma(a) + at::lgamma(at::scalar_to_tensor(b)) - at::lgamma(a + at::scalar_to_tensor(b)))
+  a: not_implemented("special_betainc a")
+
+- name: special_betainc.ab_scalar(Tensor self, Scalar a, Scalar b) -> Tensor
+  self: grad * self.pow(at::scalar_to_tensor(a) - 1) * (1 - self).pow(at::scalar_to_tensor(b) - 1) / at::exp(at::lgamma(at::scalar_to_tensor(a)) + at::lgamma(at::scalar_to_tensor(b)) - at::lgamma(at::scalar_to_tensor(a) + at::scalar_to_tensor(b)))
+
 - name: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
   result: self_t.zero_()
