@@ -5212,6 +5212,7 @@ class SetSourceTensorKernel(ExternKernelAlloc):
             self_tensor.get_layout(),
             [self_tensor, storage_tensor],
             python_kernel_name="torch.ops.aten.set_.source_Tensor",
+            op_overload=torch.ops.aten.set_.source_Tensor,
         )
         V.graph.never_reuse_buffers.add(self_tensor.data.get_name())
         V.graph.never_reuse_buffers.add(storage_tensor.get_name())
@@ -6593,7 +6594,7 @@ class InterpreterShim(torch.fx.Interpreter):
         self.graph = graph
         self.submodules = submodules
         self.extra_traceback = False
-        self.fetch_attr = submodules.__getitem__  # type: ignore[method-assign]
+        self.fetch_attr = submodules.__getitem__
         self.current_node = None
 
     def run_node(self, n: torch.fx.Node) -> Any:

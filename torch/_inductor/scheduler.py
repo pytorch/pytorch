@@ -1414,6 +1414,10 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         del self.scheduler.name_to_fused_node[self.get_name()]
         return self.scheduler.fuse_nodes(self.snodes)
 
+    def add_fake_dep(self, fake_dep: Dep) -> None:
+        self.set_read_writes(self.read_writes.with_read(fake_dep))
+        self.unmet_dependencies.add(fake_dep)
+
     @cache_on_self
     def get_name(self) -> str:
         return "_".join([x.get_name() for x in self.snodes])
@@ -1430,6 +1434,9 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         for node in self.snodes:
             result.extend(node.get_outputs())
         return result
+
+    def get_nodes(self) -> Sequence[BaseSchedulerNode]:
+        return self.snodes
 
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
@@ -1571,14 +1578,18 @@ class Scheduler:
         self.compute_dependencies()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.dead_node_elimination()
-        if config.reorder_for_compute_comm_overlap:
-            comms.decide_global_ordering_of_comms(self.nodes)
+        self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.compute_ancestors()
+        if config.reorder_for_compute_comm_overlap:
+            self.nodes = comms.decide_global_ordering_of_comms(
+                self.nodes,
+                self.name_to_buf,
+                self.name_to_fused_node,
+            )
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
-        self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.logged_slow_fusion: Set[Tuple[str, str]] = set()
