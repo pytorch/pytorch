@@ -678,12 +678,13 @@ def _export_to_aten_ir(
         with _set_node_metadata_hook(
             gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
         ):
-            insert_deferred_runtime_asserts(
-                gm,
-                fake_mode.shape_env,
-                f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
-                export=True,
-            )
+            if fake_mode:
+                insert_deferred_runtime_asserts(
+                    gm,
+                    fake_mode.shape_env,
+                    f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                    export=True,
+                )
 
     # update output specs
     gm.recompile()
