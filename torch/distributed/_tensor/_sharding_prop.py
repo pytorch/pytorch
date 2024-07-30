@@ -186,11 +186,16 @@ class ShardingPropagator:
             output_sharding = self.propagate_op_sharding(op_info.schema)
         op_info.output_sharding = output_sharding
 
-    def _generate_sharding_from_strategy(self, op_schema: OpSchema) -> OutputSharding:
+    def _generate_sharding_from_strategy(
+        self,
+        op_schema: OpSchema,
+        out_tensor_meta: Union[None, TensorMeta, Sequence[Optional[TensorMeta]]],
+    ) -> OutputSharding:
         """
         Generate sharding based on op strategy.
         This function will first search for the op strategy based on the schema.
         """
+
         def spec_to_strategy(spec: object) -> object:
             if isinstance(spec, DTensorSpec):
                 return OpStrategy([PlacementStrategy(spec)])
@@ -246,9 +251,7 @@ class ShardingPropagator:
                     else output_strategy.input_specs[idx]
                 )
                 expected_input_specs.append(
-                    desired_spec.shallow_copy_with_tensor_meta(
-                        input_spec.tensor_meta
-                    )
+                    desired_spec.shallow_copy_with_tensor_meta(input_spec.tensor_meta)
                 )
                 if input_spec.placements != desired_spec.placements:
                     needs_redistribute = True
@@ -400,9 +403,7 @@ class ShardingPropagator:
         # decide how to do redistribute on inputs
         if output_sharding.output_spec is None:
             if output_sharding.redistribute_schema is None:
-                raise RuntimeError(
-                    f"Sharding propagation failed on op {op_schema}!"
-                )
+                raise RuntimeError(f"Sharding propagation failed on op {op_schema}!")
             else:
                 # we do auto redistribute on inputs if necessary
                 # run sharding propagation again with suggested schema
@@ -429,7 +430,9 @@ class ShardingPropagator:
         out_tensor_meta = self._propagate_tensor_meta(op_schema)
 
         if op_schema.op in self.op_strategy_funcs:
-            output_sharding = self._generate_sharding_from_strategy(op_schema)
+            output_sharding = self._generate_sharding_from_strategy(
+                op_schema, out_tensor_meta
+            )
         elif op_schema.op in self.op_to_rules:
             output_sharding = self._generate_sharding_from_rule(op_schema)
         else:
