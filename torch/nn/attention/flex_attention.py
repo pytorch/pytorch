@@ -478,13 +478,11 @@ class BlockMask:
             BlockMask: A new BlockMask instance with all tensor components moved
             to the specified device.
 
-        Example:
-            >>> block_mask = BlockMask()
-            >>> block_mask_cuda = block_mask.to('cuda:0')
-
         Note:
             This method does not modify the original BlockMask in-place.
-            Instead, it returns a new BlockMask instance.
+            Instead, it returns a new BlockMask instance where invidual tensor attributes
+            may or may not be moved to the specified device, depending on their
+            current device placement.
         """
         mapped_attributes = tree_map_only(
             torch.Tensor,
