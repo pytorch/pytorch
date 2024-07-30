@@ -71,6 +71,10 @@ class TestInductorExternalCallable(TestCase):
         )
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(
+        torch.cuda.get_device_capability() < (7, 0),
+        "Triton does not support device capability < 7.0",
+    )
     def test_matmul_cuda(self):
         device = torch.device("cuda")
         x = (torch.eye(128, 128) * 2).to(device=device)
