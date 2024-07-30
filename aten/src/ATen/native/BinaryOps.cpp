@@ -248,19 +248,15 @@ TORCH_META_FUNC(special_shifted_chebyshev_polynomial_w) (const Tensor& self, con
 }
 
 TORCH_META_FUNC(special_betainc) (const Tensor& self, const Tensor& a, const Tensor& b) {
-  build(
-    TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .allow_cpu_scalars(true)
+  build(TensorIteratorConfig()
+    .allow_cpu_scalars(true) // same as build_ternary_op except this line
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
     .enforce_safe_casting_to_output(true)
-    .promote_integer_inputs_to_float(true)
-    .add_output(maybe_get_output()) // maybe try using `add_borrowed_output(maybe_get_output())` if possible
-    .add_input(self)  // similarly try using `add_borrowed_input(self)` if possible.
-    .add_input(a)  // try using `add_borrowed_input(a)` if possible.
-    .add_input(b)
-    ); // try using `add_borrowed_input(b)` if possible.
+    .add_owned_output(maybe_get_output())
+    .add_owned_const_input(self)
+    .add_owned_const_input(a)
+    .add_owned_const_input(b));
 }
 
 TORCH_META_FUNC2(copysign, Tensor) (
@@ -827,6 +823,10 @@ Tensor special_betainc(const Tensor& self, const Tensor& a, const Scalar& b) {
   return at::special_betainc(self, a, wrapped_scalar_tensor(b));
 }
 
+Tensor special_betainc(const Scalar& self, const Tensor& a, const Tensor& b) {
+  return at::special_betainc(wrapped_scalar_tensor(self), a, b);
+}
+
 Tensor& special_betainc_out(const Tensor& self, const Scalar& a, const Scalar& b, Tensor& result) {
   return at::special_betainc_out(result, self, wrapped_scalar_tensor(a), wrapped_scalar_tensor(b));
 }
@@ -837,6 +837,10 @@ Tensor& special_betainc_out(const Tensor& self, const Scalar& a, const Tensor& b
 
 Tensor& special_betainc_out(const Tensor& self, const Tensor& a, const Scalar& b, Tensor& result) {
   return at::special_betainc_out(result, self, a, wrapped_scalar_tensor(b));
+}
+
+Tensor& special_betainc_out(const Scalar& self, const Tensor& a, const Tensor& b, Tensor& result) {
+  return at::special_betainc_out(result, wrapped_scalar_tensor(self), a, b);
 }
 
 TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
