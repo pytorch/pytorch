@@ -467,7 +467,7 @@ class BlockMask:
 
         return "\n".join(total_vis)
 
-    def to(self, device):
+    def to(self, device: Union[torch.device, str]) -> "BlockMask":
         """Moves the BlockMask to the specified device.
 
         Args:
