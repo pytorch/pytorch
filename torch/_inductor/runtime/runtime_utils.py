@@ -10,6 +10,8 @@ import tempfile
 
 import torch
 
+from .benchmarking import benchmarker
+
 
 def conditional_product(*args):
     return functools.reduce(operator.mul, [x for x in args if x])
@@ -72,6 +74,18 @@ def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix="", color=
 
 def get_max_y_grid():
     return 65535
+
+
+def do_bench(fn, fn_args, fn_kwargs, **kwargs):
+    return benchmarker.original_do_bench(fn, fn_args, fn_kwargs, **kwargs)
+
+
+def do_bench_gpu(*args, **kwargs):
+    return benchmarker.original_do_bench_gpu(*args, **kwargs)
+
+
+def do_bench_cpu(fn, warmup=5, times=20):
+    return benchmarker.original_do_bench_cpu(fn, warmup=warmup, times=times)
 
 
 def cache_dir() -> str:
