@@ -41,7 +41,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
 )
-from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.distributed.multi_threaded_pg import (
     _install_threaded_pg,
     _uninstall_threaded_pg,
@@ -171,6 +170,10 @@ def import_transformers_or_skip():
         return wrapper
 
     return decorator
+
+
+def at_least_x_gpu(x):
+    return torch.cuda.is_available() and torch.cuda.device_count() >= x
 
 
 def skip_if_lt_x_gpu(x):
@@ -515,7 +518,7 @@ DEFAULT_WORLD_SIZE = 4
 # subprocesses to join.
 
 
-class MultiProcessTestCaseBase:
+class MultiProcessTestCase(TestCase):
     MAIN_PROCESS_RANK = -1
     # This exit code is used to indicate that the test code had an error and
     # exited abnormally. There are certain tests that might use sys.exit() to
@@ -585,6 +588,9 @@ class MultiProcessTestCaseBase:
                 target=self.__class__._run,
                 name="process " + str(rank),
                 args=(rank, self._current_test_name(), self.file_name, child_conn),
+                kwargs={
+                    "fake_pg": getattr(self, "fake_pg", False),
+                }
             )
             process.start()
             logger.info("Started process %s with pid %s", rank, process.pid)
@@ -630,7 +636,7 @@ class MultiProcessTestCaseBase:
                 return
 
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
@@ -844,18 +850,6 @@ class MultiProcessTestCaseBase:
         return self.rank == 0
 
 
-class MultiProcessTestCase(MultiProcessTestCaseBase, TestCase):
-    pass
-
-
-class MultiProcessInductorTestCase(MultiProcessTestCaseBase, InductorTestCase):
-    """
-    A version of MultiProcessTestCase that derives from the Inductor TestCase
-    which handles isolation of the cache dir.
-    """
-    pass
-
-
 def run_subtests(
     cls_inst,
     subtest_config: Dict[str, List[Any]],
@@ -1064,7 +1058,7 @@ class MultiThreadedTestCase(TestCase):
             self.threads.append(t)
 
     @classmethod
-    def _run(cls, test_name, rank, world_size):
+    def _run(cls, test_name, rank, world_size, **kwargs):
         self = cls(test_name)
         self.rank = rank
 
@@ -1232,14 +1226,24 @@ class SaveForwardInputsModel(nn.Module):
         return self.c2(self.c1(x))
 
 @contextmanager
-def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True):
+def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True, fake_pg=False):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
-    torch.cuda.set_device(rank)
+    if not fake_pg:
+        torch.cuda.set_device(rank)
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '6789'
     if init_pg:
-        c10d.init_process_group("nccl", rank=rank, world_size=world_size)
+        if fake_pg:
+            store = torch.testing._internal.distributed.fake_pg.FakeStore()
+            c10d.init_process_group(
+                backend="fake",
+                world_size=world_size,
+                rank=rank,
+                store=store,
+            )
+        else:
+            c10d.init_process_group("nccl", rank=rank, world_size=world_size)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
     try:
@@ -1309,7 +1313,7 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
         return torch.cuda.device_count()
 
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:
         # The rest is copypasta from MultiProcessTestCase._run
         self = cls(test_name)
         self.rank = rank

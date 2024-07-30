@@ -10,9 +10,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.distributed as dist
 from torch._dynamo.testing import skipIfNotPy311
-
 from torch.nn.parallel import DistributedDataParallel as DDP
-
 from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
@@ -24,6 +22,7 @@ from torch.testing._internal.logging_utils import (
     make_logging_test,
     make_settings_test,
 )
+
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(

@@ -25,8 +25,8 @@ int64_t _debug_has_internal_overlap(const Tensor& self) {
   return static_cast<int64_t>(at::has_internal_overlap(self));
 }
 
-bool is_pinned(const Tensor& self, std::optional<Device> device) {
-  std::optional<DeviceType> opt_device_type;
+bool is_pinned(const Tensor& self, std::optional<c10::Device> device) {
+  std::optional<c10::DeviceType> opt_device_type;
   if (device.has_value()) {
     TORCH_WARN_DEPRECATION(
         "The argument 'device' of Tensor.is_pinned() ",
@@ -41,7 +41,7 @@ bool is_pinned(const Tensor& self, std::optional<Device> device) {
   return at::globalContext().isPinnedPtr(self.storage().data(), opt_device_type);
 }
 
-Tensor pin_memory(const Tensor& self, std::optional<Device> device) {
+Tensor pin_memory(const Tensor& self, std::optional<c10::Device> device) {
   if (device.has_value()) {
     TORCH_WARN_DEPRECATION(
         "The argument 'device' of Tensor.pin_memory() ",
@@ -55,7 +55,7 @@ Tensor pin_memory(const Tensor& self, std::optional<Device> device) {
   return at::_pin_memory(self, device);
 }
 
-Tensor _pin_memory(const Tensor& self, std::optional<Device> device) {
+Tensor _pin_memory(const Tensor& self, std::optional<c10::Device> device) {
   TORCH_CHECK(self.device().is_cpu(), "cannot pin '", self.toString(), "' only dense CPU tensors can be pinned");
   // Use getAcceleratorHooksInterface to make pin_memory device-agnostic
   auto* allocator = device.has_value()?
