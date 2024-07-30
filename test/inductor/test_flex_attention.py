@@ -202,6 +202,7 @@ class TestFlexAttention(InductorTestCase):
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
+        # TODO: Make this check stricter after updating eager SDPA masked_softmax semantics
         if torch.isnan(compiled_error).any() and not torch.isnan(ref_error).any():
             self.assertTrue(False, "Output/Grad with NaN")
         if compiled_error > ref_error * fudge_factor:
@@ -1384,6 +1385,35 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out.sum().backward()
 
     @supported_platform
+    def test_fully_masked_out_rows(self):
+        # Ensure fully masked out rows won't cause NaNs.
+        query = torch.randn(
+            (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        key = torch.randn(
+            (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        value = torch.randn(
+            (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        do = torch.randn((B, H, S, D), dtype=torch.float32, device="cuda")
+
+        M = S // 2
+
+        def mask_mod(b, h, q, kv):
+            return q < M
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        out = torch.compile(flex_attention, dynamic=False)(
+            query, key, value, block_mask=block_mask
+        )
+        # TODO: Switch to self.run_test_with_call after updating eager SDPA masked_softmax semantics
+        self.assertEqual(out[:, :, M:, :].sum(), 0)
+
+        out.backward(do)
+        self.assertEqual(query.grad[:, :, M:, :].sum(), 0)
+
+    @supported_platform
     def test_comparison_vs_sdpa(self):
         def causal(score, b, h, q_idx, kv_idx):
             return torch.where(q_idx >= kv_idx, score, -float("inf"))
@@ -1622,7 +1652,7 @@ class GraphModule(torch.nn.Module):
         getitem_4: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
-        return [getitem_4, getitem_5, getitem_6]
+        return (getitem_4, getitem_5, getitem_6)
 
     class <lambda>(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]"):
