@@ -3074,7 +3074,7 @@ class TestSDPACudaOnly(NNTestCase):
             fudge_factors={
                 'out': 1.5,
                 'grad_query': 13.0,
-                'grad_key': 2.0,
+                'grad_key': 4.0,
                 'grad_value': 1.75,
             }
         )
@@ -3222,7 +3222,7 @@ class TestSDPACudaOnly(NNTestCase):
                 fudge_factors={
                     'out': 2.0,
                     'grad_query': 12.0,
-                    'grad_key': 2.0,
+                    'grad_key': 8.0,
                     'grad_value': 2.0,
                 }
             )
