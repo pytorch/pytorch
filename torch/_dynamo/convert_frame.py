@@ -703,6 +703,10 @@ def _compile(
                     log.debug("No graph captured with one_graph=True")
                 return None
 
+        assert (
+            distributed_state is None or distributed_state.all_states is not None
+        ), "compiler collective wasn't run before compilation completed"
+
         assert out_code is not None
         log_bytecode(
             "MODIFIED BYTECODE",
