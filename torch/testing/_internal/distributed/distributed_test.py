@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 import copy
 import json
@@ -589,7 +589,7 @@ class TestDistBackend(MultiProcessTestCase):
         return f"{FILE_SCHEMA}{self.file_name}"
 
     @classmethod
-    def _run(cls, rank, test_name, file_name, pipe):
+    def _run(cls, rank, test_name, file_name, pipe, **kwargs):
         if BACKEND == "nccl" and not torch.cuda.is_available():
             sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         self = cls(test_name)
