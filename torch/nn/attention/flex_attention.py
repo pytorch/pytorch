@@ -469,17 +469,16 @@ class BlockMask:
 
     def to(self, device):
         """Moves the BlockMask to the specified device.
+
         Args:
-        device (torch.device or str): The target device to move the BlockMask to.
-            Can be a torch.device object or a string (e.g., 'cpu', 'cuda:0').
+            device (torch.device or str): The target device to move the BlockMask to.
+                Can be a torch.device object or a string (e.g., 'cpu', 'cuda:0').
 
         Returns:
             BlockMask: A new BlockMask instance with all tensor components moved
             to the specified device.
 
         Example:
-        .. code-block:: python
-
             >>> block_mask = BlockMask()
             >>> block_mask_cuda = block_mask.to('cuda:0')
 
