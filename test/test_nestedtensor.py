@@ -6507,7 +6507,6 @@ BACKWARD_FAILURES = {
     "clamp_max",
     "clamp_min",
     "copysign",
-    "digamma",
     "float_power",
     "max.binary",
     "maximum",
