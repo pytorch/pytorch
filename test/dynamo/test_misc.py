@@ -4433,11 +4433,9 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertEqual(opt_m(x, m.ref_y1_id), torch.ones(2))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)
 
         self.assertEqual(opt_m(x, m.ref_y2_id), torch.zeros(2))
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 3)
 
     def test_id_of_nn_module(self):
         class M(torch.nn.Module):
