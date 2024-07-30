@@ -133,9 +133,7 @@ class TuningProcess:
             elif isinstance(obj, Ping):
                 response_queue.put(Pong())
             elif isinstance(obj, BenchmarkRequest):
-                # LazyBenchmark is not pickleable, so we may need to finalize
-                # the value here, so convert to float immediately
-                response_queue.put(float(obj.benchmark()))
+                response_queue.put(obj.benchmark())
             else:
                 raise RuntimeError(f"Invalid request type {type(obj)}")
 
@@ -582,6 +580,7 @@ class GPUDeviceBenchmarkRequest(BenchmarkRequest):
         fn,
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
+        lazy: bool = False,
     ) -> Union[LazyBenchmark, float]:
         device_idx_set = {
             tensor.device.index
@@ -597,7 +596,10 @@ class GPUDeviceBenchmarkRequest(BenchmarkRequest):
             device_idx = torch.cuda.current_device()
 
         with torch.cuda.device(device_idx):
-            out = benchmarker.lazy_benchmark_gpu(fn, pruning_key="max-autotune-gemm")
+            if lazy:
+                out = benchmarker.lazy_benchmark_gpu(fn, pruning_key="max-autotune-gemm")
+            else:
+                out = benchmarker.benchmark_gpu(fn)
 
         return out
 
