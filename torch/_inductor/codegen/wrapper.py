@@ -134,9 +134,9 @@ def get_cpp_op_schema(kernel: torch._ops.OpOverload) -> str:
     returns = kernel._schema.returns
 
     num_returns = len(returns)
-    assert num_returns > 0, "must have at least one return value"
-
-    if num_returns == 1:
+    if num_returns == 0:
+        return ""
+    elif num_returns == 1:
         cpp_return_value = convert_return_type(returns[0])
     elif num_returns > 1:
         tuple_returns = ", ".join([convert_return_type(r) for r in returns])
