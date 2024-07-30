@@ -90,10 +90,10 @@ class ScheduleTest(MultiProcContinousTest):
         for _ in range(num_iters):
             if self.rank == 0:
                 schedule.step(x)
-                dist.irecv(x, src=self.world_size - 1)
+                dist.recv(x, src=self.world_size - 1)
             elif self.rank == self.world_size - 1:
                 out = schedule.step()
-                dist.isend(out, dst=0)
+                dist.send(out, dst=0)
             else:
                 schedule.step()
             
