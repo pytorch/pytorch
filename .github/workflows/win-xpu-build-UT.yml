@@ -37,28 +37,29 @@ jobs:
 
     - name: Set conda environment
       run: |
-        echo Activating base conda environment at %conda_path%\Scripts\activate.bat
-        call %conda_path%\Scripts\activate.bat
-        
-        conda list
+        echo CALL
+        call C:\Users\nrvalgo_jenkinsadm\miniforge3\Scripts\activate.bat
+        echo Finish
 
-        echo Removing existing conda environment %conda_env%
-        conda remove -n %conda_env% --all -y
+        call conda list
 
-        echo Creating new conda environment %conda_env% with python version %python_version%
-        conda create -n %conda_env% python=%python_version% -y
+        echo REMOVE
+        call conda remove -n torch_venv --all -y
 
-        echo Activating the newly created conda environment %conda_env%
-        call %conda_path%\condabin\conda.bat activate %conda_env%
-        
-        echo Removing ucrt (if exists)
-        conda remove ucrt -y || echo ucrt not found
+        echo CREATE
+        call conda create -n torch_venv python=3.10-y
 
-        echo Installing cmake version 3.26.4
-        conda install cmake==3.26.4 --force -y
+        echo ACTIVATE
+        call C:\Users\nrvalgo_jenkinsadm\miniforge3\Scripts\activate.bat torch_venv
 
-        echo Listing installed conda packages
-        conda list
+        echo DEL_UCRT
+        call conda remove ucrt -y or echo ucrt not found
+
+        echo INSTALL_CMAKE
+        call conda install cmake==3.26.4 --force -y
+
+        echo LIST
+        call conda list
 
     - name: Activate Intel Basekit
       shell: cmd
