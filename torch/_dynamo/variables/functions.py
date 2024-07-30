@@ -928,6 +928,9 @@ class DynamoTritonHOPifier(TritonHOPifier):
             maybe_callable, (NestedUserFunctionVariable, UserFunctionVariable)
         )
 
+    def get_value(self, val):
+        return val.value
+
     def check_grid(self, grid):
         from .lists import BaseListVariable
 

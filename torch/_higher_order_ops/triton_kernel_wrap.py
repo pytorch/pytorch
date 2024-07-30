@@ -779,6 +779,9 @@ class TritonHOPifier:
     def is_callable(self, maybe_callable):
         raise NotImplementedError("abstract method")
 
+    def get_value(self, val):
+        raise NotImplementedError("abstract method")
+
     def call_grid(self, grid, meta, tx):
         raise NotImplementedError("abstract method")
 
@@ -879,7 +882,7 @@ class TritonHOPifier:
             if name in kwargs:
                 # remove special kwargs from `kwargs`
                 val = kwargs.pop(name)
-                special_kwargs[name] = val.value
+                special_kwargs[name] = self.get_value(val)
 
         if special_kwargs:
             if isinstance(variable.kernel, Autotuner):
@@ -898,7 +901,7 @@ class TritonHOPifier:
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
             new_var = type(variable)(new_kernel, None, variable.grid)
-            return new_var.call_function(tx, args, kwargs)
+            return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         if variable.grid is None:
             self.raise_unsupported("Triton kernels should always be called with a grid")
@@ -960,6 +963,9 @@ class TracingTritonHOPifier(TritonHOPifier):
 
     def is_callable(self, maybe_callable):
         return callable(maybe_callable)
+
+    def get_value(self, val):
+        return val
 
     def call_grid(self, grid, meta, tx):
         assert tx is None
