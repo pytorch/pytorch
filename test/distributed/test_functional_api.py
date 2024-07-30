@@ -587,6 +587,28 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         )
         allreduce(torch.randn(8, device=self.device), pg=dist.group.WORLD)
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @requires_nccl()
+    @with_comms()
+    def test_tracing_with_dce_code(self):
+        if self.world_size > 2:
+            return
+
+        def func(batch, group, rank):
+            ret = ft_c.permute_tensor(batch, [1, 0], group)
+            if hasattr(ret, "wait"):
+                ret = ret.wait()
+            if rank == 0:
+                return ret
+            else:
+                return batch * 5
+
+        compiled_func = torch.compile(func)
+        ret = compiled_func(
+            torch.ones((100,), device="cuda"), self.process_group, self.rank
+        )
+        dist.barrier()
+
 
 class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):
     @property
