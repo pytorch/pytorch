@@ -2994,6 +2994,15 @@ class GraphModule(torch.nn.Module):
     def test_map_enumerate(a, b):
         return list(enumerate(map(lambda x: x + 1, [a, b]), start=1)), a + 1
 
+    @make_test
+    def test_map_infinite(a, b):
+        return list(map(lambda x, y: x + y, [a, b], itertools.count(3)))
+
+    @make_test
+    def test_map_unpack_vars(a, b):
+        x, y = map(lambda x: x + 1, [a, b])
+        return x + y
+
     def test_enumerate_custom(self):
         class MyClass:
             def __iter__(self):

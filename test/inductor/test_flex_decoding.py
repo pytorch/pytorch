@@ -38,30 +38,13 @@ index = torch.ops.aten.index
 Tensor = torch.Tensor
 
 
-# score_mod / gqa_mask convert for GQA inputs before GQA is explictly supported
-def get_gqa_score_mod(score_mod, G, q_seq_len):
-    def score_mod_gqa(score, b, hkv, m, n):
-        g = m // q_seq_len
-        g = torch.where(g < G, g, 0)
-        new_m = m % q_seq_len
-        hq = hkv * G + g
-        return score_mod(score, b, hq, new_m, n)
-
-    return score_mod_gqa
-
-
-def get_gqa_mask_mod(mask_fn, G, q_seq_len):
-    def mask_mod_gqa(b, hkv, m, n):
-        g = m // q_seq_len
-        new_m = m % q_seq_len
-        hq = hkv * G + g
-        return mask_fn(b, hq, new_m, n)
-
-    return mask_mod_gqa
-
-
-def create_attention(score_mod, block_mask):
-    return functools.partial(flex_attention, score_mod=score_mod, block_mask=block_mask)
+def create_attention(score_mod, block_mask, enable_gqa=False):
+    return functools.partial(
+        flex_attention,
+        score_mod=score_mod,
+        block_mask=block_mask,
+        enable_gqa=enable_gqa,
+    )
 
 
 def create_block_mask_test(score_mod, query, key):
@@ -89,6 +72,19 @@ def _causal(
     token_kv: Tensor,
 ) -> Tensor:
     return torch.where(token_q >= token_kv, score, float("-inf"))
+
+
+def _generate_windowed(offset):
+    def _windowed(score, b, h, q, kv):
+        return torch.where(q + offset >= kv, score, float("-inf"))
+
+    return _windowed
+
+
+def _get_windowed_sdpa_mask(Mq, Mkv, offset):
+    return torch.tril(torch.ones(Mkv, Mkv, dtype=torch.bool, device="cuda"))[
+        offset : offset + Mq
+    ]
 
 
 def _rel_bias(
@@ -171,6 +167,7 @@ test_score_mods = [
     _rel_bias,
     _rel_causal,
     _generate_alibi_bias(8),
+    _generate_windowed(1000),
 ]
 
 captured_buffers_map = {
@@ -186,7 +183,6 @@ test_Hq_Hkv = [
     (16, 1),
     (8, 2),
     (16, 16),
-    (20, 1),
 ]
 
 (Hq, Hkv) = (16, 8)
@@ -237,20 +233,11 @@ class TestFlexAttention(InductorTestCase):
             msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
             self.assertTrue(False, msg)
 
-    def _check_out_and_grad(
+    def _check_out(
         self,
         golden_out: torch.Tensor,
         ref_out: torch.Tensor,
         compiled_out: torch.Tensor,
-        q_gold: torch.Tensor,
-        q_ref: torch.Tensor,
-        q: torch.Tensor,
-        k_gold: torch.Tensor,
-        k_ref: torch.Tensor,
-        k: torch.Tensor,
-        v_gold: torch.Tensor,
-        v_ref: torch.Tensor,
-        v: torch.Tensor,
     ):
         dtype = ref_out.dtype
         with torch.no_grad():
@@ -263,21 +250,6 @@ class TestFlexAttention(InductorTestCase):
 
             # Checkout output
             self._check_equal(golden_out, ref_out, compiled_out, fudge_factor, "Out")
-
-            # TODO: add backward support
-            # # Check gradients
-            # q_fudge_factor = 2.5 * fudge_factor
-            # self._check_equal(
-            #     q_gold.grad, q_ref.grad, q.grad, q_fudge_factor, "Grad_Query"
-            # )
-            # k_fudge_factor = 4 * fudge_factor
-            # self._check_equal(
-            #     k_gold.grad, k_ref.grad, k.grad, k_fudge_factor, "Grad_Key"
-            # )
-            # v_fudge_factor = 4 * fudge_factor
-            # self._check_equal(
-            #     v_gold.grad, v_ref.grad, v.grad, v_fudge_factor, "Grad_Value"
-            # )
 
     def run_test(
         self,
@@ -293,10 +265,8 @@ class TestFlexAttention(InductorTestCase):
         KV_D: int = D,
     ):
         assert Q_H % KV_H == 0
-        score_mod = get_gqa_score_mod(score_mod, G=Q_H // KV_H, q_seq_len=Q_S)
-
         q = torch.randn(
-            (Q_B, KV_H, Q_S * (Q_H // KV_H), Q_D),
+            (Q_B, Q_H, Q_S, Q_D),
             dtype=dtype,
             device="cuda",
             requires_grad=False,
@@ -311,34 +281,18 @@ class TestFlexAttention(InductorTestCase):
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
         block_mask = None
-        sdpa_partial = create_attention(score_mod, block_mask)
+        sdpa_partial = create_attention(
+            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
+        )
         compiled_sdpa = torch.compile(sdpa_partial)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
         compiled_out = compiled_sdpa(q, k, v)
 
-        # TODO: Add backward support
-        # backward_grad = torch.randn(
-        #      (Q_B, KV_H, Q_S *(Q_H // KV_H), Q_D), dtype=dtype, device="cuda"
-        # )
-
-        # golden_out.backward(backward_grad.to(torch.float64))
-        # ref_out.backward(backward_grad)
-        # compiled_out.backward(backward_grad)
-
-        self._check_out_and_grad(
+        self._check_out(
             golden_out,
             ref_out,
             compiled_out,
-            q_gold,
-            q_ref,
-            q,
-            k_gold,
-            k_ref,
-            k,
-            v_gold,
-            v_ref,
-            v,
         )
 
     def run_test_with_call(
@@ -377,19 +331,10 @@ class TestFlexAttention(InductorTestCase):
         ref_out = golden_call(q_ref, k_ref, v_ref)
         compiled_out = compiled_sdpa(q, k, v)
 
-        self._check_out_and_grad(
+        self._check_out(
             golden_out,
             ref_out,
             compiled_out,
-            q_gold,
-            q_ref,
-            q,
-            k_gold,
-            k_ref,
-            k,
-            v_gold,
-            v_ref,
-            v,
         )
 
     @supported_platform
@@ -474,7 +419,7 @@ class TestFlexAttention(InductorTestCase):
         k_shape = (B, Hkv, S, D)
         v_shape = (B, Hkv, S, D)
 
-        q = q1.view(Hq // Hkv, Hkv, B, D).transpose(0, 2)
+        q = q1.view(1, Hq, B, D).transpose(0, 2)
 
         k_strides, k_offset = k_s(B, Hkv, S, D)
         k_max = [x * (y - 1) for x, y in zip(k_strides, k_shape)]
@@ -489,7 +434,9 @@ class TestFlexAttention(InductorTestCase):
         v = torch.as_strided(v1, v_shape, v_strides, v_offset)
 
         sdpa_partial = create_attention(
-            score_mod=_generate_alibi_bias(8), block_mask=None
+            score_mod=_generate_alibi_bias(8),
+            block_mask=None,
+            enable_gqa=(not Hq == Hkv),
         )
         compiled_sdpa = torch.compile(sdpa_partial)
         ref_out = sdpa_partial(q, k, v)
@@ -825,42 +772,48 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(bias_mod)
 
     @supported_platform
-    def test_causal_no_mask_vs_sdpa(self):
-        attention = functools.partial(flex_attention, score_mod=_causal)
+    def test_windowed_no_mask_vs_sdpa(self):
+        score_mod = _generate_windowed(1000)
+        attention = functools.partial(flex_attention, score_mod=score_mod)
+
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
 
         sdpa_attention = functools.partial(
-            torch.nn.functional.scaled_dot_product_attention, is_causal=True
+            torch.nn.functional.scaled_dot_product_attention, attn_mask=sdpa_mask
         )
 
         self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
 
     @supported_platform
-    def test_causal_full_mask_vs_sdpa(self):
+    def test_windowed_full_mask_vs_sdpa(self):
         def mask_mod(b, h, q, kv):
-            return q >= kv
+            return q + 1000 >= kv
+
+        score_mod = _generate_windowed(1000)
 
         block_mask = create_block_mask(mask_mod, 1, 1, 8, S)
         attention = functools.partial(
-            flex_attention, block_mask=block_mask, score_mod=_causal
+            flex_attention, block_mask=block_mask, score_mod=score_mod
         )
 
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
         sdpa_attention = functools.partial(
-            torch.nn.functional.scaled_dot_product_attention, is_causal=True
+            torch.nn.functional.scaled_dot_product_attention, attn_mask=sdpa_mask
         )
 
         self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
 
-    @expectedFailure  # TODO: add support for partial mask.
     @supported_platform
-    def test_causal_partial_block_vs_sdpa(self):
+    def test_windowed_partial_block_vs_sdpa(self):
         def mask_mod(b, h, q, kv):
-            return q >= kv
+            return q + 1000 >= kv
 
         block_mask = create_block_mask(mask_mod, 1, 1, 8, S)
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
         sdpa_attention = functools.partial(
-            torch.nn.functional.scaled_dot_product_attention, is_causal=True
+            torch.nn.functional.scaled_dot_product_attention, attn_mask=sdpa_mask
         )
 
         self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
