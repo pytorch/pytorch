@@ -31,13 +31,13 @@ class SocketOptions {
     return prefer_ipv6_;
   }
 
-  SocketOptions& connect_timeout(std::chrono::seconds value) noexcept {
+  SocketOptions& connect_timeout(std::chrono::milliseconds value) noexcept {
     connect_timeout_ = value;
 
     return *this;
   }
 
-  std::chrono::seconds connect_timeout() const noexcept {
+  std::chrono::milliseconds connect_timeout() const noexcept {
     return connect_timeout_;
   }
 
@@ -54,7 +54,7 @@ class SocketOptions {
 
  private:
   bool prefer_ipv6_ = true;
-  std::chrono::seconds connect_timeout_{30};
+  std::chrono::milliseconds connect_timeout_{std::chrono::seconds{30}};
   std::shared_ptr<Backoff> connect_backoff_{
       std::make_shared<FixedBackoff>(std::chrono::milliseconds(1000))};
 };
