@@ -249,6 +249,170 @@ void gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
   opmath_gpu_kernel_with_scalars<arg1_t, arg2_t, return_t, func_t>(iter, f);
 }
 
+template<typename arg1_t, typename arg2_t, typename arg3_t, typename return_t, typename func_t>
+struct ABinaryFunctor {
+  using traits = function_traits<func_t>;
+  using opmath_arg1_t = typename traits::template arg<0>::type;
+  __device__ return_t operator()(arg2_t b, arg3_t c) const {
+    return f(a, b, c);
+  }
+  ABinaryFunctor(func_t f_, opmath_arg1_t a_): f(f_), a(a_) {}
+  private:
+    func_t f;
+    opmath_arg1_t a;
+};
+
+template<typename arg1_t, typename arg2_t, typename arg3_t, typename return_t, typename func_t>
+struct BBinaryFunctor {
+  using traits = function_traits<func_t>;
+  using opmath_arg2_t = typename traits::template arg<1>::type;
+  __device__ return_t operator()(arg1_t a, arg3_t c) const {
+    return f(a, b, c);
+  }
+  BBinaryFunctor(func_t f_, opmath_arg2_t b_): f(f_), b(b_) {}
+  private:
+    func_t f;
+    opmath_arg2_t b;
+};
+
+template<typename arg1_t, typename arg2_t, typename arg3_t, typename return_t, typename func_t>
+struct CBinaryFunctor {
+  using traits = function_traits<func_t>;
+  using opmath_arg3_t = typename traits::template arg<2>::type;
+  __device__ return_t operator()(arg1_t a, arg2_t b) const {
+    return f(a, b, c);
+  }
+  CBinaryFunctor(func_t f_, opmath_arg3_t c_): f(f_), c(c_) {}
+  private:
+    func_t f;
+    opmath_arg3_t c;
+};
+
+template<typename arg1_t, typename arg2_t, typename arg3_t, typename return_t, typename func_t>
+struct ABUnaryFunctor {
+  using traits = function_traits<func_t>;
+  using opmath_arg1_t = typename traits::template arg<0>::type;
+  using opmath_arg2_t = typename traits::template arg<1>::type;
+  __device__ return_t operator()(arg3_t c) const {
+    return f(a, b, c);
+  }
+  ABUnaryFunctor(func_t f_, opmath_arg1_t a_, opmath_arg2_t b_): f(f_), a(a_), b(b_) {}
+  private:
+    func_t f;
+    opmath_arg1_t a;
+    opmath_arg2_t b;
+};
+
+template<typename arg1_t, typename arg2_t, typename arg3_t, typename return_t, typename func_t>
+struct ACUnaryFunctor {
+  using traits = function_traits<func_t>;
+  using opmath_arg1_t = typename traits::template arg<0>::type;
+  using opmath_arg3_t = typename traits::template arg<2>::type;
+  __device__ return_t operator()(arg2_t b) const {
+    return f(a, b, c);
+  }
+  ACUnaryFunctor(func_t f_, opmath_arg1_t a_, opmath_arg3_t c_): f(f_), a(a_), c(c_) {}
+  private:
+    func_t f;
+    opmath_arg1_t a;
+    opmath_arg3_t c;
+};
+
+template<typename arg1_t, typename arg2_t, typename arg3_t, typename return_t, typename func_t>
+struct BCUnaryFunctor {
+  using traits = function_traits<func_t>;
+  using opmath_arg2_t = typename traits::template arg<1>::type;
+  using opmath_arg3_t = typename traits::template arg<2>::type;
+  __device__ return_t operator()(arg1_t a) const {
+    return f(a, b, c);
+  }
+  BCUnaryFunctor(func_t f_, opmath_arg2_t b_, opmath_arg3_t c_): f(f_), b(b_), c(c_) {}
+  private:
+    func_t f;
+    opmath_arg2_t b;
+    opmath_arg3_t c;
+};
+
+// Though seemingly noop, this inserts casts from arg1_t to func_t's type
+// (which may be higher precision), as well as casts to return_t
+template<typename arg1_t, typename arg2_t, typename arg3_t, typename return_t, typename func_t>
+struct TenaryFunctor {
+  __device__ return_t operator()(arg1_t a, arg2_t b, arg3_t c) const {
+    return f(a, b, c);
+  }
+  TenaryFunctor(func_t f_): f(f_) {}
+  private:
+    func_t f;
+};
+
+template <typename arg1_t, typename arg2_t = arg1_t, typename arg3_t = arg1_t, typename return_t = arg1_t, typename func_t>
+void opmath_gpu_kernel_with_scalars_ternary(TensorIteratorBase& iter, const func_t& f) {
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 4);
+
+  using traits = function_traits<func_t>;
+  using opmath_arg1_t = typename traits::template arg<0>::type;
+  using opmath_arg2_t = typename traits::template arg<1>::type;
+  using opmath_arg3_t = typename traits::template arg<2>::type;
+  static_assert(
+      traits::arity == 3,
+      "gpu_kernel_with_scalars only supports three input arguments");
+
+  const bool is_cpu_first = iter.is_cpu_scalar(1);
+  const bool is_cpu_second = iter.is_cpu_scalar(2);
+  const bool is_cpu_third = iter.is_cpu_scalar(3);
+  if (is_cpu_first & !is_cpu_second & !is_cpu_third) {
+    ABinaryFunctor<arg1_t, arg2_t, arg3_t, return_t, func_t> af(f, iter.scalar_value<opmath_arg1_t>(1));
+    iter.remove_operand(1);
+    // TODO: When all kernels that use gpu_kernel_with_scalars are
+    // ported to structured, this device guard can be deleted.  This
+    // works around incorrect device guard generation for pre-structured
+    // kernels device guards, but structured kernels do it right and
+    // we can assume the device is already set correctly
+    const OptionalDeviceGuard device_guard(iter.device(1));
+    gpu_kernel(iter, af);
+  } else if (!is_cpu_first & is_cpu_second & !is_cpu_third) {
+    BBinaryFunctor<arg1_t, arg2_t, arg3_t, return_t, func_t> bf(f, iter.scalar_value<opmath_arg2_t>(2));
+    iter.remove_operand(2);
+    gpu_kernel(iter, bf);
+  } else if (!is_cpu_first & !is_cpu_second & is_cpu_third) {
+    CBinaryFunctor<arg1_t, arg2_t, arg3_t, return_t, func_t> cf(f, iter.scalar_value<opmath_arg3_t>(3));
+    iter.remove_operand(3);
+    gpu_kernel(iter, cf);
+  } else if ((is_cpu_first & is_cpu_second) & !is_cpu_third) {
+    ABUnaryFunctor<arg1_t, arg2_t, arg3_t, return_t, func_t> abf(f, iter.scalar_value<opmath_arg1_t>(1), iter.scalar_value<opmath_arg2_t>(2));
+    iter.remove_operand(2);
+    iter.remove_operand(1);
+    gpu_kernel(iter, abf);
+  } else if ((is_cpu_first & !is_cpu_second) & is_cpu_third) {
+    ACUnaryFunctor<arg1_t, arg2_t, arg3_t, return_t, func_t> acf(f, iter.scalar_value<opmath_arg1_t>(1), iter.scalar_value<opmath_arg3_t>(3));
+    iter.remove_operand(3);
+    iter.remove_operand(1);
+    gpu_kernel(iter, acf);
+  } else if ((!is_cpu_first & is_cpu_second) & is_cpu_third) {
+    BCUnaryFunctor<arg1_t, arg2_t, arg3_t, return_t, func_t> bcf(f, iter.scalar_value<opmath_arg2_t>(2), iter.scalar_value<opmath_arg3_t>(3));
+    iter.remove_operand(3);
+    iter.remove_operand(2);
+    gpu_kernel(iter, bcf);
+  } else {
+    gpu_kernel(iter, TenaryFunctor<arg1_t, arg2_t, arg3_t, return_t, func_t>(f));
+  }
+}
+
+// Legacy variant that assumes that func_t has the correct types
+// that we expect to load from memory
+template <typename func_t>
+void gpu_kernel_with_scalars_ternary(TensorIteratorBase& iter, const func_t& f) {
+  using traits = function_traits<func_t>;
+  static_assert(
+      traits::arity == 3,
+      "gpu_kernel_with_scalars only supports three input arguments");
+  using arg1_t = typename traits::template arg<0>::type;
+  using arg2_t = typename traits::template arg<1>::type;
+  using arg3_t = typename traits::template arg<2>::type;
+  using return_t = typename traits::result_type;
+  opmath_gpu_kernel_with_scalars_ternary<arg1_t, arg2_t, arg3_t, return_t, func_t>(iter, f);
+}
+
 namespace { // functions for `gpu_kernel_multiple_outputs`.
 
 // check the return type is `thrust::tuple`, not `std::tuple`.
