@@ -4408,9 +4408,8 @@ def sample_inputs_instance_norm(opinfo, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((1, 2, 3)), kwargs={})
 
 def sample_inputs_safe_softmax(opinfo, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    # Helper function to create boolean masks
     def make_bool_mask(*shape):
         return torch.randint(0, 2, shape, device=device, dtype=torch.bool)
 
@@ -4420,41 +4419,40 @@ def sample_inputs_safe_softmax(opinfo, device, dtype, requires_grad, **kwargs):
         mask_two_rows[rows - 3] = False
         return mask_two_rows
 
+    def convert_to_float_mask(mask: torch.Tensor) -> torch.Tensor:
+        return torch.where(~mask, float('-inf'), 0.0)
+
+    def with_requires_grad(tensor):
+        return tensor.requires_grad_(requires_grad)
+
+    def generate_input_from_mask(mask_shape, dim):
+        mask = make_bool_mask(*mask_shape)
+        input_tensor = make_arg(mask_shape)
+        masked_input = input_tensor + convert_to_float_mask(mask)
+        return SampleInput(with_requires_grad(masked_input), kwargs={'dim': dim})
+
     samples = [
         # Basic 3D tensor with mask
-        SampleInput(make_arg((2, 3, 4)),
-                    kwargs={'dim': 1, 'mask': make_bool_mask(2, 3, 4)}),
-
+        generate_input_from_mask((2, 3, 4), dim=1),
         # 2D tensor with mask, testing different dim
-        SampleInput(make_arg((5, 5)),
-                    kwargs={'dim': 0, 'mask': make_bool_mask(5, 5)}),
-
-        # 4D tensor, testing with a different dimg
-        SampleInput(make_arg((2, 3, 4, 5)),
-                    kwargs={'dim': 2, 'mask': make_bool_mask(2, 3, 4, 5)}),
-
+        generate_input_from_mask((5, 5), dim=0),
+        # 4D tensor, testing with a different dim
+        generate_input_from_mask((2, 3, 4, 5), dim=2),
         # Edge case: 1D tensor
-        SampleInput(make_arg((10,)),
-                    kwargs={'dim': 0, 'mask': make_bool_mask(10)}),
-
+        generate_input_from_mask((10,), dim=0),
         # Edge case: tensor with one dimension of size 1
-        SampleInput(make_arg((1, 5, 5)),
-                    kwargs={'dim': 1, 'mask': make_bool_mask(1, 5, 5)}),
-
+        generate_input_from_mask((1, 5, 5), dim=1),
         # Testing with all elements masked
-        SampleInput(make_arg((3, 3)),
-                    kwargs={'dim': 1, 'mask': torch.zeros((3, 3), dtype=torch.bool, device=device)}),
-
+        SampleInput(with_requires_grad(make_arg((3, 3)) + convert_to_float_mask(torch.zeros((3, 3), dtype=torch.bool, device=device))),
+                    kwargs={'dim': 1}),
         # Testing with no elements masked
-        SampleInput(make_arg((3, 3)),
-                    kwargs={'dim': 1, 'mask': torch.ones((3, 3), dtype=torch.bool, device=device)}),
-
+        SampleInput(with_requires_grad(make_arg((3, 3)) + convert_to_float_mask(torch.ones((3, 3), dtype=torch.bool, device=device))),
+                    kwargs={'dim': 1}),
         # Testing with two rows masked
-        SampleInput(make_arg((6, 3)),
-                    kwargs={'dim': 1, 'mask': mask_two_rows(6, 3)}),
+        SampleInput(with_requires_grad(make_arg((6, 3)) + convert_to_float_mask(mask_two_rows(6, 3))),
+                    kwargs={'dim': 1}),
     ]
     yield from samples
-
 
 def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -16170,7 +16168,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         'torch.ops.aten._safe_softmax.default',
-        dtypes=floating_types_and(torch.half, torch.bfloat16),
+        dtypes=all_types_and(torch.half, torch.bfloat16, torch.bool),
         sample_inputs_func=sample_inputs_safe_softmax,
         assert_jit_shape_analysis=True,
         assert_autodiffed=True,
