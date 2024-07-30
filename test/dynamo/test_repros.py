@@ -5364,7 +5364,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         params = {"from": -10, "to": 10}
         tensor = torch.randn([2, 3])
         res = random_op(tensor, params)
-    
+
     # https://github.com/pytorch/pytorch/issues/131019
     def test_tensor_uniform(self):
         def uniform_op(tensor, params):
