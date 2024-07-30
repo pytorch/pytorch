@@ -11,7 +11,6 @@ from typing_extensions import Self
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.config import benchmarking as benchmarking_config, is_fbcode
-from torch._inductor.utils import is_cpu_device
 
 
 log = torch._logging.getArtifactLogger(__name__, "benchmarking")
@@ -218,6 +217,14 @@ class LazyBenchmark:
         if not hasattr(self, "benchmark"):
             return other / self.timing_ms
         return LazyBenchmark(lambda: other / self.timing_ms)
+
+
+def is_cpu_device(inputs: List[Any]) -> bool:
+    return all(
+        _input.device == torch.device("cpu")
+        for _input in inputs
+        if isinstance(_input, torch.Tensor)
+    )
 
 
 class Benchmarker:
