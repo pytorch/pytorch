@@ -7,6 +7,7 @@ import dis
 import enum
 import functools
 import gc
+import importlib
 import itertools
 import logging
 import math
@@ -28,10 +29,8 @@ import numpy as np
 
 import torch
 import torch._dynamo.testing
-
 import torch._inductor.test_case
 import torch.onnx.operators
-
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from torch import Tensor
@@ -84,6 +83,11 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
+
+
+HAS_OPTREE = importlib.util.find_spec("optree")
+if HAS_OPTREE:
+    import optree
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
@@ -223,6 +227,24 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         with self.assertRaises(TypeError):
             fn(torch.randn(16))
+
+    @unittest.skipIf(not HAS_OPTREE, "missing optree package")
+    def test_optree_graph_break_message(self):
+        @torch.compile(
+            backend="eager",
+        )
+        def fn(x):
+            d = {"a": 1}
+            optree.tree_flatten(d)
+            return torch.sin(x)
+
+        fn(torch.randn(4))
+        self.assertEqual(len(counters["graph_break"]), 1)
+        first_graph_break = list(counters["graph_break"].keys())[0]
+        self.assertExpectedInline(
+            first_graph_break,
+            "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py",
+        )
 
     @skipIfNNModuleInlined("fails internal CI")
     def test_cpp_extension_recommends_custom_ops(self):
@@ -1242,6 +1264,21 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             """tensor 'L['a']' size mismatch at index 0. expected 3, actual 4""",
             guard_failure.reason,
         )
+
+    def test_recompile_message_on_parameter(self):
+        def guard_failures(failure):
+            self.assertIn("torch._dynamo.config.force_parameter_static_shapes", failure)
+
+        @torch._dynamo.optimize("eager", guard_fail_fn=guard_failures)
+        def fn(x):
+            return torch.cos(x)
+
+        x1 = torch.nn.Parameter(torch.rand(32, 16))
+        x2 = torch.nn.Parameter(torch.rand(8, 4, 3, 3))
+        x3 = torch.nn.Parameter(torch.rand(8, 8, 3, 3))
+        fn(x1)
+        fn(x2)
+        fn(x3)
 
     def test_builtin_abs(self):
         def fn(x, y):
