@@ -6,6 +6,7 @@ from .schedules import (
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
+    ScheduleForwardOnly,
 )
 from .stage import build_stage, PipelineStage
 
@@ -22,4 +23,5 @@ __all__ = [
     "ScheduleGPipe",
     "ScheduleInterleaved1F1B",
     "ScheduleLoopedBFS",
+    "ScheduleForwardOnly",
 ]

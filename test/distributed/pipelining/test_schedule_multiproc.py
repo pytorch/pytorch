@@ -19,6 +19,7 @@ from torch.distributed.pipelining import (
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
+    ScheduleForwardOnly,
 )
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
@@ -55,6 +56,47 @@ class ScheduleTest(MultiProcContinousTest):
         super().setUpClass()
         dev_id = cls.rank % torch.cuda.device_count()
         cls.device = torch.device(f"cuda:{dev_id}")
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("ScheduleClass", [ScheduleForwardOnly])
+    def test_forward_only(self, ScheduleClass):
+        mod = MultiMLP(d_hid, n_layers=self.world_size)
+        mod.to(self.device)
+
+        x = torch.randn(batch_size, d_hid, device=self.device)
+
+        num_microbatches = 4
+        x_mb = x.chunk(num_microbatches)[0]
+
+        # Create a pipeline
+        split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
+        pipe = pipeline(
+            mod,
+            mb_args=(x_mb,),
+            split_spec=split_spec,
+        )
+
+        stage = pipe.build_stage(
+            self.rank,
+            self.device,
+        )
+
+        # Attach to a schedule
+        schedule = ScheduleClass(stage, num_microbatches)
+
+        # Run
+        num_iters = 20
+        for _ in range(num_iters):
+            if self.rank == 0:
+                schedule.step(x)
+                dist.irecv(x, src=self.world_size - 1)
+            elif self.rank == self.world_size - 1:
+                out = schedule.step()
+                dist.isend(out, dst=0)
+            else:
+                schedule.step()
+            
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
