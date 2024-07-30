@@ -16,6 +16,7 @@ BlockMask Utilities
 .. autofunction:: create_mask
 .. autofunction:: and_masks
 .. autofunction:: or_masks
+.. autofunction:: noop_mask
 
 BlockMask
 ---------
