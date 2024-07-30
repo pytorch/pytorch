@@ -4057,9 +4057,10 @@ class KernelGroup:
         code = BracesBuffer()
         # 1. Include header files
         # TODO: support kernel profile on other platforms
-        enable_kernel_profile = (
-            config.cpp.enable_kernel_profile and sys.platform == "linux"
-        )
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
         code.writeline(codecache.cpp_prefix())
