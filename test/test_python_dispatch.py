@@ -1753,7 +1753,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
     def test_mode_detection(self):
         class InfraMode(TorchDispatchMode):
             @classmethod
-            def is_infra_mode(self):
+            def is_infra_mode(cls):
                 return True
 
         class NonInfraMode(TorchDispatchMode):
