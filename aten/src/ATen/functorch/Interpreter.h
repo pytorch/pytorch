@@ -179,7 +179,7 @@ struct Interpreter {
   // fields
   TransformType type_{};
   int64_t level_{};
-  optional<c10::impl::LocalDispatchKeySet> savedLocalDispatchKeySet_;
+  std::optional<c10::impl::LocalDispatchKeySet> savedLocalDispatchKeySet_;
   std::shared_ptr<bool> is_alive_;
   InterpreterMeta meta_;
 };

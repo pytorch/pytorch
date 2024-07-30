@@ -6,7 +6,6 @@ import unittest
 
 import torch
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
-
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
@@ -2326,7 +2325,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def forward(self, x, y):
                 x = self.conv(self.relu(x))
                 y = self.linear(y)
-                y = torch.cat((y, y), 1)
+                y = torch.cat((y, y + 1), 1)
                 y = torch.ops.aten.permute.default(y, [0, 2, 1]).reshape(1, 32, 28, 28)
                 return x + y
 

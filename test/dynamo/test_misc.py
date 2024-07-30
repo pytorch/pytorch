@@ -7,6 +7,7 @@ import dis
 import enum
 import functools
 import gc
+import importlib
 import itertools
 import logging
 import math
@@ -28,10 +29,8 @@ import numpy as np
 
 import torch
 import torch._dynamo.testing
-
 import torch._inductor.test_case
 import torch.onnx.operators
-
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from torch import Tensor
@@ -84,6 +83,11 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
+
+
+HAS_OPTREE = importlib.util.find_spec("optree")
+if HAS_OPTREE:
+    import optree
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
@@ -223,6 +227,24 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         with self.assertRaises(TypeError):
             fn(torch.randn(16))
+
+    @unittest.skipIf(not HAS_OPTREE, "missing optree package")
+    def test_optree_graph_break_message(self):
+        @torch.compile(
+            backend="eager",
+        )
+        def fn(x):
+            d = {"a": 1}
+            optree.tree_flatten(d)
+            return torch.sin(x)
+
+        fn(torch.randn(4))
+        self.assertEqual(len(counters["graph_break"]), 1)
+        first_graph_break = list(counters["graph_break"].keys())[0]
+        self.assertExpectedInline(
+            first_graph_break,
+            "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py",
+        )
 
     @skipIfNNModuleInlined("fails internal CI")
     def test_cpp_extension_recommends_custom_ops(self):
@@ -1243,6 +1265,21 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             guard_failure.reason,
         )
 
+    def test_recompile_message_on_parameter(self):
+        def guard_failures(failure):
+            self.assertIn("torch._dynamo.config.force_parameter_static_shapes", failure)
+
+        @torch._dynamo.optimize("eager", guard_fail_fn=guard_failures)
+        def fn(x):
+            return torch.cos(x)
+
+        x1 = torch.nn.Parameter(torch.rand(32, 16))
+        x2 = torch.nn.Parameter(torch.rand(8, 4, 3, 3))
+        x3 = torch.nn.Parameter(torch.rand(8, 8, 3, 3))
+        fn(x1)
+        fn(x2)
+        fn(x3)
+
     def test_builtin_abs(self):
         def fn(x, y):
             return abs(x) + abs(y)
@@ -1364,6 +1401,20 @@ utils_device.CURRENT_DEVICE == None""".split(
         r2 = opt_fn(i)
         self.assertEqual(r1, r2)
 
+    def test_tensor_hasattr(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            if hasattr(x, "test"):
+                return x + 2
+            else:
+                return x + 1
+
+        self.assertEqual(torch.ones(2, 2) + 1, fn(torch.ones(2, 2)))
+
+        inp = torch.ones(2, 2)
+        inp.test = None
+        self.assertEqual(torch.ones(2, 2) + 2, fn(inp))
+
     def test_shape_unpack(self):
         def fn(x):
             a, b = x.size()
@@ -1407,7 +1458,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         r1 = fn(i, [])
         opt_fn = torch._dynamo.optimize("eager")(fn)
         r2 = opt_fn(i, [])
-        r3 = opt_fn(i, tuple())
+        r3 = opt_fn(i, ())
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
@@ -4312,7 +4363,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         subs_of_foo_reg = Foo.__subclasses__()
         sub_of_foo_subclass_var_reg = subs_of_foo_reg[0].__subclasses__()
 
-        sub_of_foo_subclass_var_optim = list()
+        sub_of_foo_subclass_var_optim = []
         counter = CompileCounter()
 
         @torch._dynamo.optimize_assert(counter)
@@ -6515,6 +6566,61 @@ utils_device.CURRENT_DEVICE == None""".split(
             guard_failure[0],
         )
 
+    def test_no_guard_for_unused_sym_node_fstring(self):
+        def fn(x):
+            f"{x.shape[0]}"
+            return x.sin()
+
+        guard_failure = None
+
+        def guard_failures(failure):
+            nonlocal guard_failure
+            guard_failure = failure
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=guard_failures, dynamic=True
+        )(fn)
+        args1 = torch.randn(10, 11)
+        out = fn(args1)
+        opt_out = opt_fn(args1)
+        self.assertEqual(out, opt_out)
+
+        # We change x.shape[0] to test whether it's guarded
+        args2 = torch.randn(9, 11)
+        out = fn(args2)
+        opt_out = opt_fn(args2)
+        self.assertEqual(out, opt_out)
+        self.assertEqual(guard_failure, None)
+
+    def test_guard_sym_node_fstring_when_used(self):
+        def fn(x):
+            # assign fstring to a variable causes the fstring to be used,
+            # which realizes the variable tracker.
+            f_str = f"{x.shape[0]}"
+            return x.sin()
+
+        guard_failure = None
+
+        def guard_failures(failure):
+            nonlocal guard_failure
+            guard_failure = failure
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=guard_failures, dynamic=True
+        )(fn)
+        args1 = torch.randn(10, 11)
+        out = fn(args1)
+        opt_out = opt_fn(args1)
+        self.assertEqual(out, opt_out)
+
+        # We change x.shape[0] to test whether it's guarded
+        args2 = torch.randn(9, 11)
+        out = fn(args2)
+        opt_out = opt_fn(args2)
+        self.assertEqual(out, opt_out)
+        self.assertTrue(guard_failure is not None)
+        self.assertIn("""tensor 'L['x']' size mismatch at index 0""", guard_failure[0])
+
     def test_restore_graphstate(self):
         # This function does some guard accumulation,
         # and then rolls back due to control flow.
@@ -7081,7 +7187,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         od = collections.OrderedDict
 
         def fn():
-            d1 = dict()
+            d1 = dict()  # noqa: C408
             d1["a"] = 1
             d2 = od(d1)
             d2["b"] = 2
@@ -9537,8 +9643,8 @@ def ___make_guard_fn():
 ShapeEnv not equal: field values don't match:
 
 ==> settings: values don't match.
-  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, _allow_complex_guards_as_runtime_asserts=False)
-  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, _allow_complex_guards_as_runtime_asserts=False)
+  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False)
+  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False)
 """,
         )
         self._replay_and_check(main)
@@ -9842,7 +9948,7 @@ ShapeEnv not equal: field values don't match:
             if not forward_deterministic and backward_deterministic:
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "^This compiled backward function is being run with torch\.use_deterministic_algorithms",
+                    r"^This compiled backward function is being run with torch\.use_deterministic_algorithms",
                 ):
                     res.backward(grad)
 
@@ -10654,6 +10760,18 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_iter_type(self):
+        @torch.compile(fullgraph=True)
+        def fn(y):
+            x = iter([])
+            if isinstance(x, list):
+                return y + 1
+            else:
+                return y + 2
+
+        res = fn(torch.ones(2))
+        self.assertEqual(torch.ones(2) + 2, res)
 
     def test_descriptor(self):
         class lazy_property:

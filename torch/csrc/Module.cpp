@@ -10,6 +10,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/BlasBackend.h>
+#include <ATen/CachedTensorUtils.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/LegacyVmapMode.h>
@@ -1785,6 +1786,22 @@ Call this whenever a new thread is created in order to propagate values from
 :func:`torch.set_num_threads` onto the new thread.
 )");
 
+  py_module.def("_set_cached_tensors_enabled", [](bool enabled) {
+    at::caching::set_cached_tensors_enabled(enabled);
+  });
+
+  py_module.def("_add_cached_tensor", [](const at::Tensor& t) {
+    at::caching::add_cached_tensor(t);
+  });
+
+  py_module.def("_remove_cached_tensor", [](const at::Tensor& t) {
+    at::caching::remove_cached_tensor(t);
+  });
+
+  py_module.def("_is_cached_tensor", [](const at::Tensor& t) {
+    return at::caching::is_cached_tensor(t);
+  });
+
   ASSERT_TRUE(
       set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
@@ -1936,16 +1953,24 @@ Call this whenever a new thread is created in order to propagate values from
                        at::Tensor const& value,
                        std::optional<at::Tensor> attn_mask,
                        double dropout,
-                       bool is_causal) {
+                       bool is_causal,
+                       bool enable_gqa) {
         return sdp::sdp_params{
-            query, key, value, std::move(attn_mask), dropout, is_causal};
+            query,
+            key,
+            value,
+            std::move(attn_mask),
+            dropout,
+            is_causal,
+            enable_gqa};
       }))
       .def_readonly("query", &sdp::sdp_params::query)
       .def_readonly("key", &sdp::sdp_params::key)
       .def_readonly("value", &sdp::sdp_params::value)
       .def_readonly("attn_mask", &sdp::sdp_params::attn_mask)
       .def_readonly("dropout", &sdp::sdp_params::dropout)
-      .def_readonly("is_causal", &sdp::sdp_params::is_causal);
+      .def_readonly("is_causal", &sdp::sdp_params::is_causal)
+      .def_readonly("enable_gqa", &sdp::sdp_params::enable_gqa);
 
   py::enum_<sdp::SDPBackend>(
       py_module,
