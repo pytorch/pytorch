@@ -85,7 +85,6 @@ ExprHandle ExprHandle::operator>>(const ExprHandle& other) const {
   return Rshift::make(*this, other);
 }
 
-// NOLINTNEXTLINE
 #define IMM_EXPR_DECLARE(Type, Name) \
   ExprHandle::ExprHandle(Type v) : ExprHandle(Name##Imm::make(v)) {}
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_EXPR_DECLARE);
@@ -209,12 +208,12 @@ ExprHandle fast_log(const ExprHandle& v) {
   // https://github.com/shibatch/sleef/blob/master/src/libm/sleefsp.c#L1131
   // to generate coefficients, this tool is provided
   // https://github.com/shibatch/sleef/blob/master/src/gencoef/gencoef.txt
-  auto ilogb2kf = [](ExprHandle x) {
+  auto ilogb2kf = [](const ExprHandle& x) {
     auto y = (bitcast<int32_t>(x) >> IntImm::make(23)) & IntImm::make(0xff);
     return y - IntImm::make(0x7f);
   };
 
-  auto ldexp3kf = [](ExprHandle x, ExprHandle e) {
+  auto ldexp3kf = [](const ExprHandle& x, const ExprHandle& e) {
     return bitcast<float>(bitcast<int32_t>(x) + (e << IntImm::make(23)));
   };
   auto e = ilogb2kf(v * FloatImm::make(1.0 / 0.75));
@@ -223,7 +222,7 @@ ExprHandle fast_log(const ExprHandle& v) {
   auto x = (m - one) / (m + one);
   auto x2 = x * x;
 
-  auto mlaf = [](ExprHandle x, ExprHandle y, float z) {
+  auto mlaf = [](const ExprHandle& x, const ExprHandle& y, float z) {
     return x * y + FloatImm::make(z);
   };
 
@@ -243,7 +242,7 @@ ExprHandle fast_log(const ExprHandle& v) {
 }
 
 ExprHandle log_vml(const ExprHandle& v) {
-  auto mlaf = [](ExprHandle x, ExprHandle y, float z) {
+  auto mlaf = [](const ExprHandle& x, const ExprHandle& y, float z) {
     return x * y + FloatImm::make(z);
   };
 
@@ -368,9 +367,7 @@ std::vector<ExprPtr> make_contiguous_strides(
   if (!dims.empty()) {
     strides.resize(dims.size());
     auto si = immLike(dims[0], 1);
-    // NOLINTNEXTLINE
-    for (int i = dims.size() - 1; i >= 0; --i) {
-      // NOLINTNEXTLINE
+    for (int64_t i = dims.size() - 1; i >= 0; --i) {
       strides[i] = si;
       si = alloc<Mul>(si, dims[i].node());
     }
@@ -411,7 +408,7 @@ std::vector<ExprPtr> make_channels_last_strides(
 }
 
 Buf::Buf(
-    VarPtr var,
+    const VarPtr& var,
     std::vector<ExprPtr> dims,
     Dtype dtype,
     ExprPtr initializer,
@@ -512,9 +509,9 @@ std::vector<ExprHandle> BufHandle::dims() const {
 }
 
 bool Buf::is_cont_with(int cur_dim, int adjacent_dim) const {
-  auto is_cont_fn = [](ExprPtr adjacent_dim,
-                       ExprPtr adjacent_stride,
-                       ExprPtr cur_stride) {
+  auto is_cont_fn = [](const ExprPtr& adjacent_dim,
+                       const ExprPtr& adjacent_stride,
+                       const ExprPtr& cur_stride) {
     // For static shape
     bool res = exprEquals(
         cur_stride,

@@ -20,7 +20,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -219,14 +219,20 @@ class BlockStackEntry:
     inst: Instruction
     target: Instruction
     stack_index: Optional[int] = None
-    with_context: Optional[ContextWrappingVariable] = None
+    with_context: Optional[
+        Union[ContextWrappingVariable, GenericContextWrappingVariable]
+    ] = None
 
     def can_restore(self):
         return self.with_context is not None
 
     def resume_fn(self):
         assert self.stack_index is not None
-        if self.with_context and self.with_context.target_values:
+        if (
+            self.with_context
+            and hasattr(self.with_context, "target_values")
+            and self.with_context.target_values
+        ):
             return ReenterWith(self.stack_index, tuple(self.with_context.target_values))
         else:
             return ReenterWith(self.stack_index)
@@ -599,6 +605,7 @@ def break_graph_if_unsupported(*, push):
             # Reconstruct the context variable CLASS in the block stack
             for b in self.block_stack:
                 assert b.with_context is not None
+                assert isinstance(b.with_context, ContextWrappingVariable)
                 b.with_context.reconstruct_type(cg)
                 cg.extend_output(b.resume_fn().try_except(cg.code_options, cleanup))
             self.output.add_output_instructions(cg.get_instructions())
@@ -1583,6 +1590,10 @@ class InstructionTranslatorBase(
         ) and argsvars.has_force_unpack_var_sequence(self):
             argsvars = TupleVariable(argsvars.force_unpack_var_sequence(self))
 
+        # Unpack for cases like fn(**obj) where obj is a map
+        if isinstance(kwargsvars, UserDefinedObjectVariable):
+            kwargsvars = BuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
+
         if not isinstance(argsvars, BaseListVariable) or not isinstance(
             kwargsvars, ConstDictVariable
         ):
@@ -1746,7 +1757,7 @@ class InstructionTranslatorBase(
         items = []
         for seq in seqs:
             try:
-                items.extend(seq.unpack_var_sequence(self))
+                items.extend(seq.force_unpack_var_sequence(self))
             except NotImplementedError:
                 unimplemented(f"BUILD_LIST_UNPACK {seq}")
         self.push(cls(items, mutable_local=MutableLocal()))
@@ -1784,7 +1795,7 @@ class InstructionTranslatorBase(
         assert isinstance(keys, TupleVariable)
         assert keys.is_python_constant()
 
-        keys = keys.unpack_var_sequence(self)
+        keys = keys.force_unpack_var_sequence(self)
         assert len(keys) == len(values)
 
         self.push(
@@ -1874,8 +1885,8 @@ class InstructionTranslatorBase(
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             val = [wrap_fx_proxy(self, proxy[i]) for i in range(inst.argval)]
-        elif seq.has_unpack_var_sequence(self):
-            val = seq.unpack_var_sequence(self)
+        elif seq.has_force_unpack_var_sequence(self):
+            val = seq.force_unpack_var_sequence(self)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
         if len(val) != inst.argval:
@@ -1888,8 +1899,8 @@ class InstructionTranslatorBase(
         prefix = inst.argval & 0xFF  # low byte
         suffix = inst.argval >> 8  # high byte
         seq = self.pop()
-        if seq.has_unpack_var_sequence(self):
-            vals = list(seq.unpack_var_sequence(self))
+        if seq.has_force_unpack_var_sequence(self):
+            vals = list(seq.force_unpack_var_sequence(self))
             assert len(vals) >= prefix + suffix
             vals_prefix = vals[:prefix]
             vals_list = vals[prefix : len(vals) - suffix]
@@ -2180,8 +2191,12 @@ class InstructionTranslatorBase(
             args = args + contents[2:]
             kwargs = {}
 
-        self.call_function(fn, args, kwargs)
-        self.kw_names = None
+        try:
+            # if call_function fails, need to set kw_names to None, otherwise
+            # a subsequent call may have self.kw_names set to an old value
+            self.call_function(fn, args, kwargs)
+        finally:
+            self.kw_names = None
 
     @break_graph_if_unsupported(push=1)
     def CALL(self, inst):
@@ -2209,11 +2224,18 @@ class InstructionTranslatorBase(
 
     def setup_or_before_with(self, inst):
         ctx = self.pop()
-        if not isinstance(ctx, ContextWrappingVariable):
+        if not isinstance(
+            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+        ):
             unimplemented(f"{inst.opname} {ctx}")
 
         if isinstance(ctx, GenericContextWrappingVariable):
             self.generic_context_manager_depth += 1
+
+        # Need this redundant check for mypy
+        assert isinstance(
+            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+        )
 
         exit = WithExitFunctionVariable(
             ctx,
@@ -2302,7 +2324,7 @@ class InstructionTranslatorBase(
             self.UNARY_POSITIVE(inst)
         elif inst.argval == 6:
             # INTRINSIC_LIST_TO_TUPLE
-            self.push(TupleVariable(self.pop().unpack_var_sequence(self)))
+            self.push(TupleVariable(self.pop().force_unpack_var_sequence(self)))
         else:
             unimplemented(f"missing CALL_INTRINSIC_1 operand {inst.argval}")
 
