@@ -2204,6 +2204,17 @@ if (custom_op_wrapper.get() == NULL) {
                 return f"PyBool_FromLong({1 if raw_arg else 0})"
             elif isinstance(arg_type, torch.StringType):
                 return f'PyUnicode_FromString("{raw_arg}")'
+            elif isinstance(arg_type, torch.NumberType):
+                # Union[bool, int, float, complex]
+                # torch/_prims_common/__init__.py
+                if isinstance(raw_arg, int):
+                    return f"PyLong_FromLongLong({raw_arg})"
+                elif isinstance(raw_arg, float):
+                    return f"PyFloat_FromDouble({raw_arg})"
+                elif isinstance(raw_arg, bool):
+                    return f"PyLong_FromLong({raw_arg})"
+                elif isinstance(raw_arg, complex):
+                    return f"PyComplex_FromDoubles({raw_arg.real, raw_arg.imag})"
             else:
                 raise NotImplementedError(
                     f"arg type {arg_type} is not yet supported by custom_op_wrapper"
