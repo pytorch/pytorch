@@ -36,6 +36,7 @@ jobs:
         path: ${{ env.home_dir }}//actionrepo
 
     - name: Set conda environment
+      shell: cmd
       run: |
         echo CALL
         call C:\Users\nrvalgo_jenkinsadm\miniforge3\Scripts\activate.bat
