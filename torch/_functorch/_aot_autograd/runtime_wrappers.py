@@ -310,7 +310,13 @@ def _create_runtime_wrapper(
             for idx in indices_of_inps_to_detach:
                 if isinstance(args_[idx], torch.Tensor):
                     args_[idx] = args_[idx].detach()
-            with torch.autograd._force_original_view_tracking(True):
+
+            # It's possible to have trace_joint inside user specified with no_grad() region,
+            # if there is a nested with enable_grad(), that forces some outputs to require gradients.
+            # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
+            with torch.autograd._force_original_view_tracking(
+                True
+            ), torch.enable_grad():
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )
