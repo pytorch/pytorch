@@ -38,7 +38,6 @@ inline void _scale_attn_mask_fusion_kernel(
   constexpr int64_t T2_n = 1;
   auto vec_scale = at::vec::VectorizedN<T1, T1_n>(val);
   int64_t i = 0;
- #if !defined(__powerpc__)
   for (; i < size - (size % vec_size2); i += vec_size2) {
     auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
     at::vec::VectorizedN<T2, T2_n> b_n;
@@ -51,7 +50,6 @@ inline void _scale_attn_mask_fusion_kernel(
     auto res = a_n * vec_scale + b_n_convert;
     res.store(out + i);
   }
- #endif //powerpc
   for (; i < size; i++) {
     auto tmp0 = a[i];
     T1 tmp1;
