@@ -1,4 +1,5 @@
 # Owner(s): ["module: optimizer", "module: LrScheduler" ]
+import copy
 import math
 import pickle
 import tempfile
@@ -2402,6 +2403,119 @@ class TestLRScheduler(TestCase):
             scheduler2 = LRClass(self.opt)
             scheduler2.load_state_dict(state_dict_loaded)
             self.assertEqual(scheduler2.state_dict(), state_dict)
+
+    @parametrize(
+        "LRClass",
+        [
+            partial(LambdaLR, lr_lambda=lambda e: e // 10),
+            partial(MultiplicativeLR, lr_lambda=lambda e: 0.95),
+            partial(StepLR, step_size=30),
+            partial(MultiStepLR, milestones=[30, 80]),
+            ConstantLR,
+            LinearLR,
+            partial(ExponentialLR, gamma=0.9),
+            PolynomialLR,
+            partial(CosineAnnealingLR, T_max=10),
+            partial(CosineAnnealingWarmRestarts, T_0=20),
+        ],
+    )
+    def test_constant_initial_lr(self, LRClass):
+        # Test that the initial learning rate is constant
+        lr = torch.as_tensor(0.1)
+        opt = SGD([torch.nn.Parameter(torch.randn(1))], lr=lr)
+        sch = LRClass(opt)
+
+        ori_param_groups = copy.deepcopy(opt.param_groups)
+
+        for i in range(2):
+            opt.step()
+            sch.step(i)
+            lr.multiply_(0.1)
+            for group, ori_group in zip(opt.param_groups, ori_param_groups):
+                self.assertEqual(group["initial_lr"], ori_group["initial_lr"])
+                self.assertEqual(sch.base_lrs, [0.1])
+
+    def test_constant_initial_params_cyclelr(self):
+        # Test that the initial learning rate is constant
+        lr = torch.as_tensor(0.1)
+        max_lr = torch.as_tensor(0.2)
+        base_momentum = torch.as_tensor(0.8)
+        max_momentum = torch.as_tensor(0.9)
+        opt = SGD([torch.nn.Parameter(torch.randn(1))], lr=lr)
+        sch = CyclicLR(
+            opt,
+            base_lr=lr,
+            max_lr=max_lr,
+            base_momentum=base_momentum,
+            max_momentum=max_momentum,
+        )
+        ori_param_groups = copy.deepcopy(opt.param_groups)
+
+        for i in range(2):
+            lr.multiply_(0.5)
+            max_lr.multiply_(0.5)
+            base_momentum.multiply_(0.5)
+            max_momentum.multiply_(0.5)
+            opt.step()
+            sch.step(i)
+            for group, ori_group in zip(opt.param_groups, ori_param_groups):
+                self.assertEqual(group["initial_lr"], ori_group["initial_lr"])
+                self.assertEqual(group["max_momentum"], ori_group["max_momentum"])
+                self.assertEqual(group["base_momentum"], ori_group["base_momentum"])
+                self.assertEqual(sch.base_lrs, [0.1])
+                self.assertEqual(sch.max_lrs, [0.2])
+                self.assertEqual(group["max_momentum"], 0.9)
+                self.assertEqual(group["base_momentum"], 0.8)
+
+    def test_constant_initial_params_onecyclelr(self):
+        # Test that the initial learning rate is constant
+        lr = torch.as_tensor(0.1)
+        base_momentum = torch.as_tensor(0.85)
+        max_momentum = torch.as_tensor(0.95)
+        opt = SGD([torch.nn.Parameter(torch.randn(1))], lr=lr)
+        sch = OneCycleLR(
+            opt,
+            max_lr=lr,
+            total_steps=10,
+            base_momentum=base_momentum,
+            max_momentum=max_momentum,
+        )
+        ori_param_groups = copy.deepcopy(opt.param_groups)
+
+        for i in range(2):
+            lr.multiply_(0.5)
+            base_momentum.multiply_(0.5)
+            max_momentum.multiply_(0.5)
+            opt.step()
+            sch.step(i)
+
+            for group, ori_group in zip(opt.param_groups, ori_param_groups):
+                self.assertEqual(group["initial_lr"], ori_group["initial_lr"])
+                self.assertEqual(group["max_lr"], ori_group["max_lr"])
+                self.assertEqual(group["min_lr"], ori_group["min_lr"])
+                self.assertEqual(group["max_momentum"], ori_group["max_momentum"])
+                self.assertEqual(group["base_momentum"], ori_group["base_momentum"])
+                self.assertEqual(group["max_momentum"], 0.95)
+                self.assertEqual(group["base_momentum"], 0.85)
+
+    def test_constant_initial_params_swalr(self):
+        # Test that the initial learning rate is constant
+        lr = torch.as_tensor(0.1)
+        swa_lr = torch.as_tensor(0.05)
+        opt = SGD([torch.nn.Parameter(torch.randn(1))], lr=lr)
+        sch = SWALR(opt, swa_lr=swa_lr)
+        ori_param_groups = copy.deepcopy(opt.param_groups)
+
+        for i in range(2):
+            lr.multiply_(0.5)
+            swa_lr.multiply_(0.5)
+            opt.step()
+            sch.step()
+            for group, ori_group in zip(opt.param_groups, ori_param_groups):
+                self.assertEqual(group["initial_lr"], ori_group["initial_lr"])
+                self.assertEqual(group["swa_lr"], ori_group["swa_lr"])
+                self.assertEqual(group["swa_lr"], 0.05)
+                self.assertEqual(sch.base_lrs, [0.1])
 
 
 instantiate_parametrized_tests(TestLRScheduler)

@@ -32,7 +32,7 @@ jobs:
           cache: pip
 
       - run: |
-          pip3 install requests==2.26 rockset==1.0.3 boto3==1.19.12
+          pip3 install requests==2.32.2 rockset==1.0.3 boto3==1.19.12
 
       - name: Upload external contribution stats
         uses: nick-fields/retry@v2.8.2

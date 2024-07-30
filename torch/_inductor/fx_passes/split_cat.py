@@ -1,8 +1,8 @@
+# mypy: allow-untyped-defs
 import itertools
 import logging
 import operator
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
-
 from typing_extensions import TypeAlias
 
 import torch
@@ -28,6 +28,7 @@ from ..pattern_matcher import (
 )
 from .group_batch_fusion import is_node_meta_valid, POST_GRAD_FUSIONS, PRE_GRAD_FUSIONS
 
+
 log = logging.getLogger(__name__)
 
 _Arguments: TypeAlias = Tuple[torch.fx.node.Argument, ...]
@@ -40,8 +41,8 @@ _TransformParam: TypeAlias = Tuple[
 _Range: TypeAlias = Tuple[int, int]
 
 
-PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
-POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
+PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
+POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
 
 pre_grad_pass_names = [
     "normalization_pass",
@@ -52,10 +53,14 @@ pre_grad_pass_names = [
     "mutate_cat_pass",
     "split_cat_pass",
     "unbind_stack_pass",
+    "optimize_cat_inputs_pass",
 ]
 
 post_grad_pass_names = [
+    "normalization_aten_pass",
     "decompose_mm_pass",
+    "unbind_stack_aten_pass",
+    "shape_padding_multiplier",
 ]
 
 for pass_name in pre_grad_pass_names:
@@ -64,7 +69,6 @@ for pass_name in pre_grad_pass_names:
     if pass_name in PRE_GRAD_FUSIONS:
         continue
     PRE_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
-        prevent_match_across_mutations=True,
         pass_name=pass_name,
     )
 
@@ -74,12 +78,11 @@ for pass_name in post_grad_pass_names:
     if pass_name in POST_GRAD_FUSIONS:
         continue
     POST_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
-        prevent_match_across_mutations=True,
         pass_name=pass_name,
     )
 
 
-def construct_pattern_matcher_pass(pass_name: str) -> PatternMatcherPass:
+def construct_pattern_matcher_pass(pass_name: str):
     """
     Return the specific pattern_matcher_pass given the pass name.
     """
@@ -600,6 +603,7 @@ class SplitCatSimplifier:
             graph, split_node, next_users, user_inputs_list_new, transform_params_list  # type: ignore[arg-type]
         )
         self.erase_old_nodes(graph, split_node, next_users)  # type: ignore[arg-type]
+        counters["inductor"]["unbind_stack_pass"] += 1
 
     def get_user_input_list(
         self, split_node: torch.fx.Node, next_users: List[torch.fx.Node]
@@ -1610,3 +1614,203 @@ def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
                 split_sections = new_split_sections
 
                 counters["inductor"]["merge_stack_tahn_unbind_pass"] += 1
+
+
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.ops.aten.cat.default, users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("normalization_aten_pass"),
+)
+def normalize_cat_default_aten(match: Match, *args, **kwargs):
+    cat_node = match.nodes[0]
+    graph = match.graph
+    tensors = get_arg_value(cat_node, 0, "tensors")
+    cat_dim = get_arg_value(cat_node, 1, "dim")
+    if cat_dim is None:
+        cat_axis = cat_node.kwargs.get("axis")
+        if cat_axis is not None:
+            cat_dim = cat_axis
+        else:
+            cat_dim = 0
+    if tensors is None or cat_dim is None:
+        log.info("couldn't find cat args")
+        return
+    assert isinstance(tensors, (list, tuple))
+    for tensor in itertools.chain([cat_node], tensors):
+        if "val" not in tensor.meta:
+            log.warning("val absent for node: %s", tensor)
+            return
+
+    ndim = cat_node.meta["val"].dim()
+
+    def is_empty_tensor(x: torch.fx.Node) -> bool:
+        # special case where torch.ops.aten.cat.default supports cat'ing with an empty tensor
+        x_shape = x.meta["val"].shape
+        return len(x_shape) == 1 and x_shape[0] == 0
+
+    assert all(ndim == x.meta["val"].dim() or is_empty_tensor(x) for x in tensors)
+
+    if cat_dim < 0:  # Normalize cat dim
+        cat_dim += ndim
+
+    with graph.inserting_after(cat_node):
+        new_cat_node = graph.call_function(
+            torch.ops.aten.cat.default,
+            args=(tensors,),
+            kwargs={"dim": cat_dim},
+        )
+    cat_node.replace_all_uses_with(new_cat_node)
+    new_cat_node.meta.update(cat_node.meta)
+    graph.erase_node(cat_node)
+    counters["inductor"]["normalization_aten_pass"] += 1
+
+
+@register_graph_pattern(
+    CallFunction(
+        torch.ops.aten.cat,
+        ListOf(CallFunctionVarArgs(torch.ops.aten.unsqueeze)),
+        _users=MULTIPLE,
+    ),
+    pass_dict=construct_pattern_matcher_pass("unbind_stack_aten_pass"),
+)
+def merge_unbind_stack_aten(match: Match, *args, **kwargs):
+    node = match.nodes[-1]
+    graph = match.graph
+    # pyre-fixme[6]
+    unsqueeze_nodes = list(node.args[0])  # type: ignore[arg-type]
+    cat_dim = get_arg_value(node, 1, "dim")
+    # check the unsqueeze nodes come from the select nodes
+    if not all(
+        get_arg_value(unsqueeze_node, 0, "input").target == torch.ops.aten.select
+        for unsqueeze_node in unsqueeze_nodes
+    ):
+        return
+    select_nodes = [
+        get_arg_value(unsqueeze_node, 0, "input") for unsqueeze_node in unsqueeze_nodes
+    ]
+    parent_of_select_node = get_arg_value(select_nodes[0], 0, "input")
+    # check the target of select_nodes are the same
+    if not all(
+        select_node.target == torch.ops.aten.select for select_node in select_nodes
+    ):
+        return
+    # check the select nodes come from the same parent node
+    if not all(
+        get_arg_value(select_node, 0, "input") == parent_of_select_node
+        for select_node in select_nodes
+    ):
+        return
+    if len(unsqueeze_nodes) != len(select_nodes):
+        return
+    # check the select nodes have the same dim
+    if not all(
+        get_arg_value(select_node, 1, "dim") == cat_dim for select_node in select_nodes
+    ):
+        return
+    # check the select nodes have consecutive indices starting from 0
+    if get_arg_value(select_nodes[0], 2, "index") != 0 or not is_sorted_and_consecutive(
+        [get_arg_value(select_node, 2, "index") for select_node in select_nodes]
+    ):
+        return
+    # check the users of parent of select node only from unsqueeze nodes that go to the cat node
+    # we simply check the number of users of the parent of select node
+    if len(parent_of_select_node.users.keys()) != len(node.args[0]):  # type: ignore[arg-type]
+        return
+    node.replace_all_uses_with(parent_of_select_node)
+    graph.erase_node(node)
+    for unsqueeze_node in unsqueeze_nodes:
+        graph.erase_node(unsqueeze_node)
+    for select_node in select_nodes:
+        if len(select_node.users) == 0:
+            graph.erase_node(select_node)
+    counters["inductor"]["unbind_stack_aten_pass"] += 1
+
+
+# ############pattern to be optimized is#########
+
+#               split_node(dim=1)  -> user=multiple
+#       /           \         ...       /         \
+# other inputs    getitem        getitem     getitem   -> user=multiple
+#            \                    /            \
+#                cat(user=mul, dim=1)             other_op
+#                      |
+
+# ################after transformation#############
+
+#                 split_node(dim=1)     other inputs    -> -> user=multiple
+#                           /           \
+#                         cat (user=mul, dim=1, split_node)
+
+
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.cat, users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("optimize_cat_inputs_pass"),
+)
+def optimize_cat_inputs(match: Match, *args, **kwargs):
+    cat_node = match.nodes[0]
+    graph = match.graph
+    tensors = get_arg_value(cat_node, 0, "tensors")
+    cat_dim = get_arg_value(cat_node, 1, "dim") or 0
+    # find the index of getitems to be cat, the input of cats can be any type
+    new_cat_args, getitem_indices, parents_seen = [], [], []  # type: ignore[var-annotated]
+    idx_to_getitems = {}
+    can_be_optimized = False
+
+    for input in tensors:  # type: ignore[union-attr]
+        if input.target != operator.getitem:
+            new_cat_args.append(input)
+        else:
+            # get the parent node of the getitem input
+            parent, idx = input.args[0], input.args[1]  # type: ignore[union-attr]
+            # we only check the split parent
+            if parent.target != torch.split:
+                new_cat_args.append(input)
+                continue
+            # check if the split and cat have same dim
+            split_input, split_size, split_dim = _get_split_args_default(parent)
+            if split_dim != cat_dim:
+                continue
+            if len(parents_seen) == 0:
+                parents_seen.append(parent)
+                idx_to_getitems[idx] = input
+                getitem_indices.append(idx)
+                continue
+            # if it is the last input in the tensors, we also check if it can be optimized
+            if parent != parents_seen[-1] or input == tensors[-1]:
+                if input == tensors[-1]:
+                    getitem_indices.append(idx)
+                    idx_to_getitems[idx] = input
+                # we need to check the nodes before we move to the next parent
+                # get all the getitems from the parent node
+                if len(split_size) == len(
+                    getitem_indices
+                ) and is_sorted_and_consecutive(getitem_indices):
+                    # we can merge the getitems from the previous parent
+                    new_cat_args.append(parents_seen[-1].args[0])
+                    can_be_optimized = True
+                else:
+                    # get the getitems based on the indexes
+                    for i in getitem_indices:
+                        new_cat_args.append(idx_to_getitems[i])
+                # reset the indices array for the next parent
+                # remember to add the last element since it is the first
+                # item in this round of parent
+                getitem_indices, idx_to_getitems = [idx], {idx: input}
+                # add the parent to the list of seen parents
+                parents_seen.append(parent)
+            else:
+                getitem_indices.append(idx)
+                idx_to_getitems[idx] = input
+
+    if can_be_optimized:
+        new_args = (new_cat_args,)
+        with graph.inserting_after(cat_node):
+            new_cat_node = graph.call_function(
+                torch.cat,
+                args=new_args,
+                kwargs={"dim": cat_dim},
+            )
+            cat_node.replace_all_uses_with(new_cat_node)
+            new_cat_node.meta.update(cat_node.meta)
+            # remove the cat node
+            graph.erase_node(cat_node)
+            counters["inductor"]["optimize_cat_inputs_pass"] += 1

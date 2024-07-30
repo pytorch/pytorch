@@ -1,7 +1,6 @@
 import io
 import sys
 
-import torch
 import yaml
 from android_api_module import AndroidAPIModule
 from builtin_ops import TSBuiltinOpsModule, TSCollectionOpsModule
@@ -44,12 +43,14 @@ from tensor_ops import (
     TensorTypingOpsModule,
     TensorViewOpsModule,
 )
-from torch.jit.mobile import _load_for_lite_interpreter
 from torchvision_models import (
     MobileNetV2Module,
     MobileNetV2VulkanModule,
     Resnet18Module,
 )
+
+import torch
+from torch.jit.mobile import _load_for_lite_interpreter
 
 test_path_ios = "ios/TestApp/models/"
 test_path_android = "android/pytorch_android/src/androidTest/assets/"

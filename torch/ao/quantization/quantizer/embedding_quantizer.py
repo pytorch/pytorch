@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import copy
@@ -16,6 +17,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     OperatorPatternType,
     QuantizationConfig,
 )
+
 
 __all__ = [
     "get_embedding_operators_config",

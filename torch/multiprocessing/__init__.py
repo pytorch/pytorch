@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """torch.multiprocessing is a wrapper around the native :mod:`multiprocessing` module.
 
 It registers custom reducers, that use shared memory to provide shared
@@ -73,6 +74,24 @@ def get_sharing_strategy():
 def get_all_sharing_strategies():
     """Return a set of sharing strategies supported on a current system."""
     return _all_sharing_strategies
+
+
+def _set_thread_name(name: str) -> None:
+    """Set the name of the current thread.
+
+    Args:
+        name (str): Name of the current thread.
+    """
+    torch._C._set_thread_name(name)
+
+
+def _get_thread_name() -> str:
+    """Get the name of the current thread.
+
+    Returns:
+        str: Name of the current thread.
+    """
+    return torch._C._get_thread_name()
 
 
 init_reductions()

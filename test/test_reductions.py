@@ -1220,21 +1220,19 @@ class TestReductions(TestCase):
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
-            with self.assertWarnsOnceRegex(UserWarning, "_aminmax is deprecated"):
-                if dim is None:
-                    return torch._aminmax(x)[0]
-                else:
-                    return torch._aminmax(x, dim, keepdims)[0]
+            return torch.aminmax(x, dim=dim, keepdim=keepdims)[0]
 
         def _amax_wrapper(x, dim=None, keepdims=False):
-            with self.assertWarnsOnceRegex(UserWarning, "_aminmax is deprecated"):
-                if dim is None:
-                    return torch._aminmax(x)[1]
-                else:
-                    return torch._aminmax(x, dim, keepdims)[1]
+            return torch.aminmax(x, dim=dim, keepdim=keepdims)[1]
 
         self._test_minmax_helper(_amin_wrapper, np.amin, device, dtype)
         self._test_minmax_helper(_amax_wrapper, np.amax, device, dtype)
+
+    @onlyNativeDeviceTypes
+    @dtypes(*complex_types())
+    def test_invalid_0dim_aminmax(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError, 'not implemented'):
+            torch.aminmax(torch.tensor(1., dtype=dtype, device=device), dim=0)
 
     # TODO: bincount isn't a classic reduction -- maybe this test suite is
     #   reductions and summary ops?

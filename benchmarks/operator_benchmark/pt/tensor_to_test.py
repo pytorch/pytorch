@@ -1,6 +1,7 @@
+import operator_benchmark as op_bench
+
 import torch
 
-import operator_benchmark as op_bench
 
 tensor_conversion_short_configs = op_bench.cross_product_configs(
     M=(

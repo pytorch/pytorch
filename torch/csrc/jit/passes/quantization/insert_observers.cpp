@@ -49,7 +49,7 @@ void fillQConfigMap(
     const QConfigDict& qconfig_dict,
     ModuleQConfigMap& map,
     const std::string& key = "",
-    const std::optional<QConfig>& parent_qconfig = c10::nullopt) {
+    const std::optional<QConfig>& parent_qconfig = std::nullopt) {
   std::optional<QConfig> qconfig;
   if (qconfig_dict.find(key) != qconfig_dict.end()) {
     GRAPH_DEBUG("Got module config for key:", key);
@@ -953,9 +953,9 @@ void InsertObserversHelper::insertObserverFor(
   }
   GRAPH_DEBUG("Inserting observer for:", v->debugName());
   Module observer = observer_module.deepcopy();
-  std::string observer_name = "_observer_" + c10::to_string(uid_++);
+  std::string observer_name = "_observer_" + std::to_string(uid_++);
   while (module.hasattr(observer_name)) {
-    observer_name = "_observer_" + c10::to_string(uid_++);
+    observer_name = "_observer_" + std::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
   observer_name_and_modules.emplace_back(observer_name, observer);
@@ -1414,7 +1414,7 @@ InsertObserversHelper::insertObserversFor(
       if (!isObserved(v, block_observed_values)) {
         block_output_observers.emplace_back(getObserverFor(v));
       } else {
-        block_output_observers.emplace_back(c10::nullopt);
+        block_output_observers.emplace_back(std::nullopt);
       }
     }
   }

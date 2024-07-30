@@ -2,6 +2,10 @@
 
 import torch
 import torch._dynamo.test_case
+from torch._guards import CompileId
+
+
+set_eval_frame = torch._C._dynamo.eval_frame.set_eval_frame  # noqa: F401
 
 
 def target_with_varkwargs(arg1, /, positional_only_arg, *, keyword_only_arg, **kwargs):
@@ -89,7 +93,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
             if frame.f_code in code_map1:
                 transformed_code = code_map1[frame.f_code]
                 return torch._dynamo.types.GuardedCode(
-                    transformed_code, lambda f_locals: True
+                    transformed_code, lambda f_locals: True, CompileId(0, 0)
                 )
             return None
 
@@ -97,7 +101,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
             if frame.f_code in code_map2:
                 transformed_code = code_map2[frame.f_code]
                 return torch._dynamo.types.GuardedCode(
-                    transformed_code, lambda f_locals: True
+                    transformed_code, lambda f_locals: True, CompileId(0, 0)
                 )
             return None
 
@@ -109,7 +113,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
             expected_kwargs_output = target_with_varkwargs(
                 1, 2, keyword_only_arg=1, name2=2, name3=3
             )
-            original = torch._dynamo.eval_frame.set_eval_frame(callback1)
+            original = set_eval_frame(callback1)
             real_varargs_output = target_with_varargs(
                 1, 2, 3, 4, name1=1, name2=2, name3=3
             )
@@ -118,7 +122,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
             )
             self.assertEqual(real_varargs_output, expected_varargs_output)
             self.assertEqual(real_kwargs_output, expected_kwargs_output)
-            torch._dynamo.eval_frame.set_eval_frame(original)
+            set_eval_frame(original)
 
 
 if __name__ == "__main__":

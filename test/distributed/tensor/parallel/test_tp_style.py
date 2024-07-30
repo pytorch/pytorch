@@ -5,7 +5,6 @@ from copy import deepcopy
 
 import torch
 import torch.nn as nn
-
 from torch.distributed._tensor import (
     distribute_tensor,
     DTensor,
@@ -317,6 +316,18 @@ class TensorParallelStyleTest(DTensorTestBase):
         self.assertEqual(comm_mode.get_total_counts(), 2)
         self.assertEqual(output.shape, (1 * self.world_size, 8))
 
+        # test the case where x is a DTensor
+        x_dt = DTensor.from_local(
+            torch.randn(1, 8, device=self.device_type), mesh, [Shard(0)]
+        )
+        with comm_mode:
+            output = test_kwonly_mod(
+                x=x_dt, z=torch.ones(1, 8, device=self.device_type)
+            )
+
+        self.assertEqual(comm_mode.get_total_counts(), 2)
+        self.assertEqual(output.shape, (1 * self.world_size, 8))
+
     @with_comms
     def test_prepare_module_output(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
@@ -408,6 +419,22 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertIsInstance(sharded_out, DTensor)
             self.assertEqual(sharded_out.placements, (Shard(1),))
             self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # test sharded on non-sequence dim input
+        sharded_batch_input = distribute_tensor(global_input, mesh, [Shard(0)])
+        rmsnorm = RMSNormPython(embedding_dim).to(self.device_type)
+        sp_rmsnorm = parallelize_module(deepcopy(rmsnorm), mesh, SequenceParallel())
+
+        with comm_mode:
+            sharded_out = sp_rmsnorm(sharded_batch_input)
+            grad_out = torch.ones_like(sharded_out)
+            sharded_out.backward(grad_out)
+            self.assertIsInstance(sharded_out, DTensor)
+            # output still sharded on sequence dimension
+            self.assertEqual(sharded_out.placements, (Shard(1),))
+            self.assertEqual(sp_rmsnorm.weight.grad.placements, (_Partial(),))
+            # communication happens in both fwd/bwd to redistribute input
+            self.assertEqual(comm_mode.get_total_counts(), 2)
 
 
 if __name__ == "__main__":

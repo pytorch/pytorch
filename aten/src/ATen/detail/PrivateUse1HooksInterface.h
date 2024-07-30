@@ -6,10 +6,11 @@
 #include <c10/core/Device.h>
 #include <c10/core/Storage.h>
 #include <c10/util/Exception.h>
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
 struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
-  virtual ~PrivateUse1HooksInterface() override = default;
+  ~PrivateUse1HooksInterface() override = default;
   virtual const at::Generator& getDefaultGenerator(
       c10::DeviceIndex device_index) {
     TORCH_CHECK_NOT_IMPLEMENTED(
@@ -23,13 +24,17 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getDeviceFromPtr`.");
   }
 
-  virtual Allocator* getPinnedMemoryAllocator() const {
+  virtual bool isPinnedPtr(const void* data) const override {
+    return false;
+  }
+
+  virtual Allocator* getPinnedMemoryAllocator() const override {
     TORCH_CHECK(
         false,
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getPinnedMemoryAllocator`.");
   }
 
-  virtual bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex device_index) const override {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `hasPrimaryContext`.");
@@ -59,3 +64,4 @@ TORCH_API const at::PrivateUse1HooksInterface& getPrivateUse1Hooks();
 } // namespace detail
 
 } // namespace at
+C10_DIAGNOSTIC_POP()
