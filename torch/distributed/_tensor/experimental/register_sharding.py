@@ -20,28 +20,30 @@ from torch.distributed._tensor.ops.utils import expand_to_full_mesh_op_strategy
 
 def register_sharding(op: Union[OpOverload, List[OpOverload]]):
     """
-    ``register_sharding`` is an experimental API that allows users to register a customized
-    sharding strategy to an ``op`` when the tensor inputs and outputs are :class:`DTensor`s.
-    It can be useful when there doesn't exist a default sharding strategy for ``op``, e.g.
-    when ``op`` is a customized op that is not supported by :class:`DTensor`.
+    ``register_sharding`` is an experimental API that allows users to register sharding
+    strategies for an operator when the tensor inputs and outputs are :class:`DTensor`s.
+    It can be useful when: (1) there doesn't exist a default sharding strategy for ``op``,
+    e.g. when ``op`` is a custom operator that is not supported by :class:`DTensor`; (2)
+    when users would like to overwrite default sharding strategies of existing operators.
 
     Args:
         op (Union[OpOverload, List[OpOverload]]):
             An op or a list of ops to register the customized sharding function.
 
     Returns:
-        A function decorator which can be used to wrap a customized sharding function,
-        which will be registered to DTensor's sharding propagation strategies and override
-        the default strategy if any. The customized sharding function takes the same inputs
+        A function decorator which can be used to wrap a function that defines the sharding
+        strategy for the operator specified in ``op``. The defined sharding strategy will be
+        registered to DTensor and will override the default sharding strategy if DTensor has
+        already implemented the operator. The customized sharding function takes the same inputs
         as the original op (except that if an arg is a :class:`torch.Tensor`, it will be
-        replaced by a :class:`DTensorSpec`). The function should return a sequence of 2-tuples,
-        each specifying acceptable input placements and it's corresponding output placements,
-        with outputs listed first.
+        replaced by a tensor-like object that DTensor uses internally). The function should
+        return a sequence of 2-tuples, each specifying acceptable output placements and its
+        corresponding intput placements.
 
     Example:
         >>> # xdoctest: +SKIP("distributed")
         >>> @register_sharding(aten._softmax.default)
-        >>> def custom_softmax_sharding(x: DTensorSpec, dim: int, half_to_float: torch.dtype):
+        >>> def custom_softmax_sharding(x, dim, half_to_float):
         >>>     softmax_dim = dim if dim >= 0 else dim + x.ndim
         >>>     acceptable_shardings = []
         >>>
@@ -96,7 +98,7 @@ def register_sharding(op: Union[OpOverload, List[OpOverload]]):
         )
 
     def wrapper(custom_sharding_fn):
-        def get_schema_info(op):
+        def derive_schema_info(op):
             # NOTE: without user directly providing RuntimeSchemaInfo, for now
             #       we create it in a conservative fashion as follows:
             #       1. let static_argnum be the first int argument
@@ -121,7 +123,7 @@ def register_sharding(op: Union[OpOverload, List[OpOverload]]):
             DTensor._op_dispatcher.sharding_propagator.register_op_strategy(
                 overload,
                 partial(custom_strategy, custom_sharding_fn),
-                get_schema_info(overload),
+                derive_schema_info(overload),
             )
 
         return custom_sharding_fn

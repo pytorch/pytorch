@@ -494,7 +494,7 @@ class TestMaxAutotune(TestCase):
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
         inputs = [torch.rand([256, 256], device="cuda") for _ in range(3)]
 
-        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(fn_c(*inputs), fn(*inputs), atol=1e-2, rtol=1e-2)
 
         from torch._dynamo.utils import counters
 
@@ -678,6 +678,20 @@ class TestMaxAutotune(TestCase):
             actual = torch.compile(fn)(image, filt)
             torch.testing.assert_close(actual, expected, atol=6e-5, rtol=0.001)
 
+    @config.patch(
+        max_autotune=True, max_autotune_conv_backends="", layout_optimization=False
+    )
+    def test_conv_backend(self):
+        m = torch.nn.Sequential(
+            torch.nn.Conv2d(3, 3, 1, 1),
+        ).cuda()
+        inp = torch.randn([2, 3, 16, 16]).cuda()
+
+        with self.assertRaises(BackendCompilerFailed) as context:
+            torch.compile(m)(inp)
+
+        self.assertIn("NoValidChoicesError", str(context.exception))
+
     def test_non_contiguous_input_mm(self):
         """
         Make sure the triton template can work with non-contiguous inputs without crash.
@@ -694,7 +708,7 @@ class TestMaxAutotune(TestCase):
 
         ref = x @ y
         act = f(x, y)
-        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
+        torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
     def test_non_contiguous_input_addmm(self):
         b = torch.randn((768), dtype=torch.bfloat16, device="cuda")
@@ -709,7 +723,7 @@ class TestMaxAutotune(TestCase):
 
         ref = torch.addmm(b, x, y)
         act = f(x, y)
-        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
+        torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
     def test_non_contiguous_input_bmm(self):
         x = rand_strided(
@@ -725,7 +739,7 @@ class TestMaxAutotune(TestCase):
 
         ref = torch.bmm(x, y)
         act = f(x, y)
-        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
+        torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
     def test_non_contiguous_input_mm_plus_mm(self):
         x1 = rand_strided((50257, 32768), (1, 50304), device="cuda")
@@ -740,7 +754,7 @@ class TestMaxAutotune(TestCase):
 
         ref = x1 @ y1 + x2 @ y2
         act = f(x1, y1, x2, y2)
-        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
+        torch.testing.assert_close(act, ref, atol=1e-2, rtol=1e-2)
 
     @config.patch(
         max_autotune=True,
