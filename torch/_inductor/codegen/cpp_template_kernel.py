@@ -339,7 +339,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
         assert self.bmreq is not None
         self.bmreq.precompile()
 
-    def benchmark(self, *args, out) -> float:
+    def benchmark(self, *args, out, lazy=False) -> float:
         assert self.bmreq is not None
         return self.bmreq.benchmark(*args, output_tensor=out)
 
