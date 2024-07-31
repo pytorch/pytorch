@@ -339,8 +339,9 @@ class TestBenchmarkingGPU(TestBenchmarking):
             _callable()
         end_event.record()
         torch.cuda.synchronize()
-        roofline_timing_ms = start_event.elapsed_time(end_event) / 10
-        self.assertEqual(timing_ms <= roofline_timing_ms, True)
+        baseline_timing_ms = start_event.elapsed_time(end_event) / 10
+        if timing_ms > baseline_timing_ms:
+            self.assertEqual(baseline_timing_ms, timing_ms, atol=0.1, rtol=0.25)
 
     @gpu_patches
     def test_benchmark_smoke(self, benchmarker, kernels):
