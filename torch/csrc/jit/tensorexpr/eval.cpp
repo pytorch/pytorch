@@ -6,6 +6,8 @@
 
 #include <c10/util/irange.h>
 
+#include <utility>
+
 namespace torch::jit::tensorexpr {
 
 RegisterCodeGen<SimpleIREvaluator> ir_eval_codegen_reg("simple_ir_eval");
@@ -22,15 +24,14 @@ int64_t InterpValue::intValue() const {
 }
 
 template <typename T>
-inline typename std::enable_if<std::is_integral<T>::value, T>::type mod_value(
-    T lhs,
-    T rhs) {
+inline std::enable_if_t<std::is_integral_v<T>, T> mod_value(T lhs, T rhs) {
   return lhs % rhs;
 }
 
 template <typename T>
-inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
-mod_value(T lhs, T rhs) {
+inline std::enable_if_t<std::is_floating_point_v<T>, T> mod_value(
+    T lhs,
+    T rhs) {
   return std::fmod(lhs, rhs);
 }
 
@@ -39,17 +40,14 @@ inline bool mod_value(bool lhs, bool rhs) {
 }
 
 template <typename T>
-inline typename std::enable_if<std::is_integral<T>::value, T>::type div_value(
-    T lhs,
-    T rhs) {
+inline std::enable_if_t<std::is_integral_v<T>, T> div_value(T lhs, T rhs) {
   TORCH_CHECK(rhs != 0, "Division by zero");
   return lhs / rhs;
 }
 
 template <typename T>
-inline typename std::enable_if<std::is_floating_point<T>::value, T>::
-    type __ubsan_ignore_float_divide_by_zero__
-    div_value(T lhs, T rhs) {
+inline std::enable_if_t<std::is_floating_point_v<T>, T>
+    __ubsan_ignore_float_divide_by_zero__ div_value(T lhs, T rhs) {
   return lhs / rhs;
 }
 
@@ -74,17 +72,17 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   ~SimpleIREvaluatorImpl() override = default;
 
-  void bindBuf(BufPtr buf, void* ptr) {
+  void bindBuf(const BufPtr& buf, void* ptr) {
     GRAPH_DEBUG("Binding ptr ", ptr, " with buf ", buf->name_hint());
     buffer_mapping_[buf] = ptr;
   }
-  void bindVar(VarPtr var, const InterpValue& val) {
+  void bindVar(const VarPtr& var, const InterpValue& val) {
     eval_context_[var] = val;
     GRAPH_DEBUG(
         "Binding value ", val.intValue(), " with var ", var->name_hint());
   }
 
-  InterpValue evaluateExpr(ExprPtr e) {
+  InterpValue evaluateExpr(const ExprPtr& e) {
     e->accept(this);
     return value_;
   }
@@ -142,28 +140,28 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   }
 
   template <typename T>
-  typename std::enable_if_t<std::is_floating_point<T>::value, T> max_value(
+  typename std::enable_if_t<std::is_floating_point_v<T>, T> max_value(
       T a,
       T b) {
     return std::isnan(a) ? a : (std::isnan(b) ? b : (a < b ? b : a));
   }
 
   template <typename T>
-  typename std::enable_if_t<!std::is_floating_point<T>::value, T> max_value(
+  typename std::enable_if_t<!std::is_floating_point_v<T>, T> max_value(
       T a,
       T b) {
     return a < b ? b : a;
   }
 
   template <typename T>
-  typename std::enable_if_t<std::is_floating_point<T>::value, T> min_value(
+  typename std::enable_if_t<std::is_floating_point_v<T>, T> min_value(
       T a,
       T b) {
     return std::isnan(a) ? a : (std::isnan(b) ? b : (a < b ? a : b));
   }
 
   template <typename T>
-  typename std::enable_if_t<!std::is_floating_point<T>::value, T> min_value(
+  typename std::enable_if_t<!std::is_floating_point_v<T>, T> min_value(
       T a,
       T b) {
     return a < b ? a : b;
@@ -246,8 +244,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     for (const auto i : c10::irange(lhs_v.size())) {
       switch (op_type) {
         case IRNodeType::kLshift: {
-          typename std::make_unsigned<T>::type a =
-              static_cast<typename std::make_unsigned<T>::type>(lhs_v[i]);
+          auto a = static_cast<std::make_unsigned_t<T>>(lhs_v[i]);
           result_v[i] = a << rhs_v[i];
           break;
         }
@@ -304,9 +301,9 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   template <
       typename D,
-      typename std::enable_if<std::is_same<
+      std::enable_if_t<std::is_same_v<
           decltype(detail::bin_op_deducer(std::declval<D>())),
-          void>::value>::type* = nullptr>
+          void>>* = nullptr>
   void visit_binary_op(NodePtr<D> v, bool option = false) {
     v->lhs()->accept(this);
     InterpValue lhs_v = value_;
@@ -390,7 +387,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   }
 
   void visit_compare_select_op(
-      CompareSelectPtr v,
+      const CompareSelectPtr& v,
       CompareSelectOperation cmp_op) {
     v->lhs()->accept(this);
     InterpValue lhs_v = value_;
@@ -1114,8 +1111,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   template <
       typename TReturn,
       typename TInput,
-      typename std::enable_if<std::is_floating_point<TInput>::value, int>::
-          type = 0>
+      std::enable_if_t<std::is_floating_point_v<TInput>, int> = 0>
   static TReturn compute_intrinsics(IntrinsicsOp op_type, TInput v) {
     switch (op_type) {
       case kSin:
@@ -1185,16 +1181,14 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   template <
       typename TReturn,
       typename TInput,
-      typename std::enable_if<std::is_integral<TInput>::value, int>::type = 0>
+      std::enable_if_t<std::is_integral_v<TInput>, int> = 0>
   static TReturn compute_intrinsics(IntrinsicsOp op_type, TInput v) {
     switch (op_type) {
       case kAbs: {
         // internal tool complains about calling `abs` on unsigned, the
         // following makes the tool happy
-        using X =
-            std::conditional_t<std::is_unsigned<TInput>::value, int, TInput>;
-        return std::is_unsigned<TInput>::value ? v
-                                               : std::abs(static_cast<X>(v));
+        using X = std::conditional_t<std::is_unsigned_v<TInput>, int, TInput>;
+        return std::is_unsigned_v<TInput> ? v : std::abs(static_cast<X>(v));
       }
       default:
         throw std::runtime_error(
@@ -1243,7 +1237,7 @@ SimpleIREvaluator::SimpleIREvaluator(
     const std::vector<BufferArg>& buffer_args,
     at::Device device,
     const std::string& kernel_func_name)
-    : CodeGen(stmt, buffer_args, device, kernel_func_name) {
+    : CodeGen(std::move(stmt), buffer_args, device, kernel_func_name) {
   impl_ = std::make_unique<SimpleIREvaluatorImpl>();
   expand_intrinsics();
 }
@@ -1292,7 +1286,7 @@ void SimpleIREvaluator::bindArg(const BufferArg& bufArg, void* data) {
   }
 }
 
-void SimpleIREvaluator::bindVar(VarPtr v, ExprPtr e) {
+void SimpleIREvaluator::bindVar(const VarPtr& v, const ExprPtr& e) {
   impl_->bindVar(v, impl_->evaluateExpr(e));
 }
 
@@ -1302,7 +1296,7 @@ InterpValue SimpleIREvaluator::value() const {
 
 std::optional<int64_t> evalInt(ExprPtr e) {
   try {
-    return ExprEval<SimpleIREvaluator>(cast<int64_t>(ExprHandle(e)))
+    return ExprEval<SimpleIREvaluator>(cast<int64_t>(ExprHandle(std::move(e))))
         .value<int64_t>();
   } catch (std::runtime_error& err) {
     return std::nullopt;
