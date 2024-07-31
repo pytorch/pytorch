@@ -16,6 +16,7 @@ from torch.monitor import (
     unregister_event_handler,
     Stat,
     TensorboardEventHandler,
+    WaitCounter,
 )
 
 class TestMonitor(TestCase):
@@ -97,6 +98,13 @@ class TestMonitor(TestCase):
         unregister_event_handler(handle)
         log_event(e)
         self.assertEqual(len(events), 2)
+
+    def test_wait_counter(self) -> None:
+        wait_counter = WaitCounter(
+            "test_wait_counter",
+        )
+        with wait_counter.guard() as wcg:
+            pass
 
 
 @skipIfTorchDynamo("Really weird error")

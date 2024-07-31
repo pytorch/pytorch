@@ -10,6 +10,7 @@ from torch._inductor.fx_passes.micro_pipeline_tp import (
     _get_unexposed_collectives,
     find_all_gather_patterns,
     find_reduce_scatter_patterns,
+    micro_pipeline_tp_pass,
 )
 from torch._inductor.fx_passes.post_grad import remove_noop_ops, view_to_reshape
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
@@ -38,7 +39,7 @@ from torch.utils._triton import has_triton
 
 
 def _make_post_grad_fx(f, *inps):
-    gm = make_fx(f, decompositions)(*inps)
+    gm = make_fx(f, decompositions, tracing_mode="fake")(*inps)
     remove_noop_ops(gm.graph)
     view_to_reshape(gm)
     return gm
@@ -220,12 +221,12 @@ class MicroPipelineTPTest(TestCase):
             code = run_and_get_triton_code(compiled, A_shard, B)
 
         if gather_dim == A_dims - 1:
-            assert "fused_all_gather_matmul" not in code
-            assert "all_gather_into_tensor" in code
+            self.assertNotIn("fused_all_gather_matmul", code)
+            self.assertIn("all_gather_into_tensor", code)
         else:
             # Decomposing the matmul on the K dimension is not supported
-            assert "fused_all_gather_matmul" in code
-            assert "all_gather_into_tensor" not in code
+            self.assertIn("fused_all_gather_matmul", code)
+            self.assertNotIn("all_gather_into_tensor", code)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])
@@ -268,12 +269,25 @@ class MicroPipelineTPTest(TestCase):
         A_scale = torch.tensor(0.1, device="cuda")
         B_scale = torch.tensor(0.1, device="cuda")
 
+        gm = _make_post_grad_fx(func, A_shard, B, A_scale, B_scale, torch.bfloat16)
+        with _test_mode():
+            micro_pipeline_tp_pass(gm.graph)
+        if gather_dim == A_dims - 1:
+            self.assertNotIn("fused_all_gather_scaled_matmul", str(gm.graph))
+            self.assertIn("all_gather_into_tensor", str(gm.graph))
+        else:
+            # Decomposing the matmul on the K dimension is not supported
+            self.assertIn("fused_all_gather_scaled_matmul", str(gm.graph))
+            self.assertNotIn("all_gather_into_tensor", str(gm.graph))
+
+        if torch.cuda.get_device_capability() < (8, 9):
+            return
+
         with _test_mode():
             compiled = torch.compile(func)
             code = run_and_get_triton_code(
                 compiled, A_shard, B, A_scale, B_scale, torch.bfloat16
             )
-
         if gather_dim == A_dims - 1:
             self.assertNotIn("fused_all_gather_scaled_matmul", code)
             self.assertIn("all_gather_into_tensor", code)
@@ -308,6 +322,59 @@ class MicroPipelineTPTest(TestCase):
             code = run_and_get_triton_code(compiled, A, B)
 
         self.assertIn("fused_matmul_reduce_scatter", code)
+        self.assertNotIn("reduce_scatter_tensor", code)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @parametrize("A_dims", [2, 3])
+    @parametrize("scatter_dim", [0, 1, 2])
+    @fresh_inductor_cache()
+    def test_fuse_scaled_matmul_reduce_scatter(self, A_dims, scatter_dim):
+        if scatter_dim >= A_dims:
+            return
+
+        group = dist.group.WORLD
+
+        def func(
+            A: torch.Tensor,
+            B: torch.Tensor,
+            A_scale: torch.Tensor,
+            B_scale: torch.Tensor,
+            out_dtype: torch.dtype,
+        ) -> torch.Tensor:
+            if len(A.shape) > 2:
+                C = torch._scaled_mm(
+                    A.flatten(0, -2), B, A_scale, B_scale, out_dtype=out_dtype
+                )
+                C = C.view(*A.shape[:-1], B.shape[1])
+            else:
+                C = torch._scaled_mm(A, B, A_scale, B_scale, out_dtype=out_dtype)
+            return reduce_scatter_tensor(C, "avg", scatter_dim, group)
+
+        if A_dims == 2:
+            A = torch.rand(64, 32, device="cuda").to(torch.float8_e4m3fn)
+        elif A_dims == 3:
+            A = torch.rand(2, 64, 32, device="cuda").to(torch.float8_e4m3fn)
+        else:
+            raise AssertionError(f"Invalid A_dims: {A_dims}")
+        B = torch.rand(16, 32, device="cuda").to(torch.float8_e4m3fn).T
+        A_scale = torch.tensor(0.1, device="cuda")
+        B_scale = torch.tensor(0.1, device="cuda")
+
+        gm = _make_post_grad_fx(func, A, B, A_scale, B_scale, torch.bfloat16)
+        with _test_mode():
+            micro_pipeline_tp_pass(gm.graph)
+        self.assertIn("fused_scaled_matmul_reduce_scatter", str(gm.graph))
+        self.assertNotIn("reduce_scatter_tensor", str(gm.graph))
+
+        if torch.cuda.get_device_capability() < (8, 9):
+            return
+
+        with _test_mode():
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(
+                compiled, A, B, A_scale, B_scale, torch.bfloat16
+            )
+        self.assertIn("fused_scaled_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")

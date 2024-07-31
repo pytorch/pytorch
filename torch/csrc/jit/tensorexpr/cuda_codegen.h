@@ -1,6 +1,5 @@
 #pragma once
 
-#include <unordered_map>
 #include <unordered_set>
 
 #include <ATen/ATen.h>
@@ -29,7 +28,7 @@ class CudaAnalysis : public IRVisitor {
     gpu_thread_extents_ = {
         alloc<IntImm>(1), alloc<IntImm>(1), alloc<IntImm>(1)};
   }
-  bool is_buf_store_target(BufPtr buf) const {
+  bool is_buf_store_target(const BufPtr& buf) const {
     return store_targets_.count(buf) > 0;
   }
 
@@ -50,14 +49,14 @@ class CudaAnalysis : public IRVisitor {
   }
 
  private:
-  void visit(StorePtr v) override {
+  void visit(const StorePtr& v) override {
     store_targets_.insert(v->buf());
   }
 
-  void visit(AllocatePtr v) override;
-  void visit(FreePtr v) override;
-  void visit(PlacementAllocatePtr v) override;
-  void visit(ForPtr v) override;
+  void visit(const AllocatePtr& v) override;
+  void visit(const FreePtr& v) override;
+  void visit(const PlacementAllocatePtr& v) override;
+  void visit(const ForPtr& v) override;
 
   std::unordered_set<BufPtr> store_targets_;
   std::unordered_set<VarPtr> thread_local_bufs_;
@@ -114,7 +113,6 @@ class GPUMetaVarRewriter : public IRMutator {
 
  private:
   // When processing a block, stores the contents of each sub-segment.
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   class Segment {
    public:
     void reset(bool mask) {
@@ -164,22 +162,22 @@ class CudaPrinter : public IRPrinter {
     }
   }
 
-  void visit(CastPtr v) override;
-  void visit(IntrinsicsPtr v) override;
-  void visit(ForPtr v) override;
+  void visit(const CastPtr& v) override;
+  void visit(const IntrinsicsPtr& v) override;
+  void visit(const ForPtr& v) override;
 
-  void visit(LoadPtr v) override;
-  void visit(StorePtr v) override;
-  void visit(AtomicAddPtr v) override;
-  void visit(MaxPtr v) override;
-  void visit(MinPtr v) override;
-  void visit(IfThenElsePtr v) override;
-  void visit(BlockPtr v) override;
-  void visit(AllocatePtr v) override;
-  void visit(FreePtr v) override;
-  void visit(LetPtr v) override;
+  void visit(const LoadPtr& v) override;
+  void visit(const StorePtr& v) override;
+  void visit(const AtomicAddPtr& v) override;
+  void visit(const MaxPtr& v) override;
+  void visit(const MinPtr& v) override;
+  void visit(const IfThenElsePtr& v) override;
+  void visit(const BlockPtr& v) override;
+  void visit(const AllocatePtr& v) override;
+  void visit(const FreePtr& v) override;
+  void visit(const LetPtr& v) override;
 
-  void visit(ExternalCallPtr v) override;
+  void visit(const ExternalCallPtr& v) override;
 
   VarPtr rand_func() const {
     return rand_func_;
@@ -194,15 +192,14 @@ class CudaPrinter : public IRPrinter {
   VarPtr rand_func_;
   const CudaAnalysis* cuda_analysis_;
 
-  void print_flat_alloc(AllocatePtr alloc);
+  void print_flat_alloc(const AllocatePtr& alloc);
 };
 
-// Construct Cuda C from the buffer and tensor input, and invoke the kernel
-// when real arguments are provided.
+// Construct Cuda C from the buffer and tensor input, and invoke the
+// kernel when real arguments are provided.
 class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
  public:
   template <typename... Ts>
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CudaCodeGen(StmtPtr stmt, Ts... ts)
       : CodeGen(
             stmt,
@@ -217,7 +214,7 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
       const std::vector<BufferArg>& buffer_args,
       at::Device device = at::Device(at::kCUDA, at::cuda::current_device()),
       const std::string& kernel_func_name = "func")
-      : CodeGen(stmt, buffer_args, device, kernel_func_name) {
+      : CodeGen(std::move(stmt), buffer_args, device, kernel_func_name) {
     Initialize();
   }
 
@@ -274,7 +271,7 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
   std::unique_ptr<GPUMetaVarRewriter> metavar_rewriter_;
   std::unordered_set<std::string> taken_func_names;
   std::mutex eval_lock_;
-  CUfunction function_;
+  CUfunction function_{nullptr};
   bool has_random_ = false;
   int thread_block_size_ = -1;
 

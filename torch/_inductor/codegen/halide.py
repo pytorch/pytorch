@@ -15,7 +15,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Set,
     Tuple,
     TYPE_CHECKING,
     Union,
@@ -60,6 +59,7 @@ from .simd import constant_repr, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
+    from torch.utils._ordered_set import OrderedSet
     from ..ops_handler import ReductionType, StoreMode
 
 log = logging.getLogger(__name__)
@@ -237,7 +237,12 @@ def halide_acc_type(dtype):
 
 class HalideOverrides(OpOverrides):
     @staticmethod
-    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
+    def to_dtype(
+        x,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types=True,
+    ):
         if dtype == torch.bool:
             return f"({x} != 0)"
         return f"hl.cast({halide_type(dtype)}, {x})"
@@ -660,7 +665,7 @@ class HalideKernel(SIMDKernel):
         self,
         *groups,
         index_dtype: str,
-        mutations: Optional[Set[str]] = None,
+        mutations: Optional[OrderedSet[str]] = None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
         override_persistent_reduction=None,
@@ -1642,7 +1647,7 @@ class HalideScheduling(SIMDScheduling):
     int32_type = "hl.Int(32)"
     # TODO(jansel): Halide doesn't actually support 64 bit indexing...
     int64_type = "hl.Int(64)"
-    kernel_type = HalideKernel
+    kernel_type = HalideKernel  # type: ignore[arg-type]
 
     @classmethod
     def get_backend_features(cls, device: torch.device):
