@@ -14,9 +14,6 @@ from typing import Dict, List, TYPE_CHECKING
 
 import torch
 from torch import sym_float, sym_int
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, polyfill, variables
@@ -69,6 +66,11 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
 
 log = logging.getLogger(__name__)
 
