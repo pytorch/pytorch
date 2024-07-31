@@ -21,7 +21,7 @@ struct C10_API UndefinedTensorImpl final : public TensorImpl {
 #else
   static constexpr inline TensorImpl* singleton() {
 #endif
-    return &_singleton;
+    return &getInstance();
   }
 #ifdef DEBUG
   bool has_storage() const override;
@@ -35,7 +35,7 @@ struct C10_API UndefinedTensorImpl final : public TensorImpl {
 
  private:
   UndefinedTensorImpl();
-  static UndefinedTensorImpl _singleton;
+  static UndefinedTensorImpl& getInstance();
   const char* tensorimpl_type_name() const override;
 };
 

@@ -38,6 +38,9 @@ const char* UndefinedTensorImpl::tensorimpl_type_name() const {
   return "UndefinedTensorImpl";
 }
 
-UndefinedTensorImpl UndefinedTensorImpl::_singleton;
+UndefinedTensorImpl& UndefinedTensorImpl::getInstance() {
+  static UndefinedTensorImpl instance;
+  return instance;
+}
 
 } // namespace c10
