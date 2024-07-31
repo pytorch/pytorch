@@ -9,8 +9,8 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
+from torch._guards import Source
 
-from ..._guards import Source
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_user_stop_iteration, unimplemented
