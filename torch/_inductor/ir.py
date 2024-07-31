@@ -4677,7 +4677,7 @@ class ExternKernel(InputsKernel):
             for i, x in enumerate(self.constant_args):
                 idx = len(self.inputs) + i
                 type_ = (
-                    self.arg_properties[i].get("type")
+                    self.arg_properties[idx].get("type")
                     if self.arg_properties and idx < len(self.arg_properties)
                     else None
                 )
