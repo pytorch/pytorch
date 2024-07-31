@@ -25,7 +25,7 @@ from torch._inductor.select_algorithm import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 
-from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -68,6 +68,11 @@ class FailChoiceCaller(ChoiceCaller):
 
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
+    def setUp(self):
+        super().setUp()
+        if not is_big_gpu(0):
+            return self.skipTest("Not enough SMs to run the MaxAutotune test.")
+
     def _create_buffer(self, name, shape):
         return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
 
@@ -876,8 +881,6 @@ class TestTuningProcess(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._inductor.utils import is_big_gpu
-
     # Set env to make it work in CI.
     if HAS_CUDA and HAS_CPU and is_big_gpu(0):
         run_tests()
