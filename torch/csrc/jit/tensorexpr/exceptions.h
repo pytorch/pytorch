@@ -3,7 +3,6 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 
-#include <sstream>
 #include <stdexcept>
 
 // Forward declarations of types
@@ -18,8 +17,8 @@ class Stmt;
 
 // Forward declarations of functions
 namespace std {
-TORCH_API std::string to_string(const torch::jit::tensorexpr::ExprPtr);
-TORCH_API std::string to_string(const torch::jit::tensorexpr::StmtPtr);
+TORCH_API std::string to_string(const torch::jit::tensorexpr::ExprPtr&);
+TORCH_API std::string to_string(const torch::jit::tensorexpr::StmtPtr&);
 } // namespace std
 
 namespace torch {
