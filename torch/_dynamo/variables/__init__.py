@@ -34,6 +34,7 @@ from .functions import (
     UserMethodVariable,
 )
 from .higher_order_ops import (
+    FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     TorchHigherOrderOperatorVariable,
 )
