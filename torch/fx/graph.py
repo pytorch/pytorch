@@ -566,14 +566,13 @@ class CodeGen:
 
             if verbose:
                 # override annotation with more detailed information
-                from torch._subclasses.fake_tensor import FakeTensor
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
                 meta_val = node.meta.get('val', node.meta.get('tensor_meta', node.meta.get('example_value', None)))
                 # use string as annotation, to make it valid python code
 
-                if isinstance(meta_val, FakeTensor):
+                if isinstance(meta_val, torch.Tensor):
                     stride_annotation = f"{stringify_shape(meta_val.stride())}" if include_stride else ""
                     device_annotation = f"{meta_val.device}" if include_device else ""
                     maybe_type_annotation = \
