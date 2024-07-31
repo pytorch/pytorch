@@ -435,5 +435,5 @@ def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
     return nested_view_from_values_offsets_lengths(
         values=res_values,
         lengths=res_lengths,
-        offsets=F.pad(res_lengths.cumsum(dim=0), (1,0))
+        offsets=F.pad(res_lengths.cumsum(dim=0), (1,0)),
     )
