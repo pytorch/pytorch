@@ -1617,6 +1617,28 @@ class TestAutogradFunctionVmapAPI(TestCase):
         with self.assertRaisesRegex(RuntimeError, "returned an incompatible"):
             result = vmap(Zeros.apply)(x)
 
+    def test_kwarg_only_tensors(self, device):
+        with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
+
+            class MyClass(torch.autograd.Function):
+                @staticmethod
+                def forward(x, *, y):
+                    return x + y
+
+                @staticmethod
+                def setup_context(ctx, inputs, output):
+                    pass
+
+                @staticmethod
+                def vmap(info, in_dims, x, *, y):
+                    assert in_dims == (0,)
+                    return x + y, 0
+
+            x = torch.randn(3)
+            y = torch.randn(3)
+
+            vmap(MyClass.apply)(x, y=y)
+
 
 @markDynamoStrictTest
 class TestVmapOfGrad(TestCase):
@@ -3690,8 +3712,8 @@ class TestMakeFunctional(TestCase):
                 super().__init__()
                 self.bias = nn.Parameter(torch.randn(3))
                 self.linear = nn.Linear(3, 3)
-                self.register_buffer("buffer", torch.randn(3))
-                self.register_buffer("buffer_tied", self.buffer)
+                self.buffer = nn.Buffer(torch.randn(3))
+                self.buffer_tied = self.buffer
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3721,7 +3743,7 @@ class TestMakeFunctional(TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = nn.Linear(3, 3)
-                self.register_buffer("buffer", torch.randn(3))
+                self.buffer = nn.Buffer(torch.randn(3))
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3743,7 +3765,7 @@ class TestMakeFunctional(TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = nn.Linear(3, 3)
-                self.register_buffer("buffer", torch.randn(3))
+                self.buffer = nn.Buffer(torch.randn(3))
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3803,8 +3825,8 @@ class TestMakeFunctional(TestCase):
                 self.linear = nn.Linear(3, 3)
                 self.weight = self.linear.weight
                 self.bias = self.linear.bias
-                self.register_buffer("buffer", torch.randn(3))
-                self.register_buffer("buffer_tied", self.buffer)
+                self.buffer = nn.Buffer(torch.randn(3))
+                self.buffer_tied = self.buffer
 
             def forward(self, x):
                 x = self.linear(x)
