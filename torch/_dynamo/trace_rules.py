@@ -174,6 +174,7 @@ manual_torch_name_rule_map = {
     # https://github.com/pytorch/pytorch/issues/93501
     "torch.nn.utils.rnn.pack_padded_sequence": SkipFunctionVariable,
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
+    "torch.nn.Buffer": TorchInGraphFunctionVariable,
     "torch._nested_tensor_from_mask": SkipFunctionVariable,
     "torch._nested_from_padded": SkipFunctionVariable,
     "torch.nested.nested_tensor_from_jagged": UserFunctionVariable,
@@ -653,6 +654,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._is_alias_of",
         "torch._C._is_any_autocast_enabled",
         "torch._C._is_cached_tensor",
+        "torch._C._is_flash_attention_available",
         "torch._C._is_fwd_grad_enabled",
         "torch._C._is_key_in_tls",
         "torch._C._is_multithreading_enabled",
@@ -2393,6 +2395,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.backends.cuda.enable_mem_efficient_sdp",
         "torch.backends.cuda.flash_sdp_enabled",
         "torch.backends.cuda.is_built",
+        "torch.backends.cuda.is_flash_attention_available",
         "torch.backends.cuda.math_sdp_enabled",
         "torch.backends.cuda.mem_efficient_sdp_enabled",
         "torch.backends.cuda.cudnn_sdp_enabled",
@@ -3277,14 +3280,20 @@ SKIP_DIRS_RE = re.compile(r"match nothing^")
 is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
 # Skip fbcode paths(including torch.package paths) containing
 # one of the following strings.
-FBCODE_SKIP_DIRS = set()
-# Remove this after fbcode is fully migrated to tracing through torchrec.
-if torch._dynamo.config.skip_torchrec:
-    FBCODE_SKIP_DIRS.add("torchrec/distributed")
-    FBCODE_SKIP_DIRS.add("torchrec/fb/distributed")
-    FBCODE_SKIP_DIRS.add("caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py")
+FBCODE_SKIP_DIRS: Set[str] = set()
+
 FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS))})")
 
+# Remove this after fbcode is fully migrated to tracing through torchrec.
+FBCODE_SKIP_TORCHREC_DIRS = {
+    "torchrec/distributed",
+    "trochrec/fb/distributed",
+    "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py",
+}
+
+FBCODE_SKIP_TORCHREC_DIRS_RE = re.compile(
+    f".*({'|'.join(map(re.escape, FBCODE_SKIP_TORCHREC_DIRS))})"
+)
 
 # TODO(yanboliang, anijain2305) - There are a few concerns that we should
 # resolve
@@ -3353,6 +3362,7 @@ def check_file(filename, is_inlined_call=False):
         )
     if (
         is_fbcode
+        and FBCODE_SKIP_DIRS
         and bool(FBCODE_SKIP_DIRS_RE.match(filename))
         and not bool(FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE.match(filename))
     ):
@@ -3360,6 +3370,16 @@ def check_file(filename, is_inlined_call=False):
             True,
             "FBCODE_SKIP_DIRS",
         )
+
+    if (
+        is_fbcode
+        and torch._dynamo.config.skip_torchrec
+        and FBCODE_SKIP_TORCHREC_DIRS
+        and bool(FBCODE_SKIP_TORCHREC_DIRS_RE.match(filename))
+        and not bool(FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE.match(filename))
+    ):
+        return SkipResult(True, "FBCODE_SKIP_TORCHREC_DIRS")
+
     if bool(SKIP_DIRS_RE.match(filename)):
         return SkipResult(True, "SKIP_DIRS")
     else:
