@@ -840,13 +840,12 @@ class BuiltinVariable(VariableTracker):
 
             handlers.append(constant_fold_handler)
 
-        error_msg = f"builtin: {fn.__name__} {arg_types} {has_kwargs}"
         def builtin_dispatch(tx: "InstructionTranslator", args, kwargs):
-            for fn in handlers:
-                rv = fn(tx, args, kwargs)
+            for f in handlers:
+                rv = f(tx, args, kwargs)
                 if rv:
                     return rv
-            unimplemented(error_msg)
+            unimplemented(f"builtin: {fn.__name__} {arg_types} {has_kwargs}")
 
         return builtin_dispatch
 
