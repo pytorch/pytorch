@@ -13,7 +13,7 @@ conda_reinstall() {
 }
 
 if [ -n "${ROCM_VERSION}" ]; then
-  TRITON_REPO="https://github.com/openai/triton"
+  TRITON_REPO="https://github.com/nmacchioni/triton"
   TRITON_TEXT_FILE="triton-rocm"
 elif [ -n "${XPU_VERSION}" ]; then
   TRITON_REPO="https://github.com/intel/intel-xpu-backend-for-triton"

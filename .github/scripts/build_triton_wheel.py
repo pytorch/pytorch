@@ -74,9 +74,10 @@ def build_triton(
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
         triton_pythondir = triton_basedir / "python"
-        triton_repo = "https://github.com/openai/triton"
+        triton_repo = "https://github.com/nmacchioni/triton"
         if device == "rocm":
             triton_pkg_name = "pytorch-triton-rocm"
+            triton_repo = "https://github.com/openai/triton"
         elif device == "xpu":
             triton_pkg_name = "pytorch-triton-xpu"
             triton_repo = "https://github.com/intel/intel-xpu-backend-for-triton"
