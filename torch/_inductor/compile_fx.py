@@ -546,7 +546,9 @@ def compile_fx_inner(
         """
         compiled_graph = fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
         if isinstance(compiled_graph, str):
-            # No need to do any postprocessing if we return a string
+            # We only return a string in aot mode, in which case we don't
+            # need to do any post-compilation steps: we just return the string,
+            # which is the filename of the compiled code.
             return compiled_graph
         cudagraph_info = None
         if cudagraphs:

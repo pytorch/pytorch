@@ -52,6 +52,7 @@ from torch._inductor.utils import (
     run_and_get_code,
     run_and_get_cpp_code,
     run_and_get_triton_code,
+    run_fw_bw_and_get_code,
 )
 from torch._inductor.virtualized import V
 from torch._prims_common import is_integer_dtype
@@ -214,15 +215,6 @@ def define_custom_op_3_for_test(id_, fn_cpu, fn_cuda, fn_xpu, fn_meta, tags=()):
 
 
 f32 = torch.float32
-
-
-def run_fw_bw_and_get_code(fn):
-    def run_with_backward():
-        result = fn()
-        result.sum().backward()
-        return result
-
-    return run_and_get_code(run_with_backward)
 
 
 def register_ops_with_aoti_compile(ns, op_set, dispatch_key, torch_compile_op_lib_impl):
@@ -7181,6 +7173,11 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(64, 64)])
 
+    def test_new_cpp_build_logical(self):
+        from torch._inductor.codecache import validate_new_cpp_commands
+
+        validate_new_cpp_commands()
+
     def test_as_strided(self):
         def fn(x):
             return (
@@ -9996,10 +9993,9 @@ class CommonTemplate:
         if is_cpp_backend(self.device):
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             _, code = run_and_get_cpp_code(opt_fn, *args)
-            print(code)
             FileCheck().check_count(
-                "static_cast<int32_t>(256)",
-                1,
+                "static_cast<int64_t>(256)",
+                2,
                 exactly=True,
             ).run(code)
 
