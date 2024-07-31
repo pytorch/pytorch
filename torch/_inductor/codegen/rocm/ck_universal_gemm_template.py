@@ -270,7 +270,7 @@ class CKGemmTemplate(CKTemplate):
             op.c_elementwise_op = "Bilinear"
             # this dtype is also used for adding bias to matmul result
             # before converting down to the result dtype
-            op.c_shuffle_dtype = 'F32'
+            op.c_shuffle_dtype = "F32"
 
         op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
             op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,
