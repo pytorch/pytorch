@@ -802,6 +802,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def _wrap_source(self, attr_source):
         if not isinstance(attr_source, UnspecializedNNModuleSource):
             return UnspecializedNNModuleSource(attr_source)
+        return attr_source
 
     def get_nn_module_stack_source(self):
         return self.nn_module_stack_source or self.source
@@ -1166,3 +1167,4 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
                 return FSDPNNModuleSource(attr_source)
             else:
                 return UnspecializedNNModuleSource(attr_source)
+        return attr_source
