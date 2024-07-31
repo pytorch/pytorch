@@ -1,0 +1,60 @@
+name: Check Labels
+
+on:
+  # We need pull_request_target to be able to post comments on PRs from forks.
+  # Only allow pull_request_target when merging to main, not some historical branch.
+  #
+  # Make sure to don't introduce explicit checking out and installing/running
+  # untrusted user code into this workflow!
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [main]
+
+  # To check labels on ghstack PRs.
+  # Note: as pull_request doesn't trigger on PRs targeting main,
+  # to test changes to the workflow itself one needs to create
+  # a PR that targets a gh/**/base branch.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [gh/**/base]
+
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  check-labels:
+    name: Check labels
+    if: github.repository_owner == 'pytorch'
+    runs-on: linux.20_04.4x
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/.github/requirements-gha-cache.txt
+
+      - name: Install requirements
+        id: requirements
+        run: |
+          pip install -r .github/requirements-gha-cache.txt --user
+
+      - name: Check labels
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUM: ${{ github.event.number }}
+        run: |
+          set -ex
+          python3 .github/scripts/check_labels.py "${PR_NUM}"
