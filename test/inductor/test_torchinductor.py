@@ -9841,7 +9841,7 @@ class CommonTemplate:
     def test_data_type_propogation(self):
         from torch._dynamo.utils import detect_fake_mode
         from torch._inductor.codegen.common import boolean_ops
-        from torch._inductor.compile_fx import _shape_env_from_inputs
+        from torch._inductor.compile_fx import shape_env_from_inputs
         from torch._inductor.debug import DebugContext
         from torch._inductor.decomposition import decompositions
         from torch._inductor.graph import GraphLowering
@@ -9873,7 +9873,7 @@ class CommonTemplate:
             *example_inputs
         )
 
-        shape_env = _shape_env_from_inputs(example_inputs)
+        shape_env = shape_env_from_inputs(example_inputs)
 
         fake_mode = detect_fake_mode(example_inputs)
         if not fake_mode:
