@@ -443,10 +443,10 @@ def linalg_svd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy(
-    [aten._log_softmax.default, aten._softmax.default], schema_info=RuntimeSchemaInfo(1)
+    [aten._log_softmax.default, aten._softmax.default, aten._safe_softmax.default], schema_info=RuntimeSchemaInfo(1)
 )
 def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
-    input_strategy, softmax_dim, _ = op_schema.args_schema
+    input_strategy, softmax_dim, *_ = op_schema.args_schema
     input_strategy = cast(OpStrategy, input_strategy)
     softmax_dim = cast(int, softmax_dim)
     softmax_dim = normalize_dim(softmax_dim, input_strategy.ndim)
