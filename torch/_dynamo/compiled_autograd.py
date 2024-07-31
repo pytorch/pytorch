@@ -33,6 +33,7 @@ from torch.utils._traceback import CapturedTraceback
 if TYPE_CHECKING:
     from torch.fx.proxy import Proxy
 
+
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
 

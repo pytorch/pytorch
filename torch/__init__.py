@@ -309,8 +309,9 @@ def _load_global_deps() -> None:
             "cuda_cupti": "libcupti.so.*[0-9]",
             "cufft": "libcufft.so.*[0-9]",
             "curand": "libcurand.so.*[0-9]",
-            "cusolver": "libcusolver.so.*[0-9]",
+            "nvjitlink": "libnvJitLink.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",
+            "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
             "nvtx": "libnvToolsExt.so.*[0-9]",
         }
@@ -942,15 +943,16 @@ if not TYPE_CHECKING:
     # non-standard, and attributes of those submodules cannot be pickled since
     # pickle expect to be able to import them as "from _C.sub import attr"
     # which fails with "_C is not a package
-    __name, __candidate = "", None
-    for __name in dir(_C):
-        __candidate = getattr(_C, __name)
-        if inspect.ismodule(__candidate):
-            # submodule
-            sys.modules.setdefault(f"{__name__}._C.{__name}", __candidate)
+    def _set_sys_modules(module, module_name):
+        for name in dir(module):
+            member = getattr(module, name)
+            if inspect.ismodule(member):
+                sys.modules.setdefault(f"{module_name}.{name}", member)
+                # Recurse for submodules (e.g., `_C._dynamo.eval_frame`)
+                _set_sys_modules(member, f"{module_name}.{name}")
 
-    del __name, __candidate
-
+    _set_sys_modules(_C, f"{__name__}._C")
+    del _set_sys_modules
 
 ################################################################################
 # Define basic utilities
@@ -2358,7 +2360,7 @@ def compile(
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
 
         - To register an out-of-tree custom backend:
-       https://pytorch.org/docs/main/torch.compiler_custom_backends.html#registering-custom-backends
+          https://pytorch.org/docs/main/torch.compiler_custom_backends.html#registering-custom-backends
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
 
         - "default" is the default mode, which is a good balance between performance and overhead

@@ -37,11 +37,22 @@ from typing import (
 )
 from unittest.mock import patch
 
+import sympy
+
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
+
+# see discussion at https://github.com/pytorch/pytorch/issues/120699
+from torch._C._dynamo.eval_frame import (  # noqa: F401
+    reset_code,
+    set_guard_error_hook,
+    skip_code,
+    unsupported,
+)
+from torch._dispatch.python import enable_python_dispatcher
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import _process_dynamic_shapes
 from torch.fx import GraphModule
@@ -54,40 +65,26 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
-from .backends.registry import CompilerFn, lookup_backend
-from .hooks import Hooks
-
-
-# see discussion at https://github.com/pytorch/pytorch/issues/120699
-reset_code = torch._C._dynamo.eval_frame.reset_code  # noqa: F401
-
-set_guard_error_hook = torch._C._dynamo.eval_frame.set_guard_error_hook  # noqa: F401
-skip_code = torch._C._dynamo.eval_frame.skip_code  # noqa: F401
-unsupported = torch._C._dynamo.eval_frame.unsupported  # noqa: F401
-
 from . import config, convert_frame, external_utils, trace_rules, utils
+from .backends.registry import CompilerFn, lookup_backend
 from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
+from .hooks import Hooks
 from .mutation_guard import install_generation_tagging_init
 from .utils import common_constant_types, compile_times
-
-
-log = logging.getLogger(__name__)
-
-from torch._dispatch.python import enable_python_dispatcher
-
-
-always_optimize_code_objects = utils.ExactWeakKeyDictionary()
-null_context = contextlib.nullcontext
-
-
-import sympy
 
 
 if TYPE_CHECKING:
     from torch._subclasses import fake_tensor
 
     from .types import CacheEntry, DynamoCallback
+
+
+log = logging.getLogger(__name__)
+
+
+always_optimize_code_objects = utils.ExactWeakKeyDictionary()
+null_context = contextlib.nullcontext
 
 
 # See https://github.com/python/typing/pull/240
@@ -166,6 +163,7 @@ class OptimizedModule(torch.nn.Module):
         self._orig_mod = mod
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
+        self.training = self._orig_mod.training
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
@@ -200,6 +198,19 @@ class OptimizedModule(torch.nn.Module):
     def __setstate__(self, state):
         self.__dict__ = state
         self._initialize()
+
+    @property
+    def training(self):
+        return self._orig_mod.training
+
+    @training.setter
+    def training(self, value):
+        try:
+            super().__getattr__("_orig_mod")
+            self._orig_mod.training = value
+        except AttributeError:
+            # still initializing
+            pass
 
     def __getattr__(self, name):
         if name == "_orig_mod":
@@ -686,9 +697,6 @@ def is_dynamo_supported():
 
 def check_if_inductor_supported():
     check_if_dynamo_supported()
-
-    if sys.platform == "win32":
-        raise RuntimeError("Windows not yet supported for inductor")
 
 
 def is_inductor_supported():
