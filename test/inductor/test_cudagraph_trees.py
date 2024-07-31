@@ -749,6 +749,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             )
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+
+            # Reset dynamo and rerun. We should see a cache hit now
             torch._dynamo.reset()
 
             out2 = foo(inp2)
