@@ -39,9 +39,10 @@ jobs:
       shell: cmd
       run: |
         call %conda_path%\Scripts\activate.bat
+        conda init cmd.exe
         conda remove -n %conda_env% --all -y
         conda create -n %conda_env% python=3.10 -y
-        call %conda_path%\Scripts\activate.bat activate %conda_env%
+        conda activate %conda_env%
         conda remove ucrt -y
         conda install cmake==3.26.4 --force -y
         conda list
@@ -60,6 +61,7 @@ jobs:
       shell: cmd
       run: |
         call %conda_path%\Scripts\activate.bat activate %conda_env%
+        conda list
         if exist "%home_dir%\pytorch" rmdir /s /q "%home_dir%\pytorch"
         git clone https://github.com/pytorch/pytorch.git %home_dir%\pytorch
         cd %home_dir%\pytorch
