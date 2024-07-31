@@ -1300,7 +1300,7 @@ class VariableBuilder:
                 # Assume that integers that came from NN modules want to be
                 # specialized (as we don't expect users to be changing the
                 # NN modules on the fly)
-                or self.source.guard_source().is_nn_module()
+                or self.source.guard_source().is_specialized_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
                 # TODO: Delete this condition when rollout is done.  NB: this
@@ -1350,7 +1350,7 @@ class VariableBuilder:
         )
 
         if (
-            source.guard_source().is_nn_module() or make_graph_attribute
+            source.guard_source().is_specialized_nn_module() or make_graph_attribute
         ) and not source.guard_source().is_fsdp_module():
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
@@ -2612,7 +2612,7 @@ def wrap_to_fake_tensor_and_record(
 
         if (
             is_tensor
-            and not (static_shapes and source.is_nn_module())
+            and not (static_shapes and source.is_specialized_nn_module())
             and not is_constant_source(source)
         ):
             tx.output.tracked_fakes.append(

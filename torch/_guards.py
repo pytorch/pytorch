@@ -80,8 +80,8 @@ class TraceId(NamedTuple):
 class GuardSource(enum.Enum):
     LOCAL = 0
     GLOBAL = 1
-    LOCAL_NN_MODULE = 2
-    GLOBAL_NN_MODULE = 3
+    LOCAL_SPECIALIZED_NN_MODULE = 2
+    GLOBAL_SPECIALIZED_NN_MODULE = 3
     CONSTANT = 4
     RANDOM_VALUE = 5
     SHAPE_ENV = 6
@@ -94,12 +94,12 @@ class GuardSource(enum.Enum):
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
 
-    def is_nn_module(self) -> bool:
+    def is_specialized_nn_module(self) -> bool:
         return (
             self
             in (
-                GuardSource.GLOBAL_NN_MODULE,
-                GuardSource.LOCAL_NN_MODULE,
+                GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+                GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
             )
             or self.is_fsdp_module()
         )
@@ -107,7 +107,7 @@ class GuardSource(enum.Enum):
     def is_local(self):
         return self in (
             GuardSource.LOCAL,
-            GuardSource.LOCAL_NN_MODULE,
+            GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
             GuardSource.LOCAL_FSDP_MODULE,
         )
 
@@ -263,8 +263,8 @@ class Guard:
                 log.error("Created at:\n%s", "".join(self.stack.format()[-4:]).rstrip())
             raise
 
-    def is_nn_module(self):
-        return self.source.is_nn_module()
+    def is_specialized_nn_module(self):
+        return self.source.is_specialized_nn_module()
 
     def is_fsdp_module(self):
         return self.source.is_fsdp_module()
@@ -820,8 +820,8 @@ class Source:
             raise NotImplementedError
         return Guard(self, fn)
 
-    def is_nn_module(self) -> bool:
-        return self.guard_source().is_nn_module()
+    def is_specialized_nn_module(self) -> bool:
+        return self.guard_source().is_specialized_nn_module()
 
     def subguards_allowed(self):
         """True if you can guard on attributes of this"""
