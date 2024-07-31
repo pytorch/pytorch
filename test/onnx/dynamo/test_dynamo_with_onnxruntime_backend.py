@@ -20,9 +20,9 @@ from torch.onnx import (
     _OrtBackendOptions as OrtBackendOptions,
     ExportOptions,
 )
-
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNNModuleInlined
+
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import onnx_test_common
