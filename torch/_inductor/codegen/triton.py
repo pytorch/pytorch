@@ -2236,16 +2236,54 @@ class TritonKernel(SIMDKernel):
             def sum_fn(a, b):
                 return [ops.add(ai, bi) for ai, bi in zip(a, b)]
 
+            def bitcast_float_to_int_type(dtype):
+                bits = torch.finfo(dtype).bits
+                if bits == 8:
+                    return torch.int8
+                elif bits == 16:
+                    return torch.int16
+                elif bits == 32:
+                    return torch.int32
+                elif bits == 64:
+                    return torch.int64
+                else:
+                    raise NotImplementedError(
+                        f"Unknown size of floating point type {dtype}"
+                    )
+
+            def bitcast_if_float(var, dtype):
+                if dtype.is_floating_point:
+                    int_type = triton_store_type(bitcast_float_to_int_type(dtype))
+                    return f"{var}.to({int_type}, bitcast=True)"
+                else:
+                    return str(var)
+
+            def bitcast_back_to_float(var, dtype):
+                if dtype.is_floating_point:
+                    return f"{var}.to({triton_store_type(dtype)}, bitcast=True)"
+                else:
+                    return str(var)
+
             sum_helper_fn = self._lift_helper(sum_fn, len(values))
             pre_reduce_vars = ", ".join(
-                f"{scan_var} * (rbase == (RBLOCK - 1))"
-                for scan_var in partial_scan_vars
+                f"{bitcast_if_float(scan_var, dtype)} * (rbase == (RBLOCK - 1))"
+                for scan_var, dtype in zip(partial_scan_vars, dtypes)
             )
             # tl.reduce doesn't work for non-commutative operators, so instead
             # of repeating the scan op as a reduction, we use sum to select the
             # last scan value
-            partial_reduce_vars = cse_multiple(
+            partial_reduce_vars_bitcast = cse_multiple(
                 f"tl.reduce(({pre_reduce_vars}), -1, {sum_helper_fn}, keep_dims=True)",
+                len(values),
+                masks,
+            )
+            partial_reduce_vars = cse_multiple(
+                ", ".join(
+                    [
+                        bitcast_back_to_float(var, dtype)
+                        for var, dtype in zip(partial_reduce_vars_bitcast, dtypes)
+                    ]
+                ),
                 len(values),
                 masks,
             )
