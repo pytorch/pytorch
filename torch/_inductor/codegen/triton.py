@@ -2237,7 +2237,7 @@ class TritonKernel(SIMDKernel):
                 return [ops.add(ai, bi) for ai, bi in zip(a, b)]
 
             def bitcast_float_to_int_type(dtype):
-                bits = torch.finfo(dtype).bits
+                bits = _get_primitive_bitwidth(dtype)
                 if bits == 8:
                     return torch.int8
                 elif bits == 16:
@@ -2260,7 +2260,7 @@ class TritonKernel(SIMDKernel):
 
             def bitcast_back_to_float(var, dtype):
                 if dtype.is_floating_point:
-                    return f"{var}.to({triton_store_type(dtype)}, bitcast=True)"
+                    return f"{var}.to({triton_compute_type(dtype)}, bitcast=True)"
                 else:
                     return str(var)
 
