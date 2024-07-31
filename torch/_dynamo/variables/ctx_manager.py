@@ -3,7 +3,7 @@ import dataclasses
 import inspect
 import sys
 import warnings
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch._C
 
@@ -29,6 +29,7 @@ from .functions import (
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
+from .user_defined import UserDefinedObjectVariable
 
 
 @dataclasses.dataclass
@@ -122,20 +123,30 @@ class ContextWrappingVariable(VariableTracker):
             return WrappedUserFunctionVariable(args[0], self)
 
 
-class GenericContextWrappingVariable(ContextWrappingVariable):
-    def __init__(self, target_values, initial_values=None, *, cm_obj=None, **kwargs):
+class GenericContextWrappingVariable(UserDefinedObjectVariable):
+    # Some methods in ContextWrappingVariable assumes the arguments are
+    # python contants. Which might not always be the case here.
+    def __init__(self, cm_obj, **kwargs):
         assert cm_obj is not None
         super().__init__(
-            target_values=target_values, initial_values=initial_values, **kwargs
+            value=cm_obj,
+            value_type=cm_obj.__class__,
+            **kwargs,
         )
         self.cm_obj = cm_obj
+
+    def module_name(self):
+        return self.cm_obj.__module__
+
+    def fn_name(self):
+        return type(self.cm_obj).__name__
 
     def enter(self, tx):
         source = None if self.source is None else AttrSource(self.source, "__enter__")
         try:
             return variables.UserMethodVariable(
                 self.cm_obj.__enter__.__func__,
-                variables.UserDefinedObjectVariable(self.cm_obj),
+                self,
                 source=source,
             ).call_function(tx, [], {})
         except Unsupported as e:
@@ -149,7 +160,7 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         try:
             x = variables.UserMethodVariable(
                 self.cm_obj.__exit__.__func__,
-                variables.UserDefinedObjectVariable(self.cm_obj),
+                self,
                 source=source,
             ).call_function(
                 tx,
@@ -1026,9 +1037,16 @@ class WithExitFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, ctx: ContextWrappingVariable, target, **kwargs):
+    def __init__(
+        self,
+        ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
+        target,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
-        assert isinstance(ctx, ContextWrappingVariable)
+        assert isinstance(
+            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+        )
         self.ctx = ctx
         self.target = target
 

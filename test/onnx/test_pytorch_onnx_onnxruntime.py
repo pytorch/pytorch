@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import functools
-
 import io
 import itertools
 import os
@@ -12,6 +11,7 @@ from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple, Type, Union
 
 import numpy as np
+
 import onnx
 import onnx_test_common
 import parameterized
@@ -38,7 +38,6 @@ from pytorch_test_common import (
 )
 
 import torch
-
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
 from torch.onnx import errors, verification
@@ -3907,15 +3906,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 ctx.save_for_backward(input)
                 return input.clamp(min=0)
 
-        def symbolic_python_op(
-            ctx: torch.onnx.SymbolicContext, g: torch._C.Graph, *args, **kwargs
-        ):
-            n = ctx.cur_node
+        def symbolic_python_op(g, *args, **kwargs):
             name = kwargs["name"]
             if name == "MyClip":
-                return g.op("Clip", args[0], args[1], outputs=n.outputsSize())
+                return g.op("Clip", args[0], args[1])
             elif name == "MyRelu":
-                return g.op("Relu", args[0], outputs=n.outputsSize())
+                return g.op("Relu", args[0])
             else:
                 # TODO(justinchuby): Remove reference to internal names in symbolic_helper
                 return torch.onnx.symbolic_helper._unimplemented(
