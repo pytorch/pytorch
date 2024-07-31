@@ -3570,7 +3570,7 @@ CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {
 // and not inside MemPoolContext class, because in windows we
 // can't use __declspec(dllexport) and __declspec(thread)
 // together: https://stackoverflow.com/a/50967977
-static thread_local MemPool* MemPoolContext::active_mempool_ = nullptr;
+static thread_local MemPool* active_mempool_ = nullptr;
 
 MemPoolContext::MemPoolContext(MemPool* mempool)
     : prev_mempool_(active_mempool_) {
