@@ -307,7 +307,7 @@ static py::object dispatch_on_subclass(
         PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
             .is(py::handle(arg)) &&
         torch_function.ptr() != torch::disabled_torch_function_impl()) {
-      TORCH_WARN(
+      TORCH_WARN_ONCE(
           "Defining your `",
           torch_function_name_str,
           "` as a plain method is deprecated ",
