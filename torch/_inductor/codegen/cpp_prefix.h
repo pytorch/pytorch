@@ -34,6 +34,9 @@
 #if INDUCTOR_USE_VECTOR_TYPES()
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
+#else
+// For calc_erfinv
+#include <ATen/native/Math.h>
 #endif
 
 typedef at::Half half;
@@ -46,61 +49,129 @@ template <typename T>
 struct Welford {
   T mean = T(0);
   T m2 = T(0);
+  // Use weight for tail cases since the index of each element in the vec may be
+  // different. A single index can not express masked welford reduction.
   T weight = T(0);
+  uint64_t index = 0;
 };
 
 
 template <typename T>
 struct IsVecType: std::false_type {};
-template <typename T>
-struct Is2VecType: std::false_type {};
 
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T>
 struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
-template <typename T>
-struct Is2VecType<at::vec::VectorizedN<T, 2>>: std::true_type {};
 #endif
 
 template <typename T>
-Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
-  if constexpr (!IsVecType<T>::value && !Is2VecType<T>::value) {
-    if (a.weight == 0) {
-      return b;
-    }
-    if (b.weight == 0) {
-      return a;
+struct WeightRecp {
+  using scalar_t = typename T::value_type;
+  std::vector<scalar_t> weight_recps;
+  WeightRecp(uint64_t N) {
+    weight_recps.reserve(N);
+    for (const auto i : c10::irange(N)) {
+      weight_recps.push_back(
+          scalar_t(static_cast<double>(1) / static_cast<double>(i + 1)));
     }
   }
+};
+
+template <typename T>
+Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_index=false) {
+  if (a.index == 0) {
+    return b;
+  }
+  if (b.index == 0) {
+    return a;
+  }
   auto delta = b.mean - a.mean;
-  auto new_weight = a.weight + b.weight;
-  auto wb_over_w = b.weight / new_weight;
-  if constexpr (IsVecType<T>::value || Is2VecType<T>::value) {
+  auto a_weight = use_index ? T(a.index) : a.weight;
+  auto b_weight = use_index ? T(b.index) : b.weight;
+  auto new_weight = a_weight + b_weight;
+  auto new_index = a.index + b.index;
+  auto wb_over_w = b_weight / new_weight;
+  if constexpr (IsVecType<T>::value) {
     // Guard against division by zero
     wb_over_w = T::blendv(wb_over_w, T(0), new_weight == T(0));
   }
   auto result = Welford<T>{
     a.mean + delta * wb_over_w,
-    a.m2 + b.m2 + delta * delta * a.weight * wb_over_w,
-    new_weight
+    a.m2 + b.m2 + delta * delta * a_weight * wb_over_w,
+    new_weight,
+    new_index
   };
   return result;
 }
 
 template <typename T>
-Welford<T> welford_combine(const Welford<T> &acc, T data) {
+Welford<T> welford_combine(const Welford<T>& acc, const T& data, const WeightRecp<T>* w=nullptr) {
   // Add a single data point
-  auto delta = data - acc.mean;
+  uint64_t new_index = acc.index + 1;
   auto new_weight = acc.weight + T(1);
-  auto new_mean = acc.mean + delta / new_weight;
+  auto delta = data - acc.mean;
+  T new_mean;
+  if constexpr (!IsVecType<T>::value) {
+    new_mean = acc.mean + delta / new_weight;
+  } else {
+    // use new_index to fecth 1 / new_weight to avoid divisions
+    new_mean = acc.mean +
+      ((w == nullptr || acc.index >= w->weight_recps.size())
+            ? delta / new_weight
+            : delta * T(w->weight_recps[acc.index]));
+  }
   auto new_delta = data - new_mean;
   auto result = Welford<T>{
     new_mean,
     acc.m2 + delta * new_delta,
-    new_weight
+    new_weight,
+    new_index
   };
   return result;
 }
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+Welford<T> welford_combine(const Welford<T>& acc, const T& data, const int64_t tail_size, const WeightRecp<T>* w=nullptr) {
+  auto out = welford_combine(acc, data, w);
+  return Welford<T>{
+    T::set(acc.mean, out.mean, tail_size),
+    T::set(acc.m2, out.m2, tail_size),
+    T::set(acc.weight, out.weight, tail_size),
+    out.index
+  };
+}
+
+template <typename T>
+T max_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+  auto out = at::vec::maximum(a, b);
+  return T::set(a, out, tail_size);
+}
+
+template <typename T>
+T min_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+  auto out = at::vec::minimum(a, b);
+  return T::set(a, out, tail_size);
+}
+
+template <typename T>
+T sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+  auto out = a + b;
+  return T::set(a, out, tail_size);
+}
+
+template <typename T>
+T prod_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+  auto out = a * b;
+  return T::set(a, out, tail_size);
+}
+
+template <typename T>
+T xor_sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+  auto out = a ^ b;
+  return T::set(a, out, tail_size);
+}
+#endif
 
 // Refer to https://github.com/pytorch/pytorch/blob/b5b36cf0c4e1958f1ff25120f5d4beeef3288187/
 // aten/src/ATen/native/SharedReduceOps.h#L419-L445
@@ -181,16 +252,22 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
 template <typename scalar_t>
 Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc) {
   using Vec = at::vec::Vectorized<scalar_t>;
+  Welford<scalar_t> result;
+  if (acc.index == 0) {
+    return result;
+  }
+  // if all values of acc.weight are same as index,
+  // use index to reduce to save the overhead of vec_shuffle_down for acc.weight
+  bool use_index = (acc.weight - Vec(acc.index)).zero_mask() == static_cast<int>((1 << Vec::size()) - 1);
   for (size_t n = 1; n < Vec::size(); n *= 2) {
     auto shuffled = Welford<Vec>{
       vec_shuffle_down(acc.mean, n),
       vec_shuffle_down(acc.m2, n),
-      vec_shuffle_down(acc.weight, n)
-    };
-    acc = welford_combine(acc, shuffled);
+      use_index ? Vec(0) : vec_shuffle_down(acc.weight, n),
+      acc.index};
+    acc = welford_combine(acc, shuffled, use_index);
   }
 
-  Welford<scalar_t> result;
   alignas(alignof(Vec)) scalar_t array[Vec::size()];
   acc.mean.store(array);
   result.mean = array[0];
@@ -200,6 +277,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
 
   acc.weight.store(array);
   result.weight = array[0];
+  result.index = result.weight;
 
   return result;
 }
@@ -216,9 +294,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::VectorizedN<scalar_t, 
     acc.m2[1],
     acc.weight[1]
   };
-  auto result0 = welford_vec_reduce_all(Welford0);
-  auto result1 = welford_vec_reduce_all(Welford1);
-  return welford_combine(result0, result1);
+  return welford_vec_reduce_all(welford_combine(Welford0, Welford1));
 }
 #endif
 
@@ -316,14 +392,21 @@ atomic_add(volatile T *addr, T offset) {
   atomic_addr->fetch_add(offset, std::memory_order_relaxed);
 }
 
-std::tuple<int64_t, int64_t, int64_t> mm_get_thread_blocking(
+void mm_get_thread_blocking(
+    int num_threads,
     int64_t M,
     int64_t N,
     int64_t K,
     int64_t M0,
     int64_t N0,
     int64_t K0,
-    int num_threads) {
+    int64_t& Mt,
+    int64_t& Nt,
+    int64_t& Kt) {
+  // see NOTE [Thread blocking in Cpp GEMM] for heuristics
+  // TODO(jgong5): cache thread blocking results
+  Mt = Nt = Kt = 0;
+
   auto get_factors = [](int64_t number) {
     int count = 0;
     for (int64_t i = std::sqrt(number); i > 0; --i) {
@@ -353,6 +436,15 @@ std::tuple<int64_t, int64_t, int64_t> mm_get_thread_blocking(
     return std::make_tuple(thread_block_m, thread_block_n, k_blocks);
   };
 
+  auto is_better_blocking = [=](int64_t Mt_,
+                              int64_t Nt_,
+                              int64_t Kt_,
+                              int64_t Mt,
+                              int64_t Nt,
+                              int64_t Kt) {
+    return Mt == 0 || Mt_ * M0 + Nt_ * N0 < Mt * M0 + Nt * N0;
+  };
+
   int64_t m_blocks = (M + M0 - 1) / M0;
   int64_t n_blocks = (N + N0 - 1) / N0;
   int64_t k_blocks = (K + K0 - 1) / K0;
@@ -362,29 +454,33 @@ std::tuple<int64_t, int64_t, int64_t> mm_get_thread_blocking(
 
   for (int i = 0; i < count; ++i) {
     int64_t factor = factors[i];
-    if (n_blocks % factor == 0 &&
-        m_blocks % (num_threads / factor) == 0) {
-      return get_blocking(
+    if (n_blocks >= factor &&
+        m_blocks >= num_threads / factor) {
+      auto [Mt_, Nt_, Kt_] = get_blocking(
           num_threads, factor, m_blocks, n_blocks, k_blocks);
+      if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
+        std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
+      }
     }
+  }
+
+  if (Mt != 0) {
+    return;
   }
 
   for (int i = 0; i < count; ++i) {
     int64_t factor = factors[i];
-    if (n_blocks % factor == 0) {
-      return get_blocking(
-          num_threads, factor, m_blocks, n_blocks, k_blocks);
-    }
     int64_t cofactor = num_threads / factor;
-    if (m_blocks % cofactor == 0) {
-      return get_blocking(
+    if (n_blocks >= factor || m_blocks >= cofactor) {
+      auto [Mt_, Nt_, Kt_] = get_blocking(
           num_threads, factor, m_blocks, n_blocks, k_blocks);
+      if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
+        std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
+      }
     }
   }
 
-  assert(false && "Should not reach here.");
-  // Dummy return to avoid compiler warning
-  return std::make_tuple(0, 0, 0);
+  assert(Mt != 0);
 }
 
 inline void mm_get_thread_blocks(
@@ -412,3 +508,65 @@ inline void mm_get_thread_blocks(
   m_block_start = std::min(thread_id * Mt_blocks, M_blocks);
   m_block_end = std::min(m_block_start + Mt_blocks, M_blocks);
 }
+
+struct amx_tilecfg {
+  uint8_t palette_id;
+  uint8_t start_row;
+  uint8_t reserved_0[14];
+  uint16_t colsb[16];
+  uint8_t rows[16];
+};
+
+class AMXState {
+ private:
+  amx_tilecfg tilecfg_;
+  uint8_t rows_;
+  uint16_t colsb_;
+  uint8_t num_tile_rows_;
+  uint8_t num_tile_columns_;
+
+ public:
+  AMXState() : rows_(0), colsb_(0), num_tile_rows_(0), num_tile_columns_(0) {
+    memset(&tilecfg_, 0, sizeof(tilecfg_));
+  }
+
+  inline void configure(
+      uint8_t rows,
+      uint16_t colsb,
+      uint8_t num_tile_rows,
+      uint8_t num_tile_columns,
+      void (*loadconfig)(const amx_tilecfg&)) {
+    if (tilecfg_.palette_id == 1 && rows_ == rows && colsb_ == colsb &&
+        num_tile_rows_ == num_tile_rows &&
+        num_tile_columns_ == num_tile_columns) {
+      return;
+    }
+    tilecfg_.palette_id = 1;
+    rows_ = rows;
+    colsb_ = colsb;
+    num_tile_rows_ = num_tile_rows;
+    num_tile_columns_ = num_tile_columns;
+    const auto num_c_tiles = num_tile_rows * num_tile_columns;
+    // For C
+    for (int i = 0; i < num_c_tiles; i++) {
+      tilecfg_.rows[i] = rows;
+      tilecfg_.colsb[i] = 64;
+    }
+    // For A
+    for (int i = 0; i < num_tile_rows; i++) {
+      tilecfg_.rows[i + num_c_tiles] = rows;
+      tilecfg_.colsb[i + num_c_tiles] = colsb;
+    }
+    // For B
+    for (int i = 0; i < num_tile_columns; i++) {
+      tilecfg_.rows[i + num_c_tiles + num_tile_rows] = colsb / 4;
+      tilecfg_.colsb[i + num_c_tiles + num_tile_rows] = 64;
+    }
+    loadconfig(tilecfg_);
+  }
+
+  inline void release(void (*tile_release)()) {
+    tilecfg_.palette_id = 0;
+    tile_release();
+  }
+};

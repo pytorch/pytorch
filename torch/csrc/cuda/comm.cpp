@@ -11,9 +11,9 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
+#include <optional>
 
 #include <cstddef>
 #include <vector>
@@ -232,7 +232,7 @@ std::vector<at::Tensor>& scatter_out(
     const at::Tensor& tensor,
     std::vector<at::Tensor>& out_tensors,
     int64_t dim,
-    const std::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>&
+    const std::optional<std::vector<std::optional<at::cuda::CUDAStream>>>&
         streams) {
   TORCH_CHECK(
       !out_tensors.empty(),
@@ -315,7 +315,7 @@ std::vector<at::Tensor> scatter(
     at::IntArrayRef devices,
     const std::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
-    const std::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>&
+    const std::optional<std::vector<std::optional<at::cuda::CUDAStream>>>&
         streams) {
   TORCH_CHECK(!devices.empty(), "Expected at least one device to scatter to");
   if (chunk_sizes.has_value()) {

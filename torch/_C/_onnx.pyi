@@ -2,7 +2,6 @@
 
 from enum import Enum
 
-_CAFFE2_ATEN_FALLBACK: bool
 PRODUCER_VERSION: str
 
 class TensorProtoDataType(Enum):

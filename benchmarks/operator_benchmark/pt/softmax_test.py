@@ -1,7 +1,7 @@
+import operator_benchmark as op_bench
+
 import torch
 import torch.nn as nn
-
-import operator_benchmark as op_bench
 
 
 """

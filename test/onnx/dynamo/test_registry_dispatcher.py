@@ -6,12 +6,12 @@ import operator
 from typing import TypeVar, Union
 
 import onnxscript  # type: ignore[import]
-
-import torch
-import torch.fx
 from onnxscript import BFLOAT16, DOUBLE, FLOAT, FLOAT16  # type: ignore[import]
 from onnxscript.function_libs.torch_lib import ops  # type: ignore[import]
 from onnxscript.onnx_opset import opset15 as op  # type: ignore[import]
+
+import torch
+import torch.fx
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.fx import (
     analysis,
@@ -20,6 +20,7 @@ from torch.onnx._internal.fx import (
     registration,
 )
 from torch.testing._internal import common_utils
+
 
 # TODO: this can only be global. https://github.com/microsoft/onnxscript/issues/805
 TCustomFloat = TypeVar("TCustomFloat", bound=Union[FLOAT16, FLOAT, DOUBLE, BFLOAT16])

@@ -1,3 +1,5 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 from typing import List, Tuple, Union, Dict, Any, Set, Mapping, Optional
 import collections
 from dataclasses import dataclass
