@@ -95,8 +95,8 @@ from .source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
     TypeSource,
-    UnspecializedNNModuleSource,
     UnspecializedBuiltinNNModuleSource,
+    UnspecializedNNModuleSource,
     WeakRefCallSource,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401

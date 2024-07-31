@@ -40,7 +40,7 @@ _GUARD_SOURCE_UNSPECIALIZED_NN_MODULE = {
     GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
 }
 
-# represents nn.Modules tracked with UnspecializedBuilinNNModuleVariable
+# represents nn.Modules tracked with UnspecializedBuiltinNNModuleVariable
 _GUARD_SOURCE_UNSPECIALIZED_BUILTIN_NN_MODULE = {
     GuardSource.LOCAL: GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
     GuardSource.GLOBAL: GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
