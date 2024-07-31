@@ -6,7 +6,6 @@ numpy
 psutil
 pyyaml
 requests
-setuptools
 types-dataclasses
 typing-extensions>=4.8.0
 sympy==1.12.1 ; python_version == "3.8"
