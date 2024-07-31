@@ -69,7 +69,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
       auto maskedMM = [mpsGraph matrixMultiplicationWithPrimaryTensor:qTensor secondaryTensor:kT name:nil];
 
       bool macOS15_0_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
-      if (macOS15_0_plus) {
+      if (macOS15_0_plus && [maskedMM dataType] == MPSDataTypeFloat32) {
         // TODO: In MacOS15 beta, there is a MPSGraph issue when the SDPA sequence gets remapped to use
         // an improved kernel for the computation, causing NaNs in the result. This identity prevents the remapping.
         // Limit the availability check once a fix lands.
