@@ -1804,7 +1804,7 @@ class GuardBuilder(GuardBuilderBase):
         # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
         # to a new tensor everytime and therefore id differs.
         if (
-            guard.is_nn_module()
+            guard.is_specialized_nn_module()
             and not isinstance(guard.originating_source, NumpyTensorSource)
         ) or match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
@@ -2166,7 +2166,7 @@ class CheckFunctionManager:
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
                 not config.guard_nn_modules
-                and guard.is_nn_module()
+                and guard.is_specialized_nn_module()
                 # Default func args must be guarded on.
                 # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
                 and "__defaults__" not in guard.name
