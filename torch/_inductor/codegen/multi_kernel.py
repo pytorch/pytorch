@@ -1,14 +1,15 @@
 # mypy: allow-untyped-defs
 import logging
 import os
+import pathlib
 from typing import Any, List
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 
 from .. import config
-from ..codecache import PyCodeCache, TritonFuture
+from ..codecache import get_path, TritonFuture
 from ..runtime.runtime_utils import do_bench_gpu
-from ..utils import cache_on_self
+from ..utils import cache_on_self, IndentedBuffer
 from ..virtualized import V
 from .common import TensorArg
 
@@ -111,25 +112,6 @@ class MultiKernelState:
             # the second pass of cpp-wrapper.
             return multi_kernel_name
 
-        wrapper = V.graph.wrapper_code
-
-        kernel_call_def_code = "\n".join(
-            [
-                f"""
-    def call{idx}(need_clone_args=False):
-        args = [{', '.join(get_kernel_argdefs(kernels[idx]))}]
-        if need_clone_args:
-            args, _ = multi_kernel_call.kernels[{idx}].clone_args(*args)
-        multi_kernel_call.kernels[{idx}].run(*args, {', '.join(get_numel_argdefs(kernels[idx]))}, grid=grid, stream=stream)
-        """.format(
-                    idx
-                ).strip(
-                    "\n"
-                )
-                for idx in range(len(kernels))
-            ]
-        )
-
         # add subkernel src code hashes to the multi-kernel source code so changing a
         # subkernel implementation will result in a different py file for
         # multi-kernel. This makes cache implementation straightforward since
@@ -142,24 +124,21 @@ class MultiKernelState:
             f"# subkernel{i} code hash: {kernel.code_hash}"
             for i, kernel in enumerate(kernels)
         )
+        kernel_name_list = ",\n    ".join(kernel_names)
 
-        src_code = f"""
-{subkernel_hashes}
-def run(multi_kernel_call, {', '.join(get_all_kernel_argdefs(kernels))}, {', '.join(get_numel_argdefs(kernels[0]))}, grid, stream):
-{kernel_call_def_code}
-    multi_kernel_call.run_with_argless_kernels([call0, call1])"""  # noqa: B950 line too long
+        buf = IndentedBuffer()
+        buf.writeline(
+            f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, ["
+        )
+        with buf.indent():
+            for name in kernel_names:
+                buf.writeline(f"{name},")
+        buf.writeline("])")
 
-        multi_kernel_compile = f"""
-{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, [
-    {", ".join(kernel_names)},
-],
-'''
-{src_code}
-'''
-)"""
-        wrapper.header.splice(multi_kernel_compile)
+        wrapper = V.graph.wrapper_code
+        wrapper.header.splice(buf)
         if config.triton.autotune_at_compile_time:
-            wrapper.kernel_autotune_defs.splice(multi_kernel_compile)
+            wrapper.kernel_autotune_defs.splice(buf)
 
         return multi_kernel_name
 
@@ -196,14 +175,12 @@ class MultiKernel:
         """
         assert kernel_name == self.kernel_name
         V.graph.wrapper_code.write_triton_header_once()
-        call_args_list = []
-        arg_types_list = []
-        for kernel in self.kernels:
-            _, call_args, _, arg_types = kernel.args.python_argdefs()
-            call_args_list.append(call_args)
-            arg_types_list.append(arg_types)
+        _, call_args, _, arg_types = self.kernels[0].args.python_argdefs()
+        for kernel in self.kernels[1:]:
+            _, other_call_args, _, other_arg_types = kernel.args.python_argdefs()
+            assert call_args == other_call_args
+            assert arg_types == other_arg_types
 
-        all_call_args, arg_types = get_all_call_args(call_args_list, arg_types_list)
         grid: List[Any] = []
 
         if V.graph.cpp_wrapper:
@@ -211,20 +188,16 @@ class MultiKernel:
             # the fast kernel directly
             picked_kernel = MultiKernelCall.lookup_choice(kernel_name)
             kernel_name = self.kernels[picked_kernel].kernel_name
-            final_call_args = call_args_list[picked_kernel]
-            arg_types = arg_types_list[picked_kernel]
-        else:
-            final_call_args = all_call_args
 
         # numels for all subkernels should be the same. Use kernels[0] here
         self.kernels[0].add_numel_to_call_args_and_grid(
-            kernel_name, final_call_args, arg_types, grid
+            kernel_name, call_args, arg_types, grid
         )
 
         grid = V.graph.wrapper_code.generate_default_grid(kernel_name, grid)
         V.graph.wrapper_code.generate_kernel_call(
             kernel_name,
-            final_call_args,
+            call_args,
             grid,
             arg_types=arg_types,
         )
@@ -271,12 +244,11 @@ class MultiKernelCall:
     This class is called at run time to actually run the kernel
     """
 
-    def __init__(self, multi_kernel_name, kernels, src_code):
+    def __init__(self, multi_kernel_name, kernels):
         assert len(kernels) >= 2
         self._kernels = kernels
         self.multi_kernel_name = multi_kernel_name
 
-        self._run = PyCodeCache.load(src_code).run
         self.disable_cache = os.environ.get(
             "TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE"
         ) == "1" or is_metric_table_enabled("persistent_red_perf")
@@ -293,14 +265,14 @@ class MultiKernelCall:
         self._recorded = False
 
     def cache_file_path(self):
-        py_file_path = self._run.__globals__["__file__"]
-        return os.path.splitext(py_file_path)[0] + ".picked_kernel"
+        _, _, path = get_path(self.kernels[0].fn.cache_key, "picked_kernel")
+        return pathlib.Path(path)
 
     def load_cache(self):
         assert self.picked_kernel is None
         path = self.cache_file_path()
-        if os.path.exists(path):
-            with open(path) as fd:
+        if path.exists():
+            with path.open() as fd:
                 self.picked_kernel = int(fd.read())
                 assert self.picked_kernel >= 0 and self.picked_kernel < len(
                     self._kernels
@@ -312,7 +284,9 @@ class MultiKernelCall:
     def store_cache(self):
         assert self.picked_kernel is not None
         path = self.cache_file_path()
-        with open(path, "w") as fd:
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        with path.open("w") as fd:
             fd.write(str(self.picked_kernel))
         log.debug("Store picked kernel %d to cache file %s", self.picked_kernel, path)
 
@@ -331,11 +305,7 @@ class MultiKernelCall:
 
         return self._kernels
 
-    def run(self, *args, **kwargs):
-        self._run(self, *args, **kwargs)
-
-    @staticmethod
-    def benchmark_sub_kernels(kernel_calls):
+    def benchmark_sub_kernels(self, *args, **kwargs):
         """
         Benchmark all the sub kernels and return the execution time
         (in milliseconds) for each of time.
@@ -343,9 +313,17 @@ class MultiKernelCall:
         Unit test may mock this method to force a specific kernel to
         be picked.
         """
+
+        def wrap_fn(kernel):
+            def inner():
+                args_clone, kwargs_clone = kernel.clone_args(*args, **kwargs)
+                return kernel.run(*args_clone, **kwargs_clone)
+
+            return inner
+
         return [
-            do_bench_gpu(lambda: kernel_call(True), rep=40, fast_flush=True)
-            for kernel_call in kernel_calls
+            do_bench_gpu(wrap_fn(kernel), rep=40, fast_flush=True)
+            for kernel in self.kernels
         ]
 
     # record_choice and lookup_choice are helper functions for cpp-wrapper
@@ -381,9 +359,9 @@ class MultiKernelCall:
         # there should be no miss
         return V.graph.multi_kernel_to_choice[multi_kernel_name]
 
-    def run_with_argless_kernels(self, kernel_calls):
+    def run(self, *args, **kwargs):
         if self.picked_kernel is None:
-            timings = self.benchmark_sub_kernels(kernel_calls)
+            timings = self.benchmark_sub_kernels(*args, **kwargs)
             self.picked_kernel = timings.index(min(timings))
             k0 = self.kernels[0]
             log.debug(
@@ -416,4 +394,5 @@ class MultiKernelCall:
         if not self._recorded:
             self._recorded = True
             self.record_choice(self.multi_kernel_name, self.picked_kernel)
-        kernel_calls[self.picked_kernel]()
+        self.run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
+        self.run(*args, **kwargs)
