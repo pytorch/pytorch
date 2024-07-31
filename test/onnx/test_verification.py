@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 import numpy as np
+
 import onnx
 import parameterized
 import pytorch_test_common
