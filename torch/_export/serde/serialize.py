@@ -1413,7 +1413,7 @@ class GraphModuleDeserializer(metaclass=Final):
         constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]]
         example_inputs: Optional[Tuple[Tuple[torch.Tensor, ...], Dict[str, Any]]]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.serialized_name_to_node: Dict[str, torch.fx.Node] = {}
         self.serialized_name_to_meta: Dict[str, MetaType] = {}
         self.graph = torch.fx.Graph()

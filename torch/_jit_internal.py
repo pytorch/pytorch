@@ -194,7 +194,7 @@ def _qualified_name(obj, mangle_name=True) -> str:
 
 
 class SourceLoader:
-    def __init__(self):
+    def __init__(self) -> None:
         self.content = {}
 
     def cache(self, fn, source):

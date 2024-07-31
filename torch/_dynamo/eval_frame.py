@@ -496,7 +496,7 @@ class _TorchDynamoContext:
                         wrapper function.
 
                         >> class CallableClass:
-                        >>     def __init__(self):
+                        >>     def __init__(self) -> None:
                         >>         super().__init__()
                         >>         self.relu = torch.nn.ReLU()
                         >>
@@ -577,7 +577,7 @@ class OptimizeContext(_TorchDynamoContext):
 
 
 class RunOnlyContext(_TorchDynamoContext):
-    def __init__(self):
+    def __init__(self) -> None:
         # cudagraph trees relies on generation increment
         def on_enter():
             torch._dynamo.mutation_guard.GenerationTracker.generation += 1
@@ -589,7 +589,7 @@ class RunOnlyContext(_TorchDynamoContext):
 
 
 class DisableContext(_TorchDynamoContext):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(callback=None)
 
     def __call__(self, fn):

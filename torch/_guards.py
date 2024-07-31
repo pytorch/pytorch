@@ -407,7 +407,7 @@ class ModuleContextCheckpointState:
 
 
 class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
-    def __init__(self):
+    def __init__(self) -> None:
         self.nn_modules: Dict[str, Any] = {}
 
     def copy_graphstate(self):
@@ -456,7 +456,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
         "autocast_cache_enabled",
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.global_state: Dict[str, Tuple[Callable, ...]] = {}
 
     def copy_graphstate(self):
@@ -524,7 +524,7 @@ class GuardsSet:
 
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
-    def __init__(self):
+    def __init__(self) -> None:
         self.dynamo_guards: GuardsSet = GuardsSet()
         self.aotautograd_guards: List[GuardEnvExpr] = []
 

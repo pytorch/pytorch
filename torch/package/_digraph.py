@@ -10,7 +10,7 @@ class DiGraph:
     copy their API.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Dict of node -> dict of arbitrary attributes
         self._node = {}
         # Nested dict of node -> successor node -> nothing.

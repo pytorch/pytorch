@@ -173,7 +173,7 @@ def get_logger_dict(mod: nn.Module, prefix: str = "") -> Dict[str, Dict]:
 class Logger(nn.Module):
     r"""Base class for stats logging"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.stats = {}
         # We only insert observer if the op is quantized with static quantization,
@@ -194,7 +194,7 @@ class ShadowLogger(Logger):
     shadow modules.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.stats["float"] = []
         self.stats["quantized"] = []
@@ -215,7 +215,7 @@ class ShadowLogger(Logger):
 class OutputLogger(Logger):
     r"""Class used to log the outputs of the module"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.stats["tensor_val"] = []
 

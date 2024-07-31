@@ -169,7 +169,7 @@ def debug_insert_nops(
 
 
 class CompileCounter:
-    def __init__(self):
+    def __init__(self) -> None:
         self.frame_count = 0
         self.op_count = 0
 
@@ -206,7 +206,7 @@ class CompileCounterWithBackend:
 # Equivalent to backend="eager", but also records graphs that
 # we can assert on
 class EagerAndRecordGraphs:
-    def __init__(self):
+    def __init__(self) -> None:
         self.graphs = []
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):

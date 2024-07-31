@@ -52,7 +52,7 @@ class MeanShadowLogger(ns.Logger):
     of the data passed to the floating point and quantized models
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Set up initial values for float and quantized stats, count, float sum, and quant sum."""
         super().__init__()
         self.stats["float"] = None

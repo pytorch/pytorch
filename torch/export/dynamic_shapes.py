@@ -663,7 +663,7 @@ class ShapesCollection:
         torch.export(..., args, dynamic_shapes=dynamic_shapes)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._shapes = {}
 
     def __setitem__(self, t, shape):

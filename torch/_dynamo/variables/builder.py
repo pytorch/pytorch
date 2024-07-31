@@ -270,7 +270,7 @@ class GraphArg:
 
 
 class BackwardStateGraphArg(GraphArg):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(
             source=None,
             _example=BackwardState(),
@@ -2638,7 +2638,7 @@ class SourcelessBuilder:
     if/else type->VariableTracker trees that were cropping up all over dynamo.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         raise AssertionError("Use SourcelessBuilder.create()")
 
     @staticmethod

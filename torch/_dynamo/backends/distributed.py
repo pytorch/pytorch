@@ -247,7 +247,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # This gives us the appropriately strided outputs here which will reflect runtime strides.
 
             class FakeifyFirstAOTInvocationGuard:
-                def __init__(self):
+                def __init__(self) -> None:
                     self.tc = torch._guards.TracingContext.try_get()
                     assert self.tc
                     torch._guards.TracingContext.try_get().fakify_first_call = True

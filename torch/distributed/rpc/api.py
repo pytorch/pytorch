@@ -97,7 +97,7 @@ def _require_initialized(func):
 
 
 class AllGatherStates:
-    def __init__(self):
+    def __init__(self) -> None:
         # Each `gathered_objects` is an empty dict at beginning.
         # The leader worker is elected as the first worker in a sorted worker
         # name list. Whenever there is a worker entering `_all_gather()`, it

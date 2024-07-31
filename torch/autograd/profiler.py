@@ -959,7 +959,7 @@ def load_nvprof(path):
 class EnforceUnique:
     """Raises an error if a key is seen more than once."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.seen = set()
 
     def see(self, *key):

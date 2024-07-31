@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 class CompilationCallbackHandler:
-    def __init__(self):
+    def __init__(self) -> None:
         self.start_callbacks = []
         self.end_callbacks = []
 

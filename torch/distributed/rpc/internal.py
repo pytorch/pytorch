@@ -40,7 +40,7 @@ class _InternalRPCPickler:
     e.g. attach tensor to distributed autograd graph in C++
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Ignore type error because dispatch_table is defined in third-party package
         self._dispatch_table = copyreg.dispatch_table.copy()  # type: ignore[attr-defined]
         self._dispatch_table[torch.Tensor] = self._tensor_reducer

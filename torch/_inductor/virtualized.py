@@ -146,7 +146,7 @@ class NullKernelHandler(NullHandler):
     attribute name.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.removed_buffers = set()
         self.inplaced_to_remove = set()

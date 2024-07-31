@@ -327,7 +327,7 @@ class CUDACompileSourceCapturingContext:
     # Helper class for Benchmarking and Testing CUTLASS Kernels in isolation.
     # Can be used to capture the sourcecode passed to CUDACodeCache.compile
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.sources = []
         self._compile_patch = None
 

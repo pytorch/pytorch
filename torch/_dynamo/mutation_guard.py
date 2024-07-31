@@ -17,7 +17,7 @@ unpatched_nn_module_init = torch.nn.Module.__init__
 class MutationTracker:
     db = ExactWeakKeyDictionary()
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.mutation_count = 0
         self.watchers = []
 
