@@ -16,7 +16,6 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
