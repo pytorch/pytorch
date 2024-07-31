@@ -492,7 +492,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
                 / benchmarker.gpu_time_ms_per_gpu_clock_cycle
             )
         )
-        for _ in range(gpu_queue_limit - 1):
+        for _ in range(gpu_queue_limit):
             start_time_s = time.perf_counter()
             torch.cuda.Event(enable_timing=True).record()
             elapsed_time_ms = (time.perf_counter() - start_time_s) * 100
