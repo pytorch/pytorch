@@ -846,16 +846,22 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   bool storeError_{false};
 
-  // The lock which protects the write/read of extendedTimeout_
+  // The lock which protects the write/read of
+  // extendedTimeout_/inflightTimeoutExt_.
   std::mutex mtxTimeoutExtension_;
 
   // The extended timeout on top of existing timeout for works issued before
   // first work finishes.
   std::chrono::milliseconds extendedTimeout_ = std::chrono::milliseconds(0);
 
+  // The timeout extension which has been already applied to work.
+  std::chrono::milliseconds inflightTimeoutExt_ = std::chrono::milliseconds(0);
+
   // Record of first work and will get reset if timeout is further extended.
-  c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> firstWorkSinceExtended_ =
-      nullptr;
+  std::unordered_map<
+      c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>,
+      std::chrono::milliseconds>
+      workTimeReduce_ = {};
 
   const c10::intrusive_ptr<Options> options_;
 

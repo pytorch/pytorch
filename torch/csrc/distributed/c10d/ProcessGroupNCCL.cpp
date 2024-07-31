@@ -1606,9 +1606,6 @@ void ProcessGroupNCCL::extendTimeoutUntilFirstDone(
     const std::chrono::milliseconds& timeout) {
   std::unique_lock<std::mutex> lock(mtxTimeoutExtension_);
   extendedTimeout_ += timeout;
-  if (firstWorkSinceExtended_ != nullptr) {
-    firstWorkSinceExtended_ = nullptr;
-  }
 }
 
 void ProcessGroupNCCL::watchdogHandler() {
@@ -1789,10 +1786,13 @@ void ProcessGroupNCCL::watchdogHandler() {
         {
           // Reset the timeout and first work if the work is completed.
           std::unique_lock<std::mutex> lock(mtxTimeoutExtension_);
-          if (firstWorkSinceExtended_ != nullptr &&
-              firstWorkSinceExtended_.get() == &work) {
-            firstWorkSinceExtended_ = nullptr;
-            extendedTimeout_ = std::chrono::milliseconds(0);
+          auto workPtr =
+              c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>::reclaim(&work);
+          if (workTimeReduce_.find(workPtr) != workTimeReduce_.end()) {
+            auto timeReduce = workTimeReduce_.at(workPtr);
+            extendedTimeout_ -= timeReduce;
+            inflightTimeoutExt_ -= timeReduce;
+            workTimeReduce_.erase(workPtr);
           }
         }
         pgStatus_->lastCompletedSeq = work.seq_;
@@ -2436,9 +2436,8 @@ void ProcessGroupNCCL::assignTimeoutToWork(
     timeout += extendedTimeout_;
   }
   work->opTimeout_ = timeout;
-  if (firstWorkSinceExtended_ == nullptr) {
-    firstWorkSinceExtended_ = work;
-  }
+  workTimeReduce_[work] = extendedTimeout_ - inflightTimeoutExt_;
+  inflightTimeoutExt_ = extendedTimeout_;
 }
 
 void ProcessGroupNCCL::workEnqueue(
