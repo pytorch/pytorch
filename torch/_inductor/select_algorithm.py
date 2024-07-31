@@ -400,7 +400,7 @@ class TritonTemplateKernel(TritonKernel):
             self.body.writeline(f"{output_name} = {out.value}")
 
             body_val = self.body.getvalue()
-            self.cse.invalidate(set())
+            self.cse.invalidate(set())  # type: ignore[arg-type]
             return body_val
 
     def store_output(

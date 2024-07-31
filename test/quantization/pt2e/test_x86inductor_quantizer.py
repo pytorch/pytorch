@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import itertools
-
 import sys
 from enum import Enum
 
@@ -27,6 +26,7 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfTorchDynamo
+
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write("Windows CI still has some issue to be fixed.\n")
