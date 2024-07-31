@@ -60,6 +60,7 @@ from .simd import constant_repr, SIMDKernel, SIMDScheduling
 
 if TYPE_CHECKING:
     from torch.utils._ordered_set import OrderedSet
+
     from ..ops_handler import ReductionType, StoreMode
 
 log = logging.getLogger(__name__)
@@ -717,7 +718,7 @@ class HalideKernel(SIMDKernel):
         assert not (
             self.index_replacements or self.halide_vars or self.reduction_renames
         )
-        size_hint = functools.partial(V.graph.sizevars.size_hint, fallback=inf)
+        size_hint = functools.partial(V.graph.sizevars.size_hint, fallback=inf)  # type: ignore[arg-type]
         indices = dict.fromkeys(map(super().prepare_indexing, indices))
         all_used_symbols = set()
         sym_to_node = {

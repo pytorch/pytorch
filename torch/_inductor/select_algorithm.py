@@ -600,7 +600,7 @@ class TritonTemplate(KernelTemplate):
         self.all_templates[name] = self
         self.debug = debug
 
-    def generate(
+    def generate(  # type: ignore[override]
         self,
         input_nodes,
         layout,
