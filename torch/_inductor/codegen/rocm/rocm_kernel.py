@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Callable, cast, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
 from ...utils import sympy_product
 from ...virtualized import V
+from ...runtime.benchmarking import LazyBenchmark
 from ..common import IndentedBuffer, Kernel, OpOverrides
 from ..cpp_utils import CppPrinter
 from .rocm_benchmark_request import ROCmBenchmarkRequest
@@ -245,9 +246,9 @@ class ROCmTemplateCaller(ChoiceCaller):
         assert self.bmreq is not None
         self.bmreq.precompile()
 
-    def benchmark(self, *args, out, lazy=False) -> float:
+    def benchmark(self, *args, out, lazy=False) -> Union[LazyBenchmark, float]:
         assert self.bmreq is not None
-        return cast(float, self.bmreq.benchmark(*args, output_tensor=out))
+        return self.bmreq.benchmark(*args, output_tensor=out, lazy=lazy)
 
     def __str__(self):
         return f"ROCmTemplateCaller(source_file={self.bmreq.source_file}, {self.info_dict()})"

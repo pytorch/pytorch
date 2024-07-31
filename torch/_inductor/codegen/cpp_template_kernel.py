@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
@@ -13,6 +13,7 @@ from ..autotune_process import CppBenchmarkRequest
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
+from ..runtime.benchmarking import LazyBenchmark
 from .cpp import CppKernel, CppKernelProxy, KernelGroup
 from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext
 
@@ -339,9 +340,9 @@ class CppTemplateCaller(ir.ChoiceCaller):
         assert self.bmreq is not None
         self.bmreq.precompile()
 
-    def benchmark(self, *args, out, lazy=False) -> float:
+    def benchmark(self, *args, out, lazy=False) -> Union[LazyBenchmark, float]:
         assert self.bmreq is not None
-        return cast(float, self.bmreq.benchmark(*args, output_tensor=out))
+        return self.bmreq.benchmark(*args, output_tensor=out, lazy=lazy)
 
     def hash_key(self) -> str:
         return "-".join(

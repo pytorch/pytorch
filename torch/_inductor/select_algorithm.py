@@ -40,7 +40,7 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
-from .runtime.benchmarking import benchmarker
+from .runtime.benchmarking import benchmarker, LazyBenchmark
 from .runtime.hints import DeviceProperties
 from .utils import (
     FakeIndentedBuffer,
@@ -944,7 +944,7 @@ class ExternKernelCaller(ChoiceCaller):
             # no need to run the kerrnel of do benchmarking
             return 0.0
         if self.has_out_variant:
-            return super().benchmark(*args, out=out)
+            return super().benchmark(*args, out=out, lazy=lazy)
         else:
             algo = self.to_callable()
             out_new = algo(*args)
@@ -1056,9 +1056,9 @@ class DataProcessorChoiceCallerWrapper:
     def __getattr__(self, name):
         return getattr(self._wrapped, name)
 
-    def benchmark(self, *args, out, lazy=False) -> float:
+    def benchmark(self, *args, out, lazy=False) -> Union[LazyBenchmark, float]:
         new_args, new_out = self._preprocessor(args, out)
-        result = self._wrapped.benchmark(*new_args, out=new_out)
+        result = self._wrapped.benchmark(*new_args, out=new_out, lazy=lazy)
         new_out = self._postprocessor(new_out)
         if out is not new_out:
             out.copy_(new_out)
@@ -1443,7 +1443,7 @@ class AlgorithmSelectorCache(PersistentCache):
             )
             expected = None
             if VERIFY:
-                choices[0].benchmark(*example_inputs_extern, out=out_extern)
+                choices[0].benchmark(*example_inputs_extern, out=out_extern, lazy=False)
                 expected = out_extern.clone()
 
             return example_inputs, example_inputs_extern, out, out_extern, expected
