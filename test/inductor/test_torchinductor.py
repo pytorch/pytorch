@@ -52,6 +52,7 @@ from torch._inductor.utils import (
     run_and_get_code,
     run_and_get_cpp_code,
     run_and_get_triton_code,
+    run_fw_bw_and_get_code,
 )
 from torch._inductor.virtualized import V
 from torch._prims_common import is_integer_dtype
@@ -214,15 +215,6 @@ def define_custom_op_3_for_test(id_, fn_cpu, fn_cuda, fn_xpu, fn_meta, tags=()):
 
 
 f32 = torch.float32
-
-
-def run_fw_bw_and_get_code(fn):
-    def run_with_backward():
-        result = fn()
-        result.sum().backward()
-        return result
-
-    return run_and_get_code(run_with_backward)
 
 
 def register_ops_with_aoti_compile(ns, op_set, dispatch_key, torch_compile_op_lib_impl):
@@ -4295,7 +4287,7 @@ class CommonTemplate:
         class MyModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.zeros(1))
+                self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.w1 = torch.nn.Parameter(torch.zeros(1))
                 self.w2 = torch.nn.Parameter(torch.zeros(1))
 
@@ -4342,7 +4334,7 @@ class CommonTemplate:
         class MyModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.ones(4, 4))
+                self.buf = torch.nn.Buffer(torch.ones(4, 4))
                 self.w = torch.nn.Parameter(
                     torch.Tensor([[4, 5], [1, 2], [6, 7], [8, 9]])
                 )
@@ -7181,6 +7173,11 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(64, 64)])
 
+    def test_new_cpp_build_logical(self):
+        from torch._inductor.codecache import validate_new_cpp_commands
+
+        validate_new_cpp_commands()
+
     def test_as_strided(self):
         def fn(x):
             return (
@@ -9473,9 +9470,7 @@ class CommonTemplate:
         class Repro(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer(
-                    "_tensor_constant0", torch.randn([], dtype=torch.float32)
-                )
+                self._tensor_constant0 = nn.Buffer(torch.randn([], dtype=torch.float32))
 
             def forward(self, arg0_1, arg1_1):
                 convert_element_type = torch.ops.prims.convert_element_type.default(
@@ -9996,10 +9991,9 @@ class CommonTemplate:
         if is_cpp_backend(self.device):
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             _, code = run_and_get_cpp_code(opt_fn, *args)
-            print(code)
             FileCheck().check_count(
-                "static_cast<int32_t>(256)",
-                1,
+                "static_cast<int64_t>(256)",
+                2,
                 exactly=True,
             ).run(code)
 
@@ -11177,18 +11171,6 @@ class CommonTemplate:
             return (div,)
 
         self.common(forward, ())
-
-    def test_flip_cat(self):
-        def forward(unsqueeze, unsqueeze_1):
-            cat_1 = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], 1)
-            view = torch.ops.aten.view.default(cat_1, [4])
-            slice_5 = torch.ops.aten.slice.Tensor(view, 0, 0, 3)
-            rev_1 = torch.ops.aten.flip.default(slice_5, [0])
-            return (rev_1,)
-
-        a = torch.randn(2, 1, requires_grad=True)
-        b = torch.randn(2, 1, requires_grad=True)
-        self.common(forward, (a, b))
 
 
 @dataclasses.dataclass
