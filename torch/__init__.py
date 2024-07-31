@@ -37,6 +37,10 @@ from typing import (
 from typing_extensions import ParamSpec as _ParamSpec, TypeGuard as _TypeGuard
 
 
+if TYPE_CHECKING:
+    from .types import IntLikeType
+
+
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
 # https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137
@@ -55,6 +59,7 @@ from torch._utils_internal import (
     USE_GLOBAL_DEPS,
     USE_RTLD_GLOBAL_WITH_LIBTORCH,
 )
+
 
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if _running_with_deploy():
@@ -304,8 +309,9 @@ def _load_global_deps() -> None:
             "cuda_cupti": "libcupti.so.*[0-9]",
             "cufft": "libcufft.so.*[0-9]",
             "curand": "libcurand.so.*[0-9]",
-            "cusolver": "libcusolver.so.*[0-9]",
+            "nvjitlink": "libnvJitLink.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",
+            "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
             "nvtx": "libnvToolsExt.so.*[0-9]",
         }
@@ -471,6 +477,9 @@ class SymInt:
     def __add__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
+    def __mod__(self, other: "IntLikeType") -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __mul__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
@@ -504,8 +513,11 @@ class SymInt:
     def __neg__(self):
         raise TypeError("type stub not overridden")
 
+    def __sub__(self, other: "IntLikeType") -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __repr__(self):
-        return str(self.node)
+        return self.node._graph_repr()
 
     def _sympy_(self):
         return self.node.expr
@@ -514,8 +526,27 @@ class SymInt:
         if self.node.is_nested_int():
             return hash(self.node.nested_int())
         else:
-            # Force specialization
-            return hash(builtins.int(self))
+            # We could support constant SymInts as well, but not doing it for now
+            raise TypeError("unhashable type: non-nested SymInt")
+            # TODO: Force specialization
+            # This can't be done because the TypeError here is load bearing
+            # for einops
+            # https://github.com/arogozhnikov/einops/blob/6181e1e95dc58c00a3143c1726da1c6ee0463164/einops/einops.py#L237
+            # return hash(builtins.int(self))
+
+    def as_integer_ratio(self) -> _Tuple["SymInt", builtins.int]:
+        """Represent this int as an exact integer ratio"""
+        return self, 1
+
+    def bit_length(self) -> builtins.int:
+        # TODO: A more relaxed guard is possible here, where you guard to
+        # allow all integer quantities which would result in the same bit
+        # length.  We can also just make a dedicated Sympy function for
+        # computing this quantity and represent it symbolically.
+        return builtins.int(self).bit_length()
+
+    def conjugate(self) -> "SymInt":
+        return self
 
 
 class SymFloat:
@@ -615,18 +646,18 @@ class SymFloat:
         """Return True if the float is an integer."""
         raise TypeError("type stub not overridden")
 
+    def as_integer_ratio(self) -> _Tuple[builtins.int, builtins.int]:
+        """Represent this float as an exact integer ratio"""
+        return builtins.float(self).as_integer_ratio()
+
     def __repr__(self):
-        return self.node.str()
+        return self.node._graph_repr()
 
     def _sympy_(self):
         return self.node.expr
 
     def __hash__(self):
-        if self.node.is_constant():
-            return hash(self.node.float_())
-        else:
-            # Force specialization
-            return hash(builtins.float(self))
+        return hash(builtins.float(self))
 
 
 class SymBool:
@@ -684,7 +715,7 @@ class SymBool:
         raise TypeError("type stub not overridden")
 
     def __repr__(self):
-        return str(self.node)
+        return self.node._graph_repr()
 
     def _sympy_(self):
         return self.node.expr
@@ -885,6 +916,7 @@ except ImportError:
 # The torch._C submodule is already loaded via `from torch._C import *` above
 # Make an explicit reference to the _C submodule to appease linters
 from torch import _C as _C
+
 
 __name, __obj = "", None
 for __name in dir(_C):
@@ -1651,6 +1683,7 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
 from math import e, inf, nan, pi
 
+
 newaxis: None = None
 
 __all__.extend(["e", "pi", "nan", "inf", "newaxis"])
@@ -1893,6 +1926,7 @@ from torch.amp import autocast, GradScaler
 from torch.random import get_rng_state, initial_seed, manual_seed, seed, set_rng_state
 from torch.serialization import load, save
 
+
 ################################################################################
 # Initialize extension
 ################################################################################
@@ -1953,6 +1987,7 @@ del __name, __obj
 ################################################################################
 
 import torch
+
 
 __all__.extend(
     name for name in dir(torch) if isinstance(getattr(torch, name), torch.dtype)
@@ -2045,6 +2080,7 @@ from torch import (
 )
 from torch.signal import windows as windows
 
+
 # Quantized, sparse, AO, etc. should be last to get imported, as nothing
 # is expected to depend on them.
 from torch import ao as ao  # usort: skip
@@ -2055,10 +2091,12 @@ import torch.nn.qat
 import torch.nn.quantizable
 import torch.nn.quantized
 
+
 _C._init_names(list(_storage_classes))
 
 # attach docstrings to torch and tensor functions
 from torch import _size_docs, _storage_docs, _tensor_docs, _torch_docs
+
 
 del _torch_docs, _tensor_docs, _storage_docs, _size_docs
 
@@ -2069,9 +2107,10 @@ def compiled_with_cxx11_abi() -> builtins.bool:
 
 
 from torch import _library as _library, _ops as _ops
+from torch._classes import classes as classes
+
 
 # Import the ops "namespace"
-from torch._classes import classes as classes
 from torch._ops import ops as ops  # usort: skip
 
 # quantization depends on torch.fx and torch.ops
@@ -2089,12 +2128,14 @@ legacy_contiguous_format = contiguous_format  # defined by _C._initExtension()
 # Register fork handler to initialize OpenMP in child processes (see gh-28389)
 from torch.multiprocessing._atfork import register_after_fork
 
+
 register_after_fork(torch.get_num_threads)
 del register_after_fork
 
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
 from torch._lobpcg import lobpcg as lobpcg
+
 
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
@@ -2115,7 +2156,6 @@ from torch._linalg_utils import (  # type: ignore[misc]
     matrix_rank,
     solve,
 )
-
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
 
@@ -2123,7 +2163,7 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
-        self.config: _Dict[str, _Any] = dict()
+        self.config: _Dict[str, _Any] = {}
         self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
@@ -2319,7 +2359,7 @@ def compile(
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
 
         - To register an out-of-tree custom backend:
-       https://pytorch.org/docs/main/torch.compiler_custom_backends.html#registering-custom-backends
+          https://pytorch.org/docs/main/torch.compiler_custom_backends.html#registering-custom-backends
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
 
         - "default" is the default mode, which is a good balance between performance and overhead
@@ -2437,6 +2477,7 @@ from torch import (
 from torch._higher_order_ops import cond as cond, while_loop as while_loop
 from torch.func import vmap as vmap
 
+
 if not TYPE_CHECKING:
     from torch import _meta_registrations
 
@@ -2448,6 +2489,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
+
 
 # Register MPS specific decomps
 torch.backends.mps._init()
@@ -2562,6 +2604,7 @@ def _constrain_as_size(
 
 
 from torch import _logging
+
 
 _logging._init_logs()
 

@@ -35,11 +35,8 @@ struct UsageStream {
   UsageStream(const UsageStream& us) = default;
   UsageStream(const UsageStream&& us) noexcept
       : stream(us.stream), device(us.device) {}
-  UsageStream& operator=(UsageStream other) {
-    stream = other.stream;
-    device = other.device;
-    return *this;
-  }
+  UsageStream& operator=(const UsageStream& other) = default;
+  UsageStream& operator=(UsageStream&& other) noexcept = default;
 };
 
 bool operator==(const UsageStream& lhs, const UsageStream& rhs) {
@@ -607,6 +604,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     } else {
       it->second.recorded_streams.insert(to_record);
     }
+  }
+
+  ShareableHandle shareIpcHandle(void* handle) override {
+    TORCH_CHECK(
+        false,
+        "cudaMallocAsync does not yet support shareIpcHandle. "
+        "If you need it, please file an issue describing your use case.");
   }
 
   std::shared_ptr<void> getIpcDevPtr(std::string handle) override {

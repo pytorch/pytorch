@@ -8,27 +8,23 @@ import logging
 import os
 import pickle
 import shutil
-
 from dataclasses import dataclass
-
 from typing import Callable, List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters
 from torch._functorch import config
-
 from torch._inductor.codecache import (
     _ident,
     BypassFxGraphCache,
     CompiledFxGraph,
+    extract_tensor_metadata_for_cache_key,
     FxGraphCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
     write_atomic,
 )
-
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._subclasses.fake_tensor import extract_tensor_metadata
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
@@ -39,8 +35,8 @@ from .runtime_wrappers import (
     RuntimeWrapper,
     SubclassMeta,
 )
-
 from .schemas import AOTConfig, ViewAndMutationMeta  # noqa: F401
+
 
 if TYPE_CHECKING:
     from torch.fx.node import Node
@@ -174,24 +170,16 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
         try:
-            # We don't use FxGraphHashDetails to hash example_inputs because it expects
-            # example_inputs to always be FakeTensors, but at AOTAutograd's entry point,
-            # they're still regular. So instead we store their metadata here.
-            # TODO: this currently causes more cache misses than necessary
+            # TODO: example_inputs causes more cache misses than necessary
             # with dynamic shapes, because this is before we add
             # symints to tensor metadata. Improve this later.
-            self.example_input_metadata = [
-                extract_tensor_metadata(t)
-                for t in example_inputs
-                if isinstance(t, torch.Tensor)
-            ]
-            super().__init__(gm, [], {}, [])
+            super().__init__(gm, example_inputs, {}, [])
         except BypassFxGraphCache as e:
             # Sometimes inductor configs are unpickleable and can fail
             raise BypassAOTAutogradCache from e
 
-    def debug_str(self) -> str:
-        return AOTAutogradCachePickler.debug_str(self)
+    def debug_lines(self) -> List[str]:
+        return AOTAutogradCachePickler.debug_lines(self)
 
 
 def _reduce_aot_config(aot_config: AOTConfig):
@@ -213,9 +201,24 @@ def _reduce_aot_config(aot_config: AOTConfig):
     )
 
 
+def _reduce_tensor(tensor):
+    """
+    Reduce the tensor to a stable key for caching.
+    """
+    return (
+        _ident,
+        (
+            extract_tensor_metadata_for_cache_key(
+                FxGraphCachePickler._device_map, tensor
+            ),
+        ),
+    )
+
+
 class AOTAutogradCachePickler(FxGraphCachePickler):
     dispatch_table = FxGraphCachePickler.dispatch_table.copy()
     dispatch_table[AOTConfig] = _reduce_aot_config
+    dispatch_table[torch.Tensor] = _reduce_tensor
 
 
 def autograd_cache_key(
@@ -231,9 +234,8 @@ def autograd_cache_key(
     details = AOTAutogradCacheDetails(gm, example_inputs, config)
     # The prefix distinguishes among the other kinds of objects we cache
     key = "a" + AOTAutogradCachePickler.get_hash(details)
-    log.debug(
-        "Autograd graph cache hash details for key %s:\n%s", key, details.debug_str()
-    )
+    debug_str = "\n".join(details.debug_lines())
+    log.debug("Autograd graph cache hash details for key %s:\n%s", key, debug_str)
     return key
 
 

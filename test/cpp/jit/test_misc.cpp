@@ -170,8 +170,7 @@ TEST(THNNConvTest, Basic) {
       torch::randn_like(output, at::MemoryFormat::Preserve);
 
   // run backward eagerly
-  at::Tensor grad_input, grad_weight, grad_bias;
-  std::tie(grad_input, grad_weight, grad_bias) = at::_slow_conv2d_backward(
+  auto [grad_input, grad_weight, grad_bias] = at::_slow_conv2d_backward(
       grad_output,
       input,
       weight,
@@ -216,8 +215,7 @@ TEST(THNNConvTest, Basic) {
   tensor_grads_in.push_back(grad_output);
 
   // Get outputs from the interpreter
-  tensor_list tensors_out, tensor_grads_out;
-  std::tie(tensors_out, tensor_grads_out) =
+  auto [tensors_out, tensor_grads_out] =
       runGradient(grad_spec, tensors_in, tensor_grads_in);
 
   // prepare expected structs
@@ -255,8 +253,7 @@ TEST(ATenNativeBatchNormTest, Basic) {
   at::Tensor running_var_jit = running_var.clone();
 
   // run forward eagerly
-  at::Tensor output, savemean, saveinvstd;
-  std::tie(output, savemean, saveinvstd) = at::native_batch_norm(
+  auto [output, savemean, saveinvstd] = at::native_batch_norm(
       input,
       weight,
       bias,
@@ -275,12 +272,11 @@ TEST(ATenNativeBatchNormTest, Basic) {
       torch::zeros_like(saveinvstd, at::MemoryFormat::Preserve);
 
   // run backward eagerly
-  at::Tensor grad_input, grad_weight, grad_bias;
   // aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor
   // weight, Tensor running_mean, Tensor running_var, Tensor save_mean, Tensor
   // save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor,
   // Tensor, Tensor)
-  std::tie(grad_input, grad_weight, grad_bias) = at::native_batch_norm_backward(
+  auto [grad_input, grad_weight, grad_bias] = at::native_batch_norm_backward(
       grad_output,
       input,
       weight,
@@ -341,8 +337,7 @@ TEST(ATenNativeBatchNormTest, Basic) {
   tensor_grads_in.push_back(grad_saveinvstd);
 
   // Get outputs from the interpreter
-  tensor_list tensors_out, tensor_grads_out;
-  std::tie(tensors_out, tensor_grads_out) =
+  auto [tensors_out, tensor_grads_out] =
       runGradient(grad_spec, tensors_in, tensor_grads_in);
 
   // prepare expected structs
@@ -1937,7 +1932,7 @@ TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   ASSERT_NE(guard, nodes.end());
   ASSERT_EQ(
       guard->input()->type()->expectRef<TensorType>().sizes().size(),
-      c10::nullopt);
+      std::nullopt);
   checkShape(*guard, {2, 3}, false);
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
   int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
@@ -2907,7 +2902,7 @@ TEST(TestConstant, TensorGrad) {
   auto graph = std::make_shared<Graph>();
   IValue ten = torch::randn({3, 5}).requires_grad_(true);
   auto con = tryInsertConstant(*graph, ten);
-  ASSERT_TRUE(con == c10::nullopt);
+  ASSERT_TRUE(con == std::nullopt);
 }
 
 TEST(TestMutation, Basic) {

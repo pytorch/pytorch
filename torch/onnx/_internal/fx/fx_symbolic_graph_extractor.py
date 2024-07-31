@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import functools
 
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Mapping, Sequence
 
 import torch
 import torch.fx
 import torch.onnx
 
 import torch.onnx._internal.fx.passes as passes
-from torch.onnx._internal import _beartype, exporter, io_adapter
+from torch.onnx._internal import exporter, io_adapter
 
 # Functions directly wrapped to produce torch.fx.Proxy so that symbolic
 # data can flow through those functions. Python functions (e.g., `torch.arange`)
@@ -18,7 +18,7 @@ from torch.onnx._internal import _beartype, exporter, io_adapter
 # they are not automatically patched by FX's Python dispatcher.
 # The list below means `torch.arange`, `torch.tensor`, and so on will be
 # patched.
-_TORCH_METHODS_TO_PATCH: Tuple[str, ...] = (
+_TORCH_METHODS_TO_PATCH: tuple[str, ...] = (
     "arange",
     "tensor",
     "finfo",
@@ -37,7 +37,6 @@ class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
     exporter.
     """
 
-    @_beartype.beartype
     def is_leaf_module(
         self, module: torch.nn.Module, module_qualified_name: str
     ) -> bool:
@@ -46,14 +45,13 @@ class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
         # torch.fx._symbolic_trace.Tracer.call_module.
         return False
 
-    @_beartype.beartype
     def to_bool(self, obj: torch.fx.Proxy) -> bool:
         # FIXME: This is a hack to tracing through if-else Python blocks.
         # It may generate incorrect ONNX graphs if the if-else block
         return False
 
 
-def _wrap_for_symbolic_trace(target: Callable) -> Tuple[Callable, Callable]:
+def _wrap_for_symbolic_trace(target: Callable) -> tuple[Callable, Callable]:
     """This function wraps ```target`` for symbolic tracing.
 
     This function wraps ```target``` so that its wrapper produces
@@ -82,10 +80,9 @@ def _wrap_for_symbolic_trace(target: Callable) -> Tuple[Callable, Callable]:
     return wrapper, target
 
 
-@_beartype.beartype
 def _module_expansion_symbolic_trace(
-    root: Union[torch.nn.Module, Callable[..., Any]],
-    concrete_args: Optional[Dict[str, Any]] = None,
+    root: torch.nn.Module | Callable[..., Any],
+    concrete_args: dict[str, Any] | None = None,
 ) -> torch.fx.GraphModule:
     """Trace a callable into FX graph.
 
@@ -155,12 +152,11 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
                 assert f({'a': 1, 'b': 2, 'c': 4}) == 7
     """
 
-    def __init__(self, concrete_args: Optional[Dict[str, Any]] = None):
+    def __init__(self, concrete_args: dict[str, Any] | None = None):
         super().__init__()
         # TODO: plumb ``concrete_args`` to symbolic_trace call at ``generate_fx``
         self.concrete_args = concrete_args
 
-    @_beartype.beartype
     def _trace_into_fx_graph_via_fx_symbolic_trace(
         self, model, model_args, model_kwargs
     ) -> torch.fx.GraphModule:
@@ -194,7 +190,7 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
     def generate_fx(
         self,
         options: exporter.ResolvedExportOptions,
-        model: Union[torch.nn.Module, Callable],
+        model: torch.nn.Module | Callable,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> torch.fx.GraphModule:
@@ -238,11 +234,10 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
 
         return self.pre_export_passes(options, model, graph_module, updated_model_args)  # type: ignore[return-value]
 
-    @_beartype.beartype
     def pre_export_passes(
         self,
         options: exporter.ResolvedExportOptions,
-        original_model: Union[torch.nn.Module, Callable],
+        original_model: torch.nn.Module | Callable,
         fx_module: torch.fx.GraphModule,
         fx_module_args: Sequence[Any],
     ):

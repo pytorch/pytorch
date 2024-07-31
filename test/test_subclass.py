@@ -56,6 +56,11 @@ class TestSubclass(TestCase):
         self.assertNotIsInstance(x, nn.Parameter)
         self.assertEqual(x.requires_grad, tensor_requires_grad)
 
+        class UninitializedParam(nn.Parameter):
+            pass
+
+        self.assertNotIsInstance(param, UninitializedParam)
+
     @skipIfTorchDynamo()
     @parametrize_tensor_cls
     @parametrize("as_param", [False, True])

@@ -1375,7 +1375,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // The device that was current when markCompleted was called, which we'll
   // restore when invoking callbacks. It's optional because we'll only store it
   // if the future completes successfully.
-  optional<c10::Device> currentDevice_;
+  std::optional<c10::Device> currentDevice_;
 
   // The events that correspond to the completion of the async I/O kernels. They
   // are recorded on the appropriate streams when the future is marked completed
@@ -1748,7 +1748,7 @@ template <class T>
 struct _fake_type {};
 
 // generic_to<T> converts an IValue from a generic list or generic dict
-// to a concrete list/dict type likelike List<T>, Dict<...> or optional<T>.
+// to a concrete list/dict type likelike List<T>, Dict<...> or std::optional<T>.
 // Note that in the case of lists, this only works for IValue-based lists,
 // i.e. not for int64_t, double, ...
 // generic_to<T> is an implementation detail of IValue::to<T> and not
@@ -1949,7 +1949,7 @@ inline T IValue::to() && {
 template <>
 inline std::optional<c10::string_view> IValue::to() && {
   // In the default implementation, the IValue is destroyed with std::move.
-  // But if the unboxed type is optional<string_view> we cannot destroy
+  // But if the unboxed type is std::optional<string_view> we cannot destroy
   // the IValue.
   return generic_to(*this, _fake_type<std::optional<c10::string_view>>{});
 }
@@ -2366,7 +2366,7 @@ inline std::optional<std::reference_wrapper<const std::string>> IValue::
   if (isNone()) {
     return std::nullopt;
   }
-  AT_ASSERT(isString(), "Expected optional<string> but got ", tagKind());
+  AT_ASSERT(isString(), "Expected std::optional<string> but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toOptionalStringRef on null intrusive_ptr IValue");
@@ -2390,7 +2390,7 @@ inline PyObject* IValue::toPyObject() const {
 }
 
 template <typename T>
-inline optional<T> IValue::toOptional() {
+inline std::optional<T> IValue::toOptional() {
   if (this->isNone()) {
     return std::nullopt;
   }
@@ -2398,7 +2398,7 @@ inline optional<T> IValue::toOptional() {
 }
 
 template <typename T>
-inline optional<T> IValue::toOptional() const {
+inline std::optional<T> IValue::toOptional() const {
   if (this->isNone()) {
     return std::nullopt;
   }
