@@ -1330,15 +1330,16 @@ class TestConverter(TestCase):
     def test_ts2ep_with_loop(self):
         def func1(x, x_list: List[torch.Tensor]):
             a, b, c = x, x, x
-            for i in range(5):
-                a = a + a + i
-                b = b + b - i
-                x_list.append(x_list[i] + x_list[i + 1])
-            for i in range(5):
-                b = b + b - i
-                c = c + c * i
-                x_list.append(x_list[i] + x_list[i + 1] - x_list[i + 2])
-            return x
+            for i in range(1, 5, 2):
+                for k in range(5):
+                    a = a + a + k
+                    b = b + b - k
+                    x_list.append(x_list[k] + x_list[k + 1])
+                for k in range(5):
+                    b = b + b - k
+                    c = c + c * k
+                    x_list.append(x_list[k] + x_list[k + 1] - x_list[k + 2])
+            return x, x_list
 
         def func2(x):
             for i in range(x.size(0)):
