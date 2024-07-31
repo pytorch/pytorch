@@ -9,6 +9,7 @@ import dis
 import enum
 import functools
 import gc
+import importlib
 import inspect
 import itertools
 import linecache
@@ -52,11 +53,21 @@ from typing import (
 )
 from typing_extensions import Literal, ParamSpec, TypeGuard
 
+import torch
+import torch._functorch.config
+import torch._inductor.config as inductor_config
+import torch.fx.experimental.symbolic_shapes
+import torch.utils._pytree as pytree
+from torch import fx
+from torch._dispatch.python import enable_python_dispatcher
+from torch._guards import TracingContext
+from torch._subclasses.meta_utils import is_sparse_compressed
+from torch._utils_internal import log_compilation_event
+from torch.fx._utils import _format_graph_code, lazy_format_graph_code
+from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
-
-T = TypeVar("T")
-_P = ParamSpec("_P")
 
 try:
     import numpy as np
@@ -94,22 +105,9 @@ try:
 except ImportError:
     pass
 
-import importlib
 
-import torch
-import torch._functorch.config
-import torch._inductor.config as inductor_config
-import torch.fx.experimental.symbolic_shapes
-import torch.utils._pytree as pytree
-from torch import fx
-from torch._dispatch.python import enable_python_dispatcher
-from torch._guards import TracingContext
-from torch._subclasses.meta_utils import is_sparse_compressed
-from torch._utils_internal import log_compilation_event
-from torch.fx._utils import _format_graph_code, lazy_format_graph_code
-from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._triton import has_triton, has_triton_package
-
+T = TypeVar("T")
+_P = ParamSpec("_P")
 
 unpatched_nn_module_getattr = torch.nn.Module.__getattr__
 

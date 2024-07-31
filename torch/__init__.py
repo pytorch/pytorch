@@ -943,16 +943,15 @@ if not TYPE_CHECKING:
     # non-standard, and attributes of those submodules cannot be pickled since
     # pickle expect to be able to import them as "from _C.sub import attr"
     # which fails with "_C is not a package
-    def _set_sys_modules(module, module_name):
-        for name in dir(module):
-            member = getattr(module, name)
-            if inspect.ismodule(member):
-                sys.modules.setdefault(f"{module_name}.{name}", member)
-                # Recurse for submodules (e.g., `_C._dynamo.eval_frame`)
-                _set_sys_modules(member, f"{module_name}.{name}")
+    __name, __candidate = "", None
+    for __name in dir(_C):
+        __candidate = getattr(_C, __name)
+        if inspect.ismodule(__candidate):
+            # submodule
+            sys.modules.setdefault(f"{__name__}._C.{__name}", __candidate)
 
-    _set_sys_modules(_C, f"{__name__}._C")
-    del _set_sys_modules
+    del __name, __candidate
+
 
 ################################################################################
 # Define basic utilities

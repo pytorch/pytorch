@@ -310,7 +310,6 @@ if sys.version_info[:2] <= (3, 8):
         HAS_UNPARSE_FUNCTIONS = True
     except ImportError:
         HAS_UNPARSE_FUNCTIONS = False
-        pass
 else:
     HAS_UNPARSE_FUNCTIONS = True
 

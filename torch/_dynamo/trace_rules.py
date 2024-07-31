@@ -35,13 +35,6 @@ import weakref
 from collections import defaultdict
 from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
 
-
-np: Optional[types.ModuleType] = None
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    pass
-
 import torch
 import torch._inductor.test_operators
 import torch.distributed
@@ -60,6 +53,13 @@ from .variables import (
     UserFunctionVariable,
     UserMethodVariable,
 )
+
+
+np: Optional[types.ModuleType] = None
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    pass
 
 
 if typing.TYPE_CHECKING:
