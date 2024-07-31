@@ -7,7 +7,7 @@
 
 namespace c10 {
 
-enum struct C10_API_ENUM MinCutStatus {
+enum class C10_API_ENUM MinCutStatus {
   SUCCESS = 0,
   UNBOUNDED = 1,
   OVERFLOW = 2,
