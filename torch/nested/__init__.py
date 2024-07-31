@@ -424,15 +424,9 @@ def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
             f"torch.nested.masked_select requires a strided mask, given: {mask.layout}"
         )
 
-    if not is_expandable_to(mask.shape, tensor.shape):
-        raise RuntimeError(
-            f"Mask shape {mask.shape} is not broadcastable to tensor shape {tensor.shape}"
-        )
-
-    expanded_mask = mask.expand(tensor.shape)
-
     res_values = tensor.masked_select(mask)
-    res_lengths = expanded_mask.sum(dim=len(tensor.shape) - 1)
+    expanded_mask = mask.expand(tensor.shape)
+    res_lengths = expanded_mask.sum(dim=tensor.ndim - 1)
 
     from torch.nested._internal.nested_tensor import (
         nested_view_from_values_offsets_lengths,
@@ -441,9 +435,5 @@ def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
     return nested_view_from_values_offsets_lengths(
         values=res_values,
         lengths=res_lengths,
-        offsets=torch.cat(
-            [torch.zeros(1, device=tensor.device, dtype=res_lengths.dtype), res_lengths.cumsum(dim=0)]
-        ),
+        offsets=F.pad(res_lengths.cumsum(dim=0), (1,0))
     )
-
-
