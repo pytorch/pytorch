@@ -25,11 +25,9 @@ def time_and_log(fn: Callable[..., Any]) -> Callable[..., Any]:
         start_time = perf_counter()
         result = fn(*args, **kwargs)
         log.debug(
-            "{function_name} took {elapsed_time_s} seconds.",
-            extra=dict(
-                function_name=fn.__name__,
-                elapsed_time_s=perf_counter() - start_time,
-            ),
+            "%s took %f seconds.",
+            fn.__name__,
+            perf_counter() - start_time,
         )
         return result
 
@@ -107,8 +105,9 @@ def maybe_fallback_to_original_benchmarking(
         def wrapper(self: Benchmarker, *args: Any, **kwargs: Any) -> Any:
             if should_fallback_to_original_benchmarking():
                 log.debug(
-                    "Falling back to original benchmarking function {original_fn_name} from {fn_name}.",
-                    extra=dict(original_fn_name=original_fn_name, fn_name=fn.__name__),
+                    "Falling back to original benchmarking function %s from %s.",
+                    original_fn_name,
+                    fn.__name__,
                 )
                 counters["inductor"][
                     "benchmarking_fallback_to_original_benchmarking"
@@ -129,8 +128,9 @@ def maybe_fallback_to_non_lazy_benchmarking(
         def wrapper(self: Benchmarker, *args: Any, **kwargs: Any) -> Any:
             if not should_enable_lazy_benchmarking():
                 log.debug(
-                    "Falling back to non-lazy benchmarking function {non_lazy_fn_name} from {fn_name}.",
-                    extra=dict(non_lazy_fn_name=non_lazy_fn_name, fn_name=fn.__name__),
+                    "Falling back to non-lazy benchmarking function %s from %s.",
+                    non_lazy_fn_name,
+                    fn.__name__,
                 )
                 counters["inductor"][
                     "benchmarking_fallback_to_non_lazy_benchmarking"
@@ -680,8 +680,8 @@ class Benchmarker:
         if ranking_key is not None:
             if should_enable_early_ranking():
                 log.debug(
-                    "Returning early ranking for ranking key {ranking_key}.",
-                    extra=dict(ranking_key=ranking_key),
+                    "Returning early ranking for ranking key %s.",
+                    ranking_key,
                 )
                 counters["inductor"]["benchmarking_early_ranking"] += 1
                 # explicitly delete the buffer, sometimes helps memory
@@ -713,14 +713,10 @@ class Benchmarker:
                     callables
                 ) - len(callables_to_benchmark)
                 log.debug(
-                    "Early pruning pruned {num_pruned_callables} from {num_callables} total callables,"  # noqa: G003
-                    + " continuing benchmarking with remaining {num_unpruned_callables} callables.",
-                    extra=dict(
-                        num_pruned_callables=len(callables)
-                        - len(callables_to_benchmark),
-                        num_callables=len(callables),
-                        num_unpruned_callables=len(callables_to_benchmark),
-                    ),
+                    "Early pruning pruned %d from %d total callables, continuing benchmarking with remaining %d callables.",
+                    len(callables) - len(callables_to_benchmark),
+                    len(callables),
+                    len(callables_to_benchmark),
                 )
                 cpu_launch_overhead_ms_per_iter = (
                     cpu_launch_overhead_ms_per_iter_per_callable
