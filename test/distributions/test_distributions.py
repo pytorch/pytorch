@@ -32,7 +32,6 @@ import math
 import numbers
 import unittest
 from collections import namedtuple
-from functools import partial
 from itertools import product
 from random import shuffle
 
@@ -5390,7 +5389,9 @@ class TestKL(DistributionsTestCase):
         )
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         lognormal = pairwise(LogNormal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
-        multinomial = tuple(Multinomial(total_count=1, probs=cat.probs) for cat in categorical)
+        multinomial = tuple(
+            Multinomial(total_count=1, probs=cat.probs) for cat in categorical
+        )
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         independent = (Independent(normal[0], 1), Independent(normal[1], 1))
         onehotcategorical = pairwise(
