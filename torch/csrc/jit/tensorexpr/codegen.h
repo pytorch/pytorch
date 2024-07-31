@@ -19,11 +19,9 @@ class TORCH_API CodeGen {
   class CallArg;
 
   template <typename... Ts>
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CodeGen(StmtPtr stmt, Ts... ts)
       : stmt_(std::move(stmt)), buffer_args_({BufferArg(ts)...}) {}
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CodeGen(
       StmtPtr stmt,
       std::vector<BufferArg> buffer_args,
@@ -37,7 +35,7 @@ class TORCH_API CodeGen {
   }
 
   void set_stmt(StmtPtr s) {
-    stmt_ = s;
+    stmt_ = std::move(s);
   }
 
   void apply_mutator(IRMutator* mutator) {
@@ -190,6 +188,9 @@ class CodeGen::CallArg {
   }
 
   CallArg& operator=(const CallArg& rhs) {
+    if (this == &rhs) {
+      return *this;
+    }
     if (rhs.data_ == rhs.buffer_) {
       memcpy(this->buffer_, rhs.buffer_, sizeof(rhs.buffer_));
       this->data_ = (void*)(this->buffer_);
@@ -218,7 +219,6 @@ class CodeGen::CallArg {
   char buffer_[8] = {0}; // 64bits
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class RegisterCodeGenList {
  public:
   TORCH_API static RegisterCodeGenList& GetInstance() {
@@ -239,7 +239,6 @@ class RegisterCodeGenList {
  private:
   template <class CodeGenType>
   friend class RegisterCodeGen;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   RegisterCodeGenList() = default;
   TORCH_API void AddStmtFactoryMethod(
       const std::string& name,
@@ -259,7 +258,6 @@ class RegisterCodeGen {
            const std::vector<CodeGen::BufferArg>& params,
            at::Device device,
            const std::string& kernel_func_name) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::unique_ptr<CodeGen> method(
               new CodeGenType(stmt, params, device, kernel_func_name));
           return method;
