@@ -60,9 +60,11 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compiler,
 )
 
+
 T = TypeVar("T")
 
 from _collections_abc import dict_keys  # noqa: TCH003
+
 
 """
 codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
