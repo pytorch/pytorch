@@ -1201,7 +1201,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         block_mask = _create_empty_block_mask(q, k)
-        kernel_params = {
+        kernel_options = {
             "scale": 1.0,
             "rows_guaranteed_safe": False,
             "prescale_qk": False,
@@ -1216,7 +1216,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
-                kernel_params,
+                kernel_options,
             )
 
         @torch.compile(backend="aot_eager")
@@ -1226,7 +1226,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             backend. We need to replicate this.
             """
             return flex_attention_hop(
-                q, k, v, score_mod, block_mask.as_tuple(), kernel_params
+                q, k, v, score_mod, block_mask.as_tuple(), kernel_options
             )
 
         ref_out, ref_lse = eager_sdpa_hop(
@@ -1275,7 +1275,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         block_mask = _create_empty_block_mask(q, k)
-        kernel_params = {
+        kernel_options = {
             "scale": 1.0,
             "rows_guaranteed_safe": False,
             "prescale_qk": False,
@@ -1290,7 +1290,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
-                kernel_params,
+                kernel_options,
             )
             lse_2 = lse * 2
             return lse_2
@@ -1310,7 +1310,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         block_mask = _create_empty_block_mask(q, k)
-        kernel_params = {
+        kernel_options = {
             "scale": 1.0,
             "rows_guaranteed_safe": False,
             "prescale_qk": False,
@@ -1325,7 +1325,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
-                kernel_params,
+                kernel_options,
             )
             lse_2 = lse * 2
             return out, lse_2

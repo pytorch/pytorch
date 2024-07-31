@@ -713,24 +713,20 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     )
 
 
-def _create_and_apply_kernel_params(query, key, value, **kwargs: Dict[str, Any]):
-    kernel_params: Dict[str, Any] = {}
-    kernel_params.update(kwargs)
-    if "scale" not in kernel_params:
-        kernel_params["scale"] = 1.0 / math.sqrt(query.size(-1))
-    if "rows_guaranteed_safe" not in kernel_params:
-        kernel_params["rows_guaranteed_safe"] = False
-    if "prescale_qk" not in kernel_params:
-        kernel_params["prescale_qk"] = False
+def _create_and_apply_kernel_options(query, key, value, **kwargs: Any):
+    kernel_options: Dict[str, Any] = {}
+    kernel_options.update(kwargs)
+    if kernel_options["scale"] is None:
+        kernel_options["scale"] = 1.0 / math.sqrt(query.size(-1))
 
     # If foward kernel needs to return logsumexp is decided by this rule internally.
     any_inputs_require_grad = (
         query.requires_grad or key.requires_grad or value.requires_grad
     )
     output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
-    kernel_params["output_logsumexp"] = output_logsumexp
+    kernel_options["output_logsumexp"] = output_logsumexp
 
-    return kernel_params
+    return kernel_options
 
 
 def flex_attention(
@@ -739,7 +735,10 @@ def flex_attention(
     value: Tensor,
     score_mod: Optional[_score_mod_signature] = None,
     block_mask: Optional[BlockMask] = None,
-    **kwargs: Dict[str, Any],
+    *,
+    scale: Optional[float] = None,
+    rows_guaranteed_safe: bool = False,
+    prescale_qk: bool = False,
 ) -> Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -776,8 +775,8 @@ def flex_attention(
     Kwargs:
         scale (float): Scaling factor applied prior to softmax. If
         none, the default value is set to :math`\frac{1}{\sqrt{E}}`
-        rows_guaranteed_safe (bool): Is it guaranteed that at least one value in each row is not masked out?
-        If so, we can skip an extra safety check. Defaults to ``False``.
+        rows_guaranteed_safe (bool): For all rows, is it guaranteed into a (BLOCK_M, BLOCK_N) block that at least one value
+        in each row is not masked out? If so, we can skip an extra safety check. Defaults to ``False``.
         prescale_qk (bool): Whether to pre-scale QK by 1/sqrt(d) and change of base in Triton kernel.
         Has about 20% more numerical error, but slightly faster. Defaults to ``False``.
 
@@ -812,14 +811,21 @@ def flex_attention(
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
 
-    kernel_params = _create_and_apply_kernel_params(query, key, value, **kwargs)
+    kernel_options = _create_and_apply_kernel_options(
+        query,
+        key,
+        value,
+        scale=scale,
+        rows_guaranteed_safe=rows_guaranteed_safe,
+        prescale_qk=prescale_qk,
+    )
 
     if torch.compiler.is_dynamo_compiling():
         # mark head_dim always to be static
         for x in [query, key, value]:
             torch._dynamo.mark_static(x, -1)
         out, _ = flex_attention_hop(
-            query, key, value, score_mod, block_mask.as_tuple(), kernel_params
+            query, key, value, score_mod, block_mask.as_tuple(), kernel_options
         )
         return out
 
@@ -831,5 +837,5 @@ def flex_attention(
             with _temp_remove_pre_dispatch_torch_function_mode():
                 out, _ = torch.compile(
                     flex_attention_hop, backend="eager", fullgraph=True
-                )(query, key, value, score_mod, block_mask.as_tuple(), kernel_params)
+                )(query, key, value, score_mod, block_mask.as_tuple(), kernel_options)
                 return out

@@ -540,7 +540,7 @@ def flex_attention(
     value,
     subgraph,
     block_mask,
-    kernel_params,
+    kernel_options,
     score_mod_other_buffers,
     mask_mod_other_buffers,
 ):
@@ -578,7 +578,7 @@ def flex_attention(
             value,
             subgraph,
             block_mask,
-            kernel_params,
+            kernel_options,
             *score_mod_other_buffers,
         )
     mask_graph_placeholder_inps = [
@@ -676,8 +676,8 @@ def flex_attention(
             num_stages=num_stages,
             num_warps=num_warps,
             call_sizes=query.get_size(),
-            OUTPUT_LOGSUMEXP=kernel_params["output_logsumexp"],
-            SM_SCALE=kernel_params["scale"],
+            OUTPUT_LOGSUMEXP=kernel_options["output_logsumexp"],
+            SM_SCALE=kernel_options["scale"],
             BLOCK_DMODEL=query.get_size()[-1],
             # Performance tuning
             BLOCK_M=BLOCK_M,
@@ -686,8 +686,8 @@ def flex_attention(
             SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
             # For now, we always assume the "sound" option
-            ROWS_GUARANTEED_SAFE=kernel_params["rows_guaranteed_safe"],
-            PRESCALE_QK=kernel_params["prescale_qk"],
+            ROWS_GUARANTEED_SAFE=kernel_options["rows_guaranteed_safe"],
+            PRESCALE_QK=kernel_options["prescale_qk"],
             HAS_FULL_BLOCKS=has_full_blocks,
         )
     inputs_for_autotuning = (
@@ -1195,7 +1195,7 @@ def flex_attention_backward(*args, **kwargs):
         fw_graph,
         joint_graph,
         block_mask,
-        kernel_params,
+        kernel_options,
         score_mod_other_buffers,
         mask_mod_other_buffers,
     ) = args
@@ -1348,7 +1348,7 @@ def flex_attention_backward(*args, **kwargs):
             call_sizes=query.get_size() + [key.get_size()[2]],
             num_stages=num_stages,
             num_warps=num_warps,
-            SM_SCALE=kernel_params["scale"],
+            SM_SCALE=kernel_options["scale"],
             BLOCK_DMODEL=query.get_size()[-1],
             # Performance tuning
             BLOCK_M1=BLOCK1,
@@ -1359,7 +1359,7 @@ def flex_attention_backward(*args, **kwargs):
             SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
             # For now, we always assume the "sound" option
-            PRESCALE_QK=kernel_params["prescale_qk"],
+            PRESCALE_QK=kernel_options["prescale_qk"],
             HAS_FULL_BLOCKS=has_full_blocks,
         )
     inputs_for_autotuning = (
