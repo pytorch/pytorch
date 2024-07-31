@@ -326,25 +326,25 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
       : currentScope_(std::make_shared<Scope>(nullptr, nullptr, 0)) {}
   ~RegisterizerAnalysis() override = default;
 
-  void visit(ForPtr v) override;
+  void visit(const ForPtr& v) override;
 
-  void visit(CondPtr v) override;
+  void visit(const CondPtr& v) override;
 
-  void visit(BlockPtr v) override;
+  void visit(const BlockPtr& v) override;
 
-  void visit(StorePtr v) override;
+  void visit(const StorePtr& v) override;
 
-  void visit(LoadPtr v) override;
+  void visit(const LoadPtr& v) override;
 
-  void visit(IfThenElsePtr v) override;
+  void visit(const IfThenElsePtr& v) override;
 
-  void visit(LetPtr v) override;
+  void visit(const LetPtr& v) override;
 
-#define STMT_ON_STACK(Op)          \
-  void visit(Op##Ptr v) override { \
-    stmtStack_.push_front(v);      \
-    IRVisitor::visit(v);           \
-    stmtStack_.pop_front();        \
+#define STMT_ON_STACK(Op)                 \
+  void visit(const Op##Ptr& v) override { \
+    stmtStack_.push_front(v);             \
+    IRVisitor::visit(v);                  \
+    stmtStack_.pop_front();               \
   }
 
   STMT_ON_STACK(AtomicAdd);

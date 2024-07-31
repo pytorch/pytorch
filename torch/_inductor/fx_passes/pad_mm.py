@@ -16,6 +16,7 @@ from torch._inductor.autoheuristic.autoheuristic import (
     LocalFeedback,
 )
 from torch._inductor.autoheuristic.autoheuristic_utils import (
+    context_add_strides,
     pad_mm_operations,
     pad_mm_precondition,
 )
@@ -23,7 +24,6 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
 from ...utils._triton import has_triton
-
 from ..pattern_matcher import (
     fwd_only,
     gen_register_replacement,
@@ -32,6 +32,7 @@ from ..pattern_matcher import (
     ReplaceFn,
     SearchFn,
 )
+
 
 aten = torch.ops.aten
 
@@ -583,12 +584,8 @@ def get_context(
     context.add_feature("k", mat1.shape[1])
     context.add_feature("n", mat2.shape[1])
 
-    mat1_strides = mat1.stride()
-    mat2_strides = mat2.stride()
-    context.add_feature("mat1_stride_0", mat1_strides[0])
-    context.add_feature("mat1_stride_1", mat1_strides[1])
-    context.add_feature("mat2_stride_0", mat2_strides[0])
-    context.add_feature("mat2_stride_1", mat2_strides[1])
+    context_add_strides(context, "mat1", mat1.stride())
+    context_add_strides(context, "mat2", mat2.stride())
 
     context.add_feature("m_padded_length", m_padded_length)
     context.add_feature("k_padded_length", k_padded_length)
