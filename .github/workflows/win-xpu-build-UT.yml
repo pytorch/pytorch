@@ -62,7 +62,7 @@ jobs:
         call %conda_path%\Scripts\activate.bat
         call conda activate %conda_env%
         conda list
-        if exist "%home_dir%\pytorch" call rmdir /s /q "%home_dir%\pytorch"
+        # if exist "%home_dir%\pytorch" call rmdir /s /q "%home_dir%\pytorch"
         call git clone https://github.com/pytorch/pytorch.git %home_dir%\pytorch
         call cd %home_dir%\pytorch
         echo ${{ inputs.working_commit }} > third_party/xpu.txt
