@@ -60,9 +60,11 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compiler,
 )
 
+
 T = TypeVar("T")
 
 from _collections_abc import dict_keys  # noqa: TCH003
+
 
 """
 codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
@@ -1464,6 +1466,7 @@ def get_include_and_linking_paths(
         # like aoti_torch_grad_mode_set_enabled
         if aot_mode and sys.platform == "linux" and not config.is_fbcode():
             libs += ["torch", "torch_cpu"]
+            lpaths += [cpp_extension.TORCH_LIB_PATH]
 
     # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
     if not config.abi_compatible:

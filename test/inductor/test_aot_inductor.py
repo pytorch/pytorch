@@ -52,6 +52,7 @@ if HAS_CUDA:
         add_kernel_autotuned,
         add_kernel_with_optional_param,
         add_kernel_with_scaling,
+        mul2_inplace_kernel,
     )
 
 if IS_WINDOWS and IS_CI:
@@ -1353,7 +1354,7 @@ class AOTInductorTestsTemplate:
         class Model(torch.nn.Module):
             def __init__(self, device):
                 super().__init__()
-                self.register_buffer("foo", torch.randn(4, 4, device=device))
+                self.foo = torch.nn.Buffer(torch.randn(4, 4, device=device))
 
             def forward(self, x):
                 self.foo.add_(1)
@@ -1363,13 +1364,12 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(self.device), example_inputs)
 
     def test_non_tensor_input(self):
-        def fn(a, b, alpha=1.0):
-            return torch.add(a, b, alpha=alpha)
+        class Model(torch.nn.Module):
+            def forward(self, a, b, alpha=1.0):
+                return torch.add(a, b, alpha=alpha)
 
         a = torch.randn(10, device=self.device)
         b = torch.randn(10, device=self.device)
-        with self.assertRaises(RuntimeError):
-            torch._export.aot_compile(fn, args=(a, b), kwargs={"alpha": 2.0})
 
         for simdlen in [0, None]:
             with torch._inductor.config.patch({"cpp.simdlen": simdlen}):
@@ -1377,20 +1377,19 @@ class AOTInductorTestsTemplate:
                     torch.ops.aten.add,
                     args=(a, b),
                     kwargs={"alpha": 2.0},
-                    same_signature=False,
                 )
                 kernel_runner = AOTIRunnerUtil.load_runner(self.device, so_path)
                 res = kernel_runner.run([a, b])
                 self.assertTrue(isinstance(res, list))
                 self.assertTrue(len(res) == 1)
-                self.assertEqual(fn(a, b, alpha=2.0), res[0])
+                self.assertEqual(Model()(a, b, alpha=2.0), res[0])
 
     def test_buffer_mutation_2(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
                 super().__init__()
-                self.register_buffer("foo", torch.arange(10, device=device))
-                self.register_buffer("bar", torch.arange(10, device=device))
+                self.foo = torch.nn.Buffer(torch.arange(10, device=device))
+                self.bar = torch.nn.Buffer(torch.arange(10, device=device))
 
             def forward(self, x):
                 self.bar.mul_(2)
@@ -1412,8 +1411,8 @@ class AOTInductorTestsTemplate:
             ):
                 super().__init__()
                 cache_shape = (max_batch_size, n_heads, max_seq_length, head_dim)
-                self.register_buffer("k_cache", torch.zeros(cache_shape, dtype=dtype))
-                self.register_buffer("v_cache", torch.zeros(cache_shape, dtype=dtype))
+                self.k_cache = torch.nn.Buffer(torch.zeros(cache_shape, dtype=dtype))
+                self.v_cache = torch.nn.Buffer(torch.zeros(cache_shape, dtype=dtype))
 
             def update(self, input_pos, k_val, v_val):
                 # input_pos: [S], k_val: [B, H, S, D]
@@ -2085,6 +2084,28 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), inputs)
 
+    def test_triton_kernel_sympy_fn_like_arg(self):
+        # This test should hit sympy.expand("sqrt") which crashes with
+        # AttributeError: 'function' object has no attribute 'expand'.
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                out = torch.zeros_like(x)
+                add_kernel_with_optional_param[1,](
+                    in_ptr0=x,
+                    in_ptr1=x,
+                    out_ptr=out,
+                    n_elements=x.numel(),
+                    BLOCK_SIZE=1,
+                    ARGS_PASSED="sqrt",  # sqrt is a valid sympy fn
+                )
+                return out
+
+        inputs = (torch.randn(4, device=self.device),)
+        self.check_model(Model(), inputs)
+
     def test_triton_kernel_with_none_input(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -2273,6 +2294,22 @@ class AOTInductorTestsTemplate:
 
             self.check_model(Model(), inputs)
 
+    def test_repeated_user_defined_triton_kernel(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                for _ in range(3):
+                    mul2_inplace_kernel[4,](x, n_elements=4, BLOCK_SIZE=16)
+                return x
+
+        inputs = (torch.randn(4, 4, device=self.device),)
+        self.check_model(Model(), inputs)
+
     def test_convolution(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -2353,7 +2390,7 @@ class AOTInductorTestsTemplate:
             def __init__(self):
                 super().__init__()
                 self.register_parameter("0", torch.nn.Parameter(torch.randn(3, 4)))
-                self.register_buffer("test_buf", torch.randn(3, 4))
+                self.test_buf = torch.nn.Buffer(torch.randn(3, 4))
                 self.register_parameter(
                     "test_param", torch.nn.Parameter(torch.randn(3, 4))
                 )
@@ -2368,7 +2405,7 @@ class AOTInductorTestsTemplate:
                 self.register_parameter(
                     "test_param", torch.nn.Parameter(torch.randn(3, 4))
                 )
-                self.register_buffer("test_buf", torch.randn(3, 4))
+                self.test_buf = torch.nn.Buffer(torch.randn(3, 4))
 
             def forward(self, x):
                 return (self.foo_bar(x) + self.test_param) * self.test_buf
@@ -2405,7 +2442,7 @@ class AOTInductorTestsTemplate:
         class NestedChild(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("nestedchild3buffer", torch.ones(2, 3) * 3)
+                self.nestedchild3buffer = torch.nn.Buffer(torch.ones(2, 3) * 3)
 
             def forward(self, x):
                 return x / self.nestedchild3buffer
@@ -2425,7 +2462,7 @@ class AOTInductorTestsTemplate:
         class Child2(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("child2buffer", torch.ones(2, 3) * 2)
+                self.child2buffer = torch.nn.Buffer(torch.ones(2, 3) * 2)
 
             def forward(self, x):
                 return x - self.child2buffer
@@ -2969,6 +3006,26 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(16, 16, 16, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_bool_input(self):
+        # Specialize on whichever branch the example input for b is
+        class Model(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x * x
+                else:
+                    return x + x
+
+        example_inputs = (torch.randn(3, 3, device=self.device), True)
+        self.check_model(Model(), example_inputs)
+
+    def test_int_list_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, i):
+                return x * i[0] * i[1]
+
+        example_inputs = (torch.randn(3, 3, device=self.device), [3, 4])
+        self.check_model(Model(), example_inputs)
+
     def test_nested_tensor_from_jagged(self):
         class Model(nn.Module):
             def __init__(self):
@@ -3178,6 +3235,10 @@ CPU_TEST_FAILURES = {
     "test_buffer_mutation_1": fail_stack_allocation(is_skip=True),
     # segfault
     "test_buffer_mutation_2": fail_stack_allocation(is_skip=True),
+    # segfault
+    "test_bool_input": fail_stack_allocation(is_skip=True),
+    # segfault
+    "test_int_list_input": fail_stack_allocation(is_skip=True),
     # segfault
     # 'AOTInductorTestABICompatibleCpuWithStackAllocation' object has no attribute 'code_check_count'
     "test_buffer_mutation_3": fail_stack_allocation(is_skip=True),

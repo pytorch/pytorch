@@ -40,7 +40,6 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_symbols,
@@ -91,7 +90,6 @@ from .lowering import (
     needs_realized_inputs,
     unsupported_output_tensor,
 )
-
 from .scheduler import BaseSchedulerNode
 from .sizevars import SizeVarAllocator
 from .utils import (
@@ -918,6 +916,8 @@ class GraphLowering(torch.fx.Interpreter):
             expr = sympy.sympify(example)
             self.graph_inputs[target] = expr
             return expr
+        elif example is None:
+            return None
         if isinstance(example, BackwardState):
             # Ignored arg, must be unused
             # Alternately we could filter this out in AotAutograd
@@ -1556,7 +1556,7 @@ class GraphLowering(torch.fx.Interpreter):
         if config.disable_cpp_codegen:
             raise CppWrapperCodeGenError("C++ codegen is disabled")
 
-        if sys.platform not in ["linux", "darwin"]:
+        if sys.platform not in ["linux", "darwin", "win32"]:
             raise CppWrapperCodeGenError(f"Unsupported platform {sys.platform}")
 
         for value in self.graph_inputs.values():
@@ -1622,7 +1622,9 @@ class GraphLowering(torch.fx.Interpreter):
                 def materialize(
                     x: Union[torch.SymInt, torch.SymFloat, torch.Tensor]
                 ) -> Union[int, float, torch.Tensor]:
-                    if isinstance(x, (torch.SymInt, torch.SymFloat)):
+                    if x is None:
+                        return None
+                    elif isinstance(x, (torch.SymInt, torch.SymFloat)):
                         # Need concrete value to run dynamic shapes and tune the result
                         return x.node.hint
                     elif isinstance(x, FakeTensor):

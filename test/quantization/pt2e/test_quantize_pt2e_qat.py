@@ -922,7 +922,7 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         )
         m = prepare_qat_pt2e(m, quantizer)
         m = convert_pt2e(m)
-        (conv_node, bn_node, getitem_node) = _get_conv_bn_getitem_nodes(m)
+        (conv_node, bn_node, _) = _get_conv_bn_getitem_nodes(m)
         self.assertTrue(conv_node is not None)
         self.assertTrue(bn_node is None)
 
