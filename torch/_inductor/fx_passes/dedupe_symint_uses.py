@@ -33,7 +33,7 @@ class _SymHashingDict:
     fallback to symnodes.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.sym_hash_dict = {}
 
     def __setitem__(self, key, value):

@@ -4024,7 +4024,7 @@ class CppScheduling(BaseScheduling):
 
 
 class KernelGroup:
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.args = KernelArgs()
         self.loops_code = BracesBuffer()
@@ -4098,7 +4098,7 @@ class KernelGroup:
 
 
 class CppWrapperKernelGroup(KernelGroup):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.args = CppWrapperKernelArgs()
 

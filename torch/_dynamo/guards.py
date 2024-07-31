@@ -147,7 +147,7 @@ class GuardManager:
     the check_nopybind from C++.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.root = RootGuardManager()
 
         self.closure_vars = None

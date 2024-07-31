@@ -245,7 +245,7 @@ MAX_STACK_ALLOCATION_SIZE = 1024 * 100
 
 
 class MemoryPlanningState:
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.reuse_pool: Dict[
             ReuseKey, List[FreeIfNotReusedLine]
@@ -460,7 +460,7 @@ class WrapperCodeGen(CodeGen):
     Generate outer wrapper in Python that calls the kernels.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self._names_iter: Iterator[int] = count()
         self.header = IndentedBuffer()

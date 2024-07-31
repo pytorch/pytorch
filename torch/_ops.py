@@ -41,7 +41,7 @@ class OperatorBase:
     (which represents Python-only operators that are unrepresentable in TorchScript).
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         # The dispatch cache precomputes a mapping of dispatch key that the
         # dispatcher wants to dispatch to, to an actual implementation of the
         # dispatch key.  Confusingly, the actual implementation could *also* be a
@@ -486,7 +486,7 @@ def key_extractor(tensors, key_mask):
 # checking for incorrect schemas in regards to
 # aliasing or mutating ops.
 class _ModeStackStateForPreDispatch:
-    def __init__(self) -> None:
+    def __init__(self):
         self.__infra_modes = [None, None]
         self._schema_check_mode = None
 
@@ -1291,7 +1291,7 @@ class _PyOpNamespace(_OpNamespace):
 class _Ops(types.ModuleType):
     __file__ = "_ops.py"
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__("torch.ops")
         self.loaded_libraries = set()
         self._higher_order_op_namespace = _PyOpNamespace(

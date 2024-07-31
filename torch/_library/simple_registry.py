@@ -24,7 +24,7 @@ class SimpleLibraryRegistry:
     (including the overload) to SimpleOperatorEntry.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         self._data = {}
 
     def find(self, qualname: str) -> "SimpleOperatorEntry":

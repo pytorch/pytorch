@@ -53,7 +53,7 @@ class ModTracker:
     A Set containing the fqn for each module currently running their forward
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.parents = {"Global"}
         self._active_module_cnt = {}
         self._known_modules: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()

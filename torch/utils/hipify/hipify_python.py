@@ -664,14 +664,14 @@ class TrieNode:
        A special char '' represents end of word
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.children = {}
 
 class Trie:
     """Creates a Trie out of a list of words. The trie can be exported to a Regex pattern.
     The corresponding Regex should match much faster than a simple Regex union."""
 
-    def __init__(self) -> None:
+    def __init__(self):
         """Initialize the trie with an empty root node."""
         self.root = TrieNode()
 

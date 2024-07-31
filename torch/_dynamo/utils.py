@@ -512,7 +512,7 @@ def nothing(*args, **kwargs):
 class ExactWeakKeyDictionary:
     """Similar to weakref.WeakKeyDictionary, but use `is`/`id` rather than `==` to compare equality"""
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.values = {}
         self.refs = {}
 
@@ -1701,7 +1701,7 @@ class CompileProfiler:
      * (TODO)confirming which functions got compiled/skipped
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.frame_count = 0
         self.op_count = 0
         self.backend_ctx_ctor = disable_cache_limit

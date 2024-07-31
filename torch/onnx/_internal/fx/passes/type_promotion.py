@@ -227,7 +227,7 @@ class DivElementwiseTypePromotionRule(ElementwiseTypePromotionRule):
     Rule depends on the value of the `rounding_mode` argument.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__(
             "aten",
             "div",
@@ -1221,7 +1221,7 @@ class ElementwiseTypePromotionRuleSetGenerator:
 class TypePromotionTable:
     """Type promotion table for torch.ops."""
 
-    def __init__(self) -> None:
+    def __init__(self):
         self._rule_table = {}
         for rule in _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET:
             self.add_rule(rule)

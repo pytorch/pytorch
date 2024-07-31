@@ -95,7 +95,7 @@ class cuFFTPlanCacheManager:
 
     __initialized = False
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.caches = []
         self.__initialized = True
 

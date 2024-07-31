@@ -938,7 +938,7 @@ class _LazySeedTracker:
     # Note: `manual_seed_all` followed by `manual_seed` overwrites
     # the seed on current device. We track the order of **latest**
     # calls between these two API.
-    def __init__(self) -> None:
+    def __init__(self):
         self.manual_seed_all_cb = None
         self.manual_seed_cb = None
         self.call_order = []

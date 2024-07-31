@@ -34,7 +34,7 @@ class CppWrapperCpu(WrapperCodeGen):
     Generates cpp wrapper for running on CPU and calls cpp kernels
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         if not hasattr(self, "device"):
             self.device = "cpu"
         super().__init__()

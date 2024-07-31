@@ -86,7 +86,7 @@ class ForeachKernel(Kernel):
 
         return all_partitions
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.blocking_2d = False
         self.block_size_1d = 1024  # Try tuning this value

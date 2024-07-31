@@ -81,7 +81,7 @@ class MultiKernelState:
     V.graph.wrapper_code has a reference to MultiKernelState instance.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.subkernel_to_kernel_name = {}
 
     def define_kernel(self, kernels):

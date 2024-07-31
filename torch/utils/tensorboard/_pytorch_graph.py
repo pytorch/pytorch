@@ -140,7 +140,7 @@ class GraphPy:
     and scope_name_appeared.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.nodes_op = []
         self.nodes_io = OrderedDict()
         self.unique_name_to_scoped_name = {}

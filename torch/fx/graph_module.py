@@ -34,7 +34,7 @@ _USER_PRESERVED_ATTRIBUTES_KEY = "_user_preserved_attributes"
 # Using _exec_with_source will add it to our local cache
 # and then tools like TorchScript will be able to get source info.
 class _EvalCacheLoader:
-    def __init__(self) -> None:
+    def __init__(self):
         self.eval_cache = {}
         self.next_id = 0
 
@@ -541,7 +541,7 @@ import torch
 
 from torch.nn import *
 class {module_name}(torch.nn.Module):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
 """
 

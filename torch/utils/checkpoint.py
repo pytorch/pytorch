@@ -769,7 +769,7 @@ class _Handle:
 
 
 class _Holder:
-    def __init__(self) -> None:
+    def __init__(self):
         self.handles: Dict[int, Optional[_Handle]] = {}
 
 
@@ -978,7 +978,7 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
     cpp_tb = platform.machine() == 'x86_64' and platform.system() == 'Linux'
 
     class CaptureLogs:
-        def __init__(self) -> None:
+        def __init__(self):
             self.logs = None
             self.tbs = None
 

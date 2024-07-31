@@ -123,7 +123,7 @@ class _Namespace:
     - Each name is unique within a given namespace.
     - Names generated do not shadow builtins, unless the object is indeed that builtin.
     """
-    def __init__(self) -> None:
+    def __init__(self):
         self._obj_to_name: Dict[Any, str] = {}
         self._unassociated_names = set()
         self._used_names: Set[str] = set()
@@ -326,7 +326,7 @@ def _parse_stack_trace(stack_trace: str):
 
 @compatibility(is_backward_compatible=False)
 class CodeGen:
-    def __init__(self) -> None:
+    def __init__(self):
         self._body_transformer: Optional[TransformCodeFunc] = None
         self._func_name: str = "forward"
 
@@ -789,7 +789,7 @@ class _FindNodesLookupTable:
     """
     Side table for the graph for the purpose of doing fast queries
     """
-    def __init__(self) -> None:
+    def __init__(self):
         self.table: Dict[Tuple[str, Optional[Target]], Dict[Node, None]] = defaultdict(dict)
 
     def _key(self, node) -> Tuple[str, Optional[Target]]:
@@ -831,7 +831,7 @@ class Graph:
         import torch.fx
 
         class MyModule(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(3, 4))
                 self.linear = torch.nn.Linear(4, 5)

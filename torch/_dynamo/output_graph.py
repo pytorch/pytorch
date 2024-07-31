@@ -126,7 +126,7 @@ class VariableTrackerCacheKey:
 
 
 class VariableTrackerCache:
-    def __init__(self) -> None:
+    def __init__(self):
         self.cache = {}
 
     def lookup(self, value, source):

@@ -77,7 +77,7 @@ class CommModeModuleTracker(ModTracker):
     parameters and sharding information of a model at a module-level
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.module_helper_dict = {}
         self.module_parameters_dict = {}
@@ -242,7 +242,7 @@ class CommDebugMode(TorchDispatchMode):
 
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.comm_counts: Dict[Any, int] = defaultdict(int)
         self.comm_module_counts = {}
         self.comm_module_operation_counts = {}
