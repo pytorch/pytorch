@@ -113,7 +113,7 @@ else:
 
             return res_submesh
 
-        def get_root_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
+        def get_root_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
             # If a mesh could not be found in the child_to_root_mapping, it is a root mesh itself.
             # A root mesh is not created through slicing.
             # We considers the root mesh of a root mesh is itself.

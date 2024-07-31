@@ -56,7 +56,9 @@ def _validate_tp_mesh_dim(
         )
 
     root_mesh = _mesh_resources.get_root_mesh(device_mesh)
-    if root_mesh:
+    # if a root mesh is not the same as device_mesh,
+    # meaning the device_mesh is sliced out from the root mesh.
+    if root_mesh and root_mesh != device_mesh:
         tp_mesh_dim_in_root = _mesh_resources.get_root_mesh_dim(device_mesh)
         if tp_mesh_dim_in_root != root_mesh.ndim - 1:
             raise RuntimeError(
