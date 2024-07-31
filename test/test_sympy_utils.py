@@ -241,6 +241,10 @@ class TestValueRanges(TestCase):
             ValueRangeAnalysis.mul(ValueRanges.wrap(0), ValueRanges.unknown()),
             ValueRanges.wrap(0),
         )
+        self.assertEqual(
+            ValueRangeAnalysis.mul(ValueRanges.wrap(0.0), ValueRanges.unknown()),
+            ValueRanges.wrap(0.0),
+        )
 
     @parametrize("fn", UNARY_BOOL_OPS)
     def test_unary_bool_ref_range(self, fn):

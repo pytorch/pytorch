@@ -503,8 +503,8 @@ class profile:
             if _filter_name(kineto_event.name()):
                 continue
             rel_start_ns = kineto_event.start_ns() - trace_start_ns
-            rel_end_ns = rel_start_ns + kineto_event.duration_ns()
-            abs_end_ns = kineto_event.start_ns() + kineto_event.duration_ns()
+            rel_end_ns = kineto_event.end_ns() - trace_start_ns
+            abs_end_ns = kineto_event.end_ns()
 
             cpu_memory_usage = 0
             device_memory_usage = 0
@@ -531,6 +531,7 @@ class profile:
                 fwd_thread=kineto_event.fwd_thread_id(),
                 input_shapes=kineto_event.shapes(),
                 concrete_inputs=kineto_event.concrete_inputs(),
+                kwinputs=kineto_event.kwinputs(),
                 stack=[
                     entry
                     for entry in kineto_event.stack()
@@ -546,6 +547,7 @@ class profile:
                 device_index=kineto_event.device_index(),
                 device_resource_id=kineto_event.device_resource_id(),
                 flops=kineto_event.flops(),
+                is_user_annotation=kineto_event.is_user_annotation(),
             )
             max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:
@@ -639,6 +641,7 @@ class profile:
 
 class record_function(_ContextDecorator):
     """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
+    Label will only appear if CPU activity tracing is enabled.
 
     It is useful when tracing the code profile.
 

@@ -46,7 +46,7 @@ Value* ConvertSliceToIndex(Node* slice, Value* size, Node* insertBefore) {
       aten::slice,
       {index,
        graph->insertConstant(
-           scalar_to_tensor(at::Scalar(0)), c10::nullopt, slice->scope()),
+           scalar_to_tensor(at::Scalar(0)), std::nullopt, slice->scope()),
        start,
        end,
        step});

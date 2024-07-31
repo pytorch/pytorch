@@ -8,8 +8,7 @@
 #include <cstddef>
 #include <limits>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -223,5 +222,4 @@ void InlineFunctionalGraphs(const std::shared_ptr<Graph>& graph) {
   InlineFunctionalGraphs(graph->block());
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

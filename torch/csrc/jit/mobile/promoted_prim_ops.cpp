@@ -118,7 +118,7 @@ void toPrimDType(Stack& stack) {
   pop(stack, non_blocking, copy);
   std::optional<at::ScalarType> scalarType =
       pop(stack).toOptional<at::ScalarType>();
-  std::optional<c10::Device> device = c10::nullopt;
+  std::optional<c10::Device> device = std::nullopt;
   at::Tensor self = pop(stack).toTensor();
   push(stack, to_dispatch(self, device, scalarType, non_blocking, copy));
 }

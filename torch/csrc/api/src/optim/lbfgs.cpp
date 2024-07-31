@@ -68,7 +68,7 @@ bool if_container_equal(T lhs, T rhs) {
 
 bool operator==(const LBFGSParamState& lhs, const LBFGSParamState& rhs) {
   auto isNull = [](const std::optional<std::vector<Tensor>>& val) {
-    return val == c10::nullopt;
+    return val == std::nullopt;
   };
   return (lhs.func_evals() == rhs.func_evals()) &&
       (lhs.n_iter() == rhs.n_iter()) && (lhs.t() == rhs.t()) &&
@@ -97,7 +97,7 @@ void LBFGSParamState::serialize(
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG_DEQUE(old_stps);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG_DEQUE(ro);
   // Python version only serializes state vars if explicitly defined
-  if (al() != c10::nullopt) {
+  if (al() != std::nullopt) {
     _TORCH_OPTIM_SERIALIZE_TORCH_ARG(al);
   }
 }
@@ -131,7 +131,7 @@ Tensor LBFGS::_gather_flat_grad() {
 }
 
 int64_t LBFGS::_numel() {
-  if (_numel_cache == c10::nullopt) {
+  if (_numel_cache == std::nullopt) {
     auto res = 0;
     for (const auto& p : param_groups_.at(0).params()) {
       res += p.numel();
@@ -194,12 +194,12 @@ static double _cubic_interpolate(
     double x2,
     double f2,
     double g2,
-    std::optional<std::tuple<double, double>> bounds = c10::nullopt) {
+    std::optional<std::tuple<double, double>> bounds = std::nullopt) {
   // ported from https://github.com/torch/optim/blob/master/polyinterp.lua
   // Compute bounds of interpolation area
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double xmin_bound, xmax_bound;
-  if (bounds != c10::nullopt) {
+  if (bounds != std::nullopt) {
     std::tie(xmin_bound, xmax_bound) = *bounds;
   } else {
     std::tie(xmin_bound, xmax_bound) =
@@ -509,7 +509,7 @@ Tensor LBFGS::step(LossClosure closure) {
       // multiplied by the gradient
       int64_t num_old = static_cast<int64_t>(old_dirs.size());
 
-      if (state.al() == c10::nullopt) {
+      if (state.al() == std::nullopt) {
         state.al(std::vector<Tensor>(history_size));
       }
       auto& al = state.al();
@@ -557,7 +557,7 @@ Tensor LBFGS::step(LossClosure closure) {
 
     // optional line search: user function
     auto ls_func_evals = 0;
-    if (line_search_fn != c10::nullopt) {
+    if (line_search_fn != std::nullopt) {
       TORCH_CHECK(
           *line_search_fn == "strong_wolfe",
           "only 'strong_wolfe' is supported");
@@ -627,7 +627,7 @@ void LBFGS::load(serialize::InputArchive& archive) {
     TORCH_WARN(
         "Your serialized LBFGS optimizer is still using the old serialization format. "
         "The func_evals and n_iter value in state will be set to 0, ro will be set to an empty deque "
-        "and al will be set to c10::nullopt because the old LBFGS optimizer didn't save these values."
+        "and al will be set to std::nullopt because the old LBFGS optimizer didn't save these values."
         "You should re-save your LBFGS optimizer to use the new serialization format.");
     Tensor d, t, H_diag, prev_flat_grad, prev_loss;
     std::deque<Tensor> old_dirs, old_stps;

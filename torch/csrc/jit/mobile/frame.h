@@ -2,8 +2,8 @@
 
 #include <cstddef>
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/mobile/code.h>
+#include <optional>
 
 namespace torch {
 namespace jit {

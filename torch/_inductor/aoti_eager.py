@@ -8,6 +8,7 @@ from unittest import mock
 import torch
 import torch._export
 from torch._inductor.utils import is_cpu_device
+
 from .runtime.runtime_utils import cache_dir
 
 
@@ -51,7 +52,7 @@ def load_aoti_eager_cache(
                         return []
 
                     for metadata in item["meta_info"]:
-                        if "is_dynamic" in metadata and metadata["is_dynamic"]:
+                        if metadata.get("is_dynamic"):
                             raise NotImplementedError(
                                 "Only support static shape for now"
                             )
