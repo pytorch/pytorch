@@ -152,11 +152,12 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
 
 def get_plain_tensors(subclass: Tensor) -> List[Tensor]:
     assert is_traceable_wrapper_subclass(subclass)
-    plain_tensors = []
+    plain_tensors: List[Tensor] = []
     todo = [subclass]
     while todo:
         curr = todo.pop()
         if not is_traceable_wrapper_subclass(curr):
+            assert isinstance(curr, Tensor)
             plain_tensors.append(curr)
             continue
 
@@ -1586,30 +1587,6 @@ class FakeTensorMode(TorchDispatchMode):
             storage = view_arg.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
                 empty.set_(storage, storage_offset, shape, stride)
-        else:
-            if isinstance(storage_offset, SymInt):
-                # Do it this way so we don't import symbolic_shapes (which imports
-                # expensive sympy) unless we have to.
-                from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
-                zero_offset = guard_size_oblivious(storage_offset == 0)
-            else:
-                zero_offset = storage_offset == 0
-            if not zero_offset:
-                storage = empty.untyped_storage()
-                with in_kernel_invocation_manager(self), maybe_suppress():
-                    empty.set_(storage, storage_offset, shape, stride)
-
-        if isinstance(storage_bytes, SymInt):
-            # Do it this way so we don't import symbolic_shapes (which imports
-            # expensive sympy) unless we have to.
-            from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
-            zero_bytes = guard_size_oblivious(storage_bytes == 0)
-        else:
-            zero_bytes = storage_bytes == 0
-        if zero_bytes:
-            empty.untyped_storage().resize_(0)
 
         return FakeTensor(self, empty, metadata.device)
 
