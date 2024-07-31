@@ -1547,8 +1547,8 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             fw_graph.code.strip(),
             """\
-def forward(self, primals_1):
-    view = torch.ops.aten.view.default(primals_1, [-1]);  primals_1 = None
+def forward(self, arg0_1):
+    view = torch.ops.aten.view.default(arg0_1, [-1]);  arg0_1 = None
     return (view,)""",
         )
 
@@ -2199,12 +2199,11 @@ def forward(self, primals_1):
         self.assertExpectedInline(
             fw_graph.code.strip(),
             """\
-def forward(self, primals_1, primals_2):
-    view = torch.ops.aten.view.default(primals_1, [3, 3]);  primals_1 = None
-    t = torch.ops.aten.t.default(view);  view = None
-    view_1 = torch.ops.aten.view.default(primals_2, [3, 3]);  primals_2 = None
-    view_2 = torch.ops.aten.view.default(t, [3, 3])
-    return (t, view_1, view_2)""",
+def forward(self, arg0_1, arg1_1):
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    view = torch.ops.aten.view.default(arg1_1, [3, 3]);  arg1_1 = None
+    view_1 = torch.ops.aten.view.default(t, [3, 3])
+    return (t, view, view_1)""",
         )
 
     def test_view_detach(self):
@@ -3587,7 +3586,7 @@ def forward(self, tangents_1):
         class MyModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.zeros(1))
+                self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.w1 = torch.nn.Parameter(torch.zeros(1))
                 self.w2 = torch.nn.Parameter(torch.zeros(1))
 
@@ -3642,7 +3641,7 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
         class MyModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.ones(4, 4))
+                self.buf = torch.nn.Buffer(torch.ones(4, 4))
                 self.w = torch.nn.Parameter(
                     torch.Tensor([[4, 5], [1, 2], [6, 7], [8, 9]])
                 )
@@ -3868,7 +3867,7 @@ def forward(self, tangents_1):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(4, 5))
+                self.buffer = torch.nn.Buffer(torch.ones(4, 5))
 
             def forward(self, x):
                 y = self.buffer.add_(3)
@@ -4222,7 +4221,7 @@ def forward(self, arg0_1, arg1_1):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("foo", torch.zeros(2, 2))
+                self.foo = torch.nn.Buffer(torch.zeros(2, 2))
 
             def forward(self, x):
                 self.foo.add_(4)
@@ -4796,7 +4795,7 @@ class <lambda>(torch.nn.Module):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self, x):
                 x.add_(4)
@@ -4822,7 +4821,7 @@ def forward(self, arg0_1, arg1_1):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self, x, y):
                 y.add_(4)
@@ -5743,6 +5742,59 @@ def forward(self, tangents_1, tangents_2):
         # Both grad_inputs are TwoTensors
         self.assertEqual(a_ref_base.grad.a, a_test_base.grad.a)
         self.assertEqual(a_ref_base.grad.b, a_test_base.grad.b)
+
+    def test_aot_dispatch_output_requires_grad_in_no_grad(self):
+        def fn(x):
+            out1 = x.sin()
+            with torch.enable_grad():
+                out2 = x.cos()
+            return out1, out2
+
+        inp_fns = [
+            lambda: torch.ones(10, requires_grad=True),
+            lambda: torch.ones(10, requires_grad=False),
+        ]
+
+        compiled_f = aot_function(fn, nop)
+        for inp_fn in inp_fns:
+            with torch.no_grad():
+                ref_x = inp_fn()
+                ref_out = fn(ref_x)
+                x = inp_fn()
+                out = compiled_f(x)
+                for r, o in zip(ref_out, out):
+                    self.assertEqual(r.requires_grad, o.requires_grad)
+            if ref_x.requires_grad:
+                with torch.enable_grad():
+                    (ref_out[0] + ref_out[1]).sum().backward()
+                    (out[0] + out[1]).sum().backward()
+                    self.assertEqual(ref_x.grad, x.grad)
+                    assert torch.allclose(ref_x.grad, x.grad, atol=1e-3, rtol=1e-3)
+
+    def test_aot_dispatch_output_requires_grad_in_no_grad_views(self):
+        # view-type ops preserve requires_grad even in no_grad.
+        def fn(x):
+            return x.view(-1), x.sin()
+
+        inference_graph_cell = [None]
+        inference_compiler = make_boxed_compiler(
+            partial(extract_graph, graph_cell=inference_graph_cell)
+        )
+        compiled_fn = aot_function(fn, nop, inference_compiler=inference_compiler)
+
+        inp_x0 = torch.ones(2, 3, requires_grad=True)
+        # Clone in no_grad will make requires_grad=False tensors, keep clone outside of no_grad
+        ref_x0 = inp_x0.clone()
+        x0 = inp_x0.clone()
+        with torch.no_grad():
+            ref_out1, ref_out2 = fn(ref_x0)
+
+            out1, out2 = compiled_fn(x0)
+            # Assert that we executed inference graph
+            self.assertTrue(inference_graph_cell[0] is not None)
+
+            self.assertEqual(ref_out1.requires_grad, out1.requires_grad)
+            self.assertEqual(ref_out2.requires_grad, out2.requires_grad)
 
 
 class TestAOTModuleSimplified(AOTTestCase):
