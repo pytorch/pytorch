@@ -32,21 +32,29 @@ aten = torch.ops.aten
 @dataclass
 class MaskBuffer:
     data: Optional[torch.Tensor] = None
+    # refcount allows shared usage of the MaskBuffer, as long as all users have the same data
+    refcount: int = 0
 
     def materialize_mask(self, mask):
-        if self.data is not None:
-            raise RuntimeError("MaskBuffer has already been materialized")
-        self.data = mask
+        if self.refcount == 0:
+            self.data = mask
+        else:
+            assert self.data is not None
+            if not torch.equal(self.data, mask):
+                raise RuntimeError(
+                    "MaskBuffer has been materialized with conflicting data"
+                )
+        self.refcount += 1
 
     def release_mask(self):
-        # TODO: evaluate if we need to release the mask buffer or the buffer
-        # can just have the same lifetime as the Partial placement
-        if self.data is None:
+        if self.refcount == 0 or self.data is None:
             raise RuntimeError("MaskBuffer has not been materialized")
-        self.data = None
+        self.refcount -= 1
+        if self.refcount == 0:
+            self.data = None
 
     def apply_mask(self, tensor):
-        if self.data is None:
+        if self.refcount == 0 or self.data is None:
             raise RuntimeError("MaskBuffer has not been materialized")
 
         # NOTE: _MaskPartial is being used by the embedding op and the gather op.
@@ -70,8 +78,11 @@ class _MaskPartial(Partial):
     lifecycle, i.e. the indices_mask would only be alive during the lifetime of the DTensor.
     """
 
-    logical_dim_size: int = -1
     mask_buffer: MaskBuffer = field(default_factory=MaskBuffer)
+
+    # required fields for computing the local offset and deriving the mask
+    offset_shape: Optional[torch.Size] = None
+    offset_dim: int = 0
 
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
@@ -79,8 +90,11 @@ class _MaskPartial(Partial):
         # override parent logic to perform partial mask for embedding
         num_chunks = mesh.size(mesh_dim)
         # get local shard size and offset on the embedding_dim
+        assert (
+            self.offset_shape is not None
+        ), "offset_shape needs to be set for _MaskPartial"
         local_shard_size, local_offset_on_dim = Shard._local_shard_size_on_dim(
-            self.logical_dim_size,
+            self.offset_shape[self.offset_dim],
             num_chunks,
             mesh.get_local_rank(mesh_dim),
             return_offset=True,
@@ -146,19 +160,24 @@ class _MaskPartial(Partial):
 
         return (
             self.reduce_op == other.reduce_op
-            and self.logical_dim_size == other.logical_dim_size
+            and self.offset_shape == other.offset_shape
+            and self.offset_dim == other.offset_dim
         )
 
     def __hash__(self) -> int:
         return 1 + hash(
-            (self.logical_dim_size, id(self.mask_buffer.data), self.reduce_op)
+            (
+                self.reduce_op,
+                self.offset_shape,
+                self.offset_dim,
+            )
         )
 
     def __repr__(self) -> str:
         """
         machine readable representation of the MaskPartial placement
         """
-        return f"_MaskPartial(logical_dim_size={self.logical_dim_size})"
+        return f"_MaskPartial(offset_shape={self.offset_shape}, offset_dim={self.offset_dim})"
 
     def __str__(self) -> str:
         """
@@ -192,7 +211,7 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     single_mesh_dim_strategies.append(colwise_sharding)
 
     # rowwise sharding, output is embedding partial, weight shard on dim 0, input accepts embedding partial
-    embedding_partial_placement = _MaskPartial(logical_dim_size=weight_shape[0])
+    embedding_partial_placement = _MaskPartial(offset_shape=weight_shape, offset_dim=0)
 
     # NOTE we want to reuse the same mask partial placement so that we can reuse the same mask that generates
     # from the input indices and use it for output reduction

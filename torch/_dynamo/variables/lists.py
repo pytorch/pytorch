@@ -17,7 +17,7 @@ from ..._guards import Source
 
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import ObservedUserStopIteration, unimplemented
+from ..exc import raise_observed_user_stop_iteration, unimplemented
 from ..source import AttrSource, GetItemSource
 from ..utils import (
     get_fake_value,
@@ -33,6 +33,7 @@ from ..utils import (
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
+from .iter import IteratorVariable
 
 
 class BaseListVariable(VariableTracker):
@@ -339,11 +340,11 @@ class CommonListMethodsVariable(BaseListVariable):
             name == "extend"
             and self.mutable_local
             and args
-            and args[0].has_unpack_var_sequence(tx)
+            and args[0].has_force_unpack_var_sequence(tx)
         ):
             assert not kwargs
             (arg,) = args
-            seq = arg.unpack_var_sequence(tx)
+            seq = arg.force_unpack_var_sequence(tx)
             tx.output.side_effects.mutation(self)
             self.items.extend(seq)
             return ConstantVariable.create(None)
@@ -427,11 +428,13 @@ class ListVariable(CommonListMethodsVariable):
             key, value = args
             tx.output.side_effects.mutation(self)
             if isinstance(key, SliceVariable):
-                if not value.has_unpack_var_sequence(tx):
+                if not value.has_force_unpack_var_sequence(tx):
                     unimplemented(
                         f"Missing dynamo support for expanding {value} into a list for slice assignment."
                     )
-                self.items[key.as_python_constant()] = value.unpack_var_sequence(tx)
+                self.items[key.as_python_constant()] = value.force_unpack_var_sequence(
+                    tx
+                )
             else:
                 self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
@@ -459,7 +462,12 @@ class DequeVariable(CommonListMethodsVariable):
             )
         )
         codegen.foreach(self.items)
-        codegen.extend_output(create_call_function(len(self.items), False))
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_LIST", arg=len(self.items)),
+                *create_call_function(1, False),
+            ]
+        )
 
     def call_method(
         self,
@@ -482,11 +490,15 @@ class DequeVariable(CommonListMethodsVariable):
             tx.output.side_effects.mutation(self)
             self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
-        elif name == "extendleft" and self.mutable_local:
+        elif (
+            name == "extendleft"
+            and self.mutable_local
+            and args[0].has_force_unpack_var_sequence(tx)
+        ):
             assert not kwargs
 
             (arg,) = args
-            prefix = arg.unpack_var_sequence(tx)
+            prefix = arg.force_unpack_var_sequence(tx)
             prefix.reverse()
             tx.output.side_effects.mutation(self)
             self.items = prefix + list(self.items)
@@ -784,10 +796,10 @@ class SliceVariable(BaseListVariable):
         return self.items[fields.index(name)]
 
 
-class ListIteratorVariable(VariableTracker):
+class ListIteratorVariable(IteratorVariable):
     _nonvar_fields = {
         "index",
-        *VariableTracker._nonvar_fields,
+        *IteratorVariable._nonvar_fields,
     }
 
     def __init__(self, items, index: int = 0, **kwargs):
@@ -807,13 +819,7 @@ class ListIteratorVariable(VariableTracker):
         assert self.mutable_local
         old_index = self.index
         if old_index >= len(self.items):
-            # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
-            # stack and raise the exception.
-            exception_vt = variables.BuiltinVariable(StopIteration).call_function(
-                self, [], {}
-            )
-            tx.exn_vt_stack.append(exception_vt)
-            raise ObservedUserStopIteration
+            raise_observed_user_stop_iteration(self, tx)
 
         tx.output.side_effects.mutation(self)
         self.index += 1
@@ -843,6 +849,9 @@ class ListIteratorVariable(VariableTracker):
 
     def unpack_var_sequence(self, tx):
         return list(self.items[self.index :])
+
+    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
+        return self.unpack_var_sequence(tx)
 
     def reconstruct(self, codegen):
         remaining_items = self.items[self.index :]
