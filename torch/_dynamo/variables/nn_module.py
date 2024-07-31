@@ -24,6 +24,7 @@ from ..source import (
     FSDPNNModuleSource,
     GetItemSource,
     NNModuleSource,
+    UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
 )
 from ..utils import (
@@ -1134,6 +1135,17 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if out is None:
             raise ObservedException(f"object has no attribute {name}")
         return out
+
+
+class UnspecializedBuiltinNNModuleVariable(UnspecializedNNModuleVariable):
+    """
+    Differentiates between builtin nn modules (e.g. torch.nn.Linear) and user defined nn modules.
+    """
+
+    def _wrap_source(self, attr_source):
+        if not isinstance(attr_source, UnspecializedBuiltinNNModuleSource):
+            return UnspecializedBuiltinNNModuleSource(attr_source)
+        return attr_source
 
 
 class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
