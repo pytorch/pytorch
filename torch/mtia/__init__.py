@@ -136,6 +136,22 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
     return torch._C._mtia_getCurrentStream(_get_device_index(device, optional=True))
 
 
+def get_device_properties(device: Optional[_device_t] = None) -> Dict[str, Any]:
+    r"""Get the properties of a device.
+
+    Args:
+        device (torch.device or int or str): device for which to return the
+            properties of the device.
+
+    Returns:
+        Dict[str, Any]: A dictionary containig the properties of the device
+    """
+    device = _get_device_index(device, optional=True)
+    if device < 0 or device >= device_count():
+        raise AssertionError("Invalid device index")
+    return torch._C._mtia_getDeviceProperties(device)
+
+
 def default_stream(device: Optional[_device_t] = None) -> Stream:
     r"""Return the default :class:`Stream` for a given device.
 
@@ -318,6 +334,7 @@ __all__ = [
     "current_device",
     "current_stream",
     "default_stream",
+    "get_device_properties",
     "memory_stats",
     "set_device",
     "set_stream",

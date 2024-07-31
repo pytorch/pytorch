@@ -15,6 +15,7 @@ The MTIA backend is implemented out of the tree, only interfaces are be defined 
     current_stream
     default_stream
     device_count
+    get_device_properties
     init
     is_available
     is_initialized
