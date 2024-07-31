@@ -188,12 +188,23 @@ class DecisionTree:
                 codegen_node(node.right, depth + 1)
 
         def handle_leaf(node, indent, unsafe_leaves):
+            """
+            This generates the code for a leaf node in the decision tree. If the leaf is unsafe, the learned heuristic
+            will return "unsure" (i.e. None).
+            """
             if node.id in unsafe_leaves:
                 return f"{indent}return None"
             class_probas = node.value
             return f"{indent}return {best_probas_and_indices(class_probas)}"
 
         def best_probas_and_indices(class_probas):
+            """
+            Given a list of tuples (proba, idx), this function returns a string in which the tuples are
+            sorted by proba in descending order. E.g.:
+            Given class_probas=[(0.3, 0), (0.5, 1), (0.2, 2)]
+            this function returns
+            "[(0.5, 1), (0.3, 0), (0.2, 2)]"
+            """
             # we generate a list of tuples (proba, idx) sorted by proba in descending order
             # idx is the index of a choice
             # we only generate a tuple if proba > 0
