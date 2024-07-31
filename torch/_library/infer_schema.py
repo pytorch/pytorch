@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
 import typing
@@ -10,7 +11,11 @@ from torch.utils._exposed_in import exposed_in
 
 @exposed_in("torch.library")
 def infer_schema(
-    prototype_function: typing.Callable, mutates_args=(), op_name: Optional[str] = None
+    prototype_function: typing.Callable,
+    /,
+    *,
+    mutates_args,
+    op_name: Optional[str] = None,
 ) -> str:
     r"""Parses the schema of a given function with type hints. The schema is inferred from the
     function's type hints, and can be used to define a new operator.
