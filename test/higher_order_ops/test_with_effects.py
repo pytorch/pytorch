@@ -23,7 +23,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 from torch.utils.hooks import RemovableHandle  # noqa: TCH001
 
@@ -111,7 +110,7 @@ def forward(self, arg0_1, arg1_1):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.ones(3))
+                self.buf = torch.nn.Buffer(torch.ones(3))
 
             def forward(self, x):
                 torch.ops.aten._print("moo")

@@ -17,7 +17,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._dynamo.exc import UserError
@@ -1117,7 +1116,7 @@ def forward(self, x, y):
             def __init__(self):
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.ones(1, 1))
-                self.register_buffer("buffer", torch.ones(1, 1))
+                self.buffer = torch.nn.Buffer(torch.ones(1, 1))
 
             def forward(self, x):
                 x = torch.nn.functional.linear(x, torch.randn(4, 4))
@@ -2928,7 +2927,7 @@ def forward(self, x):
         dynamic_shapes = {"x": (dim0,)}
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "must be specialized.*guards generated.*too complex",
+            r"Constraints violated \(dim0\)",
         ):
             torch.export.export(foo, (x,), dynamic_shapes=dynamic_shapes)
 
@@ -2936,7 +2935,7 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Not all values.*satisfy the generated guard",
+            r"Constraints violated \(dim0\)",
         ):
             torch.export.export(qux, (x,), dynamic_shapes=dynamic_shapes)
 
@@ -3161,7 +3160,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 2))
+                self.buffer1 = torch.nn.Buffer(torch.ones(6, 2))
 
             def forward(self, x):
                 x.add_(2)
@@ -3773,7 +3772,7 @@ G['macademia'], accessed at:
         class A(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer1", torch.zeros(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.zeros(6, 4))
 
             def forward(self):
                 return self.buffer1.sum()
@@ -3781,7 +3780,7 @@ G['macademia'], accessed at:
         class B(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer2", torch.ones(6, 4))
+                self.buffer2 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self):
                 return self.buffer2.sum()
@@ -3809,7 +3808,7 @@ G['macademia'], accessed at:
         class A(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer1", torch.zeros(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.zeros(6, 4))
 
             def forward(self):
                 return self.buffer1.sum()
@@ -3817,7 +3816,7 @@ G['macademia'], accessed at:
         class B(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer2", torch.ones(6, 4))
+                self.buffer2 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self):
                 return self.buffer2.sum()
@@ -3854,7 +3853,7 @@ G['macademia'], accessed at:
         class A(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer1", torch.zeros(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.zeros(6, 4))
 
             def forward(self):
                 return self.buffer1.sum()
@@ -3862,7 +3861,7 @@ G['macademia'], accessed at:
         class B(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer2", torch.ones(6, 4))
+                self.buffer2 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self):
                 return self.buffer2.sum()
@@ -4157,7 +4156,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer1", torch.zeros(5, 5))
+                self.buffer1 = torch.nn.Buffer(torch.zeros(5, 5))
 
             def forward(self, x):
                 self.buffer1.add_(1)
@@ -4176,7 +4175,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         class Child(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer2", torch.zeros(5))
+                self.buffer2 = torch.nn.Buffer(torch.zeros(5))
 
             def forward(self, x):
                 return x.sum() + self.buffer2.sum()
@@ -4184,7 +4183,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer1", torch.zeros(5))
+                self.buffer1 = torch.nn.Buffer(torch.zeros(5))
                 self.child = Child()
 
             def forward(self, x):

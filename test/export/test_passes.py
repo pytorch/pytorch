@@ -11,7 +11,6 @@ from re import escape
 from typing import List, Set
 
 import torch
-
 from functorch.experimental.control_flow import cond
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export.non_strict_utils import (
@@ -873,7 +872,7 @@ def forward(self, sin, cos):
             class M(torch.nn.Module):
                 def __init__(self):
                     super().__init__()
-                    self.register_buffer("state", torch.zeros(1))
+                    self.state = torch.nn.Buffer(torch.zeros(1))
 
                 def forward(self, x):
                     return torch.ops.DO_NOT_USE_TEST_ONLY.custom_mutator(x, self.state)
@@ -914,7 +913,7 @@ def forward(self, sin, cos):
             class M(torch.nn.Module):
                 def __init__(self):
                     super().__init__()
-                    self.register_buffer("state", torch.zeros(1))
+                    self.state = torch.nn.Buffer(torch.zeros(1))
 
                 def forward(self, x):
                     return torch.ops.DO_NOT_USE_TEST_ONLY.custom_mutator_tuple(
