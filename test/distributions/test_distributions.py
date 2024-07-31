@@ -5424,7 +5424,7 @@ class TestKL(DistributionsTestCase):
         # estimator; their implementations have been reviewed with extra care:
         # - (pareto, normal)
         self.precision = 0.1  # Set this to 0.01 when testing a new KL implementation.
-        self.max_samples = int(1e06)  # Increase this when testing at smaller precision.
+        self.max_samples = int(1e07)  # Increase this when testing at smaller precision.
         self.samples_per_batch = int(1e04)
         self.finite_examples = [
             (bernoulli, bernoulli),
