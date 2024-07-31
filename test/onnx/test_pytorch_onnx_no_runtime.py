@@ -674,7 +674,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         self.assertRaises(RuntimeError, check_proto)
 
     def test_maintain_dynamic_shapes_of_unreliable_nodes(self):
-        def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
+        def symbolic_pythonop(g, *args, **kwargs):
             return g.op("com.microsoft::PythonOp")
 
         torch.onnx.register_custom_op_symbolic("prim::PythonOp", symbolic_pythonop, 1)
