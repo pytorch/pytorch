@@ -380,6 +380,17 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm(
     AtenTensorHandle* ret0,
     AtenTensorHandle* ret1);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm_v2(
+    AtenTensorHandle self,
+    AtenTensorHandle mat2,
+    AtenTensorHandle scale_a,
+    AtenTensorHandle scale_b,
+    AtenTensorHandle bias,
+    AtenTensorHandle scale_result,
+    int32_t* out_dtype,
+    int8_t use_fast_accum,
+    AtenTensorHandle* ret0);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
     AtenTensorHandle input,
     AtenTensorHandle weight,
