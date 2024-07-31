@@ -237,7 +237,12 @@ def halide_acc_type(dtype):
 
 class HalideOverrides(OpOverrides):
     @staticmethod
-    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
+    def to_dtype(
+        x,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types=True,
+    ):
         if dtype == torch.bool:
             return f"({x} != 0)"
         return f"hl.cast({halide_type(dtype)}, {x})"
