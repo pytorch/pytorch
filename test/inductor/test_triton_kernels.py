@@ -1375,6 +1375,47 @@ def forward(self, x_1, output_1):
         f(x, x)
 
     @requires_gpu
+    @common_utils.parametrize("dynamic", [False, True])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_multiple_outputs(self, dynamic, backend):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            out_ptr2,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+            tl.store(out_ptr2 + offsets, output + 1, mask=mask)
+
+        @torch.compile(fullgraph=True, backend=backend, dynamic=dynamic)
+        def f(x, y, z):
+            output = torch.empty_like(x)
+            output2 = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, y, output, output2, n_elements, BLOCK_SIZE=16)
+            # The z return is intentional: we're testing training
+            return output, output2, z**2
+
+        x = torch.randn(3, requires_grad=True, device=GPU_TYPE)
+        y = torch.randn(3, requires_grad=True, device=GPU_TYPE)
+        z = torch.randn(3, requires_grad=True, device=GPU_TYPE)
+        out, out2, out3 = f(x, y, z)
+        self.assertEqual(out, x + y)
+        self.assertEqual(out2, x + y + 1)
+        self.assertEqual(out3, z**2)
+
+    @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_num_ctas(self, backend):
         @triton.jit
