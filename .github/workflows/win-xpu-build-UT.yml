@@ -38,12 +38,12 @@ jobs:
       shell: cmd
       run: |
         call %conda_path%\Scripts\activate.bat
-        conda remove -n %conda_env% --all -y
-        conda create -n %conda_env% python=3.10 -y
-        conda activate %conda_env%
-        conda remove ucrt -y
-        conda install cmake==3.26.4 --force -y
-        conda list
+        call conda remove -n %conda_env% --all -y
+        call conda create -n %conda_env% python=3.10 -y
+        call conda activate %conda_env%
+        call conda remove ucrt -y
+        call conda install cmake==3.26.4 --force -y
+        call conda list
 
     - name: Activate Intel Basekit
       shell: cmd
