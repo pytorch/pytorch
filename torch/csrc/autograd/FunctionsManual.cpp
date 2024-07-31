@@ -239,13 +239,10 @@ std::tuple<Tensor, Tensor> _euclidean_dist_backward(
 
 Tensor _safe_softmax_backward(
     const Tensor& grad,
-    const Tensor& self,
     const Tensor& result,
-    int64_t dim) {
-  auto grad_input = grad * result;
-  auto grad_sum = grad_input.sum(dim, /*keepdim=*/true);
-  grad_input -= result * grad_sum;
-  return grad_input;
+    int64_t dim,
+    at::ScalarType input_dtype) {
+  return at::_softmax_backward_data(grad, result, dim, input_dtype);
 }
 
 Tensor norm_backward(
