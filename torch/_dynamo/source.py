@@ -19,6 +19,9 @@ _GUARD_SOURCE_SPECIALIZED_NN_MODULE = {
     GuardSource.GLOBAL: GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
     GuardSource.LOCAL_SPECIALIZED_NN_MODULE: GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
     GuardSource.GLOBAL_SPECIALIZED_NN_MODULE: GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+    # Just to ensure that guard_source() works
+    GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+    GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
 }
 
 # represents nn.Modules tracked with UnspecializedNNModuleVariable
