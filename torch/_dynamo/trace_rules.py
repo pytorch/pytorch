@@ -174,6 +174,7 @@ manual_torch_name_rule_map = {
     # https://github.com/pytorch/pytorch/issues/93501
     "torch.nn.utils.rnn.pack_padded_sequence": SkipFunctionVariable,
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
+    "torch.nn.Buffer": TorchInGraphFunctionVariable,
     "torch._nested_tensor_from_mask": SkipFunctionVariable,
     "torch._nested_from_padded": SkipFunctionVariable,
     "torch.nested.nested_tensor_from_jagged": UserFunctionVariable,
