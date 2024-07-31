@@ -27,7 +27,9 @@ disable_progress = True
 verbose_progress = False
 
 # use fx aot graph codegen cache
-fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
+fx_graph_cache = (
+    os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE", "0" if is_fbcode() else "1") == "1"
+)
 
 # use remote fx aot graph codegen cache
 # False: Disables the cache
@@ -280,7 +282,7 @@ max_autotune_gemm_backends = os.environ.get(
 # NB: in some cases for 1x1 convs we emit as matmul,
 # which will use the backends of `max_autotune_gemm_backends`
 max_autotune_conv_backends = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
+    "TORCHINDUCTOR_MAX_AUTOTUNE_CONV_BACKENDS", "ATEN,TRITON"
 ).upper()
 
 
@@ -440,17 +442,18 @@ assert_indirect_indexing = True
 # compute CSE bounds on variables that do not appear in the FX graph
 compute_all_bounds = False
 
-# benchmark combo kernels and only allow ones with perf gains
-benchmark_combo_kernel = False
-# combo_kernel autotuning options: 0 - disable, 1 - enable except for foreach,
-# 2 - enable for all
-combo_kernels_autotune = 1
-
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
+
+# Mode to emulate pytorch eager numerics for lower precision (fp16, bf16)
+# Pytorch eager computes bf16/fp16 by upcasting inputs to fp32 and downcasting after
+# For multiple, fused pointwise nodes, inductor will elide the intermediary upcasts and downcasts
+# Typically this should be closer to fp64 ref numerics. However, it can be useful for debugging
+# to emulate the eager numerics.
+emulate_precision_casts = False
 
 # warnings intended for PyTorch developers, disable for point releases
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
