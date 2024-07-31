@@ -44,6 +44,7 @@ jobs:
         call conda activate %conda_env%
         call conda remove ucrt -y
         call conda install cmake==3.26.4 --force -y
+        echo "0000000000000000000"
         call conda list
 
     - name: Activate Intel Basekit
