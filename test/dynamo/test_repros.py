@@ -2168,8 +2168,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("sorted", torch.ones(4, 4))
-                self.register_buffer("indices", torch.ones(4, 4, dtype=torch.long))
+                self.sorted = torch.nn.Buffer(torch.ones(4, 4))
+                self.indices = torch.nn.Buffer(torch.ones(4, 4, dtype=torch.long))
 
             def forward(self, x):
                 torch.sort(x, out=(self.sorted, self.indices))
@@ -2200,7 +2200,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("base", torch.ones(4, 4))
+                self.base = torch.nn.Buffer(torch.ones(4, 4))
 
             def forward(self, x):
                 torch.sigmoid(x, out=self.base)
@@ -2508,8 +2508,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("x", torch.ones(3))
-                self.register_buffer("y", torch.ones(3))
+                self.x = torch.nn.Buffer(torch.ones(3))
+                self.y = torch.nn.Buffer(torch.ones(3))
 
             def forward(self, inp):
                 res = 0
@@ -5364,6 +5364,17 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         params = {"from": -10, "to": 10}
         tensor = torch.randn([2, 3])
         res = random_op(tensor, params)
+
+    # https://github.com/pytorch/pytorch/issues/131019
+    def test_tensor_uniform(self):
+        def uniform_op(tensor, params):
+            res = tensor.uniform_(**params)
+            return res
+
+        uniform_op = torch.compile(uniform_op)
+        params = {"from": -10, "to": 10}
+        tensor = torch.randn([2, 3])
+        res = uniform_op(tensor, params)
 
     def test_data_attr_mutation_after_saved_for_bw(self):
         def f(x):

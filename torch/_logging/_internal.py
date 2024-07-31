@@ -14,9 +14,9 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from weakref import WeakSet
 
 import torch._logging.structured
-
 from torch._utils_internal import log_trace_structured_event
 from torch.utils._traceback import CapturedTraceback
+
 
 log = logging.getLogger(__name__)
 
