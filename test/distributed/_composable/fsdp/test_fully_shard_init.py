@@ -889,7 +889,7 @@ class TestFullyShardHSDPBroadcast(FSDPTestMultiThread):
         model_args = ModelArgs()
         model = Transformer(model_args)
         # Add a buffer to show that this flow works for buffers too
-        model.register_buffer("buf", torch.randn((model_args.dim,)))
+        model.buf = torch.nn.Buffer(torch.randn((model_args.dim,)))
         for module in model.modules():
             if isinstance(module, TransformerBlock):
                 fully_shard(module, mesh=mesh)

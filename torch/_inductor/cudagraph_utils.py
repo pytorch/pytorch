@@ -9,6 +9,7 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.utils import InputType
 
+
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 

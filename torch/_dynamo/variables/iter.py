@@ -60,6 +60,7 @@ class ItertoolsVariable(VariableTracker):
             and not kwargs
             and all(arg.has_unpack_var_sequence(tx) for arg in args)
         ):
+            # TODO support itertools.chain with arbitrary iterables
             seqs = [arg.unpack_var_sequence(tx) for arg in args]
             items = list(itertools.chain.from_iterable(seqs))
             return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
