@@ -6,7 +6,6 @@ from textwrap import dedent
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.test_case
 import torch.fx.traceback as fx_traceback
@@ -16,6 +15,7 @@ from torch._functorch.aot_autograd import _aot_export_function, create_functiona
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.profiler import profile
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 
 
@@ -26,6 +26,10 @@ def maybe_dupe_op(x):
         return y, y
     else:
         return y, z
+
+
+def is_dynamic_shape_test(test_name):
+    return test_name.endswith("_dynamic_shapes")
 
 
 aten = torch.ops.aten
@@ -1189,6 +1193,216 @@ SeqNr|OrigAten|SrcFn
             fn(x)
         with self.assertRaises(Exception):
             opt_fn(x_opt)
+
+    @torch._functorch.config.patch(donated_buffer=True)
+    def test_donated_buffer1(self):
+        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+
+        @torch.compile()
+        def relu(x):
+            return torch.nn.functional.relu(x)
+
+        with self.assertLogs(logger_name, level="INFO") as captured:
+            relu(torch.rand([3, 3], requires_grad=True)).sum().backward()
+
+        if is_dynamic_shape_test(self._testMethodName):
+            # an extra symint exists
+            expected_msg = "bw_donated_idxs=[1]"
+        else:
+            expected_msg = "bw_donated_idxs=[0]"
+
+        # le is a donated buffer from relu
+        FileCheck().check(expected_msg).run("\n".join(captured.output))
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer2(self):
+        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+
+        # we will re-use the graph for g across f1 and f2
+        @torch.compile()
+        def g(activation, param2):
+            return torch.matmul(activation, param2)
+
+        def f(inp, param1, param2):
+            activation = inp + param1
+            return g(activation, param2)
+
+        inp = torch.ones(4, 4)
+        param1 = torch.ones(4, 4, requires_grad=True)
+        param2 = torch.ones(4, 4, requires_grad=True)
+
+        with self.assertLogs(logger_name, level="INFO") as captured:
+            f(inp, param1, param2).sum().backward()
+
+        FileCheck().check("bw_donated_idxs=[]").run("\n".join(captured.output))
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer3(self):
+        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+
+        # we will re-use the graph for g across f1 and f2
+        @torch.compile()
+        def g(activation, param2):
+            return torch.matmul(activation, param2)
+
+        def f(inp, param1, param2):
+            # exp saves it output (the activation) for bw
+            activation = torch.exp(inp + param1)
+            return g(activation, param2)
+
+        inp = torch.ones(4, 4)
+        param1 = torch.ones(4, 4, requires_grad=True)
+        param2 = torch.ones(4, 4, requires_grad=True)
+
+        with self.assertLogs(logger_name, level="INFO") as captured:
+            f(inp, param1, param2).sum().backward()
+
+        FileCheck().check("bw_donated_idxs=[]").run("\n".join(captured.output))
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer4(self):
+        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.zeros([2, 2]))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return torch.nn.functional.relu(x) + self.param
+
+        mod = Mod()
+        mod = torch.compile(mod)
+
+        inp = torch.ones([2, 2], requires_grad=True)
+
+        with self.assertLogs(logger_name, level="INFO") as captured:
+            mod(inp).sum().backward()
+
+        # Forward graph:
+        #   %primals_1 : [num_users=1] = placeholder[target=primals_1]
+        #   %primals_2 : [num_users=1] = placeholder[target=primals_2]
+        #   %relu : [num_users=2] = call_function[target=torch.ops.aten.relu.default](args = (%primals_2,), kwargs = {})
+        #   %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%relu, %primals_1), kwargs = {})
+        #   %le : [num_users=1] = call_function[target=torch.ops.aten.le.Scalar](args = (%relu, 0), kwargs = {})
+        #   return [add, le]
+        #
+        # `le` is a donated buffer
+        FileCheck().check("bw_donated_idxs=[0]").run("\n".join(captured.output))
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer5(self):
+        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+
+        @torch.compile()
+        def f(x, z):
+            y = x.view(2, 3)
+            z = torch.nn.functional.relu(z)
+            return torch.mm(y, x) + z
+
+        inp = [
+            torch.rand([3, 2], requires_grad=True),
+            torch.rand([2, 2], requires_grad=True),
+        ]
+
+        with self.assertLogs(logger_name, level="INFO") as captured:
+            f(*inp).sum().backward()
+
+        # Forward graph:
+        #   %primals_1 : [num_users=3] = placeholder[target=primals_1]
+        #   %primals_2 : [num_users=1] = placeholder[target=primals_2]
+        #   %view : [num_users=1] = call_function[target=torch.ops.aten.view.default](args = (%primals_1, [2, 3]), kwargs = {})
+        #   %relu : [num_users=2] = call_function[target=torch.ops.aten.relu.default](args = (%primals_2,), kwargs = {})
+        #   %mm : [num_users=1] = call_function[target=torch.ops.aten.mm.default](args = (%view, %primals_1), kwargs = {})
+        #   %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mm, %relu), kwargs = {})
+        #   %le : [num_users=1] = call_function[target=torch.ops.aten.le.Scalar](args = (%relu, 0), kwargs = {})
+        #   return [add, primals_1, le]
+        #
+        # `le` is a donated buffer but primals_1 is not.
+        FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer_with_retain_or_create_graph1(self):
+        # Gives non-empty bw_donated_idxs
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.zeros([3, 3]))
+
+            def forward(self, x):
+                return torch.nn.functional.relu(x) + self.param
+
+        inp = torch.randn(3, 3, requires_grad=True)
+
+        mod = torch.compile(Mod())
+        for _ in range(5):
+            mod(inp).sum().backward()
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer_with_retain_or_create_graph2(self):
+        # Gives non-empty bw_donated_idxs
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.zeros([3, 3]))
+
+            def forward(self, x):
+                return torch.nn.functional.relu(x) + self.param
+
+        inp = torch.randn(3, 3, requires_grad=True)
+
+        mod = torch.compile(Mod())
+        out = mod(inp).sum()
+        for _ in range(5):
+            out.backward(retain_graph=True)
+        out.backward()
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer_with_retain_or_create_graph3(self):
+        # Gives non-empty bw_donated_idxs
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.zeros([3, 3]))
+
+            def forward(self, x):
+                return torch.nn.functional.relu(x) + self.param
+
+        inp = torch.randn(3, 3, requires_grad=True)
+
+        mod = torch.compile(Mod())
+        mod(inp).sum().backward(create_graph=True)
+        out = mod(inp).sum()
+        for _ in range(5):
+            out.backward(retain_graph=True)
+        out.backward()
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer_with_retain_or_create_graph4(self):
+        # Gives non-empty bw_donated_idxs
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.zeros([3, 3]))
+
+            def forward(self, x):
+                return torch.nn.functional.relu(x) + self.param
+
+        inp = torch.randn(3, 3, requires_grad=True)
+
+        mod = torch.compile(Mod())
+        mod(inp).sum().backward()
+        out = mod(inp).sum()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"This backward function was compiled with non-empty donated "
+            r"buffers which requires create_graph=False and retain_graph=False. "
+            r"Please keep backward\(create_graph=False, retain_graph=False\) "
+            r"across all backward\(\) function calls, or set "
+            r"torch._functorch.config.donated_buffer=False to disable "
+            r"donated buffer.",
+        ):
+            out.backward(retain_graph=True)
 
 
 if __name__ == "__main__":
