@@ -484,16 +484,31 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
     def reinplace_and_refine_tensors_to_clone(old_tensors_to_clone, kwargs):
         tensors_to_clone: List[str] = []
+        storage_of_reinplaced_args = set()
         for arg in old_tensors_to_clone:
             assert arg in kwargs
             mutated_arg = kwargs[arg]
-            if can_inplace(node, mutated_arg):
+            if (
+                # Let's say we have:
+                # - op(x, y) that mutates both x and y
+                # - new_x, new_y = functional_op(x, y) is the functional variant
+                # If we are presented with functional_op(x, x), we must not reinplace
+                # this into op(x, x), because then it would be writing to the same Tensor.
+                # Instead, it's OK to reinplace one of them and to clone the other:
+                # >>> y = x.clone()
+                # >>> op(x, y)
+                # This also applies if we have views: functional_op(x, x[0])
+                # should not reinplace into op(x, x[0]).
+                get_node_storage(mutated_arg) not in storage_of_reinplaced_args and
+                can_inplace(node, mutated_arg)
+            ):
                 copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                 if copy_node is not None:
                     replace_dict[copy_node] = copy_node.args[0]
                 for user in node.users:
                     if user.target == operator.getitem and user.args[1] == arg:
                         replace_dict[user] = mutated_arg
+                storage_of_reinplaced_args.add(get_node_storage(mutated_arg))
             else:
                 tensors_to_clone.append(arg)
         return tensors_to_clone
