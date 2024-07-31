@@ -860,9 +860,9 @@ parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAUL
 parser.add_argument('--rerun-disabled-tests', action='store_true')
 parser.add_argument('--pytest-single-test', type=str, nargs=1)
 if sys.version_info >= (3, 9):
-    parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=(not IS_CI))
+    parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=False)
 else:
-    parser.add_argument('--showlocals', action='store_true', default=(not IS_CI))
+    parser.add_argument('--showlocals', action='store_true', default=False)
     parser.add_argument('--no-showlocals', dest='showlocals', action='store_false')
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
@@ -899,7 +899,7 @@ TEST_IN_SUBPROCESS = args.subprocess
 TEST_SAVE_XML = args.save_xml
 REPEAT_COUNT = args.repeat
 SEED = args.seed
-SHOW_LOCALS = args.showlocals
+SHOWLOCALS = args.showlocals
 if not getattr(expecttest, "ACCEPT", False):
     expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
@@ -1137,7 +1137,7 @@ def run_tests(argv=UNITTEST_ARGS):
     if not lint_test_case_extension(suite):
         sys.exit(1)
 
-    if SHOW_LOCALS:
+    if SHOWLOCALS:
         argv = [
             argv[0],
             *(["--showlocals", "--tb=long", "--color=yes"] if USE_PYTEST else ["--locals"]),
@@ -3765,11 +3765,10 @@ class TestCase(expecttest.TestCase):
         elif isinstance(x, Sequence) and isinstance(y, torch.Tensor):
             x = torch.as_tensor(x, dtype=y.dtype, device=y.device)
 
-        # If x or y are tensors and nested then we unbind them to a list of tensors this should allow us to compare
-        # a nested tensor to a nested tensor and a nested tensor to a list of expected tensors
-        if isinstance(x, torch.Tensor) and x.is_nested:
+        # unbind NSTs to compare them; don't do this for NJTs
+        if isinstance(x, torch.Tensor) and x.is_nested and x.layout == torch.strided:
             x = x.unbind()
-        if isinstance(y, torch.Tensor) and y.is_nested:
+        if isinstance(y, torch.Tensor) and y.is_nested and y.layout == torch.strided:
             y = y.unbind()
 
         error_metas = not_close_error_metas(
@@ -4143,8 +4142,8 @@ class TestCase(expecttest.TestCase):
         env["PYTORCH_API_USAGE_STDERR"] = "1"
         # remove CI flag since this is a wrapped test process.
         # CI flag should be set in the parent process only.
-        if "CI" in env.keys():
-            del env["CI"]
+        env.pop("CI", None)
+        env.pop("TEST_SHOWLOCALS", None)
         (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
         return stderr.decode('ascii')
 
