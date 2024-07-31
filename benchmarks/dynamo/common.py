@@ -4433,7 +4433,7 @@ def run(runner, args, original_dir=None):
             runner.model_iter_fn = baseline_ctx(runner.model_iter_fn)
             optimize_ctx = torchao_optimize_ctx(args.quantization)
         else:
-            optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython, dynamic=True)
+            optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = (
             speedup_experiment if not args.backend == "torchao" else latency_experiment
         )

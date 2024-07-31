@@ -1116,10 +1116,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             return variables.ConstDictVariable(
                 result, type(hooks_dict), source=hooks_dict_source
             )
-        out = super().var_getattr(tx, name)
-        if out.source:
-            out.source = self._wrap_source(out.source)
-        return out
+        return super().var_getattr(tx, name).realize()
 
     def manually_trace_nn_module_getattr(self, tx: "InstructionTranslator", name):
         """
