@@ -13,8 +13,7 @@ intraop_bench_configs = op_bench.config_list(
 
 
 @torch.jit.script
-def torch_sumall(a, iterations):
-    # type: (Tensor, int)
+def torch_sumall(a: torch.Tensor, iterations: int):
     result = 0.0
     for _ in range(iterations):
         result += float(torch.sum(a))
