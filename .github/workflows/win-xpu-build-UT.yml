@@ -35,17 +35,16 @@ jobs:
         fetch-depth: 0
         path: ${{ env.home_dir }}//actionrepo
 
-    # - name: Set conda environment
-    #   shell: cmd
-    #   run: |
-    #     call %conda_path%\Scripts\activate.bat
-    #     call conda init
-    #     call conda remove -n %conda_env% --all -y
-    #     call conda create -n %conda_env% python=3.10 -y
-    #     call activate %conda_env%
-    #     call conda remove ucrt -y
-    #     call conda install cmake==3.26.4 --force -y
-    #     call conda list
+    - name: Set conda environment
+      shell: cmd
+      run: |
+        call %conda_path%\Scripts\activate.bat
+        conda remove -n %conda_env% --all -y
+        conda create -n %conda_env% python=3.10 -y
+        conda activate %conda_env%
+        conda remove ucrt -y
+        conda install cmake==3.26.4 --force -y
+        conda list
 
     - name: Activate Intel Basekit
       shell: cmd
@@ -60,7 +59,7 @@ jobs:
     - name: Build Torch
       shell: cmd
       run: |
-        conda list
+        conda activate %conda_env%
         if exist "%home_dir%\pytorch" rmdir /s /q "%home_dir%\pytorch"
         git clone https://github.com/pytorch/pytorch.git %home_dir%\pytorch
         cd %home_dir%\pytorch
