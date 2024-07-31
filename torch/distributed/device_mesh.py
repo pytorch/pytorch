@@ -444,28 +444,15 @@ else:
                 (mesh_dim_names,) if isinstance(mesh_dim_names, str) else mesh_dim_names
             )
 
-            error_msg = (
-                f"Invalid mesh_dim_name {mesh_dim_names} specified. "
-                f"Valid mesh_dim_names should be a contiguous subsequence of {self.mesh_dim_names}."
-            )
-
             if mesh_dim_names == self.mesh_dim_names:
                 return self
             elif len(mesh_dim_names) > len(self.mesh_dim_names) or not all(
                 mesh_dim_name in self.mesh_dim_names for mesh_dim_name in mesh_dim_names
             ):
-                raise KeyError(error_msg)
-            # Check if the user-provided slicing is a valid contiguous subsequence of the mesh_dim_names
-            # of the current DeviceMesh.
-            else:
-                outermost_dim_name = mesh_dim_names[0]
-                outermost_dim_idx = self.mesh_dim_names.index(outermost_dim_name)
-                for i, j in zip(
-                    mesh_dim_names,
-                    self.mesh_dim_names[outermost_dim_idx : len(mesh_dim_names)],
-                ):
-                    if i != j:
-                        raise KeyError(error_msg)
+                raise KeyError(
+                    f"Invalid mesh_dim_name {mesh_dim_names} specified. "
+                    f"Valid mesh_dim_names should be a contiguous subsequence of {self.mesh_dim_names}."
+                )
 
             submesh = _mesh_resources.create_child_mesh(self, mesh_dim_names)
             return submesh
