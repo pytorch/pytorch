@@ -5,7 +5,7 @@ import inspect
 import itertools
 import types
 from contextlib import contextmanager, nullcontext
-from typing import Dict, List, TYPE_CHECKING
+from typing import Any, Dict, List, TYPE_CHECKING
 
 import torch.nn
 
@@ -799,11 +799,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         # nn_module_stack_source appropriately to resemble mod.linear.
         self.nn_module_stack_source = self.source
 
-    def _wrap_source(self, attr_source):
-        if not isinstance(attr_source, UnspecializedNNModuleSource):
-            return UnspecializedNNModuleSource(attr_source)
-        return attr_source
-
     def get_nn_module_stack_source(self):
         return self.nn_module_stack_source or self.source
 
@@ -1115,10 +1110,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             return variables.ConstDictVariable(
                 result, type(hooks_dict), source=hooks_dict_source
             )
-        out = super().var_getattr(tx, name)
-        if out.source:
-            out.source = self._wrap_source(out.source)
-        return out
+        return super().var_getattr(tx, name)
 
     def manually_trace_nn_module_getattr(self, tx: "InstructionTranslator", name):
         """
@@ -1159,12 +1151,19 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
         super().__init__(value=value, **kwargs)
         self.source = source
 
-    def _wrap_source(self, attr_source):
-        if not isinstance(
-            attr_source, (FSDPNNModuleSource, UnspecializedNNModuleSource)
-        ):
+    @staticmethod
+    def _wrap_source(source):
+        if not isinstance(source, (FSDPNNModuleSource, UnspecializedNNModuleSource)):
             if torch._dynamo.config.skip_fsdp_guards:
-                return FSDPNNModuleSource(attr_source)
+                return FSDPNNModuleSource(source)
             else:
-                return UnspecializedNNModuleSource(attr_source)
-        return attr_source
+                # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
+                return UnspecializedNNModuleSource(source)
+        else:
+            return source
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "source":
+            value = FSDPManagedNNModuleVariable._wrap_source(value)
+
+        return super().__setattr__(name, value)
