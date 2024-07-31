@@ -14,6 +14,7 @@ import torch.ao.quantization.quantize_fx as quantize_fx
 import torch.nn as nn
 from torch.ao.quantization import MinMaxObserver, PerChannelMinMaxObserver
 from torch.fx import GraphModule
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import (
     override_qengines,
     qengine_is_fbgemm,
@@ -562,7 +563,7 @@ class TestSerialization(TestCase):
             ref_model, input_size=[5, 5], generate=False, check_numerics=False
         )
 
-    # @skipIfNoFBGEMM
+    @skipIfNoFBGEMM
     def test_linear_relu_package_quantization_transforms(self):
         m = LinearReluFunctional(4).eval()
         self._test_package(m, input_size=(1, 1, 4, 4), generate=False)
