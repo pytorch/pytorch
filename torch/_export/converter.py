@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 import torch
 import torch.export._trace
 from torch import _C
-
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     ConstantArgument,
@@ -21,7 +20,6 @@ from torch.export.graph_signature import (
     TensorArgument,
 )
 from torch.fx import subgraph_rewriter
-
 
 log = logging.getLogger(__name__)
 
