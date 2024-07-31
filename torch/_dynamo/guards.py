@@ -96,6 +96,7 @@ from .source import (
     TupleIteratorGetItemSource,
     TypeSource,
     UnspecializedNNModuleSource,
+    UnspecializedBuiltinNNModuleSource,
     WeakRefCallSource,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
@@ -864,6 +865,7 @@ class GuardBuilder(GuardBuilderBase):
                 OptimizerSource,
                 NNModuleSource,
                 UnspecializedNNModuleSource,
+                UnspecializedBuiltinNNModuleSource,
                 FSDPNNModuleSource,
             ),
         ):
