@@ -38,46 +38,33 @@ jobs:
     - name: Set conda environment
       shell: cmd
       run: |
-        echo CALL
-        call C:\Users\nrvalgo_jenkinsadm\miniforge3\Scripts\activate.bat
-        echo Finish
-
-        call conda list
-
-        echo REMOVE
-        call conda remove -n torch_venv --all -y
-
-        echo CREATE
-        call conda create -n torch_venv python=3.10-y
-
-        echo ACTIVATE
-        call C:\Users\nrvalgo_jenkinsadm\miniforge3\Scripts\activate.bat torch_venv
-
-        echo DEL_UCRT
-        call conda remove ucrt -y or echo ucrt not found
-
-        echo INSTALL_CMAKE
+        call %conda_path%\Scripts\activate.bat
+        call conda remove -n %conda_env% --all -y
+        call conda create -n %conda_env% python=3.10 -y
+        call %conda_path%\Scripts\activate.bat %conda_env%
+        call conda remove ucrt -y
         call conda install cmake==3.26.4 --force -y
-
-        echo LIST
         call conda list
 
     - name: Activate Intel Basekit
       shell: cmd
       run: |
         set "basekit_path=C:\Program Files (x86)\Intel\oneAPI"
-        echo "%basekit_path%\setvars.bat"
         call "%basekit_path%\setvars.bat"
 
     - name: Build Torch
+      shell: cmd
       run: |
-        rmdir /S "%home_dir%\vision"
+        IF EXIST "%home_dir%\vision"(
+          rmdir /S "%home_dir%\vision"
+        )
         git clone https://github.com/pytorch/pytorch.git %home_dir%\pytorch
         cd %home_dir%\pytorch
         echo ${{ inputs.working_commit }} > third_party/xpu.txt
         python -u setup.py bdist_wheel
 
     - name: Build TorchVision
+      shell: cmd
       run: |
         git clone https://github.com/pytorch/vision.git %home_dir%\vision
         cd %home_dir%\vision
