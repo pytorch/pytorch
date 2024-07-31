@@ -1022,8 +1022,8 @@ def load_cached_autotuning(
 
 
 def should_use_remote_autotune_cache(inductor_meta):
-    if inductor_meta.get("autotune_remote_cache"):
-        return True
+    if inductor_meta.get("autotune_remote_cache") is not None:
+        return inductor_meta.get("autotune_remote_cache")
     if not inductor_meta.get("is_fbcode"):
         return False
     if inductor_meta.get("is_hip"):
