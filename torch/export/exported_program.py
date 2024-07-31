@@ -223,10 +223,10 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
         if torch._C.DispatchKey.CompositeImplicitAutograd in op_overload.py_kernels:
             del op_overload.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd]
 
-        def _(*args, **kwargs):
-            return NotImplemented
+            def _(*args, **kwargs):
+                return NotImplemented
 
-        op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(_)
+            op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(_)
 
         # For fake tensor prop, we do want to register meta kernel directly
         if torch._C.DispatchKey.Meta not in op_overload.py_kernels:

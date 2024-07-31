@@ -4991,6 +4991,30 @@ graph():
         ep = export(m, inputs)
         self.assertEqual(ep.module()(*inputs), m(*inputs))
 
+    def test_multi_head_attention(self):
+        class Model(torch.nn.Module):
+            def __init__(self, num_heads: int, hidden_dim: int):
+                super().__init__()
+                self.ln_1 = torch.nn.LayerNorm(hidden_dim, eps=1e-6)
+                self.self_attention = torch.nn.MultiheadAttention(hidden_dim, num_heads, batch_first=True)
+
+            def forward(self, input: torch.Tensor):
+                x = self.ln_1(input)
+                x, _ = self.self_attention(x, x, x, need_weights=False)
+                return x
+
+        model = Model(12, 768)
+        inputs = (torch.randn(1, 197, 768),)
+        ep = export(model, inputs)
+        self.assertEqual(ep.module()(*inputs), model(*inputs))
+        ep.run_decompositions(
+            _preserve_ops=(torch.ops.aten.scaled_dot_product_attention.default,),
+        )
+        self.assertTrue(any([
+            node.op == "call_function" and node.target == torch.ops.aten.scaled_dot_product_attention.default
+            for node in ep.graph.nodes
+        ]))
+
     @testing.expectedFailureSerDer  # symfloat nyi
     def test_sym_sqrt(self):
         import math
