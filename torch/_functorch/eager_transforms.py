@@ -12,7 +12,6 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.autograd.forward_ad as fwAD
-
 from torch._C._functorch import (
     _assert_wrapped_functional,
     _func_decrement_nesting,
@@ -42,8 +41,8 @@ from torch.utils._pytree import (
     tree_unflatten,
     treespec_pprint,
 )
-from .apis import vmap
 
+from .apis import vmap
 from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
 
 

@@ -2504,12 +2504,20 @@ class DeviceCachingAllocator {
     if (isRetry) {
       stats.num_alloc_retries += 1;
     }
+#ifdef FBCODE_CAFFE2
+    bool in_fbcode = true;
+#else
+    bool in_fbcode = false;
+#endif
 
     if (set_fraction &&
         total_allocated_memory + size > allowed_memory_maximum) {
       p.err = cudaErrorMemoryAllocation;
       return false;
-    } else if (CUDAAllocatorConfig::expandable_segments()) {
+      // Temporarily disable checkpointing & cudagraphs internally
+    } else if (
+        CUDAAllocatorConfig::expandable_segments() &&
+        !(in_fbcode && p.pool->owner_PrivatePool)) {
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
       if (p.block) {
