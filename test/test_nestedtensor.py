@@ -33,6 +33,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
+    ops,
     PYTORCH_CUDA_MEMCHECK,
     skipCUDAIf,
     skipCUDAIfRocm,
@@ -56,6 +57,8 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
+from torch.testing._internal.opinfo.definitions.nested import njt_op_db
+from torch.utils._pytree import tree_flatten, tree_map
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
 
@@ -262,8 +265,22 @@ def convert_nt_to_jagged(nt):
     return buffer_from_jagged(nt)
 
 
+# Base TestCase for NT tests; used to define common helpers, etc.
+class NestedTensorTestCase(TestCase):
+    def assertEqualIgnoringNestedInts(self, a, b):
+        # unbinding NJTs allows us to compare them as essentially equal without
+        # caring about exact nested int comparison
+        def _unbind_njts(x):
+            if isinstance(x, torch.Tensor) and x.is_nested and x.layout == torch.jagged:
+                return x.unbind()
+            else:
+                return x
+
+        self.assertEqual(tree_map(_unbind_njts, a), tree_map(_unbind_njts, b))
+
+
 @markDynamoStrictTest
-class TestNestedTensor(TestCase):
+class TestNestedTensor(NestedTensorTestCase):
     @parametrize("batch_size", [2, 4])
     @parametrize("max_seq_len", [3, 5])
     @parametrize("vocab_size", [10, 20])
@@ -831,7 +848,7 @@ class TestNestedTensor(TestCase):
 
 
 @markDynamoStrictTest
-class TestNestedTensorDeviceType(TestCase):
+class TestNestedTensorDeviceType(NestedTensorTestCase):
     # Helper function to generate a pair of random nested tensors
     # the 2 nested tensors have same shapes
     def random_nt_pair(self, device, dtype, num_tensors, max_dims):
@@ -2679,7 +2696,7 @@ class TestNestedTensorDeviceType(TestCase):
 
 
 @markDynamoStrictTest
-class TestNestedTensorAutograd(TestCase):
+class TestNestedTensorAutograd(NestedTensorTestCase):
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck
     # includes the default parameters used for testing ops with gradcheck. However nested tensor
     # does not support the stack op therefore we turn it off for these tests
@@ -3457,7 +3474,7 @@ def get_tolerances(
 # We can probably parametrizing existing tests instead of having a separate
 # test class as we begin to support more ops. Also maybe rewrite with OpInfos.
 @markDynamoStrictTest
-class TestNestedTensorSubclass(TestCase):
+class TestNestedTensorSubclass(NestedTensorTestCase):
     # TODO: consolidate with the below
     def _get_list_for_jagged_tensor(self, nested_size, device, requires_grad=True):
         Ds = nested_size[1:]
@@ -3729,13 +3746,13 @@ class TestNestedTensorSubclass(TestCase):
         nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
         out = torch.split(nt, 2, -1)
         self.assertEqual(len(out), 2)
-        self.assertEqual(
+        self.assertEqualIgnoringNestedInts(
             out[0],
             torch.nested.as_nested_tensor(
                 [a[:, 0:2], b[:, 0:2], c[:, 0:2]], layout=torch.jagged
             ),
         )
-        self.assertEqual(
+        self.assertEqualIgnoringNestedInts(
             out[1],
             torch.nested.as_nested_tensor(
                 [a[:, 2:], b[:, 2:], c[:, 2:]], layout=torch.jagged
@@ -3756,13 +3773,13 @@ class TestNestedTensorSubclass(TestCase):
         nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
         out = torch.split(nt, [1, 2], -1)
         self.assertEqual(len(out), 2)
-        self.assertEqual(
+        self.assertEqualIgnoringNestedInts(
             out[0],
             torch.nested.as_nested_tensor(
                 [a[:, 0:1], b[:, 0:1], c[:, 0:1]], layout=torch.jagged
             ),
         )
-        self.assertEqual(
+        self.assertEqualIgnoringNestedInts(
             out[1],
             torch.nested.as_nested_tensor(
                 [a[:, 1:], b[:, 1:], c[:, 1:]], layout=torch.jagged
@@ -5034,11 +5051,11 @@ class TestNestedTensorSubclass(TestCase):
             # should be the non-copying (view) case
             self.assertTrue(nt._is_view() and nt._base is t)
 
-        # should be equivalent to construction from unbound tensor list
+        # should have equivalent components to construction from unbound tensor list
         nt_from_unbind = torch.nested.as_nested_tensor(
             list(t.unbind(0)), device=device, dtype=dtype, layout=layout
         )
-        self.assertEqual(nt, nt_from_unbind)
+        self.assertEqualIgnoringNestedInts(nt, nt_from_unbind)
 
         # ensure call on a NT with the same properties returns the NT directly
         nt2 = torch.nested.as_nested_tensor(
@@ -6423,10 +6440,242 @@ class TestNestedTensorSubclass(TestCase):
         torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
 
 
+FORWARD_FAILURES = {
+    # === BEGIN NotImplementedError SECTION ===
+    # unary
+    "nn.functional.celu",
+    "nn.functional.elu",
+    "nn.functional.hardshrink",
+    "nn.functional.hardsigmoid",
+    "nn.functional.hardtanh",
+    "nn.functional.logsigmoid",
+    "nn.functional.mish",
+    "nn.functional.relu6",
+    "nn.functional.rrelu",
+    "nn.functional.selu",
+    "nn.functional.softplus",
+    "nn.functional.softshrink",
+    "nn.functional.threshold",
+    "rad2deg",
+    # binary
+    "__rsub__",
+    "complex",
+    "floor_divide",
+    "polar",
+    "rsub",
+    # reduction
+    "all",
+    "amax",
+    "amin",
+    "any",
+    "argmax",
+    "argmin",
+    "count_nonzero",
+    "linalg.vector_norm",
+    "nansum",
+    "std",
+    "std.unbiased",
+    "var",
+    "var.unbiased",
+    # === BEGIN UNSUPPORTED SECTION ===
+    # RuntimeError: mean(): not supported for NestedTensor on dim=1
+    "mean",
+    # ValueError: expects strided tensor (got torch.jagged tensor)
+    "masked.amax",
+    "masked.amin",
+    "masked.argmax",
+    "masked.argmin",
+    "masked.logsumexp",
+    "masked.mean",
+    "masked.norm",
+    "masked.prod",
+    "masked.std",
+    "masked.sum",
+    "masked.var",
+    # === BEGIN BUG SECTION ===
+    # NJT arg is second for these signatures; need to support this
+    *(f"polygamma.polygamma_n_{n}" for n in range(5)),
+    "special.polygamma.special_polygamma_n_0",
+    "ldexp",
+    # Returns a tuple of Tensors so it doesn't work with NJT's unary pointwise logic
+    "frexp",
+    # Need to adjust sample input func to pass the right thing
+    "nn.functional.prelu",
+    # TypeError: fill() received an invalid combination of arguments
+    # got (NestedTensor), but expected one of:
+    # * (Tensor input, Tensor value)
+    # * (Tensor input, Number value)
+    "fill",
+    # RuntimeError: unsupported tensor layout: Jagged
+    "jiterator_binary",
+    "jiterator_binary_return_by_ref",
+    "jiterator_unary",
+    # Bug found: sum() with keepdim=True returns invalid shape
+    "sum",
+    # RuntimeError: prod(): keepdim=True must be set for NestedTensor
+    "prod",
+    # RuntimeError: "jagged_to_padded_dense" not implemented for 'Bool'
+    "nanmean",
+}
+
+BACKWARD_FAILURES = {
+    *FORWARD_FAILURES,
+    # TODO: categorize these
+    "__rpow__",
+    "atanh",
+    "cdouble",
+    "cfloat",
+    "chalf",
+    "clamp_max",
+    "clamp_min",
+    "copysign",
+    "digamma",
+    "float_power",
+    "max.binary",
+    "maximum",
+    "min.binary",
+    "minimum",
+    "pow",
+    "sgn",
+    "sinc",
+    "special.i1",
+    "special.i1e",
+}
+
+COMPILE_BACKWARD_FAILURES = {
+    *BACKWARD_FAILURES,
+    # mvlgamma_backward calls arange() passing self.options() and layout=torch.jagged
+    # is not supported for the arange() decomp. Backward function should be fixed
+    *(f"mvlgamma.mvlgamma_p_{p}" for p in [1, 3, 5]),
+}
+
+
+def withXFails(failure_list):
+    return decorateIf(
+        unittest.expectedFailure,
+        lambda params: params["op"].full_name in failure_list,
+    )
+
+
+# OpInfo-based NJT tests. These tests utilize an NJT-specific op_db generated from the standard
+# op_db. Note that certain tradeoffs were made wrt coverage vs. time spent running tests:
+#   * All tests run with dtype=torch.float32 only
+class TestNestedTensorOpInfo(NestedTensorTestCase):
+    # TODO: move this
+    def _gen_grad_outputs(self, out_val):
+        if isinstance(out_val, (list, tuple)):
+            return tuple(torch.ones_like(c) for c in out_val)
+        else:
+            return (torch.ones_like(out_val),)
+
+    @withXFails(FORWARD_FAILURES)
+    @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
+    def test_forward(self, device, dtype, op):
+        for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=False):
+            # compare to reference, but expect different nested int
+            out = op.op(sample.input, *sample.args, **sample.kwargs)
+            out_ref = op.ref(op, sample)
+            self.assertEqualIgnoringNestedInts(out, out_ref)
+
+    @withXFails(BACKWARD_FAILURES)
+    @ops(
+        [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
+        allowed_dtypes=(torch.float32,),
+    )
+    def test_backward(self, device, dtype, op):
+        for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=True):
+            # compare to reference, but expect different nested int
+            out = op.op(sample.input, *sample.args, **sample.kwargs)
+            out_ref = op.ref(op, sample)
+            self.assertEqualIgnoringNestedInts(out, out_ref)
+
+            inps, _ = tree_flatten((sample.input, sample.args, sample.kwargs))
+            g_inps = [
+                inp
+                for inp in inps
+                if isinstance(inp, torch.Tensor) and inp.requires_grad
+            ]
+            if len(g_inps) > 0:
+                grads = torch.autograd.grad(
+                    out, inputs=g_inps, grad_outputs=self._gen_grad_outputs(out)
+                )
+
+                grads_ref = torch.autograd.grad(
+                    out_ref,
+                    inputs=g_inps,
+                    grad_outputs=self._gen_grad_outputs(out_ref),
+                )
+
+                self.assertEqual(grads, grads_ref)
+
+    @withXFails(FORWARD_FAILURES)
+    @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
+    def test_compile_forward(self, device, dtype, op):
+        for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=False):
+            torch.compiler.reset()
+
+            op_fn = op.op
+
+            def f(*args, **kwargs):
+                return op_fn(*args, **kwargs)
+
+            compiled_f = torch.compile(
+                f, fullgraph=True, backend="aot_eager_decomp_partition"
+            )
+
+            out_ref = f(sample.input, *sample.args, **sample.kwargs)
+            out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
+
+            self.assertEqual(out_compile, out_ref)
+
+    @withXFails(COMPILE_BACKWARD_FAILURES)
+    @ops(
+        [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
+        allowed_dtypes=(torch.float32,),
+    )
+    def test_compile_backward(self, device, dtype, op):
+        for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=True):
+            torch.compiler.reset()
+
+            op_fn = op.op
+
+            def f(*args, **kwargs):
+                return op_fn(*args, **kwargs)
+
+            compiled_f = torch.compile(
+                f, fullgraph=True, backend="aot_eager_decomp_partition"
+            )
+
+            out_ref = f(sample.input, *sample.args, **sample.kwargs)
+            out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
+
+            self.assertEqual(out_compile, out_ref)
+
+            inps, _ = tree_flatten((sample.input, sample.args, sample.kwargs))
+            g_inps = [
+                inp
+                for inp in inps
+                if isinstance(inp, torch.Tensor) and inp.requires_grad
+            ]
+            if len(g_inps) > 0:
+                grads_compile = torch.autograd.grad(
+                    out_compile,
+                    inputs=g_inps,
+                    grad_outputs=self._gen_grad_outputs(out_compile),
+                )
+
+                grads_ref = torch.autograd.grad(
+                    out_ref, inputs=g_inps, grad_outputs=self._gen_grad_outputs(out_ref)
+                )
+
+                self.assertEqual(grads_compile, grads_ref)
+
+
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 instantiate_device_type_tests(TestNestedTensorAutograd, globals())
 instantiate_device_type_tests(TestNestedTensorSubclass, globals())
+instantiate_device_type_tests(TestNestedTensorOpInfo, globals())
 
 if __name__ == "__main__":
     run_tests()
