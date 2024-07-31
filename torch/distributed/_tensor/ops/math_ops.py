@@ -418,9 +418,12 @@ def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrateg
     [
         aten._linalg_svd.default,
         aten.linalg_qr.default,
-        # TODO: `diagonal_copy` can have an improved sharding strategy for
+        # TODO: The diagonal ops can have an improved sharding strategy for
         # shard placements that does not require redistributing to replicate.
         aten.diagonal_copy.default,
+        aten.diag_embed.default,
+        aten.diag.default,
+        aten.diagonal.default,
     ],
     schema_info=RuntimeSchemaInfo(1),
 )
