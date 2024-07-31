@@ -483,6 +483,23 @@ static PyObject* THPVariable__functionalize_was_storage_changed(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__functionalize_set_storage_changed(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_set_storage_changed(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(self_);
+  wrapper->set_storage_changed();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
 static PyObject* THPVariable__functionalize_get_storage_size(
     PyObject* self,
     PyObject* args,
@@ -916,6 +933,11 @@ static PyMethodDef torch_functions_manual[] = {
     {"_functionalize_was_storage_changed",
      castPyCFunctionWithKeywords(
          THPVariable__functionalize_was_storage_changed),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_set_storage_changed",
+     castPyCFunctionWithKeywords(
+         THPVariable__functionalize_set_storage_changed),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_functionalize_get_storage_size",
