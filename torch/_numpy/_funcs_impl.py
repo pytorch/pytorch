@@ -748,7 +748,7 @@ def indices(dimensions, dtype: Optional[DTypeLike] = int, sparse=False):
     N = len(dimensions)
     shape = (1,) * N
     if sparse:
-        res = tuple()
+        res = ()
     else:
         res = torch.empty((N,) + dimensions, dtype=dtype)
     for i, dim in enumerate(dimensions):
@@ -941,7 +941,7 @@ def choose(
     return choices[idx_list].squeeze(0)
 
 
-# ### unique et al ###
+# ### unique et al. ###
 
 
 def unique(
@@ -1021,7 +1021,7 @@ def resize(a: ArrayLike, new_shape=None):
     return reshape(a, new_shape)
 
 
-# ### diag et al ###
+# ### diag et al. ###
 
 
 def diagonal(a: ArrayLike, offset=0, axis1=0, axis2=1):

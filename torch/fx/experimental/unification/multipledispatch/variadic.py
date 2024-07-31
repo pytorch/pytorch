@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from .utils import typename
 
 __all__ = ["VariadicSignatureType", "isvariadic", "VariadicSignatureMeta", "Variadic"]

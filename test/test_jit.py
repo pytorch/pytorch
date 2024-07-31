@@ -38,7 +38,7 @@ from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
 from jit.test_torchbind import TestTorchbind  # noqa: F401
-from jit.test_module_interface import TestModuleInterface  # noqa: F401  # noqa: F401
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
 from jit.test_enum import TestEnum  # noqa: F401
 from jit.test_string_formatting import TestStringFormatting  # noqa: F401
@@ -96,7 +96,7 @@ import torch.nn.functional as F
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
-    suppress_warnings, BUILD_WITH_CAFFE2, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
+    suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
     freeze_rng_state, slowTest, TemporaryFileName, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
     skipIfCrossRef, skipIfTorchDynamo
@@ -167,7 +167,7 @@ def doAutodiffCheck(testname):
     # these tests are disabled because BailOut nodes
     # inserted by ProfilingExecutor interfere with
     # subgraph slicing of Differentiable Graphs
-    test_exceptions = [
+    test_exceptions = (
         # functional
         'test_nn_dropout',
         'test_nn_log_softmax',
@@ -195,11 +195,9 @@ def doAutodiffCheck(testname):
         'test_split_with_sizes_dim_neg0',
         'test_split_with_sizes_size_0',
         'test_nn_max_pool2d_with_indices',
-    ]
+    )
 
-    if testname in test_exceptions:
-        return False
-    return True
+    return testname not in test_exceptions
 
 
 # TODO: enable TE in PE when all tests are fixed
@@ -4329,7 +4327,7 @@ def foo(x):
             return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(foobar)
-        with self.assertRaisesRegex(RuntimeError, f"test_jit.py\", line {lineno + 1}"):
+        with self.assertRaisesRegex(RuntimeError, f'test_jit.py", line {lineno + 1}'):
             scripted = torch.jit.script(foobar)
 
     def test_file_line_error_class_defn(self):
@@ -4338,7 +4336,7 @@ def foo(x):
                 return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(FooBar)
-        with self.assertRaisesRegex(RuntimeError, f"test_jit.py\", line {lineno + 2}"):
+        with self.assertRaisesRegex(RuntimeError, f'test_jit.py", line {lineno + 2}'):
             torch.jit.script(FooBar)
 
     def test_file_line_graph(self):
@@ -4405,7 +4403,7 @@ def foo(xyz):
         loaded = self.getExportImportCopy(ft)
         _, lineno = inspect.getsourcelines(FooTest)
 
-        with self.assertRaisesRegex(RuntimeError, f'test_jit.py\", line {lineno + 3}'):
+        with self.assertRaisesRegex(RuntimeError, f'test_jit.py", line {lineno + 3}'):
             loaded(torch.rand(3, 4), torch.rand(30, 40))
 
     def test_serialized_source_ranges_graph(self):
@@ -4431,7 +4429,7 @@ def foo(xyz):
 
         _, lineno = inspect.getsourcelines(FooTest2)
 
-        with self.assertRaisesRegex(torch.jit.Error, f'test_jit.py\", line {lineno + 3}'):
+        with self.assertRaisesRegex(torch.jit.Error, f'test_jit.py", line {lineno + 3}'):
             ft = FooTest2()
             loaded = self.getExportImportCopy(ft)
             loaded()
@@ -4967,6 +4965,7 @@ a")
                     test(backward=True)
                     test(backward=True)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_index(self):
         def consec(size, start=0):
             numel = torch.tensor(size).prod().item()
@@ -6431,6 +6430,7 @@ a")
             cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float_int)))
             cu.func_float_int(5.3, 0)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_math_ops(self):
         def checkMathWrap(func_name, num_args=1, is_float=True, **args):
             if is_float:
@@ -6959,6 +6959,7 @@ a")
         self.assertFalse(test_all_float_list([3.14, 0, 8.9]))
 
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_number_math(self):
         ops_template = dedent('''
         def func():
@@ -7207,6 +7208,7 @@ a")
 
             test(op, tensor, const, swap_args)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_tensor_number_math(self):
         self._test_tensor_number_math()
 
@@ -7643,6 +7645,7 @@ dedent """
         with self.assertRaises(Exception):
             foo(2)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_isinstance(self):
         # test isinstance operator for static type checking
         template = dedent('''
@@ -10004,7 +10007,7 @@ dedent """
                 super().__init__()
                 x = torch.zeros(1, 3)
                 mod_fn = lambda : mod(x)  # noqa: E731
-                self.mod = torch.jit.trace(mod_fn, tuple())
+                self.mod = torch.jit.trace(mod_fn, ())
 
             @torch.jit.script_method
             def forward(self):
@@ -10260,7 +10263,7 @@ dedent """
         n = next(graph.inputs())
         self.assertTrue(n.type() == torch._C.TensorType.getInferred())
 
-        with self.assertRaisesRegex(RuntimeError, "Inferred \'x\' to be of type \'Tensor"):
+        with self.assertRaisesRegex(RuntimeError, "Inferred 'x' to be of type 'Tensor"):
             fn("1")
 
     def test_script_define_order(self):
@@ -12309,7 +12312,7 @@ dedent """
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
         FileCheck().check_not("value=<Tensor>").check("aten::mm")\
-            .check("prim::CallMethod[name=\"forward\"]").check("aten::add") \
+            .check('prim::CallMethod[name="forward"]').check("aten::add") \
             .run(str(tm.graph))
         FileCheck().check("aten::mm").run(str(tm.mod.graph))
 
@@ -12796,7 +12799,7 @@ dedent """
         tracemalloc.stop()
 
         # Check if the peak sizes at most differ by an empirically obtained factor
-        assert peak_from_file < peak_from_string * 500
+        self.assertLess(peak_from_file, peak_from_string * 500)
 
     # for each type, the input type annotation and corresponding return type annotation
     def type_input_return_pairs(self):
@@ -14743,7 +14746,7 @@ dedent """
                 return self.hello("hi"), self.hello(.5)
 
         w = CompileOverloadError()
-        with self.assertRaisesRegex(Exception, "but instead found type \'str\'"):
+        with self.assertRaisesRegex(Exception, "but instead found type 'str'"):
             torch.jit.script(w)
 
         # testing overload declared first, then non-overload
@@ -15294,56 +15297,6 @@ dedent """
                     continue
                 self.assertEqual(value, getattr(loaded, "_" + name))
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
-    @unittest.skipIf(not BUILD_WITH_CAFFE2, "PyTorch is build without Caffe2 support")
-    def test_old_models_bc(self):
-        model = {
-            'archive/version': b'1',
-            'archive/code/archive.py':
-                b'''
-                op_version_set = 0
-                def forward(self,
-                    _0: Tensor) -> Tensor:
-                  _1 = torch.zeros([10], dtype=6, layout=0, device=torch.device("cpu"))
-                  result = torch.to(torch.fill_(_1, 5), dtype=6, layout=0, device=torch.device("cpu"),
-                                    non_blocking=False, copy=False)
-                  result2 = torch.rand([10], dtype=6, layout=0, device=torch.device("cpu"))
-                  result3 = torch.rand_like(result2, dtype=6, layout=0, device=torch.device("cpu"))
-                  _2 = torch.add(torch.add(result, result2, alpha=1), result3, alpha=1)
-                  return _2
-                ''',
-            'archive/attributes.pkl': b'\x80\x02](e.',
-            'archive/libs.py': b'op_version_set = 0\n',
-            'archive/model.json':
-                b'''
-                {
-                   "protoVersion":"2",
-                   "mainModule":{
-                      "torchscriptArena":{
-                         "key":"code/archive.py"
-                      },
-                      "name":"archive",
-                      "optimize":true
-                   },
-                   "producerName":"pytorch",
-                   "producerVersion":"1.0",
-                   "libs":{
-                      "torchscriptArena":{
-                         "key":"libs.py"
-                      }
-                   }
-                }'''}
-        with TemporaryFileName() as fname:
-            archive_name = os.path.basename(os.path.normpath(fname))
-            with zipfile.ZipFile(fname, 'w') as archive:
-                for k, v in model.items():
-                    archive.writestr(k, v)
-
-            with open(fname, "rb") as f:
-                fn = torch.jit.load(f)
-
-        x = torch.zeros(10)
-        fn(x)
 
     def test_submodule_attribute_serialization(self):
         class S(torch.jit.ScriptModule):

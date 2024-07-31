@@ -2,6 +2,8 @@
 
 import os
 
+from torchvision import datasets, transforms
+
 import torch
 import torch._lazy
 import torch._lazy.metrics
@@ -10,7 +12,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
-from torchvision import datasets, transforms
 
 torch._lazy.ts_backend.init()
 

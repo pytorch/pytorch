@@ -260,17 +260,17 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
 
  private:
   // Node visitors.
-  void visit(StorePtr v) override;
-  void visit(LoadPtr v) override;
-  void visit(ForPtr v) override;
-  void visit(CondPtr v) override;
-  void visit(IfThenElsePtr v) override;
-  void visit(CompareSelectPtr v) override;
-  void visit(BlockPtr v) override;
-  void visit(LetPtr v) override;
-  void visit(AtomicAddPtr v) override;
-  void visit(AllocatePtr v) override;
-  void visit(FreePtr v) override;
+  void visit(const StorePtr& v) override;
+  void visit(const LoadPtr& v) override;
+  void visit(const ForPtr& v) override;
+  void visit(const CondPtr& v) override;
+  void visit(const IfThenElsePtr& v) override;
+  void visit(const CompareSelectPtr& v) override;
+  void visit(const BlockPtr& v) override;
+  void visit(const LetPtr& v) override;
+  void visit(const AtomicAddPtr& v) override;
+  void visit(const AllocatePtr& v) override;
+  void visit(const FreePtr& v) override;
 
   using BoundRelationship = std::pair<IndexBounds, std::shared_ptr<AccessInfo>>;
 

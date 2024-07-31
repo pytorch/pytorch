@@ -17,6 +17,7 @@
 #define RESTRICT __restrict__
 #endif
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 namespace at::native {
 
 namespace {
@@ -341,12 +342,46 @@ inline void tinygemm_kernel(
 
 #if !defined(C10_MOBILE) && defined(__aarch64__)
 #include <arm_neon.h>
-template <int BLOCK_M, int BLOCK_N>
-inline void tinygemm_kernel(
-    const Half* RESTRICT A,
+
+inline float32x4x2_t load_as_float32x4x2(const Half* ptr) {
+  float16x4x2_t f16_val = vld2_f16(reinterpret_cast<const float16_t *>(ptr));
+  auto val_low = vcvt_f32_f16(f16_val.val[0]);
+  auto val_high = vcvt_f32_f16(f16_val.val[1]);
+  return {val_low, val_high};
+}
+
+inline void store_float32x4(Half* ptr, float32x4_t val) {
+    vst1_f16(reinterpret_cast<float16_t*>(ptr), vcvt_f16_f32(val));
+}
+
+inline float32x4x2_t load_as_float32x4x2(const BFloat16* ptr) {
+  int32x4_t shift = vdupq_n_s32(16);
+  uint16x4x2_t u16_val = vld2_u16(reinterpret_cast<const uint16_t *>(ptr));
+  uint32x4_t int_low = vmovl_u16(u16_val.val[0]);
+  uint32x4_t int_high = vmovl_u16(u16_val.val[1]);
+  return {vreinterpretq_f32_u32(vshlq_u32(int_low, shift)), vreinterpretq_f32_u32(vshlq_u32(int_high, shift))};
+}
+
+inline void store_float32x4(BFloat16* ptr, float32x4_t val) {
+    int32x4_t shift = vdupq_n_s32(-16);
+    uint32x4_t uint32_val = vshlq_u32(vreinterpretq_u32_f32(val), shift);
+    vst1_u16(reinterpret_cast<uint16_t*>(ptr), vmovn_u32(uint32_val));
+}
+
+inline float32x4x2_t load_as_float32x4x2(const float* ptr) {
+  return vld2q_f32(ptr);
+}
+
+inline void store_float32x4(float* ptr, float32x4_t val) {
+    vst1q_f32(ptr, val);
+}
+
+template <int BLOCK_M, int BLOCK_N, typename T>
+inline void tinygemm_kernel_(
+    const T* RESTRICT A,
     const uint8_t* RESTRICT B,
-    const Half* RESTRICT ScaleAndZeros,
-    Half* RESTRICT C,
+    const T* RESTRICT ScaleAndZeros,
+    T* RESTRICT C,
     int lda,
     int ldb,
     int ldc,
@@ -368,9 +403,9 @@ inline void tinygemm_kernel(
         if (is_block_start(k, BLOCK_K)) {
           int kb = k / BLOCK_K;
           c10::ForcedUnroll<4>{}([&](auto i) {
-            auto scales_and_zeros = vld2_f16(reinterpret_cast<const float16_t*>(ScaleAndZeros + kb * ldc * 2 + n * 2 + i * 8));
-            scales[i] = vcvt_f32_f16(scales_and_zeros.val[0]);
-            zeros[i] = vcvt_f32_f16(scales_and_zeros.val[1]);
+            auto scales_and_zeros = load_as_float32x4x2(ScaleAndZeros + kb * ldc * 2 + n * 2 + i * 8);
+            scales[i] = scales_and_zeros.val[0];
+            zeros[i] = scales_and_zeros.val[1];
           });
         }
         c10::ForcedUnroll<4>{}([&](auto i) {
@@ -383,10 +418,52 @@ inline void tinygemm_kernel(
         });
       }
       c10::ForcedUnroll<4>{}([&](auto i) {
-        vst1_f16(reinterpret_cast<float16_t*>(C + m * ldc + n + i * 4), vcvt_f16_f32(c_val[i]));
+        store_float32x4(C + m * ldc + n + i * 4, c_val[i]);
       });
     }
   }
+}
+
+template <int BLOCK_M, int BLOCK_N>
+inline void tinygemm_kernel(
+    const Half* RESTRICT A,
+    const uint8_t* RESTRICT B,
+    const Half* RESTRICT ScaleAndZeros,
+    Half* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K,
+    int BLOCK_K) {
+  tinygemm_kernel_<BLOCK_M, BLOCK_N>(A, B, ScaleAndZeros, C, lda, ldb, ldc, K, BLOCK_K);
+}
+
+template <int BLOCK_M, int BLOCK_N>
+inline void tinygemm_kernel(
+    const BFloat16* RESTRICT A,
+    const uint8_t* RESTRICT B,
+    const BFloat16* RESTRICT ScaleAndZeros,
+    BFloat16* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K,
+    int BLOCK_K) {
+  tinygemm_kernel_<BLOCK_M, BLOCK_N>(A, B, ScaleAndZeros, C, lda, ldb, ldc, K, BLOCK_K);
+}
+
+template <int BLOCK_M, int BLOCK_N>
+inline void tinygemm_kernel(
+    const float* RESTRICT A,
+    const uint8_t* RESTRICT B,
+    const float* RESTRICT ScaleAndZeros,
+    float* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K,
+    int BLOCK_K) {
+  tinygemm_kernel_<BLOCK_M, BLOCK_N>(A, B, ScaleAndZeros, C, lda, ldb, ldc, K, BLOCK_K);
 }
 #endif
 
@@ -532,71 +609,84 @@ void weight_to_int4pack_kernel(
     int N, int K) {
 
   auto weight_packed_data = reinterpret_cast<uint8_t*>(weight_packed.data_ptr());
-  const auto weight_data = weight.data_ptr<int32_t>();
+  const auto weight_data = weight.data_ptr<uint8_t>();
 
   // 64 for avx512 and 32 for avx2/non-vectorized
   constexpr int BLOCK_N = vec::Vectorized<float>::size() * 4;
   const int NB =  (N + BLOCK_N - 1) / BLOCK_N;
+  int K_div_2 = K / 2;
 
   // parallel on NB blocks
   at::parallel_for(0, NB, 0, [&](int begin, int end) {
     for (const auto i : c10::irange(begin, end)) {
       int nb_size = std::min(BLOCK_N, N - i * BLOCK_N);
 
-      const int32_t* src = weight_data + i * BLOCK_N * K;
+      const uint8_t* src = weight_data + i * BLOCK_N * K_div_2;
       uint8_t* dst = weight_packed_data + i * K * BLOCK_N / 2;
-      for (const auto k : c10::irange(K)) {
+      for (const auto k : c10::irange(K_div_2)) {
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
         if (nb_size == BLOCK_N) {
           for (const auto d : c10::irange(16)) {
-            int32_t val0 = src[(d +  0) * K + k];
-            int32_t val1 = src[(d + 16) * K + k];
-            int32_t val2 = src[(d + 32) * K + k];
-            int32_t val3 = src[(d + 48) * K + k];
+            uint8_t val0 = src[(d + 0) * K_div_2 + k];
+            uint8_t val1 = src[(d + 16) * K_div_2 + k];
+            uint8_t val2 = src[(d + 32) * K_div_2 + k];
+            uint8_t val3 = src[(d + 48) * K_div_2 + k];
 
-            uint8_t packed02 = (((uint8_t)(val2) << 4)) | ((uint8_t)(val0));
-            uint8_t packed13 = (((uint8_t)(val3) << 4)) | ((uint8_t)(val1));
+            uint8_t packed02_0 = (val2 & 0xF0) | ((val0 & 0xF0) >> 4);
+            uint8_t packed13_0 = (val3 & 0xF0) | ((val1 & 0xF0) >> 4);
+            uint8_t packed02_1 = ((val2 & 0xF) << 4) | (val0 & 0xF);
+            uint8_t packed13_1 = ((val3 & 0xF) << 4) | (val1 & 0xF);
 
-            dst[k * 32 + d] = packed02;
-            dst[k * 32 + 16 + d] = packed13;
+            dst[k * 2 * 32 + d] = packed02_0;
+            dst[k * 2 * 32 + 16 + d] = packed13_0;
+            dst[(k * 2 + 1) * 32 + d] = packed02_1;
+            dst[(k * 2 + 1) * 32 + 16 + d] = packed13_1;
           }
         } else {
           // for nb_size 16, 32, 48
           for (int n = 0; n < nb_size; n += 2) {
-            int32_t val0 = src[n * K + k];
-            int32_t val1 = src[n * K + K + k];
+            uint8_t val0 = src[n * K_div_2 + k];
+            uint8_t val1 = src[n * K_div_2 + K_div_2 + k];
 
-            uint8_t packed = (((uint8_t)(val1) << 4)) | ((uint8_t)(val0));
-            dst[k * nb_size / 2 + n / 2] = packed;
+            uint8_t packed_0 = ((val1 & 0xF0)) | ((val0 & 0xF0) >> 4);
+            uint8_t packed_1 = ((val1 & 0xF) << 4) | (val0 & 0xF);
+            dst[k * 2 * nb_size / 2 + n / 2] = packed_0;
+            dst[(k * 2 + 1) * nb_size / 2 + n / 2] = packed_1;
           }
         }
 #elif defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
         if (nb_size == BLOCK_N) {
           // for nb_size 32
           for (const auto d : c10::irange(16)) {
-            int32_t val0 = src[(d + 0) * K + k];
-            int32_t val1 = src[(d + 16) * K + k];
+            uint8_t val0 = src[(d + 0) * K_div_2 + k];
+            uint8_t val1 = src[(d + 16) * K_div_2 + k];
 
-            uint8_t packed01 = (((uint8_t)(val1) << 4)) | ((uint8_t)(val0));
-            dst[k * 16 + d] = packed01;
+            uint8_t packed01_0 = ((val1 & 0xF0) | ((val0 & 0xF0) >> 4));
+            uint8_t packed01_1 = ((val1 & 0xF) << 4) | (val0 & 0xF);
+            dst[k * 2 * 16 + d] = packed01_0;
+            dst[(k * 2 + 1) * 16 + d] = packed01_1;
           }
         } else {
           // for nb_size 16
           for (int n = 0; n < nb_size; n += 2) {
-            int32_t val0 = src[n * K + k];
-            int32_t val1 = src[n * K + K + k];
+            int32_t val0 = src[n * K_div_2 + k];
+            int32_t val1 = src[n * K_div_2 + K_div_2 + k];
 
-            uint8_t packed = (((uint8_t)(val1) << 4)) | ((uint8_t)(val0));
-            dst[k * nb_size / 2 + n / 2] = packed;
+            uint8_t packed_0 = ((val1 & 0xF0)) | ((val0 & 0xF0) >> 4);
+            uint8_t packed_1 = ((val1 & 0xF) << 4) | (val0 & 0xF);
+            dst[k * 2 * nb_size / 2 + n / 2] = packed_0;
+            dst[(k * 2 + 1) * nb_size / 2 + n / 2] = packed_1;
           }
         }
 #else
         for (int n = 0; n < nb_size; n += 2) {
-          int32_t val0 = src[n * K + k];
-          int32_t val1 = src[n * K + K + k];
+          uint8_t val0 = src[n * K_div_2 + k];
+          uint8_t val1 = src[n * K_div_2 + K_div_2 + k];
 
-          uint8_t packed = (((uint8_t)(val1) << 4)) | ((uint8_t)(val0));
-          dst[k * nb_size / 2 + n / 2] = packed;
+          uint8_t packed_0 = ((val1 & 0xF0)) | ((val0 & 0xF0) >> 4);
+          uint8_t packed_1 = ((val1 & 0xF) << 4) | (val0 & 0xF);
+          dst[k * 2 * nb_size / 2 + n / 2] = packed_0;
+          dst[(k * 2 + 1) * nb_size / 2 + n / 2] = packed_1;
         }
 #endif
       }
@@ -689,3 +779,4 @@ ALSO_REGISTER_AVX512_DISPATCH(weight_to_int4pack_stub, &weight_to_int4pack_kerne
 ALSO_REGISTER_AVX512_DISPATCH(int4pack_mm_stub, &int4pack_mm_kernel);
 
 } // at::native
+C10_DIAGNOSTIC_POP()

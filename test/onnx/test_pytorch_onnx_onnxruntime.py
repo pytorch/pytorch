@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import functools
-
 import io
 import itertools
 import os
@@ -12,10 +11,10 @@ from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple, Type, Union
 
 import numpy as np
+
 import onnx
 import onnx_test_common
 import parameterized
-import torch
 import torchvision
 from model_defs import (
     lstm_flattening_result,
@@ -38,6 +37,7 @@ from pytorch_test_common import (
     skipTraceTest,
 )
 
+import torch
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
 from torch.onnx import errors, verification
@@ -2584,6 +2584,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         update = torch.randn(4, 1, 3, 2)
         self.run_test(IndexPutModel2(), (x, update))
 
+    @unittest.skip(
+        "regression in 1.18: https://github.com/microsoft/onnxruntime/issues/20855"
+    )
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_loop(self):
         @torch.jit.script
@@ -3721,6 +3724,20 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
         self.run_test(BitshiftModel(), input)
 
+    @skipIfUnsupportedMinOpsetVersion(18)
+    def test_bitwise_and(self):
+        class BitwiseAndModel(torch.nn.Module):
+            def forward(self, input, other):
+                return (
+                    input & 20,
+                    torch.bitwise_and(input, other),
+                    other & torch.tensor([1, 2], dtype=torch.int32),
+                )
+
+        input = torch.randint(0, 255, (3, 4, 2), dtype=torch.uint8)
+        other = torch.randint(-128, 127, (3, 4, 2), dtype=torch.int8)
+        self.run_test(BitwiseAndModel(), (input, other))
+
     # uint8 not implemented in ORT for Mul used in
     # exporting bitshift for opset_version < 10
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -3889,15 +3906,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 ctx.save_for_backward(input)
                 return input.clamp(min=0)
 
-        def symbolic_python_op(
-            ctx: torch.onnx.SymbolicContext, g: torch._C.Graph, *args, **kwargs
-        ):
-            n = ctx.cur_node
+        def symbolic_python_op(g, *args, **kwargs):
             name = kwargs["name"]
             if name == "MyClip":
-                return g.op("Clip", args[0], args[1], outputs=n.outputsSize())
+                return g.op("Clip", args[0], args[1])
             elif name == "MyRelu":
-                return g.op("Relu", args[0], outputs=n.outputsSize())
+                return g.op("Relu", args[0])
             else:
                 # TODO(justinchuby): Remove reference to internal names in symbolic_helper
                 return torch.onnx.symbolic_helper._unimplemented(
@@ -12580,7 +12594,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         model_export = M()
         model_onnx = io.BytesIO()
-        test_inputs = tuple()
+        test_inputs = ()
         torch.onnx.export(
             model_export, test_inputs, model_onnx, opset_version=self.opset_version
         )

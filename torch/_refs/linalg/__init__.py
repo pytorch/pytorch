@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from functools import partial
 
 from typing import List, Optional, Tuple, Union
@@ -110,13 +111,15 @@ def vector_norm(
     *,
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     # Checks
     check_fp_or_complex(x.dtype, "linalg.vector_norm")
 
     if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
 
-    if x.numel() == 0 and (ord < 0.0 or ord == float("inf")):
+    if guard_size_oblivious(x.numel() == 0) and (ord < 0.0 or ord == float("inf")):
         torch._check(
             dim is not None and len(dim) != 0,
             lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
@@ -284,7 +287,7 @@ def norm(
     else:
         if ord is None:
             ord = 2.0
-        return vector_norm(A, ord, dim, keepdim, dtype=dtype)
+        return vector_norm(A, ord, dim, keepdim, dtype=dtype)  # type: ignore[arg-type]
 
 
 # CompositeImplicitAutograd

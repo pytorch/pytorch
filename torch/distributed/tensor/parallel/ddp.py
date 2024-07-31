@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Any, List, Tuple
 
 import torch.nn as nn
@@ -5,6 +6,7 @@ from torch.distributed.tensor.parallel._data_parallel_utils import (
     _flatten_tensor,
     _unflatten_tensor,
 )
+
 
 __all__ = []  # type: ignore[var-annotated]
 

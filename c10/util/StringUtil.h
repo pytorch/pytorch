@@ -142,7 +142,7 @@ struct C10_API SourceLocation {
 std::ostream& operator<<(std::ostream& out, const SourceLocation& loc);
 
 // unix isprint but insensitive to locale
-inline static bool isPrint(char s) {
+inline bool isPrint(char s) {
   return s > 0x1f && s < 0x7f;
 }
 

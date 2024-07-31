@@ -1,10 +1,10 @@
+# mypy: allow-untyped-defs
 from typing import List, Sequence, Tuple
 
 import numpy as np
 
 from torch._prims_common import ShapeType
 from torch.distributed._tensor import DeviceMesh
-
 from torch.distributed._tensor.placement_types import Placement, Shard
 
 

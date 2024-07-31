@@ -75,6 +75,9 @@ import numpy as np
 from torch.testing import FileCheck
 from typing import Callable, Tuple, Dict, Any, Union, Type, Optional
 import torch._dynamo as torchdynamo
+import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
+from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
+import contextlib
 
 class NodeSpec:
     ''' Used for checking GraphModule Node
@@ -329,14 +332,6 @@ def skipIfNoQNNPACK(fn):
             fn(*args, **kwargs)
     return wrapper
 
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        if not torch.onnx._CAFFE2_ATEN_FALLBACK:
-            raise unittest.SkipTest(reason)
-        else:
-            fn(*args, **kwargs)
-    return wrapper
-
 def withQNNPACKBackend(fn):
     # TODO(future PR): consider combining with skipIfNoQNNPACK,
     # will require testing of existing callsites
@@ -481,6 +476,7 @@ def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
     assert torch.isnan(out).sum() == 0
 
     out = out.to(dtype=torch.int32).reshape(w.shape)
+    out_uint8 = (out[::, ::2] << 4 | out[::, 1::2]).to(torch.uint8)
 
     # Scales and zeros for the same q-group should be contiguous, so we can
     # load as a 32-bit word
@@ -496,7 +492,40 @@ def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
         ).transpose(0, 1).contiguous()
     )
 
-    return out, scales_and_zeros
+    return out_uint8, scales_and_zeros
+
+
+def _dynamically_quantize_per_channel(x, quant_min, quant_max, target_dtype):
+    # source: https://github.com/pytorch-labs/gpt-fast/blob/main/quantize.py
+    # default setup for affine quantization of activations
+    x_dtype = x.dtype
+    x = x.float()
+    eps = torch.finfo(torch.float32).eps
+
+    # get min and max
+    min_val, max_val = torch.aminmax(x, dim=1)
+
+    # calculate scales and zero_points based on min and max
+    # reference: https://fburl.com/code/srbiybme
+    min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
+    max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
+    device = min_val_neg.device
+
+    # reference: https://fburl.com/code/4wll53rk
+    max_val_pos = torch.max(-min_val_neg, max_val_pos)
+    scales = max_val_pos / (float(quant_max - quant_min) / 2)
+    # ensure scales is the same dtype as the original tensor
+    scales = torch.clamp(scales, min=eps).to(x.dtype)
+    zero_points = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
+
+    # quantize based on qmin/qmax/scales/zp
+    x_div = x / scales.unsqueeze(-1)
+    x_round = torch.round(x_div)
+    x_zp = x_round + zero_points.unsqueeze(-1)
+    quant = torch.clamp(x_zp, quant_min, quant_max).to(target_dtype)
+
+    return quant, scales.to(x_dtype), zero_points
+
 
 
 # QuantizationTestCase used as a base class for testing quantization on modules
@@ -1277,6 +1306,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             self.checkGraphModuleNodes(m_fx, expected_node_occurrence=node_occurrence)
             fx_quant_output = m_fx(*example_inputs)
             self.assertEqual(fx_quant_output, pt2_quant_output)
+        return m
 
     def _quantize(self, m, quantizer, example_inputs, is_qat: bool = False):
         # resetting dynamo cache
@@ -2900,3 +2930,35 @@ class TestHelperModules:
         def forward(self, x):
             x = self.relu(self.fc(x))
             return x
+
+def _generate_qdq_quantized_model(
+    mod, inputs, is_qat=False, is_dynamic=False, quantizer=None
+):
+
+    def get_default_quantizer(is_qat, is_dynamic):
+        quantizer = X86InductorQuantizer()
+        quantizer.set_global(
+            xiq.get_default_x86_inductor_quantization_config(
+                is_qat=is_qat, is_dynamic=is_dynamic
+            )
+        )
+        return quantizer
+
+    maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
+    with maybe_no_grad:
+        export_model = capture_pre_autograd_graph(
+            mod,
+            inputs,
+        )
+        quantizer = (
+            quantizer if quantizer else get_default_quantizer(is_qat, is_dynamic)
+        )
+        prepare_model = (
+            prepare_qat_pt2e(export_model, quantizer)
+            if is_qat
+            else prepare_pt2e(export_model, quantizer)
+        )
+        prepare_model(*inputs)
+        torch.ao.quantization.move_exported_model_to_eval(prepare_model)
+        convert_model = convert_pt2e(prepare_model)
+        return convert_model
