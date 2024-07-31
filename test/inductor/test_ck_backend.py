@@ -204,11 +204,7 @@ class TestCKBackend(TestCase):
             Y_compiled = addmm(x, a, b, alpha, beta)
             Y_eager = torch.addmm(x, a, b, alpha=alpha, beta=beta)
 
-            # this is an effort to account for accumulating errors in the individual result elements
-            # (1.3e-6, 1e-5) are default (atol, rtol) for fp32 which is the accumulation dtype
-            torch.testing.assert_close(
-                Y_compiled, Y_eager, atol=k * 1.3e-6 * 2, rtol=k * 1e-5 * 2
-            )
+            torch.testing.assert_close(Y_compiled, Y_eager)
 
 
 if __name__ == "__main__":
