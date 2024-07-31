@@ -159,7 +159,7 @@ def get_arith_intensity(data: Any) -> float:
     k = data["k"]
     n = data["n"]
     if m == 0 or k == 0 or n == 0:
-        return 0
+        return 0.0
     return m * k * n / (m * k + k * n + m * n)
 
 
