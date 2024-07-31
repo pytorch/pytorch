@@ -896,6 +896,7 @@
     "LongTensor",
     "ShortTensor",
     "addmm",
+    "solve",
     "log_softmax",
     "mm",
     "softmax"
