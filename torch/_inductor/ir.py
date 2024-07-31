@@ -5111,9 +5111,14 @@ class InplaceCopyFallback(ExternKernel):
 
     def codegen(self, wrapper):
         (dst, src, non_blocking) = self.codegen_args()
-        wrapper.writeline(
-            f"{self.get_kernel_name()}({dst}, {src}, {non_blocking}){wrapper.ending}"
-        )
+        if "ArrayRefTensor" in wrapper.get_input_cpp_type(self.inputs[1]):
+            wrapper.writeline(
+                f"{self.get_kernel_name()}({dst}, {src}.expensiveCopyToTensor(), {non_blocking}){wrapper.ending}"
+            )
+        else:
+            wrapper.writeline(
+                f"{self.get_kernel_name()}({dst}, {src}, {non_blocking}){wrapper.ending}"
+            )
 
     def should_allocate(self):
         return False
