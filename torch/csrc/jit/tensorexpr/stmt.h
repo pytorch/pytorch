@@ -750,20 +750,20 @@ class TORCH_API For : public StmtNode<For> {
     set_parent(body_, this);
   }
 
-  For(const VarPtr& var,
-      const ExprPtr& start,
-      const ExprPtr& stop,
+  For(VarPtr var,
+      ExprPtr start,
+      ExprPtr stop,
       StmtPtr body,
       LoopOptions loop_options)
-      : var_(var),
-        start_(start),
-        stop_(stop),
+      : var_(std::move(var)),
+        start_(std::move(start)),
+        stop_(std::move(stop)),
         loop_options_(std::move(loop_options)) {
-    if (!var) {
+    if (!var_) {
       throw malformed_input("invalid Var in For loop");
-    } else if (!start) {
+    } else if (!start_) {
       throw malformed_input("invalid Start in For loop");
-    } else if (!stop) {
+    } else if (!stop_) {
       throw malformed_input("invalid Stop in For loop");
     } else if (!body || body->get_parent()) {
       throw malformed_input("invalid Body in For loop");
