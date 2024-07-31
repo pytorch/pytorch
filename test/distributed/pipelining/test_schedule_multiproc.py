@@ -16,7 +16,7 @@ from torch.distributed.pipelining import (
     PipelineStage,
     Schedule1F1B,
     ScheduleFlexibleInterleaved1F1B,
-    ScheduleForwardOnly,
+    _ScheduleForwardOnly,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
@@ -59,7 +59,7 @@ class ScheduleTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("ScheduleClass", [ScheduleForwardOnly])
+    @parametrize("ScheduleClass", [_ScheduleForwardOnly])
     def test_forward_only(self, ScheduleClass):
         mod = MultiMLP(d_hid, n_layers=self.world_size)
         mod.to(self.device)

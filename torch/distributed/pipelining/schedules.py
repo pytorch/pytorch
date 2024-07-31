@@ -26,7 +26,7 @@ __all__ = [
     "ScheduleGPipe",
     "ScheduleInterleaved1F1B",
     "ScheduleLoopedBFS",
-    "ScheduleForwardOnly",
+    "_ScheduleForwardOnly",
 ]
 
 logger = logging.getLogger(__name__)
@@ -565,7 +565,7 @@ class PipelineScheduleSingle(_PipelineSchedule):
             return None
 
 
-class ScheduleForwardOnly(PipelineScheduleSingle):
+class _ScheduleForwardOnly(PipelineScheduleSingle):
     """
     The forward-only schedule.
     Will go through all the microbatches and perform only the forward pass

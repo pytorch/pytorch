@@ -3,7 +3,7 @@ from ._IR import Pipe, pipe_split, pipeline, SplitPoint
 from .schedules import (
     Schedule1F1B,
     ScheduleFlexibleInterleaved1F1B,
-    ScheduleForwardOnly,
+    _ScheduleForwardOnly,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
@@ -23,5 +23,5 @@ __all__ = [
     "ScheduleGPipe",
     "ScheduleInterleaved1F1B",
     "ScheduleLoopedBFS",
-    "ScheduleForwardOnly",
+    "_ScheduleForwardOnly",
 ]
