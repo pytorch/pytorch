@@ -110,17 +110,12 @@ class RingAttentionTest(DTensorTestBase):
             out.sum().backward()
 
         with context_parallel_buffers(
-            self.rank, self.world_size, (out, q.grad, k.grad, v.grad), (2, 2, 2, 2)
+            device_mesh, (out, q.grad, k.grad, v.grad), (2, 2, 2, 2)
         ) as local_buffers:
             local_out, local_dq, local_dk, local_dv = local_buffers
 
         enable_context_parallel(2, [], device_mesh)
-        with context_parallel_buffers(
-            self.rank,
-            self.world_size,
-            (q, k, v),
-            (2, 2, 2),
-        ) as cp_buffers:
+        with context_parallel_buffers(device_mesh, (q, k, v), (2, 2, 2)) as cp_buffers:
             cp_q, cp_k, cp_v = cp_buffers
 
             cp_q.requires_grad = True
@@ -294,6 +289,7 @@ class RingAttentionTest(DTensorTestBase):
                 * args.n_layers,
             },
         )
+
 
 if backends:
     instantiate_parametrized_tests(RingAttentionTest)

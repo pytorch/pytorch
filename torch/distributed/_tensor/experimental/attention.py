@@ -824,24 +824,20 @@ def enable_context_parallel(
 
 
 def _get_sequence_shard(
-    src_buffer: torch.Tensor,
-    cp_rank: int,
-    cp_world_size: int,
-    seq_dim: int,
+    buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
 ) -> torch.Tensor:
-    return src_buffer.chunk(cp_world_size, dim=seq_dim)[cp_rank]
+    return buffer.chunk(mesh.size(), dim=seq_dim)[mesh.get_local_rank()]
 
 
 @contextlib.contextmanager
 @torch.no_grad()
 def context_parallel_buffers(
-    cp_rank: int,
-    cp_world_size: int,
+    mesh: Optional[DeviceMesh],
     buffers: List[torch.Tensor],
     seq_dims: List[int],
     restore_funcs: Optional[Tuple[Optional[Callable]]] = None,
 ) -> Generator[List[torch.Tensor], None, None]:
-    if cp_world_size == 1:
+    if mesh is None:
         yield buffers
         return
 
@@ -861,10 +857,11 @@ def context_parallel_buffers(
             "number of as `buffers`."
         )
 
+    assert mesh is not None
     new_buffers = []
     for buffer, seq_dim, restore_func in zip(buffers, seq_dims, restore_funcs_tuple):
         original_buffers.append(buffer if restore_func else None)
-        new_buffers.append(_get_sequence_shard(buffer, cp_rank, cp_world_size, seq_dim))
+        new_buffers.append(_get_sequence_shard(buffer, mesh, seq_dim))
 
     yield new_buffers
 
