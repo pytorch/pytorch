@@ -38,16 +38,8 @@ class AHTrainDecisionTreeMM(AHTrainDecisionTree):
         return {"max_depth": [5], "min_samples_leaf": [0.01], "criterion": ["entropy"]}
 
     def add_training_data(self, df_train, datasets):
-        df_hf = datasets["mm_hf"]
-        # add each dataset to the training data 3 times
+        # add timm and hf to the training data 3 times
         # we really want to make sure that the heuristic performs well on these datasets
-        df_hf = df_hf.loc[df_hf.index.repeat(3)].reset_index(drop=True)
-        df_timm = datasets["mm_timm"]
-        df_timm = df_timm.loc[df_timm.index.repeat(3)].reset_index(drop=True)
-        df_torchbench = datasets["mm_torchbench"]
-        df_torchbench = df_torchbench.loc[df_torchbench.index.repeat(3)].reset_index(
-            drop=True
-        )
         df_timm_train = datasets["train_timm"]
         df_timm_train = df_timm_train.loc[df_timm_train.index.repeat(3)].reset_index(
             drop=True
@@ -57,10 +49,7 @@ class AHTrainDecisionTreeMM(AHTrainDecisionTree):
             drop=True
         )
         df_train = datasets["train"]
-        df_train = pd.concat(
-            [df_train, df_hf, df_timm, df_torchbench, df_timm_train, df_hf_train],
-            ignore_index=True,
-        )
+        df_train = pd.concat([df_train, df_timm_train, df_hf_train], ignore_index=True)
         return df_train
 
     def ranking_always_included_choices(self):
