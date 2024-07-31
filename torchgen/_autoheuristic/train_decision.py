@@ -43,21 +43,35 @@ class AHTrainDecisionTree(AHTrain):
         return sorted_classes[:k]
 
     def is_unsafe_leaf(self, row, predicted_config, choice2time):
+        """
+        Can be overridden by subclasses to define their own logic for deciding when a leaf is unsafe. Returns a sample
+        that landed in the leaf, the choice predicted by the tree, and a dictionary that maps each choice to the
+        execution time. One can for example decide to mark a leaf as unsafe if the predicted choice is 2x slower
+        than the fastest choice.
+        If a leaf is unsafe, the learned heuristic will always return 'unsure' if an input lands in that leaf.
+        """
+
         return False
 
     def get_unsafe_leaves(self, model, df, feature_columns):
+        """
+        Given a trained decision tree, and a dataframe containing the training data, returns a list of unsafe leaves.
+        """
         X = df[feature_columns]
         y = df["winner"]
         leaf_ids = model.apply(X)
         unique_leaves = np.unique(leaf_ids)
 
         unsafe_leaves = []
+        # Iterate over each leaf
         for leaf in unique_leaves:
             leaf_mask = leaf_ids == leaf
+            # Get samples that land in this leaf
             leaf_X = X[leaf_mask]
 
             predicted_config = model.predict(leaf_X.iloc[[0]])[0]
 
+            # For each sample, check if we should mark the leaf as unsafe
             for idx, row in leaf_X.iterrows():
                 choice2time = json.loads(df.loc[idx, "choice2time"])
                 if self.is_unsafe_leaf(row, predicted_config, choice2time):
@@ -66,9 +80,17 @@ class AHTrainDecisionTree(AHTrain):
         return unsafe_leaves
 
     def get_allowed_wrong_prediction_pct(self):
+        """
+        This is used to determine a threshold for when a learned heuristic returns 'unsure'.
+        If this function returns 0.01, we will set the probability required for the decision tree to return a decision
+        such that at most 1% of the predictions will be wrong on the validation set.
+        """
         return 0.01
 
     def get_grid_search_values(self):
+        """
+        Standard values for grid search. Can be overriden.
+        """
         return {
             "max_depth": [5, 6, 7],
             "min_samples_leaf": [1, 5, 10, 0.01, 0.05, 0.02],
@@ -76,6 +98,9 @@ class AHTrainDecisionTree(AHTrain):
         }
 
     def predict(self, model, df, feature_columns):
+        """
+        Returns the predictions, probabilities, and leaf ids for a given dataframe.
+        """
         predictions = model.predict(df[feature_columns])
         proba = model.predict_proba(df[feature_columns])
         leaf_ids = model.apply(df[feature_columns])
@@ -84,6 +109,10 @@ class AHTrainDecisionTree(AHTrain):
     def train_and_evaluate_models(
         self, datasets, max_depths, min_samples_leafs, criterion_list, feature_columns
     ):
+        """
+        Does a grid search over max_depths, min_samples_leafs, and criterion_list and returns the best model.
+        """
+
         results = []
         best_model = None
         best_model_safe_proba = 0
@@ -210,9 +239,16 @@ class AHTrainDecisionTree(AHTrain):
         )
 
     def get_test_and_val_size(self):
+        """
+        Returns the size of the test and validation sets.
+        """
         return (0.15, 0.15)
 
     def prepare_datasets(self, df, other_datasets, cat_feature2cats):
+        """
+        Splits the dataframe into train, val, and test sets.
+        Also adds other datasets, specified by the user, to the train set.
+        """
         test_size, val_size = self.get_test_and_val_size()
         # Split into train+val and test
         df_train_val, df_test = train_test_split(
@@ -229,6 +265,9 @@ class AHTrainDecisionTree(AHTrain):
         return datasets
 
     def export_to_dot(self, best_model, df, feature_columns):
+        """
+        Export a learned decision tree to a dot file.
+        """
         from sklearn import tree
 
         tree.export_graphviz(
@@ -242,6 +281,10 @@ class AHTrainDecisionTree(AHTrain):
         )
 
     def get_feature_columns(self, df):
+        """
+        The dataframe contains columns that are not features, such as 'winner', 'speedup' that are only used for
+        debugging purposes. This function returns the columns that are actually features.
+        """
         exclude_columns = [
             "speedup",
             "winner",
@@ -254,6 +297,9 @@ class AHTrainDecisionTree(AHTrain):
         return feature_columns
 
     def main(self, log_path, other_datasets, nrows, heuristic_name, save_dot=False):
+        """
+        Main function that trains a decision tree and generates a heuristic.
+        """
         # TODO: Enable apply_filters
         (df, choices, cat_feature2cats, dummy_col_2_col_val, metadata) = self.get_df(
             log_path, nrows=nrows, apply_filters=False
@@ -301,6 +347,9 @@ class AHTrainDecisionTree(AHTrain):
             )
 
     def get_df(self, log_path, cat_feature2cats=None, nrows=None, apply_filters=False):
+        """
+        Parses the log file and processes the data into a dataframe that can be used for training.
+        """
         (df, metadata, features, categorical_features, choices) = self.parse_log(
             log_path, nrows
         )
@@ -399,6 +448,10 @@ class AHTrainDecisionTree(AHTrain):
         unsafe_leaves=None,
         leaf_ids=None,
     ):
+        """
+        Custom evaluation function that evaluates a learned decision tree.
+        """
+
         def compute_speedup_over_default(default_config, pred, df, i, predicted_time):
             nonlocal num_non_default_predictions
             nonlocal speedups_over_default
@@ -522,10 +575,25 @@ class AHTrainDecisionTree(AHTrain):
         }
 
     def gen_classes(self, classes, num_spaces):
+        """
+        If classes=['choice1', 'choice2', 'choice3'], then this function returns
+        the following string:
+        self.choices.append('choice1')
+        self.choices.append('choice2')
+        self.choices.append('choice3')
+        Used in the generated heuristic to map the index of a choice to its name.
+        """
         indent = " " * num_spaces
         return "\n".join([f"{indent}self.choices.append('{c}')" for c in classes])
 
     def best_probas_and_indices(self, class_probas):
+        """
+        Given a list of tuples (proba, idx), this function returns a string in which the tuples are sorted by proba in
+        descending order. E.g.:
+        Given class_probas=[(0.3, 0), (0.5, 1), (0.2, 2)]
+        this function returns
+        "[(0.5, 1), (0.3, 0), (0.2, 2)]"
+        """
         # we generate a list of tuples (proba, idx) sorted by proba in descending order
         # idx is the index of a choice
         # we only generate a tuple if proba > 0
@@ -540,9 +608,18 @@ class AHTrainDecisionTree(AHTrain):
         return f"[{probas_indices_sorted_str}]"
 
     def get_default_config(self, row):
+        """
+        Returns the default config for a given sample. The default config could for example be the config that is
+        the chosen by a current handwritten heuristic. This can for example be used in get_unsafe_leaf to
+        compare the predicted config with the default config.
+        """
         return None
 
     def handle_leaf(self, tree_, node, indent, unsafe_leaves):
+        """
+        This generates the code for a leaf node in the decision tree. If the leaf is unsafe, the learned heuristic
+        will return "unsure" (i.e. None).
+        """
         if node in unsafe_leaves:
             return f"{indent}return None"
         leaf_num_samples = tree_.n_node_samples[node]
@@ -550,13 +627,23 @@ class AHTrainDecisionTree(AHTrain):
         return f"{indent}return {self.best_probas_and_indices(class_probas)}"
 
     def gen_predict_fn_def(self):
+        """
+        Generates the definition of the predict function.
+        """
         return "def get_best_choices(self, context: AHContext) -> Optional[List[Tuple[float, int]]]:"
 
     def codegen_boilerplate(
         self, heuristic_name, opt_name, threshold, shared_memory, device_capa, dt
     ):
+        """
+        Generates the boilerplate code for the generated heuristic. This includes things like imports, class definition,
+        etc.
+        """
+
         boiler_plate = f"""# flake8: noqa: B950
 # fmt: off
+# This file was generated by AutoHeuristic. Do not modify it manually!
+# To regenerate this file, take a look at the steps in the README.md file inside torchgen/_autoheuristic/{opt_name}/
 from typing import List, Optional, Tuple
 
 from torch._inductor.autoheuristic.autoheuristic_utils import (
@@ -592,6 +679,9 @@ class {heuristic_name}(LearnedHeuristicDecision):
         return boiler_plate
 
     def add_real_datasets(self, datasets, other_datasets, cat_feature2cats):
+        """
+        Adds datasets specified by the user to the datasets dictionary.
+        """
         if other_datasets:
             for name, path in other_datasets:
                 (df_other, choices, _, _, _) = self.get_df(
