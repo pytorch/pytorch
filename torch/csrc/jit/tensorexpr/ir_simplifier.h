@@ -119,10 +119,10 @@ class Term : public ExprNode<Term> {
     sort();
   }
 
-  Term(HashProvider& hasher, const ExprPtr& s, const std::vector<ExprPtr>& v)
+  Term(HashProvider& hasher, ExprPtr s, std::vector<ExprPtr> v)
       : ExprNodeBase(promoteTypesVec(s, v)),
-        variables_(v),
-        scalar_(s),
+        variables_(std::move(v)),
+        scalar_(std::move(s)),
         hasher_(hasher) {
     sort();
   }
