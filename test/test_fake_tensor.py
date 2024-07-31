@@ -12,18 +12,19 @@ import weakref
 from unittest.mock import patch
 
 import numpy as np
+
 import torch
 import torch._dynamo
 import torch._functorch.config
 import torch._prims as prims
 import torch.testing._internal.optests as optests
 import torch.utils._pytree as pytree
-
 from torch import distributed as dist
 from torch._C._functorch import _add_batch_dim, get_unwrapped, is_batchedtensor
 from torch._dynamo.testing import make_test_cls_with_patches, rand_strided
 from torch._guards import tracing, TracingContext
 from torch._subclasses.fake_tensor import (
+    _CacheKeyState,
     DynamicOutputShapeException,
     extract_tensor_metadata,
     FakeTensor,
@@ -31,7 +32,6 @@ from torch._subclasses.fake_tensor import (
     FakeTensorMode,
     unset_fake_temporarily,
     UnsupportedOperatorException,
-    _CacheKeyState
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
@@ -65,6 +65,7 @@ from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.jit_utils import RUN_CUDA
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
+
 
 aten = torch.ops.aten
 
