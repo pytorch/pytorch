@@ -1322,7 +1322,7 @@ class OutputGraph:
             "dynamo_flat_name_to_original_fqn"
         ] = self.dynamo_flat_name_to_original_fqn.copy()
 
-        graph_code_log.debug(
+        graph_code_log.warning(
             "%s",
             lazy_format_graph_code(
                 name, gm, include_stride=True, include_device=True, colored=True
