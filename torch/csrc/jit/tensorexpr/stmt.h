@@ -750,9 +750,9 @@ class TORCH_API For : public StmtNode<For> {
     set_parent(body_, this);
   }
 
-  For(VarPtr var,
-      ExprPtr start,
-      ExprPtr stop,
+  For(const VarPtr& var,
+      const ExprPtr& start,
+      const ExprPtr& stop,
       StmtPtr body,
       LoopOptions loop_options)
       : var_(std::move(var)),
