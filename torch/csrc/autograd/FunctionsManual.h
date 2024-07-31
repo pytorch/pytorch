@@ -64,11 +64,6 @@ TORCH_API std::vector<Tensor> not_implemented_list(
 at::Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result);
 at::Tensor maybe_multiply(const at::Tensor& t, const at::Scalar& s);
 int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim);
-Tensor _safe_softmax_backward(
-    const Tensor& grad,
-    const Tensor& result,
-    int64_t dim,
-    at::ScalarType input_dtype);
 Tensor restore_reduced_dims(
     const Tensor& output,
     IntArrayRef dims,
