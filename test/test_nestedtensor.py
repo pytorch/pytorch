@@ -3943,7 +3943,7 @@ class TestNestedTensorSubclass(TestCase):
         values = torch.randn(
             5, 11, dtype=torch.float64, device=device, requires_grad=True
         )
-        offsets = torch.tensor([0, 2, 3, 5])
+        offsets = torch.tensor([0, 2, 3, 5], device=device)
 
         def grad_test_func(values, offsets):
             nt = torch.nested.nested_tensor_from_jagged(values, offsets)

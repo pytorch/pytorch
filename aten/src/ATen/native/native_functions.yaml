@@ -1469,6 +1469,7 @@
 - func: chunk_backward(Tensor[] grads, Tensor input, int chunks, int dim) -> Tensor
   variants: function
   dispatch:
+    CompositeImplicitAutograd: chunk_backward
     NestedTensorCPU, NestedTensorCUDA: chunk_backward
 
 - func: tensor_split.sections(Tensor(a -> *) self, SymInt sections, int dim=0) -> Tensor(a)[]
