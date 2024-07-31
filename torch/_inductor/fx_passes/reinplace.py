@@ -499,8 +499,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 # >>> op(x, y)
                 # This also applies if we have views: functional_op(x, x[0])
                 # should not reinplace into op(x, x[0]).
-                get_node_storage(mutated_arg) not in storage_of_reinplaced_args and
-                can_inplace(node, mutated_arg)
+                get_node_storage(mutated_arg) not in storage_of_reinplaced_args
+                and can_inplace(node, mutated_arg)
             ):
                 copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                 if copy_node is not None:
