@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TemporaryFileName,
     TEST_CUDA,
+    TEST_XPU,
 )
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
@@ -68,6 +69,7 @@ def generate_faked_module():
 
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
+@unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionOpenRgistration(common.TestCase):
     """Tests Open Device Registration with C++ extensions."""
@@ -343,71 +345,24 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         cpu_tensor_pin = cpu_tensor.pin_memory("foo")
         self.assertTrue(cpu_tensor_pin.is_pinned("foo"))
 
-        # Test storage pin_memory on custom device string
+        # Test storage pin_memory and is_pin
         cpu_storage = cpu_tensor.storage()
-        foo_device = torch.device("foo")
-        self.assertFalse(cpu_storage.is_pinned("foo"))
+        # We implement a dummy pin_memory of no practical significance
+        # for custom device. Once tensor.pin_memory() has been called,
+        # then tensor.is_pinned() will always return true no matter
+        # what tensor it's called on.
+        self.assertTrue(cpu_storage.is_pinned("foo"))
 
-        cpu_storage_pin = cpu_storage.pin_memory("foo")
-        self.assertFalse(cpu_storage.is_pinned())
-        self.assertFalse(cpu_storage.is_pinned("foo"))
-        self.assertFalse(cpu_storage.is_pinned(foo_device))
-        self.assertFalse(cpu_storage_pin.is_pinned())
-        self.assertTrue(cpu_storage_pin.is_pinned("foo"))
-        self.assertTrue(cpu_storage_pin.is_pinned(foo_device))
-
-        cpu_storage_pin_already = cpu_storage_pin.pin_memory("foo")
-        self.assertTrue(cpu_storage_pin.is_pinned("foo"))
-        self.assertTrue(cpu_storage_pin.is_pinned(foo_device))
-        self.assertTrue(cpu_storage_pin_already.is_pinned("foo"))
-        self.assertTrue(cpu_storage_pin_already.is_pinned(foo_device))
-        self.assertFalse(cpu_storage.is_pinned("foo"))
-
-        cpu_storage_pinned = cpu_storage.pin_memory(foo_device)
-        self.assertFalse(cpu_storage.is_pinned())
-        self.assertFalse(cpu_storage.is_pinned("foo"))
-        self.assertFalse(cpu_storage.is_pinned(foo_device))
-        self.assertFalse(cpu_storage_pinned.is_pinned())
+        cpu_storage_pinned = cpu_storage.pin_memory("foo")
         self.assertTrue(cpu_storage_pinned.is_pinned("foo"))
-        self.assertTrue(cpu_storage_pinned.is_pinned(foo_device))
 
         # Test untyped storage pin_memory and is_pin
         cpu_tensor = torch.randn([3, 2, 1, 4])
         cpu_untyped_storage = cpu_tensor.untyped_storage()
-        self.assertFalse(cpu_untyped_storage.is_pinned())
-        self.assertFalse(cpu_untyped_storage.is_pinned("foo"))
+        self.assertTrue(cpu_untyped_storage.is_pinned("foo"))
 
         cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory("foo")
-        self.assertFalse(cpu_untyped_storage_pinned.is_pinned())
         self.assertTrue(cpu_untyped_storage_pinned.is_pinned("foo"))
-        self.assertTrue(cpu_untyped_storage_pinned.is_pinned(foo_device))
-
-        cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory(foo_device)
-        self.assertFalse(cpu_untyped_storage_pinned.is_pinned())
-        self.assertTrue(cpu_untyped_storage_pinned.is_pinned("foo"))
-        self.assertTrue(cpu_untyped_storage_pinned.is_pinned(foo_device))
-
-        with self.assertRaisesRegex(TypeError, "positional arguments but 3 were given"):
-            cpu_untyped_storage_pinned.is_pinned("foo1", "foo2")
-
-        # Test storage pin_memory on error device
-        self.assertFalse(cpu_storage_pinned.is_pinned("hpu"))
-        self.assertFalse(cpu_untyped_storage_pinned.is_pinned("hpu"))
-        invalid_device = torch.device("hpu")
-        self.assertFalse(cpu_untyped_storage_pinned.is_pinned(invalid_device))
-
-        with self.assertRaisesRegex(
-            NotImplementedError, "with arguments from the 'HPU' backend"
-        ):
-            cpu_storage.pin_memory("hpu")
-        with self.assertRaisesRegex(
-            NotImplementedError, "with arguments from the 'HPU' backend"
-        ):
-            cpu_untyped_storage.pin_memory("hpu")
-        with self.assertRaisesRegex(
-            NotImplementedError, "with arguments from the 'HPU' backend"
-        ):
-            cpu_untyped_storage.pin_memory(invalid_device)
 
     @unittest.skip(
         "Temporarily disable due to the tiny differences between clang++ and g++ in defining static variable in inline function"

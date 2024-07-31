@@ -1,5 +1,18 @@
 import warnings
-from typing import Iterable, List, NamedTuple, Optional, Tuple, Union
+from collections.abc import Iterable
+from typing import (
+    Any,
+    Callable,
+    List,
+    NamedTuple,
+    Optional,
+    overload,
+    Tuple,
+    TypeVar,
+    Union,
+)
+
+from typing_extensions import Self
 
 import torch
 from torch import _VF, Tensor
@@ -16,6 +29,9 @@ __all__ = [
     "unpack_sequence",
 ]
 
+_T = TypeVar("_T")
+_R = TypeVar("_R")
+
 
 class PackedSequence_(NamedTuple):
     data: torch.Tensor
@@ -24,7 +40,7 @@ class PackedSequence_(NamedTuple):
     unsorted_indices: Optional[torch.Tensor]
 
 
-def bind(optional, fn):
+def bind(optional: Optional[_T], fn: Callable[[_T], _R]) -> Optional[_R]:
     if optional is None:
         return None
     return fn(optional)
@@ -64,12 +80,15 @@ class PackedSequence(PackedSequence_):
         This invariant is maintained throughout :class:`PackedSequence` class,
         and all functions that construct a :class:`PackedSequence` in PyTorch
         (i.e., they only pass in tensors conforming to this constraint).
-
     """
 
     def __new__(
-        cls, data, batch_sizes=None, sorted_indices=None, unsorted_indices=None
-    ):
+        cls,
+        data: Tensor,
+        batch_sizes: Optional[Tensor] = None,
+        sorted_indices: Optional[Tensor] = None,
+        unsorted_indices: Optional[Tensor] = None,
+    ) -> Self:
         return super().__new__(
             cls,
             *_packed_sequence_init_args(
@@ -81,7 +100,7 @@ class PackedSequence(PackedSequence_):
     #
     # See the note above in doc string (starting with ":attr:`data` can be on
     # arbitrary device...").
-    def pin_memory(self):
+    def pin_memory(self) -> Self:
         # Why not convert `batch_sizes`?
         # See NOTE [ device and dtype of a PackedSequence ]
         return type(self)(
@@ -91,48 +110,35 @@ class PackedSequence(PackedSequence_):
             bind(self.unsorted_indices, lambda t: t.pin_memory()),
         )
 
-    def cuda(self, *args, **kwargs):
-        # Tests to see if 'cuda' should be added to kwargs
-        ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(
-            *args, **kwargs
-        )
-        if ex.is_cuda:
-            return self.to(*args, **kwargs)
-        return self.to(*args, device="cuda", **kwargs)
+    @overload
+    def to(
+        self,
+        dtype: torch.dtype,
+        non_blocking: bool = ...,
+        copy: bool = ...,
+    ) -> Self:
+        ...
 
-    def cpu(self, *args, **kwargs):
-        ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(
-            *args, **kwargs
-        )
-        if ex.device.type == "cpu":
-            return self.to(*args, **kwargs)
-        return self.to(*args, device="cpu", **kwargs)
+    @overload
+    def to(
+        self,
+        device: Optional[Union[str, torch.device, int]] = ...,
+        dtype: Optional[torch.dtype] = ...,
+        non_blocking: bool = ...,
+        copy: bool = ...,
+    ) -> Self:
+        ...
 
-    def double(self):
-        return self.to(dtype=torch.double)
+    @overload
+    def to(
+        self,
+        other: Tensor,
+        non_blocking: bool = ...,
+        copy: bool = ...,
+    ) -> Self:
+        ...
 
-    def float(self):
-        return self.to(dtype=torch.float)
-
-    def half(self):
-        return self.to(dtype=torch.half)
-
-    def long(self):
-        return self.to(dtype=torch.long)
-
-    def int(self):
-        return self.to(dtype=torch.int)
-
-    def short(self):
-        return self.to(dtype=torch.short)
-
-    def char(self):
-        return self.to(dtype=torch.int8)
-
-    def byte(self):
-        return self.to(dtype=torch.uint8)
-
-    def to(self, *args, **kwargs):
+    def to(self, *args: Any, **kwargs: Any) -> Self:
         r"""Perform dtype and/or device conversion on `self.data`.
 
         It has similar signature as :meth:`torch.Tensor.to`, except optional
@@ -163,12 +169,55 @@ class PackedSequence(PackedSequence_):
             )
             return type(self)(data, self.batch_sizes, sorted_indices, unsorted_indices)
 
+    def cuda(self, *args: Any, **kwargs: Any) -> Self:
+        # Tests to see if 'cuda' should be added to kwargs
+        ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(
+            *args, **kwargs
+        )
+        if ex.is_cuda:
+            return self.to(*args, **kwargs)
+        kwargs["device"] = "cuda"
+        return self.to(*args, **kwargs)
+
+    def cpu(self, *args: Any, **kwargs: Any) -> Self:
+        ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(
+            *args, **kwargs
+        )
+        if ex.device.type == "cpu":
+            return self.to(*args, **kwargs)
+        kwargs["device"] = "cpu"
+        return self.to(*args, **kwargs)
+
+    def double(self) -> Self:
+        return self.to(dtype=torch.double)
+
+    def float(self) -> Self:
+        return self.to(dtype=torch.float)
+
+    def half(self) -> Self:
+        return self.to(dtype=torch.half)
+
+    def long(self) -> Self:
+        return self.to(dtype=torch.long)
+
+    def int(self) -> Self:
+        return self.to(dtype=torch.int)
+
+    def short(self) -> Self:
+        return self.to(dtype=torch.short)
+
+    def char(self) -> Self:
+        return self.to(dtype=torch.int8)
+
+    def byte(self) -> Self:
+        return self.to(dtype=torch.uint8)
+
     @property
-    def is_cuda(self):
+    def is_cuda(self) -> bool:
         r"""Return true if `self.data` stored on a gpu."""
         return self.data.is_cuda
 
-    def is_pinned(self):
+    def is_pinned(self) -> bool:
         r"""Return true if `self.data` stored on in pinned memory."""
         return self.data.is_pinned()
 
@@ -231,7 +280,7 @@ def invert_permutation(permutation: Optional[Tensor]) -> Optional[Tensor]:
 
 def pack_padded_sequence(
     input: Tensor,
-    lengths: Tensor,
+    lengths: Union[Tensor, List[int]],
     batch_first: bool = False,
     enforce_sorted: bool = True,
 ) -> PackedSequence:
@@ -343,10 +392,6 @@ def pad_packed_sequence(
         containing the list of lengths of each sequence in the batch.
         Batch elements will be re-ordered as they were ordered originally when
         the batch was passed to ``pack_padded_sequence`` or ``pack_sequence``.
-
-
-
-
     """
     max_seq_length = sequence.batch_sizes.size(0)
     if total_length is not None:
@@ -370,7 +415,7 @@ def pad_packed_sequence(
     return padded_output, lengths
 
 
-# NOTE: .pyi stub allows Iterable[Tensor], but for JIT-compatibility we need to be more restrictive here.
+# NOTE: for JIT-compatibility, we need to be more restrictive here and use specific types instead of Iterable.
 def pad_sequence(
     sequences: Union[Tensor, List[Tensor]],
     batch_first: bool = False,
@@ -420,15 +465,15 @@ def pad_sequence(
 
         # In JIT context this leads to,
         # RuntimeError: cannot statically infer the expected size of a list in this context
-        sequences = tuple(sequences)
+        sequences = tuple(sequences)  # type: ignore[assignment]
     else:
         # For JIT, we only support Union[Tensor, Tuple[Tensor]]
         if isinstance(sequences, torch.Tensor):
-            sequences = sequences.unbind(0)
+            sequences = sequences.unbind(0)  # type: ignore[assignment]
 
     # assuming trailing dimensions and type of all the Tensors
     # in sequences are same and fetching those from sequences[0]
-    return torch._C._nn.pad_sequence(sequences, batch_first, padding_value)
+    return torch._C._nn.pad_sequence(sequences, batch_first, padding_value)  # type: ignore[arg-type]
 
 
 def unpad_sequence(
@@ -496,7 +541,6 @@ def pack_sequence(
     is ``True``, the sequences should be sorted in the order of decreasing length.
     ``enforce_sorted = True`` is only necessary for ONNX export.
 
-
     Example:
         >>> from torch.nn.utils.rnn import pack_sequence
         >>> a = torch.tensor([1, 2, 3])
@@ -504,7 +548,6 @@ def pack_sequence(
         >>> c = torch.tensor([6])
         >>> pack_sequence([a, b, c])
         PackedSequence(data=tensor([1, 4, 6, 2, 5, 3]), batch_sizes=tensor([3, 2, 1]), sorted_indices=None, unsorted_indices=None)
-
 
     Args:
         sequences (list[Tensor]): A list of sequences of decreasing length.
@@ -526,7 +569,6 @@ def unpack_sequence(packed_sequences: PackedSequence) -> List[Tensor]:
 
     ``packed_sequences`` should be a PackedSequence object.
 
-
     Example:
         >>> from torch.nn.utils.rnn import pack_sequence, unpack_sequence
         >>> a = torch.tensor([1, 2, 3])
@@ -541,7 +583,6 @@ def unpack_sequence(packed_sequences: PackedSequence) -> List[Tensor]:
         >>> unpacked_sequences = unpack_sequence(packed_sequences)
         >>> print(unpacked_sequences)
         [tensor([1, 2, 3]), tensor([4, 5]), tensor([6])]
-
 
     Args:
         packed_sequences (PackedSequence): A PackedSequence object.
