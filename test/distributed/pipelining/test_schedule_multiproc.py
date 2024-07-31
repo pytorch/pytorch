@@ -16,10 +16,10 @@ from torch.distributed.pipelining import (
     PipelineStage,
     Schedule1F1B,
     ScheduleFlexibleInterleaved1F1B,
+    ScheduleForwardOnly,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
-    ScheduleForwardOnly,
 )
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
@@ -64,7 +64,10 @@ class ScheduleTest(MultiProcContinousTest):
         mod = MultiMLP(d_hid, n_layers=self.world_size)
         mod.to(self.device)
 
+        mod_ref = copy.deepcopy(mod)
+
         x = torch.randn(batch_size, d_hid, device=self.device)
+        x_clone = x.clone()
 
         num_microbatches = 4
         x_mb = x.chunk(num_microbatches)[0]
@@ -96,7 +99,13 @@ class ScheduleTest(MultiProcContinousTest):
                 dist.send(out, dst=0)
             else:
                 schedule.step()
-            
+
+        # Validate pipelined output is the same as reference model
+        if self.rank == self.world_size - 1:
+            for _ in range(num_iters):
+                x_clone = mod_ref(x_clone)
+
+            torch.testing.assert_close(x_clone, out)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")

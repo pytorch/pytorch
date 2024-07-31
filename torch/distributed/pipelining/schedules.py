@@ -582,7 +582,9 @@ class ScheduleForwardOnly(PipelineScheduleSingle):
         Run one iteration of the pipeline schedule
         """
         if target_mbs is not None or losses is not None:
-            raise RuntimeError("Forward-only schedule does not support loss computation")
+            raise RuntimeError(
+                "Forward-only schedule does not support loss computation"
+            )
 
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
 
