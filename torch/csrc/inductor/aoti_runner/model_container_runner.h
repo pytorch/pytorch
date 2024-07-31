@@ -82,7 +82,7 @@ class TORCH_API AOTIModelContainerRunner {
   std::unique_ptr<torch::aot_inductor::ProxyExecutor> proxy_executor_;
 };
 
-using AOTIModelRunnerABC = std::shared_ptr<AOTIModelContainerRunner> (*)(
+using CreateAOTIModelRunnerFunc = std::shared_ptr<AOTIModelContainerRunner> (*)(
     const std::string& model_so_path,
     size_t num_models,
     const std::string& device_str,
@@ -90,16 +90,17 @@ using AOTIModelRunnerABC = std::shared_ptr<AOTIModelContainerRunner> (*)(
 
 // Return a global map "device name" -> "aoti model runner create function" for
 // all registered in AOTI external backends
-TORCH_API std::unordered_map<std::string, AOTIModelRunnerABC>&
+TORCH_API std::unordered_map<std::string, CreateAOTIModelRunnerFunc>&
 getAOTIModelRunnerRegistry();
 
 // To register a new external backend in AOTI one needs to create an instance of
-// this struct
+// this struct. It is not thread-safe. Becase it is expected to be called during
+// the initialization of the program.
 struct TORCH_API RegisterAOTIModelRunner {
   RegisterAOTIModelRunner(
       const std::string& name,
-      AOTIModelRunnerABC aoti_model_runner_fn) {
-    getAOTIModelRunnerRegistry()[name] = aoti_model_runner_fn;
+      CreateAOTIModelRunnerFunc create_aoti_model_runner_fn) {
+    getAOTIModelRunnerRegistry()[name] = create_aoti_model_runner_fn;
   }
 };
 
