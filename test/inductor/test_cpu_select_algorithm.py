@@ -419,9 +419,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 super().__init__()
                 self.wte = torch.nn.Embedding(128, seq_lens)
                 self.wpe = torch.nn.Embedding(in_features, seq_lens)
-                self.linear1 = torch.nn.Linear(seq_lens, out_features, bias)
-                self.linear2 = torch.nn.Linear(out_features, seq_lens, bias)
-                self.ln = torch.nn.LayerNorm(seq_lens)
+                self.linear = torch.nn.Linear(out_features, seq_lens, bias)
 
             def forward(self, view_12, input_ids, view_9):
                 inputs_embeds = self.wte(input_ids)
@@ -433,7 +431,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 add = inputs_embeds + position_embeds
                 add_4 = view_9 + add
 
-                _linear_pointwise_default_45 = self.linear2(view_12)
+                _linear_pointwise_default_45 = self.linear(view_12)
 
                 view_13 = torch.ops.aten.reshape.default(
                     _linear_pointwise_default_45, [batch_size, in_features, seq_lens]
