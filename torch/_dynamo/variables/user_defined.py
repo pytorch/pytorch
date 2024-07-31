@@ -11,30 +11,14 @@ import sys
 import threading
 import types
 import warnings
-
 from typing import Dict, Generic, List, TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
-from ..bytecode_transformation import create_call_function
-
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
-
-try:
-    from torch.utils._cxx_pytree import PyTreeSpec
-except ImportError:
-    PyTreeSpec = type(None)
-
 import torch._dynamo.config
-
 import torch.nn
 from torch._guards import TracingContext
 
 from .. import variables
+from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import ObservedException, unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -62,6 +46,21 @@ from ..utils import (
 )
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
+
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
+try:
+    from torch.utils._cxx_pytree import PyTreeSpec
+except ImportError:
+    PyTreeSpec = type(None)
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 def is_standard_setattr(val):
