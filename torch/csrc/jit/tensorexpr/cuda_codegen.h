@@ -16,9 +16,7 @@
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/unique_name_manager.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 // A class that analyzes the given program relevant for Cuda backends.
 class CudaAnalysis : public IRVisitor {
@@ -287,6 +285,4 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
   std::string GetUniqueFuncName(const std::string& func_prefix);
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

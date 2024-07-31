@@ -239,7 +239,6 @@ void BlockPrinter::PrintDistribution(const std::unordered_set<BufPtr>& bufs) {
   for (auto& buf : bufs) {
     emitIndent();
     emitIndent();
-    auto buf_name = buf->name_hint();
     os() << block_analysis_->getFlatInputName(buf) << " = ";
     os() << "{(0, 1, )}" << '\n';
   }
