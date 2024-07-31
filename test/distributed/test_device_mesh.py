@@ -526,6 +526,29 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         tp_mesh = mesh["tp"]
         self.assertEqual(_world.group_count, ref_pg_count)
 
+    @with_comms
+    def test_get_item_3d_noncontinuous_slicing(self):
+        mesh_shape = (2, 2, 2)
+        mesh_dim_names = ("dp", "pp", "cp")
+        mesh_3d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        # Slice order simply decides which mesh_dim sits on which mesh_dim.
+        # For dp_cp_mesh, cp mesh is the innermost dimension.
+        dp_cp_mesh = mesh_3d["dp", "cp"]
+        cp_mesh = mesh_3d["cp"]
+        dp_local_rank = dp_cp_mesh.get_local_rank("dp")
+        # Check on the current dp_local_rank, whether the cp mesh tensor is the same.
+        self.assertEqual(dp_cp_mesh.mesh[dp_local_rank], cp_mesh.mesh)
+
+        # For dp_cp_mesh, dp mesh is the innermost dimension.
+        cp_dp_mesh = mesh_3d["cp", "dp"]
+        dp_mesh = mesh_3d["dp"]
+        cp_local_rank = cp_dp_mesh.get_local_rank("cp")
+        # Check on the current cp_local_rank, whether the dp mesh tensor is the same.
+        self.assertEqual(cp_dp_mesh.mesh[cp_local_rank], dp_mesh.mesh)
+
 
 class TestMeshEnv(DTensorTestBase):
     @with_comms
