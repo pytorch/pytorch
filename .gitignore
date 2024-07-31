@@ -248,7 +248,6 @@ distribute/*
 cmake_build
 .cmake_build
 gen
-install/*
 .setuptools-cmake-build
 .pytest_cache
 aten/build/*
