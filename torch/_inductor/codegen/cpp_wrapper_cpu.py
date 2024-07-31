@@ -2212,7 +2212,7 @@ if (custom_op_wrapper.get() == NULL) {
                 elif isinstance(raw_arg, float):
                     return f"PyFloat_FromDouble({raw_arg})"
                 elif isinstance(raw_arg, bool):
-                    return f"PyLong_FromLong({raw_arg})"
+                    return f"PyBool_FromLong({1 if raw_arg else 0})"
                 elif isinstance(raw_arg, complex):
                     return f"PyComplex_FromDoubles({raw_arg.real, raw_arg.imag})"
             else:
