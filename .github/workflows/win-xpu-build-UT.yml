@@ -23,9 +23,8 @@ env:
     ACTIONS_RUNNER_DEBUG: true
 
 jobs:
-  build-and-test:
+  Preparation:
     runs-on: ["${{ inputs.win_runner }}"]
-
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -52,6 +51,10 @@ jobs:
         set "basekit_path=C:\Program Files (x86)\Intel\oneAPI"
         call "%basekit_path%\setvars.bat"
 
+  Build-whls:
+    runs-on: ["${{ inputs.win_runner }}"]
+    needs: [Preparation]
+    steps:
     - name: Build Torch
       shell: cmd
       run: |
@@ -85,6 +88,10 @@ jobs:
             exit
         fi
 
+  Unit-tests:
+    runs-on: ["${{ inputs.win_runner }}"]
+    needs: [Build-whls, Preparation]
+    steps:
     - name: Run Unit Tests
       run: |
         if exist "%home_dir%\xpurepo" rmdir /s /q "%home_dir%\xpurepo"
