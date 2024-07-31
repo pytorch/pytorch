@@ -410,25 +410,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
     )
 
     V.graph.sizevars.guard_leq(m * gqa_shared_heads, sympy.Integer(BLOCK_M))
-
-    print(type(query))
-    print("->", type(query.data))
-    if not isinstance(query.data, ir.Buffer):
-        print("->", type(query.data.data))
-        if not isinstance(query.data.data, ir.Buffer):
-            print("->", type(query.data.data))
-
     query = ir.ExternKernel.realize_input(query)
-
     q_stride = query.get_stride()
-
-    print(type(query))
-    print("->", type(query.data))
-    if not isinstance(query.data, ir.Buffer):
-        print("->", type(query.data.data))
-
-    print(q_stride)
-    print(query.get_size())
 
     # Reshape query for GQA: [B, Hq, Mq, D] -> [B, Hkv, G, Mq, D]
     gqa_query_shape = (
