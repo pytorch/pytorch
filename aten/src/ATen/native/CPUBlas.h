@@ -191,7 +191,6 @@ void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy);
 void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy);
 void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy);
 
-
 #if AT_MKLDNN_ENABLED()
 template <typename key_t, typename value_t>
 struct Kernel_Cache {
@@ -215,20 +214,21 @@ struct Kernel_Cache {
 };
 
 inline dnnl::memory::data_type get_dnnl_dtype(ScalarType dtype) {
-    if (dtype == ScalarType::Float) {
-        return dnnl::memory::data_type::f32;
-    } else if (dtype == ScalarType::BFloat16) {
-        return dnnl::memory::data_type::bf16;
-    } else if (dtype == ScalarType::Half) {
-        return dnnl::memory::data_type::f16;
-    } else if (dtype == ScalarType::Byte) {
-        return dnnl::memory::data_type::u8;
-    } else if (dtype == ScalarType::Char) {
-        return dnnl::memory::data_type::s8;
-    } else {
-        TORCH_CHECK(false, "get_dnnl_dtype expects float/bfloat16/half/int8 tensor input");
-    }
+  if (dtype == ScalarType::Float) {
+    return dnnl::memory::data_type::f32;
+  } else if (dtype == ScalarType::BFloat16) {
+    return dnnl::memory::data_type::bf16;
+  } else if (dtype == ScalarType::Half) {
+    return dnnl::memory::data_type::f16;
+  } else if (dtype == ScalarType::Byte) {
+    return dnnl::memory::data_type::u8;
+  } else if (dtype == ScalarType::Char) {
+    return dnnl::memory::data_type::s8;
+  } else {
+    TORCH_CHECK(false, "get_dnnl_dtype expects float/bfloat16/half/int8 tensor input");
+  }
 }
+#endif
 
 struct BrgemmKey {
   int64_t M;
@@ -304,6 +304,8 @@ struct PackKey {
   }
 };
 
+#if AT_MKLDNN_ENABLED()
+// Helper struct for convenient brgemm configuration
 struct GemmHelper {
   GemmHelper(
       int64_t M,
@@ -320,10 +322,21 @@ struct GemmHelper {
       const float beta) {
     // Create brgemm
     brg = dnnl::ukernel::brgemm(
-        M, N, K, bs, ld_a, ld_b, ld_c, get_dnnl_dtype(dt_a), get_dnnl_dtype(dt_b), get_dnnl_dtype(dt_c), alpha, beta);
+        M,
+        N,
+        K,
+        bs,
+        ld_a,
+        ld_b,
+        ld_c,
+        get_dnnl_dtype(dt_a),
+        get_dnnl_dtype(dt_b),
+        get_dnnl_dtype(dt_c),
+        alpha,
+        beta);
     // Create a scratchpad buffer for the brgemm execution
     scratchpad = std::vector<uint8_t>(brg.get_scratchpad_size());
-    // Prepare vector of pairs of tensors A and B offsets for each batch.
+    // Prepare default vector of pairs of tensors A and B offsets for each batch.
     A_B_offsets.reserve(1);
     A_B_offsets[0] = std::make_pair(0, 0);
   }
@@ -332,8 +345,10 @@ struct GemmHelper {
   std::vector<std::pair<int64_t, int64_t>> A_B_offsets;
 };
 
-template<typename scalar_t_a, typename scalar_t_b, typename scalar_t_c>
 struct Brgemm : public Kernel_Cache<BrgemmKey, GemmHelper> {
+  // Fetch/create GemmHelper object and execute brgemm with batch size and
+  // extern offset
+  template <typename scalar_t_a, typename scalar_t_b, typename scalar_t_c>
   static inline void call(
       int64_t M,
       int64_t N,
@@ -345,21 +360,53 @@ struct Brgemm : public Kernel_Cache<BrgemmKey, GemmHelper> {
       const float alpha,
       const float beta,
       const scalar_t_a* A,
-      const scalar_t_a* B,
+      const scalar_t_b* B,
       const std::vector<std::pair<int64_t, int64_t>>& offsets,
       scalar_t_c* C) {
-    auto&& key = BrgemmKey(M, N, K, bs, ld_a, ld_b, ld_c, c10::CppTypeToScalarType<scalar_t_a>::value, c10::CppTypeToScalarType<scalar_t_b>::value, c10::CppTypeToScalarType<scalar_t_c>::value, alpha, beta);
+    auto&& key = BrgemmKey(
+        M,
+        N,
+        K,
+        bs,
+        ld_a,
+        ld_b,
+        ld_c,
+        c10::CppTypeToScalarType<scalar_t_a>::value,
+        c10::CppTypeToScalarType<scalar_t_b>::value,
+        c10::CppTypeToScalarType<scalar_t_c>::value,
+        alpha,
+        beta);
+    // Fetch/create GemmHelper object
     auto&& value = fetch_or_create(key, [&]() {
       auto&& v = std::make_shared<GemmHelper>(
-          M, N, K, 1, ld_a, ld_b, ld_c, c10::CppTypeToScalarType<scalar_t_a>::value, c10::CppTypeToScalarType<scalar_t_b>::value, c10::CppTypeToScalarType<scalar_t_c>::value, alpha, beta);
+          M,
+          N,
+          K,
+          1,
+          ld_a,
+          ld_b,
+          ld_c,
+          c10::CppTypeToScalarType<scalar_t_a>::value,
+          c10::CppTypeToScalarType<scalar_t_b>::value,
+          c10::CppTypeToScalarType<scalar_t_c>::value,
+          alpha,
+          beta);
       (*v).brg.generate();
       return std::move(v);
     });
-    ((*value).brg).set_hw_context();
+    // Set the hardware context when encountering different brgemm objects
+    if (get_current() != value) {
+      // TODO Call release_hw_context at the end when there are no calculation issues
+      dnnl::ukernel::brgemm::release_hw_context();
+      ((*value).brg).set_hw_context();
+      get_current() = value;
+    }
+    // Execute brgemm
     ((*value).brg).execute(A, B, offsets, C, (*value).scratchpad.data());
-    release();
   }
 
+  // Fetch/create GemmHelper object and execute brgemm without batch size
+  template <typename scalar_t_a, typename scalar_t_b, typename scalar_t_c>
   static inline void call(
       int64_t M,
       int64_t N,
@@ -373,25 +420,53 @@ struct Brgemm : public Kernel_Cache<BrgemmKey, GemmHelper> {
       const scalar_t_b* B,
       scalar_t_c* C) {
     auto&& key = BrgemmKey(
-        M, N, K, int64_t(1), ld_a, ld_b, ld_c, c10::CppTypeToScalarType<scalar_t_a>::value, c10::CppTypeToScalarType<scalar_t_b>::value, c10::CppTypeToScalarType<scalar_t_c>::value, alpha, beta);
+        M,
+        N,
+        K,
+        int64_t(1),
+        ld_a,
+        ld_b,
+        ld_c,
+        c10::CppTypeToScalarType<scalar_t_a>::value,
+        c10::CppTypeToScalarType<scalar_t_b>::value,
+        c10::CppTypeToScalarType<scalar_t_c>::value,
+        alpha,
+        beta);
+    // Fetch/create GemmHelper object
     auto&& value = fetch_or_create(key, [&]() {
       auto&& v = std::make_shared<GemmHelper>(
-          M, N, K, 1, ld_a, ld_b, ld_c, c10::CppTypeToScalarType<scalar_t_a>::value, c10::CppTypeToScalarType<scalar_t_b>::value, c10::CppTypeToScalarType<scalar_t_c>::value, alpha, beta);
+          M,
+          N,
+          K,
+          1,
+          ld_a,
+          ld_b,
+          ld_c,
+          c10::CppTypeToScalarType<scalar_t_a>::value,
+          c10::CppTypeToScalarType<scalar_t_b>::value,
+          c10::CppTypeToScalarType<scalar_t_c>::value,
+          alpha,
+          beta);
       (*v).brg.generate();
       return std::move(v);
     });
-    ((*value).brg).set_hw_context();
+    if (get_current() != value) {
+      dnnl::ukernel::brgemm::release_hw_context();
+      ((*value).brg).set_hw_context();
+      get_current() = value;
+    }
     ((*value).brg)
         .execute(A, B, (*value).A_B_offsets, C, (*value).scratchpad.data());
-    release();
   }
-  static inline void release() {
-    dnnl::ukernel::brgemm::release_hw_context();
+
+  static inline std::shared_ptr<GemmHelper>& get_current() {
+    static thread_local std::shared_ptr<GemmHelper> current;
+    return current;
   }
 };
 
-struct Pack : public Kernel_Cache<PackKey, dnnl::ukernel::brgemm_pack_B> {
-  using pack_t = dnnl::ukernel::brgemm_pack_B;
+using pack_t = dnnl::ukernel::brgemm_pack_B;
+struct Pack : public Kernel_Cache<PackKey, pack_t> {
   static inline void call(
       int64_t K,
       int64_t N,
@@ -403,12 +478,12 @@ struct Pack : public Kernel_Cache<PackKey, dnnl::ukernel::brgemm_pack_B> {
       void* out) {
     auto&& key = PackKey(K, N, ld_in, ld_out, dt_in, dt_out);
     auto&& pack = fetch_or_create(key, [&]() {
-      auto&& pack_tmp =
-          std::make_shared<pack_t>(K, N, ld_in, ld_out, get_dnnl_dtype(dt_in), get_dnnl_dtype(dt_out));
-      if ((*pack_tmp).need_pack()) {
-        (*pack_tmp).generate();
+      auto&& p = std::make_shared<pack_t>(
+          K, N, ld_in, ld_out, get_dnnl_dtype(dt_in), get_dnnl_dtype(dt_out));
+      if ((*p).need_pack()) {
+        (*p).generate();
       }
-      return std::move(pack_tmp);
+      return std::move(p);
     });
     if ((*pack).need_pack()) {
       (*pack).execute(in, out);
@@ -421,12 +496,17 @@ struct Pack : public Kernel_Cache<PackKey, dnnl::ukernel::brgemm_pack_B> {
     auto key = PackKey(
         int64_t(64), int64_t(64), int64_t(64), int64_t(64), dt_in, dt_out);
     auto&& pack = fetch_or_create(key, [&]() {
-      auto&& pack_tmp = std::make_shared<pack_t>(
-          int64_t(64), int64_t(64), int64_t(64), int64_t(64), get_dnnl_dtype(dt_in), get_dnnl_dtype(dt_out));
-      if ((*pack_tmp).need_pack()) {
-        (*pack_tmp).generate();
+      auto&& p = std::make_shared<pack_t>(
+          int64_t(64),
+          int64_t(64),
+          int64_t(64),
+          int64_t(64),
+          get_dnnl_dtype(dt_in),
+          get_dnnl_dtype(dt_out));
+      if ((*p).need_pack()) {
+        (*p).generate();
       }
-      return std::move(pack_tmp);
+      return std::move(p);
     });
     return (*pack).need_pack();
   }
@@ -473,6 +553,9 @@ void brgemm(
     const at::Half* A,
     const at::Half* B,
     float* C);
+
+// Release brgemm hardware context
+void brgemm_release();
 
 // Pack B matrix to get better performance if needed
 void pack(
