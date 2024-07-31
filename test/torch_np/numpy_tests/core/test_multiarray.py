@@ -42,7 +42,7 @@ if TEST_WITH_TORCHDYNAMO:
     import numpy as np
     from numpy.testing import (
         assert_,
-        assert_allclose,  # IS_PYPY, IS_PYSTON, HAS_REFCOUNT,
+        assert_allclose,
         assert_almost_equal,
         assert_array_almost_equal,
         assert_array_equal,
@@ -50,15 +50,14 @@ if TEST_WITH_TORCHDYNAMO:
         assert_equal,
         assert_raises_regex,
         assert_warns,
-        # runstring, temppath,
-        suppress_warnings,  # break_cycles,
+        suppress_warnings,
     )
 
 else:
     import torch._numpy as np
     from torch._numpy.testing import (
         assert_,
-        assert_allclose,  # IS_PYPY, IS_PYSTON, HAS_REFCOUNT,
+        assert_allclose,
         assert_almost_equal,
         assert_array_almost_equal,
         assert_array_equal,
@@ -66,8 +65,7 @@ else:
         assert_equal,
         assert_raises_regex,
         assert_warns,
-        # runstring, temppath,
-        suppress_warnings,  # break_cycles,
+        suppress_warnings,
     )
 
 

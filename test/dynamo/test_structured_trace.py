@@ -15,6 +15,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._logging.structured
 import torch.distributed as dist
+import torch.fx as fx
 from torch._inductor.test_case import TestCase
 from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -82,6 +83,16 @@ class StructuredTraceTestingFormatter(logging.Formatter):
                 metadata["describe_tensor"]["view_func"] = "VIEW_FUNC"
         if "describe_source" in metadata:
             metadata["describe_source"]["describer_id"] = "ID"
+
+        if "dump_file" in metadata:
+            # Don't include the actually key number, that's sensitive to other
+            # test runs
+            metadata["dump_file"]["name"] = "<eval_with_key>"
+            return (
+                json.dumps(metadata)
+                + "\n"
+                + "\n".join(l.rstrip() for l in record.payload.splitlines())
+            )
 
         return json.dumps(metadata)
 
@@ -533,6 +544,37 @@ class StructuredTraceTest(TestCase):
         )
 
         self.assertParses()
+
+    def test_dump_file(self):
+        def f(x, y):
+            return x.add(y)
+
+        gm = fx.symbolic_trace(f)
+        torch.compile(gm, backend="eager")(torch.randn(3), torch.randn(3))
+
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            """\
+{"dynamo_start": {"stack": "STACK"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"dump_file": {"name": "<eval_with_key>"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+
+
+
+def forward(self, x, y):
+    add = x.add(y);  x = y = None
+    return add
+
+{"describe_storage": {"id": 0, "describer_id": "ID", "size": 12}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"describe_tensor": {"id": 0, "ndim": 1, "dtype": "torch.float32", "device": "device(type='cpu')", "size": [3], "is_leaf": true, "stride": [1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"describe_source": {"describer_id": "ID", "id": 0, "source": "L['x']"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"describe_storage": {"id": 1, "describer_id": "ID", "size": 12}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"describe_tensor": {"id": 1, "ndim": 1, "dtype": "torch.float32", "device": "device(type='cpu')", "size": [3], "is_leaf": true, "stride": [1], "storage": 1, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"describe_source": {"describer_id": "ID", "id": 1, "source": "L['y']"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"dynamo_output_graph": {"sizes": {"l_x_": [3], "l_y_": [3], "add": [3]}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+""",  # noqa: B950
+        )
 
     @torch._inductor.config.patch("fx_graph_cache", True)
     def test_codecache(self):
