@@ -582,18 +582,25 @@ def break_graph_if_unsupported(*, push):
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
                 if (
-                    graph_break_log.isEnabledFor(logging.DEBUG)
+                    graph_break_log.isEnabledFor(logging.WARNING)
                     and not explain
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
                     user_stack_formatted = "".join(traceback.format_list(user_stack))
                     # This log line is exercised from
                     #   python test/dynamo/test_exc.py -k test_graph_break_log
-                    graph_break_log.debug(
-                        "Graph break: from user code at:\n%s",
-                        user_stack_formatted,
-                        exc_info=True,
-                    )
+                    if excp.msg == "Tensor.item":
+                        graph_break_log.warning(
+                            "Graph break: from user code at:\n%s",
+                            user_stack_formatted,
+                            exc_info=True,
+                        )
+                    else:
+                        graph_break_log.debug(
+                            "Graph break: from user code at:\n%s",
+                            user_stack_formatted,
+                            exc_info=True,
+                        )
                 else:
                     # This log line MUST NOT contain the string "Graph break",
                     # exercised by
