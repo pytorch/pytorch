@@ -313,6 +313,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     bool checkTimeout(
         std::optional<std::chrono::milliseconds> timeout = std::nullopt);
 
+    std::chrono::milliseconds getOpTimeout() const;
+
     std::vector<at::Tensor> result() override;
 
    protected:
@@ -340,6 +342,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Clone of opTimeout_ from ProcessGroupNCCL.
     std::chrono::milliseconds opTimeout_;
+
+    // timeout to be reduced after this work finishes.
+    std::chrono::milliseconds opTimeoutReduce_;
 
     // Time point representing when the work started.
     std::chrono::time_point<std::chrono::steady_clock> workStartTime_;
@@ -856,12 +861,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // The timeout extension which has been already applied to work.
   std::chrono::milliseconds inflightTimeoutExt_ = std::chrono::milliseconds(0);
-
-  // Record of first work and will get reset if timeout is further extended.
-  std::unordered_map<
-      c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>,
-      std::chrono::milliseconds>
-      workTimeReduce_ = {};
 
   const c10::intrusive_ptr<Options> options_;
 

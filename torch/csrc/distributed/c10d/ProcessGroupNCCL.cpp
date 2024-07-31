@@ -586,6 +586,10 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   return true;
 }
 
+std::chrono::milliseconds ProcessGroupNCCL::WorkNCCL::getOpTimeout() const {
+  return opTimeout_;
+}
+
 bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
     std::optional<std::chrono::milliseconds> timeout) {
   STATIC_SCOPED_WAIT_COUNTER(
@@ -1786,13 +1790,11 @@ void ProcessGroupNCCL::watchdogHandler() {
         {
           // Reset the timeout and first work if the work is completed.
           std::unique_lock<std::mutex> lock(mtxTimeoutExtension_);
-          auto workPtr =
-              c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>::reclaim(&work);
-          if (workTimeReduce_.find(workPtr) != workTimeReduce_.end()) {
-            auto timeReduce = workTimeReduce_.at(workPtr);
-            extendedTimeout_ -= timeReduce;
-            inflightTimeoutExt_ -= timeReduce;
-            workTimeReduce_.erase(workPtr);
+          LOG(ERROR) << work.opTimeoutReduce_.count() << "CHECK HERE \n\n\n\n\n";
+          if (work.opTimeoutReduce_.count() > 0) {
+            extendedTimeout_ -= work.opTimeoutReduce_;
+            inflightTimeoutExt_ -= work.opTimeoutReduce_;
+            LOG(ERROR) << extendedTimeout_.count() << "HERE \n\n\n\n\n";
           }
         }
         pgStatus_->lastCompletedSeq = work.seq_;
@@ -2436,7 +2438,7 @@ void ProcessGroupNCCL::assignTimeoutToWork(
     timeout += extendedTimeout_;
   }
   work->opTimeout_ = timeout;
-  workTimeReduce_[work] = extendedTimeout_ - inflightTimeoutExt_;
+  work->opTimeoutReduce_ = extendedTimeout_ - inflightTimeoutExt_;
   inflightTimeoutExt_ = extendedTimeout_;
 }
 
