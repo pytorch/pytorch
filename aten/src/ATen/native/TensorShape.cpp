@@ -84,7 +84,7 @@
 #include <ATen/ops/cat_meta.h>
 #include <ATen/ops/cat_native.h>
 #include <ATen/ops/chunk_native.h>
-#include <ATen/ops/chunk_backward.h>
+#include <ATen/ops/chunk_backward_native.h>
 #include <ATen/ops/col_indices_copy_native.h>
 #include <ATen/ops/column_stack_native.h>
 #include <ATen/ops/concat_native.h>
