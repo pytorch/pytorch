@@ -178,10 +178,10 @@ log_state = LogState()
 
 # sample usage: torch._logging.set_logs(**torch._logging.DEFAULT_LOGGING)
 DEFAULT_LOGGING = {
-    "dynamo": logging.DEBUG,
-    "aot": logging.DEBUG,
-    "inductor": logging.DEBUG,
-    "fsdp": logging.DEBUG,
+    "dynamo": logging.INFO,
+    "aot": logging.INFO,
+    "inductor": logging.INFO,
+    "fsdp": logging.INFO,
     "ddp_graphs": True,
     "graph_breaks": True,
     "guards": True,

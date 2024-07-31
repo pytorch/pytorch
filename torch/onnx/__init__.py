@@ -3,8 +3,7 @@ from torch import _C
 from torch._C import _onnx as _C_onnx
 from torch._C._onnx import OperatorExportTypes, TensorProtoDataType, TrainingMode
 
-# TODO(After 1.13 release): Remove the deprecated SymbolicContext
-from ._exporter_states import ExportTypes, SymbolicContext
+from ._exporter_states import ExportTypes
 from ._internal.onnxruntime import (
     is_onnxrt_backend_supported,
     OrtBackend as _OrtBackend,

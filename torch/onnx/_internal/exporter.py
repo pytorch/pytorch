@@ -28,7 +28,6 @@ import torch
 import torch._ops
 import torch.export as torch_export
 import torch.utils._pytree as pytree
-from torch._subclasses import fake_tensor
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.fx import (
@@ -53,6 +52,7 @@ if TYPE_CHECKING:
         registration as torchlib_registry,
     )
 
+    from torch._subclasses import fake_tensor
     from torch.onnx._internal.fx import diagnostics
 
 _DEFAULT_OPSET_VERSION: Final[int] = 18
