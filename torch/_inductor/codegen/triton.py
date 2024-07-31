@@ -123,12 +123,12 @@ def gen_common_triton_imports():
 
 
 block_offsets = {
-    symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True, nonnegative=True)
+    symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True)
     for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
 }
 
 block_sizes = {
-    symt: sympy.Symbol(f"{prefix_str[symt].upper()}BLOCK", integer=True, positive=True)
+    symt: sympy.Symbol(f"{prefix_str[symt].upper()}BLOCK", integer=True, nonzero=True)
     for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
 }
 
@@ -383,22 +383,24 @@ class TritonPrinter(PythonPrinter):
         assert len(expr.args) == 1
         return f"{self.paren(self._print(expr.args[0]))}.to(tl.float64)"
 
+    # TODO: This is wrong if one of the inputs is negative.  This is hard to
+    # tickle though, as the inputs are typically positive (and if we can prove
+    # they are positive, we will have used Mod instead, for which this codegen
+    # is right).  If you are trying to hit this, maybe try something like
+    # torch.arange(n, device="cuda") - 1 and then do a modulus on it
     def _print_PythonMod(self, expr):
-        quot, div = expr.args
-        quot_s = self._print(quot)
-        div_s = self._print(div)
-        if quot.is_nonnegative and div.is_nonnegative:
-            return f"{self.paren(quot_s)} % {self.paren(div_s)}"
-        return f"triton_helpers.remainder_integer({quot_s}, {div_s})"
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
 
+    # TODO: This is wrong, see
+    # https://github.com/triton-lang/triton/issues/955
+    # But for Sympy expressions, things will /mostly/ work out because we
+    # don't usually deal with negative numbers in the division
     def _print_FloorDiv(self, expr):
         assert expr.is_integer
-        quot, div = expr.args
-        quot_s = self._print(quot)
-        div_s = self._print(div)
-        if quot.is_nonnegative and div.is_nonnegative:
-            return f"({self.paren(quot_s)} // {self.paren(div_s)})"
-        return f"triton_helpers.div_floor_integer({quot_s},  {div_s})"
+        x, div = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        return f"({x} // {div})"
 
     # TODO: This is wrong, when lhs, rhs > 2**53, Python does a higher
     # precision algorithm, which we would need to replicate here
@@ -592,7 +594,12 @@ class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton"""
 
     @staticmethod
-    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
+    def to_dtype(
+        x,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types=True,
+    ):
         def _get_min_elements_per_thread(
             src_dtype: torch.dtype, dst_dtype: torch.dtype
         ) -> int:
@@ -635,7 +642,13 @@ class TritonOverrides(OpOverrides):
             # to work around llvm uint conversion semantics
             # that produces 0's for negative values
             return f"{x}.to(tl.int8).to(tl.uint8)"
-        return f"{x}.to({triton_compute_type(dtype)})"
+
+        if use_compute_types:
+            out_dtype = triton_compute_type(dtype)
+        else:
+            out_dtype = triton_store_type(dtype)
+
+        return f"{x}.to({out_dtype})"
 
     @staticmethod
     def to_dtype_bitcast(x, dtype: torch.dtype, src_dtype: torch.dtype):
@@ -1170,7 +1183,6 @@ class TritonKernel(SIMDKernel):
         reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
         override_persistent_reduction=None,
-        optimize_mask=True,
     ):
         super().__init__(
             *groups,
@@ -1189,7 +1201,6 @@ class TritonKernel(SIMDKernel):
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints: Set[AutotuneHint] = set()
         self.triton_meta: Optional[Dict[str, object]] = None
-        self.optimize_mask: bool = optimize_mask
 
         self.codegen_range_tree()
 
@@ -2871,8 +2882,6 @@ class TritonKernel(SIMDKernel):
         return V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block)
 
     def filter_masks(self, mask_vars):
-        if not self.optimize_mask:
-            return
         for tree in self.range_trees:
             if self._has_constant_mask(tree):
                 mask_vars.discard(f"{tree.prefix}mask")
