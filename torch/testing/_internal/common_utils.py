@@ -1428,7 +1428,7 @@ if TEST_CUDA_CUDSS:
         A = spd.T @ spd
         b = torch.rand(3).cuda()
         A = A.to_sparse_csr().cuda()
-        x = torch.sparse.solve(A, b)
+        x = torch.sparse.spsolve(A, b)
     except RuntimeError as e:
         if "Calling torch.linalg.solve with sparse tensors requires" in str(e):
             TEST_CUDA_CUDSS = False

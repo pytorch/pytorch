@@ -21,7 +21,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_sparse_solve.h>
+#include <ATen/ops/_spsolve.h>
 #include <ATen/ops/_cholesky_solve_helper.h>
 #include <ATen/ops/_cholesky_solve_helper_native.h>
 #include <ATen/ops/_linalg_check_errors.h>
@@ -1936,7 +1936,7 @@ Tensor linalg_solve(const Tensor& A,
                     const Tensor& B,
                     bool left) {
   if (A.layout() == kSparseCsr) {
-    return at::_sparse_solve(A, B, left);
+    return at::_spsolve(A, B, left);
   }
   auto [result, info] = at::linalg_solve_ex(A, B, left);
   at::_linalg_check_errors(info, "torch.linalg.solve", A.dim() == 2);

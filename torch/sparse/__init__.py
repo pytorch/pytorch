@@ -297,8 +297,8 @@ Args:
 )
 
 
-solve = _add_docstr(_sparse._sparse_solve, r"""
-sparse.solve(input, other, *, left=True) -> Tensor
+spsolve = _add_docstr(_sparse._spsolve, r"""
+sparse.spsolve(input, other, *, left=True) -> Tensor
 
 Computes the solution of a square system of linear equations with 
 a unique solution. Its purpose is similar to :func:`torch.linalg.solve`,
