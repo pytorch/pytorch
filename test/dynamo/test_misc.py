@@ -10536,6 +10536,45 @@ fn
         c5 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c5), 0)
 
+    def test_inspect_signature_bind(self):
+        import inspect
+
+        def inner(a, b, *ar, c=10, d=11, **kw):
+            pass
+
+        def fn(x, apply_defaults):
+            sig = inspect.signature(inner)
+            bound = sig.bind(1, 2, 3, d=12, e=15)
+            bound.arguments["d"] = 13
+            if apply_defaults:
+                bound.apply_defaults()
+            return (
+                sig,
+                bound.signature,
+                bound,
+                bound.arguments,
+                bound.args,
+                bound.kwargs,
+                x + 1,
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        for apply_defaults in (True, False):
+            _, _, bound0, arguments0, args0, kwargs0, _ = fn(
+                torch.ones(3, 3), apply_defaults
+            )
+            _, _, bound1, arguments1, args1, kwargs1, _ = opt_fn(
+                torch.ones(3, 3), apply_defaults
+            )
+
+            self.assertEqual(bound0, bound1)
+            self.assertEqual(arguments0, arguments1)
+            self.assertEqual(args0, args1)
+            self.assertEqual(kwargs0, kwargs1)
+            self.assertTrue(args1)
+            self.assertTrue(kwargs1)
+
     def test_grad_none(self):
         def fn(x, y):
             x.grad = torch.abs(y)

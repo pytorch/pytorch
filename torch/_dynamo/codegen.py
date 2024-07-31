@@ -96,6 +96,11 @@ class PyCodegen:
         with such bits (LOAD_GLOBAL 3.11+, LOAD_ATTR 3.12+, LOAD_SUPER_ATTR).
         """
         old_len = len(self._output)
+        if sys.version_info < (3, 13):
+            # gen_fn may DUP_TOP instead if TOS is not cleared.
+            # Will cause problems since NULL will be pushed right
+            # before the generated instructions in <= 3.12
+            self.clear_tos()
         gen_fn()
         # inplace modify self._output
         added_insts = self._output[old_len:]
