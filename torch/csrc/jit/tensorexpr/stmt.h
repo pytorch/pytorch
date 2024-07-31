@@ -34,7 +34,7 @@ class TORCH_API Stmt : public std::enable_shared_from_this<Stmt> {
   static StmtPtr clone(StmtPtr s);
 
  protected:
-  static void set_parent(StmtPtr s, Stmt* new_parent) {
+  static void set_parent(const StmtPtr& s, Stmt* new_parent) {
     s->parent_ = new_parent;
   }
   std::shared_ptr<Stmt> getptr() {
@@ -93,7 +93,7 @@ class TORCH_API Block : public StmtNode<Block> {
     }
 
     stmts_.push_front(s);
-    set_parent(std::move(s), this);
+    set_parent(s, this);
   }
   void append_stmt(StmtPtr s) {
     if (s->get_parent()) {
@@ -102,7 +102,7 @@ class TORCH_API Block : public StmtNode<Block> {
     }
 
     stmts_.push_back(s);
-    set_parent(std::move(s), this);
+    set_parent(s, this);
   }
 
   void insert_stmt_before(StmtPtr s, StmtPtr before) {
@@ -118,7 +118,7 @@ class TORCH_API Block : public StmtNode<Block> {
     }
 
     stmts_.insert(pos, s);
-    set_parent(std::move(s), this);
+    set_parent(s, this);
   }
 
   void insert_stmt_after(StmtPtr s, StmtPtr after) {
@@ -184,13 +184,13 @@ class TORCH_API Block : public StmtNode<Block> {
     return alloc<Block>(cloned_stmts);
   }
 
-  bool remove_stmt(StmtPtr stmt) {
+  bool remove_stmt(const StmtPtr& stmt) {
     auto pos = std::find(stmts_.begin(), stmts_.end(), stmt);
     if (pos == stmts_.end()) {
       return false;
     }
 
-    set_parent(std::move(stmt), nullptr);
+    set_parent(stmt, nullptr);
     stmts_.erase(pos);
     return true;
   }
