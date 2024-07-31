@@ -3039,6 +3039,15 @@ class GraphModule(torch.nn.Module):
     def test_map_enumerate(a, b):
         return list(enumerate(map(lambda x: x + 1, [a, b]), start=1)), a + 1
 
+    @make_test
+    def test_map_infinite(a, b):
+        return list(map(lambda x, y: x + y, [a, b], itertools.count(3)))
+
+    @make_test
+    def test_map_unpack_vars(a, b):
+        x, y = map(lambda x: x + 1, [a, b])
+        return x + y
+
     def test_enumerate_custom(self):
         class MyClass:
             def __iter__(self):
@@ -3587,6 +3596,46 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         opt_fn_1 = torch.compile(fullgraph=True, backend=counter)(fn)
         self.assertEqual(opt_fn_1(t), fn(t))
         self.assertEqual(counter.frame_count, 2)
+
+    def test_str_handler_for_user_defined_object(self):
+        """
+        Confirms handler behaviour for `str` is the same between eager and dynamo.
+        Compares a user defined object with custom `__str__` method and without.
+        """
+
+        class CustomStr:
+            def __str__(self):
+                return "ok"
+
+        def foo_custom_str(x):
+            a = CustomStr()
+            return x, str(a)
+
+        eager_custom_str = foo_custom_str(torch.ones(4))
+        dynamo_custom_str = torch.compile(foo_custom_str, fullgraph=True)(torch.ones(4))
+
+        self.assertEqual(eager_custom_str[1], dynamo_custom_str[1])
+        self.assertEqual(eager_custom_str[1], "ok")
+
+        class DefaultStr:
+            pass
+
+        def foo_default_str(x):
+            a = DefaultStr()
+            return x, str(a)
+
+        eager_default_str = foo_default_str(torch.ones(4))
+        dynamo_default_str = torch.compile(foo_default_str, fullgraph=True)(
+            torch.ones(4)
+        )
+
+        # Check that the tensor output from eager and dynamo modes are the same
+        self.assertEqual(eager_default_str[0], dynamo_default_str[0])
+
+        # Check that the class name (without memory address) is the same in both modes
+        eager_class_name = eager_default_str[1].split(" object at")[0]
+        dynamo_class_name = dynamo_default_str[1].split(" object at")[0]
+        self.assertEqual(eager_class_name, dynamo_class_name)
 
 
 instantiate_parametrized_tests(FunctionTests)

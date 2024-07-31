@@ -460,6 +460,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten._unsafe_masked_index_put_accumulate,
             aten.unsafe_split.Tensor,
             aten.unsafe_split_with_sizes,
+            aten.unsqueeze_copy,
             aten._unsafe_view,
             aten.upsample_linear1d,
             aten.upsample_bilinear2d,

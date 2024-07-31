@@ -138,7 +138,7 @@ def _while_loop_tests():
         def __init__(self):
             super().__init__()
             self.linear = torch.nn.Linear(2, 2)
-            self.register_buffer("dec", torch.tensor(1))
+            self.dec = torch.nn.Buffer(torch.tensor(1))
 
         def forward(self, iter, x):
             def cond_fn(it, x):
@@ -154,7 +154,7 @@ def _while_loop_tests():
             super().__init__()
             self.mod = SimpleWithLinear()
             self.outer_linear = torch.nn.Linear(2, 2)
-            self.register_buffer("dec", torch.tensor(1))
+            self.dec = torch.nn.Buffer(torch.tensor(1))
 
         def forward(self, iter, x):
             def cond_fn(it, x):
@@ -2969,7 +2969,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 self.register_parameter(
                     "param", torch.nn.Parameter(torch.ones(2, 3), requires_grad=False)
                 )
-                self.register_buffer("buffer", torch.ones(2, 3) + 1)
+                self.buffer = torch.nn.Buffer(torch.ones(2, 3) + 1)
 
         my_mode = Mod()
 
