@@ -5464,12 +5464,19 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     # https://github.com/pytorch/pytorch/issues/132200
     def test_partitioner_cse_respects_mutation_boundaries(self):
+        set_available = hasattr(torch.ops, "fsdp") and hasattr(torch.ops.fsdp, "set_")
+        if not set_available:
+            return
+
         @torch.compile(backend="aot_eager_decomp_partition")
         def f(x, l):
+            # z0 and z1 can be CSEd
             z0 = x.sin()
             z1 = x.sin()
             y = x + 1
             torch.ops.fsdp.set_.default(x, y)
+            # z3 and z3 can be CSEd with each other,
+            # but *not* with z0/z1 (they cross a mutation boundary)
             z2 = x.sin()
             z3 = x.sin()
             return z0, z1, z2, z3, l**2
