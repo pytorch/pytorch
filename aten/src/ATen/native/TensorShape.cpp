@@ -84,6 +84,7 @@
 #include <ATen/ops/cat_meta.h>
 #include <ATen/ops/cat_native.h>
 #include <ATen/ops/chunk_native.h>
+#include <ATen/ops/chunk_backward.h>
 #include <ATen/ops/col_indices_copy_native.h>
 #include <ATen/ops/column_stack_native.h>
 #include <ATen/ops/concat_native.h>
@@ -4089,5 +4090,12 @@ int64_t dense_dim_default(const Tensor& self) {
   TORCH_CHECK(self.layout() == kStrided, "dense_dim expected sparse or strided tensor layout but got ", self.layout());
   return self.dim();
 }
+
+Tensor chunk_backward(at::TensorList grads, const at::Tensor & input, int64_t chunks, int64_t dim) {
+    // Not implemented
+    // chunk_backward is only used by Nested Jagged Tensor.
+    TORCH_CHECK_NOT_IMPLEMENTED(input.is_nested() && input.layout() == c10::kJagged, "chunk_backward is not implemented explicitly");
+    return Tensor{};
+  }
 
 } // namespace at::native

@@ -1314,7 +1314,7 @@ class TestNestedTensorDeviceType(TestCase):
         chunked = torch.chunk(nt_grad, 2, dim=-1)
         self.assertRaisesRegex(
             RuntimeError,
-            "derivative for aten::chunk is not implemented",
+            "chunk_backward is not implemented explicitly",
             lambda: chunked[0].backward(chunked[0].clone()),
         )
 
@@ -3917,17 +3917,58 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(flattened.shape, nt.view(3, -1, 10, 6).shape)
 
     def test_chunk(self, device):
+        # none NJT case
+        t = torch.randn(10, 4, 5, requires_grad=True)
+        t_list = t.chunk(3, dim=0)
+        loss = t_list[0].sum() + t_list[2].sum()
+        loss.backward()
+
         # normal case
         D = 30
         B = 8
         nt = random_nt_from_dims(
-            [B, None, D], device=device, dtype=torch.float32, layout=torch.jagged
+            [B, None, D],
+            device=device,
+            dtype=torch.float32,
+            layout=torch.jagged,
+            requires_grad=True,
         )
         NUM_CHUNKS = 3
         chunks = nt.chunk(NUM_CHUNKS, dim=-1)
         self.assertEqual(len(chunks), NUM_CHUNKS)
         for i in range(NUM_CHUNKS):
             self.assertEqual(chunks[i].shape[-1], D // NUM_CHUNKS)
+
+        # test chunk_backward
+        values = torch.randn(
+            5, 11, dtype=torch.float64, device=device, requires_grad=True
+        )
+        offsets = torch.tensor([0, 2, 3, 5])
+
+        def grad_test_func(values, offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            chunks = nt.chunk(3, dim=-1)
+            return (
+                chunks[0].values().sum()
+                + chunks[1].values().sum()
+                + chunks[2].values().sum()
+            )
+
+        assert gradcheck(
+            grad_test_func,
+            inputs=(values, offsets),
+            check_batched_grad=False,
+        )
+
+        # test chunk_backward when some grads are None
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "NestedTensor chunk backward requires that all grads are not NONE",
+        ):
+            # nt = nt.clone().detach().requires_grad_(True)
+            # chunks = nt.chunk(NUM_CHUNKS, dim=-1)
+            loss = chunks[0].values().sum() + chunks[2].values().sum()
+            loss.backward()
 
         # chunk on batch dim
         chunks = nt.chunk(NUM_CHUNKS, dim=0)
@@ -3944,6 +3985,17 @@ class TestNestedTensorSubclass(TestCase):
             )
             self.assertEqual(chunks[i]._offsets[1:], offsets_expected)
         self.assertEqual(nt._values, torch.cat([x._values for x in chunks], dim=0))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "chunk_backward.* not supported for NestedTensor on dim=0"
+        ):
+            # doesn't support backward for chunk (dim=0) yet
+            loss = (
+                chunks[0].values().sum()
+                + chunks[1].values().sum()
+                + chunks[2].values().sum()
+            )
+            loss.backward()
 
         # chunk on ragged dim not supported
         with self.assertRaisesRegex(

@@ -73,6 +73,7 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
         named_arg_types = named_arg_types[:-1]
     else:
         if not (len(args) >= min_args and len(args) <= len(named_arg_types)):
+            print(args)
             raise ValueError(
                 f"NestedTensor {func.__name__}({schema_str}): expected at least {min_args} "
                 f"arguments and at most {len(named_arg_types)} arguments, but got: "
@@ -722,6 +723,53 @@ def chunk_default(func, *args, **kwargs):
             NestedTensor(values=x, **extract_kwargs(inp))
             for x in func(inp._values, **new_kwargs)
         ]
+
+
+@register_jagged_func(
+    torch.ops.aten.chunk_backward.default,
+    "grads: any, input: jt, chunks: any, dim: any",
+)
+def chunk_backward(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    grads = new_kwargs.pop("grads")
+    inp = new_kwargs.pop("input")
+
+    # Only support the simple case when dim != 0 for now
+    # To support chunk_backward dim=0, need to support cat(dim=0) first
+    dim = _wrap_jagged_dim(
+        inp.dim(), new_kwargs["dim"], "chunk_backward", convert_to_inner_dim=False
+    )
+
+    need_to_fill_grad = False
+    for grad in grads:
+        if grad is None:
+            need_to_fill_grad = True
+            break
+
+    if need_to_fill_grad:
+        # Since torch.zeros([.., j0, ..]) is not supported, skipping this case for now
+        raise RuntimeError(
+            "NestedTensor chunk backward requires that all grads are not NONE"
+        )
+
+        # dim_size = inp._size[dim]
+        # split_size = int((dim_size + chunks - 1) / chunks)
+        # grad_shape = list(inp._size)
+        # grad_shape[dim] = split_size
+        # last_grad_shape = list(inp._size)
+        # residue = dim_size - split_size * (dim_size // split_size)
+        # last_grad_shape[dim] = residue if residue != 0 else split_size
+        # last_idx = len(grads) - 1
+        # for idx, grad in enumerate(grads):
+        #     if grad is None:
+        #         if idx == last_idx:
+        #             grad = torch.zeros(last_grad_shape)
+        #         else:
+        #             grad = torch.zeros(grad_shape)
+
+    return torch.cat(tensors=grads, dim=dim)
 
 
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt_all, dim: any?")
