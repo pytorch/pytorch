@@ -6,14 +6,13 @@ import itertools
 import logging
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
 import sympy
 
 import torch
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
-from torch.utils._ordered_set import OrderedSet
 
 from .codegen.common import index_prevent_reordering
 from .utils import (
@@ -124,7 +123,7 @@ class MemoryDep(Dep):
         if self.is_indirect():
             numel = V.graph.get_numel(self.name)
         else:
-            vars: OrderedSet[sympy.Expr] = OrderedSet(self.index.free_symbols)
+            vars = set(self.index.free_symbols)
             numel = sympy.Integer(1)
             for var, size in zip(self.var_names, self.size):
                 if var in vars:
@@ -273,9 +272,9 @@ class IndexExprDep:
 
 @dataclasses.dataclass
 class ReadWrites:
-    reads: OrderedSet[Dep]
-    writes: OrderedSet[Dep]
-    index_exprs: OrderedSet[IndexExprDep]
+    reads: Set[Dep]
+    writes: Set[Dep]
+    index_exprs: Set[IndexExprDep]
     range_vars: Optional[List[sympy.Expr]] = None
     var_ranges: Optional[VarRanges] = None
     op_counts: typing.Counter[str] = dataclasses.field(
@@ -284,8 +283,8 @@ class ReadWrites:
 
     def rename(self, renames: typing.Dict[str, str]) -> "ReadWrites":
         return ReadWrites(
-            OrderedSet(dep.rename(renames) for dep in self.reads),
-            OrderedSet(dep.rename(renames) for dep in self.writes),
+            {dep.rename(renames) for dep in self.reads},
+            {dep.rename(renames) for dep in self.writes},
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
@@ -295,7 +294,7 @@ class ReadWrites:
     def with_read(self, dep: Dep) -> "ReadWrites":
         assert isinstance(dep, (WeakDep, StarDep))
         return ReadWrites(
-            OrderedSet.union(self.reads, [dep]),
+            set.union(self.reads, {dep}),
             self.writes,
             self.index_exprs,
             self.range_vars,
@@ -304,18 +303,18 @@ class ReadWrites:
         )
 
     def merge(self, other: "ReadWrites"):
-        reads = OrderedSet.union(self.reads, other.reads)
-        writes = OrderedSet.union(self.writes, other.writes)
-        index_exprs = OrderedSet.union(self.index_exprs, other.index_exprs)
+        reads = set.union(self.reads, other.reads)
+        writes = set.union(self.writes, other.writes)
+        index_exprs = set.union(self.index_exprs, other.index_exprs)
         op_counts = collections.Counter(self.op_counts)
         op_counts.update(other.op_counts)
         return ReadWrites(reads - writes, writes, index_exprs, op_counts=op_counts)
 
     @staticmethod
     def merge_list(read_writes: List["ReadWrites"]):
-        all_writes = OrderedSet.union(*[rw.writes for rw in read_writes])
-        all_reads = OrderedSet.union(*[rw.reads for rw in read_writes]) - all_writes
-        all_index_exprs = OrderedSet.union(*[rw.index_exprs for rw in read_writes])
+        all_writes = set.union(*[rw.writes for rw in read_writes])
+        all_reads = set.union(*[rw.reads for rw in read_writes]) - all_writes
+        all_index_exprs = set.union(*[rw.index_exprs for rw in read_writes])
 
         op_counts: typing.Counter[Any] = collections.Counter()
         for rw in read_writes:
@@ -340,7 +339,7 @@ class ReadWrites:
         """
         Integer index is used for load_seed.
         """
-        names: OrderedSet[str] = OrderedSet()
+        names = set()
         for dep in self.reads_and_writes():
             if not isinstance(dep, MemoryDep):
                 continue
@@ -354,9 +353,9 @@ class ReadWrites:
 class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     def __init__(self, var_ranges: VarRanges, normalize: bool):
         super().__init__()
-        self._reads: OrderedSet[Dep] = OrderedSet()
-        self._writes: OrderedSet[MemoryDep] = OrderedSet()
-        self._index_exprs: OrderedSet[IndexExprDep] = OrderedSet()
+        self._reads: Set[Dep] = set()
+        self._writes: Set[MemoryDep] = set()
+        self._index_exprs: Set[IndexExprDep] = set()
         self._var_ranges: VarRanges = var_ranges
         self._normalize: bool = normalize
 
@@ -510,8 +509,8 @@ def extract_read_writes(
 
     inner = rw.parent_handler.parent_handler
     return ReadWrites(
-        OrderedSet(inner._reads),
-        OrderedSet(inner._writes),
+        set(inner._reads),
+        set(inner._writes),
         inner._index_exprs,
         range_vars,
         var_ranges,
@@ -551,7 +550,7 @@ def extract_input_node_reduction_ranges(
     reduction_size = None
     size = None
     while reduction_size is None and len(reads) > 0:
-        seen: OrderedSet[str] = OrderedSet()
+        seen = set()
         new_reads = []
         for read in reads:
             if not isinstance(read, MemoryDep):
@@ -587,10 +586,10 @@ def canonicalization_prefix():
 
 # ops handler which computes all the free unbacked symbols for an IR
 class FreeUnbackedSymbolsOpsHandler:
-    symbols: OrderedSet[sympy.Symbol]
+    symbols: Set[sympy.Symbol]
 
     def __init__(self):
-        self.symbols = OrderedSet()
+        self.symbols = set()
 
     def __getattr__(self, name: str) -> Callable[..., Any]:
         def inner(*args, **kwargs):
