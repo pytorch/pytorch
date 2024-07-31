@@ -4285,8 +4285,8 @@ class TestQuantizeFx(QuantizationTestCase):
         m.load_state_dict(state_dict)
         with TemporaryFileName() as fname:
             torch.save(m.state_dict(), fname)
-            # Don't test weights_only here as this is loading a ScriptModule
-            m.load_state_dict(torch.load(fname))
+            # weights_only=False as this is loading a ScriptModule
+            m.load_state_dict(torch.load(fname, weights_only=False))
 
         checkModel(m, data, ref_weight, ref_bias, ref_res)
 

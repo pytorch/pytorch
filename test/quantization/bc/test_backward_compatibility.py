@@ -15,7 +15,6 @@ import torch.nn as nn
 
 from torch.ao.quantization import MinMaxObserver, PerChannelMinMaxObserver
 from torch.fx import GraphModule
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import (
     override_qengines,
     qengine_is_fbgemm,
@@ -267,7 +266,7 @@ class TestSerialization(TestCase):
         # load input tensor
         input_tensor = torch.load(input_file)
         expected_output_tensor = torch.load(expected_file)
-        expected_get_attrs = torch.load(get_attr_targets_file)
+        expected_get_attrs = torch.load(get_attr_targets_file, weights_only=False)
 
         # load model from package and verify output and get_attr targets match
         imp = torch.package.PackageImporter(package_file)
@@ -564,7 +563,7 @@ class TestSerialization(TestCase):
             ref_model, input_size=[5, 5], generate=False, check_numerics=False
         )
 
-    @skipIfNoFBGEMM
+    # @skipIfNoFBGEMM
     def test_linear_relu_package_quantization_transforms(self):
         m = LinearReluFunctional(4).eval()
         self._test_package(m, input_size=(1, 1, 4, 4), generate=False)

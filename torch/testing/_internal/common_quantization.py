@@ -674,7 +674,8 @@ class QuantizationTestCase(TestCase):
         b = io.BytesIO()
         torch.save(ref_model, b)
         b.seek(0)
-        loaded = torch.load(b)
+        # weights_only=False as this is legacy code that saves the model
+        loaded = torch.load(b, weights_only=False)
         load_out = loaded(*x)
         check_outputs(ref_out, load_out)
 

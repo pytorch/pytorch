@@ -156,7 +156,8 @@ class TestNN(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/linear.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            m = torch.load(path)
+            # weights_only=False as this is legacy code that saves the model
+            m = torch.load(path, weights_only=False)
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
 
