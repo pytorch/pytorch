@@ -22,6 +22,7 @@ from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
 )
 from torch.nn.attention._utils import _validate_sdpa_input
+from torch.utils._pytree import tree_map_only
 
 __all__ = [
     "BlockMask",
@@ -253,34 +254,58 @@ class BlockMask:
         kv_indices: Tensor,
         full_kv_num_blocks: Optional[Tensor] = None,
         full_kv_indices: Optional[Tensor] = None,
+        q_num_blocks: Optional[Tensor] = None,
+        q_indices: Optional[Tensor] = None,
+        full_q_num_blocks: Optional[Tensor] = None,
+        full_q_indices: Optional[Tensor] = None,
         BLOCK_SIZE: Union[int, Tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
         mask_mod: Optional[_mask_mod_signature] = None,
     ):
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
+
         self.kv_num_blocks = kv_num_blocks
         self.kv_indices = kv_indices
         self.full_kv_num_blocks = full_kv_num_blocks
         self.full_kv_indices = full_kv_indices
 
-        self.q_num_blocks, self.q_indices = _transpose_ordered(
-            kv_num_blocks, kv_indices
-        )
+        # Set q_num_blocks and q_indices if provided, otherwise generate them
+        if q_num_blocks is not None and q_indices is not None:
+            self.q_num_blocks = q_num_blocks
+            self.q_indices = q_indices
+        else:
+            self.q_num_blocks, self.q_indices = _transpose_ordered(
+                kv_num_blocks, kv_indices
+            )
 
-        if full_kv_num_blocks is not None:
+        # Set full_q_num_blocks and full_q_indices if provided, otherwise generate them if full_kv tensors are available
+        if full_q_num_blocks is not None and full_q_indices is not None:
+            self.full_q_num_blocks = full_q_num_blocks
+            self.full_q_indices = full_q_indices
+        elif full_kv_num_blocks is not None and full_kv_indices is not None:
             self.full_q_num_blocks, self.full_q_indices = _transpose_ordered(
                 full_kv_num_blocks, full_kv_indices
             )
         else:
             self.full_q_num_blocks, self.full_q_indices = None, None
+
         if isinstance(BLOCK_SIZE, int):
             BLOCK_SIZE = (BLOCK_SIZE, BLOCK_SIZE)
         self.BLOCK_SIZE = BLOCK_SIZE
-        if mask_mod is None:
-            mask_mod = noop_mask
-        self.mask_mod = mask_mod
 
-    def as_tuple(self):
+        self.mask_mod = mask_mod if mask_mod is not None else noop_mask
+
+    def as_tuple(self, flatten: bool = True):
+        """
+        Returns a tuple of the attributes of the BlockMask.
+
+        Args:
+            flatten (bool): If True, it will flatten the tuple of (KV_BLOCK_SIZE, Q_BLOCK_SIZE)
+        """
+        block_size = (
+            (self.BLOCK_SIZE[0], self.BLOCK_SIZE[1]) if flatten else (self.BLOCK_SIZE,)
+        )
+
         return (
             self.kv_num_blocks,
             self.kv_indices,
@@ -290,8 +315,7 @@ class BlockMask:
             self.q_indices,
             self.full_q_num_blocks,
             self.full_q_indices,
-            self.BLOCK_SIZE[0],
-            self.BLOCK_SIZE[1],
+            *block_size,
             self.mask_mod,
         )
 
@@ -442,6 +466,30 @@ class BlockMask:
             total_vis.append(block_vis)
 
         return "\n".join(total_vis)
+
+    def to(self, device: Union[torch.device, str]) -> "BlockMask":
+        """Moves the BlockMask to the specified device.
+
+        Args:
+            device (torch.device or str): The target device to move the BlockMask to.
+                Can be a torch.device object or a string (e.g., 'cpu', 'cuda:0').
+
+        Returns:
+            BlockMask: A new BlockMask instance with all tensor components moved
+            to the specified device.
+
+        Note:
+            This method does not modify the original BlockMask in-place.
+            Instead, it returns a new BlockMask instance where invidual tensor attributes
+            may or may not be moved to the specified device, depending on their
+            current device placement.
+        """
+        mapped_attributes = tree_map_only(
+            torch.Tensor,
+            lambda x: x.to(device),
+            self.as_tuple(flatten=False),
+        )
+        return BlockMask(*mapped_attributes)
 
 
 def _broadcast_to_dim(x, dim):

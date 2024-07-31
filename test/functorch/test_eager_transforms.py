@@ -3712,8 +3712,8 @@ class TestMakeFunctional(TestCase):
                 super().__init__()
                 self.bias = nn.Parameter(torch.randn(3))
                 self.linear = nn.Linear(3, 3)
-                self.register_buffer("buffer", torch.randn(3))
-                self.register_buffer("buffer_tied", self.buffer)
+                self.buffer = nn.Buffer(torch.randn(3))
+                self.buffer_tied = self.buffer
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3743,7 +3743,7 @@ class TestMakeFunctional(TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = nn.Linear(3, 3)
-                self.register_buffer("buffer", torch.randn(3))
+                self.buffer = nn.Buffer(torch.randn(3))
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3765,7 +3765,7 @@ class TestMakeFunctional(TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = nn.Linear(3, 3)
-                self.register_buffer("buffer", torch.randn(3))
+                self.buffer = nn.Buffer(torch.randn(3))
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3825,8 +3825,8 @@ class TestMakeFunctional(TestCase):
                 self.linear = nn.Linear(3, 3)
                 self.weight = self.linear.weight
                 self.bias = self.linear.bias
-                self.register_buffer("buffer", torch.randn(3))
-                self.register_buffer("buffer_tied", self.buffer)
+                self.buffer = nn.Buffer(torch.randn(3))
+                self.buffer_tied = self.buffer
 
             def forward(self, x):
                 x = self.linear(x)
