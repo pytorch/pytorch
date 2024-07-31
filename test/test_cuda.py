@@ -3957,6 +3957,11 @@ class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_raw_amdsmi_device_count(self):
+        """
+        This unit test will verify if the number of GPUs shown in `amd-smi
+        list` is equivalent to the count returned by `_raw_device_count_amdsmi`.
+        This should be unaffected by visible device settings.
+        """
         raw_device_cnt = int(
             subprocess.check_output(
                 "amd-smi list | grep 'GPU' | wc -l", shell=True
@@ -3967,6 +3972,12 @@ class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_raw_amdsmi_device_uuids(self):
+        """
+        This unit test will extract a list of UUIDs for each GPU using
+        rocminfo information, and check whether each UUID is present in
+        the output from `_raw_device_uuid_amdsmi` this allows us to test
+        that the pytorch call is returning a correct list of UUIDs.
+        """
         cmd = "rocminfo | grep -o 'Uuid:.*GPU-.*' | sed 's/Uuid:.*GPU-//'"
         uuids = (
             subprocess.check_output(cmd, shell=True, universal_newlines=True)
@@ -3984,6 +3995,12 @@ class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_uuid_visible_devices(self):
+        """
+        This unit test will simulate an environment where a UUID is passed
+        via CUDA/HIP_VISIBLE_DEVICES and ensure that the correct device count
+        is returned. This allows us to test that the visible device functionality
+        is operating as expected.
+        """
         test_script = """\
 import torch
 import os
