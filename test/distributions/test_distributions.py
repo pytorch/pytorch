@@ -5389,6 +5389,10 @@ class TestKL(DistributionsTestCase):
         )
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         lognormal = pairwise(LogNormal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
+        multinomial = pairwise(
+            Multinomial,
+            [[0.4, 0.3, 0.3], [0.2, 0.7, 0.1], [0.33, 0.33, 0.34], [0.2, 0.2, 0.6]],
+        )
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         independent = (Independent(normal[0], 1), Independent(normal[1], 1))
         onehotcategorical = pairwise(
@@ -5420,7 +5424,7 @@ class TestKL(DistributionsTestCase):
         # The following pairs are not tested due to very high variance of the monte carlo
         # estimator; their implementations have been reviewed with extra care:
         # - (pareto, normal)
-        self.precision = 0.1  # Set this to 0.01 when testing a new KL implementation.
+        self.precision = 0.01  # Set this to 0.01 when testing a new KL implementation.
         self.max_samples = int(1e07)  # Increase this when testing at smaller precision.
         self.samples_per_batch = int(1e04)
         self.finite_examples = [
@@ -5458,7 +5462,7 @@ class TestKL(DistributionsTestCase):
             (laplace, laplace),
             (lognormal, lognormal),
             (laplace, normal),
-            (normal, gumbel),
+            (multinomial, multinomial)(normal, gumbel),
             (normal, laplace),
             (normal, normal),
             (onehotcategorical, onehotcategorical),
