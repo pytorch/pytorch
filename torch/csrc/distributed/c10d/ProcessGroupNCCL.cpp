@@ -1128,7 +1128,10 @@ void ProcessGroupNCCL::abortCommsFromMap(
 }
 
 // Abort all communicators on this rank
-bool ProcessGroupNCCL::abort(std::optional<std::string> abortReason) {
+// Note: original name of this method is `abort`. It was renamed to
+// `abortComms` to distinguish from the `abort` method below. The `abort`
+// method calls `abortComms` but does more destruction than the latter.
+bool ProcessGroupNCCL::abortComms(std::optional<std::string> abortReason) {
   // Remove record from global ncclCommDevIdxMapMutex before aboarting,
   // so that a new cache segment would not register to already aborded
   // communicators. Note that ncclCommDevIdxMap is a global container which may
@@ -1147,7 +1150,8 @@ bool ProcessGroupNCCL::abort(std::optional<std::string> abortReason) {
   return true;
 }
 
-void ProcessGroupNCCL::shutdown(std::optional<std::string> reason) {
+// Abort this backend.
+void ProcessGroupNCCL::abort(std::optional<std::string> reason) {
   // Don't join threads here since the purpose of this method is to abort all
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
@@ -1157,8 +1161,9 @@ void ProcessGroupNCCL::shutdown(std::optional<std::string> reason) {
   // lauch abort asynchrounously and wait for it to complete or timeout
   LOG(INFO) << logPrefix()
             << "Launching ProcessGroupNCCL abort asynchrounously.";
-  std::future<bool> fut = std::async(
-      std::launch::async, [this, &reason]() { return this->abort(reason); });
+  std::future<bool> fut = std::async(std::launch::async, [this, &reason]() {
+    return this->abortComms(reason);
+  });
 
   waitForFutureOrTimeout(fut, options_->timeout, "ProcessGroup abort", true);
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL aborts successfully.";
@@ -1167,6 +1172,15 @@ void ProcessGroupNCCL::shutdown(std::optional<std::string> reason) {
   // heartbeat monitoring thread.
   terminateHeartbeatMonitorThread_.store(true);
   monitorWakeUpCV_.notify_one();
+}
+
+// Destroy (shutdown) this backend -- normal exit.
+void ProcessGroupNCCL::shutdown() {
+  // kwen2501 (Aug 2024): moved code of `shutdown()` to `abort()` because it
+  // actually implemented an abort behavior.
+  // TODO: implementation of `shutdown` should use ncclCommDestroy() instead
+  // of ncclCommAbort(). Ideally non-blocking API mode should be used.
+  this->abort();
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
@@ -1720,7 +1734,7 @@ void ProcessGroupNCCL::watchdogHandler() {
           work.abort();
           // PG level abort, which would abort all other communicators on this
           // rank
-          abort();
+          abortComms();
         }
 
         // Report desync state in case of timeout
@@ -1870,7 +1884,7 @@ void ProcessGroupNCCL::runHookLoop() {
         // already finished successfully at this point. We just need to abort
         // the process Abort all NCCL Communicators on this ProcessGroupNCCL
         // instance.
-        abort(errorStr);
+        abortComms(errorStr);
       }
     }
 
