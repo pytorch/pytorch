@@ -496,12 +496,12 @@ class TestBenchmarkingGPU(TestBenchmarking):
             start_time_s = time.perf_counter()
             torch.cuda.Event(enable_timing=True).record()
             elapsed_time_ms = (time.perf_counter() - start_time_s) * 100
-            self.assertEqual(elapsed_time_ms < 1)
+            self.assertEqual(elapsed_time_ms < 1, True)
         start_time_s = time.perf_counter()
         torch.cuda.Event(enable_timing=True).record()
         elapsed_time_ms = (time.perf_counter() - start_time_s) * 1000
         torch.cuda.synchronize()
-        self.assertEqual(elapsed_time_ms > 1)
+        self.assertEqual(elapsed_time_ms > 1, True)
 
     @gpu_patches
     def test_cpu_launch_overhead_ms_per_event_record(self, benchmarker, *args):
