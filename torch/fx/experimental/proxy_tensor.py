@@ -289,7 +289,7 @@ def snapshot_fake(val: Tensor) -> Optional[Tensor]:
 _ExtractValType = Optional[Union[
     PySymType, _AnyScriptObjectType, BackwardState,
     List["_ExtractValType"], Tuple["_ExtractValType", ...], Tensor,
-    int, float, bool]]
+    int, float, bool, dict]]
 
 def extract_val(val: _ExtractValType) -> _ExtractValType:
     if is_fake(val):
@@ -317,6 +317,8 @@ def extract_val(val: _ExtractValType) -> _ExtractValType:
             return None
     elif isinstance(val, (int, float, bool)):
         return val
+    elif isinstance(val, dict):
+        return {k: extract_val(v) for k, v in val.items()}
     elif val is None:
         return None
 
@@ -437,9 +439,8 @@ def track_tensor_tree(
             # which does not participate in const-prop)
             assert constant is None
 
-            # if isinstance(proxy, fx.Proxy):
-            #    # BUG? This is guaranteed to be a no-op
-            #    set_meta(proxy, e)
+            if isinstance(proxy, fx.Proxy):
+               set_meta(proxy, e)
 
             for key, val in e.items():
                 wrap_with_proxy(val, proxy[key], None)  # type: ignore[index]
