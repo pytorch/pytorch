@@ -551,24 +551,33 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
 
 class TestMeshEnv(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
     @with_comms
-    def test_get_parent_mesh(self):
-        mesh_shape = (2, self.world_size // 2)
-        mesh_dim_names = ("DP", "TP")
-        mesh_2d = init_device_mesh(
-            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+    def test_get_root_mesh(self):
+        mesh_3d = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("dp", "cp", "tp")
         )
 
-        self.assertEqual(_mesh_resources.get_parent_mesh(mesh_2d["DP"]), mesh_2d)
-        self.assertEqual(_mesh_resources.get_parent_mesh(mesh_2d["TP"]), mesh_2d)
+        dp_cp_mesh = mesh_3d["dp", "cp"]
+        cp_dp_mesh = mesh_3d["cp", "dp"]
+        dp_mesh = mesh_3d["dp"]
+        cp_mesh = mesh_3d["cp"]
+        tp_mesh = mesh_3d["tp"]
+        self.assertEqual(_mesh_resources.get_root_mesh(dp_cp_mesh), mesh_3d)
+        self.assertEqual(_mesh_resources.get_root_mesh(cp_dp_mesh), mesh_3d)
+        self.assertEqual(_mesh_resources.get_root_mesh(dp_mesh), mesh_3d)
+        self.assertEqual(_mesh_resources.get_root_mesh(cp_mesh), mesh_3d)
+        self.assertEqual(_mesh_resources.get_root_mesh(tp_mesh), mesh_3d)
 
-        mesh_0_2 = DeviceMesh(self.device_type, [0, 2])
-        mesh_1_3 = DeviceMesh(self.device_type, [1, 3])
-
-        self.assertEqual(_mesh_resources.get_parent_mesh(mesh_2d["DP"]), mesh_2d)
-        self.assertEqual(_mesh_resources.get_parent_mesh(mesh_2d["TP"]), mesh_2d)
-        self.assertEqual(_mesh_resources.get_parent_mesh(mesh_0_2), None)
-        self.assertEqual(_mesh_resources.get_parent_mesh(mesh_1_3), None)
+        # Slice the 1D mesh from the 2D submesh.
+        dp_mesh = dp_cp_mesh["dp"]
+        cp_mesh = dp_cp_mesh["cp"]
+        # Check the root mesh is still the original 3D mesh.
+        self.assertEqual(_mesh_resources.get_root_mesh(dp_mesh), mesh_3d)
+        self.assertEqual(_mesh_resources.get_root_mesh(cp_mesh), mesh_3d)
 
     @with_comms
     def test_get_parent_mesh_dim_exist(self):
@@ -578,15 +587,15 @@ class TestMeshEnv(DTensorTestBase):
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
 
-        self.assertEqual(_mesh_resources.get_parent_mesh_dim(mesh_2d["DP"]), 0)
-        self.assertEqual(_mesh_resources.get_parent_mesh_dim(mesh_2d["TP"]), 1)
+        self.assertEqual(_mesh_resources.get_root_mesh_dim(mesh_2d["DP"]), 0)
+        self.assertEqual(_mesh_resources.get_root_mesh_dim(mesh_2d["TP"]), 1)
 
     @with_comms
     def test_get_parent_mesh_dim_not_exist(self):
         mesh_shape = (self.world_size,)
         mesh = init_device_mesh(self.device_type, mesh_shape)
 
-        self.assertEqual(_mesh_resources.get_parent_mesh_dim(mesh), None)
+        self.assertEqual(_mesh_resources.get_root_mesh_dim(mesh), None)
 
     @with_comms
     def test_get_mesh_dim_by_name(self):
