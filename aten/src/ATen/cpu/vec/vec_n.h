@@ -149,10 +149,7 @@ class VectorizedN {
           a.values[i],
           b.values[i],
           std::min(count, (int64_t)Vectorized<T>::size()));
-      count -= Vectorized<T>::size();
-      if (count <= 0) {
-        break;
-      }
+      count = count < Vectorized<T>::size() ? 0 : count - Vectorized<T>::size();
     }
     return result;
   }
