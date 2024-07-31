@@ -22,12 +22,27 @@ class B2BGEMMTest(TestCase):
             g = torch.nn.GELU()
             return torch.mm(g(torch.mm(m1, m2)), m3)
 
+        def f_32(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
+            """
+            When the optimization is applied,
+            the Triton kernel is more precise than the above f,
+            because it internally uses float32 for accumulation while the above f uses float16.
+            To ensure a fair comparison,
+            we promote the baseline f to float32 for precision comparison.
+            This actually reduced some atol's in the tests from 0.2 to 0.1.
+            """
+            m1 = m1.to(torch.float32)
+            m2 = m2.to(torch.float32)
+            m3 = m3.to(torch.float32)
+            g = torch.nn.GELU()
+            return torch.mm(g(torch.mm(m1, m2)), m3).to(torch.float16)
+
         f_opt = torch.compile(f)
         A = torch.randn((256, 32), device="cuda", dtype=torch.float16)
         B = torch.randn((32, 256), device="cuda", dtype=torch.float16)
         C = torch.randn((256, 32), device="cuda", dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.2, rtol=0.01))
+        self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" in code)
 
     @torch._dynamo.config.patch(cache_size_limit=32)
@@ -42,12 +57,19 @@ class B2BGEMMTest(TestCase):
             g = torch.nn.ReLU()
             return torch.mm(m1, g(torch.mm(m2, m3)))
 
+        def f_32(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
+            m1 = m1.to(torch.float32)
+            m2 = m2.to(torch.float32)
+            m3 = m3.to(torch.float32)
+            g = torch.nn.ReLU()
+            return torch.mm(m1, g(torch.mm(m2, m3))).to(torch.float16)
+
         f_opt = torch.compile(f)
         A = torch.randn((32, 256), device="cuda", dtype=torch.float16)
         B = torch.randn((256, 32), device="cuda", dtype=torch.float16)
         C = torch.randn((32, 256), device="cuda", dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.2, rtol=0.01))
+        self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" in code)
 
     @torch._dynamo.config.patch(cache_size_limit=32)
@@ -61,12 +83,18 @@ class B2BGEMMTest(TestCase):
         def f(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
             return torch.mm(torch.mm(m1, m2), m3)
 
+        def f_32(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
+            m1 = m1.to(torch.float32)
+            m2 = m2.to(torch.float32)
+            m3 = m3.to(torch.float32)
+            return torch.mm(torch.mm(m1, m2), m3).to(torch.float16)
+
         f_opt = torch.compile(f)
         A = torch.randn((256, 32), device="cuda", dtype=torch.float16)
         B = torch.randn((32, 256), device="cuda", dtype=torch.float16)
         C = torch.randn((256, 32), device="cuda", dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.2, rtol=0.01))
+        self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" in code)
 
     @torch._dynamo.config.patch(cache_size_limit=32)
@@ -80,12 +108,18 @@ class B2BGEMMTest(TestCase):
         def f(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
             return torch.mm(m1, torch.mm(m2, m3))
 
+        def f_32(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
+            m1 = m1.to(torch.float32)
+            m2 = m2.to(torch.float32)
+            m3 = m3.to(torch.float32)
+            return torch.mm(m1, torch.mm(m2, m3)).to(torch.float16)
+
         f_opt = torch.compile(f)
         A = torch.randn((32, 256), device="cuda", dtype=torch.float16)
         B = torch.randn((256, 32), device="cuda", dtype=torch.float16)
         C = torch.randn((32, 256), device="cuda", dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.2, rtol=0.01))
+        self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" in code)
 
     @torch._dynamo.config.patch(cache_size_limit=32)
@@ -105,7 +139,7 @@ class B2BGEMMTest(TestCase):
         B = torch.randn((32, 256), device="cuda", dtype=torch.float16)
         C = torch.randn((256, 32), device="cuda", dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.2, rtol=0.01))
+        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
 
@@ -124,7 +158,7 @@ class B2BGEMMTest(TestCase):
         B = torch.randn((100, 100), device="cuda", dtype=torch.float16)
         C = torch.randn((100, 100), device="cuda", dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.2, rtol=0.01))
+        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
 
