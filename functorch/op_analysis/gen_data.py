@@ -1,8 +1,9 @@
 import csv
 from collections import defaultdict
 
-import torch
 import yaml
+
+import torch
 
 
 def get_ops_for_key(key):

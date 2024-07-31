@@ -69,7 +69,7 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       const std::vector<at::Tensor>& outputs = {},
       bool record = false) override {
     return c10::make_intrusive<WorkNCCLSimulateErrors>(
-        device, simulateError_, rank, opType, seq_);
+        device, simulateError_, rank, opType, seqCollective_);
   }
 
   size_t getNCCLCommCacheSize() {
@@ -131,7 +131,7 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       const std::vector<at::Tensor>& outputs = {},
       bool record = false) override {
     return c10::make_intrusive<WorkNCCLTimedoutErrors>(
-        device, setTimedoutError_, rank, opType, seq_);
+        device, setTimedoutError_, rank, opType, seqCollective_);
   }
 
   void setTimedoutError() {

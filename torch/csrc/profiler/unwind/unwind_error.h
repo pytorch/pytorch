@@ -1,6 +1,6 @@
 #pragma once
-#include <c10/util/Optional.h>
 #include <fmt/format.h>
+#include <optional>
 #include <stdexcept>
 
 namespace torch::unwind {
@@ -26,6 +26,6 @@ struct UnwindError : public std::runtime_error {
 // #define PRINT_LINE_TABLE(...) LOG_INFO(__VA_ARGS__)
 #define PRINT_LINE_TABLE(...)
 
-using c10::optional; // NOLINT
+using std::optional; // NOLINT
 
 } // namespace torch::unwind

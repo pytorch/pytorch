@@ -4,8 +4,8 @@ import torch
 import torch.distributed._tensor.api as dtensor
 from torch._prims_common import ShapeType
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -178,7 +178,7 @@ def compute_global_tensor_info(
                 if i != shard_dim and tensor_stride[i] >= tensor_stride[shard_dim]:
                     # rescale the stride by the shard size
                     tensor_stride[i] = tensor_stride[i] * mesh_dim_size
-        elif not isinstance(placement, (Replicate, _Partial)):
+        elif not isinstance(placement, (Replicate, Partial)):
             raise RuntimeError(f"placement type {type(placement)} not supported!")
     return tensor_shape, tensor_stride
 

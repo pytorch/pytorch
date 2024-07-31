@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-
 import copy
 import dataclasses
 import io
@@ -26,18 +25,18 @@ from typing import (
 )
 
 import numpy as np
-
 import onnxruntime
 import pytest
 import pytorch_test_common
+
 import torch
 from torch import export as torch_export
 from torch.onnx import _constants, verification
-from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import diagnostics
 from torch.testing._internal import common_utils
 from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
+
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
@@ -205,7 +204,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         if not is_model_script and not self.is_script:
             _run_test(model, tracing_remained_onnx_input_idx)
 
-    @_beartype.beartype
     def run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         self,
         model: _ModelType,
@@ -248,6 +246,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 This is needed because Torch Dynamo uses the dynamic_shapes flag as a hint, only.
 
         """
+        from torch._dynamo import config as _dynamo_config
 
         # avoid mutable data structure
         if input_kwargs is None:
@@ -274,7 +273,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             self.model_type
             == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
         ):
-            ref_model = torch.export.export(ref_model, args=ref_input_args)
+            with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
+                ref_model = torch.export.export(ref_model, args=ref_input_args)
             if (
                 self.dynamic_shapes
             ):  # TODO: Support dynamic shapes for torch.export.ExportedProgram
@@ -288,18 +288,19 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         # since ONNX doesn't represent kwargs.
         export_error: Optional[torch.onnx.OnnxExporterError] = None
         try:
-            onnx_program = torch.onnx.dynamo_export(
-                ref_model,
-                *ref_input_args,
-                **ref_input_kwargs,
-                export_options=torch.onnx.ExportOptions(
-                    op_level_debug=self.op_level_debug,
-                    dynamic_shapes=self.dynamic_shapes,
-                    diagnostic_options=torch.onnx.DiagnosticOptions(
-                        verbosity_level=logging.DEBUG
+            with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
+                onnx_program = torch.onnx.dynamo_export(
+                    ref_model,
+                    *ref_input_args,
+                    **ref_input_kwargs,
+                    export_options=torch.onnx.ExportOptions(
+                        op_level_debug=self.op_level_debug,
+                        dynamic_shapes=self.dynamic_shapes,
+                        diagnostic_options=torch.onnx.DiagnosticOptions(
+                            verbosity_level=logging.DEBUG
+                        ),
                     ),
-                ),
-            )
+                )
         except torch.onnx.OnnxExporterError as e:
             export_error = e
             onnx_program = e.onnx_program
@@ -356,7 +357,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 )
 
 
-@_beartype.beartype
 def run_ort(
     onnx_model: Union[str, torch.onnx.ONNXProgram],
     pytorch_inputs: Sequence[_InputArgsType],
@@ -402,7 +402,6 @@ def run_ort(
     return session.run(None, ort_input)
 
 
-@_beartype.beartype
 def _try_clone_model(model: _ModelType) -> _ModelType:
     """Used for preserving original model in case forward mutates model states."""
     try:
@@ -414,14 +413,12 @@ def _try_clone_model(model: _ModelType) -> _ModelType:
         return model
 
 
-@_beartype.beartype
 def _try_clone_inputs(input_args, input_kwargs):
     ref_input_args = copy.deepcopy(input_args)
     ref_input_kwargs = copy.deepcopy(input_kwargs)
     return ref_input_args, ref_input_kwargs
 
 
-@_beartype.beartype
 def _compare_pytorch_onnx_with_ort(
     onnx_program: torch.onnx.ONNXProgram,
     model: _ModelType,

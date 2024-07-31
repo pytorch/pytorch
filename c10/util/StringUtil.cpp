@@ -41,10 +41,15 @@ std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString);
 
 #ifndef _WIN32
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+// TODO (huydhn) https://en.cppreference.com/w/cpp/header/codecvt has been
+// deprecated in C++17 but there is no alternative yet, so I just ack it
 std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString) {
   std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
   return _str(ss, converter.to_bytes(wString));
 }
+#pragma GCC diagnostic pop
 
 #else // #ifndef _WIN32
 // The WIN32 implementation of wstring_convert leaks memory; see

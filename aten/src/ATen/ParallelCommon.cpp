@@ -29,6 +29,7 @@ const char* get_env_var(
   return value ? value : def_value;
 }
 
+#ifndef C10_MOBILE
 size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
   try {
     if (auto* value = std::getenv(var_name)) {
@@ -43,6 +44,7 @@ size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
   }
   return def_value;
 }
+#endif
 
 } // namespace
 
@@ -80,8 +82,6 @@ std::string get_parallel_info() {
   ss << "OpenMP";
   #elif AT_PARALLEL_NATIVE
   ss << "native thread pool";
-  #elif AT_PARALLEL_NATIVE_TBB
-  ss << "native thread pool and TBB";
   #endif
   #ifdef C10_MOBILE
   ss << " [mobile]";
