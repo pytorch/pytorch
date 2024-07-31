@@ -1,21 +1,17 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Dict, Union
 from fnmatch import fnmatch
+from typing import Dict, Union
 
 import torch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
-from torch.distributed._tensor import (
-    DeviceMesh,
-)
+from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.random import (
     is_rng_supported_mesh,
     TensorParallelRNGTracker,
 )
 from torch.distributed.tensor.parallel._utils import _validate_tp_mesh_dim
-from torch.distributed.tensor.parallel.style import (
-    ParallelStyle,
-)
+from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
 __all__ = [
@@ -98,14 +94,19 @@ def parallelize_module(  # type: ignore[return]
                 atom = path_splits.pop(0)
                 matched_children = filter(
                     # `t[0]` is child name
-                    lambda t: fnmatch(t[0], atom), module.named_children()
+                    lambda t: fnmatch(t[0], atom),
+                    module.named_children(),
                 )
                 # apply the plan to all matched submodules
                 for _, submodule in matched_children:
                     if path_splits:
                         # we haven't reached the leaf, apply in dict style
-                        leaf_path = ".".join(path_splits)   # rest of the path after `atom`
-                        parallelize_module(submodule, device_mesh, {leaf_path: parallelize_style})
+                        leaf_path = ".".join(
+                            path_splits
+                        )  # rest of the path after `atom`
+                        parallelize_module(
+                            submodule, device_mesh, {leaf_path: parallelize_style}
+                        )
                     else:
                         # otherwise, directly apply style to this submodule
                         parallelize_module(submodule, device_mesh, parallelize_style)

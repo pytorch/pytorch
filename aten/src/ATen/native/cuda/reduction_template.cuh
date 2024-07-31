@@ -595,6 +595,7 @@ struct ReduceJitOp {
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
+      __threadfence(); //complete acquire pattern
       value = ident;
       if (config.should_block_x_reduce()) {
         uint32_t input_offset = threadIdx.x + threadIdx.y * blockDim.x;

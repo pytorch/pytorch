@@ -35,7 +35,7 @@ template <
     typename Batch = std::vector<Example<>>,
     typename BatchRequest = size_t>
 class StatefulDataset
-    : public BatchDataset<Self, optional<Batch>, BatchRequest> {
+    : public BatchDataset<Self, std::optional<Batch>, BatchRequest> {
  public:
   /// Resets internal state of the dataset.
   virtual void reset() = 0;

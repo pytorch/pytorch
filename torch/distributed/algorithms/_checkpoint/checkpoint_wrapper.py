@@ -1,4 +1,6 @@
+# mypy: allow-untyped-defs
 import warnings
+from abc import ABC, abstractmethod
 from enum import auto, Enum
 from functools import partial
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
@@ -9,6 +11,7 @@ from torch.autograd.graph import save_on_cpu
 from torch.distributed.utils import _pack_kwargs, _replace_by_prefix, _unpack_kwargs
 from torch.utils.checkpoint import checkpoint as torch_utils_checkpoint
 
+
 _CHECKPOINT_WRAPPED_MODULE = "_checkpoint_wrapped_module"
 _CHECKPOINT_PREFIX = _CHECKPOINT_WRAPPED_MODULE + "."
 
@@ -18,7 +21,7 @@ class CheckpointImpl(Enum):
     NO_REENTRANT = auto()
 
 
-class ActivationWrapper(torch.nn.Module):
+class ActivationWrapper(torch.nn.Module, ABC):
     """
     Base class for Activation Checkpoint and Activation Offload.
 
@@ -33,10 +36,9 @@ class ActivationWrapper(torch.nn.Module):
         self._register_state_dict_hook(self._post_state_dict_hook)
         # load_state_dict pre-hook to allow loading back into
         # checkpoint-wrapped module.
-        self._register_load_state_dict_pre_hook(
-            self._pre_load_state_dict_hook, with_module=True
-        )
+        self.register_load_state_dict_pre_hook(self._pre_load_state_dict_hook)
 
+    @abstractmethod
     def forward(self, *args, **kwargs):
         raise ValueError("Subclasses should implement forward().")
 
@@ -233,7 +235,8 @@ def checkpoint_wrapper(
             f"Please specify {CheckpointImpl.NO_REENTRANT} as "
             f"{CheckpointImpl.REENTRANT} will soon be removed as "
             "the default and eventually deprecated.",
-            stacklevel=1,
+            FutureWarning,
+            stacklevel=2,
         )
     return CheckpointWrapper(
         module,
@@ -284,8 +287,12 @@ def apply_activation_checkpointing(
     """
     # TODO: Importing inside function to avoid circular import issue between FSDP and
     # checkpoint_wrapper. This can be resolved once wrap() APIs are decoupled from FSDP code.
-    from torch.distributed.fsdp.wrap import _recursive_wrap, lambda_auto_wrap_policy, _Policy
     from torch.distributed.fsdp._wrap_utils import _construct_wrap_fn, _post_order_apply
+    from torch.distributed.fsdp.wrap import (
+        _Policy,
+        _recursive_wrap,
+        lambda_auto_wrap_policy,
+    )
 
     policy = (
         auto_wrap_policy
@@ -300,7 +307,9 @@ def apply_activation_checkpointing(
         target_module_to_kwargs = policy._run_policy(
             model, ignored_modules=set(), root_kwargs={}
         )
-        wrap_fn = _construct_wrap_fn(model, target_module_to_kwargs, checkpoint_wrapper_fn)
+        wrap_fn = _construct_wrap_fn(
+            model, target_module_to_kwargs, checkpoint_wrapper_fn
+        )
         _post_order_apply(model, wrap_fn)
         return
 

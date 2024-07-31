@@ -226,17 +226,6 @@ private:
     int64_t data_;
 };
 
-std::ostream& operator<<(std::ostream& ss, DimEntry entry) {
-    if (entry.is_none()) {
-        ss << "None";
-    } else if (entry.is_positional()) {
-        ss << entry.position();
-    } else {
-        ss << entry.dim();
-    }
-    return ss;
-}
-
 // Dim wrapper methods
 DimEntry _wrap_dim(mpy::handle d, size_t N, bool keepdim) {
     if (Dim::check(d)) {
@@ -1639,16 +1628,6 @@ static PyObject* _dims(PyObject *self,
     return result.release();
     PY_END(nullptr)
 }
-
-static int64_t dim_index(const std::vector<mpy::obj<Dim>>& dims, mpy::hdl<Dim> dim) {
-    for (int64_t i = 0, N  = dims.size(); i < N; ++i) {
-        if (dims[i].ptr() == dim.ptr()) {
-            return i;
-        }
-    }
-    return -1;
-}
-
 
 struct DotPart {
     Slice<DimEntry> dims;

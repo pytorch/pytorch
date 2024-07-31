@@ -10,7 +10,7 @@ from torch.distributed._tensor import DeviceMesh, distribute_tensor
 from torch.distributed._tensor.api import DTensor
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import (
-    _Partial,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -77,7 +77,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
         # test if addmm output is a partial
         self.assertIsInstance(dist_res, DTensor)
-        self.assertIsInstance(dist_res.placements[0], _Partial)
+        self.assertIsInstance(dist_res.placements[0], Partial)
 
         # test if result is the same as tensor
         dist_local_res = dist_res.full_tensor()
@@ -144,11 +144,11 @@ class DistMatrixOpsTest(DTensorTestBase):
         da = distribute_tensor(a, device_mesh, [Shard(1)])
         db = distribute_tensor(b, device_mesh, [Shard(0)])
 
-        # mm(da, db) should return a _Partial tensor.
-        # transposing it should keep it _Partial
+        # mm(da, db) should return a Partial tensor.
+        # transposing it should keep it Partial
         dc = torch.mm(da, db).t()
 
-        self.assertTrue(isinstance(dc.placements[0], _Partial))
+        self.assertTrue(isinstance(dc.placements[0], Partial))
 
         # check that the local and distributed op results match
         self.assertEqual(

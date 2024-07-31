@@ -181,7 +181,7 @@ class TORCH_API TensorExprKernel {
   }
 
   const std::string& getKernelName() const {
-    return codegen_->kernel_func_name();
+    return (codegen_ ? codegen_->kernel_func_name() : kernel_func_name_);
   }
 
   const std::vector<int64_t>& getSymbolicShapeInputs() const {

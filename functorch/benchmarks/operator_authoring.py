@@ -3,8 +3,10 @@ from functools import partial
 
 import numpy as np
 import pandas as pd
+
 import torch
 from functorch.compile import pointwise_operator
+
 
 WRITE_CSV = False
 CUDA = False

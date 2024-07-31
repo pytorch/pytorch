@@ -1,6 +1,6 @@
-import torch
-
 import operator_benchmark as op_bench
+
+import torch
 
 
 """Microbenchmarks for Chunk operator"""

@@ -6,12 +6,10 @@ import warnings
 from itertools import product
 
 import torch
-
 import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     TEST_CUDA,
@@ -61,6 +59,7 @@ from torch.testing._internal.common_utils import (
     TEST_SCIPY,
     TEST_WITH_ROCM,
 )
+
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
@@ -525,6 +524,37 @@ class TestConvolutionNN(NNTestCase):
             in_channels=16, out_channels=32, kernel_size=2, bias=True
         ).cuda()
         result = m(x)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
+    def test_cudnn_not_mutate_stride(self):
+        weight = torch.randn(64, 64, 1, 1)
+        x = torch.randn(2, 64, 10, 10).to(memory_format=torch.channels_last)
+        weight_stride = weight.stride()
+
+        def conv(x, weight):
+            return torch.convolution(
+                x,
+                weight,
+                stride=(1, 1),
+                padding=(0, 0),
+                dilation=(1, 1),
+                transposed=False,
+                output_padding=(0, 0),
+                groups=1,
+                bias=None,
+            )
+
+        # should have run in nhwc without mutating input strides
+        out_nhwc = conv(x, weight)
+        self.assertEqual(weight.stride(), weight_stride)
+        self.assertTrue(out_nhwc.is_contiguous(memory_format=torch.channels_last))
+
+        x = x.contiguous(memory_format=torch.contiguous_format)
+        out_c = conv(x, weight)
+        self.assertTrue(out_c.is_contiguous(memory_format=torch.contiguous_format))
+        self.assertEqual(out_c, out_nhwc)
+        self.assertEqual(weight.stride(), weight_stride)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")

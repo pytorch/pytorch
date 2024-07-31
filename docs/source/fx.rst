@@ -1175,6 +1175,7 @@ API Reference
 .. py:module:: torch.fx.passes.fake_tensor_prop
 .. py:module:: torch.fx.passes.graph_drawer
 .. py:module:: torch.fx.passes.graph_manipulation
+.. py:module:: torch.fx.passes.graph_transform_observer
 .. py:module:: torch.fx.passes.infra.partitioner
 .. py:module:: torch.fx.passes.infra.pass_base
 .. py:module:: torch.fx.passes.infra.pass_manager
