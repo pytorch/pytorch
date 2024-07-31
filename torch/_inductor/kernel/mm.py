@@ -220,10 +220,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
             top_k=10,
             always_included=always_included,
         )
-        if ah_choices is not None and len(ah_choices) > 0:
-            choices = ah_choices
-        else:
-            choices = choices[:num_choices_before_extra_configs]
+        if not torch._inductor.config.collect_autoheuristic(name):
+            if ah_choices is not None and len(ah_choices) > 0:
+                choices = ah_choices
+            else:
+                choices = choices[:num_choices_before_extra_configs]
 
     if (
         len(choices) == 0
