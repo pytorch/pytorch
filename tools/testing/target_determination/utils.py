@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
-import sys
-from typing import Any
 import random
+from pathlib import Path
+from typing import Any
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+
 
 def gen_ci_artifact(included: list[Any], excluded: list[Any]) -> None:
     file_name = f"td_exclusions-{os.urandom(10).hex()}.json"
@@ -26,7 +27,7 @@ def get_percent_to_run(enable_td: bool) -> int:
     # Use SystemRandom instead of normal random because we frequently set seed
     # in testing, which would affect random. SystemRandom uses os.urandom, which
     # takes randomness from unaffected sources.
-    run_extra = random.SystemRandom().random() < .25
+    run_extra = random.SystemRandom().random() < 0.25
     default = 25
     extra = 50
     return extra if run_extra else default
