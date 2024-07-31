@@ -95,6 +95,7 @@ from .source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
     TypeSource,
+    UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     WeakRefCallSource,
 )
@@ -864,6 +865,7 @@ class GuardBuilder(GuardBuilderBase):
                 OptimizerSource,
                 NNModuleSource,
                 UnspecializedNNModuleSource,
+                UnspecializedBuiltinNNModuleSource,
                 FSDPNNModuleSource,
             ),
         ):
