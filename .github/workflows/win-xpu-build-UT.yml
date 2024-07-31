@@ -55,7 +55,8 @@ jobs:
     - name: Build Torch
       shell: cmd
       run: |
-        if exist "C:\path\to\folder" rmdir /s /q "C:\path\to\folder"
+        conda list
+        if exist "%home_dir%\pytorch" rmdir /s /q "%home_dir%\pytorch"
         git clone https://github.com/pytorch/pytorch.git %home_dir%\pytorch
         cd %home_dir%\pytorch
         echo ${{ inputs.working_commit }} > third_party/xpu.txt
@@ -64,6 +65,7 @@ jobs:
     - name: Build TorchVision
       shell: cmd
       run: |
+        if exist "%home_dir%\vision" rmdir /s /q "%home_dir%\vision"
         git clone https://github.com/pytorch/vision.git %home_dir%\vision
         cd %home_dir%\vision
         pip install -r docs/requirements.txt
@@ -85,9 +87,8 @@ jobs:
 
     - name: Run Unit Tests
       run: |
-        rmdir /S "%home_dir%\xpurepo"
+        if exist "%home_dir%\xpurepo" rmdir /s /q "%home_dir%\xpurepo"
         git clone https://github.com/intel/torch-xpu-ops.git %home_dir%\xpurepo
         cd %home_dir%\xpurepo\examples
         pip install pytest expecttest
-        python -m pytest -v | tee "C:\Users\nrvalgo_jenkinsadm\mtl-bundle-uts.log"
-
+        python -m pytest -v | tee "%home_dir%\mtl-bundle-uts.log"
