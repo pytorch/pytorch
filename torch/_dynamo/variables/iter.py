@@ -1,15 +1,9 @@
 # mypy: ignore-errors
 
-MAX_CYCLE = 3000
-
 import itertools
 import operator
 import sys
-
 from typing import Dict, List, Optional, TYPE_CHECKING, Union
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -20,9 +14,15 @@ from ..exc import (
     unimplemented,
     UserError,
 )
-
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
+
+MAX_CYCLE = 3000
 
 
 class ItertoolsVariable(VariableTracker):

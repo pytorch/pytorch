@@ -13,8 +13,6 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
@@ -32,6 +30,10 @@ from ..utils import (
 from .base import VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import is_standard_setattr, UserDefinedObjectVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class SuperVariable(VariableTracker):

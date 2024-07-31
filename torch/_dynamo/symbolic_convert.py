@@ -110,6 +110,7 @@ from .variables.user_defined import (
     UserDefinedObjectVariable,
 )
 
+
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
@@ -831,6 +832,9 @@ class InstructionTranslatorBase(
         TracingContext.set_current_loc(
             self.f_code.co_filename, lineno, self.f_code.co_name
         )
+        from torch._logging.structured import dump_file
+
+        dump_file(self.f_code.co_filename)
         if trace_source_log.isEnabledFor(logging.DEBUG):
             trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
 
@@ -1605,6 +1609,19 @@ class InstructionTranslatorBase(
                 # aten.random.from, again causing syntax errors. Since this
                 # usecase is uncommon, graph break.
                 unimplemented("random_ op is called with from keyword")
+            elif (
+                fn.name == "uniform_"
+                and isinstance(argsvars, TupleVariable)
+                and len(argsvars.items) == 0
+                and isinstance(kwargsvars, ConstDictVariable)
+                and ConstantVariable.create("from") in kwargsvars
+            ):
+                # `from`` is python keyword. Adding uniform_ with `from` in the
+                # Fx graph causes syntax error. Even if we convert the kwargs to
+                # args, aot_autograd/inductor while lowering generates
+                # aten.uniform.from, again causing syntax errors. Since this
+                # usecase is uncommon, graph break.
+                unimplemented("uniform_ op is called with from keyword")
 
         if not isinstance(
             argsvars, BaseListVariable
@@ -3241,9 +3258,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 unimplemented("Storing handles in globals - NYI")
             name = inst.argval
             fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
-            fglobals_vt = self.output.side_effects.track_object_existing(
-                fglobals_value, fglobals_vt
-            )
             self.output.side_effects.store_attr(fglobals_vt, name, value)
 
 
