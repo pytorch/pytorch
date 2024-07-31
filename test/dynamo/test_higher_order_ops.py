@@ -7,10 +7,8 @@ import unittest
 import warnings
 
 import functorch.experimental.control_flow as control_flow
-
 import torch
 import torch._dynamo.config as config
-
 import torch._dynamo.test_case
 import torch._functorch.config
 import torch.nn as nn
@@ -332,7 +330,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_d_x_: "f32[]", l_d_y_0_: "f32[]", l_d_y_1_2_: "f32[]"):
             sin: "f32[]" = l_d_x_.sin();  l_d_x_ = None
             cos: "f32[]" = l_d_y_0_.cos();  l_d_y_0_ = None
@@ -370,7 +368,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[3]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[3, 1]"):
             view: "f32[3]" = l_x_.view(3);  l_x_ = None
             add: "f32[3]" = view + 0.5;  view = None
@@ -390,7 +388,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[s0]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[s0, 1]", size: "Sym(s0)"):
             view: "f32[s0]" = l_x_.view(size);  l_x_ = size = None
             add: "f32[s0]" = view + 0.5;  view = None
@@ -1453,7 +1451,7 @@ def forward(self, child, const_unused):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(6, 4))
+                self.buffer = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self, x):
                 def true_fn(x):
@@ -1489,7 +1487,7 @@ def forward(self, child, const_unused):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(6, 4))
+                self.buffer = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self, x, y):
                 def true_fn(x):
@@ -1714,7 +1712,7 @@ def forward(self):
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("w", torch.ones(6, 4))
+                self.w = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self, xs):
                 def body(x):
@@ -1744,7 +1742,7 @@ def forward(self):
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("w", torch.ones(6, 4))
+                self.w = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self, xs):
                 def body(x):
@@ -1846,7 +1844,7 @@ class GraphModule(torch.nn.Module):
         getitem_1: "f32[3]" = wrap[1];  wrap = None
         return (getitem, getitem_1)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_arg1_0_: "f32[3]", l_arg2_0_: "f32[3]"):
             child: "f32[3]" = l_arg1_0_ + 1;  l_arg1_0_ = None
 
@@ -2045,7 +2043,7 @@ class GraphModule(torch.nn.Module):
         add: "f32[2, 3]" = a + b;  a = b = None
         return (add,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[2, 3]"):
             child: "f32[2, 3]" = l_x_.sin()
             child_1: "f32[2, 3]" = l_x_.cos();  l_x_ = None
@@ -2080,7 +2078,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[3]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[3]"):
             child: "f32[3]" = -l_x_;  l_x_ = None
             return (child,)
@@ -3587,6 +3585,174 @@ class GraphModule(torch.nn.Module):
                 },
             )
             self.assertEqual(actual, expected)
+
+    @config.patch(inline_inbuilt_nn_modules=True)
+    def test_functional_call(self):
+        def wrapper_fn(model, params, inputs, targets):
+            prediction = torch.func.functional_call(model, params, (inputs,))
+            return torch.nn.functional.mse_loss(prediction, targets)
+
+        model = torch.nn.Linear(3, 3)
+        params = dict(model.named_parameters())
+        inputs = torch.randn(64, 3)
+        targets = torch.randn(64, 3)
+
+        wrapped_gm = self._compile_check(wrapper_fn, (model, params, inputs, targets))
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        if torch._dynamo.config.inline_inbuilt_nn_modules:
+            self.assertExpectedInline(
+                actual,
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_model_parameters_weight_: "f32[3, 3]", L_model_parameters_bias_: "f32[3]", L_inputs_: "f32[64, 3]", L_targets_: "f32[64, 3]"):
+        l_model_parameters_weight_ = L_model_parameters_weight_
+        l_model_parameters_bias_ = L_model_parameters_bias_
+        l_inputs_ = L_inputs_
+        l_targets_ = L_targets_
+
+        prediction: "f32[64, 3]" = torch._C._nn.linear(l_inputs_, l_model_parameters_weight_, l_model_parameters_bias_);  l_inputs_ = l_model_parameters_weight_ = l_model_parameters_bias_ = None
+
+        mse_loss: "f32[]" = torch.nn.functional.mse_loss(prediction, l_targets_);  prediction = l_targets_ = None
+        return (mse_loss,)
+""",
+            )
+        else:
+            self.assertExpectedInline(
+                actual,
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_inputs_: "f32[64, 3]", L_targets_: "f32[64, 3]"):
+        l_inputs_ = L_inputs_
+        l_targets_ = L_targets_
+
+        prediction: "f32[64, 3]" = self.model(l_inputs_);  l_inputs_ = None
+
+        mse_loss: "f32[]" = torch.nn.functional.mse_loss(prediction, l_targets_);  prediction = l_targets_ = None
+        return (mse_loss,)
+""",
+            )
+
+    @config.patch(inline_inbuilt_nn_modules=True)
+    def test_functional_call_sequential_params_and_buffers(self):
+        # copied from test/test_stateless.py
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(1, 1)
+                self.register_buffer("buffer", torch.ones(1))
+                self.foo = 0.0
+
+            def forward(self, x):
+                return self.l1(x) + self.buffer
+
+        def wrapper_fn(model, params, buffers, inputs):
+            # two separate dictionaries
+            return torch.func.functional_call(model, (params, buffers), inputs)
+
+        model = MockModule()
+        params = dict(model.named_parameters())
+        buffers = dict(model.named_buffers())
+        inputs = torch.tensor([[1.5]])
+
+        wrapped_gm = self._compile_check(
+            wrapper_fn, (model, params, buffers, inputs), fullgraph=False
+        )
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        if torch._dynamo.config.inline_inbuilt_nn_modules:
+            self.assertExpectedInline(
+                actual,
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_params_l1_weight_: "f32[1, 1]", L_params_l1_bias_: "f32[1]", L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
+        l_params_l1_weight_ = L_params_l1_weight_
+        l_params_l1_bias_ = L_params_l1_bias_
+        l_buffers_buffer_ = L_buffers_buffer_
+        l_inputs_ = L_inputs_
+
+        linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_params_l1_weight_, l_params_l1_bias_);  l_inputs_ = l_params_l1_weight_ = l_params_l1_bias_ = None
+        add: "f32[1, 1]" = linear + l_buffers_buffer_;  linear = l_buffers_buffer_ = None
+        return (add,)
+""",
+            )
+        else:
+            self.assertExpectedInline(
+                actual,
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[1, 1]"):
+        l_x_ = L_x_
+
+        l__self___l1: "f32[1, 1]" = self.L__self___l1(l_x_);  l_x_ = None
+        l__self___buffer: "f32[1]" = self.L__self___buffer
+        add: "f32[1, 1]" = l__self___l1 + l__self___buffer;  l__self___l1 = l__self___buffer = None
+        return (add,)
+""",
+            )
+
+    @config.patch(inline_inbuilt_nn_modules=True)
+    def test_functional_call_disable_capture(self):
+        counters.clear()
+
+        with config.patch(capture_func_transforms=False):
+            # We have verified above that this
+            # function compiles
+            def wrapper_fn(model, params, inputs, targets):
+                prediction = torch.func.functional_call(model, params, (inputs,))
+                return torch.nn.functional.mse_loss(prediction, targets)
+
+            model = torch.nn.Linear(3, 3)
+            params = dict(model.named_parameters())
+            inputs = torch.randn(64, 3)
+            targets = torch.randn(64, 3)
+
+            actual = wrapper_fn(model, params, inputs, targets)
+            expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+                model, params, inputs, targets
+            )
+            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertEqual(
+                {
+                    "torch.func.functional_call capture is disabled, it can be "
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 1,
+                },
+                dict(counters["graph_break"]),
+            )
+            self.assertEqual(actual, expected)
+
+    @config.patch(inline_inbuilt_nn_modules=False)
+    def test_functional_call_disable_inline_nn_module(self):
+        counters.clear()
+
+        def wrapper_fn(model, params, inputs, targets):
+            prediction = torch.func.functional_call(model, params, (inputs,))
+            return torch.nn.functional.mse_loss(prediction, targets)
+
+        model = torch.nn.Linear(3, 3)
+        params = dict(model.named_parameters())
+        inputs = torch.randn(64, 3)
+        targets = torch.randn(64, 3)
+
+        actual = wrapper_fn(model, params, inputs, targets)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+            model, params, inputs, targets
+        )
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            {
+                "torch.func.functional_call capture is disabled, it can be "
+                "turned on by setting `torch._dynamo.config.inline_inbuilt_nn_modules=True`": 1,
+            },
+            dict(counters["graph_break"]),
+        )
+        self.assertEqual(actual, expected)
 
     def test_grad(self):
         counters.clear()

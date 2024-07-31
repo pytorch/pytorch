@@ -20,12 +20,12 @@ from torch._subclasses.fake_tensor import is_fake
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
-
 from .functional_utils import (
     _check_if_mutation_can_be_in_graph,
     FunctionalTensorMetadataEq,
 )
 from .utils import strict_zip
+
 
 zip = strict_zip
 
@@ -345,6 +345,11 @@ class ViewAndMutationMeta:
     indices_of_inputs_that_requires_grad_with_mutations_in_bw: List[int] = field(
         default_factory=list
     )
+
+    # Indexes of saved tensors which are donated buffer.
+    # Donated buffer means the tensor is not alias of any forward user input, forward user output,
+    # and backward output.
+    bw_donated_idxs: Optional[List[int]] = None
 
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
