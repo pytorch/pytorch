@@ -644,7 +644,10 @@ def _compile(
         nonlocal dynamo_time_before_restart
         nonlocal restart_reasons
         last_attempt_start_time = start_time = time.time()
-        time.sleep(10)
+        j =0
+        for i in range(1:10000000):
+            j=j*i+i-19*j*j
+        print(j)    
         def log_bytecode(
             prefix: str, name: str, filename: str, line_no: int, code: CodeType
         ) -> None:
