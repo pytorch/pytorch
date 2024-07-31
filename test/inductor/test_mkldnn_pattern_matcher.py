@@ -608,33 +608,30 @@ class TestPatternMatcher(TestPatternMatcherBase):
         )
         out_feature = 30
 
-        from torch.testing._internal.logging_utils import log_settings
-
-        with log_settings("output_code"):
-            for binary_fn, input_shape, bias, dtype in options:
-                metrics.reset()
-                # addmm(mm) + (linear+add)
-                match_count = 2
-                match_nodes = 3
-                if len(input_shape) == 3:
-                    is_inplace = binary_list[binary_fn][2]
-                    # view + linear + view(joint_graph+freeze pass)
-                    match_count = match_count + 5 if is_inplace else match_count + 3
-                    match_nodes = match_nodes + 7 if is_inplace else match_nodes + 5
-                mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
-                v = torch.randn(input_shape)
-                other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
-                self._test_common(
-                    mod,
-                    (
-                        v,
-                        other,
-                    ),
-                    match_count,
-                    match_nodes,
-                    check_autocast=dtype,
-                )
-                self.assertEqual(metrics.generated_kernel_count, 1)
+        for binary_fn, input_shape, bias, dtype in options:
+            metrics.reset()
+            # addmm(mm) + (linear+add)
+            match_count = 2
+            match_nodes = 3
+            if len(input_shape) == 3:
+                is_inplace = binary_list[binary_fn][2]
+                # view + linear + view(joint_graph+freeze pass)
+                match_count = match_count + 5 if is_inplace else match_count + 3
+                match_nodes = match_nodes + 7 if is_inplace else match_nodes + 5
+            mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
+            v = torch.randn(input_shape)
+            other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
+            self._test_common(
+                mod,
+                (
+                    v,
+                    other,
+                ),
+                match_count,
+                match_nodes,
+                check_autocast=dtype,
+            )
+            self.assertEqual(metrics.generated_kernel_count, 1)
 
     def test_multi_linear_share_same_input(self):
         # llama pattern.
