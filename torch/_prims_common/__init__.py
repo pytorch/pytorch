@@ -448,17 +448,23 @@ def compute_elementwise_output_logical_to_physical_perm(
     if ndim == 1:
         return [0]
 
-    # Short-circuits if contiguous, following the fake fast path.
+    # Short-circuits if contiguous or channels last, following the fake fast path.
     # This reduces the number of guards we end up making
-    # TODO: do channels last too
     is_contiguous = True
+    is_channels_last = True
     for t in tensors:
         is_contiguous = is_contiguous and t.is_contiguous(
             memory_format=torch.contiguous_format
         )
+        is_channels_last = is_channels_last and t.is_contiguous(
+            memory_format=torch.channels_last
+        )
 
-    if is_contiguous:
+    if is_contiguous and not is_channels_last:
         return list(range(ndim))
+
+    if is_channels_last and not is_contiguous:
+        return [0, *list(range(2, ndim)), 1]
 
     shape = tensors[0].shape
 

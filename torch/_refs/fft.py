@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 import math
 
 from typing import Iterable, List, Literal, NamedTuple, Optional, Sequence, Tuple, Union
