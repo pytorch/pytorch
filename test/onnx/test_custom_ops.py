@@ -62,13 +62,12 @@ class TestCustomAutogradFunction(pytorch_test_common.ExportTestCase):
                 h = self.relu(h)
                 return h
 
-        def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
-            n = ctx.cur_node
+        def symbolic_pythonop(g, *args, **kwargs):
             name = kwargs["name"]
             if name == "MyClip":
-                return g.op("Clip", args[0], min_f=args[1], outputs=n.outputsSize())
+                return g.op("Clip", args[0], min_f=args[1])
             elif name == "MyRelu":
-                return g.op("Relu", args[0], outputs=n.outputsSize())
+                return g.op("Relu", args[0])
             else:
                 return symbolic_helper._unimplemented(
                     "prim::PythonOp", "unknown node kind: " + name
