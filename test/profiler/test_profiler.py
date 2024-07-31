@@ -519,9 +519,9 @@ class TestProfiler(TestCase):
         for e in p.function_events:
             if "aten::mm" in e.name:
                 found_mm = True
-            if "gemm" in e.name or "Cijk" in e.name:
+            if "gemm" in e.name.lower() or "Cijk" in e.name:
                 found_gemm = True
-            if "Memcpy" in e.name or "memcpy" in e.name:
+            if "memcpy" in e.name.lower():
                 found_memcpy = True
         if use_cuda:
             self.assertTrue(found_gemm)

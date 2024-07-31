@@ -2001,14 +2001,44 @@ class Module:
             super().__delattr__(name)
 
     def _register_state_dict_hook(self, hook):
-        r"""Register a state-dict hook.
+        r"""Register a post-hook for the :meth:`~torch.nn.Module.state_dict` method.
 
-        These hooks will be called with arguments: `self`, `state_dict`,
-        `prefix`, `local_metadata`, after the `state_dict` of `self` is set.
-        Note that only parameters and buffers of `self` or its children are
-        guaranteed to exist in `state_dict`. The hooks may modify `state_dict`
-        inplace or return a new one.
+        It should have the following signature::
+            hook(module, state_dict, prefix, local_metadata) -> None or state_dict
+
+        The registered hooks can modify the ``state_dict`` inplace or return a new one.
+        If a new ``state_dict`` is returned, it will only be respected if it is the root
+        module that :meth:`~nn.Module.state_dict` is called from.
         """
+        if getattr(hook, "_from_public_api", False):
+            raise RuntimeError(
+                "Cannot register the same function as the state dict post hook that was "
+                "previously registered via register_state_dict_post_hook"
+            )
+        handle = RemovableHandle(self._state_dict_hooks)
+        self._state_dict_hooks[handle.id] = hook
+        return handle
+
+    def register_state_dict_post_hook(self, hook):
+        r"""Register a post-hook for the :meth:`~torch.nn.Module.state_dict` method.
+
+        It should have the following signature::
+            hook(module, state_dict, prefix, local_metadata) -> None
+
+        The registered hooks can modify the ``state_dict`` inplace.
+        """
+        # In _register_state_dict_hook there was a bug described in
+        # https://github.com/pytorch/pytorch/issues/117437 where the return value
+        # was only respected for the root module but not child submodules.
+        # We fix this in this public version by only allowing inplace modifications on
+        # the state_dict by the hook. However, since hooks registered via both these
+        # APIs will be added to `_state_dict_hooks` and the type of `_state_dict_hooks`
+        # cannot be changed due to many dependencies on it, we mark a hook
+        # as being registered via the public API by setting `_from_public_api` on it.
+        # In the implementation of `state_dict`, if the callable does not have this
+        # flag, the old behavior of respecting the return value will be preserved
+        # for the root module, otherwise, we ensure that the hook returns None.
+        hook._from_public_api = True
         handle = RemovableHandle(self._state_dict_hooks)
         self._state_dict_hooks[handle.id] = hook
         return handle
@@ -2016,9 +2046,10 @@ class Module:
     def register_state_dict_pre_hook(self, hook):
         r"""Register a pre-hook for the :meth:`~torch.nn.Module.state_dict` method.
 
-        These hooks will be called with arguments: ``self``, ``prefix``,
-        and ``keep_vars`` before calling ``state_dict`` on ``self``. The registered
-        hooks can be used to perform pre-processing before the ``state_dict``
+        It should have the following signature::
+            hook(module, prefix, keep_vars) -> None
+
+        The registered hooks can be used to perform pre-processing before the ``state_dict``
         call is made.
         """
         handle = RemovableHandle(self._state_dict_pre_hooks)
@@ -2150,20 +2181,21 @@ class Module:
                 )
         for hook in self._state_dict_hooks.values():
             hook_result = hook(self, destination, prefix, local_metadata)
-            if hook_result is not None:
-                destination = hook_result
+            if not getattr(hook, "_from_public_api", False):
+                if hook_result is not None:
+                    destination = hook_result
+            else:
+                if hook_result is not None:
+                    raise RuntimeError("state_dict post-hook must return None")
         return destination
 
     def _register_load_state_dict_pre_hook(self, hook, with_module=False):
-        r"""Register a pre-hook for the :meth:`~torch.nn.Module.load_state_dict` method.
+        r"""See :meth:`~torch.nn.Module.register_load_state_dict_pre_hook` for details.
 
-        These hooks will be called with arguments: `state_dict`, `prefix`,
-        `local_metadata`, `strict`, `missing_keys`, `unexpected_keys`,
-        `error_msgs`, before loading `state_dict` into `self`. These arguments
-        are exactly the same as those of `_load_from_state_dict`.
-
-        If ``with_module`` is ``True``, then the first argument to the hook is
-        an instance of the module.
+        A subtle difference is that if ``with_module`` is set to ``False``, then the
+        hook will not take the ``module`` as the first argument whereas
+        :meth:`~torch.nn.Module.register_load_state_dict_pre_hook` always takes the
+        ``module`` as the first argument.
 
         Arguments:
             hook (Callable): Callable hook that will be invoked before
@@ -2177,8 +2209,20 @@ class Module:
         )
         return handle
 
+    def register_load_state_dict_pre_hook(self, hook):
+        r"""Register a pre-hook to be run before module's :meth:`~nn.Module.load_state_dict` is called.
+
+        It should have the following signature::
+            hook(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs) -> None  # noqa: B950
+
+        Arguments:
+            hook (Callable): Callable hook that will be invoked before
+                loading the state dict.
+        """
+        return self._register_load_state_dict_pre_hook(hook, with_module=True)
+
     def register_load_state_dict_post_hook(self, hook):
-        r"""Register a post hook to be run after module's ``load_state_dict`` is called.
+        r"""Register a post-hook to be run after module's :meth:`~nn.Module.load_state_dict` is called.
 
         It should have the following signature::
             hook(module, incompatible_keys) -> None

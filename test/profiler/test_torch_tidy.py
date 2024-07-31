@@ -28,6 +28,7 @@ from torch._C._profiler import _TensorMetadata
 from torch.profiler import _utils, profile
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+
 Json = Dict[str, Any]
 
 from torch._C._profiler import _ExtraFields_PyCall
