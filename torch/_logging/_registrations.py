@@ -162,7 +162,7 @@ register_artifact(
 register_artifact(
     "benchmarking",
     "Detailed Inductor benchmarking information.",
-    off_by_default=True,
+    off_by_default=False,
 )
 
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")
