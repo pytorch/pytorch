@@ -831,6 +831,9 @@ class InstructionTranslatorBase(
         TracingContext.set_current_loc(
             self.f_code.co_filename, lineno, self.f_code.co_name
         )
+        from torch._logging.structured import dump_file
+
+        dump_file(self.f_code.co_filename)
         if trace_source_log.isEnabledFor(logging.DEBUG):
             trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
 
