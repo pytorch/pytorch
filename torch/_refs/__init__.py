@@ -7,14 +7,12 @@ import itertools
 import math
 import operator
 import warnings
-
 from collections.abc import Iterable
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
 from typing import Any, Callable, Dict, List, Optional, overload, Sequence, Tuple, Union
 
 import torch
-
 import torch._prims as prims
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
@@ -50,6 +48,7 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
+
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -294,6 +293,7 @@ __all__ = [
     "unfold",
     "unfold_copy",
     "unsqueeze",
+    "unsqueeze_copy",
     "view",
     "view_as",
     "view_copy",
@@ -446,6 +446,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
 
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
+
 
 #
 # Elementwise unary references
@@ -6321,6 +6322,7 @@ expand_copy = _make_copy_from_view(aten.expand)
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(aten.narrow)
 t_copy = _make_copy_from_view(aten.t)
+unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
 view_copy = _make_copy_from_view(aten.view)
 
 

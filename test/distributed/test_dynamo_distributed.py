@@ -844,6 +844,39 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @config.patch(enable_compiler_collectives=True)
+    def test_compiler_collectives_automatic_dynamic_speculation_divergence(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            torch._dynamo.utils.clear_compilation_metrics()
+
+            # TODO: This should be possible to do inside the function, but
+            device = f"cuda:{self.rank}"
+
+            @torch.compile()
+            def f(x, y):
+                zx = x.shape
+                zy = y.shape
+                return x.sum() + y.sum()
+
+            if self.rank == 0:
+                dataloader = [4, 4]
+            else:
+                dataloader = [3, 4]
+
+            for data in dataloader:
+                f(
+                    torch.randn(data, device=self.rank),
+                    torch.randn(data, device=self.rank),
+                )
+
+            metrics = torch._dynamo.utils.get_compilation_metrics()
+            # Number of compiles same on all nodes
+            res = [None] * self.world_size
+            torch.distributed.all_gather_object(res, len(metrics))
+            for r in res[1:]:
+                self.assertEqual(res[0], r)
+
 
 @requires_nccl()
 @requires_cuda
@@ -1379,8 +1412,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self._param = torch.randn((3,), device="cuda")
-                self.register_buffer(
-                    "_buf", torch.randn((3,), requires_grad=False, device="cuda")
+                self._buf = torch.nn.Buffer(
+                    torch.randn((3,), requires_grad=False, device="cuda")
                 )
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -1410,8 +1443,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         class BufModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer(
-                    "_buf", torch.randn((3,), requires_grad=False, device="cuda")
+                self._buf = nn.Buffer(
+                    torch.randn((3,), requires_grad=False, device="cuda")
                 )
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -1423,7 +1456,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 self._param = nn.Parameter(torch.randn((1,), device="cuda"))
                 self._buf_module = BufModule()
                 # Share the buffer, meaning same tensor but different source
-                self.register_buffer("_buf", self._buf_module._buf)
+                self._buf = self._buf_module._buf
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 # Use the same buffer tensor twice in the compiled forward,
