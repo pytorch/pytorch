@@ -636,7 +636,6 @@ cpu_flash_attention(
   int64_t qSplitSize = q_split_size > qSize ? qSize : q_split_size;
   int64_t kvSplitSize = kv_split_size > kvSize ? kvSize : kv_split_size;
   int64_t qSlice = (qSize - 1) / qSplitSize + 1;
-  // int64_t qTail = (qSize - 1) % qSplitSize + 1;
   int64_t kvSlice = (kvSize - 1) / kvSplitSize + 1;
   int64_t kvTail = (kvSize - 1) % kvSplitSize + 1;
 
@@ -1050,6 +1049,7 @@ cpu_flash_attention(
           data_index_step(i, batchSize, j, num_head, k, qSlice);
         }
       });
+  at::native::cpublas::brgemm_release();
 }
 
 template <typename scalar_t, typename mask_t, int64_t q_split_size, int64_t kv_split_size>

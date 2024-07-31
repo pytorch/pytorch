@@ -837,10 +837,11 @@ void brgemm(
     const std::vector<std::pair<int64_t, int64_t>>& offsets,
     float* C) {
 #if AT_MKLDNN_ENABLED()
-    Brgemm<at::Half, at::Half, float>::call(M, N, K, bs, ld_a, ld_b, ld_c, alpha, beta, A, B, offsets, C);
+  Brgemm::call<at::Half, at::Half, float>(
+      M, N, K, bs, ld_a, ld_b, ld_c, alpha, beta, A, B, offsets, C);
 #else
-// Note gemm assume column major
-  for (int64_t i = 0; i < bs; i ++) {
+  // Note: gemm assume column major
+  for (int64_t i = 0; i < bs; i++) {
     gemm(
         TransposeType::NoTranspose,
         TransposeType::NoTranspose,
@@ -872,10 +873,11 @@ void brgemm(
     const at::Half* B,
     float* C) {
 #if AT_MKLDNN_ENABLED()
-    Brgemm<at::Half, at::Half, float>::call(M, N, K, ld_a, ld_b, ld_c, alpha, beta, A, B, C);
+  Brgemm::call<at::Half, at::Half, float>(
+      M, N, K, ld_a, ld_b, ld_c, alpha, beta, A, B, C);
 #else
-  // Note gemm assume column major
-    gemm(
+  // Note: gemm assume column major
+  gemm(
       TransposeType::NoTranspose,
       TransposeType::NoTranspose,
       N,
@@ -892,6 +894,12 @@ void brgemm(
 #endif
 }
 
+void brgemm_release() {
+#if AT_MKLDNN_ENABLED()
+  dnnl::ukernel::brgemm::release_hw_context();
+#endif
+}
+
 void pack(
     int64_t K,
     int64_t N,
@@ -902,18 +910,18 @@ void pack(
     const void* in,
     void* out) {
 #if AT_MKLDNN_ENABLED()
-    Pack::call(K, N, ld_in, ld_out, dt_in, dt_out, in, out);
+  Pack::call(K, N, ld_in, ld_out, dt_in, dt_out, in, out);
 #else
-    TORCH_CHECK(false, "pack is only supported with oneDNN enabled");
+  TORCH_CHECK(false, "pack is only supported with oneDNN enabled");
 #endif
 }
 
 bool need_pack(ScalarType dt_in, ScalarType dt_out) {
 #if AT_MKLDNN_ENABLED()
-    return Pack::need_pack(dt_in, dt_out);
+  return Pack::need_pack(dt_in, dt_out);
 #else
-    return false;
+  return false;
 #endif
 }
 
-}  // namespace at::native::cpublas
+} // namespace at::native::cpublas
