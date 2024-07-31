@@ -504,7 +504,13 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     scatter_dim: int,
     group_name: str,
 ) -> torch.Tensor:
-    C = torch._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale, out_dtype=out_dtype)
+    C = torch._scaled_mm(
+        A.flatten(0, -2).contiguous(),
+        B,
+        A_scale,
+        B_scale,
+        out_dtype=out_dtype,
+    )
     C = C.view(*A.shape[:-1], B.shape[1])
     res = funcol.reduce_scatter_tensor(
         C,

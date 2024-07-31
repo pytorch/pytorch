@@ -2348,6 +2348,66 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         expected = torch.empty_like(x)
         self.assertEqual(out, expected)
 
+    @requires_gpu
+    @common_utils.parametrize("dynamic", [False, True])
+    @common_utils.parametrize("autotune", [False, True])
+    def test_capture_triton_special_kwargs(self, dynamic, autotune):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        if autotune:
+            add_kernel = triton.autotune(
+                configs=[
+                    triton.Config({"BLOCK_SIZE": 128}),
+                    triton.Config({"BLOCK_SIZE": 64}),
+                ],
+                key=["n_elements"],
+            )(add_kernel)
+
+        def f(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            if autotune:
+                kwargs = {}
+            else:
+                kwargs = {"BLOCK_SIZE": 128}
+            capture_triton(add_kernel)[grid](
+                x,
+                y,
+                output,
+                n_elements,
+                num_warps=8,
+                num_stages=3,
+                **kwargs,
+            )
+            return output
+
+        x = torch.randn(4, device=GPU_TYPE)
+        tracing_mode = "symbolic" if dynamic else "fake"
+
+        result = f(x, x)
+        self.assertEqual(result, x + x)
+
+        from functorch import make_fx
+
+        gm = make_fx(f, tracing_mode=tracing_mode)(x, x)
+        self.assertEqual(gm(x, x), x + x)
+
 
 common_utils.instantiate_parametrized_tests(KernelTests)
 common_utils.instantiate_parametrized_tests(CustomOpTests)
