@@ -81,7 +81,6 @@ class CppWrapperCpu(WrapperCodeGen):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
-        grid_extra_kwargs="",
     ):
         """
         Generates kernel call code.
@@ -171,6 +170,8 @@ class CppWrapperCpu(WrapperCodeGen):
                     #include <torch/csrc/inductor/aoti_runtime/model.h>
                     """
                 )
+            self.header.splice("typedef at::Half half;")
+            self.header.splice("typedef at::BFloat16 bfloat16;")
         else:
             self.header.splice(
                 """
@@ -2484,12 +2485,18 @@ if (py_{buf_name}.get() == NULL) {{
             ), f"{val} does not match with arg type {type_}"
             element_type = type_.getElementType()
             if config.abi_compatible:
-                assert len(val) > 0, "Empty array is not supported in C"
                 var_name = f"var_array_{next(self.var_array_id)}"
-                result = f"{{{', '.join(self.val_to_arg_str(x, element_type) for x in val)}}}"
-                self.writeline(
-                    f"const {self.c_type_for_prim_type(element_type)} {var_name}[] = {result};"
-                )
+                if len(val) == 0:
+                    # Zero-size array is not supported in the C or C++ standard, so
+                    # we declare a null pointer for it.
+                    self.writeline(
+                        f"const {self.c_type_for_prim_type(element_type)}* {var_name} = nullptr;"
+                    )
+                else:
+                    result = f"{{{', '.join(self.val_to_arg_str(x, element_type) for x in val)}}}"
+                    self.writeline(
+                        f"const {self.c_type_for_prim_type(element_type)} {var_name}[] = {result};"
+                    )
                 # Need to pass the array length because we can't use std::vector
                 return f"{var_name}, {len(val)}"
             else:
