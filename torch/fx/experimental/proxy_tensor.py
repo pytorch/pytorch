@@ -1791,7 +1791,7 @@ def maybe_handle_decomp(
 ) -> object:
     from torch._inductor.bisect_helper import BisectionManager
     if op in CURRENT_DECOMPOSITION_TABLE:
-        if not BisectionManager.torch_bisect("aot_eager_decomp_partition", "decomposition"):
+        if BisectionManager.disable_subsystem("aot_eager_decomp_partition", "decomposition", lambda: repr(op)):
             return NotImplemented
 
         with proxy_mode:
