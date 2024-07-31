@@ -679,6 +679,14 @@ def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
     return True
 
 
+def is_from_param_buffer_source(source: Source):
+    if isinstance(source, ParamBufferSource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_param_buffer_source(source.base)
+    return False
+
+
 def is_from_flatten_script_object_source(source: Source):
     if isinstance(source, FlattenScriptObjectSource):
         return True
