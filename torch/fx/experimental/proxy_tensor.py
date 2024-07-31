@@ -440,7 +440,7 @@ def track_tensor_tree(
             assert constant is None
 
             if isinstance(proxy, fx.Proxy):
-               set_meta(proxy, e)
+                set_meta(proxy, e)
 
             for key, val in e.items():
                 wrap_with_proxy(val, proxy[key], None)  # type: ignore[index]
