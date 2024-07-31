@@ -5,7 +5,6 @@ import dataclasses
 import inspect
 import logging
 import threading
-import typing
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Union
 
@@ -566,6 +565,11 @@ def triton_kernel_wrapper_mutation_fake_tensor_mode(
         return None
 
 
+@triton_kernel_wrapper_mutation.py_impl(DispatchKey.Meta)
+def _(*, kernel_idx, constant_args_idx, grid, kwargs):
+    return None
+
+
 def trace_triton_kernel_wrapper(proxy_mode, func_overload, node_args):
     with disable_proxy_modes_tracing():
         out = func_overload(**node_args)
@@ -747,8 +751,6 @@ triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)
 # The "TritonHOPifier": a class that transforms a call to a triton kernel into
 # a call to the triton_kernel_wrapper_mutation HOP.
 
-fx_acceptable_types = typing.get_args(fx.node.BaseArgumentTypes)
-
 
 class TritonHOPifier:
     """Orchestrator for converting a user-defined triton kernel into a call
@@ -774,6 +776,9 @@ class TritonHOPifier:
         raise NotImplementedError("abstract method")
 
     def is_callable(self, maybe_callable):
+        raise NotImplementedError("abstract method")
+
+    def get_value(self, val):
         raise NotImplementedError("abstract method")
 
     def call_grid(self, grid, meta, tx):
@@ -876,7 +881,7 @@ class TritonHOPifier:
             if name in kwargs:
                 # remove special kwargs from `kwargs`
                 val = kwargs.pop(name)
-                special_kwargs[name] = val.value
+                special_kwargs[name] = self.get_value(val)
 
         if special_kwargs:
             if isinstance(variable.kernel, Autotuner):
@@ -895,7 +900,7 @@ class TritonHOPifier:
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
             new_var = type(variable)(new_kernel, None, variable.grid)
-            return new_var.call_function(tx, args, kwargs)
+            return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         if variable.grid is None:
             self.raise_unsupported("Triton kernels should always be called with a grid")
@@ -958,6 +963,9 @@ class TracingTritonHOPifier(TritonHOPifier):
     def is_callable(self, maybe_callable):
         return callable(maybe_callable)
 
+    def get_value(self, val):
+        return val
+
     def call_grid(self, grid, meta, tx):
         assert tx is None
         return grid(meta)
@@ -973,14 +981,13 @@ class TracingTritonHOPifier(TritonHOPifier):
     def call_HOP(self, variable, grids, combined_args, tx):
         assert tx is None
 
+        def is_graphable(val):
+            return isinstance(val, fx.node.base_types)
+
         non_graphable_args = {
-            k: v
-            for k, v in combined_args.items()
-            if not isinstance(v, fx_acceptable_types)
+            k: v for k, v in combined_args.items() if not is_graphable(v)
         }
-        graphable_args = {
-            k: v for k, v in combined_args.items() if isinstance(v, fx_acceptable_types)
-        }
+        graphable_args = {k: v for k, v in combined_args.items() if is_graphable(v)}
 
         constant_args_idx = kernel_side_table.add_constant_args(non_graphable_args)
         return triton_kernel_wrapper_mutation(
