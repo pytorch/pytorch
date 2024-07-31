@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import logging
-
 import tempfile
-
 from typing import Mapping, Tuple
 
 import onnx
 import onnx.inliner
+
 import pytorch_test_common
 import transformers  # type: ignore[import]
 
@@ -407,7 +406,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 super().__init__()
                 self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=False)
                 self.fc1 = nn.Linear(9216, 128, bias=False)
-                self.register_buffer("buffer", torch.randn(1, 128))
+                self.buffer = torch.nn.Buffer(torch.randn(1, 128))
 
             def forward(self, tensor_x: torch.Tensor):
                 tensor_x = self.conv2(tensor_x)
