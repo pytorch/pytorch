@@ -94,6 +94,12 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   bool hasPrimaryContext(DeviceIndex device_index) const override {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  virtual bool isPinnedPtr(const void* data) const override {
+    return false;
+  }
+  virtual Allocator* getPinnedMemoryAllocator() const override {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
   #undef FAIL_MPSHOOKS_FUNC
 };
 

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Owner(s): ["module: tests"]
 
@@ -8432,9 +8433,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
-        if not torch.cuda.is_available():
-            self.assertRaises(RuntimeError, lambda: x.pin_memory())
-        else:
+        if torch.cuda.is_available():
             pinned = x.pin_memory()
             self.assertTrue(pinned.is_pinned())
             self.assertEqual(pinned, x)
@@ -8681,6 +8680,16 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertSequenceEqual(
                 dim_order, torch.empty_permuted(shape, dim_order).dim_order()
             )
+
+        for shape in [(2, 2, 2, 2), (2, 1, 2, 2), (2, 2, 1, 2), (2, 2, 2, 1), (2, 2, 1, 1), (2, 1, 1, 2)]:
+            for memory_format in (torch.contiguous_format, torch.channels_last):
+                t = torch.empty(shape).to(memory_format=memory_format)
+                if memory_format == torch.contiguous_format:
+                    dim_order_target = list(range(len(shape)))
+                elif memory_format == torch.channels_last:
+                    dim_order_target = [0, *list(range(2, len(shape))), 1]
+
+                self.assertSequenceEqual(dim_order_target, t.dim_order())
 
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor
@@ -10666,6 +10675,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_c10_feature_enabled(self):
         namespace = "movefast/knobs"
         feature = "use_justknobs"
+
         @contextlib.contextmanager
         def mocksetting(v):
             if IS_FBCODE:
@@ -10673,9 +10683,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 with PyPatchJustKnobs().patch(f"{namespace}:{feature}", v):
                     yield
             else:
+                assert feature not in os.environ
+                os.environ[feature] = "1" if v else "0"
                 try:
-                    assert k not in os.environ
-                    os.environ[feature] = "1" if feature else "0"
                     yield
                 finally:
                     del os.environ[feature]

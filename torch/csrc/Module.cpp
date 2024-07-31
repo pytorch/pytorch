@@ -1154,7 +1154,8 @@ PyObject* THPModule_c10_justknobs_check(PyObject* _unused, PyObject* args) {
   PyObject* the_namespace = nullptr;
   PyObject* feature = nullptr;
   int default_value = 0;
-  if (!PyArg_ParseTuple(args, "OOp", &the_namespace, &feature, &default_value)) {
+  if (!PyArg_ParseTuple(
+          args, "OOp", &the_namespace, &feature, &default_value)) {
     return nullptr;
   }
   if (!PyUnicode_Check(the_namespace) || !PyUnicode_Check(feature)) {
@@ -1575,7 +1576,10 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      (PyCFunction)(void (*)())THPModule_has_torch_function_variadic,
      METH_FASTCALL,
      nullptr},
-    {"_c10_justknobs_check", THPModule_c10_justknobs_check, METH_VARARGS, nullptr},
+    {"_c10_justknobs_check",
+     THPModule_c10_justknobs_check,
+     METH_VARARGS,
+     nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 void THCPStream_init(PyObject* module);
@@ -2007,6 +2011,13 @@ Call this whenever a new thread is created in order to propagate values from
       .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention)
       .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
 
+  py_module.def("_is_flash_attention_available", []() {
+#ifdef USE_CUDA
+    return sdp::is_flash_attention_available();
+#else
+    return false;
+#endif
+  });
   py_module.def(
       "_can_use_flash_attention",
       [](const sdp::sdp_params& params, bool debug) {
