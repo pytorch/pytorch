@@ -4177,12 +4177,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             out_expected = torch.cat(
                 [func(t, dim=(reduce_dim[0] - 1)).unsqueeze(0) for t in nt.unbind()]
             )
+            if keepdim:
+                out_expected = out_expected.unsqueeze(reduce_dim[0])
 
             self.assertFalse(
                 out_actual.is_nested,
                 f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
             )  # output is a dense tensor
-            self.assertTrue(torch.allclose(out_actual, out_expected))
+            self.assertEqual(out_actual, out_expected)
 
     @dtypes(torch.float32)
     @parametrize(
@@ -4242,12 +4244,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                         for t in nt_transposed.unbind()
                     ]
                 )
+                if keepdim:
+                    out_expected = out_expected.unsqueeze(reduce_dim[0])
 
                 self.assertFalse(
                     out_actual.is_nested,
                     f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
                 )  # output is a dense tensor
-                self.assertTrue(torch.allclose(out_actual, out_expected, rtol=1e-4))
+                self.assertEqual(out_actual, out_expected)
 
     @dtypes(torch.float32)
     @parametrize(

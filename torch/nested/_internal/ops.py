@@ -1200,8 +1200,10 @@ def mean_dim(func, *args, **kwargs):
         # for every non-batch dimension,
         #   unsqueeze lengths into the same shape as the PyTorch sum,
         #   as the extra dimensions must all be divided by the same length
+        # Note: keepdim=True is on at this point so lengths has to be unsqueezed for
+        # that 1-size dim as well.
         lengths = inp._offsets.diff()
-        for _ in range(inp.dim() - 2):
+        for _ in range(inp.dim() - 1):
             lengths = lengths.unsqueeze(-1)
 
         return torch_sum / lengths.broadcast_to(torch_sum.shape)
