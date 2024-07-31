@@ -4,7 +4,6 @@ import dataclasses
 import importlib
 import logging
 import os
-
 from typing import (
     Any,
     Callable,
@@ -32,6 +31,7 @@ from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 from torch.utils import _pytree
+
 
 if TYPE_CHECKING:
     import onnx
@@ -929,7 +929,7 @@ class OrtBackend:
             try:
                 from onnxscript import optimizer  # type: ignore[import]
                 from onnxscript.rewriter import (  # type: ignore[import]
-                    onnxruntime as ort_rewriter,  # type: ignore[import]
+                    onnxruntime as ort_rewriter,
                 )
 
                 onnx_model = optimizer.optimize(onnx_model)
@@ -1112,7 +1112,6 @@ class OrtBackend:
         the ``compile`` method is invoked directly."""
         if self._options.use_aot_autograd:
             from functorch.compile import min_cut_rematerialization_partition
-
             from torch._dynamo.backends.common import aot_autograd
 
             return aot_autograd(
