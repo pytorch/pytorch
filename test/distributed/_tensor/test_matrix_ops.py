@@ -303,7 +303,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         #       Gaps include missing op support for aten.masked_fill_.Scalar.
         is_causal = True
         params = torch.backends.cuda.SDPAParams(
-            query, key, value, None, dropout_p, is_causal
+            query, key, value, None, dropout_p, is_causal, enable_gqa=False
         )
         if torch.backends.cuda.can_use_flash_attention(params, debug=False):
             available_backends.append(SDPBackend.FLASH_ATTENTION)
