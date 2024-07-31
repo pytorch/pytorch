@@ -98,9 +98,9 @@ function install_124 {
   rm -rf /usr/local/cuda-12.4 /usr/local/cuda
   # install CUDA 12.4.1 in the same container
   wget -q https://developer.download.nvidia.com/compute/cuda/12.4.1/local_installers/cuda_12.4.1_550.54.15_linux.run
-  chmod +x cuda_12.4.1_550.54.14_linux.run
-  ./cuda_12.4.1_550.54.14_linux.run --toolkit --silent
-  rm -f cuda_12.4.1_550.54.14_linux.run
+  chmod +x cuda_12.4.1_550.54.15_linux.run
+  ./cuda_12.4.1_550.54.15_linux.run --toolkit --silent
+  rm -f cuda_12.4.1_550.54.15_linux.run
   rm -f /usr/local/cuda && ln -s /usr/local/cuda-12.4 /usr/local/cuda
 
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
