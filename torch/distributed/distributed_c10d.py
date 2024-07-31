@@ -4439,9 +4439,9 @@ def split_group(
             my_group = split_group
             group_rank = split_group.index(parent_group_rank)
             break
-    # if my rank does not belong to any sub group or my rank is the only member in the subgroup,
+    # if my rank does not belong to any sub group,
     # no_color split should be called
-    if my_group is None or group_rank == -1 or len(my_group) == 1:
+    if my_group is None or group_rank == -1:
         parent_backend.perform_nocolor_split(device_id)
         return None
 
@@ -4943,7 +4943,7 @@ def _find_or_create_pg_by_ranks_and_tag(
                 my_ranks = rank_set
         assert my_ranks is not None, "rankset doesn't include the current node"
 
-    my_ranks.sort()
+    my_ranks = sorted(my_ranks)
 
     pg = _find_pg_by_ranks_and_tag(tag, my_ranks)
     if pg is not None:
