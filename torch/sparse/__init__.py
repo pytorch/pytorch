@@ -297,14 +297,16 @@ Args:
 )
 
 
-spsolve = _add_docstr(_sparse._spsolve, r"""
+spsolve = _add_docstr(
+    _sparse._spsolve,
+    r"""
 sparse.spsolve(input, other, *, left=True) -> Tensor
 
-Computes the solution of a square system of linear equations with 
+Computes the solution of a square system of linear equations with
 a unique solution. Its purpose is similar to :func:`torch.linalg.solve`,
 except that the system is defined by a sparse CSR matrix with layout
-`sparse_csr`. 
-                    
+`sparse_csr`.
+
 Args:
     input (Tensor): a sparse CSR matrix of shape `(n, n)` representing the
         coefficients of the linear system.
@@ -312,7 +314,8 @@ Args:
         side of the linear system.
     left (bool, optional): whether to solve the system for `input @ out = other`
         (default) or `out @ input = other`. Only `left=True` is supported.
-""")
+""",
+)
 
 log_softmax = _add_docstr(
     _sparse._sparse_log_softmax,
