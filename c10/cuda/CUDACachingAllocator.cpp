@@ -3566,7 +3566,11 @@ CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {
   return allocator_;
 }
 
-thread_local MemPool* MemPoolContext::active_mempool_ = nullptr;
+// Note that active_mempool_ is a global variable here
+// and not inside MemPoolContext class, because in windows we
+// can't use __declspec(dllexport) and __declspec(thread)
+// together: https://stackoverflow.com/a/50967977
+static thread_local MemPool* MemPoolContext::active_mempool_ = nullptr;
 
 MemPoolContext::MemPoolContext(MemPool* mempool)
     : prev_mempool_(active_mempool_) {

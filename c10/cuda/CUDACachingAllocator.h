@@ -530,7 +530,6 @@ struct C10_CUDA_API MemPoolContext {
 
  private:
   MemPool* prev_mempool_;
-  static thread_local MemPool* active_mempool_;
 };
 
 } // namespace c10::cuda
