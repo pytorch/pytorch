@@ -15,8 +15,8 @@ from torch.distributed._tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
-from torch.distributed._tensor.ops.common_rules import pointwise_rule
-from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
+from torch.distributed._tensor.ops._common_rules import pointwise_rule
+from torch.distributed._tensor.ops._embedding_ops import _MaskPartial
 from torch.distributed._tensor.ops.utils import (
     expand_to_full_mesh_op_strategy,
     is_tensor_dim_sharded,
@@ -408,7 +408,7 @@ def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # this only works when the input is sharded on the gather dimension, and
     # index has size 1 on the gather dimension
     if index_shape[dim] == 1:
-        index_partial_placement = _MaskPartial(logical_dim_size=input_shape[dim])
+        index_partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=dim)
         input_sharding: PlacementList = [
             index_partial_placement,
             Shard(dim),
