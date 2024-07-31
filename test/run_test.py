@@ -57,11 +57,11 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results
-from tools.testing.target_determination.utils import gen_ci_artifact, get_percent_to_run
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
 )
 from tools.testing.target_determination.heuristics.utils import get_pr_number
+from tools.testing.target_determination.utils import gen_ci_artifact, get_percent_to_run
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
     calculate_shards,
@@ -1798,9 +1798,7 @@ def main():
             return s.strip()
 
     percent_to_run = get_percent_to_run(options.enable_td)
-    print_to_stderr(
-        f"Running {percent_to_run}% of tests based on TD"
-    )
+    print_to_stderr(f"Running {percent_to_run}% of tests based on TD")
     include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
 
     test_batch = TestBatch("tests to run", include, False)
