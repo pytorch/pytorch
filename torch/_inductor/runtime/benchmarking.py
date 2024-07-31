@@ -711,7 +711,7 @@ class Benchmarker:
                         break
                     if timing_ms <= target_timing_ms:
                         callables_to_benchmark.append(_callable)
-                counters["inductor"]["benchmarking_earling_pruning"] += len(
+                counters["inductor"]["benchmarking_early_pruning"] += len(
                     callables
                 ) - len(callables_to_benchmark)
                 log.debug(
