@@ -6199,9 +6199,12 @@ class TestNestedTensorSubclass(TestCase):
         )
         self.assertEqual(masked_nt.lengths(), None)
 
+    @skipIfTorchDynamo(
+        "Fails on returning a fresh tensor but this is expected behavior"
+    )
     def test_nested_masked_select(self, device):
-        t = torch.randn([3, 3])
-        mask = torch.tensor([False])
+        t = torch.randn([3, 3], device=device)
+        mask = torch.tensor([False], device=device)
 
         njt = torch.nested.masked_select(t, mask)
         self.assertEqual(njt.values(), torch.tensor([], device=device))
@@ -6215,7 +6218,8 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(njt.offsets(), torch.tensor([0, 0, 0, 3], device=device))
 
         mask = torch.tensor(
-            [[False, False, True], [True, False, True], [False, False, True]]
+            [[False, False, True], [True, False, True], [False, False, True]],
+            device=device,
         )
         njt = torch.nested.masked_select(t, mask)
         self.assertEqual(njt.values(), t.masked_select(mask))
