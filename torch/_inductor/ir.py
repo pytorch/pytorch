@@ -1472,10 +1472,6 @@ class Reduction(Loops):
         )
 
 
-def num_reduction_outputs(reduction_type: Set[str]) -> int:
-    return 3 if "welford" in reduction_type else 1
-
-
 class WelfordReduction(Reduction):
     output_index: int
 
@@ -7149,7 +7145,7 @@ class _WaitKernel(_CollectiveKernel):
 # NB: recursive structure here reflects val_to_arg_str, avoid
 # calling free_unbacked_symbols on "exotic" types that don't get pexpr
 # treatment
-def maybe_free_unbacked_symbols(s: object) -> Set[Symbol]:
+def maybe_free_unbacked_symbols(s: object) -> OrderedSet[Symbol]:
     if isinstance(s, (SymTypes, Expr)):
         # This branch should be impossible in return position
         return free_unbacked_symbols(s)
