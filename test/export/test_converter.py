@@ -26,8 +26,7 @@ class TestConverter(TestCase):
     ) -> ExportedProgram:
         # By default, it tests both jit.trace and jit.script.
         if option is None:
-            # option = ["trace", "script"]
-            option = ["script"]
+            option = ["trace", "script"]
 
         if check_persistent:
             num_iterations = 10
@@ -58,7 +57,6 @@ class TestConverter(TestCase):
             else:
                 raise RuntimeError(f"Unrecognized mode for torch.jit: {opt}")
 
-            print(opt, ts_model.graph)
             ep = TS2EPConverter(ts_model, inp).convert()
             ep_list.append(ep)
 
@@ -964,9 +962,6 @@ class TestConverter(TestCase):
                 y = torch.tensor(s)
                 return y
 
-        ep = torch.export.export(
-            M(), (torch.ones(3),), dynamic_shapes=({0: torch.export.Dim("m")},)
-        )
         ep_list = self._check_equal_ts_ep_converter(M(), (torch.ones(3),))
         for ep in ep_list:
             self.assertEqual(len(ep.constants), 0)
@@ -984,11 +979,9 @@ class TestConverter(TestCase):
                 y = torch.tensor([s, s * 2, 1])
                 return y
 
-        ep = torch.export.export(
-            M(), (torch.ones(3),), dynamic_shapes=({0: torch.export.Dim("m")},)
-        )
         ep_list = self._check_equal_ts_ep_converter(M(), (torch.ones(3),))
-        for ep in ep_list:
+        # Trace directly inline a tensor constant.
+        for ep in ep_list[1:]:
             self.assertEqual(len(ep.constants), 0)
 
         # TODO: Additional check once dynamic shape is supported.

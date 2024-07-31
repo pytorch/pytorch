@@ -1032,12 +1032,14 @@ def _use_conv_autotune_backend(backend: str) -> bool:
     ]
 
 
-def use_triton_template(layout, *, enable_int32=False):
+def use_triton_template(layout, *, enable_int32=False, enable_float8=False):
     from .codegen.common import BackendFeature, has_backend_feature
 
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
+    if enable_float8:
+        layout_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
     return (
         _use_template_for_cuda(layout, layout_dtypes)
         and _use_autotune_backend("TRITON")
