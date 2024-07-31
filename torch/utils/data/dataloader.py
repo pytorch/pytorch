@@ -34,6 +34,7 @@ from torch.utils.data.sampler import (
     Sampler,
     SequentialSampler,
 )
+from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
 
 
 __all__ = [
@@ -170,8 +171,7 @@ class DataLoader(Generic[_T_co]):
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
         multiprocessing_context (str or multiprocessing.context.BaseContext, optional): If
-            ``None``, the default `multiprocessing context`_ of your operating system will
-            be used. (default: ``None``)
+            ``None``, the ``spawn`` start method be used. (default: ``None``)
         generator (torch.Generator, optional): If not ``None``, this RNG will be used
             by RandomSampler to generate random indexes and multiprocessing to generate
             ``base_seed`` for workers. (default: ``None``)
@@ -1079,10 +1079,12 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         assert self._prefetch_factor > 0
 
         if loader.multiprocessing_context is None:
-            multiprocessing_context = torch.multiprocessing
+            multiprocessing_context = torch.multiprocessing.get_context("spawn")
         else:
             multiprocessing_context = loader.multiprocessing_context
 
+        if multiprocessing_context.get_start_method() == 'spawn':
+            _check_unpickable_fn(loader.worker_init_fn)
         self._worker_init_fn = loader.worker_init_fn
 
         # Adds forward compatibilities so classic DataLoader can work with DataPipes:
