@@ -645,7 +645,7 @@ def _compile(
         nonlocal restart_reasons
         last_attempt_start_time = start_time = time.time()
         j =0
-        for i in range(10000000):
+        for i in range(1000):
             j=j*i+i-19*j*j
         print(j)    
         def log_bytecode(
