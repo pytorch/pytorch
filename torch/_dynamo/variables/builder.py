@@ -17,20 +17,7 @@ import types
 import weakref
 from typing import Any, List, NamedTuple, Optional, TYPE_CHECKING, Union
 
-from torch._utils_internal import justknobs_check
-
-from torch.utils._sympy.value_ranges import ValueRanges
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
-
 import torch
-
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
@@ -38,6 +25,7 @@ from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch._subclasses.meta_utils import is_sparse_any
+from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -49,10 +37,10 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
 
 from .. import config, mutation_guard, replay_record, trace_rules
-
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, unimplemented
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
@@ -109,7 +97,6 @@ from ..utils import (
     unwrap_with_attr_name_if_wrapper,
     wrap_fake_exception,
 )
-
 from .base import MutableLocal, typestr, VariableTracker, VariableTrackerMeta
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
@@ -182,7 +169,6 @@ from .misc import (
 from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
-
 from .sdpa import SDPAParamsVariable
 from .tensor import (
     NumpyNdarrayVariable,
@@ -200,6 +186,16 @@ from .user_defined import (
     UserDefinedObjectVariable,
     WeakRefVariable,
 )
+
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 log = logging.getLogger(__name__)
@@ -931,10 +927,12 @@ class VariableBuilder:
         # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
         elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return PythonModuleVariable(
+            result = PythonModuleVariable(
                 value,
                 source=self.source,
             )
+            self.tx.output.side_effects.track_object_existing(value, result)
+            return result
         elif isinstance(value, types.MethodType) and isinstance(
             value.__self__, (torch.nn.Module, torch.utils._pytree.TreeSpec)
         ):
@@ -976,7 +974,11 @@ class VariableBuilder:
             # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
-            if value in (torch.utils.hooks.BackwardHook, torch.nn.Parameter):
+            if value in (
+                torch.utils.hooks.BackwardHook,
+                torch.nn.Parameter,
+                torch.nn.Buffer,
+            ):
                 # TODO(jansel): combine this case with the one above
                 return trace_rules.lookup(value).create_with_source(
                     value, source=self.source
@@ -2010,6 +2012,7 @@ def wrap_fx_proxy_cls(
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
+        is_buffer = isinstance(example_value, torch.nn.Buffer)
 
         # NB: In most (all?) cases, this does not actually do a clone.
         # (WARNING: this means that if we mutate metadata on the fake
@@ -2024,7 +2027,11 @@ def wrap_fx_proxy_cls(
         ):
             tensor_type = subclass_type if subclass_type else torch.Tensor
             specialized_props["class_type"] = (
-                torch.nn.Parameter if is_parameter else tensor_type
+                torch.nn.Parameter
+                if is_parameter
+                else torch.nn.Buffer
+                if is_buffer
+                else tensor_type
             )
 
         options.update(specialized_props)
@@ -2160,6 +2167,7 @@ def wrap_fx_proxy_cls(
         set_example_value(proxy.node, example_value)
         return SDPAParamsVariable(proxy, **options)
     elif isinstance(example_value, bool) and proxy.node.target in [
+        torch.backends.cuda.is_flash_attention_available,
         torch.backends.cuda.can_use_flash_attention,
         torch.backends.cuda.can_use_efficient_attention,
     ]:
