@@ -1747,6 +1747,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("-inf")),))
 
+    @requires_gpu
     def test_reduction_config_limit(self):
         """
         This unit-test tests whether we exceed cudaDeviceProperties.maxGridSize in
