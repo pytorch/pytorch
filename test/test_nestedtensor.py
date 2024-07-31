@@ -3948,27 +3948,13 @@ class TestNestedTensorSubclass(TestCase):
         def grad_test_func(values, offsets):
             nt = torch.nested.nested_tensor_from_jagged(values, offsets)
             chunks = nt.chunk(3, dim=-1)
-            return (
-                chunks[0].values().sum()
-                + chunks[1].values().sum()
-                + chunks[2].values().sum()
-            )
+            return chunks[0].values().sum()
 
         assert gradcheck(
             grad_test_func,
             inputs=(values, offsets),
             check_batched_grad=False,
         )
-
-        # test chunk_backward when some grads are None
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "NestedTensor chunk backward requires that all grads are not NONE",
-        ):
-            # nt = nt.clone().detach().requires_grad_(True)
-            # chunks = nt.chunk(NUM_CHUNKS, dim=-1)
-            loss = chunks[0].values().sum() + chunks[2].values().sum()
-            loss.backward()
 
         # chunk on batch dim
         chunks = nt.chunk(NUM_CHUNKS, dim=0)

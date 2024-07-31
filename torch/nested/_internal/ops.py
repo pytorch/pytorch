@@ -734,8 +734,9 @@ def chunk_backward(func, *args, **kwargs):
     )
     grads = new_kwargs.pop("grads")
     inp = new_kwargs.pop("input")
-
-    # Only support the simple case when dim != 0 for now
+    offsets = inp.offsets()
+    chunks = new_kwargs.pop("chunks")
+    # Only support the simple case when dim != 0 and dim !=1 for now
     # To support chunk_backward dim=0, need to support cat(dim=0) first
     dim = _wrap_jagged_dim(
         inp.dim(), new_kwargs["dim"], "chunk_backward", convert_to_inner_dim=False
@@ -748,25 +749,22 @@ def chunk_backward(func, *args, **kwargs):
             break
 
     if need_to_fill_grad:
-        # Since torch.zeros([.., j0, ..]) is not supported, skipping this case for now
-        raise RuntimeError(
-            "NestedTensor chunk backward requires that all grads are not NONE"
-        )
-
-        # dim_size = inp._size[dim]
-        # split_size = int((dim_size + chunks - 1) / chunks)
-        # grad_shape = list(inp._size)
-        # grad_shape[dim] = split_size
-        # last_grad_shape = list(inp._size)
-        # residue = dim_size - split_size * (dim_size // split_size)
-        # last_grad_shape[dim] = residue if residue != 0 else split_size
-        # last_idx = len(grads) - 1
-        # for idx, grad in enumerate(grads):
-        #     if grad is None:
-        #         if idx == last_idx:
-        #             grad = torch.zeros(last_grad_shape)
-        #         else:
-        #             grad = torch.zeros(grad_shape)
+        dim_size = inp._size[dim]
+        split_size = int((dim_size + chunks - 1) / chunks)
+        grad_values_shape = list(inp.values().shape)
+        grad_values_shape[dim - 1] = split_size
+        last_grad_values_shape = grad_values_shape.copy()
+        residue = dim_size - split_size * (dim_size // split_size)
+        if residue != 0:
+            last_grad_values_shape[dim - 1] = residue
+        last_idx = len(grads) - 1
+        for idx, grad in enumerate(grads):
+            if grad is None:
+                if idx == last_idx:
+                    value = torch.zeros(last_grad_values_shape, device=inp.device)
+                else:
+                    value = torch.zeros(grad_values_shape, device=inp.device)
+                grads[idx] = NestedTensor(values=value, offsets=offsets)
 
     return torch.cat(tensors=grads, dim=dim)
 

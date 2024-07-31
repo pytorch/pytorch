@@ -4094,7 +4094,7 @@ int64_t dense_dim_default(const Tensor& self) {
 Tensor chunk_backward(at::TensorList grads, const at::Tensor & input, int64_t chunks, int64_t dim) {
     // Not implemented
     // chunk_backward is only used by Nested Jagged Tensor.
-    TORCH_CHECK_NOT_IMPLEMENTED(input.is_nested() && input.layout() == c10::kJagged, "chunk_backward is not implemented explicitly");
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "chunk_backward is not implemented explicitly");
     return Tensor{};
   }
 
