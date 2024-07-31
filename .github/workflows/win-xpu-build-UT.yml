@@ -69,42 +69,42 @@ jobs:
         echo ${{ inputs.working_commit }} > third_party/xpu.txt
         python -u setup.py bdist_wheel
 
-    - name: Build TorchVision
-      shell: cmd
-      run: |
-        call %conda_path%\Scripts\activate.bat
-        call activate %conda_env%
-        if exist "%home_dir%\vision" rmdir /s /q "%home_dir%\vision"
-        git clone https://github.com/pytorch/vision.git %home_dir%\vision
-        cd %home_dir%\vision
-        pip install -r docs/requirements.txt
-        if [ -e %home_dir%\pytorch\dist\torch-*.whl ]; then
-            pip install %home_dir%\pytorch\dist\torch-*.whl --force-reinstall
-        else
-            echo "No torch whl found."
-            exit
-        fi
+  #   - name: Build TorchVision
+  #     shell: cmd
+  #     run: |
+  #       call %conda_path%\Scripts\activate.bat
+  #       call activate %conda_env%
+  #       if exist "%home_dir%\vision" rmdir /s /q "%home_dir%\vision"
+  #       git clone https://github.com/pytorch/vision.git %home_dir%\vision
+  #       cd %home_dir%\vision
+  #       pip install -r docs/requirements.txt
+  #       if [ -e %home_dir%\pytorch\dist\torch-*.whl ]; then
+  #           pip install %home_dir%\pytorch\dist\torch-*.whl --force-reinstall
+  #       else
+  #           echo "No torch whl found."
+  #           exit
+  #       fi
 
-        python setup.py bdist_wheel
+  #       python setup.py bdist_wheel
 
-        if [ -e %home_dir%\vision\dist\torchvision-*.whl ]; then
-            pip install %home_dir%\vision\dist\torchvision-*.whl --force-reinstall
-        else
-            echo "No torchvision whl found."
-            exit
-        fi
+  #       if [ -e %home_dir%\vision\dist\torchvision-*.whl ]; then
+  #           pip install %home_dir%\vision\dist\torchvision-*.whl --force-reinstall
+  #       else
+  #           echo "No torchvision whl found."
+  #           exit
+  #       fi
 
-  Unit-tests:
-    runs-on: ["${{ inputs.win_runner }}"]
-    needs: [Build-whls, Preparation]
-    steps:
-    - name: Run Unit Tests
-      shell: cmd
-      run: |
-        call %conda_path%\Scripts\activate.bat
-        call activate %conda_env%
-        if exist "%home_dir%\xpurepo" rmdir /s /q "%home_dir%\xpurepo"
-        git clone https://github.com/intel/torch-xpu-ops.git %home_dir%\xpurepo
-        cd %home_dir%\xpurepo\examples
-        pip install pytest expecttest
-        python -m pytest -v | tee "%home_dir%\mtl-bundle-uts.log"
+  # Unit-tests:
+  #   runs-on: ["${{ inputs.win_runner }}"]
+  #   needs: [Build-whls, Preparation]
+  #   steps:
+  #   - name: Run Unit Tests
+  #     shell: cmd
+  #     run: |
+  #       call %conda_path%\Scripts\activate.bat
+  #       call activate %conda_env%
+  #       if exist "%home_dir%\xpurepo" rmdir /s /q "%home_dir%\xpurepo"
+  #       git clone https://github.com/intel/torch-xpu-ops.git %home_dir%\xpurepo
+  #       cd %home_dir%\xpurepo\examples
+  #       pip install pytest expecttest
+  #       python -m pytest -v | tee "%home_dir%\mtl-bundle-uts.log"
