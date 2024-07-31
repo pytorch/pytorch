@@ -44,7 +44,7 @@ Load::Load(Dtype dtype, BufPtr buf, std::vector<ExprPtr> indices)
   castIndicesToInts(indices_);
 }
 
-Load::Load(BufPtr buf, const std::vector<ExprPtr>& indices)
+Load::Load(const BufPtr& buf, const std::vector<ExprPtr>& indices)
     : Load(ChooseDtype(buf->dtype(), dtypeOfIndices(indices)), buf, indices) {}
 
 ExprHandle Load::make(

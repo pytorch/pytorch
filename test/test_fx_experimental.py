@@ -1250,8 +1250,8 @@ class {test_classname}(torch.nn.Module):
                 self.seq = torch.nn.Sequential(torch.nn.BatchNorm1d(2, 2))
                 self.linear = torch.nn.Linear(2, 2)
                 self.attr = torch.randn(2)
-                self.register_buffer("attr2", torch.randn(2))
-                self.register_buffer("attr3", torch.ones(2, dtype=torch.int32))
+                self.attr2 = torch.nn.Buffer(torch.randn(2))
+                self.attr3 = torch.nn.Buffer(torch.ones(2, dtype=torch.int32))
 
             def forward(self, x):
                 return self.linear(self.seq(self.W + self.attr + self.attr2 + self.attr3 + x))
@@ -1712,7 +1712,7 @@ class TestModule(torch.nn.Module):
                 "include_last_offset",
             },
         )
-        self.assertEqual(norm_args_and_kwargs.args, tuple())
+        self.assertEqual(norm_args_and_kwargs.args, ())
 
     def test_normalize_args_op_overload(self):
         for target in [torch.ops.aten.resize_as_.default, torch.ops.aten.resize_as_]:

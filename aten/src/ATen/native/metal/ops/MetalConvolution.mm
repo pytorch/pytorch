@@ -15,7 +15,7 @@ using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
 Tensor conv2d(
     const Tensor& input,
     const Tensor& weight,
-    const c10::optional<at::Tensor>& bias,
+    const std::optional<at::Tensor>& bias,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,

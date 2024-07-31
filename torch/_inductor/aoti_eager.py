@@ -14,6 +14,7 @@ import torch._export
 import torch.export._trace
 from torch._dynamo.source import ConstantSource
 from torch._inductor.utils import is_cpu_device
+
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.sym_node import SymNode, sympy_is_contiguous_generic
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
@@ -86,7 +87,7 @@ def load_aoti_eager_cache(
                     shape_env = ShapeEnv()
 
                     for metadata in item["meta_info"]:
-                        if "is_dynamic" in metadata and metadata["is_dynamic"]:
+                        if metadata.get("is_dynamic"):
                             assert isinstance(metadata["sizes_hint"], Dict)
                             assert isinstance(metadata["strides_hint"], Dict)
                             sizes_hint = list(metadata["sizes_hint"].values())

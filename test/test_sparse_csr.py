@@ -4059,7 +4059,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                     dump()  # this will update torch/sparse/_triton_ops_meta.py
 
             expected = reference(input, mat1, mat2, beta=beta, alpha=alpha)
-            kwargs = dict(bsr_dense_addmm=dict(beta=beta, alpha=alpha), bsr_dense_mm=dict(),
+            kwargs = dict(bsr_dense_addmm=dict(beta=beta, alpha=alpha), bsr_dense_mm={},
                           bsr_dense_linear=dict(bias=input.transpose(-1, -2)))[op]
 
             args = dict(bsr_dense_addmm=(input, bsr, mat2), bsr_dense_mm=(bsr, mat2),
