@@ -68,7 +68,7 @@ def _trace_and_get_graph_from_model(model, args):
 
 def _create_jit_graph(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
-) -> tuple[torch.Graph, list[_C.IValue], Any | None, torch.ScriptModule | None]:
+) -> tuple[torch.Graph, list[torch.jit.IValue], Any | None, torch.ScriptModule | None]:
     if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
         flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
         torch_out = None
