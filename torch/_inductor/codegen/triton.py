@@ -594,7 +594,12 @@ class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton"""
 
     @staticmethod
-    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
+    def to_dtype(
+        x,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types=True,
+    ):
         def _get_min_elements_per_thread(
             src_dtype: torch.dtype, dst_dtype: torch.dtype
         ) -> int:
@@ -637,7 +642,13 @@ class TritonOverrides(OpOverrides):
             # to work around llvm uint conversion semantics
             # that produces 0's for negative values
             return f"{x}.to(tl.int8).to(tl.uint8)"
-        return f"{x}.to({triton_compute_type(dtype)})"
+
+        if use_compute_types:
+            out_dtype = triton_compute_type(dtype)
+        else:
+            out_dtype = triton_store_type(dtype)
+
+        return f"{x}.to({out_dtype})"
 
     @staticmethod
     def to_dtype_bitcast(x, dtype: torch.dtype, src_dtype: torch.dtype):
@@ -1172,7 +1183,6 @@ class TritonKernel(SIMDKernel):
         reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
         override_persistent_reduction=None,
-        optimize_mask=True,
     ):
         super().__init__(
             *groups,
@@ -1191,7 +1201,6 @@ class TritonKernel(SIMDKernel):
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints: Set[AutotuneHint] = set()
         self.triton_meta: Optional[Dict[str, object]] = None
-        self.optimize_mask: bool = optimize_mask
 
         self.codegen_range_tree()
 
@@ -2312,12 +2321,12 @@ class TritonKernel(SIMDKernel):
             return tuple(result_vars)
 
         assert self.range_trees[-1].prefix == "r"
-        rmask = "None" if self._has_constant_mask(self.range_trees[-1]) else "rmask"
+        rnumel = "None" if self._has_constant_mask(self.range_trees[-1]) else "rnumel"
 
         if len(values) == 2:
             line = (
                 f"triton_helpers.sort_with_index({broadcasted_values[0]}, {broadcasted_values[1]},"
-                f" {rmask}, {dim}, stable={stable}, descending={descending})"
+                f" {rnumel}, {dim}, stable={stable}, descending={descending})"
             )
             result_vars = cse_multiple(line, len(values), masks)
         else:
@@ -2873,8 +2882,6 @@ class TritonKernel(SIMDKernel):
         return V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block)
 
     def filter_masks(self, mask_vars):
-        if not self.optimize_mask:
-            return
         for tree in self.range_trees:
             if self._has_constant_mask(tree):
                 mask_vars.discard(f"{tree.prefix}mask")

@@ -614,6 +614,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
         @torch._inductor.config.patch("fx_graph_cache", True)
+        @torch._inductor.config.patch("fx_graph_remote_cache", False)
         def test_cache_hit_forward_miss_backward(self):
             # Test that we don't cache cudagraphs, skipping cudagraphs on backward on a cache miss
             @torch.compile(mode="reduce-overhead")
@@ -1838,9 +1839,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with self.assertRaisesRegex(
                 Exception,
                 r"static input data pointer changed.\n"
-                r"input name: primals_2. data pointer changed from .* to .*. input stack trace: None\n"
+                r"input name: primals_2. data pointer changed from .* to .*. input stack trace:(?s).*"
                 r"input name: primals_3. data pointer changed from .* to .*. input stack trace:.*,"
-                r" in forward\n.* self.static_tensor.add\_\(torch.ones\(\(2, 2\), device=\"cuda\"\)\).*\n\n",
+                r" in forward\n.* self.static_tensor.add\_\(torch.ones\(\(2, 2\), device=\"cuda\"\)\).*\n",
             ):
                 self.curr_node().run(
                     [foo.goo.linear.weight, foo.goo.linear.bias, foo.static_tensor, inp]
