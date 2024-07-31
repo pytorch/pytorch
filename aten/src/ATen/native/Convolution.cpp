@@ -1865,9 +1865,9 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
       // the ConvForward kernels don't support asymmetric padding.
       auto gW_size = gW.sizes();
       auto w_size = weight.sizes();
-      for (const auto i : c10::irange(2, gW_size.size())) {
+      for (const auto i : c10::irange(2, static_cast<int64_t>(gW_size.size()))) {
         if (gW_size[i] > w_size[i]) {
-            gW = gW.narrow(static_cast<int64_t>(i), 0, w_size[i]);
+            gW = gW.narrow(i, 0, w_size[i]);
             gW_size = gW.sizes();
         }
       }
@@ -1894,9 +1894,9 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
         // rather than narrowing the computed gI
         auto gI_size = gI.sizes();
         auto i_size = input.sizes();
-        for (const auto i : c10::irange(2, gI_size.size())) {
+        for (const auto i : c10::irange(2, static_cast<int64_t>(gI_size.size()))) {
           if (gI_size[i] > i_size[i]) {
-            gI = gI.narrow(static_cast<int64_t>(i), 0, i_size[i]);
+            gI = gI.narrow(i, 0, i_size[i]);
             gI_size = gI.sizes();
           }
         }
