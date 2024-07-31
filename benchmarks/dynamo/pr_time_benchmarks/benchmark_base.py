@@ -1,7 +1,7 @@
 import csv
 from abc import ABC, abstractmethod
 
-from cirron import Collector
+from benchmarks.dynamo.pr_time_benchmarks.cirron.cirron import Collector
 
 
 class Benchmark(ABC):
