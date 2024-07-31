@@ -836,7 +836,7 @@ void brgemm(
     const at::Half* B,
     const std::vector<std::pair<int64_t, int64_t>>& offsets,
     float* C) {
-#if AT_MKLDNN_ENABLED()
+#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
   Brgemm::call<at::Half, at::Half, float>(
       M, N, K, bs, ld_a, ld_b, ld_c, alpha, beta, A, B, offsets, C);
 #else
@@ -872,7 +872,7 @@ void brgemm(
     const at::Half* A,
     const at::Half* B,
     float* C) {
-#if AT_MKLDNN_ENABLED()
+#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
   Brgemm::call<at::Half, at::Half, float>(
       M, N, K, ld_a, ld_b, ld_c, alpha, beta, A, B, C);
 #else
@@ -895,7 +895,7 @@ void brgemm(
 }
 
 void brgemm_release() {
-#if AT_MKLDNN_ENABLED()
+#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
   dnnl::ukernel::brgemm::release_hw_context();
 #endif
 }
@@ -909,7 +909,7 @@ void pack(
     ScalarType dt_out,
     const void* in,
     void* out) {
-#if AT_MKLDNN_ENABLED()
+#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
   Pack::call(K, N, ld_in, ld_out, dt_in, dt_out, in, out);
 #else
   TORCH_CHECK(false, "pack is only supported with oneDNN enabled");
@@ -917,7 +917,7 @@ void pack(
 }
 
 bool need_pack(ScalarType dt_in, ScalarType dt_out) {
-#if AT_MKLDNN_ENABLED()
+#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
   return Pack::need_pack(dt_in, dt_out);
 #else
   return false;

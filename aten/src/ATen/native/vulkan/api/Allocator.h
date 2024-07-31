@@ -6,7 +6,6 @@
 //
 
 #include <ATen/native/vulkan/api/vk_api.h>
-#include <c10/macros/Macros.h>
 
 #ifdef USE_VULKAN_API
 
@@ -42,13 +41,19 @@
 */
 #endif /* VULKAN_DEBUG */
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wnullability-completeness")
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-variable")
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
-    "-Winconsistent-missing-destructor-override")
+// Note: Do not try to use C10 convenience macors here, as this header is
+// included from ExecuTorch that does not want to have dependency on C10
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wnullability-completeness"
+#pragma clang diagnostic ignored "-Wunused-variable"
+#pragma clang diagnostic ignored "-Winconsistent-missing-destructor-override"
+#endif /* __clang__ */
+
 #include <include/vk_mem_alloc.h>
-C10_DIAGNOSTIC_POP()
-C10_DIAGNOSTIC_POP()
-C10_DIAGNOSTIC_POP()
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif /* __clang__ */
 
 #endif /* USE_VULKAN_API */

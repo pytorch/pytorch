@@ -13171,6 +13171,16 @@ op_db: List[OpInfo] = [
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),),
            ),
+    OpInfo('expand_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_expand,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
+           supports_out=True,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+           )),
     OpInfo('diag',
            ref=np.diag,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -19643,6 +19653,29 @@ op_db: List[OpInfo] = [
            autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            sample_inputs_func=sample_unsqueeze),
+    OpInfo('unsqueeze_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           supports_out=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # See https://github.com/pytorch/pytorch/pull/78358
+           check_batched_forward_grad=False,
+           # vmap does not support inplace views
+           check_inplace_batched_forward_grad=False,
+           assert_jit_shape_analysis=True,
+           assert_autodiffed=True,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
+           sample_inputs_func=sample_unsqueeze,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
+               DecorateInfo(
+                   unittest.expectedFailure,
+                   'TestJit',
+                   'test_variant_consistency_jit',
+                   dtypes=(torch.float32,),
+               ),
+           )),
     BinaryUfuncInfo('xlogy',
                     aliases=('special.xlogy',),
                     dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -23748,6 +23781,11 @@ python_ref_db = [
         torch_opinfo_name="expand_as",
     ),
     PythonRefInfo(
+        "_refs.expand_copy",
+        torch_opinfo_name="expand_copy",
+        supports_out=True,
+    ),
+    PythonRefInfo(
         "_refs.flatten",
         torch_opinfo_name="flatten",
     ),
@@ -23930,6 +23968,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.unsqueeze",
         torch_opinfo_name="unsqueeze",
+    ),
+    PythonRefInfo(
+        "_refs.unsqueeze_copy",
+        torch_opinfo_name="unsqueeze_copy",
+        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.view",
