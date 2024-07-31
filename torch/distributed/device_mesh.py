@@ -411,31 +411,47 @@ else:
             self, mesh_dim_names: Union[str, Tuple[str, ...]]
         ) -> "DeviceMesh":
             """
-            Slice the current DeviceMesh based on the mesh_dim_name given to create a child
-            DeviceMesh.
+            Slice the current DeviceMesh based on the mesh_dim_names given to create a child
+            DeviceMesh. This supports 1D or nD slicing. The DeviceMesh created will have dimensions
+            corresponding to the length of the provided mesh_dim_names and the order of dimensions
+            will be consistent with the order in which the mesh_dim_names were provided.
 
             Args:
-                mesh_dim_name (Union[str, Tuple[str]]): the name or the tuple of names of the
+                mesh_dim_names (Union[str, Tuple[str]]): the name or the tuple of names of the
                 mesh dimension of the parent DeviceMesh to create the child DeviceMesh for.
             Returns:
                 A :class:`DeviceMesh` object
 
-            The following program runs on each process/rank in an SPMD manner. In this example, we have 2
-            hosts with 4 GPUs each.
-            Calling mesh["tp"] on rank 0, 1, 2, 3 would return a 1D child DeviceMesh:([0, 1, 2, 3]).
-            Calling mesh["tp"] on rank 4, 5, 6, 7 would return a 1D child DeviceMesh:([4, 5, 6, 7]).
-            Calling mesh["dp"] on rank 0, 4 would return a 1D child DeviceMesh:([0, 4]).
-            Calling mesh["dp"] on rank 1, 5 would return a 1D child DeviceMesh:([1, 5]).
-            Calling mesh["dp"] on rank 2, 6 would return a 1D child DeviceMesh:([2, 6]).
-            Calling mesh["dp"] on rank 3, 7 would return a 1D child DeviceMesh:([3, 7]).
+            The following program runs on each process/rank in an SPMD manner in a world size of 8.
+            In the first example:
+                Calling mesh_2d["tp"] on rank 0, 1, 2, 3 returns a 1D child DeviceMesh:([0, 1, 2, 3]).
+                Calling mesh_2d["tp"] on rank 4, 5, 6, 7 returns a 1D child DeviceMesh:([4, 5, 6, 7]).
+                Calling mesh_2d["dp"] on rank 0, 4 returns a 1D child DeviceMesh:([0, 4]).
+                Calling mesh_2d["dp"] on rank 1, 5 returns a 1D child DeviceMesh:([1, 5]).
+                Calling mesh_2d["dp"] on rank 2, 6 returns a 1D child DeviceMesh:([2, 6]).
+                Calling mesh_2d["dp"] on rank 3, 7 returns a 1D child DeviceMesh:([3, 7]).
+
+            In the second example:
+                Calling mesh_3d["dp", "cp"] on rank 0, 1, 4, 5 returns a 2D child DeviceMesh:([[0, 1], [4, 5]]).
+                Calling mesh_3d["dp", "cp"] on rank 2, 3, 6, 7 returns a 2D child DeviceMesh:([[2, 3], [6, 7]]).
+                Calling mesh_3d["cp", "dp"] on rank 0, 1, 4, 5 returns a 2D child DeviceMesh:([[0, 4], [1, 5]]).
+                Calling mesh_3d["cp", "dp"] on rank 2, 3, 6, 7 returns a 2D child DeviceMesh:([[2, 6], [3, 7]]).
 
             Example::
                 >>> # xdoctest: +SKIP("no rank")
                 >>> from torch.distributed.device_mesh import DeviceMesh
                 >>>
-                >>> # Initialize device mesh as (2, 4) to represent the topology
+                >>> # Initialize a 2D device mesh as (2, 4) to represent the topology
                 >>> # of cross-host(dim 0), and within-host (dim 1).
-                >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
+                >>> mesh_2d = init_device_mesh(device_type="cuda", (2,4), mesh_dim_names=("dp", "tp"))
+                >>> tp_mesh = mesh_2d["tp"]
+                >>> dp_mesh = mesh_2d["dp"]
+                >>>
+                >>> # Initialize a 3D mesh.
+                >>> mesh_3d = init_device_mesh(device_type="cuda", (2,2,2), mesh_dim_names=("dp", "pp", "cp"))
+                >>> # The order of the mesh_dim_names provided deteremines the order of dimensions in the child mesh.
+                >>> dp_cp_mesh = mesh_3d["dp", "cp"]
+                >>> cp_dp_mesh = mesh_3d["cp", "dp"]
             """
             if not self.mesh_dim_names:
                 raise RuntimeError("Cannot slice a DeviceMesh without mesh_dim_names!")
