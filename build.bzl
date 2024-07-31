@@ -73,6 +73,7 @@ def define_targets(rules):
         "$(execpath //torchgen:gen)",
         "--install_dir=$(RULEDIR)",
         "--source-path aten/src/ATen",
+        "--aoti_install_dir=$(RULEDIR)/torch/csrc/inductor/aoti_torch/generated"
     ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []))
 
     gen_aten_outs_cuda = (
@@ -83,6 +84,7 @@ def define_targets(rules):
     gen_aten_outs = (
         GENERATED_H + GENERATED_H_CORE +
         GENERATED_CPP + GENERATED_CPP_CORE +
+        GENERATED_AOTI_CPP +
         aten_ufunc_generated_cpu_sources() +
         aten_ufunc_generated_cpu_kernel_sources() + [
             "Declarations.yaml",
@@ -316,3 +318,8 @@ GENERATED_AUTOGRAD_CPP = [
     "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
     "torch/csrc/lazy/generated/RegisterLazy.cpp",
 ] + _GENERATED_AUTOGRAD_CPP_HEADERS + GENERATED_LAZY_H
+
+GENERATED_AOTI_CPP = [
+    "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
+    "torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp",
+]

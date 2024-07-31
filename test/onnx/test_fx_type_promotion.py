@@ -1,6 +1,7 @@
 # Owner(s): ["module: onnx"]
 
 import pytorch_test_common
+
 from torch.onnx._internal.fx.passes import type_promotion
 from torch.testing._internal import common_utils
 

@@ -71,6 +71,8 @@
 #include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/trunc.h>
 #include <ATen/ops/trunc_native.h>
+#include <ATen/ops/is_pinned_native.h>
+#include <ATen/ops/_pin_memory_native.h>
 #endif
 
 namespace at::native {
@@ -258,7 +260,7 @@ Tensor& threshold_backward_sparse_out(
 
 Tensor nan_to_num_sparse(
     const Tensor &self, std::optional<double> nan,
-    std::optional<double> posinf, c10::optional<double> neginf) {
+    std::optional<double> posinf, std::optional<double> neginf) {
   return coalesced_unary_ufunc(
       self, [&](const Tensor &t) {
         return at::nan_to_num(t, nan, posinf, neginf);
@@ -266,7 +268,7 @@ Tensor nan_to_num_sparse(
 }
 Tensor& nan_to_num_sparse_out(
     const Tensor &self, std::optional<double> nan,
-    std::optional<double> posinf, c10::optional<double> neginf,
+    std::optional<double> posinf, std::optional<double> neginf,
     Tensor &out) {
   return coalesced_unary_ufunc_out(
       self, out, [&](const Tensor &t, Tensor &out) {
@@ -275,9 +277,28 @@ Tensor& nan_to_num_sparse_out(
 }
 Tensor& nan_to_num_sparse_(
     Tensor &self, std::optional<double> nan,
-    std::optional<double> posinf, c10::optional<double> neginf) {
+    std::optional<double> posinf, std::optional<double> neginf) {
   TORCH_CHECK(self.is_coalesced(), "nan_to_num_ requires coalesced input");
   return nan_to_num_sparse_out(self, nan, posinf, neginf, self);
+}
+
+bool is_pinned_sparse(const Tensor& self, std::optional<c10::Device> device) {
+  if (device.has_value()) {
+    TORCH_WARN_DEPRECATION(
+        "The argument 'device' of Tensor.is_pinned() ",
+        "is deprecated. Please do not pass this argument.")
+  }
+  // Currently, we don't support pin memory for sparse tensor.
+  // so always return false
+  return false;
+}
+
+Tensor _pin_memory_sparse(const Tensor& self, std::optional<c10::Device> device) {
+  // Here, we throw an error rather than return self tensor. This
+  // is because we always return the pinned memory tensor, while
+  // giving unpinned tensor might mislead users.
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false, "'aten::_pin_memory' is not implemented for sparse tensor.");
 }
 
 }  // namespace at::native

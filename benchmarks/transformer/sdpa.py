@@ -4,12 +4,13 @@ from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from typing import Callable, List, Tuple
 
+from tabulate import tabulate
+from tqdm import tqdm
+
 import torch
 import torch.utils.benchmark as benchmark
-from tabulate import tabulate
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.functional import scaled_dot_product_attention
-from tqdm import tqdm
 
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:

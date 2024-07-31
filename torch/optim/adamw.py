@@ -1,3 +1,5 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 from typing import cast, List, Optional, Tuple, Union
 
 import torch
@@ -8,7 +10,6 @@ from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
-    _dispatch_sqrt,
     _foreach_doc,
     _fused_doc,
     _get_capturable_supported_devices,
@@ -42,12 +43,15 @@ class AdamW(Optimizer):
         differentiable: bool = False,
         fused: Optional[bool] = None,
     ):
+        if isinstance(lr, Tensor):
+            if foreach and not capturable:
+                raise ValueError(
+                    "lr as a Tensor is not supported for capturable=False and foreach=True"
+                )
+            if lr.numel() != 1:
+                raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
-        if isinstance(lr, Tensor) and foreach and not capturable:
-            raise ValueError(
-                "lr as a Tensor is not supported for capturable=False and foreach=True"
-            )
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= betas[0] < 1.0:
@@ -309,6 +313,8 @@ AdamW.__doc__ = (
         {_capturable_doc}
         {_differentiable_doc}
         {_fused_doc}
+    .. Note::
+        A prototype implementation of Adam and AdamW for MPS supports `torch.float32` and `torch.float16`.
     .. _Decoupled Weight Decay Regularization:
         https://arxiv.org/abs/1711.05101
     .. _On the Convergence of Adam and Beyond:
@@ -419,7 +425,7 @@ def _single_tensor_adamw(
 
             step_size = lr / bias_correction1
 
-            bias_correction2_sqrt = _dispatch_sqrt(bias_correction2)
+            bias_correction2_sqrt = bias_correction2**0.5
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
@@ -513,7 +519,7 @@ def _multi_tensor_adamw(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if device_state_steps[0].is_cpu:
+        if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:
             torch._foreach_add_(
                 device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
@@ -586,7 +592,7 @@ def _multi_tensor_adamw(
             step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
 
             bias_correction2_sqrt = [
-                _dispatch_sqrt(bc) for bc in bias_correction2  # type: ignore[arg-type]
+                bc**0.5 for bc in bias_correction2  # type: ignore[arg-type]
             ]
 
             if amsgrad:
@@ -661,6 +667,9 @@ def _fused_adamw(
         ),
         _,
     ) in grouped_tensors.items():
+        if device.type == "mps":  # type: ignore[union-attr]
+            assert found_inf is None and grad_scale is None
+
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
             device_grad_scale = grad_scale_dict.setdefault(

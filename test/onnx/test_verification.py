@@ -6,12 +6,13 @@ import tempfile
 import unittest
 
 import numpy as np
+
 import onnx
 import parameterized
 import pytorch_test_common
+from packaging import version
 
 import torch
-from packaging import version
 from torch.onnx import _constants, _experimental, verification
 from torch.testing._internal import common_utils
 

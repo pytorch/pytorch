@@ -28,7 +28,7 @@ jobs:
 
       - name: Install Python Packages
         run: |
-          pip3 install rockset==1.0.3 boto3==1.19.12 requests==2.27.1
+          pip3 install rockset==1.0.3 boto3==1.19.12 requests==2.32.2
 
       - name: Create alerts
         run: |

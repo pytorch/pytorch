@@ -1,6 +1,7 @@
 # flake8: noqa
-import torch
 import math
+
+import torch
 
 a = torch.randn(4)
 b = torch.randn(4)
@@ -20,8 +21,8 @@ torch.acosh(a.uniform_(1, 2))
 # add
 torch.add(a, 20)
 torch.add(a, torch.randn(4, 1), alpha=10)
-torch.add(a+1j, 20+1j)
-torch.add(a+1j, 20, alpha=1j)
+torch.add(a + 1j, 20 + 1j)
+torch.add(a + 1j, 20, alpha=1j)
 
 # addcdiv
 torch.addcdiv(torch.randn(1, 3), torch.randn(3, 1), torch.randn(1, 3), value=0.1)
@@ -30,7 +31,7 @@ torch.addcdiv(torch.randn(1, 3), torch.randn(3, 1), torch.randn(1, 3), value=0.1
 torch.addcmul(torch.randn(1, 3), torch.randn(3, 1), torch.randn(1, 3), value=0.1)
 
 # angle
-torch.angle(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))*180/3.14159
+torch.angle(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])) * 180 / 3.14159
 
 # asin/arcsin
 torch.asin(a)
@@ -91,37 +92,41 @@ torch.cosh(a)
 torch.deg2rad(torch.tensor([[180.0, -180.0], [360.0, -360.0], [90.0, -90.0]]))
 
 # div/divide/true_divide
-x = torch.tensor([ 0.3810,  1.2774, -0.2972, -0.3719,  0.4637])
+x = torch.tensor([0.3810, 1.2774, -0.2972, -0.3719, 0.4637])
 torch.div(x, 0.5)
-p = torch.tensor([[-0.3711, -1.9353, -0.4605, -0.2917],
-                  [ 0.1815, -1.0111,  0.9805, -1.5923],
-                  [ 0.1062,  1.4581,  0.7759, -1.2344],
-                  [-0.1830, -0.0313,  1.1908, -1.4757]])
-q = torch.tensor([ 0.8032,  0.2930, -0.8113, -0.2308])
+p = torch.tensor(
+    [
+        [-0.3711, -1.9353, -0.4605, -0.2917],
+        [0.1815, -1.0111, 0.9805, -1.5923],
+        [0.1062, 1.4581, 0.7759, -1.2344],
+        [-0.1830, -0.0313, 1.1908, -1.4757],
+    ]
+)
+q = torch.tensor([0.8032, 0.2930, -0.8113, -0.2308])
 torch.div(p, q)
-torch.divide(p, q, rounding_mode='trunc')
-torch.divide(p, q, rounding_mode='floor')
+torch.divide(p, q, rounding_mode="trunc")
+torch.divide(p, q, rounding_mode="floor")
 
 # digamma
 torch.digamma(torch.tensor([1, 0.5]))
 
 # erf
-torch.erf(torch.tensor([0, -1., 10.]))
+torch.erf(torch.tensor([0, -1.0, 10.0]))
 
 # erfc
-torch.erfc(torch.tensor([0, -1., 10.]))
+torch.erfc(torch.tensor([0, -1.0, 10.0]))
 
 # erfinv
-torch.erfinv(torch.tensor([0, 0.5, -1.]))
+torch.erfinv(torch.tensor([0, 0.5, -1.0]))
 
 # exp
-torch.exp(torch.tensor([0, math.log(2.)]))
+torch.exp(torch.tensor([0, math.log(2.0)]))
 
 # exp2
-torch.exp2(torch.tensor([0, math.log2(2.), 3, 4]))
+torch.exp2(torch.tensor([0, math.log2(2.0), 3, 4]))
 
 # expm1
-torch.expm1(torch.tensor([0, math.log(2.)]))
+torch.expm1(torch.tensor([0, math.log(2.0)]))
 
 # fake_quantize_per_channel_affine
 x = torch.randn(2, 2, 2)
@@ -140,11 +145,11 @@ torch.float_power(torch.arange(1, 5), torch.tensor([2, -3, 4, -5]))
 torch.floor(a)
 
 # floor_divide
-torch.floor_divide(torch.tensor([4., 3.]), torch.tensor([2., 2.]))
-torch.floor_divide(torch.tensor([4., 3.]), 1.4)
+torch.floor_divide(torch.tensor([4.0, 3.0]), torch.tensor([2.0, 2.0]))
+torch.floor_divide(torch.tensor([4.0, 3.0]), 1.4)
 
 # fmod
-torch.fmod(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
+torch.fmod(torch.tensor([-3.0, -2, -1, 1, 2, 3]), 2)
 torch.fmod(torch.tensor([1, 2, 3, 4, 5]), 1.5)
 
 # frac
@@ -154,11 +159,11 @@ torch.frac(torch.tensor([1, 2.5, -3.2]))
 torch.randn(4, dtype=torch.cfloat).imag
 
 # ldexp
-torch.ldexp(torch.tensor([1.]), torch.tensor([1]))
+torch.ldexp(torch.tensor([1.0]), torch.tensor([1]))
 torch.ldexp(torch.tensor([1.0]), torch.tensor([1, 2, 3, 4]))
 
 # lerp
-start = torch.arange(1., 5.)
+start = torch.arange(1.0, 5.0)
 end = torch.empty(4).fill_(10)
 torch.lerp(start, end, 0.5)
 torch.lerp(start, end, torch.full_like(start, 0.5))
@@ -200,8 +205,11 @@ torch.logical_and(r, s, out=torch.empty(4, dtype=torch.bool))
 # logical_not
 torch.logical_not(torch.tensor([True, False]))
 torch.logical_not(torch.tensor([0, 1, -10], dtype=torch.int8))
-torch.logical_not(torch.tensor([0., 1.5, -10.], dtype=torch.double))
-torch.logical_not(torch.tensor([0., 1., -10.], dtype=torch.double), out=torch.empty(3, dtype=torch.int16))
+torch.logical_not(torch.tensor([0.0, 1.5, -10.0], dtype=torch.double))
+torch.logical_not(
+    torch.tensor([0.0, 1.0, -10.0], dtype=torch.double),
+    out=torch.empty(3, dtype=torch.int16),
+)
 
 # logical_or
 torch.logical_or(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
@@ -235,13 +243,13 @@ torch.igammac(a1, a2)
 # mul/multiply
 torch.mul(torch.randn(3), 100)
 torch.multiply(torch.randn(4, 1), torch.randn(1, 4))
-torch.mul(torch.randn(3)+1j, 100+1j)
+torch.mul(torch.randn(3) + 1j, 100 + 1j)
 
 # mvlgamma
 torch.mvlgamma(torch.empty(2, 3).uniform_(1, 2), 2)
 
 # nan_to_num
-w = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14])
+w = torch.tensor([float("nan"), float("inf"), -float("inf"), 3.14])
 torch.nan_to_num(x)
 torch.nan_to_num(x, nan=2.0)
 torch.nan_to_num(x, nan=2.0, posinf=1.0)
@@ -251,7 +259,9 @@ torch.neg(torch.randn(5))
 
 # nextafter
 eps = torch.finfo(torch.float32).eps
-torch.nextafter(torch.tensor([1, 2]), torch.tensor([2, 1])) == torch.tensor([eps + 1, 2 - eps])
+torch.nextafter(torch.tensor([1, 2]), torch.tensor([2, 1])) == torch.tensor(
+    [eps + 1, 2 - eps]
+)
 
 # polygamma
 torch.polygamma(1, torch.tensor([1, 0.5]))
@@ -261,7 +271,7 @@ torch.polygamma(4, torch.tensor([1, 0.5]))
 
 # pow
 torch.pow(a, 2)
-torch.pow(torch.arange(1., 5.), torch.arange(1., 5.))
+torch.pow(torch.arange(1.0, 5.0), torch.arange(1.0, 5.0))
 
 # rad2deg
 torch.rad2deg(torch.tensor([[3.142, -3.142], [6.283, -6.283], [1.570, -1.570]]))
@@ -273,7 +283,7 @@ torch.randn(4, dtype=torch.cfloat).real
 torch.reciprocal(a)
 
 # remainder
-torch.remainder(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
+torch.remainder(torch.tensor([-3.0, -2, -1, 1, 2, 3]), 2)
 torch.remainder(torch.tensor([1, 2, 3, 4, 5]), 1.5)
 
 # round
@@ -286,13 +296,13 @@ torch.rsqrt(a)
 torch.sigmoid(a)
 
 # sign
-torch.sign(torch.tensor([0.7, -1.2, 0., 2.3]))
+torch.sign(torch.tensor([0.7, -1.2, 0.0, 2.3]))
 
 # sgn
-torch.tensor([3+4j, 7-24j, 0, 1+2j]).sgn()
+torch.tensor([3 + 4j, 7 - 24j, 0, 1 + 2j]).sgn()
 
 # signbit
-torch.signbit(torch.tensor([0.7, -1.2, 0., 2.3]))
+torch.signbit(torch.tensor([0.7, -1.2, 0.0, 2.3]))
 
 # sin
 torch.sin(a)
@@ -324,8 +334,10 @@ torch.tanh(a)
 torch.trunc(a)
 
 # xlogy
-f = torch.zeros(5,)
-g = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
+f = torch.zeros(
+    5,
+)
+g = torch.tensor([-1, 0, 1, float("inf"), float("nan")])
 torch.xlogy(f, g)
 
 f = torch.tensor([1, 2, 3])

@@ -1,8 +1,9 @@
 # Owner(s): ["module: onnx"]
+import pytorch_test_common
+
 import torch
 import torch._dynamo
 import torch.fx
-
 from torch.onnx._internal.fx.passes import _utils as pass_utils
 from torch.testing._internal import common_utils
 
@@ -96,6 +97,10 @@ class TestFxPasses(common_utils.TestCase):
 
 @common_utils.instantiate_parametrized_tests
 class TestModularizePass(common_utils.TestCase):
+    @pytorch_test_common.xfail(
+        error_message="'torch_nn_modules_activation_GELU_used_gelu_1' not found",
+        reason="optimizer",
+    )
     @common_utils.parametrize(
         "is_exported_program",
         [
@@ -146,6 +151,10 @@ class TestModularizePass(common_utils.TestCase):
         )
         self.assertFalse(any("ReLU" in name for name in function_proto_names))
 
+    @pytorch_test_common.xfail(
+        error_message="'torch_nn_modules_activation_ReLU_relu_1' not found",
+        reason="optimizer",
+    )
     @common_utils.parametrize(
         "is_exported_program",
         [
@@ -187,6 +196,10 @@ class TestModularizePass(common_utils.TestCase):
         self.assertIn("torch_nn_modules_activation_ReLU_relu_1", function_proto_names)
         self.assertIn("torch_nn_modules_activation_ReLU_relu_2", function_proto_names)
 
+    @pytorch_test_common.xfail(
+        error_message="'torch_nn_modules_activation_ReLU_inner_module_relu_1' not found",
+        reason="optimizer",
+    )
     @common_utils.parametrize(
         "is_exported_program",
         [

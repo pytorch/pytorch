@@ -6,9 +6,9 @@ import sys
 
 import torch
 import torch.onnx
-
 from torch.testing._internal import common_utils
 from torch.utils import _pytree as torch_pytree
+
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import onnx_test_common

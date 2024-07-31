@@ -1,11 +1,7 @@
+# mypy: allow-untyped-defs
 from torch import _C
 from torch._C import _onnx as _C_onnx
-from torch._C._onnx import (
-    _CAFFE2_ATEN_FALLBACK,
-    OperatorExportTypes,
-    TensorProtoDataType,
-    TrainingMode,
-)
+from torch._C._onnx import OperatorExportTypes, TensorProtoDataType, TrainingMode
 
 from . import (  # usort:skip. Keep the order instead of sorting lexicographically
     _deprecation,
@@ -29,8 +25,7 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     utils,
 )
 
-# TODO(After 1.13 release): Remove the deprecated SymbolicContext
-from ._exporter_states import ExportTypes, SymbolicContext
+from ._exporter_states import ExportTypes
 from ._type_utils import JitScalarType
 from .errors import CheckerError  # Backwards compatibility
 from .utils import (

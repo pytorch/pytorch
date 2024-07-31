@@ -19,6 +19,7 @@ import pytest
 
 from numpy.linalg.linalg import _multi_dot_matrix_chain_order
 from pytest import raises as assert_raises
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1958,7 +1959,7 @@ class TestMisc(TestCase):
             pid = os.fork()
         except (OSError, AttributeError):
             # fork failed, or not running on POSIX
-            raise SkipTest("Not POSIX or fork failed.")  # noqa: TRY200
+            raise SkipTest("Not POSIX or fork failed.")  # noqa: B904
 
         if pid == 0:
             # child; close i/o file handles
