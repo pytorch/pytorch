@@ -29,8 +29,7 @@ class PublicBindings(HeuristicInterface):
             changed_files = []
 
         if any(
-            (file.startswith("torch/") and file.endswith(".py"))
-            or file in self.additional_files
+            file.startswith("torch/") or file in self.additional_files
             for file in changed_files
         ):
             test_ratings[TestRun(self.test_public_bindings)] = 1.0
