@@ -1969,7 +1969,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 def __init__(self, param, buf) -> None:
                     super().__init__()
                     self.weight = param
-                    self.register_buffer("buf", buf)
+                    self.buf = torch.nn.Buffer(buf)
 
                 def forward(self, x):
                     return x * self.weight + self.buf

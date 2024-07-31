@@ -577,7 +577,7 @@ class TestConverter(TestCase):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
 
             def forward(self, x: torch.Tensor):
                 return self.w + x
@@ -586,7 +586,7 @@ class TestConverter(TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.m = M()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
 
             def forward(self, x: torch.Tensor):
                 return self.w + self.m(x)
@@ -595,7 +595,7 @@ class TestConverter(TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.m = NestedM()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
 
             def forward(self, x: torch.Tensor):
                 return self.w + self.m(x)
@@ -610,7 +610,7 @@ class TestConverter(TestCase):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
                 self.count = 1
 
             def forward(self, x: torch.Tensor):
@@ -621,7 +621,7 @@ class TestConverter(TestCase):
                 super().__init__()
                 self.m1 = M()
                 self.m2 = M()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
 
             def forward(self, x: torch.Tensor):
                 if torch.sum(x) > 1:
@@ -636,7 +636,7 @@ class TestConverter(TestCase):
                 super().__init__()
                 self.m1 = NestedM()
                 self.m2 = NestedM()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
 
             def forward(self, x: torch.Tensor):
                 if torch.max(x) > 1:
@@ -1034,7 +1034,7 @@ class TestConverter(TestCase):
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("data", torch.ones(3, 2))
+                self.data = torch.nn.Buffer(torch.ones(3, 2))
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 self.data = self.data + x
@@ -1048,7 +1048,7 @@ class TestConverter(TestCase):
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("data", torch.ones(3, 2))
+                self.data = torch.nn.Buffer(torch.ones(3, 2))
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 self.data = self.data + x
@@ -1115,7 +1115,7 @@ class TestConverter(TestCase):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("w2", torch.ones(1))
+                self.w2 = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x: torch.Tensor):
                 self.w2 += 1
