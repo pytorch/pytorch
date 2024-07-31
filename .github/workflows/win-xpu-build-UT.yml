@@ -21,7 +21,7 @@ env:
     USE_XPU: 1
     VS2022INSTALLDIR: 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools'
     ACTIONS_RUNNER_DEBUG: true
-    PATH: '%PATH%;C:\Users\nrvalgo_jenkinsadm\miniforge3;C:\Users\nrvalgo_jenkinsadm\miniforge3\Scripts.'
+    PATH: '%PATH%;C:\Program Files\Git\cmd;C:\Users\nrvalgo_jenkinsadm\miniforge3;C:\Users\nrvalgo_jenkinsadm\miniforge3\Scripts.'
 
 jobs:
   Preparation:
