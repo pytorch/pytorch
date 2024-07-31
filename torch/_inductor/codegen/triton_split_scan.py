@@ -73,8 +73,6 @@ class TritonSplitScanKernel(TritonKernel):
                     has_zdim=False,
                 )
             )
-        for tree in self.range_trees:
-            self.iteration_ranges_codegen_header(tree, self.body)
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError("NYI TritonSplitDimKernel reductions")
