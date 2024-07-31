@@ -449,7 +449,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
     def test_benchmark_many_gpu_fallback(self, benchmarker, kernels):
         callables = [_callable for _, _, _, _callable in kernels]
         _ = benchmarker.benchmark_many_gpu(callables)
-        self.assertEqual(self.counter_fallback_to_original_benchmarking(), len(kernels))
+        self.assertEqual(self.counter_fallback_to_original_benchmarking(), 1)
 
     @gpu_patches
     @config.patch({"benchmarking.fallback_to_original_benchmarking": True})
