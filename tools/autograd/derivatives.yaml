@@ -398,8 +398,6 @@
   self: cholesky_backward(grad, upper, result)
 
 - name: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]
-  # self: cat(grads, dim)
-  # self: chunk_backward()
   dispatch:
     Default:
       self: not_implemented("chunk")

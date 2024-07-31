@@ -73,7 +73,6 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
         named_arg_types = named_arg_types[:-1]
     else:
         if not (len(args) >= min_args and len(args) <= len(named_arg_types)):
-            print(args)
             raise ValueError(
                 f"NestedTensor {func.__name__}({schema_str}): expected at least {min_args} "
                 f"arguments and at most {len(named_arg_types)} arguments, but got: "
