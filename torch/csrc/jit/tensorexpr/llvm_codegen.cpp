@@ -328,7 +328,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(const RshiftPtr& v) override;
   void visit(const CompareSelectPtr& v) override;
 
-#define IMM_VISIT_DECLARE(_1, Name) void visit(Name##ImmPtr v) override;
+#define IMM_VISIT_DECLARE(_1, Name) void visit(const Name##ImmPtr& v) override;
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT_DECLARE);
 #undef IMM_VISIT_DECLARE
 
@@ -1073,7 +1073,7 @@ getFromType(llvm::Type* type, T value) {
 }
 
 #define IMM_VISIT_DECLARE(Type, Name)                  \
-  void LLVMCodeGenImpl::visit(Name##ImmPtr v) {        \
+  void LLVMCodeGenImpl::visit(const Name##ImmPtr& v) { \
     value_ = getFromType<Type>(Name##Ty_, v->value()); \
   }
 AT_FORALL_SCALAR_TYPES(IMM_VISIT_DECLARE);
@@ -1083,7 +1083,7 @@ void LLVMCodeGenImpl::visit(const HalfImmPtr& v) {
   value_ = llvm::ConstantFP::get(HalfTy_, v->value());
 }
 
-void LLVMCodeGenImpl::visit(BFloat16ImmPtr v) {
+void LLVMCodeGenImpl::visit(const BFloat16ImmPtr& v) {
   value_ = llvm::ConstantInt::get(ShortTy_, v->value().x);
 }
 
