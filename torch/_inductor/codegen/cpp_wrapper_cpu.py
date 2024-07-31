@@ -1699,7 +1699,6 @@ class CppWrapperCpu(WrapperCodeGen):
                     ),
                     offset,
                 ]
-                breakpoint()
                 call_str = (
                     f"auto {tmp_name} = reinterpret_tensor_wrapper({', '.join(args)});"
                 )
