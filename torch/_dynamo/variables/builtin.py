@@ -1337,9 +1337,10 @@ class BuiltinVariable(VariableTracker):
                 # This is applicable for user defined objects which seem like dict, but are not really dicts. For
                 # example, TensorDict derives from MutableMapping. For such cases, we can directly inline the .items
                 # method and create a new dict.
-                out = tx.inline_user_function_return(
-                    arg.var_getattr(tx, "items"), args, kwargs
-                )
+                func_var = arg.var_getattr(tx, "items")
+                if not isinstance(func_var, variables.UserFunctionVariable):
+                    unimplemented(f"{user_cls.__name__}.items(): {args} {kwargs}")
+                out = tx.inline_user_function_return(func_var, args, kwargs)
                 if isinstance(out, ConstDictVariable):
                     return out
                 return BuiltinVariable(user_cls).call_custom_dict(tx, user_cls, out)
