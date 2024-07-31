@@ -9984,7 +9984,6 @@ class CommonTemplate:
                 graph = GraphLowering(
                     gm,
                     shape_env=shape_env,
-                    num_static_inputs=0,
                 )
                 with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
                     graph.run(*example_inputs)
