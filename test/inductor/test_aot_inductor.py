@@ -3001,7 +3001,15 @@ class AOTInductorTestsTemplate:
     def test_fft_c2c(self):
         class Model(torch.nn.Module):
             def forward(self, x):
-                return torch.fft.fftn(x), torch.fft.fftn(x).real
+                return torch.fft.fftn(x)
+
+        example_inputs = (torch.randn(16, 16, 16, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
+    def test_fft_c2c_real(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.fft.fftn(x).real
 
         example_inputs = (torch.randn(16, 16, 16, device=self.device),)
         self.check_model(Model(), example_inputs)
@@ -3210,7 +3218,7 @@ CPU_TEST_FAILURES = {
     # https://github.com/pytorch/pytorch/issues/123691
     "test_dynamic_scalar": fail_minimal_arrayref_interface(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/122980
-    "test_fft_c2c": fail_stack_allocation(is_skip=True),
+    # "test_fft_c2c_real": fail_stack_allocation(is_skip=True),
     # TODO: test_freezing_abi_compatible_cpu fails,
     #   AssertionError: None, i.e. optional output is not supported
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),

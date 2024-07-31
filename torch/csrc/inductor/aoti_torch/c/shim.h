@@ -53,6 +53,7 @@
 
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
+#include <c10/util/complex.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -639,6 +640,7 @@ DEFINE_DTYPE_SPECIALIZATION(int16_t, int16)
 DEFINE_DTYPE_SPECIALIZATION(int32_t, int32)
 DEFINE_DTYPE_SPECIALIZATION(int64_t, int64)
 DEFINE_DTYPE_SPECIALIZATION(bool, bool)
+DEFINE_DTYPE_SPECIALIZATION(c10::complex<float>, complex64)
 
 #endif
 

@@ -171,6 +171,7 @@ class CppWrapperCpu(WrapperCodeGen):
                     #include <torch/csrc/inductor/aoti_runtime/model.h>
                     """
                 )
+            self.header.splice("typedef c10::complex<float> complex64;")
         else:
             self.header.splice(
                 """
@@ -1698,6 +1699,7 @@ class CppWrapperCpu(WrapperCodeGen):
                     ),
                     offset,
                 ]
+                breakpoint()
                 call_str = (
                     f"auto {tmp_name} = reinterpret_tensor_wrapper({', '.join(args)});"
                 )
