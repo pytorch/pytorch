@@ -35,7 +35,7 @@ runner_types:
     disk_size: 200
     instance_type: m4.10xlarge
     is_ephemeral: false
-    max_available: 60
+    max_available: 450
     os: linux
   lf.linux.24xl.spr-metal:
     disk_size: 200
@@ -200,7 +200,7 @@ runner_types:
     disk_size: 200
     instance_type: m4.10xlarge
     is_ephemeral: false
-    max_available: 60
+    max_available: 450
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
   lf.amz2023.linux.24xl.spr-metal:
