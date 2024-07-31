@@ -5,6 +5,7 @@ import torch._dynamo
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch.testing._internal.common_utils import skipIfNNModuleInlined
 
+
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 

@@ -85,15 +85,19 @@ DimList = List
 
 log = logging.getLogger(__name__)
 
-class GuardOnDataDependentSymNode(RuntimeError):
-    pass
-
-class PendingUnbackedSymbolNotFound(RuntimeError):
-    pass
-
 import sympy
 from sympy.printing.str import StrPrinter
 from sympy.printing.precedence import precedence, PRECEDENCE
+
+class GuardOnDataDependentSymNode(RuntimeError):
+    cond: sympy.Expr
+
+    def __init__(self, cond, *args):
+        super().__init__(*args)
+        self.cond = cond
+
+class PendingUnbackedSymbolNotFound(RuntimeError):
+    pass
 
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
@@ -4740,11 +4744,11 @@ class ShapeEnv:
             )
         fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
         if expr.is_integer:
-            msg = "Could not extract specialized integer from data-dependent expression"
+            desc = "Could not extract specialized integer from data-dependent expression"
         else:
-            msg = "Could not guard on data-dependent expression"
-        return GuardOnDataDependentSymNode(
-            f"{msg} {expr} (unhinted: {unhinted_expr}).  "
+            desc = "Could not guard on data-dependent expression"
+        msg = (
+            f"{desc} {expr} (unhinted: {unhinted_expr}).  "
             f"(Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
             f"{size_oblivious_result_msg}"
             "Potential framework code culprit (scroll up for full backtrace):\n"
@@ -4759,6 +4763,7 @@ class ShapeEnv:
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
+        return GuardOnDataDependentSymNode(expr, msg)
 
     def _update_var_to_range(self, symbol, vr):
         lower, upper = vr.lower, vr.upper
@@ -5554,23 +5559,6 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         return result
 
 
-def _parse_data_dependent_expr(e):
-    def _floor(x):
-        # sympy parsing transforms something like `a // b` into something like
-        # `sympy.floor((1/b) * a)`, which we need to transform back to `a // b`
-        if isinstance(x, sympy.Mul):
-            a, b = x.args
-            if isinstance(a, sympy.Rational):
-                return FloorDiv(a.p * b, a.q)
-        return sympy.floor(x)
-
-    # find the unresolved condition on unbacked symints in the error message
-    match = re.search(r"data-dependent expression (.+) \(unhinted", e.args[0])
-
-    # parse it to a sympy expression
-    return sympy.sympify(match.group(1)).replace(sympy.floor, _floor)
-
-
 def _blame_user_code(e, frame):
     frame_summary = traceback.FrameSummary(
         frame.f_code.co_filename,
@@ -5606,7 +5594,9 @@ class _PythonPrinter(sympy.printing.str.StrPrinter):
         return f"{lhs} {rel_op} {rhs}"
 
 
-def _suggest_torch_checks(e, cond, src_map):
+def _suggest_torch_checks(e, src_map):
+    # extract the unresolved condition on unbacked symints in the error
+    cond = e.cond
     diff = ", ".join(s for s in cond.free_symbols if s.name not in src_map)
     if diff:
         log.warning("Unable to find user code corresponding to {%s}", diff)
@@ -5639,11 +5629,7 @@ def _suggest_fixes_for_data_dependent_error_non_strict(e):
             # add frame info to error message
             _blame_user_code(e, frame)
 
-            # extract the unresolved condition on unbacked symints in the error message
-            cond = _parse_data_dependent_expr(e)
-
             # map symbol names reachable via frame locals to their source-level names
-            # (used later to replace unbacked symints in the unresolved condition)
             src_map = {}
             for var, val in frame.f_locals.items():
                 # figure out how to access any symbol inside `val` through `var`
@@ -5656,8 +5642,9 @@ def _suggest_fixes_for_data_dependent_error_non_strict(e):
                             if isinstance(dim, torch.SymInt):
                                 src_map[str(dim.node.expr)] = f"{name}.shape[{i}]"
 
-            # add suggested torch.check()s based on `cond` and `src_map` to error message
-            _suggest_torch_checks(e, cond, src_map)
+            # add suggested torch.check()s based on `src_map` to the error message
+            # replacing unbacked symints in the unresolved condition in the error
+            _suggest_torch_checks(e, src_map)
             break
         frame = frame.f_back
 
