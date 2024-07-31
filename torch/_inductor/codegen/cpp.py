@@ -513,7 +513,7 @@ class CppOverrides(OpOverrides):
         return f"decltype({a})({a} * {b})"
 
     @staticmethod
-    def to_dtype(x, dtype, src_dtype=None):
+    def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
         assert isinstance(x, CppCSEVariable)
         if src_dtype is None:
             src_dtype = x.dtype
@@ -1343,7 +1343,7 @@ class CppVecOverrides(CppOverrides):
         return code
 
     @staticmethod
-    def to_dtype(x, dtype, src_dtype=None):
+    def to_dtype(x, dtype, src_dtype=None, use_compute_dtypes=True):
         assert dtype in [
             torch.bool,
             torch.float,
@@ -2951,7 +2951,7 @@ class CppVecKernelChecker(CppVecKernel):
                     return tmp_var
 
             @staticmethod
-            def indirect_indexing(index_var, size, check=True):
+            def indirect_indexing(index_var, size, check=True, wrap_neg=True):
                 return sympy_index_symbol(str(index_var))
 
             @staticmethod
@@ -2960,7 +2960,7 @@ class CppVecKernelChecker(CppVecKernel):
                 return self.cse.newvar()
 
             @staticmethod
-            def to_dtype(x, dtype, src_dtype=None):
+            def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
                 if dtype not in self.supported_dtypes:
                     self.disable_vec(f"to_dtype: {dtype}")
                 return x
@@ -4057,9 +4057,10 @@ class KernelGroup:
         code = BracesBuffer()
         # 1. Include header files
         # TODO: support kernel profile on other platforms
-        enable_kernel_profile = (
-            config.cpp.enable_kernel_profile and sys.platform == "linux"
-        )
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
         code.writeline(codecache.cpp_prefix())

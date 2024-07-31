@@ -9,14 +9,17 @@ self-hosted-runner:
     - linux.large
     - linux.2xlarge
     - linux.4xlarge
+    - linux.9xlarge.ephemeral
     - linux.12xlarge
+    - linux.12xlarge.ephemeral
     - linux.24xlarge
     - linux.arm64.2xlarge
+    - linux.arm64.m7g.4xlarge
     - linux.4xlarge.nvidia.gpu
     - linux.8xlarge.nvidia.gpu
     - linux.16xlarge.nvidia.gpu
     - linux.g5.4xlarge.nvidia.gpu
-    # Organization-wide AWS Linux Runners on Linux Foundation account
+    # Pytorch/pytorch AWS Linux Runners on Linux Foundation account
     - lf.linux.large
     - lf.linux.2xlarge
     - lf.linux.4xlarge
@@ -27,6 +30,29 @@ self-hosted-runner:
     - lf.linux.8xlarge.nvidia.gpu
     - lf.linux.16xlarge.nvidia.gpu
     - lf.linux.g5.4xlarge.nvidia.gpu
+    # Organization-wide AWS Linux Runners with new Amazon 2023 AMI
+    - amz2023.linux.large
+    - amz2023.linux.2xlarge
+    - amz2023.linux.4xlarge
+    - amz2023.linux.12xlarge
+    - amz2023.linux.24xlarge
+    - amz2023.linux.arm64.2xlarge
+    - amz2023.linux.arm64.m7g.4xlarge
+    - amz2023.linux.4xlarge.nvidia.gpu
+    - amz2023.linux.8xlarge.nvidia.gpu
+    - amz2023.linux.16xlarge.nvidia.gpu
+    - amz2023.linux.g5.4xlarge.nvidia.gpu
+    # Pytorch/pytorch AWS Linux Runners with the new Amazon 2023 AMI on Linux Foundation account
+    - amz2023.lf.linux.large
+    - amz2023.lf.linux.2xlarge
+    - amz2023.lf.linux.4xlarge
+    - amz2023.lf.linux.12xlarge
+    - amz2023.lf.linux.24xlarge
+    - amz2023.lf.linux.arm64.2xlarge
+    - amz2023.lf.linux.4xlarge.nvidia.gpu
+    - amz2023.lf.linux.8xlarge.nvidia.gpu
+    - amz2023.lf.linux.16xlarge.nvidia.gpu
+    - amz2023.lf.linux.g5.4xlarge.nvidia.gpu
     # Repo-specific IBM hosted S390x runner
     - linux.s390x
     # Organization wide AWS Windows runners
