@@ -80,6 +80,10 @@ def remove_split_ops(graph, shape_prop):
     return None
 
 
+def fuse_chunk_reshape_unsqueeze_concat_pass(graph):
+    return None
+
+
 pattern_matcher_passes_aten: List[PatternMatcherPass] = [
     remove_split_with_size_one_pass_aten,
     merge_getitem_cat_pass_aten,
@@ -133,6 +137,12 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 gm,
                 example_inputs,
                 "[Pre grad(predispatch IR)]Apply normalization pass",
+            )
+            pass_execution_and_save(
+                fuse_chunk_reshape_unsqueeze_concat_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply fuse_chunk_reshape_unsqueeze_concat_pass",
             )
             pass_execution_and_save(
                 group_batch_fusion_passes,

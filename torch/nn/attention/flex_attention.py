@@ -450,7 +450,7 @@ def _broadcast_to_dim(x, dim):
     return x
 
 
-def round_up_to_multiple(x, multiple):
+def _round_up_to_multiple(x, multiple):
     return (x + multiple - 1) // multiple * multiple
 
 
@@ -538,19 +538,19 @@ def _create_sparse_block_from_block_mask(
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
 ) -> BlockMask:
-    full_blocks, partial_blocks = block_mask
+    partial_blocks, full_blocks = block_mask
 
-    full_bm = _dense_to_ordered(full_blocks)
-    if partial_blocks is not None:
-        partial_bm = _dense_to_ordered(partial_blocks)
+    partial_bm = _dense_to_ordered(partial_blocks)
+    if full_blocks is not None:
+        full_bm = _dense_to_ordered(full_blocks)
     else:
-        partial_bm = (None, None)
+        full_bm = (None, None)
 
     return BlockMask(  # type: ignore[call-arg]
-        full_bm[0],
-        full_bm[1],
         partial_bm[0],
         partial_bm[1],
+        full_bm[0],
+        full_bm[1],
         BLOCK_SIZE=(KV_BLOCK_SIZE, Q_BLOCK_SIZE),
         mask_mod=mask_mod,
     )
@@ -622,14 +622,14 @@ def _create_block_mask_inner(
     with the __torch_function__ mode.
     """
     mask_tensor = create_mask(mask_mod, B, H, Q_LEN, KV_LEN, device, _compile=True)
-    full_block_mask, partial_block_mask = _convert_mask_to_block_mask(
+    partial_block_mask, full_block_mask = _convert_mask_to_block_mask(
         mask_tensor,
         KV_BLOCK_SIZE=KV_BLOCK_SIZE,
         Q_BLOCK_SIZE=Q_BLOCK_SIZE,
         separate_full_blocks=True,
     )
     return _create_sparse_block_from_block_mask(
-        (full_block_mask, partial_block_mask), mask_mod
+        (partial_block_mask, full_block_mask), mask_mod
     )
 
 
@@ -684,8 +684,8 @@ def create_block_mask(
         mod_type == _ModificationType.MASK_MOD
     ), f"create-block_mask requires a mask_mod function! Got {mask_mod}"
     inner_func = _create_block_mask_inner
-    Q_LEN = Q_LEN if Q_LEN < 128 else round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
-    KV_LEN = round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
+    Q_LEN = Q_LEN if Q_LEN < 128 else _round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
+    KV_LEN = _round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
     with TransformGetItemToIndex():
@@ -702,8 +702,8 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     of the query and key tensors.
     """
     device = query.device
-    kv_len = round_up_to_multiple(key.size()[-2], 128)
-    q_len = round_up_to_multiple(query.size()[-2], 128)
+    kv_len = _round_up_to_multiple(key.size()[-2], 128)
+    q_len = _round_up_to_multiple(query.size()[-2], 128)
     return BlockMask(
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
