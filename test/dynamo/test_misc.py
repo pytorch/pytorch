@@ -6654,6 +6654,61 @@ utils_device.CURRENT_DEVICE == None""".split(
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_symint_as_device_kwarg(self):
+        def f(rank):
+            # -2 to make device id 0 for easier testing on CI
+            return torch.ones(10, device=rank.size(0) - 2)
+
+        x = torch.randn(2)
+        out = f(torch.randn(2))
+        opt_out = torch.compile(backend="eager", dynamic=True, fullgraph=True)(f)(x)
+        self.assertEqual(out, opt_out)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    def test_symint_as_device_kwarg_multi_gpu(self):
+        def fn(rank):
+            # -2 to make device id smaller for easier testing on CI
+            return torch.ones(10, device=rank.size(0) - 2)
+
+        x = torch.randn(2)
+        out = fn(torch.randn(2))
+
+        guard_failure = None
+
+        def guard_failures(failure):
+            nonlocal guard_failure
+            guard_failure = failure
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=guard_failures, dynamic=True
+        )(fn)
+        self.assertEqual(out, opt_fn(x))
+
+        x = torch.randn(3)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertTrue(guard_failure is not None)
+        self.assertIn(
+            """tensor 'L['rank']' size mismatch at index 0""", guard_failure[0]
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_symint_as_device_kwarg_non_strict_export(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                # -2 to make device id 0 for easier testing on CI
+                return torch.ones(10, device=x.size(0) - 2)
+
+        x = torch.randn(2)
+        m = Mod()
+        d1 = torch.export.Dim("d1", max=2048)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "Constraints violated \(d1\)"
+        ):
+            ep = torch.export.export(
+                m, (x,), dynamic_shapes={"x": {0: d1}}, strict=False
+            )
+
     def test_call_parent_non_class_methods_from_child(self):
         class A:
             a = 4
