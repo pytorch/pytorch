@@ -6,13 +6,18 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
-from .. import ir
+from .. import config, ir
 
 from ..ir import FixedLayout, FlexibleLayout
 from ..lowering import empty, empty_strided, lowerings
 from ..runtime.runtime_utils import is_power_of_2, next_power_of_2
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
-from .flex_attention import compute_forward_block, compute_next_offset_func
+from .flex_attention import (
+    compute_forward_block,
+    compute_next_offset_func,
+    create_indices_fake,
+    create_num_blocks_fake_generator,
+)
 
 
 aten = torch.ops.aten
@@ -357,11 +362,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
     configs: List[Tuple[int, int, int]] = []
     configs.append(_get_decoding_default_config(key))
     # Note: max_autotune is not supported yet. Causes error in lowering the dynamic shape in reduction ops.
-    # if config.max_autotune:
-    #     configs += [
-    #         (64, 2, 2),
-    #         (32, 2, 3),
-    #     ]
+    if config.max_autotune:
+        configs += [
+            (64, 2, 2),
+            (32, 2, 3),
+            (128, 2, 3),
+        ]
     # TODO: fix autotuning.
 
     SPLIT_KV = get_split_k(key.get_size()[0], key.get_size()[1], key.get_size()[2])
@@ -430,6 +436,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     for BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0:
             continue
+        # Work around https://github.com/pytorch/pytorch/issues/129625
+        if num_stages == 2:
+            continue
         flex_decoding_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
@@ -486,8 +495,17 @@ def create_flex_decoding_kernel(*args, **kwargs):
         + list(mask_mod_other_buffers)
     )
 
+    input_gen_fns = {
+        5: create_num_blocks_fake_generator(full_kv_indices),
+        6: create_indices_fake,
+    }
+
     buf_ACC = autotune_select_algorithm(
-        "flex_decoding", choices, inputs_for_flex_decoding, layout_acc
+        "flex_decoding",
+        choices,
+        inputs_for_flex_decoding,
+        layout_acc,
+        input_gen_fns=input_gen_fns,
     )
 
     # Reduction

@@ -4,7 +4,7 @@
 import functools
 from collections import namedtuple
 from typing import Callable, Optional
-from unittest import expectedFailure, skip, skipUnless
+from unittest import expectedFailure, skipUnless
 from unittest.mock import patch
 
 import torch
@@ -754,13 +754,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(score_mod)
 
     @supported_platform
-    @skip("TODO: Figure out why this is erroring")
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune_with_captured(self):
-        head_scale = torch.randn(Hkv, device="cuda")
+        head_scale = torch.randn(Hq, device="cuda")
         batch_scale = torch.randn(B, device="cuda")
         tok_scale = torch.randn(S, device="cuda")
-        q_scale = torch.randn(Hq // Hkv, device="cuda")
+        q_scale = torch.randn(1, device="cuda")
 
         def bias_mod(score, batch, head, token_q, token_kv):
             score = score + tok_scale[token_kv]
