@@ -57,7 +57,7 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results
-from tools.testing.target_determination.gen_artifact import gen_ci_artifact
+from tools.testing.target_determination.utils import gen_ci_artifact, get_percent_to_run
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
 )
@@ -1797,11 +1797,9 @@ def main():
             s += "".join(f"    {test}\n" for test in parallel)
             return s.strip()
 
-    percent_to_run = 25 if options.enable_td else 100
+    percent_to_run = get_percent_to_run(options.enable_td)
     print_to_stderr(
         f"Running {percent_to_run}% of tests based on TD"
-        if options.enable_td
-        else "Running all tests"
     )
     include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
 
