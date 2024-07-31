@@ -20,6 +20,20 @@ _GUARD_SOURCE_SPECIALIZED_NN_MODULE = {
     GuardSource.GLOBAL: GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
     GuardSource.LOCAL_SPECIALIZED_NN_MODULE: GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
     GuardSource.GLOBAL_SPECIALIZED_NN_MODULE: GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+    # Just to ensure that guard_source() works
+    GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+    GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
+}
+
+# represents nn.Modules tracked with UnspecializedNNModuleVariable
+_GUARD_SOURCE_UNSPECIALIZED_NN_MODULE = {
+    GuardSource.LOCAL: GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+    GuardSource.GLOBAL: GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
+    GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+    GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
+    # this happens for an UnspecializedNNModule submodule on a NNModuleVariable
+    GuardSource.LOCAL_SPECIALIZED_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+    GuardSource.GLOBAL_SPECIALIZED_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
 }
 
 _GUARD_SOURCE_FSDP_MODULE = {
@@ -29,15 +43,8 @@ _GUARD_SOURCE_FSDP_MODULE = {
     GuardSource.GLOBAL_SPECIALIZED_NN_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
     GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
     GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
-}
-
-_GUARD_SOURCE_NOT_NN_MODULE = {
-    GuardSource.LOCAL: GuardSource.LOCAL,
-    GuardSource.GLOBAL: GuardSource.GLOBAL,
-    GuardSource.LOCAL_SPECIALIZED_NN_MODULE: GuardSource.LOCAL,
-    GuardSource.GLOBAL_SPECIALIZED_NN_MODULE: GuardSource.GLOBAL,
-    GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL,
-    GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL,
+    GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE: GuardSource.LOCAL_FSDP_MODULE,
+    GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
 }
 
 
@@ -535,7 +542,7 @@ class NNModuleSource(ChainedSource):
 @dataclasses.dataclass(frozen=True)
 class UnspecializedNNModuleSource(NNModuleSource):
     def guard_source(self):
-        return _GUARD_SOURCE_NOT_NN_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_UNSPECIALIZED_NN_MODULE[self.base.guard_source()]
 
 
 @dataclasses.dataclass(frozen=True)

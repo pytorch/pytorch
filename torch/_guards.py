@@ -90,6 +90,8 @@ class GuardSource(enum.Enum):
     BACKWARD_STATE = 9
     EPHEMERAL = 10
     SYNTHETIC_LOCAL = 11
+    LOCAL_UNSPECIALIZED_NN_MODULE = 12
+    GLOBAL_UNSPECIALIZED_NN_MODULE = 13
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
@@ -101,7 +103,14 @@ class GuardSource(enum.Enum):
                 GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
                 GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
             )
+            # TODO (anijain2305) - Investigate why is_fsdp_module required.
             or self.is_fsdp_module()
+        )
+
+    def is_unspecialized_nn_module(self) -> bool:
+        return self in (
+            GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
         )
 
     def is_local(self):
@@ -109,6 +118,7 @@ class GuardSource(enum.Enum):
             GuardSource.LOCAL,
             GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
             GuardSource.LOCAL_FSDP_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
         )
 
 
