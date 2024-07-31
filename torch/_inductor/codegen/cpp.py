@@ -38,6 +38,7 @@ from ..utils import (
     cache_on_self,
     get_bounds_index_expr,
     get_fused_kernel_name,
+    has_free_symbols,
     is_welford_reduction,
     parallel_num_threads,
     Placeholder,
@@ -1502,6 +1503,9 @@ class CppKernel(Kernel):
         self.is_reduction = False
         self.non_parallel_reduction_prefix = IndentedBuffer()
         self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
+        self.weight_recps_cse = CSE(
+            self.newvar_prefix, self.suffix, name_prefix="wrecps"
+        )
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
@@ -1552,15 +1556,6 @@ class CppKernel(Kernel):
                 "}",
             ],
         )
-        if (
-            reduction_type == "welford_reduce"
-            and welford_weight_reciprocal_vec_fn
-            and hasattr(self, "weight_recp_vec_range")
-            and "vec" in f"{acc_type}"
-        ):
-            self.local_reduction_init.writeline(
-                welford_weight_reciprocal_vec_fn(dtype, num_threads)
-            )
 
     def get_reduction_var_pattern(self, line: str):
         return re.search("tmp_acc[0-9]+", line)
@@ -2017,6 +2012,7 @@ class CppVecKernel(CppKernel):
         tiling_factor=0,
         tiling_idx=-1,
         tiling_dtype=torch.float,
+        tail_size=None,
     ):
         super().__init__(args, num_threads)
         self.vec_isa = cpu_vec_isa.pick_vec_isa()
@@ -2025,6 +2021,8 @@ class CppVecKernel(CppKernel):
             tiling_factor = self.vec_isa.nelements(dtype=tiling_dtype)
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
+        self.tail_size = tail_size
+        self.num_elems = tail_size if tail_size else tiling_factor
 
     def _try_get_const_stride(self, index: sympy.Expr, itervar: sympy.Symbol):
         if self.index_indirect_depends_on(index, itervar):
@@ -2101,7 +2099,7 @@ class CppVecKernel(CppKernel):
             line = (
                 f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
                 if load_mask_str
-                else f"{self._get_vec_type(dtype)}::loadu({loadbuf}, {self.tiling_factor})"
+                else f"{self._get_vec_type(dtype)}::loadu({loadbuf}, {self.num_elems})"
             )
         return line
 
@@ -2135,9 +2133,9 @@ class CppVecKernel(CppKernel):
 
         def get_result_size(dtype: torch.dtype) -> int:
             if dtype.itemsize < 4:
-                return self.tiling_factor * (4 // dtype.itemsize)
+                return self.num_elems * (4 // dtype.itemsize)
             else:
-                return self.tiling_factor
+                return self.num_elems
 
         def vec_to_array(vec_var: CppCSEVariable) -> CppCSEVariable:
             assert vec_var.is_vec
@@ -2152,7 +2150,7 @@ class CppVecKernel(CppKernel):
                 code.writeline(
                     f"__at_align__ std::array<{DTYPE_TO_CPP[vec_dtype]}, {result_size}> tmpbuf;"
                 )
-                line = f"{vec_var}.store(tmpbuf.data());"
+                line = f"{vec_var}.store(tmpbuf.data(), {result_size});"
                 code.writeline(line)
                 code.writeline("return tmpbuf;")
             code.writeline("()")
@@ -2169,7 +2167,7 @@ class CppVecKernel(CppKernel):
             )
             code.writeline(result_declare)
             if store_value:
-                code.writeline(f"{store_value}.store(tmpbuf.data());")
+                code.writeline(f"{store_value}.store(tmpbuf.data(), {result_size});")
             itervar_inner = sympy_index_symbol(
                 f"{self.itervars[self.tiling_idx]}_inner"
             )
@@ -2195,11 +2193,13 @@ class CppVecKernel(CppKernel):
                 else:
                     load_mask = f"{self._load_mask} != 0"
             if cpp_builder.is_gcc():
-                code.writeline(f"#pragma GCC unroll {self.tiling_factor}")
+                code.writeline(f"#pragma GCC unroll {self.num_elems}")
             else:
-                code.writeline(f"#pragma unroll {self.tiling_factor}")
+                code.writeline(f"#pragma unroll {self.num_elems}")
             code.writeline(
-                f"for (long {itervar_inner} = 0; {itervar_inner} < {self.tiling_factor}; {itervar_inner}++)"
+                f"for (long {itervar_inner} = 0; "
+                + f"{itervar_inner} < {self.num_elems}; "
+                + f"{itervar_inner}++)"
             )
             with code.indent(), contextlib.ExitStack() as stack:
                 index_c = cexpr_index(index)
@@ -2275,10 +2275,10 @@ class CppVecKernel(CppKernel):
         stride = self._try_get_const_stride(index, tiling_var)
         code = IndentedBuffer()
         if stride == 1:
-            if dtype == torch.float:
+            if dtype == torch.float and self.tail_size is None:
                 code.writeline(f"{value}.store({var_expr});")
             else:
-                code.writeline(f"{value}.store({var_expr}, {self.tiling_factor});")
+                code.writeline(f"{value}.store({var_expr}, {self.num_elems});")
         else:
             self._load_or_store_non_contiguous(
                 var, index, dtype, buffer=code, store_value=value
@@ -2334,20 +2334,47 @@ class CppVecKernel(CppKernel):
         self.reduction_prefix.writeline(
             f"{acc_type_vec} {acc_vec} = {self.reduction_init_vec(reduction_type, dtype)};"
         )
-        # save the reciprocal of weights for welford reduce if using static shape
-        reduction_size = functools.reduce(
-            lambda x, y: x * y, self.ranges[self.reduction_depth :]
-        )
         if reduction_type == "welford_reduce":
+            # save the reciprocal of weights for welford reduce
+            assert self.reduction_depth is not None
+            # use masked acc_vec for tail vec kernel
+            self.reduction_prefix.writeline(
+                f"{acc_type_vec} masked_{acc_vec} = {self.reduction_init_vec(reduction_type, dtype)};"
+            )
+            reduction_size = functools.reduce(
+                lambda x, y: x * y, self.ranges[self.reduction_depth :]
+            )
             reduction_factor = (
                 self.tiling_factor if self.tiling_idx >= self.reduction_depth else 1
             )
             self.weight_recp_vec_range = FloorDiv(reduction_size, reduction_factor)
-            self.non_parallel_reduction_prefix.writeline(
-                self.welford_weight_reciprocal_vec(dtype, None)
-            )
+            if self.weight_recp_vec_range not in self.weight_recps_cse.reduction_cache:
+                self.weight_recps_val = self.weight_recps_cse.generate(
+                    self.compute, f"reduction {self.weight_recp_vec_range}", write=False
+                )
+                self.weight_recps_cse.reduction_cache[
+                    self.weight_recp_vec_range
+                ] = self.weight_recps_val
+                self.non_parallel_reduction_prefix.writeline(
+                    self.welford_weight_reciprocal_vec(dtype)
+                )
+                # generate weight_recps for parallel reduction
+                num_threads = (
+                    "max_threads"
+                    if config.cpp.dynamic_threads
+                    else parallel_num_threads()
+                )
+                self.local_reduction_init.writeline(
+                    self.welford_weight_reciprocal_vec(dtype, num_threads)
+                )
+            else:
+                self.weight_recps_val = self.weight_recps_cse.reduction_cache[
+                    self.weight_recp_vec_range
+                ]
+            # use masked acc_vec for tail vec kernel
+            acc_vec_ = f"masked_{acc_vec}" if self.tail_size else acc_vec
             self.stores.writeline(
-                f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value, True)};"
+                f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, True)};"
             )
         else:
             self.stores.writeline(
@@ -2366,8 +2393,17 @@ class CppVecKernel(CppKernel):
             dtype,
             reduction_combine_fn=self.reduction_combine_vec,
             reduction_init_fn=self.reduction_init_vec,
-            welford_weight_reciprocal_vec_fn=self.welford_weight_reciprocal_vec,
         )
+        if reduction_type == "welford_reduce":
+            # use masked acc_vec for tail vec kernel
+            self._gen_parallel_reduction_buffers(
+                f"masked_{acc_vec}",
+                acc_type_vec,
+                reduction_type,
+                dtype,
+                reduction_combine_fn=self.reduction_combine_vec,
+                reduction_init_fn=self.reduction_init_vec,
+            )
         tmpvar: Union[str, CSEVariable]
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
@@ -2376,6 +2412,10 @@ class CppVecKernel(CppKernel):
                     self._get_num_vectors(dtype) == 1
                 ), "Welford reduction does not support VectorizedN (N>1)"
                 next_value = f"welford_vec_reduce_all({acc_vec})"
+                masked_next_value = f"welford_vec_reduce_all(masked_{acc_vec})"
+                self.reduction_suffix.writeline(
+                    f"{acc} = {reduction_combine(reduction_type, acc, masked_next_value)};"
+                )
             else:
                 reduce_all_body = (
                     "{ return "
@@ -2392,6 +2432,11 @@ class CppVecKernel(CppKernel):
             tmpvar = acc
         else:
             tmpvar = acc_vec
+            if is_welford_reduction(reduction_type):
+                masked_tmpvar = f"masked_{tmpvar}"
+                self.reduction_suffix.writeline(
+                    f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, masked_tmpvar)};"
+                )
 
         result = reduction_project(reduction_type, tmpvar)
         self.reduction_cse.reduction_cache[reduction_key] = result
@@ -2475,26 +2520,52 @@ class CppVecKernel(CppKernel):
             else self.weight_recp_vec_range
         )
         vec_num_range_thread_expr = cexpr_index(vec_num_range_thread)
-        return f"static WeightRecp<{self._get_vec_type(dtype)}> weight_recps({vec_num_range_thread_expr});"
+        return (
+            f"static WeightRecp<{self._get_vec_type(dtype)}> {self.weight_recps_val}"
+            f"("
+            f"{vec_num_range_thread_expr}"
+            f");"
+        )
 
     def reduction_combine_vec(
         self, reduction_type, var, next_value, use_weight_recps=False
     ):
         if reduction_type == "max":
-            return f"at::vec::maximum({var}, {next_value})"
+            if self.tail_size:
+                return f"max_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"at::vec::maximum({var}, {next_value})"
         elif reduction_type == "min":
-            return f"at::vec::minimum({var}, {next_value})"
+            if self.tail_size:
+                return f"min_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"at::vec::minimum({var}, {next_value})"
         elif reduction_type == "sum":
-            return f"{var} + {next_value}"
+            if self.tail_size:
+                return f"sum_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"{var} + {next_value}"
         elif reduction_type == "prod":
-            return f"{var} * {next_value}"
+            if self.tail_size:
+                return f"prod_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"{var} * {next_value}"
         elif reduction_type == "xor_sum":
-            return f"{var} ^ {next_value}"
+            if self.tail_size:
+                return f"xor_sum_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"{var} ^ {next_value}"
         elif reduction_type == "welford_reduce":
             if use_weight_recps:
-                return f"welford_combine({var}, {next_value}, &weight_recps)"
+                if self.tail_size:
+                    return f"welford_combine({var}, {next_value}, {self.tail_size}, &{self.weight_recps_val})"
+                else:
+                    return f"welford_combine({var}, {next_value}, &{self.weight_recps_val})"
             else:
-                return f"welford_combine({var}, {next_value})"
+                if self.tail_size:
+                    return f"welford_combine({var}, {next_value}, {self.tail_size})"
+                else:
+                    return f"welford_combine({var}, {next_value})"
         elif reduction_type == "welford_combine":
             if isinstance(next_value, tuple):
                 # When reading a value from Inductor IR we have a tuple of variable names
@@ -2502,7 +2573,10 @@ class CppVecKernel(CppKernel):
             else:
                 # When combining intermediate accumulators we have a Welford<T> struct
                 mean, m2, weight = reduction_project(reduction_type, next_value)
-            return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
+            if self.tail_size:
+                return f"welford_combine({var}, {{{mean}, {m2}, {weight}}}, {self.tail_size})"
+            else:
+                return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
         else:
             raise NotImplementedError
 
@@ -2732,6 +2806,8 @@ class CppVecKernelChecker(CppVecKernel):
 
         self.simd_vec = True
 
+        self.simd_masked_vec = True
+
         self.fast_vec_list = []
         for k, v in CppVecOverrides.__dict__.items():
             if isinstance(v, staticmethod):
@@ -2750,10 +2826,23 @@ class CppVecKernelChecker(CppVecKernel):
             torch.int64,
         ]
 
+        # TODO: remove it after all data types support masked vectorization.
+        self.supported_dtypes_for_masked_vec: List[torch.dtype] = [
+            torch.float,
+            torch.bfloat16,
+            torch.float16,
+        ]
+
     def disable_vec(self, msg=None):
         if schedule_log.isEnabledFor(logging.DEBUG):
             schedule_log.debug("Disabled vectorization: %s", msg)
         self.simd_vec = False
+        self.simd_masked_vec = False
+
+    def disable_masked_vec(self, msg=None):
+        if schedule_log.isEnabledFor(logging.DEBUG):
+            schedule_log.debug("Disabled masked vectorization: %s", msg)
+        self.simd_masked_vec = False
 
     def load(self, name: str, index: sympy.Expr):
         with RecordOptimizationContext(__name__) as node_ctx:
@@ -2763,6 +2852,14 @@ class CppVecKernelChecker(CppVecKernel):
 
             opt_ctx.dtype = load_dtype
             var = self.cse.newvar()
+
+            if load_dtype not in self.supported_dtypes_for_masked_vec:
+                self.disable_masked_vec(
+                    f"{load_dtype} not supported by masked vectorization"
+                )
+
+            if has_free_symbols(self.ranges):
+                self.disable_masked_vec("Symbolic ranges not supported by masked load")
 
             if len(self.itervars) == 0:
                 self.disable_vec("not a loop")
@@ -2779,11 +2876,19 @@ class CppVecKernelChecker(CppVecKernel):
 
     def store(self, name, index, value, mode=None):
         with RecordOptimizationContext(__name__) as node_ctx:
+            store_dtype = V.graph.get_dtype(name)
+
+            if store_dtype not in self.supported_dtypes_for_masked_vec:
+                self.disable_masked_vec(
+                    f"{store_dtype} not supported by masked vectorization"
+                )
+
+            if has_free_symbols(self.ranges):
+                self.disable_masked_vec("Symbolic ranges not supported by masked store")
+
             if len(self.itervars) == 0:
                 self.disable_vec("not a loop")
                 return self.simd_vec
-
-            store_dtype = V.graph.get_dtype(name)
 
             opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
             assert opt_ctx
@@ -2803,6 +2908,9 @@ class CppVecKernelChecker(CppVecKernel):
             return self.simd_vec
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
+        if has_free_symbols(self.ranges):
+            self.disable_masked_vec("Symbolic ranges not supported by masked reduction")
+
         if not (
             (dtype == torch.float and src_dtype == torch.float)
             or (dtype == torch.int64 and src_dtype == torch.int64)
@@ -2888,6 +2996,11 @@ class CppVecKernelChecker(CppVecKernel):
                         ):
                             opt_ctx.dtype = torch.float32
 
+                    if opt_ctx.dtype not in self.supported_dtypes_for_masked_vec:
+                        self.disable_masked_vec(
+                            f"{opt_ctx.dtype} not supported by masked vectorization"
+                        )
+
                     if opt_ctx.dtype not in self.supported_dtypes:
                         self.disable_vec(f"constant dtype: {opt_ctx.dtype}")
                     return val
@@ -2961,6 +3074,11 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
+                if dtype not in self.supported_dtypes_for_masked_vec:
+                    self.disable_masked_vec(
+                        f"{dtype} not supported by masked vectorization"
+                    )
+
                 if dtype not in self.supported_dtypes:
                     self.disable_vec(f"to_dtype: {dtype}")
                 return x
@@ -3308,6 +3426,7 @@ class CppKernelProxy(CppKernel):
             tiling_indices = select_tiling_indices(tiling_factor)
             if tiling_indices:
                 could_vec = True
+                could_masked_vec = True
                 for tiling_indice in tiling_indices:
                     with CppVecKernelChecker(
                         deepcopy(self.kernel_group.args),
@@ -3317,21 +3436,28 @@ class CppKernelProxy(CppKernel):
                     ) as vec_checker:
                         run(vec_checker)
                         could_vec = could_vec and vec_checker.simd_vec
+                        could_masked_vec = (
+                            could_masked_vec and vec_checker.simd_masked_vec
+                        )
                         if not could_vec:
                             break
                 if could_vec:
                     if len(tiling_indices) == 1:
-                        return [tiling_factor], tiling_indices
+                        return [tiling_factor], tiling_indices, could_masked_vec
                     if len(tiling_indices) == 2:
-                        return [tiling_factor, tiling_factor], tiling_indices
-            return [], []
+                        return (
+                            [tiling_factor, tiling_factor],
+                            tiling_indices,
+                            could_masked_vec,
+                        )
+            return [], [], False
 
         # Kernels share the same global contexts like V.graph.wrapper_code, V.kernel.args.
         # But the generated scalar kernel has updated these global contexts. Hence, the other kernels
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
-            tiling_factors, tiling_indices = select_tiling(vec_dtype)
+            tiling_factors, tiling_indices, could_masked_vec = select_tiling(vec_dtype)
             assert len(tiling_factors) == len(tiling_indices)
             if len(tiling_indices) == 1:
                 vec_kernel = codegen_kernel(
@@ -3342,9 +3468,21 @@ class CppKernelProxy(CppKernel):
                     tiling_indices[0], factor=tiling_factors[0]
                 )
                 main_loop.set_kernel(vec_kernel)
-                tail_loop.set_kernel(scalar_kernel)
                 main_loop.simd_vec = True
-                tail_loop.simd_omp = True
+                if could_masked_vec and (tail_loop.size - tail_loop.offset) >= 4:
+                    tail_loop.steps = tail_loop.size - tail_loop.offset
+                    masked_vec_kernel = codegen_kernel(
+                        CppVecKernel,
+                        tiling_factors[0],
+                        tiling_indices[0],
+                        vec_dtype,
+                        tail_loop.steps,
+                    )
+                    tail_loop.set_kernel(masked_vec_kernel)
+                    tail_loop.simd_vec = True
+                else:
+                    tail_loop.set_kernel(scalar_kernel)
+                    tail_loop.simd_omp = True
                 # We chop the loop into two cubes by the nelements - main loop and tail loop.
                 # Regarding the main loop, it is straightforward that it could be vectorized with
                 # nelements. But for the tail loop, it still could be vectorized. For example,
