@@ -130,6 +130,10 @@ class SizeVarAllocator:
                 for k, v in var_ranges.items()
             }
         )
+        for var in expr.free_symbols:
+            if var not in var_to_range:
+                var_to_range[var] = ValueRanges(0, IntInfinity())
+
         var_to_range_tuple = cast(
             Tuple[Tuple[sympy.Symbol, ValueRanges[sympy.Expr]]],
             tuple(var_to_range.items()),
