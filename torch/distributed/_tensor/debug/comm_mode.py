@@ -8,6 +8,7 @@ from typing import Any, Dict
 
 import torch
 import torch.nn
+from torch._guards import detect_fake_mode
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed._tensor.api import DTensor
 from torch.distributed._tools.mod_tracker import ModTracker
