@@ -52,9 +52,9 @@ class BlockAnalysis : public IRVisitor {
   }
 
  private:
-  void visit(StorePtr v) override;
-  void visit(LoadPtr v) override;
-  void visit(ForPtr v) override;
+  void visit(const StorePtr& v) override;
+  void visit(const LoadPtr& v) override;
+  void visit(const ForPtr& v) override;
 
   std::unordered_map<std::string, BufPtr> map_input_to_tensor_bufs_;
   std::unordered_set<BufPtr> store_targets_;
@@ -87,12 +87,12 @@ class BlockPrinter : public IRPrinter {
   void PrintDMAs(const std::unordered_set<BufPtr>& bufs);
   void PrintAdjustBuffers(const std::unordered_set<BufPtr>& bufs);
 
-  void visit(ForPtr v) override;
-  void visit(LoadPtr v) override;
-  void visit(StorePtr v) override;
-  void visit(BlockPtr v) override;
-  void visit(AddPtr v) override;
-  void visit(MulPtr v) override;
+  void visit(const ForPtr& v) override;
+  void visit(const LoadPtr& v) override;
+  void visit(const StorePtr& v) override;
+  void visit(const BlockPtr& v) override;
+  void visit(const AddPtr& v) override;
+  void visit(const MulPtr& v) override;
 };
 
 class TORCH_API BlockCodeGen : public CodeGen {
