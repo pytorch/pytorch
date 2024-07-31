@@ -2228,7 +2228,6 @@ def nn_module_get_all_hooks(
     check_backward_hooks=False,
     check_state_dict_hooks=False,
 ):
-    reset_code = torch._C._dynamo.eval_frame.reset_code
     """
     Sometimes its useful to differentiate between types of hooks such as forward/backward/pre
     hooks executed during module.__call__, and state_dict hooks which are executed separately.
