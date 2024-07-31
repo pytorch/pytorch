@@ -400,6 +400,7 @@
 - name: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]
   dispatch:
     Default:
+      # the default case will use the CompositeImplicitAutograd
       self: not_implemented("chunk")
     AutogradNestedTensor:
       self: chunk_backward(grads, self, chunks, dim)

@@ -47,6 +47,7 @@ xfail_not_implemented = {
     "aten::chain_matmul",
     "aten::chalf",
     "aten::choose_qparams_optimized",
+    "aten::chunk_backward",
     "aten::clip_",
     "aten::clip_.Tensor",
     "aten::coalesce",
