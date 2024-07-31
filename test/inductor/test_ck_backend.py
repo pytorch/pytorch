@@ -177,8 +177,7 @@ class TestCKBackend(TestCase):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         m, k, n = 4096, 256, 2048
-        # TBD: debug CK numerics
-        alpha, beta = 0.5, (2.0 ** -6)
+        alpha, beta = 1.0, 1.0
 
         tensor_options = {"device": "cuda", "dtype": torch.float16}
         x = torch.ones(x_shape, **tensor_options)
@@ -205,7 +204,11 @@ class TestCKBackend(TestCase):
             Y_compiled = addmm(x, a, b, alpha, beta)
             Y_eager = torch.addmm(x, a, b, alpha=alpha, beta=beta)
 
-            torch.testing.assert_close(Y_compiled, Y_eager)
+            # this is an effort to account for accumulating errors in the individual result elements
+            # (1.3e-6, 1e-5) are default (atol, rtol) for fp32 which is the accumulation dtype
+            torch.testing.assert_close(
+                Y_compiled, Y_eager, atol=k * 1.3e-6 * 2, rtol=k * 1e-5 * 2
+            )
 
 
 if __name__ == "__main__":
