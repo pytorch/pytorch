@@ -97,6 +97,7 @@ jobs:
     needs: [Build-whls, Preparation]
     steps:
     - name: Run Unit Tests
+      shell: cmd
       run: |
         call %conda_path%\Scripts\activate.bat
         call activate %conda_env%
