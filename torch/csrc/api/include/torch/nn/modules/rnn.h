@@ -277,7 +277,7 @@ class TORCH_API RNNCellImplBase : public torch::nn::Cloneable<Derived> {
   Tensor bias_hh;
 
  protected:
-  void check_forward_input(const Tensor& input, const std::string name) const;
+  void check_forward_input(const Tensor& input, const std::string& name) const;
   virtual std::string get_nonlinearity_str() const;
 };
 } // namespace detail

@@ -6,7 +6,7 @@ import torch
 from torch.utils._pytree import tree_map
 import unittest
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
 from torch.fx.operator_schemas import normalize_function
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -94,6 +94,11 @@ class IncorrectAliasTensor(torch.Tensor):
 
 # Tests various schema checking functionalities.
 class TestSchemaCheck(JitTestCase):
+    def setUp(self):
+        if TEST_WITH_TORCHDYNAMO:
+            self.skipTest("SchemaCheckMode is ignored by dynamo")
+        super().setUp()
+
     # Tests that SchemaCheckMode records operator order with grad
     def test_schema_check_mode_operator_order(self):
         with SchemaCheckMode() as schema_check:

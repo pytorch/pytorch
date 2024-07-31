@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Adds docstrings to torch.Size functions"""
 
 import torch._C

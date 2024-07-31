@@ -655,7 +655,7 @@ std::pair<K*, V*> radix_sort_parallel(
     const int64_t elements_count,
     const int64_t max_value) {
   TORCH_INTERNAL_ASSERT(false, "radix_sort_parallel: ATen not compiled with FBGEMM support");
-  std::make_pair(nullptr, nullptr);
+  return std::make_pair(nullptr, nullptr);
 }
 
 }

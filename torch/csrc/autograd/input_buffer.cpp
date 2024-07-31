@@ -11,7 +11,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
 #include <c10/core/StreamGuard.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <cstddef>
 #include <utility>
@@ -159,7 +159,7 @@ void InputBuffer::add(
   //      Accumulation happens on the var device's default stream.
 
   TORCH_INTERNAL_ASSERT(device_of(var));
-  std::optional<c10::Stream> opt_accumulate_stream = c10::nullopt;
+  std::optional<c10::Stream> opt_accumulate_stream = std::nullopt;
   const auto device_type = device_of(var).value().type();
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   if (device_of(var)->is_cuda() || device_of(var)->is_privateuseone()) {
@@ -179,7 +179,7 @@ void InputBuffer::add(
         record_stream_any_impl(var, *opt_accumulate_stream);
       }
     } else {
-      std::optional<c10::Stream> opt_sync_stream = c10::nullopt;
+      std::optional<c10::Stream> opt_sync_stream = std::nullopt;
       const auto guard = c10::impl::VirtualGuardImpl{device_type};
       if (on_consumer && !on_producer) {
         // (3a)

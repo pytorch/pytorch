@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <unordered_map>
 #include <vector>
@@ -27,9 +27,9 @@ class TORCH_API LLVMCodeGen : public CodeGen {
       at::Device device = at::kCPU,
       const std::string& kernel_func_name = "func",
       Dtype dtype = kInt,
-      std::optional<std::string> triple = c10::nullopt,
-      std::optional<std::string> cpu = c10::nullopt,
-      std::optional<std::string> attrs = c10::nullopt);
+      std::optional<std::string> triple = std::nullopt,
+      std::optional<std::string> cpu = std::nullopt,
+      std::optional<std::string> attrs = std::nullopt);
   explicit LLVMCodeGen(StmtPtr stmt);
 
   LLVMCodeGen() = delete;
@@ -126,9 +126,9 @@ struct TORCH_API LLVMCodeGenBuilder {
   at::Device device_ = at::kCPU;
   std::string kernelFuncName_ = "func";
   Dtype dtype_ = kInt;
-  std::optional<std::string> triple_ = c10::nullopt;
-  std::optional<std::string> cpu_ = c10::nullopt;
-  std::optional<std::string> attrs_ = c10::nullopt;
+  std::optional<std::string> triple_ = std::nullopt;
+  std::optional<std::string> cpu_ = std::nullopt;
+  std::optional<std::string> attrs_ = std::nullopt;
 };
 
 TORCH_API std::optional<std::string>& LLVMTargetTriple();

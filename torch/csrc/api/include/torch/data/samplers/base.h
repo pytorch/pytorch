@@ -33,7 +33,7 @@ class Sampler {
 
   /// Returns the next index if possible, or an empty optional if the
   /// sampler is exhausted for this epoch.
-  virtual optional<BatchRequest> next(size_t batch_size) = 0;
+  virtual std::optional<BatchRequest> next(size_t batch_size) = 0;
 
   /// Serializes the `Sampler` to the `archive`.
   virtual void save(serialize::OutputArchive& archive) const = 0;

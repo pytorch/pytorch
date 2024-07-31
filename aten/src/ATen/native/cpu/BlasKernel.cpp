@@ -33,6 +33,16 @@ void fp16_gemv_trans(
     const float beta,
     float16_t* y,
     const int incy);
+
+float fp16_dot_with_fp32_arith(
+  const float16_t* x,
+  const float16_t* a,
+  int64_t len);
+
+float bf16_dot_with_fp32_arith(
+  const at::BFloat16* x,
+  const at::BFloat16* a,
+  int64_t len);
 }
 #endif
 
@@ -180,8 +190,7 @@ void gemm_transa_(
 }
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
-gemm_transb_(
+void gemm_transb_impl(
     TransposeType transb,
     int64_t m,
     int64_t n,
@@ -191,12 +200,9 @@ gemm_transb_(
     int64_t lda,
     const scalar_t* b,
     int64_t ldb,
-    opmath_t beta,
-    scalar_t* c,
+    /* we expect pre-applied beta */
+    opmath_t* c,
     int64_t ldc) {
-  // c *= beta
-  scale_(m, n, beta, c, ldc);
-
   // c += alpha * (a @ b.T)
   for (const auto l : c10::irange(k)) {
     for (const auto j : c10::irange(n)) {
@@ -215,6 +221,27 @@ gemm_transb_(
   }
 }
 
+template <typename scalar_t, typename opmath_t>
+typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
+gemm_transb_(
+    TransposeType transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    opmath_t alpha,
+    const scalar_t* a,
+    int64_t lda,
+    const scalar_t* b,
+    int64_t ldb,
+    opmath_t beta,
+    scalar_t* c,
+    int64_t ldc) {
+  // c *= beta
+  scale_(m, n, beta, c, ldc);
+
+  gemm_transb_impl(transb, m, n, k, alpha, a, lda, b, ldb, c, ldc);
+}
+
 // std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
 template <typename scalar_t, typename opmath_t>
 typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
@@ -231,18 +258,44 @@ gemm_transb_(
     opmath_t beta,
     scalar_t* c,
     int64_t ldc) {
-  // c += alpha * (a @ b.T)
-  for (const auto i : c10::irange(m)) {
+  // We need to calculate full-precision dot products for correctness;
+  // users notice error accumulation with reduced-width types (e.g.,
+  // https://github.com/pytorch/pytorch/issues/95125 and
+  // https://github.com/pytorch/pytorch/issues/83863, which were filed
+  // when we used gemm_transb_impl naively, accumulating into
+  // float16/bfloat16). The straightforward way to do this is to use
+  // the vector dot column algorithm anyway, but this gives terrible
+  // performance because of the non-contiguous matrix
+  // access. Therefore, we instead elect to allocate temporary space
+  // to hold the output at higher-precision so that we can accumulate
+  // into it using the above cache-friendly "load one vector element,
+  // FMA it with an entire matrix row into the entire result vector"
+  // algorithm instead.
+  const auto c_size = m * n;
+  auto c_accum = std::make_unique<opmath_t[]>(c_size);
+  if (beta == 1) {
     for (const auto j : c10::irange(n)) {
-      const auto dot = sum(k, [&](int64_t l) -> opmath_t {
-        return static_cast<opmath_t>(a[l * lda + i]) *
-            static_cast<opmath_t>(transb == TransposeType::ConjTranspose ? conj_impl(b[l * ldb + j]) : b[l * ldb + j]);
-      });
-      if (beta == opmath_t(0)) {
-        c[j * ldc + i] = alpha * dot;
-      } else {
-        c[j * ldc + i] = beta * c[j * ldc + i] + alpha * dot;
+      for (const auto i : c10::irange(m)) {
+        c_accum[j * m + i] = c[j * ldc + i];
       }
+    }
+  } else if (beta == 0) {
+    for (const auto j : c10::irange(n)) {
+      for (const auto i : c10::irange(m)) {
+        c_accum[j * m + i] = 0;
+      }
+    }
+  } else {
+    for (const auto j : c10::irange(n)) {
+      for (const auto i : c10::irange(m)) {
+        c_accum[j * m + i] = beta * c[j * ldc + i];
+      }
+    }
+  }
+  gemm_transb_impl(transb, m, n, k, alpha, a, lda, b, ldb, c_accum.get(), m);
+  for (const auto j : c10::irange(n)) {
+    for (const auto i : c10::irange(m)) {
+      c[j * ldc + i] = c_accum[j * m + i];
     }
   }
 }
@@ -308,20 +361,21 @@ void gemm_notrans_(
 }
 
 
-static float compute_dot(const float16_t *a, const float16_t *b, int64_t l) {
-    if ((l&3) != 0) {
-      return sum(l, [&](int64_t i) -> float {
-        return float(a[i]) * float(b[i]);
-      });
-    }
-    float32x4_t rcv = vdupq_n_f32(0);
-    for (int64_t idx = 0; idx < l; idx += 4) {
-      float32x4_t aVec = vcvt_f32_f16(vld1_f16(a + idx));
-      float32x4_t bVec = vcvt_f32_f16(vld1_f16(b + idx));
-      rcv = vaddq_f32(rcv, vmulq_f32(aVec, bVec));
-    }
-    auto sum = vpaddq_f32(rcv, rcv);
-    return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
+inline float32x4_t load_as_float32x4(const BFloat16* ptr) {
+  int32x4_t shift = vdupq_n_s32(16);
+  uint32x4_t as_int = vmovl_u16(vld1_u16(reinterpret_cast<const uint16_t *>(ptr)));
+  return vreinterpretq_f32_u32(vshlq_u32(as_int, shift));
+}
+
+static float compute_dot(const at::Half* a, const at::Half* b, int64_t len) {
+  return at::native::blas_impl::fp16_dot_with_fp32_arith(
+    reinterpret_cast<const float16_t*>(a),
+    reinterpret_cast<const float16_t*>(b),
+    len);
+}
+
+static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
+  return at::native::blas_impl::bf16_dot_with_fp32_arith(a, b, len);
 }
 
 template <>
@@ -343,7 +397,35 @@ void gemm_transa_(
     for (const auto i : c10::irange(begin, end)) {
       const auto *b_ = b;
       for (const auto j : c10::irange(n)) {
-        const auto dot = compute_dot(reinterpret_cast<const float16_t*>(a_), reinterpret_cast<const float16_t*>(b_), k);
+        const auto dot = compute_dot(a_, b_, k);
+        b_ += ldb;
+        if (beta == 0) {
+          c[j*ldc+i] = alpha*dot;
+        } else {
+          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
+        }
+      }
+      a_ += lda;
+    }
+  });
+}
+
+template <>
+void gemm_transa_(
+    TransposeType transa,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const at::BFloat16 *a, int64_t lda,
+    const at::BFloat16 *b, int64_t ldb,
+    float beta,
+    at::BFloat16 *c, int64_t ldc) {
+  // c = alpha * (a.T @ b) + beta * c
+  parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
+    const auto *a_ = a + begin * lda;
+    for (const auto i : c10::irange(begin, end)) {
+      const auto *b_ = b;
+      for (const auto j : c10::irange(n)) {
+        const auto dot = compute_dot(a_, b_, k);
         b_ += ldb;
         if (beta == 0) {
           c[j*ldc+i] = alpha*dot;

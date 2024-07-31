@@ -2423,7 +2423,7 @@ class TestFunctionalMapDataPipe(TestCase):
 _generic_namedtuple_allowed = sys.version_info >= (3, 7) and sys.version_info < (3, 9)
 if _generic_namedtuple_allowed:
 
-    class InvalidData(Generic[T_co], NamedTuple):
+    class InvalidData(NamedTuple, Generic[T_co]):
         name: str
         data: T_co
 

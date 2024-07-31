@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import time
 from collections import defaultdict
 from functools import partial

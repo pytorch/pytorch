@@ -5,13 +5,13 @@ import re
 import sys
 import types
 import typing
+import typing_extensions
 from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.jit.frontend
 import torch.nn as nn
-import typing_extensions
 from torch import Tensor
 from torch.testing import FileCheck
 

@@ -1,9 +1,11 @@
+# mypy: allow-untyped-defs
 """Defines bias subclasses that work with scaled_dot_product_attention"""
 from enum import auto, IntEnum
 from typing import Optional
 from warnings import warn
 
 import torch
+import torch.nn.functional as F
 from torch.backends.cuda import (
     can_use_efficient_attention,
     can_use_flash_attention,
@@ -16,7 +18,7 @@ from torch.nn.attention._utils import (
     _postprocess_flash_output,
     _validate_sdpa_input,
 )
-from torch.nn.functional import scaled_dot_product_attention
+
 
 __all__ = ["causal_upper_left", "causal_lower_right", "CausalVariant", "CausalBias"]
 
@@ -202,7 +204,7 @@ class CausalBias(torch.Tensor):
             attn_mask.seq_len_q == attn_mask.seq_len_kv
             or attn_mask.variant == CausalVariant.UPPER_LEFT
         ):
-            return scaled_dot_product_attention(
+            return F.scaled_dot_product_attention(
                 query,
                 key,
                 value,
@@ -249,13 +251,12 @@ class CausalBias(torch.Tensor):
                     custom_mask_type=int(attn_mask.variant),
                     compute_log_sumexp=compute_log_sumexp,
                     scale=scale,
-                    causal_diagonal=None,
                     seqlen_k=None,
                 )[0].transpose(1, 2)
             else:
                 _raise_kernel_warnings(sdpa_params)
                 # We cant use efficient attention the only support for lower right is via materialization
-                return scaled_dot_product_attention(
+                return F.scaled_dot_product_attention(
                     query,
                     key,
                     value,

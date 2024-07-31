@@ -34,18 +34,26 @@ bool ConstantValueMap::HasRank(const std::string& tensorName) {
 
 std::optional<size_t> ConstantValueMap::GetRank(const std::string& tensorName) {
   if (!HasRank(tensorName)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return ConstantValueMap::getInstance().rankMap[tensorName];
 }
 
 void ConstantValueMap::SetAllGraphInputsStatic(bool all_static) {
   ConstantValueMap::getInstance().allGraphInputsStatic =
-      c10::make_optional(all_static);
+      std::make_optional(all_static);
 }
 
-c10::optional<bool> ConstantValueMap::GetAllGraphInputsStatic() {
+std::optional<bool> ConstantValueMap::GetAllGraphInputsStatic() {
   return ConstantValueMap::getInstance().allGraphInputsStatic;
+}
+
+void ConstantValueMap::SetAllGraphInputsReliableComputed(bool computed) {
+  ConstantValueMap::getInstance().allGraphInputsReliableComputed = computed;
+}
+
+bool ConstantValueMap::GetAllGraphInputsReliableComputed() {
+  return ConstantValueMap::getInstance().allGraphInputsReliableComputed;
 }
 
 void ConstantValueMap::SetShape(
@@ -63,7 +71,7 @@ bool ConstantValueMap::HasShape(const std::string& tensorName) {
 std::optional<c10::SymbolicShape> ConstantValueMap::GetShape(
     const std::string& tensorName) {
   if (!HasShape(tensorName)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return ConstantValueMap::getInstance().shapeMap[tensorName];
 }
@@ -82,7 +90,7 @@ bool ConstantValueMap::HasValue(const std::string& tensorName) {
 std::optional<at::Tensor> ConstantValueMap::GetValue(
     const std::string& tensorName) {
   if (!HasValue(tensorName)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return ConstantValueMap::getInstance().tensorValueMap[tensorName];
 }
@@ -113,7 +121,7 @@ std::optional<std::vector<int64_t>> ConstantValueMap::GetShapeInto1DInt64Vector(
       return shape_value;
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 std::optional<std::vector<int64_t>> ConstantValueMap::
@@ -144,7 +152,7 @@ std::optional<std::vector<int64_t>> ConstantValueMap::
       }
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 // accessor<int64_t, 1> for 1DInt64 case.
@@ -175,7 +183,7 @@ bool ConstantValueMap::HasTypeReliable(const std::string& tensorName) {
 std::optional<bool> ConstantValueMap::GetTypeReliable(
     const std::string& tensorName) {
   if (!HasTypeReliable(tensorName)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return ConstantValueMap::getInstance().typeReliableMap[tensorName];
 }
@@ -194,7 +202,7 @@ bool ConstantValueMap::HasUseInferredType(const std::string& tensorName) {
 std::optional<bool> ConstantValueMap::GetUseInferredType(
     const std::string& tensorName) {
   if (!HasUseInferredType(tensorName)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return ConstantValueMap::getInstance().useInferredTypeMap[tensorName];
 }
@@ -213,7 +221,7 @@ bool ConstantValueMap::HasShapeValue(const std::string& tensorName) {
 std::optional<c10::SymbolicShape> ConstantValueMap::GetShapeValue(
     const std::string& tensorName) {
   if (!HasShapeValue(tensorName)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return ConstantValueMap::getInstance().shapeValueMap[tensorName];
 }
@@ -276,7 +284,8 @@ void ConstantValueMap::ClearMaps() {
   ConstantValueMap::getInstance().inferredShapeData.clear();
   ConstantValueMap::getInstance().symbolDimMap.clear();
   ConstantValueMap::getInstance().dimSymbolMap.clear();
-  ConstantValueMap::getInstance().allGraphInputsStatic = c10::nullopt;
+  ConstantValueMap::getInstance().allGraphInputsStatic = std::nullopt;
+  ConstantValueMap::getInstance().allGraphInputsReliableComputed = false;
 }
 
 // For debug only.
