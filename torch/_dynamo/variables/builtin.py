@@ -841,27 +841,14 @@ class BuiltinVariable(VariableTracker):
             handlers.append(constant_fold_handler)
 
         error_msg = f"builtin: {fn.__name__} {arg_types} {has_kwargs}"
-        if len(handlers) == 0:
-            return lambda *args: unimplemented(error_msg)
-        elif len(handlers) == 1:
-            (handler,) = handlers
-
-            def builtin_dipatch(tx: "InstructionTranslator", args, kwargs):
-                rv = handler(tx, args, kwargs)
+        def builtin_dispatch(tx: "InstructionTranslator", args, kwargs):
+            for fn in handlers:
+                rv = fn(tx, args, kwargs)
                 if rv:
                     return rv
-                unimplemented(error_msg)
+            unimplemented(error_msg)
 
-        else:
-
-            def builtin_dipatch(tx: "InstructionTranslator", args, kwargs):
-                for fn in handlers:
-                    rv = fn(tx, args, kwargs)
-                    if rv:
-                        return rv
-                unimplemented(error_msg)
-
-        return builtin_dipatch
+        return builtin_dispatch
 
     def _handle_insert_op_in_graph(self, tx: "InstructionTranslator", args, kwargs):
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
