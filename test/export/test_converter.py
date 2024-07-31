@@ -26,8 +26,7 @@ class TestConverter(TestCase):
     ) -> ExportedProgram:
         # By default, it tests both jit.trace and jit.script.
         if option is None:
-            # option = ["trace", "script"]
-            option = ["script"]
+            option = ["trace", "script"]
 
         if check_persistent:
             num_iterations = 10
@@ -58,7 +57,6 @@ class TestConverter(TestCase):
             else:
                 raise RuntimeError(f"Unrecognized mode for torch.jit: {opt}")
 
-            print(opt, ts_model.graph)
             ep = TS2EPConverter(ts_model, inp).convert()
             ep_list.append(ep)
 
@@ -242,6 +240,42 @@ class TestConverter(TestCase):
         inp = (torch.randn(10, 2), torch.randn(5))
         self._check_equal_ts_ep_converter(Module(), inp)
 
+    def test_prim_max(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                x_len = len(x)
+                y_len = len(y)
+
+                # prim::max.int
+                len_int = max(x_len, y_len)
+
+                # prim::max.float
+                len_float = int(max(x_len * 2.0, y_len * 2.0))
+
+                # prim::max.self_int
+                len_self_int = max([x_len, y_len])
+
+                # prim::max.self_float
+                len_self_float = int(max([x_len * 2.0, y_len * 2.0]))
+
+                # prim::max.float_int
+                len_float_int = int(max(x_len * 2.0, y_len))
+
+                # prim::max.int_float
+                len_int_float = int(max(x_len, y_len * 2.0))
+
+                return torch.ones(
+                    len_int
+                    + len_float
+                    + len_self_int
+                    + len_self_float
+                    + len_float_int
+                    + len_int_float
+                )
+
+        inp = (torch.randn(10, 2), torch.randn(5))
+        self._check_equal_ts_ep_converter(Module(), inp)
+
     def test_aten___getitem___list(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -321,7 +355,7 @@ class TestConverter(TestCase):
                 M()(torch.tensor(False), torch.tensor(4)),
             )
 
-    def test_convert_if_multiple_out(self):
+    def test_convert_if_tuple_out(self):
         class M(torch.nn.Module):
             def true_fn(self, y, z):
                 return (z * z, z + z)
@@ -338,6 +372,36 @@ class TestConverter(TestCase):
                     res = self.false_fn(y, z)
 
                 return res[0] + res[1]
+
+        inp = (torch.tensor(True), torch.tensor(4))
+        ep_list = self._check_equal_ts_ep_converter(M(), inp)
+
+        for ep in ep_list[1:]:
+            torch.testing.assert_close(
+                ep.module()(torch.tensor(False), torch.tensor(4)),
+                M()(torch.tensor(False), torch.tensor(4)),
+            )
+
+    @unittest.skip("Wrong fx subgraph for cond, need to fix")
+    def test_convert_if_multiple_out(self):
+        class M(torch.nn.Module):
+            def true_fn(self, y, z):
+                return z * z
+
+            def false_fn(self, y, z):
+                return y * y * y
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                z = y * y
+
+                if x:
+                    res1 = self.true_fn(y, z)
+                    res2 = y
+                else:
+                    res1 = z
+                    res2 = self.false_fn(y, z)
+
+                return res1 + res2
 
         inp = (torch.tensor(True), torch.tensor(4))
         ep_list = self._check_equal_ts_ep_converter(M(), inp)
@@ -898,9 +962,6 @@ class TestConverter(TestCase):
                 y = torch.tensor(s)
                 return y
 
-        ep = torch.export.export(
-            M(), (torch.ones(3),), dynamic_shapes=({0: torch.export.Dim("m")},)
-        )
         ep_list = self._check_equal_ts_ep_converter(M(), (torch.ones(3),))
         for ep in ep_list:
             self.assertEqual(len(ep.constants), 0)
@@ -918,11 +979,9 @@ class TestConverter(TestCase):
                 y = torch.tensor([s, s * 2, 1])
                 return y
 
-        ep = torch.export.export(
-            M(), (torch.ones(3),), dynamic_shapes=({0: torch.export.Dim("m")},)
-        )
         ep_list = self._check_equal_ts_ep_converter(M(), (torch.ones(3),))
-        for ep in ep_list:
+        # Trace directly inline a tensor constant.
+        for ep in ep_list[1:]:
             self.assertEqual(len(ep.constants), 0)
 
         # TODO: Additional check once dynamic shape is supported.
