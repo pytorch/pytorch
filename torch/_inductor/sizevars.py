@@ -18,10 +18,10 @@ from typing import (
 import sympy
 from sympy import Expr
 
-from torch.fx.experimental.symbolic_shapes import evaluate_expr, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import bound_sympy
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .runtime.runtime_utils import is_power_of_2
 from .utils import (
@@ -34,6 +34,29 @@ from .virtualized import V
 
 
 log = logging.getLogger(__name__)
+
+
+def evaluate_expr(
+    shape_env: ShapeEnv,
+    expr: Union[sympy.Basic, bool],
+    axioms: Optional[Tuple[sympy.Expr]] = None,
+    var_to_range: Optional[Tuple[Tuple[sympy.Symbol, ValueRanges[Any]]]] = None,
+) -> bool:
+    if expr in (True, False):
+        return bool(expr)
+
+    try:
+        simplified = shape_env._maybe_evaluate_static(
+            expr,
+            axioms=axioms,
+            var_to_range=var_to_range,
+        )
+        if simplified is not None:
+            return bool(simplified)
+    except Exception:
+        log.debug("Could not simplified %s", expr)
+
+    return False
 
 
 # This class is a little awkward, because ShapeEnv is doing most of the heavy
