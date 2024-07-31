@@ -429,7 +429,9 @@ class ZipVariable(IteratorVariable):
                 codegen(it)
 
     def reconstruct(self, codegen):
-        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "zip"))
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("builtins", "zip"), call_function_ex=True
+        )
         self.reconstruct_items(codegen)
         codegen.append_output(
             create_instruction("BUILD_TUPLE", arg=len(self.iterables))
@@ -472,7 +474,9 @@ class MapVariable(ZipVariable):
         return self.fn.call_function(tx, args.items, {})
 
     def reconstruct(self, codegen):
-        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "map"))
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("builtins", "map"), call_function_ex=True
+        )
         codegen(self.fn)
         self.reconstruct_items(codegen)
         codegen.extend_output(

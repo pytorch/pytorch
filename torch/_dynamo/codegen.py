@@ -11,6 +11,7 @@ from . import utils
 
 from .bytecode_transformation import (
     add_push_null,
+    add_push_null_call_function_ex,
     create_call_function,
     create_call_method,
     create_dup_top,
@@ -83,7 +84,7 @@ class PyCodegen:
         res = value.reconstruct(self)
         assert res is None, f"reconstruct!=None {value}"
 
-    def add_push_null(self, gen_fn):
+    def add_push_null(self, gen_fn, call_function_ex=False):
         """
         `gen_fn` generates instructions via PyCodegen methods
         that push a single callable to the stack.
@@ -99,7 +100,10 @@ class PyCodegen:
         # inplace modify self._output
         added_insts = self._output[old_len:]
         del self._output[old_len:]
-        self._output.extend(add_push_null(added_insts))
+        if call_function_ex:
+            self._output.extend(add_push_null_call_function_ex(added_insts))
+        else:
+            self._output.extend(add_push_null(added_insts))
         if sys.version_info >= (3, 13):
             # NULL will be at top of stack
             self.clear_tos()

@@ -16,11 +16,7 @@ import torch.utils._pytree as pytree
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 from .. import config, variables
-from ..bytecode_transformation import (
-    add_push_null_call_function_ex,
-    create_call_function,
-    create_instruction,
-)
+from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -1110,13 +1106,14 @@ class StringFormatVariable(VariableTracker):
         return f"{self.__class__.__name__}({self.format_string!r}, {self.sym_args!r}, {self.sym_kwargs!r})"
 
     def reconstruct(self, codegen):
-        codegen.extend_output(
-            add_push_null_call_function_ex(
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
                 [
                     codegen.create_load_const(self.format_string),
                     codegen.create_load_attr("format"),
                 ]
-            )
+            ),
+            call_function_ex=True,
         )
         codegen(variables.TupleVariable(self.sym_args))
         kwargs = {
