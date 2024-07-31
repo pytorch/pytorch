@@ -3041,8 +3041,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // prevent being freed before the collective finishes.
   //
   // See [Sync Streams].
-  c10::cuda::CUDACachingAllocator::recordStream(
+  if (avoidRecordStreams_ && !coalescing_state_) {
+    work->stashed_for_allocator_safety_ = std::make_shared<std::vector<at::Tensor>>();
+    work->stashed_for_allocator_safety_->push_back(tensor);
+  } else {
+    c10::cuda::CUDACachingAllocator::recordStream(
       tensor.storage().data_ptr(), ncclStream);
+  }
 
   // This part seems common to both p2p and coalesced-p2p usage?
   ncclComm_t comm_ = ncclComm->getNcclComm();
