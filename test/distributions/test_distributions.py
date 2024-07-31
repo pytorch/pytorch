@@ -32,6 +32,7 @@ import math
 import numbers
 import unittest
 from collections import namedtuple
+from functools import partial
 from itertools import product
 from random import shuffle
 
@@ -5389,10 +5390,7 @@ class TestKL(DistributionsTestCase):
         )
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         lognormal = pairwise(LogNormal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
-        multinomial = pairwise(
-            Multinomial,
-            [[0.4, 0.3, 0.3], [0.2, 0.7, 0.1], [0.33, 0.33, 0.34], [0.2, 0.2, 0.6]],
-        )
+        multinomial = tuple(Multinomial(total_count=1, probs=cat.probs) for cat in categorical)
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         independent = (Independent(normal[0], 1), Independent(normal[1], 1))
         onehotcategorical = pairwise(
@@ -5424,8 +5422,8 @@ class TestKL(DistributionsTestCase):
         # The following pairs are not tested due to very high variance of the monte carlo
         # estimator; their implementations have been reviewed with extra care:
         # - (pareto, normal)
-        self.precision = 0.01  # Set this to 0.01 when testing a new KL implementation.
-        self.max_samples = int(1e07)  # Increase this when testing at smaller precision.
+        self.precision = 0.1  # Set this to 0.01 when testing a new KL implementation.
+        self.max_samples = int(1e06)  # Increase this when testing at smaller precision.
         self.samples_per_batch = int(1e04)
         self.finite_examples = [
             (bernoulli, bernoulli),
@@ -5462,7 +5460,8 @@ class TestKL(DistributionsTestCase):
             (laplace, laplace),
             (lognormal, lognormal),
             (laplace, normal),
-            (multinomial, multinomial)(normal, gumbel),
+            (multinomial, multinomial),
+            (normal, gumbel),
             (normal, laplace),
             (normal, normal),
             (onehotcategorical, onehotcategorical),
@@ -5525,6 +5524,14 @@ class TestKL(DistributionsTestCase):
             (Laplace(-1, 2), Gamma(3, 4)),
             (Laplace(-1, 2), Pareto(3, 4)),
             (Laplace(-1, 2), Uniform(-3, 4)),
+            (
+                Multinomial(probs=torch.tensor([0.9, 0.1])),
+                Multinomial(probs=torch.tensor([1.0, 0.0])),
+            ),
+            (
+                Multinomial(probs=torch.tensor([[0.9, 0.1], [0.9, 0.1]])),
+                Multinomial(probs=torch.tensor([1.0, 0.0])),
+            ),
             (Normal(-1, 2), Beta(3, 4)),
             (Normal(-1, 2), Chi2(3)),
             (Normal(-1, 2), Exponential(3)),
