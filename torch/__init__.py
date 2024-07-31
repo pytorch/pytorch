@@ -2108,11 +2108,14 @@ def compiled_with_cxx11_abi() -> builtins.bool:
 
 
 from torch import _library as _library, _ops as _ops
-from torch._classes import classes as classes
 
 
-# Import the ops "namespace"
+# Import the ops and classes "namespace"
 from torch._ops import ops as ops  # usort: skip
+from torch._classes import classes as classes  # usort: skip
+
+sys.modules.setdefault(f"{__name__}.ops", ops)
+sys.modules.setdefault(f"{__name__}.classes", classes)
 
 # quantization depends on torch.fx and torch.ops
 # Import quantization
@@ -2524,7 +2527,12 @@ if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
     # imported in user code.
-    from torch import _dynamo as _dynamo, _inductor as _inductor, onnx as onnx
+    from torch import (
+        _dynamo as _dynamo,
+        _inductor as _inductor,
+        _subclasses as _subclasses,
+        onnx as onnx,
+    )
 
 else:
     _lazy_modules = {

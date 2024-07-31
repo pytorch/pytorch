@@ -353,7 +353,7 @@ class CPUReproTests(TestCase):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("foo", torch.rand((3, 10)))
+                self.foo = torch.nn.Buffer(torch.rand((3, 10)))
 
             def forward(self, x):
                 lx = [x, x.clone(), x.clone()]
