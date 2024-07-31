@@ -14,7 +14,7 @@
 //   all need to call into the fastpath C++ API defined in CPUFunctions.h. The methods are also all
 //   directly inlined into TensorBody.h.
 // - CPUFunctions.h #includes TensorBody.h because it contains function declarations for the entire C++ API,
-//   which include functions that have defaultable optional<Tensor> arguments.
+//   which include functions that have defaultable std::optional<Tensor> arguments.
 //   That requires knowing the full Tensor class definition.
 //
 // We break the cycle by doing the following:

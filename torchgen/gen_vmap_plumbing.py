@@ -36,9 +36,7 @@ def is_tensor_list(typ: Type) -> bool:
 
 def unwrap_tensor(name: str, cur_level_var: str) -> list[str]:
     result = f"""\
-    Tensor {name}_value;
-    optional<int64_t> {name}_bdim;
-    std::tie({name}_value, {name}_bdim) = unwrapTensorAtLevel({name}, {cur_level_var});"""
+    auto [{name}_value, {name}_bdim] = unwrapTensorAtLevel({name}, {cur_level_var});"""
     return textwrap.dedent(result).split("\n")
 
 
