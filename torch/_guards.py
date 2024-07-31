@@ -911,31 +911,26 @@ class DeviceGuard:
 
 
 class StreamGuard:
-    def __init__(self, stream: Optional[torch.Stream]):
+    def __init__(self, stream: torch.Stream):
         self.stream = stream
         self.src_prev_stream = None
         self.dst_prev_stream = None
 
     def __enter__(self):
-        if self.stream is None:
-            return
         self.src_prev_stream = torch.current_stream(self.stream.device.type, None)  # type: ignore[assignment]
 
         # If the stream is not on the current device, then
         # set the current stream on the device
         if self.src_prev_stream.device != self.stream.device:  # type: ignore[attr-defined]
-            with DeviceGuard(self.stream.device.type, self.stream.device_index):
+            with DeviceGuard(self.stream.device.type, self.stream.device.index):
                 self.dst_prev_stream = torch.current_stream(  # type: ignore[assignment]
                     self.stream.device.type, None
                 )
-        torch.set_stream(self.stream.device.type, self.stream)
+        torch.set_stream(self.stream)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        if self.stream is None:
-            return
-
         # Reset the stream on the original device and destination device
         if self.src_prev_stream.device != self.stream.device:  # type: ignore[attr-defined]
-            torch.set_stream(self.stream.device.type, self.dst_prev_stream)  # type: ignore[call-overload]
-        torch.set_stream(self.stream.device.type, self.src_prev_stream)  # type: ignore[call-overload]
+            torch.set_stream(self.dst_prev_stream)  # type: ignore[arg-type]
+        torch.set_stream(self.src_prev_stream)  # type: ignore[arg-type]
         return False

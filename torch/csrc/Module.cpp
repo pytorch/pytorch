@@ -1101,8 +1101,7 @@ PyObject* THPModule_deviceCount(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "device_count(c10::string_view device_type)",
-      "device_count()",
+      "device_count(c10::string_view? device_type=None)",
   });
   torch::ParsedArgs<1> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -1110,9 +1109,7 @@ PyObject* THPModule_deviceCount(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   c10::DeviceType device_type;
 
-  if (r.idx == 0) {
-    device = at::Device(r.string(0));
-  }
+  device = r.deviceOptional(0);
   if (device.has_value()) {
     device_type = device->type();
   } else {
@@ -1130,8 +1127,7 @@ PyObject* THPModule_isAvailable(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "is_available(c10::string_view device_type)",
-      "is_available()",
+      "is_available(c10::string_view? device_type=None)",
   });
   torch::ParsedArgs<1> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -1139,9 +1135,7 @@ PyObject* THPModule_isAvailable(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   c10::DeviceType device_type;
 
-  if (r.idx == 0) {
-    device = at::Device(r.string(0));
-  }
+  device = r.deviceOptional(0);
   if (device.has_value()) {
     device_type = device->type();
   } else {
@@ -1162,22 +1156,29 @@ PyObject* THPModule_setDevice(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "set_device(c10::string_view device_type, *, int64_t device_index)",
-      "set_device(int64_t device_index)",
+      "set_device(Device device)",
+      "set_device(c10::string_view? device_type=None, *, int64_t device_index)",
   });
   torch::ParsedArgs<2> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   std::optional<c10::Device> device;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  c10::DeviceType device_type;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   c10::DeviceIndex device_index;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  c10::DeviceType device_type;
 
   if (r.idx == 0) {
-    device = at::Device(r.string(0));
-    device_index = static_cast<c10::DeviceIndex>(r.toInt64(1));
+    device = r.device(0);
+    TORCH_CHECK(device->has_index(), "device doesn't have device index.");
+    device_index = device->index();
   } else {
-    device_index = static_cast<c10::DeviceIndex>(r.toInt64(0));
+    device = r.deviceOptional(0);
+    if (device.has_value()) {
+      TORCH_CHECK(
+          !device->has_index(),
+          "device_type (string) must not include an index because device_index (int) was passed explicitly.");
+    }
+    device_index = static_cast<c10::DeviceIndex>(r.toInt64(1));
   }
   if (device.has_value()) {
     device_type = device->type();
@@ -1197,18 +1198,14 @@ PyObject* THPModule_getDevice(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "current_device(c10::string_view device_type)",
-      "current_device()",
+      "current_device(c10::string_view? device_type=None)",
   });
   torch::ParsedArgs<1> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
-  std::optional<c10::Device> device;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   c10::DeviceType device_type;
 
-  if (r.idx == 0) {
-    device = at::Device(r.string(0));
-  }
+  std::optional<c10::Device> device = r.deviceOptional(0);
   if (device.has_value()) {
     device_type = device->type();
   } else {
@@ -1216,7 +1213,7 @@ PyObject* THPModule_getDevice(
   }
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
-  auto current_device = impl.getDevice();
+  c10::Device current_device = impl.getDevice();
   return THPUtils_packDeviceIndex(current_device.index());
   END_HANDLE_TH_ERRORS
 }
@@ -1227,22 +1224,29 @@ PyObject* THPModule_exchangeDevice(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "_exchange_device(c10::string_view device_type, *, int64_t device_index)",
-      "_exchange_device(int64_t device_index)",
+      "_exchange_device(Device device)",
+      "_exchange_device(c10::string_view? device_type=None, *, int64_t device_index)",
   });
   torch::ParsedArgs<2> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   std::optional<c10::Device> device;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  c10::DeviceType device_type;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   c10::DeviceIndex device_index;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  c10::DeviceType device_type;
 
   if (r.idx == 0) {
-    device = at::Device(r.string(0));
-    device_index = static_cast<c10::DeviceIndex>(r.toInt64(1));
+    device = r.device(0);
+    TORCH_CHECK(device->has_index(), "device doesn't have device index.")
+    device_index = device->index();
   } else {
-    device_index = static_cast<c10::DeviceIndex>(r.toInt64(0));
+    device = r.deviceOptional(0);
+    if (device.has_value()) {
+      TORCH_CHECK(
+          !device->has_index(),
+          "device_type (string) must not include an index because device_index (int) was passed explicitly.");
+    }
+    device_index = static_cast<c10::DeviceIndex>(r.toInt64(1));
   }
   if (device_index < 0) {
     return THPUtils_packDeviceIndex(-1);
@@ -1254,8 +1258,8 @@ PyObject* THPModule_exchangeDevice(
   }
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
-  auto old_device = impl.exchangeDevice({device_type, device_index});
-  return THPUtils_packDeviceIndex(old_device.index());
+  auto orig_device = impl.exchangeDevice({device_type, device_index});
+  return THPUtils_packDeviceIndex(orig_device.index());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1265,22 +1269,29 @@ PyObject* THPModule_maybeExchangeDevice(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "_maybe_exchange_device(c10::string_view device_type, *, int64_t device_index)",
-      "_maybe_exchange_device(int64_t device_index)",
+      "_maybe_exchange_device(Device device)",
+      "_maybe_exchange_device(c10::string_view? device_type=None, *, int64_t device_index)",
   });
   torch::ParsedArgs<2> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   std::optional<c10::Device> device;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  c10::DeviceType device_type;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   c10::DeviceIndex device_index;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  c10::DeviceType device_type;
 
   if (r.idx == 0) {
-    device = at::Device(r.string(0));
-    device_index = static_cast<c10::DeviceIndex>(r.toInt64(1));
+    device = r.device(0);
+    TORCH_CHECK(device->has_index(), "device doesn't have device index.")
+    device_index = device->index();
   } else {
-    device_index = static_cast<c10::DeviceIndex>(r.toInt64(0));
+    device = r.deviceOptional(0);
+    if (device.has_value()) {
+      TORCH_CHECK(
+          !device->has_index(),
+          "device_type (string) must not include an index because device_index (int) was passed explicitly.");
+    }
+    device_index = static_cast<c10::DeviceIndex>(r.toInt64(1));
   }
   if (device_index < 0) {
     return THPUtils_packDeviceIndex(-1);
@@ -1292,9 +1303,9 @@ PyObject* THPModule_maybeExchangeDevice(
   }
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
-  auto old_device = impl.getDevice();
+  auto orig_device = impl.getDevice();
   impl.uncheckedSetDevice({device_type, device_index});
-  return THPUtils_packDeviceIndex(old_device.index());
+  return THPUtils_packDeviceIndex(orig_device.index());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1304,30 +1315,16 @@ PyObject* THPModule_setStream(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "set_stream(c10::string_view device_type, *, Stream stream)",
       "set_stream(Stream stream)",
   });
-  torch::ParsedArgs<2> parsed_args{};
+  torch::ParsedArgs<1> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
-  std::optional<c10::Device> device;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  c10::DeviceType device_type;
-  std::optional<c10::Stream> stream;
 
-  if (r.idx == 0) {
-    device = at::Device(r.string(0));
-    stream = r.stream(1);
-  } else {
-    stream = r.stream(0);
-  }
-  if (device.has_value()) {
-    device_type = device->type();
-  } else {
-    device_type = at::getAccelerator(true).value();
-  }
+  c10::Stream stream = r.stream(0);
+  c10::DeviceType device_type = stream.device_type();
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
-  impl.setStream(stream.value());
+  impl.setStream(stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1338,24 +1335,34 @@ PyObject* THPModule_getStream(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "current_stream(c10::string_view device_type, *, int64_t device_index? = None)",
-      "current_stream(int64_t device_index? = None)",
+      "current_stream(Device device)",
+      "current_stream(c10::string_view? device_type=None, *, int64_t? device_index=None)",
   });
-  torch::ParsedArgs<1> parsed_args{};
+  torch::ParsedArgs<2> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   std::optional<c10::Device> device;
+  std::optional<c10::DeviceIndex> device_index;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   c10::DeviceType device_type;
-  std::optional<c10::DeviceIndex> device_index;
 
   if (r.idx == 0) {
-    device = at::Device(r.string(0));
-    device_index = r.toInt64Optional(1);
+    device = r.device(0);
   } else {
-    device_index = r.toInt64Optional(0);
+    device = r.deviceOptional(0);
+    if (device.has_value()) {
+      TORCH_CHECK(
+          !device->has_index(),
+          "device_type (string) must not include an index because device_index (int) was passed explicitly.");
+    }
+    if (!r.isNone(1)) {
+      device_index = static_cast<c10::DeviceIndex>(r.toInt64(1));
+    }
   }
   if (device.has_value()) {
     device_type = device->type();
+    if (device->has_index()) {
+      device_index = device->index();
+    }
   } else {
     device_type = at::getAccelerator(true).value();
   }
@@ -1375,24 +1382,34 @@ PyObject* THPModule_syncStreamsOnDevice(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "synchronize(c10::string_view device_type, *, int64_t device_index? = None)",
-      "synchronize(int64_t device_index? = None)",
+      "synchronize(Device device)",
+      "synchronize(c10::string_view? device_type=None, *, int64_t? device_index=None)",
   });
   torch::ParsedArgs<2> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   std::optional<c10::Device> device;
+  std::optional<c10::DeviceIndex> device_index;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   c10::DeviceType device_type;
-  std::optional<c10::DeviceIndex> device_index;
 
   if (r.idx == 0) {
-    device = at::Device(r.string(0));
-    device_index = r.toInt64Optional(1);
+    device = r.device(0);
   } else {
-    device_index = r.toInt64Optional(0);
+    device = r.deviceOptional(0);
+    if (device.has_value()) {
+      TORCH_CHECK(
+          !device->has_index(),
+          "device_type (string) must not include an index because device_index (int) was passed explicitly.");
+    }
+    if (!r.isNone(1)) {
+      device_index = r.toInt64(1);
+    }
   }
   if (device.has_value()) {
     device_type = device->type();
+    if (device->has_index()) {
+      device_index = device->index();
+    }
   } else {
     device_type = at::getAccelerator(true).value();
   }
@@ -1403,10 +1420,8 @@ PyObject* THPModule_syncStreamsOnDevice(
   }
   {
     pybind11::gil_scoped_release no_gil;
-    c10::DeviceGuard guard({device_type, device_index.value()});
     impl.syncStreamsOnDevice(device_index.value());
   }
-
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

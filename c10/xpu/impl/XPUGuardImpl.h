@@ -168,6 +168,10 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   void syncStreamsOnDevice(const c10::DeviceIndex device_index) const override {
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_device_synchronization(c10::kXPU);
+    }
     c10::xpu::syncStreamsOnDevice(device_index);
   }
 
