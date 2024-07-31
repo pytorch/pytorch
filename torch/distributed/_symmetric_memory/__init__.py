@@ -5,7 +5,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import partial
-from typing import Callable, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -259,11 +259,16 @@ lib.define(
 )
 lib.define(
     "fused_all_gather_scaled_matmul("
-    "Tensor A, Tensor[] Bs, Tensor A_scale, Tensor[] B_scales, int gather_dim, str group_name"
-    ") -> (Tensor, Tensor[])"
+    "Tensor A, Tensor[] Bs, Tensor A_scale, Tensor[] B_scales, "
+    "ScalarType?[] out_dtypes, int gather_dim, str group_name) -> (Tensor, Tensor[])"
 )
 lib.define(
     "fused_matmul_reduce_scatter(Tensor A, Tensor B, str reduce_op, int scatter_dim, str group_name) -> Tensor"
+)
+lib.define(
+    "fused_scaled_matmul_reduce_scatter("
+    "Tensor A, Tensor B, Tensor A_scale, Tensor B_scale, "
+    "ScalarType out_dtype, str reduce_op, int scatter_dim, str group_name) -> Tensor"
 )
 lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor")
 lib.define(
@@ -384,6 +389,61 @@ def restride_A_shard_for_fused_all_gather_matmul(
     return make_contiguous_for_perm(t, perm)
 
 
+def _fused_matmul_reduce_scatter_impl(
+    mm_out_op: torch._ops.OpOverload,
+    A: torch.Tensor,
+    B: torch.Tensor,
+    kwargs: Dict[str, Any],
+    out_dtype: Optional[torch.dtype],
+    reduce_op: str,
+    scatter_dim: int,
+    group_name: str,
+) -> torch.Tensor:
+    if A.dim() < 2:
+        raise ValueError("A_shard must be a matrix")
+    if scatter_dim < 0 or scatter_dim >= A.dim():
+        raise ValueError("Invalid gather_dim")
+    if B.dim() != 2:
+        raise ValueError("B must be a matrix")
+    if reduce_op == "sum":
+        reduce_fn = partial(torch.sum, dim=0)
+    elif reduce_op == "avg":
+        reduce_fn = partial(torch.mean, dim=0)
+    else:
+        raise ValueError("reduce_op must be sum or avg")
+
+    group = c10d._resolve_process_group(group_name)
+    out_shape = [*A.shape[:-1], B.shape[1]]
+    out_shape[scatter_dim] //= group.size()
+
+    # Move the gather_dim to the front and flatten the tensor into a 2D matrix
+    x = A.movedim(scatter_dim, 0)
+    leading_dims = [group.size()] + list(x.shape[:-1])
+    leading_dims[1] //= group.size()
+    x = x.flatten(0, -2)
+    shards = x.chunk(group.size())
+
+    # Computing block-wise matmul along the first dim of A
+    def chunk_producer(rank: int, out: torch.Tensor) -> None:
+        mm_out_op(shards[rank], B, **kwargs, out=out)
+
+    stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=out_dtype or A.dtype)
+
+    _pipelined_produce_and_all2all(
+        chunk_producer,
+        stacked_partials,
+        group_name,
+    )
+    # Ensures that the transpose and reduction produce contiguous result
+    # in a single reduction kernel.
+    return reduce_fn(
+        stacked_partials.view(*leading_dims, -1)
+        .movedim(1, scatter_dim + 1)
+        .movedim(0, scatter_dim),
+        dim=scatter_dim,
+    )
+
+
 @torch.library.impl(lib, "fused_matmul_reduce_scatter", "Meta")
 def _fused_matmul_reduce_scatter_fallback(
     A: torch.Tensor,
@@ -414,58 +474,79 @@ def _fused_matmul_reduce_scatter(
     Optimal stride order for A - if A.movedim(scatter_dim, 0) is contiguous, no
     extra copy is required for input layout transformation. Otherwise A needs
     to be copied once.
-
-    NOTE:
-    - The K dim across ranks are currently accumulated with bf16 which results
-      in accuracy loss.
     """
     if _is_test_mode:
         return _fused_matmul_reduce_scatter_fallback(
             A, B, reduce_op, scatter_dim, group_name
         )
-    if A.dim() < 2:
-        raise ValueError("A_shard must be a matrix")
-    if scatter_dim < 0 or scatter_dim >= A.dim():
-        raise ValueError("Invalid gather_dim")
-    if B.dim() != 2:
-        raise ValueError("B must be a matrix")
-    if reduce_op == "sum":
-        reduce_fn = partial(torch.sum, dim=0)
-    elif reduce_op == "avg":
-        reduce_fn = partial(torch.mean, dim=0)
-    else:
-        raise ValueError("reduce_op must be sum or avg")
-
-    group = c10d._resolve_process_group(group_name)
-    out_shape = [*A.shape[:-1], B.shape[1]]
-    out_shape[scatter_dim] //= group.size()
 
     with torch.profiler.record_function("fused_matmul_reduce_scatter"):
-        # Move the gather_dim to the front and flatten the tensor into a 2D matrix
-        x = A.movedim(scatter_dim, 0)
-        leading_dims = [group.size()] + list(x.shape[:-1])
-        leading_dims[1] //= group.size()
-        x = x.flatten(0, -2)
-        shards = x.chunk(group.size())
-
-        # Computing block-wise matmul along the first dim of A
-        def chunk_producer(rank: int, out: torch.Tensor) -> None:
-            torch.matmul(shards[rank], B, out=out)
-
-        stacked_partials = x.new_empty(x.shape[0], B.shape[1])
-
-        _pipelined_produce_and_all2all(
-            chunk_producer,
-            stacked_partials,
-            group_name,
+        return _fused_matmul_reduce_scatter_impl(
+            mm_out_op=torch.ops.aten.mm.out,
+            A=A,
+            B=B,
+            kwargs={},
+            out_dtype=A.dtype,
+            reduce_op=reduce_op,
+            scatter_dim=scatter_dim,
+            group_name=group_name,
         )
-        # Ensures that the transpose and reduction produce contiguous result
-        # in a single reduction kernel.
-        return reduce_fn(
-            stacked_partials.view(*leading_dims, -1)
-            .movedim(1, scatter_dim + 1)
-            .movedim(0, scatter_dim),
-            dim=scatter_dim,
+
+
+@torch.library.impl(lib, "fused_scaled_matmul_reduce_scatter", "Meta")
+def _fused_scaled_matmul_reduce_scatter_fallback(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    A_scale: torch.Tensor,
+    B_scale: torch.Tensor,
+    out_dtype: Optional[torch.dtype],
+    reduce_op: str,
+    scatter_dim: int,
+    group_name: str,
+) -> torch.Tensor:
+    C = torch._scaled_mm(
+        A.flatten(0, -2).contiguous(),
+        B,
+        A_scale,
+        B_scale,
+        out_dtype=out_dtype,
+    )
+    C = C.view(*A.shape[:-1], B.shape[1])
+    res = funcol.reduce_scatter_tensor(
+        C,
+        reduce_op,
+        scatter_dim,
+        group_name,
+    )
+    res = funcol.wait_tensor(res)
+    return res
+
+
+@torch.library.impl(lib, "fused_scaled_matmul_reduce_scatter", "CUDA")
+def _fused_scaled_matmul_reduce_scatter(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    A_scale: torch.Tensor,
+    B_scale: torch.Tensor,
+    out_dtype: Optional[torch.dtype],
+    reduce_op: str,
+    scatter_dim: int,
+    group_name: str,
+) -> torch.Tensor:
+    if _is_test_mode:
+        return _fused_scaled_matmul_reduce_scatter_fallback(
+            A, B, A_scale, B_scale, out_dtype, reduce_op, scatter_dim, group_name
+        )
+    with torch.profiler.record_function("fused_matmul_reduce_scatter"):
+        return _fused_matmul_reduce_scatter_impl(
+            mm_out_op=torch.ops.aten._scaled_mm.out,
+            A=A,
+            B=B,
+            kwargs={"scale_a": A_scale, "scale_b": B_scale, "out_dtype": out_dtype},
+            out_dtype=out_dtype,
+            reduce_op=reduce_op,
+            scatter_dim=scatter_dim,
+            group_name=group_name,
         )
 
 
@@ -482,15 +563,63 @@ def restride_A_for_fused_matmul_reduce_scatter(
     return make_contiguous_for_perm(t, perm)
 
 
+def _maybe_convert_scalar_types_to_dtypes(
+    scalar_types: List[Any],
+) -> List[Optional[torch.dtype]]:
+    """
+    When a list of `torch.dtype`s is passed through the dispatcher as
+    `ScalarType[]`, it is converted to a list of scalar type enum values. This
+    function converts it back to a list of `torch.dtype`s.
+    """
+    # Order defined in https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
+    _SCALAR_TYPE_TO_DTYPE = {
+        0: torch.uint8,
+        1: torch.int8,
+        2: torch.short,
+        3: torch.int,
+        4: torch.int64,
+        5: torch.half,
+        6: torch.float,
+        7: torch.double,
+        8: torch.complex32,
+        9: torch.complex64,
+        10: torch.complex128,
+        11: torch.bool,
+        12: torch.qint8,
+        13: torch.quint8,
+        14: torch.qint32,
+        15: torch.bfloat16,
+        16: torch.float8_e5m2,
+        17: torch.float8_e4m3fn,
+        18: torch.float8_e5m2fnuz,
+        19: torch.float8_e4m3fnuz,
+    }
+    if any(not isinstance(x, (type(None), int)) for x in scalar_types):
+        return scalar_types
+
+    dtypes: List[Optional[torch.dtype]] = []
+    for scalar_type in scalar_types:
+        if scalar_type is None:
+            dtypes.append(scalar_type)
+        elif scalar_type not in _SCALAR_TYPE_TO_DTYPE:
+            raise ValueError("Unrecognized scalar type {scalar_type}")
+        else:
+            dtypes.append(_SCALAR_TYPE_TO_DTYPE[scalar_type])
+    return dtypes
+
+
 @torch.library.impl(lib, "fused_all_gather_scaled_matmul", "Meta")
 def _fused_all_gather_scaled_matmul_fallback(
     A_shard: torch.Tensor,
     Bs: List[torch.Tensor],
     A_scale: torch.Tensor,
     B_scales: List[torch.Tensor],
+    out_dtypes: List[Optional[torch.dtype]],
     gather_dim: int,
     group_name: str,
 ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+    out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
+
     group_size = c10d._get_group_size_by_name(group_name)
     A = torch.ops._c10d_functional.all_gather_into_tensor(
         A_shard.contiguous(), group_size, group_name
@@ -499,15 +628,21 @@ def _fused_all_gather_scaled_matmul_fallback(
     A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
 
     def scaled_matmul(
-        A: torch.Tensor, B: torch.Tensor, A_scale: torch.Tensor, B_scale: torch.Tensor
+        A: torch.Tensor,
+        B: torch.Tensor,
+        A_scale: torch.Tensor,
+        B_scale: torch.Tensor,
+        out_dtype: Optional[torch.dtype],
     ) -> torch.Tensor:
         leading_dims = A.shape[:-1]
-        res = torch.ops.aten._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale)
+        res = torch.ops.aten._scaled_mm(
+            A.flatten(0, -2), B, A_scale, B_scale, out_dtype=out_dtype
+        )
         return res.unflatten(0, leading_dims)
 
     return A.movedim(0, gather_dim), [
-        scaled_matmul(A, B, A_scale, B_scale).movedim(0, gather_dim)
-        for B, B_scale in zip(Bs, B_scales)
+        scaled_matmul(A, B, A_scale, B_scale, out_dtype).movedim(0, gather_dim)
+        for B, B_scale, out_dtype in zip(Bs, B_scales, out_dtypes)
     ]
 
 
@@ -516,7 +651,8 @@ def _fused_all_gather_scaled_matmul(
     A_shard: torch.Tensor,
     Bs: List[torch.Tensor],
     A_scale: torch.Tensor,
-    B_scales: torch.Tensor,
+    B_scales: List[torch.Tensor],
+    out_dtypes: List[Optional[torch.dtype]],
     gather_dim: int,
     group_name: str,
 ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
@@ -533,8 +669,12 @@ def _fused_all_gather_scaled_matmul(
     contiguous, no extra copy is required for input layout transformation.
     Otherwise A_shard needs to be copied once.
     """
+    out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
+
     if _is_test_mode:
-        return _fused_all_gather_matmul_fallback(A_shard, Bs, gather_dim, group_name)
+        return _fused_all_gather_scaled_matmul_fallback(
+            A_shard, Bs, A_scale, B_scales, out_dtypes, gather_dim, group_name
+        )
     if A_shard.dim() < 2:
         raise ValueError("A_shard must be a matrix")
     for B in Bs:
@@ -566,16 +706,24 @@ def _fused_all_gather_scaled_matmul(
             x.new_empty(
                 x.shape[0] * group.size(),
                 B.shape[1],
+                dtype=out_dtype if out_dtype is not None else A_shard.dtype,
             )
-            for B in Bs
+            for B, out_dtype in zip(Bs, out_dtypes)
         ]
         output_shards = [output.chunk(group.size()) for output in outputs]
 
         # Computing block-wise matmul along the first dim of A
         def shard_consumer(shard: torch.Tensor, rank: int) -> None:
-            for idx, (B, B_scale) in enumerate(zip(Bs, B_scales)):
+            for idx, (B, B_scale, out_dtype) in enumerate(
+                zip(Bs, B_scales, out_dtypes)
+            ):
                 torch.ops.aten._scaled_mm(
-                    shard, B, A_scale, B_scale, out=output_shards[idx][rank]
+                    shard,
+                    B,
+                    A_scale,
+                    B_scale,
+                    out_dtype=out_dtype,
+                    out=output_shards[idx][rank],
                 )
 
         _pipelined_all_gather_and_consume(
