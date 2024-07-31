@@ -20,7 +20,7 @@ if __name__ == "__main__":
 
 
 class Sequence(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.lstm1 = nn.LSTMCell(1, 51)
         self.lstm2 = nn.LSTMCell(51, 51)

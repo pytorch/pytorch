@@ -11,7 +11,7 @@ torch.ops.load_library("//caffe2:xnnpack_backend")
 class TestXNNPackBackend(unittest.TestCase):
     def test_xnnpack_constant_data(self):
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self._constant = torch.ones(4, 4, 4)
 

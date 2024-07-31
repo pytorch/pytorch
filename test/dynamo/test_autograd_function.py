@@ -49,7 +49,7 @@ class Module1(torch.nn.Module):
 
 
 class Module2(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fn = CustomFunc1.apply
 
@@ -63,7 +63,7 @@ class Module3(torch.nn.Module):
 
 
 class Module4(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fn = CustomFunc1.apply
 
@@ -77,7 +77,7 @@ class Module5(torch.nn.Module):
 
 
 class Module6(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fn = CustomFunc3.apply
 
@@ -658,7 +658,7 @@ class GraphModule(torch.nn.Module):
                 return (inputs >= bound) * grad_output, None
 
         class MyMod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.gamma = torch.nn.Parameter(torch.rand([4, 128, 32, 32]))
 

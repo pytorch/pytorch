@@ -162,7 +162,7 @@ class TestExportTorchbind(TestCase):
     @parametrize("pre_dispatch", [True, False])
     def test_none(self, pre_dispatch):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -212,7 +212,7 @@ def forward(self, token, obj_attr, x, n):
     @parametrize("pre_dispatch", [True, False])
     def test_attribute(self, pre_dispatch):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -246,7 +246,7 @@ def forward(self, token, obj_attr, x):
     @parametrize("pre_dispatch", [True, False])
     def test_attribute_as_custom_op_argument(self, pre_dispatch):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -282,7 +282,7 @@ def forward(self, token, obj_attr, x):
         cc = torch.classes._TorchScriptTesting._Foo(10, 20)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, cc):
@@ -320,7 +320,7 @@ def forward(self, token, x, cc):
         cc = torch.classes._TorchScriptTesting._Foo(10, 20)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, cc):
@@ -381,7 +381,7 @@ def forward(self, token, x, cc):
                 return x + torch.ops._TorchScriptTesting.takes_foo(self.foo, x)
 
         class F1(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.alpha = torch.classes._TorchScriptTesting._Foo(10, 20)
                 self.beta = self.alpha
@@ -417,7 +417,7 @@ def forward(self, token, x, cc):
     @parametrize("pre_dispatch", [True, False])
     def test_unlift_custom_obj(self, pre_dispatch):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -458,7 +458,7 @@ def forward(self, token, obj_attr, x):
     @parametrize("pre_dispatch", [True, False])
     def test_custom_obj_list_out(self, pre_dispatch):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -510,7 +510,7 @@ def forward(self, token, obj_attr, x):
     @parametrize("pre_dispatch", [True, False])
     def test_custom_obj_tuple_out(self, pre_dispatch):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -559,7 +559,7 @@ def forward(self, token, obj_attr, x):
         test = self
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 2)
                 self.check_tq_is_fake = True
@@ -617,7 +617,7 @@ def forward(self, arg0_1, arg1_1):
         test = self
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 2)
                 self.check_tq_is_fake = True
@@ -674,7 +674,7 @@ def forward(self, arg0_1, arg1_1):
 
     def test_non_strict_export_methods(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
 
@@ -857,7 +857,7 @@ def forward(self, token, safe_obj):
     @parametrize("fallthrough_via", ["lib_impl", "py_impl"])
     def test_make_fx_tensor_queue_operators(self, fallthrough_via):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, tq, x):
@@ -932,7 +932,7 @@ def forward(self, arg0_1, arg1_1):
 
     def test_aot_export_tensor_queue_operators(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, tq, x):
@@ -1072,7 +1072,7 @@ class TestCompileTorchbind(TestCase):
             backend = EagerAndRecordGraphs()
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.check_tq_is_fake = True
 
@@ -1133,7 +1133,7 @@ class TestCompileTorchbind(TestCase):
     @parametrize("backend", ["eager", "aot_eager"])
     def test_compile_script_object_input_guards(self, backend):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.check_tq_is_fake = True
 
@@ -1184,7 +1184,7 @@ class TestCompileTorchbind(TestCase):
 
     def test_compile_script_object_input_automatic_dynamic_shape(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.check_tq_is_fake = True
 
@@ -1221,7 +1221,7 @@ class TestCompileTorchbind(TestCase):
             backend = EagerAndRecordGraphs()
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.check_tq_is_fake = True
 
@@ -1418,7 +1418,7 @@ def forward(self, token, obj, x):
             backend = EagerAndRecordGraphs()
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.tq = _empty_tensor_queue()
 
@@ -1482,7 +1482,7 @@ class TestRegisterFakeClass(TestCase):
 
             @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
             class InvalidFakeFoo:
-                def __init__(self):
+                def __init__(self) -> None:
                     pass
 
     def test_register_fake_class_from_real_not_classmethod(self):

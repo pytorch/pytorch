@@ -679,7 +679,7 @@ class TestTyping(JitTestCase):
                 return self.x + x + do_something_with_list(self.state)
 
         class LowestModule(Submodule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__(123)
 
         mod = LowestModule()

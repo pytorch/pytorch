@@ -156,7 +156,7 @@ class TestSlice(JitTestCase):
                 return 0
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 module_list = [Bar("A"), Bar("B"), Bar("C"), Bar("D"), Bar("E")]
                 self.test = torch.nn.ModuleList(module_list)

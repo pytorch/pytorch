@@ -1185,7 +1185,7 @@ class DecompOneOffTests(TestCase):
         # add support for float16 over there we should update this test as well.
 
         class ScaledDotProductAttention(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(

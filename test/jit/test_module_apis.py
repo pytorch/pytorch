@@ -24,7 +24,7 @@ class TestModuleAPIs(JitTestCase):
         """Tests that default state dict methods are automatically available"""
 
         class DefaultStateDictModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(6, 16, 5)
                 self.fc = torch.nn.Linear(16 * 5 * 5, 120)
@@ -43,7 +43,7 @@ class TestModuleAPIs(JitTestCase):
         """Tests that customized state dict methods are in effect"""
 
         class CustomStateDictModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(6, 16, 5)
                 self.fc = torch.nn.Linear(16 * 5 * 5, 120)
@@ -90,7 +90,7 @@ class TestModuleAPIs(JitTestCase):
         """Tests that customized state dict methods on submodules are in effect"""
 
         class CustomStateDictModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(6, 16, 5)
                 self.fc = torch.nn.Linear(16 * 5 * 5, 120)
@@ -124,7 +124,7 @@ class TestModuleAPIs(JitTestCase):
                 return
 
         class ParentModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.sub = CustomStateDictModule()
 

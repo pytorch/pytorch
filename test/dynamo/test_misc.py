@@ -1090,7 +1090,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
 
     def test_param_shape_binops(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.randn(15))
 
@@ -1152,7 +1152,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
 
     def test_user_defined_iter(self):
         class Mod:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.a = [torch.randn(2, 2), torch.randn(2, 2)]
 
             def __iter__(self):
@@ -1558,7 +1558,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_config_obj(self):
         class Cfg:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.val = 0.5
                 self.count = 3
 
@@ -1584,7 +1584,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_config_getattr_default(self):
         class Cfg:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.val = 0.5
                 self.count = 10
 
@@ -2083,7 +2083,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         class MyConfig:
             defined_on_class = 1
 
-            def __init__(self):
+            def __init__(self) -> None:
                 self.defined_on_object = 2
 
             def __getattr__(self, name):
@@ -2131,7 +2131,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_user_getattribute(self):
         class MyObject:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.custom_dict = {"a": torch.rand((2, 2))}
                 self.my_number = 42
 
@@ -2155,7 +2155,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_nn_module_getattr(self):
         class MyMod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.custom_dict = {"queue": [torch.rand((2, 2)) for _ in range(3)]}
                 self.other_attr = torch.rand((2, 2))
@@ -2179,7 +2179,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_nn_module_getattribute(self):
         class MyMod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.my_number = 42
 
@@ -2920,7 +2920,7 @@ utils_device.CURRENT_DEVICE == None""".split(
     def test_out_variants_with_resizing_on_graph_inputs_with_dynamic(self):
         # https://github.com/pytorch/pytorch/issues/120482
         class CustomModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, inputs):
@@ -3074,7 +3074,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         counters.clear()
 
         class ModelA(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -3085,7 +3085,7 @@ utils_device.CURRENT_DEVICE == None""".split(
                 return ModelA()
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer = torch.nn.Linear(2, 2)
 
@@ -3767,7 +3767,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_optimize_on_module(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.relu = torch.nn.ReLU()
 
@@ -4109,7 +4109,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         cnts = torch._dynamo.testing.CompileCounter()
 
         class TrivialModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super(TrivialModel, self).__init__()
                 self.linear = torch.nn.Linear(2, 1)
 
@@ -4609,7 +4609,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_inline_module_attr_dict_clear(self):
         class MyMod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = {"a": torch.randn(2, 2), "b": torch.randn(2, 2)}
 
@@ -4624,7 +4624,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_inline_user_defined_dict_attr_clear(self):
         class MyMod:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.a = {"a": torch.randn(2, 2), "b": torch.randn(2, 2)}
 
         def f(obj, inp):
@@ -5011,7 +5011,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         embd_pdrop = 0.1
 
         class MyModel2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.tok_emb = torch.nn.Embedding(vocab_size, n_embd)
                 self.pos_emb = torch.nn.Parameter(torch.zeros(1, block_size, n_embd))
@@ -5021,7 +5021,7 @@ utils_device.CURRENT_DEVICE == None""".split(
                 return x
 
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.tok_emb = torch.nn.Embedding(vocab_size, n_embd)
                 self.pos_emb = torch.nn.Parameter(torch.zeros(1, block_size, n_embd))
@@ -5075,7 +5075,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         embd_pdrop = 0.1
 
         class FakeGPT(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.tok_emb = torch.nn.Embedding(vocab_size, n_embd)
                 self.pos_emb = torch.nn.Parameter(torch.zeros(1, block_size, n_embd))
@@ -5480,7 +5480,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         from functorch.experimental.control_flow import cond
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 example_inputs = (torch.randn(5, 5),)
                 self.model = torch.nn.Linear(5, 5)
@@ -5509,7 +5509,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         from functorch.experimental.control_flow import map
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 example_inputs = (torch.randn(5, 5),)
                 self.model = torch.nn.Linear(5, 5)
@@ -5553,7 +5553,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         from functorch.experimental.control_flow import map
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w = torch.tensor(1)
 
@@ -5938,7 +5938,7 @@ utils_device.CURRENT_DEVICE == None""".split(
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_repro_graph_breaks_in__get_item_by_idx(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = torch.nn.Sequential(
                     torch.nn.Linear(3, 3), torch.nn.Linear(3, 3)
@@ -6091,7 +6091,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_if_cond_nn_mod2(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer = torch.nn.Sequential()
 
@@ -8188,7 +8188,7 @@ def ___make_guard_fn():
 
     def test_dynamo_compiling_fake_tensor_to_vararg_int(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -9612,7 +9612,7 @@ def ___make_guard_fn():
 
     def test_flat_name_to_original_fqn(self):
         class FooBarModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.register_parameter("0", torch.nn.Parameter(torch.randn(3, 4)))
                 self.test_buf = torch.nn.Buffer(torch.randn(3, 4))
@@ -9624,7 +9624,7 @@ def ___make_guard_fn():
                 return ((x + self.test_buf) * getattr(self, "0")) / self.test_param
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo_bar = FooBarModule()
                 self.register_parameter(
@@ -10282,7 +10282,7 @@ fn
         """Test that a model is freed when it goes out of scope"""
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super(Mod, self).__init__()
                 self.fc = torch.nn.Linear(100, 100)
 
@@ -10329,7 +10329,7 @@ fn
             fc = torch.nn.Linear(100, 100)
 
             class Mod(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.fc_ref = fc
 
@@ -10351,7 +10351,7 @@ fn
             param = torch.nn.Parameter(torch.randn(100, 100))
 
             class Mod(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.param = param
 
@@ -10488,7 +10488,7 @@ fn
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_dynamo_cache_invalidate(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super(Mod, self).__init__()
                 self.fc = torch.nn.Linear(3, 3)
 
@@ -10608,7 +10608,7 @@ fn
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_hasattr_nn_module_guard(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.nn.Linear(3, 3)
 
@@ -10791,7 +10791,7 @@ fn
 
     def test_contains_dunder_dict(self):
         class UserDefined:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.a = 3
                 self.b = 5
 
@@ -10839,7 +10839,7 @@ fn
                 return value
 
         class UserDefined:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.a = 3
 
             @lazy_property
@@ -10869,7 +10869,7 @@ fn
 
     def test_module_dunder_dict(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = 1
                 self.bar = 2
@@ -10890,7 +10890,7 @@ class TestTracer(JitTestCase):
     def test_jit_save(self):
         def fn():
             class Foo(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.a = 3
 

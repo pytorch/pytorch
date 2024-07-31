@@ -23,7 +23,7 @@ if __name__ == "__main__":
 
 class TestDataParallel(JitTestCase):
     class Mpy(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super(TestDataParallel.Mpy, self).__init__()
             self.m = nn.Sequential(
                 nn.Linear(2, 2), nn.BatchNorm1d(2), nn.ReLU(), nn.Linear(2, 2)
@@ -56,7 +56,7 @@ class TestDataParallel(JitTestCase):
     class Msm(torch.jit.ScriptModule):
         __constants__ = ["m"]
 
-        def __init__(self):
+        def __init__(self) -> None:
             super(TestDataParallel.Msm, self).__init__()
             self.m = nn.Sequential(
                 nn.Linear(2, 2), nn.BatchNorm1d(2), nn.ReLU(), nn.Linear(2, 2)

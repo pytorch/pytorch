@@ -39,7 +39,7 @@ class TestComplex(JitTestCase):
 
     def test_pickle(self):
         class ComplexModule(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = 3 + 5j
                 self.b = [2 + 3j, 3 + 4j, 0 - 3j, -4 + 0j]
@@ -193,7 +193,7 @@ class TestComplex(JitTestCase):
 
     def test_infj_nanj_pickle(self):
         class ComplexModule(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = 3 + 5j
 

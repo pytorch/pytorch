@@ -270,7 +270,7 @@ class TestTorchbind(JitTestCase):
 
     def test_torchbind_class_attribute(self):
         class FooBar1234(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.f = torch.classes._TorchScriptTesting._StackString(["3", "4"])
 
@@ -286,7 +286,7 @@ class TestTorchbind(JitTestCase):
 
     def test_torchbind_getstate(self):
         class FooBar4321(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
@@ -307,7 +307,7 @@ class TestTorchbind(JitTestCase):
 
     def test_torchbind_deepcopy(self):
         class FooBar4321(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
@@ -323,7 +323,7 @@ class TestTorchbind(JitTestCase):
 
     def test_torchbind_python_deepcopy(self):
         class FooBar4321(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
@@ -338,7 +338,7 @@ class TestTorchbind(JitTestCase):
 
     def test_torchbind_tracing(self):
         class TryTracing(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
@@ -354,12 +354,12 @@ class TestTorchbind(JitTestCase):
 
     def test_torchbind_tracing_nested(self):
         class TryTracingNest(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
         class TryTracing123(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.nest = TryTracingNest()
 
@@ -389,7 +389,7 @@ class TestTorchbind(JitTestCase):
         class TorchBindOptionalExplicitAttr(torch.nn.Module):
             foo: Optional[torch.classes._TorchScriptTesting._StackString]
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.classes._TorchScriptTesting._StackString(["test"])
 

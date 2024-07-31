@@ -51,7 +51,7 @@ class Obj:
 
 
 class MyModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.existing = torch.nn.Parameter(torch.ones([]))
 
@@ -1449,7 +1449,7 @@ def forward(self, child, const_unused):
         cnt = CompileCounterWithBackend(backend)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer = torch.nn.Buffer(torch.ones(6, 4))
 
@@ -1485,7 +1485,7 @@ def forward(self, child, const_unused):
         z = torch.ones(4, 4)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer = torch.nn.Buffer(torch.ones(6, 4))
 
@@ -1659,7 +1659,7 @@ def forward(self):
         z = [torch.ones(4, 4)]
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, y, x):
@@ -1710,7 +1710,7 @@ def forward(self):
         cnt = CompileCounterWithBackend(backend)
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w = torch.nn.Buffer(torch.ones(6, 4))
 
@@ -1740,7 +1740,7 @@ def forward(self):
         z = [torch.ones(6, 4)]
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w = torch.nn.Buffer(torch.ones(6, 4))
 
@@ -2187,7 +2187,7 @@ class GraphModule(torch.nn.Module):
 
     def test_nested_wrap(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
 
@@ -2214,7 +2214,7 @@ class GraphModule(torch.nn.Module):
 
     def test_hooks(self):
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.net = torch.nn.Linear(10, 10)
 
@@ -2259,7 +2259,7 @@ class GraphModule(torch.nn.Module):
 
     def test_wrap_source_fn_stack(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -3640,7 +3640,7 @@ class GraphModule(torch.nn.Module):
     def test_functional_call_sequential_params_and_buffers(self):
         # copied from test/test_stateless.py
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l1 = torch.nn.Linear(1, 1)
                 self.register_buffer("buffer", torch.ones(1))
@@ -6227,7 +6227,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_module(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
 

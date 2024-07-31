@@ -1176,7 +1176,7 @@ except RuntimeError as e:
         MultiplyInStream = self._make_multiply_in_stream()
 
         class StreamModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.event = torch.cuda.Event()
                 self.stream0 = torch.cuda.Stream()
@@ -3901,7 +3901,7 @@ exit(2)
                 return grad_output * ctx.constant, None
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.nn.Parameter(torch.randn(()))
 
