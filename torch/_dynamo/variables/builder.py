@@ -95,7 +95,6 @@ from ..utils import (
     is_lru_cache_wrapped_function,
     is_namedtuple,
     is_parameter_freezing,
-    is_torch_nn_buffer,
     is_typing,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -977,7 +976,11 @@ class VariableBuilder:
             # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
-            if value in (torch.utils.hooks.BackwardHook, torch.nn.Parameter):
+            if value in (
+                torch.utils.hooks.BackwardHook,
+                torch.nn.Parameter,
+                torch.nn.Buffer,
+            ):
                 # TODO(jansel): combine this case with the one above
                 return trace_rules.lookup(value).create_with_source(
                     value, source=self.source
@@ -1142,9 +1145,7 @@ class VariableBuilder:
                 ].__dict__.copy()
 
                 guard = functools.partial(
-                    GuardBuilder.TENSOR_MATCH,
-                    value=TensorWeakRef(value[i]),
-                    is_buffer=is_torch_nn_buffer(self.tx, value[i]),
+                    GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
                 )
                 guards.append(source_i.make_guard(guard))
 
@@ -1472,7 +1473,6 @@ class VariableBuilder:
                     if isinstance(source, NumpyTensorSource)
                     else TensorWeakRef(value)
                 ),
-                is_buffer=is_torch_nn_buffer(self.tx, value),
             )
         )
 
@@ -2014,6 +2014,7 @@ def wrap_fx_proxy_cls(
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
+        is_buffer = isinstance(example_value, torch.nn.Buffer)
 
         # NB: In most (all?) cases, this does not actually do a clone.
         # (WARNING: this means that if we mutate metadata on the fake
@@ -2028,7 +2029,11 @@ def wrap_fx_proxy_cls(
         ):
             tensor_type = subclass_type if subclass_type else torch.Tensor
             specialized_props["class_type"] = (
-                torch.nn.Parameter if is_parameter else tensor_type
+                torch.nn.Parameter
+                if is_parameter
+                else torch.nn.Buffer
+                if is_buffer
+                else tensor_type
             )
 
         options.update(specialized_props)
@@ -2164,6 +2169,7 @@ def wrap_fx_proxy_cls(
         set_example_value(proxy.node, example_value)
         return SDPAParamsVariable(proxy, **options)
     elif isinstance(example_value, bool) and proxy.node.target in [
+        torch.backends.cuda.is_flash_attention_available,
         torch.backends.cuda.can_use_flash_attention,
         torch.backends.cuda.can_use_efficient_attention,
     ]:
@@ -2532,10 +2538,8 @@ def wrap_to_fake_tensor_and_record(
         or is_traceable_wrapper_subclass(e)
     ):
         assert source is not None
-
-        is_buffer = is_torch_nn_buffer(tx, source)
         static_shapes, reason = tensor_always_has_static_shape(
-            e, is_tensor, is_buffer, guard_source=source.guard_source()
+            e, is_tensor, guard_source=source.guard_source()
         )
 
         if not parent_context:

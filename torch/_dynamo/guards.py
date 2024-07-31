@@ -1294,7 +1294,7 @@ class GuardBuilder(GuardBuilderBase):
                 if weak_id is not None:
                     self.id_matched_objs[local_name] = weak_id
 
-    def NOT_NONE_MATCH(self, guard: Guard, value=None, is_buffer=False):
+    def NOT_NONE_MATCH(self, guard: Guard, value=None):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         assert isinstance(val, torch.Tensor)
@@ -1793,7 +1793,7 @@ class GuardBuilder(GuardBuilderBase):
             for shape_guard in guards:
                 self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
-    def TENSOR_MATCH(self, guard: Guard, value=None, is_buffer=False):
+    def TENSOR_MATCH(self, guard: Guard, value=None):
         # For FSDP modules, we can skip guards on nn module tensors because FSDP
         # eager assumes that the params are unchanged once the model is wrapped.
         if guard.is_fsdp_module():
@@ -1915,7 +1915,7 @@ class GuardBuilder(GuardBuilderBase):
             #
             assert guard.source is not None
             static, reason = tensor_always_has_static_shape(
-                value, is_tensor=True, is_buffer=is_buffer, guard_source=guard.source
+                value, is_tensor=True, guard_source=guard.source
             )
 
             if not static:

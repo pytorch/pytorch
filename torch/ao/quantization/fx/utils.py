@@ -268,7 +268,7 @@ def create_getattr_from_value(
         if isinstance(value, torch.Tensor)
         else torch.tensor(value, device=device)
     )
-    module.register_buffer(attr_name, new_value)
+    module.register_buffer(attr_name, torch.nn.Buffer(new_value))
     # Create get_attr with value
     attr_node = graph.create_node("get_attr", attr_name)
     return attr_node
