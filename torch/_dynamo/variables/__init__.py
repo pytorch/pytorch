@@ -82,7 +82,6 @@ from .misc import (
     UnknownVariable,
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
-
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
@@ -100,6 +99,7 @@ from .user_defined import (
     UserDefinedObjectVariable,
     WeakRefVariable,
 )
+
 
 __all__ = [
     "AutogradFunctionContextVariable",
