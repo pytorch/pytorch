@@ -615,7 +615,7 @@ Tensor _safe_softmax(
     const Tensor& self,
     int64_t dim,
     std::optional<ScalarType> dtype) {
-  const auto out = at::softmax(self, dim);
+  const auto out = at::softmax(self, dim, dtype);
   return at::nan_to_num(out);
 }
 // Computes scaled dot product attention on query, key and value tensors, using
