@@ -338,8 +338,6 @@ def _tensors_definitely_do_not_overlap(x, y):
             # without
             if offset_delta_mod + y.size(1) <= x.stride(0):
                 return True
-            else:
-                return False
     return False
 
 

@@ -163,7 +163,7 @@ template <typename input_t, BIN_SELECTION_ALGORITHM algorithm>
 void histogramdd_kernel_impl(Tensor& hist_output,
                              const TensorList& bin_edges,
                              const Tensor& input,
-                             const c10::optional<Tensor>& weight) {
+                             const std::optional<Tensor>& weight) {
   TORCH_CHECK(input.dtype() != at::kDouble, "float64 is not supported on MPS");
   TORCH_INTERNAL_ASSERT(input.dim() == 2);
 
@@ -222,7 +222,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
   thread_hist_sizes[0] = numThreads;
   std::copy(hist_sizes.begin(), hist_sizes.end(), thread_hist_sizes.begin() + 1);
   Tensor thread_histograms = at::zeros(
-      thread_hist_sizes, hist_output.scalar_type(), c10::nullopt /* layout */, kMPS, c10::nullopt /* pin_memory */
+      thread_hist_sizes, hist_output.scalar_type(), std::nullopt /* layout */, kMPS, std::nullopt /* pin_memory */
   );
   TORCH_INTERNAL_ASSERT(thread_histograms.is_contiguous());
 
@@ -286,7 +286,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
 template <BIN_SELECTION_ALGORITHM bin_algorithm>
 static void histogramdd_out_mps_template(const Tensor& self,
-                                         const c10::optional<Tensor>& weight,
+                                         const std::optional<Tensor>& weight,
                                          bool density,
                                          Tensor& hist,
                                          const TensorList& bin_edges) {
@@ -299,7 +299,7 @@ static void histogramdd_out_mps_template(const Tensor& self,
   const Tensor reshaped_input = self.reshape({M, N});
 
   const auto reshaped_weight =
-      weight.has_value() ? c10::optional<Tensor>(weight.value().reshape({M})) : c10::optional<Tensor>();
+      weight.has_value() ? std::optional<Tensor>(weight.value().reshape({M})) : std::optional<Tensor>();
 
   std::vector<Tensor> bin_edges_contig(bin_edges.size());
   for (const auto dim : c10::irange(bin_edges_contig.size())) {
@@ -334,7 +334,7 @@ static void histogramdd_out_mps_template(const Tensor& self,
 } // namespace mps
 
 static void histogramdd_kernel(const Tensor& self,
-                               const c10::optional<Tensor>& weight,
+                               const std::optional<Tensor>& weight,
                                bool density,
                                Tensor& hist,
                                const TensorList& bin_edges) {
@@ -342,7 +342,7 @@ static void histogramdd_kernel(const Tensor& self,
 }
 
 static void histogramdd_linear_kernel(const Tensor& self,
-                                      const c10::optional<Tensor>& weight,
+                                      const std::optional<Tensor>& weight,
                                       bool density,
                                       Tensor& hist,
                                       const TensorList& bin_edges,
@@ -362,8 +362,7 @@ static void histogram_select_outer_bin_edges_kernel(const Tensor& input,
                                                     const int64_t N,
                                                     std::vector<double>& leftmost_edges,
                                                     std::vector<double>& rightmost_edges) {
-  Tensor min, max;
-  std::tie(min, max) = at::aminmax(input, 0);
+  auto [min, max] = at::aminmax(input, 0);
 
   for (const auto i : c10::irange(N)) {
     leftmost_edges[i] = min[i].item().to<double>();
