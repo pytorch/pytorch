@@ -526,6 +526,7 @@ def _export_to_torch_ir(
     restore_fqn: bool = True,
     _log_export_usage: bool = True,
     same_signature: bool = True,
+    assume_static_by_default: bool = True,
 ) -> torch.fx.GraphModule:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -552,7 +553,7 @@ def _export_to_torch_ir(
                 gm_torch_level, _ = torch._dynamo.export(
                     f,
                     dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
-                    assume_static_by_default=True,
+                    assume_static_by_default=assume_static_by_default,
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
                     # currently the following 2 flags are tied together for export purposes,
