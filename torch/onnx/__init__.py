@@ -25,8 +25,7 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     utils,
 )
 
-# TODO(After 1.13 release): Remove the deprecated SymbolicContext
-from ._exporter_states import ExportTypes, SymbolicContext
+from ._exporter_states import ExportTypes
 from ._type_utils import JitScalarType
 from .errors import CheckerError  # Backwards compatibility
 from .utils import (
