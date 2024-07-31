@@ -44,7 +44,6 @@ from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
-from torch._ops import OpOverload
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
