@@ -360,7 +360,7 @@ class InspectSignatureVariable(VariableTracker):
             return variables.ConstDictVariable(
                 {
                     variables.ConstantVariable.create(name): InspectParameterVariable()
-                    for name in self.signature.parameters.keys()
+                    for name in self.inspected.inspect_parameter_names()
                 },
                 user_cls=dict,
             )

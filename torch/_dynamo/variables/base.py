@@ -306,6 +306,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def has_force_unpack_var_sequence(self, tx) -> bool:
         return self.has_unpack_var_sequence(tx)
 
+    def inspect_parameter_names(self) -> List[str]:
+        unimplemented(f"inspect_parameter_names: {self}")
+
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         unimplemented(f"hasattr {self.__class__.__name__} {name}")
 
