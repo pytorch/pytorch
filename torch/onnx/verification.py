@@ -30,6 +30,7 @@ from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import onnx_proto_utils
 from torch.types import Number
 
+
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
