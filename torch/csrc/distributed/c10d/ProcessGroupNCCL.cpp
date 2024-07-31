@@ -1151,7 +1151,7 @@ bool ProcessGroupNCCL::abortComms(std::optional<std::string> abortReason) {
 }
 
 // Abort this backend.
-void ProcessGroupNCCL::abort(std::optional<std::string> reason) {
+void ProcessGroupNCCL::abort() {
   // Don't join threads here since the purpose of this method is to abort all
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
@@ -1161,9 +1161,8 @@ void ProcessGroupNCCL::abort(std::optional<std::string> reason) {
   // lauch abort asynchrounously and wait for it to complete or timeout
   LOG(INFO) << logPrefix()
             << "Launching ProcessGroupNCCL abort asynchrounously.";
-  std::future<bool> fut = std::async(std::launch::async, [this, &reason]() {
-    return this->abortComms(reason);
-  });
+  std::future<bool> fut =
+      std::async(std::launch::async, [this]() { return this->abortComms(); });
 
   waitForFutureOrTimeout(fut, options_->timeout, "ProcessGroup abort", true);
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL aborts successfully.";
