@@ -1908,6 +1908,18 @@ class Scheduler:
         for node in self.nodes:
             node.prune_weak_deps()
 
+        self.prune_constants()
+
+    def prune_constants(self) -> None:
+        """Remove the unused constants from the graph"""
+        used_buffers = set()
+        for node in self.nodes:
+            used_buffers.update([dep.name for dep in node.read_writes.reads])
+        for constant in list(V.graph.constants.keys()):
+            if constant not in used_buffers:
+                V.graph.removed_buffers.add(constant)
+                del V.graph.constants[constant]
+
     def topological_sort_schedule(
         self, nodes: List[BaseSchedulerNode]
     ) -> List[BaseSchedulerNode]:
