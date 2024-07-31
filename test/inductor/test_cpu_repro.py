@@ -2706,6 +2706,31 @@ class CPUReproTests(TestCase):
                 2,
             )
 
+    def test_local_buffer_with_line_reuse(self):
+        # Test Global buffer which is inplace buffer and replaced by local buffer
+        def fn(x, y):
+            z = torch.matmul(x, y)
+            a_max = torch.amax(x, -1, keepdim=True)
+            # Previous is a inplace buffer and now is a local buffer
+            exp = torch.exp((z - a_max) / z)
+            sum = torch.sum(exp, -1, keepdim=True)
+            return exp - sum
+
+        inputs = [torch.rand(4, 32), torch.rand(32, 32)]
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, inputs)
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                1,
+            )
+
     def test_argmin(self):
         def fn(x):
             return torch.argmin(x, -1)
@@ -2822,7 +2847,8 @@ class CPUReproTests(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
-        sys.platform != "linux", "cpp kernel profile only support linux now"
+        sys.platform not in ["linux", "win32"],
+        "cpp kernel profile only support linux now",
     )
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch({"cpp.enable_kernel_profile": True})

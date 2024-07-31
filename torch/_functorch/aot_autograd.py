@@ -572,9 +572,8 @@ def create_aot_dispatcher_function(
 
         fake_flat_args = process_inputs(flat_args)
 
-        needs_autograd = (
-            any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
-            and torch.is_grad_enabled()
+        needs_autograd = any(
+            x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)
         )
 
         with enable_python_dispatcher():
@@ -600,7 +599,17 @@ def create_aot_dispatcher_function(
                 )
 
                 output_and_mutation_safe = not any(
-                    x.requires_grad for x in fw_metadata.output_info
+                    x.requires_grad
+                    # view-type operations preserve requires_grad even in no_grad.
+                    # Do not count aliases of inputs with requires_grad as reason to make a training graph,
+                    # as AOTAutograd will perform view-replay to regenerate the view outputs at runtime,
+                    # setting their grad_fn properly.
+                    and not (
+                        x.output_type
+                        in (OutputType.alias_of_input, OutputType.is_input)
+                        and fw_metadata.input_info[x.base_idx].requires_grad
+                    )
+                    for x in fw_metadata.output_info
                 ) and not any(
                     x.requires_grad
                     and x.mutates_data
