@@ -1424,6 +1424,16 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
 TEST_CUDA_CUDSS = TEST_CUDA and (
     (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12)
 )
+if TEST_CUDA_CUDSS:
+    try:
+        spd = torch.rand(4, 3)
+        A = spd.T @ spd
+        b = torch.rand(3).cuda()
+        A = A.to_sparse_csr().cuda()
+        x = torch.sparse.solve(A, b)
+    except RuntimeError as e:
+        if "Calling torch.linalg.solve with sparse tensors requires" in str(e):
+            TEST_CUDA_CUDSS = False
 
 def allocator_option_enabled_fn(allocator_config, _, option):
     if allocator_config is None:
