@@ -521,7 +521,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
     @gpu_patches
     def test_cpu_launch_overhead_ms_per_gpu_cache_clear(self, benchmarker, *args):
         buffer = torch.empty(
-            int(self.L2_cache_size // 4), dtype=torch.int, device="cuda"
+            int(benchmarker.L2_cache_size // 4), dtype=torch.int, device="cuda"
         )
         torch.cuda.synchronize()
         start_time_s = time.perf_counter()
@@ -539,7 +539,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
     @gpu_patches
     def test_gpu_time_ms_per_gpu_cache_clear(self, benchmarker, *args):
         buffer = torch.empty(
-            int(self.L2_cache_size // 4), dtype=torch.int, device="cuda"
+            int(benchmarker.L2_cache_size // 4), dtype=torch.int, device="cuda"
         )
         start_event = torch.cuda.Event(enable_timing=True)
         end_event = torch.cuda.Event(enable_timing=True)
