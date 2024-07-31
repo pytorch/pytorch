@@ -440,6 +440,7 @@ dtensor_fails = {
     xfail("special.xlog1py"),
     xfail("special.zeta"),
     xfail("squeeze", "multiple"),
+    xfail("squeeze_copy"),
     xfail("signal.windows.bartlett"),
     xfail("signal.windows.blackman"),
     xfail("signal.windows.cosine"),

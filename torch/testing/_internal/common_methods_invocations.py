@@ -19525,6 +19525,26 @@ op_db: List[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_squeeze_multiple),
+    OpInfo('squeeze_copy',
+           ref=_squeeze_ref,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           supports_out=True,
+           assert_autodiffed=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # vmap does not support inplace views
+           check_inplace_batched_forward_grad=False,
+           # https://github.com/pytorch/pytorch/issues/66357
+           check_batched_forward_grad=False,
+           sample_inputs_func=sample_inputs_squeeze,
+           skips=(
+               DecorateInfo(
+                   unittest.expectedFailure,
+                   'TestJit',
+                   'test_variant_consistency_jit',
+                   dtypes=(torch.float32,),
+               ),
+           )),
     UnaryUfuncInfo(
         'fill',
         ref=_fill_np,
@@ -23892,6 +23912,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.squeeze",
         torch_opinfo_name="squeeze",
+    ),
+    PythonRefInfo(
+        "_refs.squeeze_copy",
+        torch_opinfo_name="squeeze_copy",
+        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.squeeze",

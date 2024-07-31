@@ -1197,6 +1197,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason="fixme: https://github.com/microsoft/onnxscript/issues/1264",
     ),
     xfail(
+        "squeeze_copy",
+        dtypes=(torch.int8, torch.uint8, torch.int16),
+        reason="OnnxExporterError: Failed to export model",
+    ),
+    xfail(
         "svd_lowrank",
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
