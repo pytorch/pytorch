@@ -31,7 +31,6 @@ from torch.onnx._internal import jit_utils, registration
 if TYPE_CHECKING:
     from torch.types import Number
 
-
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in README.md
 
