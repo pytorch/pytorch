@@ -5,10 +5,13 @@ MAX_CYCLE = 3000
 import itertools
 import operator
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 from .. import polyfill, variables
-from ..exc import unimplemented
+from ..exc import ObservedUserStopIteration, unimplemented
 
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
@@ -29,7 +32,10 @@ class ItertoolsVariable(VariableTracker):
         return self.value
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if (
             self.value is itertools.product
@@ -255,7 +261,7 @@ class CycleIteratorVariable(IteratorVariable):
                 if self.item is None:
                     return self.next_variable(tx)
                 return self.item
-            except StopIteration:
+            except ObservedUserStopIteration:
                 self.iterator = None
                 return self.next_variable(tx)
         elif len(self.saved) > 0:
@@ -263,4 +269,10 @@ class CycleIteratorVariable(IteratorVariable):
             self.saved_index = (self.saved_index + 1) % len(self.saved)
             return self.item
         else:
-            raise StopIteration
+            # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
+            # stack and raise the exception.
+            exception_vt = variables.BuiltinVariable(StopIteration).call_function(
+                self, [], {}
+            )
+            tx.exn_vt_stack.append(exception_vt)
+            raise ObservedUserStopIteration

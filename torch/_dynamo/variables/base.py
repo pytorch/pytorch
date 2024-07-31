@@ -3,7 +3,10 @@
 import collections
 import functools
 from enum import Enum
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 from .. import variables
 from ..current_scope_id import current_scope_id
@@ -229,13 +232,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.source.make_guard(fn)
         raise NotImplementedError
 
-    def const_getattr(self, tx, name: str) -> Any:
+    def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
         v = self.as_python_constant()
         if not hasattr(v, name):
             raise NotImplementedError
         return getattr(v, name)
 
-    def var_getattr(self, tx, name: str) -> "VariableTracker":
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
 
         from .builder import SourcelessBuilder, VariableBuilder
@@ -255,7 +258,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         # Otherwise VariableBuilder will Skip it
         # This is the path taken by list.append and similar methods
-        if self.source is not None and is_function_or_wrapper(value):
+        if is_function_or_wrapper(value):
             return GetAttrVariable(self, name, source=source)
 
         try:
@@ -313,11 +316,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def inspect_parameter_names(self) -> List[str]:
         unimplemented(f"inspect_parameter_names: {self}")
 
-    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         unimplemented(f"hasattr {self.__class__.__name__} {name}")
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         unimplemented(f"call_function {self} {args} {kwargs}")
 
