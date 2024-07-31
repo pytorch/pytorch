@@ -1460,6 +1460,7 @@ def compile_fx(
             decompositions=decompositions,
             partition_fn=partition_fn,
             keep_inference_input_mutations=True,
+            cudagraphs=cudagraphs,
         )(model_, example_inputs_)
 
 
