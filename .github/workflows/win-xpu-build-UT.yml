@@ -60,7 +60,7 @@ jobs:
       shell: cmd
       run: |
         call %conda_path%\Scripts\activate.bat
-        call conda activate %conda_env%
+        conda activate %conda_env%
         conda list
         # if exist "%home_dir%\pytorch" call rmdir /s /q "%home_dir%\pytorch"
         git clone https://github.com/pytorch/pytorch.git %home_dir%\pytorch
