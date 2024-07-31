@@ -17,7 +17,6 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyCPU,
 )
 from torch.testing._internal.common_quantization import _generate_qdq_quantized_model
 from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
@@ -466,15 +465,16 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
 
-    @onlyCPU
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    def test_int8_woq_mm(self):
-        batch_size = 2
-        mid_size = 384
-        in_features = 192
-        out_features = 384
+    @dtypes(torch.bfloat16)
+    @parametrize("batch_size", (32,))
+    @parametrize("in_features", (128,))
+    @parametrize("out_features", (64, 65))
+    def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
+        # x will be reshaped from 3d to 2d
+        second_dim_size = 8
 
         def _dynamically_quantize_per_channel(x, quant_min, quant_max, target_dtype):
             # From test/test_linalg.py
@@ -530,8 +530,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         counters.clear()
         # Currently, the corresponding torch.fx pattern only supports 3D x
         # Add 2D X case once the corresponding pattern-matcher pattern is added
-        x = torch.rand((batch_size, mid_size, in_features), dtype=torch.bfloat16)
-        w = torch.rand((out_features, in_features), dtype=torch.bfloat16)
+        x = torch.rand((batch_size, second_dim_size, in_features), dtype=dtype)
+        w = torch.rand((out_features, in_features), dtype=dtype)
         w_int8pack, w_scales = _convert_weight_to_int8pack(w)
         mod = M(w_int8pack).eval()
         self.common(mod, (x, w_scales))
