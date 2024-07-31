@@ -40,7 +40,6 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_symbols,
@@ -91,7 +90,6 @@ from .lowering import (
     needs_realized_inputs,
     unsupported_output_tensor,
 )
-
 from .scheduler import BaseSchedulerNode
 from .sizevars import SizeVarAllocator
 from .utils import (
@@ -380,9 +378,15 @@ class GraphLowering(torch.fx.Interpreter):
         self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
         self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
-        self.extern_node_serializer: Optional[
-            Callable[[List[ir.ExternKernelNode]], Any]
-        ] = extern_node_serializer
+
+        from torch._inductor.extern_node_serializer import extern_node_json_serializer
+
+        self.extern_node_serializer: Callable[[List[ir.ExternKernelNode]], Any] = (
+            extern_node_serializer
+            if config.is_fbcode() and extern_node_serializer
+            else extern_node_json_serializer
+        )
+
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
@@ -912,6 +916,8 @@ class GraphLowering(torch.fx.Interpreter):
             expr = sympy.sympify(example)
             self.graph_inputs[target] = expr
             return expr
+        elif example is None:
+            return None
         if isinstance(example, BackwardState):
             # Ignored arg, must be unused
             # Alternately we could filter this out in AotAutograd
@@ -1550,7 +1556,7 @@ class GraphLowering(torch.fx.Interpreter):
         if config.disable_cpp_codegen:
             raise CppWrapperCodeGenError("C++ codegen is disabled")
 
-        if sys.platform not in ["linux", "darwin"]:
+        if sys.platform not in ["linux", "darwin", "win32"]:
             raise CppWrapperCodeGenError(f"Unsupported platform {sys.platform}")
 
         for value in self.graph_inputs.values():
@@ -1616,7 +1622,9 @@ class GraphLowering(torch.fx.Interpreter):
                 def materialize(
                     x: Union[torch.SymInt, torch.SymFloat, torch.Tensor]
                 ) -> Union[int, float, torch.Tensor]:
-                    if isinstance(x, (torch.SymInt, torch.SymFloat)):
+                    if x is None:
+                        return None
+                    elif isinstance(x, (torch.SymInt, torch.SymFloat)):
                         # Need concrete value to run dynamic shapes and tune the result
                         return x.node.hint
                     elif isinstance(x, FakeTensor):
@@ -1808,11 +1816,7 @@ class GraphLowering(torch.fx.Interpreter):
             output_code_log.debug("Output code: \n%s", code)
 
             serialized_extern_kernel_nodes = None
-            if (
-                config.is_fbcode()
-                and self.extern_kernel_nodes
-                and self.extern_node_serializer
-            ):
+            if self.extern_kernel_nodes:
                 serialized_extern_kernel_nodes = self.extern_node_serializer(
                     self.extern_kernel_nodes
                 )

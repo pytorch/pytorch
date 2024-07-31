@@ -794,7 +794,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
     import torch.nn as nn
 
     serialized_container_types = {}
-    serialized_storages = {}
+    serialized_storages: Dict[str, Tuple[torch.UntypedStorage, torch.dtype]] = {}
 
     # Since loading storages that view the same data with different dtypes is
     # not supported, we need to keep track of the dtype associated with each

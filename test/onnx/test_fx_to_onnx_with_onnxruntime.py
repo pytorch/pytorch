@@ -7,20 +7,17 @@ import operator
 import os
 import tempfile
 import unittest
-
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Type
 
 import onnx_test_common
 import onnxruntime  # type: ignore[import]
 import parameterized  # type: ignore[import]
 import pytorch_test_common
-
 import transformers  # type: ignore[import]
 
 import torch
 import torch.onnx
 from torch import nn
-
 from torch._subclasses import fake_tensor
 from torch.onnx._internal import exporter
 from torch.onnx._internal.fx import (
@@ -30,6 +27,7 @@ from torch.onnx._internal.fx import (
     serialization as fx_serialization,
 )
 from torch.testing._internal import common_utils
+
 
 try:
     import torchvision  # type: ignore[import]

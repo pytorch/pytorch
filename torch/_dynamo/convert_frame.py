@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 from __future__ import annotations
 
 import collections
@@ -35,6 +36,7 @@ except ModuleNotFoundError:
 
 import torch
 import torch._logging
+from torch._dynamo.distributed import get_compile_pg
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
 from torch._utils_internal import compile_time_strobelight_meta, signpost_event
@@ -80,7 +82,12 @@ from .guards import (
 )
 from .hooks import Hooks
 from .replay_record import ExecutionRecord
-from .symbolic_convert import InstructionTranslator, SpeculationLog
+from .symbolic_convert import (
+    DistributedState,
+    InstructionTranslator,
+    LocalState,
+    SpeculationLog,
+)
 from .trace_rules import is_numpy
 from .utils import (
     CleanupManager,
@@ -580,6 +587,10 @@ def _compile(
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
     speculation_log = SpeculationLog()
+    if compile_pg := get_compile_pg():
+        distributed_state = DistributedState(compile_pg, LocalState())
+    else:
+        distributed_state = None
     torch._dynamo.callback_handler.run_start_callbacks()
 
     @preserve_global_state
@@ -603,6 +614,7 @@ def _compile(
             mutated_closure_cell_contents,
             frame_state=frame_state,
             speculation_log=speculation_log,
+            distributed_state=distributed_state,
         )
 
         try:
@@ -781,7 +793,7 @@ def _compile(
                 cache_entry, frame
             )
 
-        exceeded, limit_type = exceeds_cache_size_limit(cache_size)
+        exceeded, limit_type = exceeds_cache_size_limit(cache_size, compile_id)
         if exceeded:
 
             def format_func_info(code: CodeType) -> str:
@@ -832,12 +844,25 @@ def _compile(
         # # 2 extra here
         # torch/_logging/_internal.py:1064 in trace_structured
         # torch/_dynamo/convert_frame.py:780 in <lambda>
+        convert_frame_intern = structured.intern_string(__file__)
         torch._logging.trace_structured(
             "dynamo_start",
             lambda: {
-                "stack": structured.from_traceback(
-                    CapturedTraceback.extract(skip=4 + skip).summary()
+                "stack": list(
+                    itertools.takewhile(
+                        lambda f: f["filename"] != convert_frame_intern,
+                        structured.from_traceback(
+                            CapturedTraceback.extract(skip=4 + skip).summary()
+                        ),
+                    )
                 )
+                + [
+                    {
+                        "line": code.co_firstlineno,
+                        "name": code.co_name,
+                        "filename": structured.intern_string(code.co_filename),
+                    }
+                ]
             },
         )
         start_time = time.time()
