@@ -110,6 +110,12 @@ class AHMetadata:
         }
 
 
+def get_metadata_str_from_log(log_path: str) -> str:
+    with open(log_path, newline="") as file:
+        json_string = file.readline().strip()
+        return json_string
+
+
 def check_minsize(context: AHContext, minsize: int) -> bool:
     return (
         context.get_value("m") >= minsize
@@ -128,10 +134,35 @@ def pad_mm_precondition(metadata: AHMetadata, context: AHContext) -> bool:
     return True
 
 
-def pad_mm_operations() -> List[AHOperation]:
+def get_mixedmm_precondition(metadata: AHMetadata, context: AHContext) -> bool:
+    m = context.get_value("m")
+    k = context.get_value("k")
+    n = context.get_value("n")
+    if m > 128 or k < 1024 or n < 1024:
+        return False
+    mat1_iscontig = context.get_value("mat1_iscontig")
+    mat2_iscontig = context.get_value("mat2_iscontig")
+    return mat1_iscontig and not mat2_iscontig
+
+
+def get_mult_dims_ops() -> List[AHOperation]:
     m_times_k_op = AHOperation("m*k", lambda data: data["m"] * data["k"])
     m_times_n_op = AHOperation("m*n", lambda data: data["m"] * data["n"])
     k_times_n_op = AHOperation("k*n", lambda data: data["k"] * data["n"])
+    return [m_times_k_op, m_times_n_op, k_times_n_op]
+
+
+def get_arith_intensity(data: Any) -> float:
+    m = data["m"]
+    k = data["k"]
+    n = data["n"]
+    if m == 0 or k == 0 or n == 0:
+        return 0.0
+    return m * k * n / (m * k + k * n + m * n)
+
+
+def pad_mm_operations() -> List[AHOperation]:
+    mult_dims_ops = get_mult_dims_ops()
     k_div_m_times_n_op = AHOperation(
         "k/(m*n)", lambda data: data["k"] / (data["m"] * data["n"])
     )
@@ -147,21 +178,12 @@ def pad_mm_operations() -> List[AHOperation]:
         "bfloat_perf_hit", bfloat_perf_hit, is_categorical=True
     )
 
-    def get_arith_intensity(data: Any) -> float:
-        m = data["m"]
-        k = data["k"]
-        n = data["n"]
-        return m * k * n / (m * k + k * n + m * n)
-
     arith_intensity_op = AHOperation("arith_intensity", get_arith_intensity)
     dims_need_padding_ops = get_dims_need_padding_ops()
     dims_multiple_ops = get_dims_multiple_ops()
     is_contig_ops = get_is_contig_ops()
 
-    ah_operations = [
-        m_times_k_op,
-        m_times_n_op,
-        k_times_n_op,
+    ah_operations = mult_dims_ops + [
         k_div_m_times_n_op,
         bfloat_perf_hit_op,
         arith_intensity_op,
@@ -170,6 +192,37 @@ def pad_mm_operations() -> List[AHOperation]:
     ah_operations.extend(dims_multiple_ops)
     ah_operations.extend(is_contig_ops)
     return ah_operations
+
+
+def between_op(data: Any, dim: str, lower: int, upper: int) -> bool:
+    return data[dim] >= lower and data[dim] <= upper
+
+
+def between_ops() -> List[AHOperation]:
+    dims = ["m", "k", "n"]
+    limits = [(1, 16), (17, 32), (33, 64), (65, 128), (129, 256)]
+    ah_operations = []
+    for dim in dims:
+        for lower, upper in limits:
+            between_op_fn = functools.partial(
+                between_op, dim=dim, lower=lower, upper=upper
+            )
+            # using 'LEQ' instead of '<=' because '<=' cannot be exported to dot
+            between_op_name = f"{lower}LEQ{dim}LEQ{upper}"
+            ah_operations.append(
+                AHOperation(between_op_name, between_op_fn, is_categorical=True)
+            )
+    return ah_operations
+
+
+def pow2_op(data: Any, dim: str, exponent: int) -> bool:
+    return data[dim] == 2**exponent
+
+
+def mixed_mm_operations() -> List[AHOperation]:
+    mult_dims_ops = get_mult_dims_ops()
+    arith_intensity_op = AHOperation("arith_intensity", get_arith_intensity)
+    return mult_dims_ops + [arith_intensity_op] + between_ops()
 
 
 def is_multiple(data: Any, dim: str, mult: int) -> bool:
