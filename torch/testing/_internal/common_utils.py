@@ -1421,9 +1421,7 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
     (torch.version.hip and float(".".join(torch.version.hip.split(".")[0:2])) >= 5.3)
 )
 
-TEST_CUDA_CUDSS = TEST_CUDA and (
-    (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12)
-)
+TEST_CUDA_CUDSS = TEST_CUDA and (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12)
 if TEST_CUDA_CUDSS:
     try:
         spd = torch.rand(4, 3)
