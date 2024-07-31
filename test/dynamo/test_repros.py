@@ -5568,6 +5568,22 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         mod.eval()
         self.assertFalse(opt_mod.training)
 
+    @requires_cuda
+    def test_memleak_when_graph_input_has_tensor_attr(self):
+        @torch.compile(backend="eager")
+        def f(x):
+            x.add_(1)
+
+        mem_before = torch.cuda.memory_allocated()
+
+        x = torch.ones(2, device='cuda')
+        x.foo = torch.zeros(2, device='cuda')
+        f(x)
+        del x.foo
+        del x
+        mem_after = torch.cuda.memory_allocated()
+        self.assertEqual(mem_before, mem_after)
+
 
 instantiate_parametrized_tests(ReproTests)
 

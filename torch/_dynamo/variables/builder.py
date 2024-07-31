@@ -1497,7 +1497,7 @@ class VariableBuilder:
 
         self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
-        tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
+        tensor_proxy.node.meta["tensor_dict"] = {k: None if isinstance(v, torch.Tensor) else v for k, v in value.__dict__.items()}
 
         # Note: this information is conveyed via subclass_type now
         fake_tensor_value = tensor_variable.proxy.node.meta["example_value"]
