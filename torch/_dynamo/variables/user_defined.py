@@ -1021,6 +1021,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 else:
                     return trace_rules.lookup(func)(func)
 
+        if source and isinstance(self, variables.UnspecializedNNModuleVariable):
+            source = self._wrap_source(source)
+
         if subobj is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(subobj):
             if source:
                 return variables.LazyVariableTracker.create(subobj, source)
