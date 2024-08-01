@@ -17,11 +17,13 @@ from builtins import (  # noqa: F401
 from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
 
 import torch
+from torch import SymBool, SymFloat, SymInt
 
 
 if TYPE_CHECKING:
     from torch.autograd.graph import GradientEdge
 
+__all__ = ["Number", "Device", "Storage"]
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
@@ -39,7 +41,14 @@ _device = torch.device
 _qscheme = torch.qscheme
 _layout = torch.layout
 _size = Union[torch.Size, List[builtins.int], Tuple[builtins.int, ...]]
+_symsize = Union[torch.Size, Sequence[Union[_int, SymInt]]]
 _dispatchkey = Union[builtins.str, torch._C.DispatchKey]
+
+# int or SymInt
+IntLikeType = Union[_int, torch.SymInt]
+
+py_sym_types = (SymInt, SymFloat, SymBool)
+PySymType = Union[SymInt, SymFloat, SymBool]
 
 # Meta-type for "numeric" things; matches our docs
 Number = Union[builtins.int, builtins.float, builtins.bool]

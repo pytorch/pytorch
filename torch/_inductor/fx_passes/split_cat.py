@@ -28,6 +28,7 @@ from ..pattern_matcher import (
 )
 from .group_batch_fusion import is_node_meta_valid, POST_GRAD_FUSIONS, PRE_GRAD_FUSIONS
 
+
 log = logging.getLogger(__name__)
 
 _Arguments: TypeAlias = Tuple[torch.fx.node.Argument, ...]
@@ -40,8 +41,8 @@ _TransformParam: TypeAlias = Tuple[
 _Range: TypeAlias = Tuple[int, int]
 
 
-PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
-POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
+PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
+POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = {}
 
 pre_grad_pass_names = [
     "normalization_pass",
@@ -67,7 +68,6 @@ for pass_name in pre_grad_pass_names:
     if pass_name in PRE_GRAD_FUSIONS:
         continue
     PRE_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
-        prevent_match_across_mutations=True,
         pass_name=pass_name,
     )
 
@@ -77,7 +77,6 @@ for pass_name in post_grad_pass_names:
     if pass_name in POST_GRAD_FUSIONS:
         continue
     POST_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
-        prevent_match_across_mutations=True,
         pass_name=pass_name,
     )
 
@@ -189,7 +188,7 @@ def normalize_split_base(
         new_split_node = graph.call_function(
             torch.split,
             args=new_args,
-            kwargs=new_kwargs,
+            kwargs=new_kwargs,  # type: ignore[arg-type]
         )
     split_node.replace_all_uses_with(new_split_node)
     new_split_node.meta.update(split_node.meta)
@@ -374,7 +373,7 @@ def normalize_stack_default(match: Match, *args, **kwargs):
 
     with graph.inserting_after(node):
         new_node = graph.call_function(
-            node.target,
+            node.target,  # type: ignore[arg-type]
             args=(tensors,),
             kwargs={"dim": dim},
         )
@@ -503,7 +502,7 @@ def merge_splits(
 
     to_remove = []
 
-    with graph.inserting_before(first_split):
+    with graph.inserting_before(first_split):  # type: ignore[arg-type]
         # Add the new split node
         new_split = graph.call_function(
             torch.split,
@@ -1432,7 +1431,7 @@ def mutate_cat_node(match: Match, split_sections: List[int], dim: int):
             # case 1: the cat uses all getitems from the split
             if len(split_sections) == len(cat_user.args[0]):  # type: ignore[arg-type]
                 # replace the users of the cat node to be the input of the split node
-                cat_user.replace_all_uses_with(split_node.args[0])
+                cat_user.replace_all_uses_with(split_node.args[0])  # type: ignore[arg-type]
                 # remove the cat node
                 graph.erase_node(cat_user)
                 counters["inductor"]["mutate_cat_pass"] += 1

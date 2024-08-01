@@ -3,12 +3,11 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
+from typing import cast, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
 
 import torch
 
 from .. import config, ir
-
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -30,6 +29,7 @@ from ..utils import (
 )
 from ..virtualized import V
 from .mm_common import filtered_configs
+
 
 if TYPE_CHECKING:
     from ..ir import TensorBox
@@ -444,12 +444,12 @@ def convert_1x1_conv_to_mm(x, weight, bias):
 def convolution(
     x: TensorBox,
     weight: TensorBox,
-    bias: TensorBox,
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    bias: Optional[TensorBox],
+    stride: Sequence[int],
+    padding: Sequence[int],
+    dilation: Sequence[int],
     transposed: bool,
-    output_padding: List[int],
+    output_padding: Sequence[int],
     groups: int,
 ):
     stride = tuple(stride)
