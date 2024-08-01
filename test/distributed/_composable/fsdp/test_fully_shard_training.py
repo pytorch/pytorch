@@ -396,8 +396,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 inp = torch.randint(0, vocab_size, (3, 64), device=device_type)
                 losses: List[torch.Tensor] = []
                 for _model, _optim in ((ref_model, ref_optim), (model, optim)):
-                    # _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-                    _optim.zero_grad()
+                    _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
                     losses.append(_model(inp).sum())
                     if _model is model and delay_after_forward:
                         torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
