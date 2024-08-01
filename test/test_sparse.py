@@ -3031,7 +3031,6 @@ class TestSparse(TestSparseBase):
 
     def _test_resize_shape(self, x_i, x_v, x_size, y_i, y_v, y_size, dtype, device):
         x_v_numel = torch.zeros(x_v).numel()
-        y_v_numel = torch.zeros(y_v).numel()
         x = torch.sparse_coo_tensor(torch.zeros(x_i),
                                     torch.arange(x_v_numel).resize_(x_v).to(torch.float),
                                     torch.Size(x_size), dtype=dtype, device=device)
@@ -4267,7 +4266,7 @@ class TestSparseMeta(TestCase):
         self.assertEqual(r.indices(), torch.empty(2, 0, device='meta', dtype=torch.int64))
         self.assertEqual(r.values(), torch.empty(0, 4, device='meta', dtype=dtype))
 
-    def _test_meta_sparse_compressed(self, dtype, index_dtype, layout, batchsize, densesize):
+    def _test_meta_sparse_compressed(self, dtype, layout, batchsize, densesize):
         index_dtype = torch.int64
         blocksize = (2, 3) if layout in {torch.sparse_bsr, torch.sparse_bsc} else ()
         sparsesize = (4, 6)
@@ -4323,9 +4322,8 @@ class TestSparseMeta(TestCase):
         if layout is torch.sparse_coo:
             self._test_meta_sparse_coo(dtype)
         else:
-            index_dtype = torch.int64
             for batchsize, densesize in itertools.product([(), (2,)], [(), (3,)]):
-                self._test_meta_sparse_compressed(dtype, index_dtype, layout, batchsize, densesize)
+                self._test_meta_sparse_compressed(dtype, layout, batchsize, densesize)
 
     def _test_print_meta_data(self, dtype, layout, batchsize, sparsesize, densesize):
         index_dtype = torch.int64
@@ -5374,10 +5372,8 @@ class TestSparseAny(TestCase):
     @onlyCPU
     @all_sparse_layouts('layout', include_strided=True)
     def test_method_pin_memory(self, device, layout):
-        """Tests sparse_xyz_tensor(indices, values, pin_memory=False).pin_memory(device)
+        """Tests sparse_xyz_tensor(indices, values, pin_memory=False).pin_memory()
         """
-        # is_pinned() ignores cuda device id, so no point in specifying it here:
-        pin_memory_device = "cuda"
 
         for t_ in self.generate_simple_inputs(
                 layout, device=device, dtype=torch.float64,
@@ -5385,37 +5381,37 @@ class TestSparseAny(TestCase):
                 pin_memory=False,         # no pinning
                 enable_batch=False,  # TODO: remove after gh-104868 is resolved
         ):
-            t = t_.pin_memory(pin_memory_device)
-            self.assertTrue(t.is_pinned(pin_memory_device))
+            t = t_.pin_memory()
+            self.assertTrue(t.is_pinned())
 
             # registering a non-pinned tensor with CUDA memory is a
             # clone operation
-            self.assertFalse(t_.is_pinned(pin_memory_device))
+            self.assertFalse(t_.is_pinned())
 
             # registering already pinned tensor with CUDA memory is an
             # identity operation:
-            t2 = t.pin_memory(pin_memory_device)
+            t2 = t.pin_memory()
             self.assertTrue(t2 is t)
 
             if layout is torch.sparse_coo:
-                self.assertTrue(t._indices().is_pinned(pin_memory_device))
-                self.assertTrue(t._values().is_pinned(pin_memory_device))
-                self.assertFalse(t_._indices().is_pinned(pin_memory_device))
-                self.assertFalse(t_._values().is_pinned(pin_memory_device))
+                self.assertTrue(t._indices().is_pinned())
+                self.assertTrue(t._values().is_pinned())
+                self.assertFalse(t_._indices().is_pinned())
+                self.assertFalse(t_._values().is_pinned())
             elif layout in {torch.sparse_csr, torch.sparse_bsr}:
-                self.assertTrue(t.crow_indices().is_pinned(pin_memory_device))
-                self.assertTrue(t.col_indices().is_pinned(pin_memory_device))
-                self.assertTrue(t.values().is_pinned(pin_memory_device))
-                self.assertFalse(t_.crow_indices().is_pinned(pin_memory_device))
-                self.assertFalse(t_.col_indices().is_pinned(pin_memory_device))
-                self.assertFalse(t_.values().is_pinned(pin_memory_device))
+                self.assertTrue(t.crow_indices().is_pinned())
+                self.assertTrue(t.col_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+                self.assertFalse(t_.crow_indices().is_pinned())
+                self.assertFalse(t_.col_indices().is_pinned())
+                self.assertFalse(t_.values().is_pinned())
             elif layout in {torch.sparse_csc, torch.sparse_bsc}:
-                self.assertTrue(t.ccol_indices().is_pinned(pin_memory_device))
-                self.assertTrue(t.row_indices().is_pinned(pin_memory_device))
-                self.assertTrue(t.values().is_pinned(pin_memory_device))
-                self.assertFalse(t_.ccol_indices().is_pinned(pin_memory_device))
-                self.assertFalse(t_.row_indices().is_pinned(pin_memory_device))
-                self.assertFalse(t_.values().is_pinned(pin_memory_device))
+                self.assertTrue(t.ccol_indices().is_pinned())
+                self.assertTrue(t.row_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+                self.assertFalse(t_.ccol_indices().is_pinned())
+                self.assertFalse(t_.row_indices().is_pinned())
+                self.assertFalse(t_.values().is_pinned())
             elif layout is torch.strided:
                 pass
             else:
@@ -5433,25 +5429,25 @@ class TestSparseAny(TestCase):
                 layout, device=device, dtype=torch.float64,
                 enable_zero_sized=False,     # pinning zero-sized tensors is a no-op
                 pin_memory=None,             # constructor does not specify pin_memory=...
-                pin_memory_device=pin_memory_device,  # indices and values are pinned to the given device
+                members_pin_memory=True,     # indices and values are pinned
                 enable_batch=False,          # TODO: remove after gh-104868 is resolved
         ):
             if layout is torch.sparse_coo:
-                self.assertTrue(t._indices().is_pinned(pin_memory_device))
-                self.assertTrue(t._values().is_pinned(pin_memory_device))
+                self.assertTrue(t._indices().is_pinned())
+                self.assertTrue(t._values().is_pinned())
             elif layout in {torch.sparse_csr, torch.sparse_bsr}:
-                self.assertTrue(t.crow_indices().is_pinned(pin_memory_device))
-                self.assertTrue(t.col_indices().is_pinned(pin_memory_device))
-                self.assertTrue(t.values().is_pinned(pin_memory_device))
+                self.assertTrue(t.crow_indices().is_pinned())
+                self.assertTrue(t.col_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
             elif layout in {torch.sparse_csc, torch.sparse_bsc}:
-                self.assertTrue(t.ccol_indices().is_pinned(pin_memory_device))
-                self.assertTrue(t.row_indices().is_pinned(pin_memory_device))
-                self.assertTrue(t.values().is_pinned(pin_memory_device))
+                self.assertTrue(t.ccol_indices().is_pinned())
+                self.assertTrue(t.row_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
             elif layout is torch.strided:
                 pass
             else:
                 assert 0  # unreachable
-            self.assertTrue(t.is_pinned(pin_memory_device))
+            self.assertTrue(t.is_pinned())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
     @onlyCPU

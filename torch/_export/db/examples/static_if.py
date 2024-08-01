@@ -13,6 +13,6 @@ class StaticIf(torch.nn.Module):
 
         return x
 
-example_inputs = (torch.randn(3, 2, 2),)
+example_args = (torch.randn(3, 2, 2),)
 tags = {"python.control-flow"}
 model = StaticIf()

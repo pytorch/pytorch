@@ -577,11 +577,11 @@ void UnpackQuantizedTensorInputs(std::shared_ptr<Graph>& graph) {
     auto input_scale =
         graph->insertInput(index + 1, input_name + "_scale")
             ->setType(TensorType::create(
-                at::kDouble, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
+                at::kDouble, at::kCPU, 0, /*requires_grad=*/std::nullopt));
     auto input_zero_point =
         graph->insertInput(index + 2, input_name + "_zero_point")
             ->setType(TensorType::create(
-                at::kLong, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
+                at::kLong, at::kCPU, 0, /*requires_grad=*/std::nullopt));
     std::vector<Value*> converted{input_value, input_scale, input_zero_point};
     auto input_tuple =
         graph->prependNode(graph->createTuple(converted))->output();

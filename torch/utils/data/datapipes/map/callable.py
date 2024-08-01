@@ -8,7 +8,8 @@ from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
 
 __all__ = ["MapperMapDataPipe", "default_fn"]
 
-T_co = TypeVar("T_co", covariant=True)
+
+_T_co = TypeVar("_T_co", covariant=True)
 
 
 # Default function to return each item directly
@@ -19,7 +20,7 @@ def default_fn(data):
 
 
 @functional_datapipe("map")
-class MapperMapDataPipe(MapDataPipe[T_co]):
+class MapperMapDataPipe(MapDataPipe[_T_co]):
     r"""
     Apply the input function over each item from the source DataPipe (functional name: ``map``).
 
@@ -60,5 +61,5 @@ class MapperMapDataPipe(MapDataPipe[T_co]):
     def __len__(self) -> int:
         return len(self.datapipe)
 
-    def __getitem__(self, index) -> T_co:
+    def __getitem__(self, index) -> _T_co:
         return self.fn(self.datapipe[index])

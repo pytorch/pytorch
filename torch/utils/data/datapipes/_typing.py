@@ -266,8 +266,8 @@ class _DataPipeType:
 
 
 # Default type for DataPipe without annotation
-T_co = TypeVar("T_co", covariant=True)
-_DEFAULT_TYPE = _DataPipeType(Generic[T_co])
+_T_co = TypeVar("_T_co", covariant=True)
+_DEFAULT_TYPE = _DataPipeType(Generic[_T_co])
 
 
 class _DataPipeMeta(GenericMeta):

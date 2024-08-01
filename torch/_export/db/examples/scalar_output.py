@@ -17,7 +17,7 @@ class ScalarOutput(torch.nn.Module):
     def forward(self, x):
         return x.shape[1] + 1
 
-example_inputs = (x,)
+example_args = (x,)
 tags = {"torch.dynamic-shape"}
 dynamic_shapes = {"x": {1: dim1_x}}
 model = ScalarOutput()

@@ -15,6 +15,20 @@ from .graph_signature import (
 )
 
 
+def _is_impure_node(node: torch.fx.Node) -> bool:
+    """
+    Check the schema of node target to detect side-effectful nodes.
+    """
+    if node.is_impure():
+        return True
+
+    if node.op == "call_function":
+        schema = getattr(node.target, "_schema", None)
+        schema_mutable = schema is not None and schema.is_mutable
+        return schema_mutable
+    return False
+
+
 def _remove_effect_tokens_from_graph_helper(
     ep, num_tokens, input_token_names, output_token_names
 ):
@@ -68,7 +82,7 @@ def _remove_effect_tokens_from_graph_helper(
             schema = _get_schema(func, node.args[2:])
 
         with ep.graph.inserting_before(node):
-            new_node = ep.graph.call_function(func, node.args[2:])
+            new_node = ep.graph.call_function(func, node.args[2:], node.kwargs)
         for k, v in node.meta.items():
             new_node.meta[k] = v
 
@@ -114,9 +128,7 @@ def _remove_effect_tokens_from_graph_helper(
         assert inp_token.name in input_token_names
         ep.graph.erase_node(inp_token)
 
-    ep.graph.eliminate_dead_code()
-    # Make graph_module.code to be consistent with the graph
-    ep.graph_module.recompile()
+    ep.graph.eliminate_dead_code(is_impure_node=_is_impure_node)
 
 
 def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:

@@ -18,5 +18,5 @@ class ClassMethod(torch.nn.Module):
         x = self.linear(x)
         return self.method(x) * self.__class__.method(x) * type(self).method(x)
 
-example_inputs = (torch.randn(3, 4),)
+example_args = (torch.randn(3, 4),)
 model = ClassMethod()

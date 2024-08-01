@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
 from enum import Enum
@@ -3255,11 +3256,11 @@ def meta__int_mm(a, b):
 def meta__convert_weight_to_int4pack(w, inner_k_tiles):
     torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
     torch._check(
-        w.dtype is torch.int32,
-        lambda: f"expected w to be int32, got {w.dtype}",
+        w.dtype is torch.uint8,
+        lambda: f"expected w to be uint8, got {w.dtype}",
     )
     n = w.size(0)
-    k = w.size(1)
+    k = w.size(1) * 2  # w is [n][k / 2] uint8
     return w.new_empty(
         (
             n // 8,
@@ -4219,18 +4220,18 @@ def meta_max_pool2d_with_indices(
 
 
 @register_meta(aten.fractional_max_pool2d.default)
-def meta_fractional_max_pool2d(self_, kernel_size, output_size, random_samples):
+def meta_fractional_max_pool2d(self, kernel_size, output_size, random_samples):
     torch._check(
-        self_.ndim in (3, 4),
-        lambda: f"fractional_max_pool2d: Expected 3D or 4D tensor, but got: {self_.ndim}",
+        self.ndim in (3, 4),
+        lambda: f"fractional_max_pool2d: Expected 3D or 4D tensor, but got: {self.ndim}",
     )
-    ndim = self_.ndim
+    ndim = self.ndim
 
     for d in range(ndim - 3, ndim):
         torch._check(
-            self_.size(d) > 0,
+            self.size(d) > 0,
             f"fractional_max_pool2d: Expected input to have non-zero "
-            f" size for non-batch dimenions, but got {self_.size()} with dimension {d} empty",
+            f" size for non-batch dimenions, but got {self.size()} with dimension {d} empty",
         )
 
     # the check and message are out of sync, but this matches the structured meta
@@ -4245,16 +4246,16 @@ def meta_fractional_max_pool2d(self_, kernel_size, output_size, random_samples):
         "either be a single int or tuple of Ints",
     )
 
-    input_channels = self_.size(-3)
-    input_height = self_.size(-2)
-    input_width = self_.size(-1)
+    input_channels = self.size(-3)
+    input_height = self.size(-2)
+    input_width = self.size(-1)
     if ndim == 4:
-        input_batch = self_.size(0)
+        input_batch = self.size(0)
     else:
         input_batch = 1
 
     torch._check(
-        self_.dtype == random_samples.dtype,
+        self.dtype == random_samples.dtype,
         lambda: "Expect _random_samples to have the same dtype as input",
     )
     torch._check(
@@ -4284,7 +4285,7 @@ def meta_fractional_max_pool2d(self_, kernel_size, output_size, random_samples):
         lambda: f"fractional_max_pool2d: kernel width {kernel_size[1]} is too large relative to input width {input_width}",
     )
 
-    if self_.dim() == 4:
+    if self.dim() == 4:
         size = [input_batch, input_channels, output_size[0], output_size[1]]
     else:
         size = [input_channels, output_size[0], output_size[1]]
@@ -4292,20 +4293,20 @@ def meta_fractional_max_pool2d(self_, kernel_size, output_size, random_samples):
     return (
         torch.empty(
             size,
-            dtype=self_.dtype,
-            device=self_.device,
+            dtype=self.dtype,
+            device=self.device,
         ),
         torch.empty(
             size,
             dtype=torch.int64,
-            device=self_.device,
+            device=self.device,
         ),
     )
 
 
 @register_meta(aten.max_unpool2d)
 @out_wrapper()
-def meta_max_unpool2d(self_, indices, output_size):
+def meta_max_unpool2d(self, indices, output_size):
     utils.alert_not_deterministic("max_unpooling2d_forward_out")
 
     torch._check(
@@ -4323,33 +4324,33 @@ def meta_max_unpool2d(self_, indices, output_size):
     oheight, owidth = output_size
 
     torch._check(
-        self_.ndim in (3, 4),
+        self.ndim in (3, 4),
         lambda: (
             f"Input to max_unpooling2d should be a 3d or 4d Tensor, "
-            f"but got a tensor with {self_.ndim} dimensions."
+            f"but got a tensor with {self.ndim} dimensions."
         ),
     )
     torch._check(
-        self_.shape == indices.shape,
+        self.shape == indices.shape,
         lambda: (
-            f"Expected shape of indices to be same as that of the input tensor ({self_.shape}) "
+            f"Expected shape of indices to be same as that of the input tensor ({self.shape}) "
             f"but got indices tensor with shape: {indices.shape}"
         ),
     )
 
-    for i in range(1, self_.ndim):
+    for i in range(1, self.ndim):
         torch._check(
-            self_.size(i) > 0,
+            self.size(i) > 0,
             lambda: (
                 f"max_unpooling2d(): "
                 f"Expected input to have non-zero size for non-batch dimensions, "
-                f"but got {self_.shape} with dimension {i} being empty."
+                f"but got {self.shape} with dimension {i} being empty."
             ),
         )
 
-    self = self_.contiguous()
+    self = self.contiguous()
 
-    if self_.ndim == 3:
+    if self.ndim == 3:
         nchannels = self.size(0)
         result = self.new_empty((nchannels, oheight, owidth))
     else:
@@ -4409,18 +4410,18 @@ def _max_unpooling3d_shape_check(input, indices, output_size, stride, padding, f
 
 @register_meta(aten.max_unpool3d)
 @out_wrapper()
-def meta_max_unpool3d(self_, indices, output_size, stride, padding):
+def meta_max_unpool3d(self, indices, output_size, stride, padding):
     utils.alert_not_deterministic("max_unpooling3d_forward_out")
 
     _max_unpooling3d_shape_check(
-        self_, indices, output_size, stride, padding, "max_unpooling3d()"
+        self, indices, output_size, stride, padding, "max_unpooling3d()"
     )
 
-    self = self_.contiguous()
+    self = self.contiguous()
 
     odepth, oheight, owidth = output_size
 
-    if self_.ndim == 4:
+    if self.ndim == 4:
         nchannels = self.size(0)
         result = self.new_empty((nchannels, odepth, oheight, owidth))
     else:
@@ -5232,6 +5233,35 @@ def meta__scaled_dot_product_efficient_backward(
 
 @register_meta(
     [
+        aten._scaled_dot_product_cudnn_attention_backward,
+    ]
+)
+def meta__scaled_dot_product_cudnn_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    philox_seed: Tensor,
+    philox_offset: Tensor,
+    attn_bias: Tensor,
+    cum_seq_q: Tensor,
+    cum_seq_k: Tensor,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    scale: Optional[float] = None,
+):
+    grad_q = torch.empty_like(query)
+    grad_k = torch.empty_like(key)
+    grad_v = torch.empty_like(value)
+    return grad_q, grad_k, grad_v
+
+
+@register_meta(
+    [
         aten._flash_attention_backward,
     ]
 )
@@ -5360,7 +5390,7 @@ def meta_scaled_mm(
     )
     torch._check(
         self.size(1) % 16 == 0,
-        lambda: f"Expected self.size(0) to be divisible by 16, but got self.size(1)={self.size(1)}",
+        lambda: f"Expected self.size(1) to be divisible by 16, but got self.size(1)={self.size(1)}",
     )
     torch._check(
         mat2.size(0) % 16 == 0 and mat2.size(1) % 16 == 0,
@@ -5370,6 +5400,48 @@ def meta_scaled_mm(
         is_fp8_type(self.dtype) and is_fp8_type(mat2.dtype),
         lambda: f"Expected both inputs to be fp8 types but got self.dtype={self.dtype} and mat2.dtype={mat2.dtype}",
     )
+
+    # determine scaling type and check input dimensions (refer to Blas.cpp op)
+    torch._check(
+        scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
+        lambda: "Both scale_a and scale_b must be float (fp32) tensors.",
+    )
+    m, k = self.shape
+    n = mat2.size(1)
+    if scale_a.numel() == 1 and scale_b.numel() == 1:
+        # tensorwise scaling
+        pass
+    else:
+        # for non-tensorwise scaling, enforce 2D input tensors
+        torch._check(
+            scale_a.dim() == 2 and scale_b.dim() == 2,
+            lambda: f"For non-tensorwise scaling, scale tensors must be 2D, but got {scale_a.dim()=} and {scale_b.dim()=}",
+        )
+
+        if (
+            scale_a.size(0) == m
+            and scale_a.size(1) == 1
+            and scale_b.size(0) == 1
+            and scale_b.size(1) == n
+        ):
+            # rowwise scaling
+            torch._check(
+                scale_a.is_contiguous() and scale_b.is_contiguous(),
+                lambda: "Both scale_a and scale_b must be contiguous for rowwise scaling.",
+            )
+        else:
+            # does not match any valid scaling type
+            torch._check(
+                False,
+                lambda: (
+                    "Invalid scaling configuration. "
+                    "For tensorwise scaling, both scales should be scalar. "
+                    f"For rowwise scaling, scale_a should be ({m}, 1), scale_b should be (1, {n}). "
+                    f"Got scale_a.size()=({scale_a.size(0)}, {scale_a.size(1)}) "
+                    f"and scale_b.size()=({scale_b.size(0)}, {scale_b.size(1)})"
+                ),
+            )
+
     _out_dtype = out_dtype if out_dtype is not None else self.dtype
     return torch.empty(self.size(0), mat2.size(1), dtype=_out_dtype, device=self.device)
 
@@ -5743,10 +5815,6 @@ def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
 def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     # From aten/src/ATen/native/Sorting.cpp
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
-    torch._check(
-        k >= 0 and k <= (self.size(dim) if self.dim() > 0 else 1),
-        lambda: "selected index k out of range",
-    )
     sliceSize = 1 if self.dim() == 0 else self.size(dim)
     torch._check(k >= 0 and k <= sliceSize, lambda: "k not in range for dimension")
 
@@ -5754,6 +5822,22 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     if len(topKSize) > 0:
         topKSize[dim] = k
     return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
+
+
+@register_meta([aten.kthvalue.default, aten.kthvalue.values])
+@out_wrapper("values", "indices")
+def kthvalue_meta(self, k, dim=-1, keepdim=False):
+    dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
+    dimSize = self.size(dim) if self.dim() > 0 else 1
+    torch._check(
+        k >= 1 and k <= dimSize,
+        lambda: f"kthvalue(): selected number k out of range for dimension {dim}",
+    )
+
+    shape = list(self.shape[:dim] + self.shape[dim + 1 :])
+    if keepdim and self.dim() > 0:
+        shape.insert(dim, 1)
+    return self.new_empty(shape), self.new_empty(shape, dtype=torch.int64)
 
 
 legacy_contiguous_memory_format = torch.contiguous_format
@@ -6020,6 +6104,49 @@ def _check_for_unsupported_isin_dtype(dtype):
     )
 
 
+@register_meta(aten._embedding_bag_backward)
+def meta_embedding_bag_backward(
+    grad,
+    indices,
+    offsets,
+    offset2bag,
+    bag_size,
+    maximum_indices,
+    num_weights,
+    scale_grad_by_freq,
+    mode,
+    sparse,
+    per_sample_weights,
+    padding_idx=-1,
+):
+    if sparse:
+        return aten._embedding_bag_sparse_backward(
+            grad,
+            indices,
+            offsets,
+            offset2bag,
+            bag_size,
+            num_weights,
+            scale_grad_by_freq,
+            mode,
+            per_sample_weights,
+            padding_idx,
+        )
+    else:
+        return meta_embedding_bag_dense_backward(
+            grad,
+            indices,
+            offset2bag,
+            bag_size,
+            maximum_indices,
+            num_weights,
+            scale_grad_by_freq,
+            mode,
+            per_sample_weights,
+            padding_idx,
+        )
+
+
 @register_meta(aten._embedding_bag_dense_backward)
 def meta_embedding_bag_dense_backward(
     grad,
@@ -6096,22 +6223,6 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     )
     return torch.empty_like(self, dtype=result_dtype)
-
-
-@register_meta(aten.channel_shuffle.default)
-def meta_channel_shuffle(input, groups):
-    # Assume the input shape is (*, C, H, W), where * represents any number of leading dimensions
-    *leading_dims, C, H, W = input.size()
-    # The output shape is the same as the input
-    return torch.empty(
-        *leading_dims,
-        C,
-        H,
-        W,
-        dtype=input.dtype,
-        layout=input.layout,
-        device=input.device,
-    )
 
 
 @register_meta(aten._local_scalar_dense)
