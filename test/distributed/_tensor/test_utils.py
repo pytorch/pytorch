@@ -127,6 +127,30 @@ class UtilTest(DTensorTestBase):
                     global_tensor[dim0_start:dim0_end, dim1_start:dim1_end],
                 )
 
+    @with_comms
+    def test_fsdp_tp_meta_compute(self):
+        # FSDP + TP sharding
+        tp_size = 2
+        dp_size = self.world_size // tp_size
+        global_mesh = init_device_mesh(
+            self.device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+        )
+        # local shard shape is [2, 2]
+        global_tensor_shape = torch.Size([2 * self.world_size, 2])
+        placements = [_StridedShard(0, split_factor=tp_size), Shard(0)]
+
+        local_shape, global_offset = compute_local_shape_and_global_offset(
+            global_tensor_shape, global_mesh, placements
+        )
+        assert global_mesh.get_coordinate is not None
+        dp_rank = global_mesh.get_local_rank("dp")
+        tp_rank = global_mesh.get_local_rank("tp")
+        shard_idx_on_dim_0 = tp_rank * dp_size + dp_rank
+        expected_local_shape = (2, 2)
+        expected_global_offset = (shard_idx_on_dim_0 * 2, 0)
+        self.assertEqual(local_shape, expected_local_shape)
+        self.assertEqual(global_offset, expected_global_offset)
+
 
 class TestStridedSharding(DTensorTestBase):
     @property
@@ -246,6 +270,64 @@ class TestStridedSharding(DTensorTestBase):
         expected_shard_dim1 = expected_shard_dim0.view(mesh_dim1_size, -1)[
             mesh_dim1_local_rank
         ]
+        self.assertEqual(shard_x, expected_shard_dim1)
+
+        # shard_to_replicate on mesh dim-1
+        full_tensor = shard_placement_dim1._to_replicate_tensor(
+            shard_x,
+            mesh_2d,
+            mesh_dim=1,
+            current_logical_shape=list(expected_shard_dim0.shape),
+        )
+        self.assertEqual(full_tensor, expected_shard_dim0)
+
+        # shard_to_replicate on mesh dim-0
+        full_tensor = shard_placement_dim0._to_replicate_tensor(
+            full_tensor,
+            mesh_2d,
+            mesh_dim=0,
+            current_logical_shape=list(x.shape),
+        )
+        self.assertEqual(full_tensor, x)
+
+    @with_comms
+    def test_2d_mesh_2d_tensor_strided_sharding(self):
+        # Test 2: 1-d tensor over 2-d mesh
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dim0", "dim1")
+        )
+        mesh_dim0_size = mesh_2d["dim0"].size()
+        mesh_dim1_size = mesh_2d["dim1"].size()
+        mesh_dim0_local_rank = mesh_2d["dim0"].get_local_rank(mesh_dim=0)
+        mesh_dim1_local_rank = mesh_2d["dim1"].get_local_rank(mesh_dim=0)
+        x = torch.arange(2 * self.world_size, device=self.device_type).reshape(2, -1)
+        """
+        strided sharding:
+            rank 0: [[0], [4]]
+            rank 1: [[2], [6]]
+            rank 2: [[1], [5]]
+            rank 3: [[3], [7]]
+        """
+        split_factor = 2
+        # shard on mesh dim-0
+        shard_placement_dim0 = _StridedShard(1, split_factor=split_factor)
+        tensor_list, _ = shard_placement_dim0._split_tensor(x, mesh_dim0_size)
+        shard_x = tensor_list[mesh_dim0_local_rank]
+        expected_shard_dim0 = (
+            torch.tensor([[0, 2], [4, 6]], device=self.device_type)
+            if mesh_dim0_local_rank == 0
+            else torch.tensor([[1, 3], [5, 7]], device=self.device_type)
+        )
+        self.assertEqual(shard_x, expected_shard_dim0)
+
+        # shard on mesh dim-1
+        shard_placement_dim1 = _StridedShard(1, split_factor=1)  # same as Shard(1)
+        tensor_list, _ = shard_placement_dim1._split_tensor(shard_x, mesh_dim1_size)
+        shard_x = tensor_list[mesh_dim1_local_rank]
+        expected_shard_dim1 = [
+            torch.tensor(value, device=self.device_type)
+            for value in [[[0], [4]], [[2], [6]], [[1], [5]], [[3], [7]]]
+        ][self.rank]
         self.assertEqual(shard_x, expected_shard_dim1)
 
         # shard_to_replicate on mesh dim-1
