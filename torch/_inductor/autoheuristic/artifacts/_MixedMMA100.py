@@ -13,6 +13,7 @@ from torch._inductor.autoheuristic.learnedheuristic_interface import (
     LearnedHeuristicDecision,
 )
 
+
 class MixedMMA100(LearnedHeuristicDecision):
 
     def __init__(self) -> None:

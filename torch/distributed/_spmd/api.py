@@ -117,7 +117,7 @@ def _to_caller_flattened_graph_module(gm: torch.fx.GraphModule) -> torch.fx.Grap
             # pyre-ignore[6]
             in_spec=None,  # type: ignore[arg-type]
             # pyre-ignore[16]
-            out_spec=gm._graph._codegen.pytree_info.out_spec,
+            out_spec=gm._graph._codegen.pytree_info.out_spec,  # type: ignore[attr-defined]
         )
     )
     gm.recompile()
