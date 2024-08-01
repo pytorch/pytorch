@@ -13,6 +13,7 @@ from torch.distributed._tensor.experimental.attention import (
     _is_causal_behavior,
     AttentionContextParallel,
     context_parallel_buffers,
+    context_parallel_unshard,
     enable_context_parallel,
 )
 from torch.distributed.tensor.parallel import parallelize_module
@@ -24,6 +25,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -57,11 +59,19 @@ class RingAttentionTest(DTensorTestBase):
         "Does not support flash nor efficient attention",
     )
     @with_comms
+    @decorateIf(
+        unittest.skip, lambda params: params["load_balance"] and not params["is_causal"]
+    )
     @parametrize("is_causal", [True, False])
     @parametrize("compiled", [True, False])
     @parametrize("backend", backends)
+    @parametrize("load_balance", [True, False])
     def test_ring_attention_sdpa(
-        self, is_causal: bool, compiled: bool, backend: SDPBackend
+        self,
+        is_causal: bool,
+        compiled: bool,
+        backend: SDPBackend,
+        load_balance: bool,
     ) -> None:
         device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
         dtype = torch.bfloat16
@@ -73,6 +83,10 @@ class RingAttentionTest(DTensorTestBase):
         torch.manual_seed(10)
         dtype = (
             torch.bfloat16 if backend == SDPBackend.FLASH_ATTENTION else torch.float32
+        )
+
+        torch.distributed._tensor.experimental.attention._enable_load_balance = (
+            load_balance
         )
 
         q = torch.rand(
@@ -103,11 +117,6 @@ class RingAttentionTest(DTensorTestBase):
         with sdpa_kernel(backend):
             out = F.scaled_dot_product_attention(q, k, v, is_causal=is_causal)
             out.sum().backward()
-
-        with context_parallel_buffers(
-            device_mesh, (out, q.grad, k.grad, v.grad), (2, 2, 2, 2)
-        ) as local_buffers:
-            local_out, local_dq, local_dk, local_dv = local_buffers
 
         enable_context_parallel(2, [], device_mesh)
         with context_parallel_buffers(device_mesh, (q, k, v), (2, 2, 2)) as cp_buffers:
@@ -142,21 +151,26 @@ class RingAttentionTest(DTensorTestBase):
 
             # Due to numerical error, we need to choose different atol for different
             # attention kernels
+            cp_out, cp_dq, cp_dk, cp_dv = context_parallel_unshard(
+                device_mesh,
+                [cp_out, cp_q.grad, cp_k.grad, cp_v.grad],
+                [2, 2, 2, 2],
+            )
             atol = (
                 1e-08
                 if backend == SDPBackend.EFFICIENT_ATTENTION
                 else 2e-3 * self.world_size
             )
-            self.assertTrue(torch.allclose(local_out, cp_out, atol=atol))
+            self.assertTrue(torch.allclose(out, cp_out, atol=atol))
 
             atol = (
                 2e-06
                 if backend == SDPBackend.EFFICIENT_ATTENTION
                 else 8e-3 * self.world_size
             )
-            self.assertTrue(torch.allclose(local_dq, cp_q.grad, atol=atol))
-            self.assertTrue(torch.allclose(local_dk, cp_k.grad, atol=atol))
-            self.assertTrue(torch.allclose(local_dv, cp_v.grad, atol=atol))
+            self.assertTrue(torch.allclose(q.grad, cp_dq, atol=atol))
+            self.assertTrue(torch.allclose(k.grad, cp_dk, atol=atol))
+            self.assertTrue(torch.allclose(v.grad, cp_dv, atol=atol))
 
     def test_is_causal_behavior(self) -> None:
         self.assertEqual(
