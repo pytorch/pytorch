@@ -128,6 +128,7 @@ if __name__ == "__main__":
             "Accept": "application/vnd.github.v3+json",
         },
     ).json()
+    print(result)
     requests.post(
         f"https://api.github.com/repos/pytorch/pytorch/pulls/{result['number']}/reviews",
         data=json.dumps({"event": "APPROVE"}),
