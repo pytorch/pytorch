@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import dataclasses
 import itertools
@@ -10,6 +11,7 @@ import torch._lazy.metrics as metrics
 from torch import fx
 from torch._lazy import computation, debug as lazy_debug
 from torch._lazy.tensor_factory_functions import tensor_factory_functions
+
 
 debug = os.environ.get("debug_extract_compiled_graph") is not None
 

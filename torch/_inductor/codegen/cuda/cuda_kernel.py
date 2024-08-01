@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
@@ -14,8 +15,8 @@ from ...ir import (
 from ...utils import sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer, Kernel, OpOverrides
-
 from ..cpp_utils import CppPrinter, DTYPE_TO_CPP
+
 
 if TYPE_CHECKING:
     from torch._inductor.codegen.cuda.cuda_template import CUDATemplate
@@ -176,11 +177,9 @@ class CUDATemplateKernel(CUDAKernel):
         else:
             call_args.append("None")
 
-        current_device = V.graph.scheduler.get_current_device_or_throw()
         wrapper.generate_kernel_call(
             name,
             call_args,
-            device_index=current_device.index,
             cuda=True,
             triton=False,
             arg_types=arg_types,

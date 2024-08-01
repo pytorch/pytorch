@@ -3,8 +3,8 @@
 #include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <variant>
 
@@ -33,15 +33,21 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
   bool is_float() override {
     return false;
   }
-  int64_t guard_int(const char* file, int64_t line) override {
+  int64_t guard_int(
+      const char* file [[maybe_unused]],
+      int64_t line [[maybe_unused]]) override {
     TORCH_CHECK(is_int(), "not an int");
     return int_();
   }
-  bool guard_bool(const char* file, int64_t line) override {
+  bool guard_bool(
+      const char* file [[maybe_unused]],
+      int64_t line [[maybe_unused]]) override {
     TORCH_CHECK(is_bool(), "not a bool");
     return bool_();
   }
-  double guard_float(const char* file, int64_t line) override {
+  double guard_float(
+      const char* file [[maybe_unused]],
+      int64_t line [[maybe_unused]]) override {
     TORCH_CHECK(false, "not a float");
   }
   int64_t int_() override {
@@ -73,14 +79,14 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
     if constexpr (is_int_()) {
       return ::std::get<int64_t>(value_);
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
   std::optional<bool> constant_bool() override {
     if constexpr (is_bool_()) {
       return ::std::get<bool>(value_);
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
   bool is_constant() override {

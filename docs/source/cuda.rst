@@ -12,6 +12,7 @@ torch.cuda
     current_blas_handle
     current_device
     current_stream
+    cudart
     default_stream
     device
     device_count

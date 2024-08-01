@@ -1,5 +1,6 @@
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/mps/MPSGraphSonomaOps.h>
+#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

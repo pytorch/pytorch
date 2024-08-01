@@ -38,7 +38,7 @@ from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
 from jit.test_torchbind import TestTorchbind  # noqa: F401
-from jit.test_module_interface import TestModuleInterface  # noqa: F401  # noqa: F401
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
 from jit.test_enum import TestEnum  # noqa: F401
 from jit.test_string_formatting import TestStringFormatting  # noqa: F401
@@ -96,7 +96,7 @@ import torch.nn.functional as F
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
-    suppress_warnings, BUILD_WITH_CAFFE2, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
+    suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
     freeze_rng_state, slowTest, TemporaryFileName, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
     skipIfCrossRef, skipIfTorchDynamo
@@ -167,7 +167,7 @@ def doAutodiffCheck(testname):
     # these tests are disabled because BailOut nodes
     # inserted by ProfilingExecutor interfere with
     # subgraph slicing of Differentiable Graphs
-    test_exceptions = [
+    test_exceptions = (
         # functional
         'test_nn_dropout',
         'test_nn_log_softmax',
@@ -195,11 +195,9 @@ def doAutodiffCheck(testname):
         'test_split_with_sizes_dim_neg0',
         'test_split_with_sizes_size_0',
         'test_nn_max_pool2d_with_indices',
-    ]
+    )
 
-    if testname in test_exceptions:
-        return False
-    return True
+    return testname not in test_exceptions
 
 
 # TODO: enable TE in PE when all tests are fixed
@@ -481,7 +479,7 @@ class TestJit(JitTestCase):
         class MyModule(torch.jit.ScriptModule):
             def __init__(self):
                 super().__init__()
-                self.register_buffer('b0', torch.randn(1, 3))
+                self.b0 = nn.Buffer(torch.randn(1, 3))
                 self.p0 = nn.Parameter(torch.randn(2, 3))
 
             @torch.jit.script_method
@@ -537,7 +535,7 @@ class TestJit(JitTestCase):
                 super().__init__()
                 whole_tensor = torch.randn(4, 5, dtype=torch.float, device='cpu')
                 self.p0 = nn.Parameter(whole_tensor.narrow(0, 0, 1))
-                self.register_buffer('b0', whole_tensor.narrow(0, 3, 1))
+                self.b0 = nn.Buffer(whole_tensor.narrow(0, 3, 1))
 
         m = Foo()
         m2 = self.getExportImportCopy(m, map_location=torch.device('cuda:0'))
@@ -3926,7 +3924,7 @@ def foo(x):
         a.p = nn.Parameter(torch.rand(3, 4))
         a.foo = nn.Module()
         a.foo.name = 'foo'
-        a.foo.register_buffer('b', torch.rand(1, 1))
+        a.foo.b = nn.Buffer(torch.rand(1, 1))
         a.foo.bar = nn.Module()
         a.foo.bar.name = 'bar'
         a.foo.bar.an_int = 4
@@ -4967,6 +4965,7 @@ a")
                     test(backward=True)
                     test(backward=True)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_index(self):
         def consec(size, start=0):
             numel = torch.tensor(size).prod().item()
@@ -6431,6 +6430,7 @@ a")
             cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float_int)))
             cu.func_float_int(5.3, 0)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_math_ops(self):
         def checkMathWrap(func_name, num_args=1, is_float=True, **args):
             if is_float:
@@ -6959,6 +6959,7 @@ a")
         self.assertFalse(test_all_float_list([3.14, 0, 8.9]))
 
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_number_math(self):
         ops_template = dedent('''
         def func():
@@ -7207,6 +7208,7 @@ a")
 
             test(op, tensor, const, swap_args)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_tensor_number_math(self):
         self._test_tensor_number_math()
 
@@ -7643,6 +7645,7 @@ dedent """
         with self.assertRaises(Exception):
             foo(2)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_isinstance(self):
         # test isinstance operator for static type checking
         template = dedent('''
@@ -8891,7 +8894,7 @@ dedent """
         class ModuleBufferMutate(torch.jit.ScriptModule):
             def __init__(self):
                 super().__init__()
-                self.register_buffer('running_var', torch.tensor(0, dtype=torch.long))
+                self.running_var = nn.Buffer(torch.tensor(0, dtype=torch.long))
 
             @torch.jit.script_method
             def forward(self):
@@ -9018,12 +9021,12 @@ dedent """
         def __init__(self):
             super(TestScript.DerivedStateModule, self).__init__()
             self.param = torch.nn.Parameter(torch.ones(3, 4, dtype=torch.float))
-            self.register_buffer('derived', torch.neg(self.param).detach().clone())
+            self.derived = nn.Buffer(torch.neg(self.param).detach().clone())
 
             # This is a flag so we can test that the pack method was called
-            self.register_buffer('pack_called', torch.zeros(1, dtype=torch.long))
+            self.pack_called = nn.Buffer(torch.zeros(1, dtype=torch.long))
             # This is a flag so we can test that the unpack method was called
-            self.register_buffer('unpack_called', torch.zeros(1, dtype=torch.long))
+            self.unpack_called = nn.Buffer(torch.zeros(1, dtype=torch.long))
 
         @torch.jit.script_method
         def _pack(self):
@@ -9203,7 +9206,7 @@ dedent """
         class SubSubMod(torch.jit.ScriptModule):
             def __init__(self):
                 super().__init__()
-                self.register_buffer('buf', torch.ones(3, 4) * 3)
+                self.buf = nn.Buffer(torch.ones(3, 4) * 3)
 
             @torch.jit.script_method
             def _pack(self):
@@ -9220,7 +9223,7 @@ dedent """
         class SubMod(torch.jit.ScriptModule):
             def __init__(self):
                 super().__init__()
-                self.register_buffer('buf', torch.ones(3, 4) * 2)
+                self.buf = nn.Buffer(torch.ones(3, 4) * 2)
                 self.ssm = SubSubMod()
 
             @torch.jit.script_method
@@ -9239,7 +9242,7 @@ dedent """
             def __init__(self):
                 super().__init__()
                 self.submod = SubMod()
-                self.register_buffer('buf', torch.ones(3, 4) * 1)
+                self.buf = nn.Buffer(torch.ones(3, 4) * 1)
 
             @torch.jit.script_method
             def _pack(self):
@@ -10004,7 +10007,7 @@ dedent """
                 super().__init__()
                 x = torch.zeros(1, 3)
                 mod_fn = lambda : mod(x)  # noqa: E731
-                self.mod = torch.jit.trace(mod_fn, tuple())
+                self.mod = torch.jit.trace(mod_fn, ())
 
             @torch.jit.script_method
             def forward(self):
@@ -12796,7 +12799,7 @@ dedent """
         tracemalloc.stop()
 
         # Check if the peak sizes at most differ by an empirically obtained factor
-        assert peak_from_file < peak_from_string * 500
+        self.assertLess(peak_from_file, peak_from_string * 500)
 
     # for each type, the input type annotation and corresponding return type annotation
     def type_input_return_pairs(self):
@@ -13072,7 +13075,7 @@ dedent """
                 self.out_features = out_features
                 self.weight = torch.nn.Parameter(torch.empty(out_features, in_features))
                 self.bias = torch.nn.Parameter(torch.empty(out_features))
-                self.register_buffer('counter', torch.ones(out_features))
+                self.counter = nn.Buffer(torch.ones(out_features))
                 self.reset_parameters()
 
             def reset_parameters(self):
@@ -13125,7 +13128,7 @@ dedent """
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.ones(out_features, in_features))
                 self.bias = torch.nn.Parameter(torch.ones(out_features))
-                self.register_buffer("buffer", torch.ones(out_features))
+                self.buffer = nn.Buffer(torch.ones(out_features))
                 self.submodule = Submodule()
 
             def forward(self, x):
@@ -13580,8 +13583,8 @@ dedent """
 
             def __init__(self, number):
                 super().__init__()
-                self.register_buffer('buffer1', torch.ones(2, 2))
-                self.register_buffer('buffer2', torch.ones(2, 2))
+                self.buffer1 = nn.Buffer(torch.ones(2, 2))
+                self.buffer2 = nn.Buffer(torch.ones(2, 2))
                 self.number = number
 
             @torch.jit.script_method
@@ -13599,8 +13602,8 @@ dedent """
 
             def __init__(self, number, submodule):
                 super().__init__()
-                self.register_buffer('buffer1', torch.ones(2, 2))
-                self.register_buffer('buffer2', torch.ones(2, 2))
+                self.buffer1 = nn.Buffer(torch.ones(2, 2))
+                self.buffer2 = nn.Buffer(torch.ones(2, 2))
                 self.number = number
                 self.submodule = submodule
 
@@ -13636,8 +13639,8 @@ dedent """
         class NoArgState(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer('buffer1', torch.ones(2, 2))
-                self.register_buffer('buffer2', torch.ones(2, 2))
+                self.buffer1 = nn.Buffer(torch.ones(2, 2))
+                self.buffer2 = nn.Buffer(torch.ones(2, 2))
 
             def forward(self):
                 pass
@@ -15088,7 +15091,7 @@ dedent """
                 def __init__(self):
                     super().__init__()
                     tensor = torch.zeros(1, requires_grad=False)
-                    self.register_buffer('some_state', torch.nn.Parameter(tensor))
+                    self.some_state = nn.Buffer(torch.nn.Parameter(tensor))
 
                 @torch.jit.script_method
                 def forward(self, x):
@@ -15294,56 +15297,6 @@ dedent """
                     continue
                 self.assertEqual(value, getattr(loaded, "_" + name))
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
-    @unittest.skipIf(not BUILD_WITH_CAFFE2, "PyTorch is build without Caffe2 support")
-    def test_old_models_bc(self):
-        model = {
-            'archive/version': b'1',
-            'archive/code/archive.py':
-                b'''
-                op_version_set = 0
-                def forward(self,
-                    _0: Tensor) -> Tensor:
-                  _1 = torch.zeros([10], dtype=6, layout=0, device=torch.device("cpu"))
-                  result = torch.to(torch.fill_(_1, 5), dtype=6, layout=0, device=torch.device("cpu"),
-                                    non_blocking=False, copy=False)
-                  result2 = torch.rand([10], dtype=6, layout=0, device=torch.device("cpu"))
-                  result3 = torch.rand_like(result2, dtype=6, layout=0, device=torch.device("cpu"))
-                  _2 = torch.add(torch.add(result, result2, alpha=1), result3, alpha=1)
-                  return _2
-                ''',
-            'archive/attributes.pkl': b'\x80\x02](e.',
-            'archive/libs.py': b'op_version_set = 0\n',
-            'archive/model.json':
-                b'''
-                {
-                   "protoVersion":"2",
-                   "mainModule":{
-                      "torchscriptArena":{
-                         "key":"code/archive.py"
-                      },
-                      "name":"archive",
-                      "optimize":true
-                   },
-                   "producerName":"pytorch",
-                   "producerVersion":"1.0",
-                   "libs":{
-                      "torchscriptArena":{
-                         "key":"libs.py"
-                      }
-                   }
-                }'''}
-        with TemporaryFileName() as fname:
-            archive_name = os.path.basename(os.path.normpath(fname))
-            with zipfile.ZipFile(fname, 'w') as archive:
-                for k, v in model.items():
-                    archive.writestr(k, v)
-
-            with open(fname, "rb") as f:
-                fn = torch.jit.load(f)
-
-        x = torch.zeros(10)
-        fn(x)
 
     def test_submodule_attribute_serialization(self):
         class S(torch.jit.ScriptModule):
@@ -15481,8 +15434,8 @@ dedent """
                 self.mod = (torch.nn.ReLU())
                 self.mod2 = (torch.nn.ReLU())
                 self.mod3 = torch.nn.Sequential(torch.nn.Sequential(torch.nn.ReLU()))
-                self.register_buffer('x', torch.zeros(3))
-                self.register_buffer('y', torch.zeros(3))
+                self.x = nn.Buffer(torch.zeros(3))
+                self.y = nn.Buffer(torch.zeros(3))
                 self.z = torch.zeros(3)
 
             def bleh(self):
@@ -15880,7 +15833,7 @@ dedent """
 
             def __init__(self):
                 super().__init__()
-                self.register_buffer("foo", torch.ones(1))
+                self.foo = torch.nn.Buffer(torch.ones(1))
                 self.register_parameter("bar", torch.nn.Parameter(torch.ones(1)))
                 self.baz = torch.ones(1)
                 self.my_constant = 1

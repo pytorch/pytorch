@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import ast
 import builtins
 import dis
