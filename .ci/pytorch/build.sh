@@ -230,6 +230,10 @@ if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
+  export CMAKE_BUILD_TYPE=RelWithAssert
+fi
+
 # Do not change workspace permissions for ROCm CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
 if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
@@ -284,12 +288,26 @@ else
         # Which should be backward compatible with Numpy-1.X
         python -mpip install --pre numpy==2.0.0rc1
       fi
-      WERROR=1 python setup.py bdist_wheel
+
+      WERROR=1 python setup.py clean
+
+      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+        BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
+        BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel --cmake
+      else
+        WERROR=1 python setup.py bdist_wheel
+      fi
     else
+      python setup.py clean
       if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
         source .ci/pytorch/install_cache_xla.sh
       fi
-      python setup.py bdist_wheel
+      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+        echo "USE_SPLIT_BUILD cannot be used with xla or rocm"
+        exit 1
+      else
+        python setup.py bdist_wheel
+      fi
     fi
     pip_install_whl "$(echo dist/*.whl)"
 
@@ -328,9 +346,10 @@ else
     CUSTOM_OP_TEST="$PWD/test/custom_operator"
     python --version
     SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+
     mkdir -p "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
-    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPython_EXECUTABLE="$(which python)" \
+    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch;$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -343,7 +362,7 @@ else
     SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
     mkdir -p "$JIT_HOOK_BUILD"
     pushd "$JIT_HOOK_BUILD"
-    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPython_EXECUTABLE="$(which python)" \
+    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch;$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -355,7 +374,7 @@ else
     python --version
     mkdir -p "$CUSTOM_BACKEND_BUILD"
     pushd "$CUSTOM_BACKEND_BUILD"
-    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPython_EXECUTABLE="$(which python)" \
+    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch;$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd

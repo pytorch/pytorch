@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import abc
 import collections
 import dataclasses
@@ -23,6 +24,7 @@ from .utils import (
     VarRanges,
 )
 from .virtualized import OpsHandler, ReductionType, V
+
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
@@ -68,7 +70,7 @@ class MemoryDep(Dep):
         """
         Return the offset by setting every variable to be 0.
         """
-        return sympy_subs(self.index, {v: 0 for v in self.var_names})
+        return sympy_subs(self.index, dict.fromkeys(self.var_names, 0))
 
     def normalize_with_stride_order(self, prefix="t"):
         r"""
@@ -107,7 +109,7 @@ class MemoryDep(Dep):
                 reindex([add_var(x) for x in new_simplified_sizes]),
             )
         )
-        new_index = sympy_subs(sympy.expand(self.index), replacement)
+        new_index = sympy_subs(sympy.expand(self.index), replacement)  # type: ignore[arg-type] # next PR
 
         out = MemoryDep(self.name, new_index, tuple(var_ranges.keys()), tuple(var_ranges.values()))  # type: ignore[arg-type]
         return out
@@ -126,7 +128,7 @@ class MemoryDep(Dep):
             for var, size in zip(self.var_names, self.size):
                 if var in vars:
                     numel = numel * size
-        return numel
+        return numel  # type: ignore[return-value]
 
     def rename(self, renames: Dict[str, str]) -> "MemoryDep":
         if self.name in renames:
@@ -199,7 +201,7 @@ class StarDep(Dep):
         raise NotImplementedError("StarDep does not have an index")
 
     def get_numel(self) -> sympy.Expr:
-        return V.graph.get_numel(self.name)
+        return V.graph.get_numel(self.name)  # type: ignore[return-value]
 
     def rename(self, renames: Dict[str, str]) -> "StarDep":
         if self.name in renames:
@@ -234,7 +236,10 @@ class StarDep(Dep):
 # materialize that buffer
 @dataclasses.dataclass(frozen=True)
 class WeakDep(Dep):
+    # Fake dependency on unused buffer
     name: str
+    # Buffer that is doing the mutation
+    mutating_buf: str
 
     @property
     def index(self):
@@ -245,7 +250,7 @@ class WeakDep(Dep):
 
     def rename(self, renames: Dict[str, str]) -> "WeakDep":
         if self.name in renames:
-            return WeakDep(renames[self.name])
+            return WeakDep(renames[self.name], self.mutating_buf)
         return self
 
     def numbytes_hint(self):
@@ -455,7 +460,7 @@ class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
 # TODO: check call sites
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
     cnt = itertools.count()
-    var_ranges: VarRanges = dict()
+    var_ranges: VarRanges = {}
 
     def add_var(length: sympy.Expr) -> sympy.Symbol:
         v = sympy_index_symbol(f"{prefix}{next(cnt)}")
@@ -553,23 +558,21 @@ def extract_input_node_reduction_ranges(
             if read.name in seen:
                 continue
             seen.add(read.name)
-            buffer = V.graph.get_buffer(read.name)
+            buffer = V.graph.try_get_buffer(read.name)
             if buffer is None:
                 continue
-            if (
-                isinstance(buffer, ComputedBuffer)
-                and len(buffer.get_reduction_size()) > 0
-            ):
+            op = buffer.get_defining_op()
+            if op is None:
+                continue
+
+            if isinstance(op, ComputedBuffer) and len(op.get_reduction_size()) > 0:
                 if reduction_size is None:
-                    reduction_size = buffer.get_reduction_size()
-                    size = buffer.get_size()
-                elif (
-                    reduction_size != buffer.get_reduction_size()
-                    or size != buffer.get_size()
-                ):
+                    reduction_size = op.get_reduction_size()
+                    size = op.get_size()
+                elif reduction_size != op.get_reduction_size() or size != op.get_size():
                     return (None, None)
             else:
-                new_reads.extend(buffer.get_reads())
+                new_reads.extend(op.get_reads())
         if reads == new_reads:
             return (size, reduction_size)
         else:
@@ -596,7 +599,9 @@ class FreeUnbackedSymbolsOpsHandler:
 
         return inner
 
-    def indirect_indexing(self, index_var, size, check=True) -> sympy.Symbol:
+    def indirect_indexing(
+        self, index_var, size, check=True, wrap_neg=True
+    ) -> sympy.Symbol:
         assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
         self.symbols |= free_unbacked_symbols(size)
         return sympy_index_symbol(f"({str(index_var)})")
@@ -605,6 +610,9 @@ class FreeUnbackedSymbolsOpsHandler:
         return (None,) * 2
 
     def scan(self, dtypes, combine_fn, values):
+        return (None,) * len(values)
+
+    def sort(self, dtypes, values, stable, descending):
         return (None,) * len(values)
 
     def reduction(

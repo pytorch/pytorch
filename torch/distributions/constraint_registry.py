@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""
 PyTorch provides two global :class:`ConstraintRegistry` objects that link
 :class:`~torch.distributions.constraints.Constraint` objects to

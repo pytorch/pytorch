@@ -3,7 +3,6 @@
 import sys
 
 import torch
-
 from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
@@ -11,15 +10,17 @@ from torch.distributed._shard.sharded_tensor import (
     ShardMetadata,
 )
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
+from torch.distributed.c10d_logger import _c10d_logger
+from torch.distributed.checkpoint.logger import _dcp_logger
 from torch.distributed.checkpoint.metadata import MetadataIndex
 from torch.distributed.checkpoint.utils import find_state_dict_object
-
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
 from torch.testing._internal.distributed.distributed_utils import with_fake_comms
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -121,6 +122,10 @@ class TestMedatadaIndex(TestCase):
 
         with self.assertRaisesRegex(ValueError, "Could not find shard"):
             find_state_dict_object(state_dict, MetadataIndex("st", [1]))
+
+    def test_dcp_logger(self):
+        self.assertTrue(_c10d_logger is not _dcp_logger)
+        self.assertEqual(1, len(_c10d_logger.handlers))
 
 
 if __name__ == "__main__":

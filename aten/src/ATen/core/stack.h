@@ -66,51 +66,51 @@ class Operation {
 
 // treat the last N elements of the stack as a list, looking up
 // element i
-static inline IValue& peek(Stack& stack, size_t i, size_t N) {
+inline IValue& peek(Stack& stack, size_t i, size_t N) {
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
   return *(stack.end() - N + i);
 }
-static inline IValue& peek(Stack* stack, size_t i, size_t N) {
+inline IValue& peek(Stack* stack, size_t i, size_t N) {
   return peek(*stack, i, N);
 }
-static inline const IValue& peek(const Stack& stack, size_t i, size_t N) {
+inline const IValue& peek(const Stack& stack, size_t i, size_t N) {
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
   return *(stack.end() - N + i);
 }
-static inline const IValue& peek(const Stack* stack, size_t i, size_t N) {
+inline const IValue& peek(const Stack* stack, size_t i, size_t N) {
   return peek(*stack, i, N);
 }
 // treat the last N elements of the stack as a list, looking up the
 // slice starting at index i and having length len
-static inline at::ArrayRef<IValue> peekSlice(
+inline at::ArrayRef<IValue> peekSlice(
     const Stack& stack,
     size_t i,
     size_t len,
     size_t N) {
   return at::ArrayRef<IValue>(stack).slice(stack.size() - N + i, len);
 }
-static inline at::ArrayRef<IValue> last(const Stack& stack, size_t N) {
+inline at::ArrayRef<IValue> last(const Stack& stack, size_t N) {
   return peekSlice(stack, 0, N, N);
 }
-static inline at::ArrayRef<IValue> last(const Stack* stack, size_t N) {
+inline at::ArrayRef<IValue> last(const Stack* stack, size_t N) {
   return last(*stack, N);
 }
-static inline void drop(Stack& stack, size_t n) {
+inline void drop(Stack& stack, size_t n) {
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
   stack.erase(stack.end() - n, stack.end());
 }
-static inline void drop(Stack* stack, size_t n) {
+inline void drop(Stack* stack, size_t n) {
   drop(*stack, n);
 }
-static inline IValue pop(Stack& stack) {
+inline IValue pop(Stack& stack) {
   auto r = std::move(stack.back());
   stack.pop_back();
   return r;
 }
-static inline IValue pop(Stack* stack) {
+inline IValue pop(Stack* stack) {
   return pop(*stack);
 }
-static inline std::vector<IValue> pop(Stack& stack, size_t n) {
+inline std::vector<IValue> pop(Stack& stack, size_t n) {
   std::vector<IValue> result;
   result.reserve(n);
   for (const auto i : c10::irange(n)) {
@@ -127,7 +127,7 @@ static inline std::vector<IValue> pop(Stack& stack, size_t n) {
 // b = pop(stack).toTensor();
 // a = pop(stack).toInt();
 template <typename... Types>
-static inline void pop(Stack& stack, Types&... args) {
+inline void pop(Stack& stack, Types&... args) {
   size_t i = 0;
   constexpr size_t N = sizeof...(args);
   (void)std::initializer_list<int>{
@@ -135,15 +135,15 @@ static inline void pop(Stack& stack, Types&... args) {
   drop(stack, N);
 }
 template <typename... Types>
-static inline void pop(Stack* stack, Types&... args) {
+inline void pop(Stack* stack, Types&... args) {
   pop(*stack, args...);
 }
 template <typename Type>
-static inline void push_one(Stack& stack, Type&& arg) {
+inline void push_one(Stack& stack, Type&& arg) {
   stack.emplace_back(std::forward<Type>(arg));
 }
 
-static inline void push_one(Stack& stack, c10::TensorOptions options) {
+inline void push_one(Stack& stack, c10::TensorOptions options) {
   stack.emplace_back(c10::typeMetaToScalarType(options.dtype()));
   stack.emplace_back(options.layout());
   stack.emplace_back(options.device());
@@ -151,15 +151,15 @@ static inline void push_one(Stack& stack, c10::TensorOptions options) {
 }
 
 template <typename... Types>
-static inline void push(Stack& stack, Types&&... args) {
+inline void push(Stack& stack, Types&&... args) {
   (void)std::initializer_list<int>{(push_one(stack, std::forward<Types>(args)), 0)...};
 }
 template <typename... Types>
-static inline void push(Stack* stack, Types&&... args) {
+inline void push(Stack* stack, Types&&... args) {
   return push(*stack, std::forward<Types>(args)...);
 }
 template <class T>
-static inline void push_list_elements(Stack& stack, const c10::List<T>& elements) {
+inline void push_list_elements(Stack& stack, const c10::List<T>& elements) {
   for (T elem : elements) {
     stack.push_back(std::move(elem));
   }
