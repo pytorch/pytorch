@@ -413,7 +413,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                         for entry in torch.fx.proxy._COPY_META_FIELDS:
                             if entry in meta:
                                 params_buffers_to_node_meta[arg.target][entry] = meta[entry]
-        
+
         aten_export_artifact = _export_to_aten_ir(
             mod,
             # this requires empty kwargs, but not in pytree.flattened format
@@ -439,12 +439,12 @@ def _decompose_and_get_gm_with_new_signature_constants(
                             fqn,
                             mod_cls.__module__ + "." + mod_cls.__qualname__,
                         )
-        
+
         # Don't copy over nn_module_stack, stack_trace metadata for params/buffers nodes
         for metadata in params_buffers_to_node_meta.values():
             metadata.pop("nn_module_stack", None)
             metadata.pop("stack_trace", None)
-        
+
         for node in gm.graph.nodes:
             if node.op == "placeholder":
                 if node.target in new_graph_signature.inputs_to_parameters:
