@@ -1871,11 +1871,16 @@ class AotCodeCompiler:
             payload_fn=lambda: source_code,
         )
 
+        # We use a file lock below to protect FS operations. The lock file
+        # is scoped to the 'key', so make sure the consts_path is protected
+        # by the same lock:
+        consts_specified_dir = os.path.join(os.path.split(input_path)[0], key)
+
         def _compile_consts_linux(consts: bytes) -> str:
             _, consts_path = write(
                 consts,
                 "bin",
-                specified_dir=os.path.split(input_path)[0],
+                specified_dir=consts_specified_dir,
             )
 
             consts_o = os.path.splitext(consts_path)[0] + ".o"
@@ -1944,7 +1949,7 @@ class AotCodeCompiler:
                 _, _binary_constants_path = write(
                     consts,
                     "bin",
-                    specified_dir=os.path.split(input_path)[0],
+                    specified_dir=consts_specified_dir,
                 )
                 log.debug("binary constants path: %s", _binary_constants_path)
 
@@ -1967,7 +1972,7 @@ class AotCodeCompiler:
             _, consts_path = write(
                 consts_asm,
                 "S",
-                specified_dir=os.path.split(input_path)[0],
+                specified_dir=consts_specified_dir,
             )
             consts_o = os.path.splitext(consts_path)[0] + ".o"
             cmd = f"{get_cpp_compiler()} -c -o {consts_o} {consts_path}"
