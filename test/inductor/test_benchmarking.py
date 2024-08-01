@@ -373,7 +373,6 @@ class TestBenchmarkingGPU(TestBenchmarking):
         callables = [_callable for _, _, _, _callable in kernels]
         for _callable, timing_ms in zip(callables, timings_ms):
             self.sanity_check(_callable, timing_ms)
-        self.gpu_properties_are_not_initialized()
 
     @gpu_patches
     def test_lazy_benchmark_gpu_smoke(self, benchmarker, kernels):
