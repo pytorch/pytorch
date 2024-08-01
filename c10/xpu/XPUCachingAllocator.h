@@ -1,37 +1,9 @@
 #pragma once
 
-#include <c10/core/Allocator.h>
+#include <c10/core/CachingDeviceAllocator.h>
 #include <c10/xpu/XPUStream.h>
 
 namespace c10::xpu::XPUCachingAllocator {
-
-struct Stat {
-  int64_t current = 0;
-  int64_t peak = 0;
-  int64_t allocated = 0;
-  int64_t freed = 0;
-};
-
-enum struct StatType : uint64_t {
-  AGGREGATE = 0,
-  SMALL_POOL = 1,
-  LARGE_POOL = 2,
-  NUM_TYPES = 3 // remember to update this whenever a new stat type is added
-};
-
-typedef std::array<Stat, static_cast<size_t>(StatType::NUM_TYPES)> StatArray;
-
-// Struct containing memory allocator summary statistics for a device.
-struct DeviceStats {
-  // SUM: bytes allocated by this memory allocator
-  StatArray allocated_bytes;
-  // SUM: bytes reserved by this memory allocator (both free and used)
-  StatArray reserved_bytes;
-  // SUM: bytes within active memory blocks
-  StatArray active_bytes;
-  // SUM: bytes requested by client code
-  StatArray requested_bytes;
-};
 
 C10_XPU_API Allocator* get();
 

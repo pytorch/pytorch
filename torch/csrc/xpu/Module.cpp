@@ -201,13 +201,7 @@ PyObject* THXPModule_memoryStats(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_stats");
   const auto device_index = THPUtils_unpackDeviceIndex(arg);
-
-  using c10::xpu::XPUCachingAllocator::DeviceStats;
-  using c10::xpu::XPUCachingAllocator::Stat;
-  using c10::xpu::XPUCachingAllocator::StatArray;
-  using c10::xpu::XPUCachingAllocator::StatType;
-
-  const auto statToDict = [](const Stat& stat) {
+  const auto statToDict = [](const c10::Stat& stat) {
     py::dict dict;
 
     dict["current"] = stat.current;
@@ -217,8 +211,8 @@ PyObject* THXPModule_memoryStats(PyObject* self, PyObject* arg) {
     return dict;
   };
 
-  const auto statArrayToDict = [=](const StatArray& statArray) {
-    const std::array<const char*, static_cast<size_t>(StatType::NUM_TYPES)>
+  const auto statArrayToDict = [=](const c10::StatArray& statArray) {
+    const std::array<const char*, static_cast<size_t>(c10::StatType::NUM_TYPES)>
         statTypeNames = {"all", "small_pool", "large_pool"};
     py::dict dict;
     for (const auto i : c10::irange(statTypeNames.size())) {
@@ -227,7 +221,7 @@ PyObject* THXPModule_memoryStats(PyObject* self, PyObject* arg) {
     return dict;
   };
 
-  const DeviceStats stats =
+  const c10::DeviceStats stats =
       c10::xpu::XPUCachingAllocator::getDeviceStats(device_index);
 
   py::dict result;
