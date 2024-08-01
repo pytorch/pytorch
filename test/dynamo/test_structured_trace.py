@@ -320,7 +320,7 @@ class StructuredTraceTest(TestCase):
     @requires_cuda
     def test_ddp_graphs(self):
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = torch.nn.Sequential(
                     torch.nn.Linear(1024, 1024),

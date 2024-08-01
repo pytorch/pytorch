@@ -12,6 +12,7 @@ from schedule_registry import ScheduleUnbalanced, ScheduleVShaped
 import torch
 import torch.distributed as dist
 from torch.distributed.pipelining import (
+    _ScheduleForwardOnly,
     pipeline,
     PipelineStage,
     Schedule1F1B,
@@ -55,6 +56,56 @@ class ScheduleTest(MultiProcContinousTest):
         super().setUpClass()
         dev_id = cls.rank % torch.cuda.device_count()
         cls.device = torch.device(f"cuda:{dev_id}")
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("ScheduleClass", [_ScheduleForwardOnly])
+    def test_forward_only(self, ScheduleClass):
+        mod = MultiMLP(d_hid, n_layers=self.world_size)
+        mod.to(self.device)
+
+        mod_ref = copy.deepcopy(mod)
+
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        x_clone = x.clone()
+
+        num_microbatches = 4
+        x_mb = x.chunk(num_microbatches)[0]
+
+        # Create a pipeline
+        split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
+        pipe = pipeline(
+            mod,
+            mb_args=(x_mb,),
+            split_spec=split_spec,
+        )
+
+        stage = pipe.build_stage(
+            self.rank,
+            self.device,
+        )
+
+        # Attach to a schedule
+        schedule = ScheduleClass(stage, num_microbatches)
+
+        # Run
+        num_iters = 20
+        for _ in range(num_iters):
+            if self.rank == 0:
+                schedule.step(x)
+                dist.recv(x, src=self.world_size - 1)
+            elif self.rank == self.world_size - 1:
+                out = schedule.step()
+                dist.send(out, dst=0)
+            else:
+                schedule.step()
+
+        # Validate pipelined output is the same as reference model
+        if self.rank == self.world_size - 1:
+            for _ in range(num_iters):
+                x_clone = mod_ref(x_clone)
+
+            torch.testing.assert_close(x_clone, out)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")

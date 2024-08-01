@@ -578,7 +578,7 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 
 
 class MyPythonStore(dist.Store):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.store = {}
 
@@ -780,7 +780,7 @@ class RendezvousTCPTest(TestCase):
 
 
 class DummyStore(dist.Store):
-    def __init__(self):
+    def __init__(self) -> None:
         self.appends = []
         self.multi_sets = []
         self.multi_gets = []

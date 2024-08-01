@@ -24,7 +24,7 @@ class ConstantAttrMap(collections.abc.MutableMapping):
     if that's the case).
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Underlying dict that we use to implement this mapping.
         self._constant_attrs: Dict[
             Union[int, torch.Tensor, FakeScriptObject], List[Any]

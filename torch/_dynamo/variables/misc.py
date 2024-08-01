@@ -46,7 +46,7 @@ class SuperVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, typevar, objvar=None, specialized=False, **kwargs):
+    def __init__(self, typevar, objvar=None, specialized=False, **kwargs) -> None:
         super().__init__(**kwargs)
         # typevar is the fist argument to super(). In the case where no argument
         # is provided to super(), it is the __class__ object where
@@ -207,7 +207,7 @@ class SuperVariable(VariableTracker):
 
 
 class ExceptionVariable(VariableTracker):
-    def __init__(self, exc_type, args, **kwargs):
+    def __init__(self, exc_type, args, **kwargs) -> None:
         super().__init__(**kwargs)
         self.exc_type = exc_type
         self.args = args
@@ -299,7 +299,7 @@ class ClosureVariable(UnknownVariable):
         *UnknownVariable._nonvar_fields,
     }
 
-    def __init__(self, name, **kwargs):
+    def __init__(self, name, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = name
 
@@ -314,7 +314,7 @@ class InlinedClosureVariable(UnknownVariable):
         *UnknownVariable._nonvar_fields,
     }
 
-    def __init__(self, name, **kwargs):
+    def __init__(self, name, **kwargs) -> None:
         super().__init__(**kwargs)
         self.name = name
 
@@ -323,12 +323,12 @@ class InlinedClosureVariable(UnknownVariable):
 
 
 class NewCellVariable(VariableTracker):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
 
 class NewGlobalVariable(VariableTracker):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
 
@@ -341,7 +341,7 @@ class InspectSignatureVariable(VariableTracker):
             unimplemented(f"inspect.signature with {kwargs}")
         return InspectSignatureVariable(callable)
 
-    def __init__(self, inspected: VariableTracker, **kwargs):
+    def __init__(self, inspected: VariableTracker, **kwargs) -> None:
         super().__init__(**kwargs)
         self.inspected = inspected
 
@@ -379,7 +379,7 @@ class AutogradFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, fn_cls, **kwargs):
+    def __init__(self, fn_cls, **kwargs) -> None:
         super().__init__(**kwargs)
         self.fn_cls = fn_cls
 
@@ -572,7 +572,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         saved_tensors=None,
         needs_input_grad=None,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
         self.inference = inference
         self.proxy = proxy
@@ -667,7 +667,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         value,
         value_type=None,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
 
     def call_method(
@@ -699,7 +699,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
 
 
 class LambdaVariable(VariableTracker):
-    def __init__(self, fn, **kwargs):
+    def __init__(self, fn, **kwargs) -> None:
         super().__init__(**kwargs)
         self.fn = fn
 
@@ -718,14 +718,14 @@ class GetAttrVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, obj, name, **kwargs):
+    def __init__(self, obj, name, **kwargs) -> None:
         super().__init__(**kwargs)
         assert isinstance(obj, VariableTracker)
         assert isinstance(name, str)
         self.obj = obj
         self.name = name
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
 
     @staticmethod
@@ -818,7 +818,7 @@ class GetAttrVariable(VariableTracker):
 
 
 class MethodWrapperVariable(VariableTracker):
-    def __init__(self, method_wrapper, **kwargs):
+    def __init__(self, method_wrapper, **kwargs) -> None:
         super().__init__(**kwargs)
         self.method_wrapper = method_wrapper
 
@@ -845,7 +845,7 @@ class MethodWrapperVariable(VariableTracker):
 
 
 class GetSetDescriptorVariable(VariableTracker):
-    def __init__(self, desc, **kwargs):
+    def __init__(self, desc, **kwargs) -> None:
         super().__init__(**kwargs)
         self.desc = desc
 
@@ -873,7 +873,7 @@ class PythonModuleVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, value: types.ModuleType, **kwargs):
+    def __init__(self, value: types.ModuleType, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
         self.is_torch = self.value is torch or self.value.__name__.startswith("torch.")
@@ -884,7 +884,7 @@ class PythonModuleVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"PythonModuleVariable({self.value})"
 
     def call_hasattr(self, tx: "InstructionTranslator", name):
@@ -909,7 +909,7 @@ class PythonModuleVariable(VariableTracker):
 
 
 class TypingVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -957,7 +957,7 @@ class NumpyVariable(VariableTracker):
 
     constant_fold_functions = (tnp.issubdtype,)
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -1064,10 +1064,10 @@ class NumpyVariable(VariableTracker):
 
 # Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
 class NullVariable(VariableTracker):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return "NullVariable"
 
     def reconstruct(self, codegen):
@@ -1101,14 +1101,14 @@ class StringFormatVariable(VariableTracker):
             )
         return cls(format_string, list(sym_args), dict(sym_kwargs))
 
-    def __init__(self, format_string, sym_args, sym_kwargs, **kwargs):
+    def __init__(self, format_string, sym_args, sym_kwargs, **kwargs) -> None:
         super().__init__(**kwargs)
         assert isinstance(format_string, str)
         self.format_string = format_string
         self.sym_args = sym_args
         self.sym_kwargs = sym_kwargs
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.format_string!r}, {self.sym_args!r}, {self.sym_kwargs!r})"
 
     def reconstruct(self, codegen):
@@ -1134,7 +1134,7 @@ class DebuggingVariable(VariableTracker):
     registered to config.reorderable_logging_functions.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -1188,7 +1188,7 @@ class LoggingLoggerVariable(VariableTracker):
     Represents a call to any of logging.Logger methods
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
 
     def call_method(
@@ -1218,7 +1218,7 @@ class ConstantLikeVariable(VariableTracker):
         np_floating = type("invalid_type", (), {})
         np_dtype = type("invalid_type", (), {})
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -1276,7 +1276,7 @@ class ConstantRegexMatchVariable(ConstantLikeVariable):
 class TorchVersionVariable(ConstantLikeVariable):
     _error_prefix = "torch.__version__"
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         kwargs.setdefault("value", torch.__version__)
         assert kwargs["value"] is torch.__version__
         super().__init__(**kwargs)
