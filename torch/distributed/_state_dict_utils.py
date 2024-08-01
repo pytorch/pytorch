@@ -23,6 +23,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
+
 if dist.is_available() or TYPE_CHECKING:
     from torch.distributed import distributed_c10d
     from torch.distributed._shard.sharded_tensor import ShardedTensor
@@ -411,16 +412,18 @@ def _create_cpu_state_dict(
             if pin_memory:
 
                 def unpin_memory(t):
-                    succ = torch.cuda.cudart().cudaHostUnregister(t.data_ptr())
+                    succ = int(torch.cuda.cudart().cudaHostUnregister(t.data_ptr()))
                     assert (
                         succ == 0
                     ), f"Unpinning shared memory failed with error-code: {succ}"
 
                 weakref.finalize(t, unpin_memory, t)
-                succ = torch.cuda.cudart().cudaHostRegister(
-                    t.data_ptr(),
-                    t.numel() * t.element_size(),
-                    1,  # lines up with 'cudaHostRegisterPortable'
+                succ = int(
+                    torch.cuda.cudart().cudaHostRegister(
+                        t.data_ptr(),
+                        t.numel() * t.element_size(),
+                        1,  # lines up with 'cudaHostRegisterPortable'
+                    )
                 )
                 assert (
                     succ == 0

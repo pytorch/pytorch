@@ -607,6 +607,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
         )
         out_feature = 30
+
         for binary_fn, input_shape, bias, dtype in options:
             metrics.reset()
             # addmm(mm) + (linear+add)
@@ -2325,7 +2326,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def forward(self, x, y):
                 x = self.conv(self.relu(x))
                 y = self.linear(y)
-                y = torch.cat((y, y), 1)
+                y = torch.cat((y, y + 1), 1)
                 y = torch.ops.aten.permute.default(y, [0, 2, 1]).reshape(1, 32, 28, 28)
                 return x + y
 
