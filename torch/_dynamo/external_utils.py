@@ -74,7 +74,7 @@ class FakeBackwardCFunction:
         self,
         real: torch.autograd.function.BackwardCFunction,
         saved_tensors: List[torch.Tensor],
-    ):
+    ) -> None:
         self.real = real
         self.saved_tensors = saved_tensors
 

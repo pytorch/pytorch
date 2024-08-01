@@ -494,9 +494,9 @@ Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking
   return to_impl(
       self,
       dtype,
-      nullopt,
+      std::nullopt,
       ensure_has_index(device),
-      nullopt,
+      std::nullopt,
       non_blocking,
       copy,
       optional_memory_format);
@@ -506,9 +506,9 @@ Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy, st
   return to_impl(
       self,
       dtype,
-      nullopt,
-      nullopt,
-      nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
       non_blocking,
       copy,
       optional_memory_format);
