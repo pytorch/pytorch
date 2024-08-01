@@ -43,7 +43,7 @@ jobs:
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
   update-slow-tests:
-    runs-on: linux.2xlarge
+    runs-on: amz2023.linux.2xlarge
     environment: update-commit-hash
     steps:
       - name: Setup SSH (Click me for login details)
