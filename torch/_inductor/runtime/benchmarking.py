@@ -265,7 +265,7 @@ class Benchmarker:
             if elapsed_time_ms > 1:
                 break
         torch.cuda.synchronize()
-        return idx
+        return idx + 1
 
     @cached_property
     def cpu_launch_overhead_ms_per_event_record(self: Self) -> float:
