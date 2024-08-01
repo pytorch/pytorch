@@ -64,7 +64,7 @@ class ConstantVariable(VariableTracker):
 
         return ConstantVariable(value, **kwargs)
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         if not ConstantVariable.is_literal(value):
             for disallowed_type, reason in _type_to_assert_reason.items():
@@ -81,7 +81,7 @@ class ConstantVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
 
     def python_type(self):
@@ -208,7 +208,7 @@ class ConstantVariable(VariableTracker):
 
 
 class EnumVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -223,7 +223,7 @@ class EnumVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"EnumVariable({type(self.value)})"
 
     def python_type(self):

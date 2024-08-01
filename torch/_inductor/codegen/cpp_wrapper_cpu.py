@@ -188,6 +188,8 @@ class CppWrapperCpu(WrapperCodeGen):
                 """
             )
 
+        self.header.splice("typedef at::Half half;")
+        self.header.splice("typedef at::BFloat16 bfloat16;")
         self.header.splice("#include <c10/util/generic_math.h>")
 
         if not V.graph.aot_mode:

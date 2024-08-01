@@ -126,7 +126,7 @@ def get_mutating_model(
 
 
 class ToyInnerModel(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = [nn.Linear(100, 100), nn.Linear(100, 100)]
         self.layers = nn.Sequential(*self.layers)
@@ -188,7 +188,7 @@ def apply_fsdp_with_checkpointing(
 
 def get_custom_model(device):
     class MyCustomLinear(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.weight = nn.Parameter(torch.randn(512, 512))
 
@@ -199,7 +199,7 @@ def get_custom_model(device):
             return tmp + torch.where(tmp < 0.5, 0.3, 0.6)
 
     class MyLinear(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.linear = torch.nn.Linear(512, 512)
 
@@ -207,7 +207,7 @@ def get_custom_model(device):
             return self.linear(x)
 
     class MyModule(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             mods = [
                 (MyLinear(), torch.nn.ReLU()),
@@ -252,7 +252,7 @@ def get_hf_bert(rank):
 
 
 class CheckSplitsCompiler:
-    def __init__(self):
+    def __init__(self) -> None:
         self.compiler_called = 0
 
     def compile_fn(self, gm, example_inputs):
@@ -334,7 +334,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
     @patch.object(config, "optimize_ddp", True)
     def test_symbol_splitting(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight1 = nn.Parameter(torch.randn(512, 512))
                 self.weight2 = nn.Parameter(torch.randn(512, 512))
@@ -354,7 +354,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
     @config.patch(optimize_ddp=True, capture_scalar_outputs=True)
     def test_unbacked_symbol_splitting_direct(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight1 = nn.Parameter(torch.randn(512, 512))
                 self.weight2 = nn.Parameter(torch.randn(512, 512))
@@ -375,7 +375,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
     @config.patch(optimize_ddp=True, capture_scalar_outputs=True)
     def test_unbacked_symbol_splitting_indirect(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight1 = nn.Parameter(torch.randn(512, 512))
                 self.weight2 = nn.Parameter(torch.randn(512, 512))
@@ -397,7 +397,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
     @config.patch(optimize_ddp=True, capture_scalar_outputs=True)
     def test_unbacked_symbol_splitting_torture_multi(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight1 = nn.Parameter(torch.randn(512, 512))
                 self.weight2 = nn.Parameter(torch.randn(512, 512))
@@ -425,7 +425,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
     @config.patch(optimize_ddp=True, capture_dynamic_output_shape_ops=True)
     def test_unbacked_symbol_splitting_no_binding(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight1 = nn.Parameter(torch.randn(512, 512))
                 self.weight2 = nn.Parameter(torch.randn(512, 512))
@@ -552,7 +552,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
         )
 
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = torch.nn.Linear(64, 32)
                 self.fc2 = torch.nn.Linear(32, 16)
@@ -1035,7 +1035,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         # channel dim must be > 64 for inductor to do layout optimization and use NHWC
 
         class ToyModelConv(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.net = nn.Sequential(
                     *[
@@ -1098,7 +1098,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         K = 70
 
         class Foo(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear0 = nn.Linear(N, K)
                 self.linear1 = torch.nn.Linear(D * K, 2048)
@@ -1231,7 +1231,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         N = 1000
 
         class InnerModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(N, N)
                 self.linear2 = torch.nn.Linear(N, N)
@@ -1242,7 +1242,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 return a
 
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.inner_mod1 = InnerModule()
                 self.inner_mod2 = InnerModule()
