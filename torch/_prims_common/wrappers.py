@@ -2,8 +2,8 @@
 import inspect
 import warnings
 from functools import wraps
-
-from typing import Callable, NamedTuple, Optional, overload, Sequence, Tuple
+from typing import Callable, NamedTuple, Optional, overload, Sequence, Tuple, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch._prims_common as utils
@@ -18,6 +18,10 @@ from torch._prims_common import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_unflatten
+
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 
 @overload
@@ -214,7 +218,7 @@ def out_wrapper(
     exact_dtype: bool = False,
     pass_is_out: bool = False,
     preserve_memory_format: bool = False,
-):
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     # The wrapped function needs to convert the output parameters to ensure
     # compatibility between the Python API (which always uses "out" as the
     # parameter name and may be a tuple) and the Aten API (which may have
@@ -231,7 +235,7 @@ def out_wrapper(
     def maybe_compute_memory_format(t):
         return utils.suggest_memory_format(t) if preserve_memory_format else None
 
-    def _out_wrapper(fn: Callable) -> Callable:
+    def _out_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         """
         Adds the out parameter to a Python reference.
         """
@@ -253,21 +257,21 @@ def out_wrapper(
         is_factory_fn = all(p in sig.parameters for p in factory_kwargs)
 
         @wraps(fn)
-        def _fn(*args, out=None, **kwargs):
+        def _fn(*args: _P.args, out=None, **kwargs: _P.kwargs):
             if is_factory_fn and out is not None:
                 for k in factory_kwargs:
                     out_attr = getattr(out, k)
                     if k not in kwargs:
                         kwargs[k] = out_attr
             if pass_is_out:
-                result = fn(*args, is_out=(out is not None), **kwargs)
+                result = fn(*args, is_out=(out is not None), **kwargs)  # type: ignore[arg-type]
             else:
                 result = fn(*args, **kwargs)
             assert (
                 isinstance(result, TensorLike)
                 and is_tensor
                 or isinstance(result, Tuple)  # type: ignore[arg-type]
-                and len(result) == len(out_names)
+                and len(result) == len(out_names)  # type: ignore[arg-type]
             )
             if out is not None:
                 # Naively you might expect this assert to be true, but
@@ -290,16 +294,16 @@ def out_wrapper(
                     assert isinstance(out, TensorLike)
                     # These two operations are done in-place
                     _maybe_resize_out(
-                        out, result.shape, maybe_compute_memory_format(result)
+                        out, result.shape, maybe_compute_memory_format(result)  # type: ignore[union-attr]
                     )
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
                     torch._check_type(
-                        len(out) == len(result),
-                        lambda: f"expected tuple of {len(result)} elements but got {len(out)}",
+                        len(out) == len(result),  # type: ignore[arg-type]
+                        lambda: f"expected tuple of {len(result)} elements but got {len(out)}",  # type: ignore[arg-type]
                     )
-                    for r, o in zip(result, out):
+                    for r, o in zip(result, out):  # type: ignore[arg-type]
                         # These two operations are done in-place
                         _maybe_resize_out(o, r.shape, maybe_compute_memory_format(r))
                         _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=exact_dtype)  # type: ignore[arg-type]
