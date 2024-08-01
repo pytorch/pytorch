@@ -245,8 +245,6 @@ class NestedTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
-        from torch._subclasses.fake_tensor import FakeTensor
-
         # inner tensors: _values, _offsets, [_lengths], [_min_seqlen], [_max_seqlen]
         assert len(inner_tensors) >= 2 and len(inner_tensors) <= 5
         values = inner_tensors["_values"]
@@ -261,13 +259,6 @@ class NestedTensor(torch.Tensor):
         if max_seqlen_tensor is not None:
             metadata_cache["max_seqlen"] = max_seqlen_tensor
         ragged_idx = meta["ragged_idx"]
-
-        # Alternatively, we could make it the caller's responsibility to
-        # cache it. But this heuristic seems simple enough.
-        ragged_source = offsets if lengths is None else lengths
-        if isinstance(ragged_source, FakeTensor):
-            ragged_size = outer_size[ragged_idx]
-            ragged_source.nested_int_memo = ragged_size
 
         return NestedTensor(
             values,

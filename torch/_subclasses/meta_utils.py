@@ -855,6 +855,14 @@ class MetaConverter:
                     )
                     inner_tensors[attr] = new_empty_tensor
 
+                if t.is_nested:
+                    # Invariant: A fake tensor post-creation is guaranteed to
+                    # have any associated symbolic nested int set
+                    offsets = inner_tensors["_offsets"]
+                    lengths = inner_tensors.get("_lengths", None)
+                    ragged_source = offsets if lengths is None else lengths
+                    ragged_source.nested_int_memo = outer_size[t.ctx["ragged_idx"]]
+
                 return t.type.__tensor_unflatten__(
                     inner_tensors, t.ctx, outer_size, outer_stride
                 )

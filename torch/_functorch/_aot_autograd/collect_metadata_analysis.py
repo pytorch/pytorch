@@ -632,7 +632,11 @@ from a multi-output view call"
                     t, lambda _, inner_t: view_avoid_dupes_with_primals(inner_t)
                 )
             if isinstance(t, Tensor):
-                return t.view(t.shape)
+                out = t.view(t.shape)
+                # Invariant: A fake tensor post-creation is guaranteed to
+                # have any associated symbolic nested int set
+                out.nested_int_memo = t.nested_int_memo  # type: ignore[attr-defined]
+                return out
             return t
 
         # This analysis function returns *only* the outputs that are meant to be tangents to the backwards.
