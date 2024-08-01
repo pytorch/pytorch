@@ -2215,6 +2215,10 @@ if (custom_op_wrapper.get() == NULL) {
                     return f"PyBool_FromLong({1 if raw_arg else 0})"
                 elif isinstance(raw_arg, complex):
                     return f"PyComplex_FromDoubles({raw_arg.real, raw_arg.imag})"
+                else:
+                    raise NotImplementedError(
+                        f"arg type {arg_type} with raw_arg {raw_arg} is not yet supported by custom_op_wrapper"
+                    )
             else:
                 raise NotImplementedError(
                     f"arg type {arg_type} is not yet supported by custom_op_wrapper"
