@@ -1644,7 +1644,7 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""",
         sub_count = 0
 
         class PoliteMode(TorchDispatchMode):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.pre_count = 0
                 self.post_count = 0
 

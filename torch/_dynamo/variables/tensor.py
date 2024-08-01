@@ -5,6 +5,7 @@ import inspect
 import logging
 import operator
 import textwrap
+import traceback
 import types
 import unittest
 from typing import Dict, List, TYPE_CHECKING
@@ -15,9 +16,6 @@ import torch._numpy as tnp
 import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -27,6 +25,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented, UserError, UserErrorType
@@ -49,10 +48,16 @@ from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
 
+
 try:
     import numpy as np
 except ModuleNotFoundError:
     np = None
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
 
 log = logging.getLogger(__name__)
 
@@ -748,6 +753,8 @@ class TensorVariable(VariableTracker):
     @staticmethod
     @functools.lru_cache(None)
     def _warn_capture_scalar_outputs():
+        user_stack = torch._guards.TracingContext.extract_stack()
+        user_stack_formatted = "".join(traceback.format_list(user_stack))
         log.warning(
             textwrap.dedent(
                 """\
@@ -756,8 +763,12 @@ class TensorVariable(VariableTracker):
                     or:
                         env TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1
                     to include these operations in the captured graph.
+
+                    Graph break: from user code at:
+                    %s
                 """
-            )
+            ),
+            user_stack_formatted,
         )
 
     def method___len__(self):

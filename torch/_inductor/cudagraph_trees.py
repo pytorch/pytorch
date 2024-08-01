@@ -1004,7 +1004,7 @@ class CUDAGraphNode:
         if (
             not self.rerecord_if_static_inputs_change
             and not torch._C._tensors_data_ptrs_at_indices_equal(
-                new_inputs,
+                new_inputs,  # type: ignore[arg-type]
                 self.static_input_data_ptrs,
                 self.non_managed_static_input_idxs,
             )
@@ -1623,7 +1623,9 @@ class CUDAGraphNode:
         # this is on the hot path so moved to C++. equivalent to:
         # return all(t.data_ptr() == data_ptr for (t, data_ptr) in zip(tensors, data_ptrs))
         if not torch._C._tensors_data_ptrs_at_indices_equal(
-            inputs, self.static_input_data_ptrs, self.cudagraph_managed_idxs
+            inputs,  # type: ignore[arg-type]
+            self.static_input_data_ptrs,
+            self.cudagraph_managed_idxs,
         ):
             status = CheckInvariantStatus.CudagraphManagedIdxMismatch
             _logger = functools.partial(
@@ -1646,7 +1648,9 @@ class CUDAGraphNode:
         if (
             self.rerecord_if_static_inputs_change
             and not torch._C._tensors_data_ptrs_at_indices_equal(
-                inputs, self.static_input_data_ptrs, self.static_input_idxs
+                inputs,  # type: ignore[arg-type]
+                self.static_input_data_ptrs,
+                self.static_input_idxs,
             )
         ):
             status = CheckInvariantStatus.StaticInputIdxMismatch

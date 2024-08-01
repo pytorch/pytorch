@@ -472,4 +472,5 @@ if TYPE_CHECKING:
 
 from torch.utils._config_module import install_config_module
 
+
 install_config_module(sys.modules[__name__])
