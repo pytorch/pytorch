@@ -143,6 +143,12 @@ def parse_args():
         default="None",
     )
 
+    parser.add_argument(
+        "--output-dir",
+        help="Choose the output directory to save the logs",
+        default="DEFAULT_OUTPUT_DIR",
+    )
+
     args, _ = parser.parse_known_args()
 
     if args.omp_num_threads:
