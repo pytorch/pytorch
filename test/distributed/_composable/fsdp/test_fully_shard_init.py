@@ -23,6 +23,7 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed._tensor.placement_types import _StridedShard
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp._init_utils import (
     _init_inter_node_process_group,
@@ -405,7 +406,9 @@ class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
             self.assertEqual(sharded_param.size(), orig_param.size())
             self.assertEqual(sharded_param.stride(), orig_param.stride())
             if "in_proj" in orig_param_name:
-                expected_placements = (Shard(0), Shard(0))
+                expected_placements = (
+                    _StridedShard(0, split_factor=tp_mesh.size()), Shard(0)
+                )
             elif "out_proj" in orig_param_name and "weight" in orig_param_name:
                 expected_placements = (Shard(0), Shard(1))
             else:
