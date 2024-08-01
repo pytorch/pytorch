@@ -249,6 +249,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         all_reduce_stream = torch.cuda.Stream()
         (
             reduce_scatter_input,
+            reduce_scatter_output,
             reduce_scatter_event,
             post_reduce_event,
             _,
