@@ -1,20 +1,29 @@
 # mypy: allow-untyped-defs
 import contextlib
 import copy
+import functools
 import math
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from unittest.mock import patch
 
 import sympy
 
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import ir
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
-from ..virtualized import V
-from .common import CSEVariable, ExprPrinter, Kernel, KernelArgs
+from ..virtualized import ops, OpsValue, V
+from .common import (
+    CSEVariable,
+    deduce_output_dtype_by_name,
+    ExprPrinter,
+    Kernel,
+    KernelArgs,
+    OptimizationContext,
+)
 
 
 DTYPE_TO_CPP = {
@@ -74,6 +83,138 @@ LAYOUT_TO_ATEN = {
 INDEX_TYPE = "long"
 
 GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
+
+
+def get_promote_dtype(args):
+    return (
+        functools.reduce(
+            torch.promote_types,  # type: ignore[arg-type]
+            [n.dtype for n in args if isinstance(n, CppCSEVariable)],
+        )
+        if all(n.dtype is not None for n in args if isinstance(n, CppCSEVariable))
+        else None  # not enough info to calculate the promote dtype
+    )
+
+
+def promote_args(new_args):
+    def promote_arg(arg, promote_type):
+        if (
+            isinstance(arg, CppCSEVariable)
+            and arg.dtype
+            and promote_type
+            and arg.dtype != promote_type
+        ):
+            arg = ops.to_dtype(arg, promote_type)
+            arg = arg.value if isinstance(arg, OpsValue) else arg
+            arg.dtype = promote_type
+        return arg
+
+    promote_type = get_promote_dtype(new_args)
+    promote_fn = functools.partial(
+        promote_arg,
+        promote_type=promote_type,
+    )
+    if (
+        all(
+            new_arg.dtype is not None
+            for new_arg in new_args
+            if isinstance(new_arg, CppCSEVariable)
+        )
+        and promote_type
+    ):
+        new_args = list(map(promote_fn, new_args))
+    return new_args
+
+
+def get_opt_ctx(node: torch.fx.Node) -> OptimizationContext:
+    return node.meta.get(OptimizationContext.key, None)
+
+
+def get_current_node_opt_ctx() -> OptimizationContext:
+    assert V.interpreter.current_node
+    return get_opt_ctx(V.interpreter.current_node)
+
+
+def deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs):
+    if (
+        output_dtype := deduce_output_dtype_by_name(
+            name,
+            *args,
+            **kwargs,
+        )
+    ) is not None:
+        return output_dtype
+    elif name == "masked":
+        # <TODO> Leslie: perhaps we can also deduce the masked dtype by
+        # inputs' CppCseVariable like other. Let's check it if any
+        # unexpected failures.
+        assert (
+            hasattr(V.interpreter, "current_node")
+            and V.interpreter.current_node.target.startswith("masked_subblock")
+            and get_current_node_opt_ctx() is not None
+        )
+        return get_current_node_opt_ctx().dtype
+    else:
+        # deduce output dtype by inputs' dtype
+        assert all(
+            arg.dtype is not None for arg in args if isinstance(arg, CppCSEVariable)
+        )
+        return functools.reduce(
+            torch.promote_types,  # type: ignore[arg-type]
+            [arg.dtype for arg in args if isinstance(arg, CppCSEVariable)],
+        )
+
+
+class CppCSEVariable(CSEVariable):
+    def __init__(self, name, bounds: ValueRanges[Any]):
+        super().__init__(name, bounds)
+        self.is_vec = False
+        self.dtype: Optional[torch.dtype] = None
+        self.dependent_itervars: Set[sympy.Symbol] = set()
+
+    def __repr__(self):
+        return (
+            f"CppCSEVariable(name: {self.name}, bounds: {self.bounds}, is_vec: {self.is_vec}, dtype: {self.dtype}, "
+            f"dependent_itervars: {self.dependent_itervars})"
+        )
+
+    def update_on_args(self, name, args, kwargs):
+        if name == "load":
+            # args[2] is index
+            self._set_dependent_itervars(args[2])
+        else:
+            # propagate relevant itervars and is_vec from args
+            self.dependent_itervars.update(
+                *[
+                    arg.dependent_itervars
+                    for arg in args
+                    if isinstance(arg, CppCSEVariable)
+                ]
+            )
+            if name == "index_expr":
+                self._set_dependent_itervars(args[0])
+            if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
+                self.is_vec = True
+        # NOTE [Deduce dtype of CppCSEVariable at runtime]
+        self.dtype = deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs)
+        assert self.dtype is not None
+
+    def _set_dependent_itervars(self, index: sympy.Expr):
+        """
+        Set the relevant itervars for this variable based on the `index` expression.
+        This includes the itervars directly used in the `index` as well as relevant itervars
+        of other cse variables used in the `index`.
+        """
+        for s in index.free_symbols:
+            if s in V.kernel.itervars:
+                self.dependent_itervars.add(s)  # type: ignore[arg-type]
+            elif s.name in V.kernel.cse.varname_map:  # type: ignore[attr-defined]
+                self.dependent_itervars.update(
+                    V.kernel.cse.varname_map[s.name].dependent_itervars  # type: ignore[attr-defined]
+                )
+
+    def depends_on(self, itervar: sympy.Symbol):
+        return itervar in self.dependent_itervars
 
 
 class CppPrinter(ExprPrinter):

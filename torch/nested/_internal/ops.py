@@ -168,7 +168,7 @@ def squeeze_leading_ones(t):
     # If unsqueezing on the 0th dim becomes supported, we would unsqueeze
     # at step (4) and we would need to update this function to record how
     # many ones we unsqueezed.
-    while t.shape[0] == 1:
+    while t.dim() > 0 and t.shape[0] == 1:
         t = t.squeeze(0)
     return t
 
@@ -209,7 +209,18 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
         # Assume there aren't additional tensors that aren't the "unary/binary" args
         num_tensor_args = sum(isinstance(x, torch.Tensor) for x in args)
         if num_tensor_args == 1:
-            check_schema("self: jt_all, ...", func, *args, **kwargs)
+            # Build up the check schema string. The first tensor arg is assumed to be
+            # an NJT and other args are sent through as-is.
+            schema_parts = []
+            for arg in func._schema.arguments:
+                if isinstance(arg.type, torch.TensorType):
+                    schema_parts.append(f"{arg.name}: jt_all")
+                    break
+                else:
+                    schema_parts.append(f"{arg.name}: any")
+            schema_parts.append("...")
+            check_schema_str = ", ".join(schema_parts)
+            check_schema(check_schema_str, func, *args, **kwargs)
             return functools.partial(jagged_unary_pointwise, func)
         elif num_tensor_args == 2:
             check_schema("lhs: any, rhs: any, ...", func, *args, **kwargs)
@@ -228,8 +239,11 @@ def extract_kwargs(arg):
 
 
 def jagged_unary_pointwise(func, *args, **kwargs):
+    # assume if we get here that there is a single NJT input in the args
+    njt = next(arg for arg in args if isinstance(arg, NestedTensor))
     return NestedTensor(
-        func(args[0]._values, *args[1:], **kwargs), **extract_kwargs(args[0])
+        func(*(arg._values if arg is njt else arg for arg in args), **kwargs),
+        **extract_kwargs(njt),
     )
 
 
@@ -682,6 +696,25 @@ def split_with_sizes_default(func, *args, **kwargs):
     ]
 
 
+@register_jagged_func(
+    torch.ops.aten.narrow.default, "self: jt, dim: any, start: any, length: any"
+)
+def narrow(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+
+    dim = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "narrow")
+    values = func(
+        inp._values,
+        dim=dim,
+        start=new_kwargs["start"],
+        length=new_kwargs["length"],
+    )
+    return NestedTensor(values, **extract_kwargs(inp))
+
+
 @register_jagged_func(torch.ops.aten.chunk.default, "self: jt, chunks: any, dim: any?")
 def chunk_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -991,6 +1024,7 @@ def sum_dim_IntList(func, *args, **kwargs):
             )  # need to read offsets --> pad jagged dimension and apply sum
 
         if new_kwargs["keepdim"]:
+            # TODO: Fix this; it's a bug. should be unsqueezing on ragged_idx
             out = out.unsqueeze(0)
         return out
     else:  # raggedness preserved --> return nested tensor
@@ -1225,7 +1259,14 @@ def select_int(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
-    new_kwargs["dim"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "select")
+    new_kwargs["dim"] = _wrap_jagged_dim(
+        inp.dim(), new_kwargs["dim"], "select", allow_batch_dim=True
+    )
+
+    # handle batch dim slicing via unbind() for now
+    # TODO: make this more efficient
+    if new_kwargs["dim"] == 0:
+        return inp.unbind()[new_kwargs["index"]]
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
@@ -1388,6 +1429,17 @@ def values_default(func, *args, **kwargs):
     # TODO: Handle inference mode properly.
     # See https://github.com/pytorch/pytorch/issues/112024#issuecomment-1779554292
     return inp._values.detach()
+
+
+@register_jagged_func(torch.ops.aten.all.default, "self: jt_all")
+def all_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    return func(inp._values)
 
 
 @register_jagged_func(
