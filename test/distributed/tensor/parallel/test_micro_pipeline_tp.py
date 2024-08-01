@@ -5,6 +5,7 @@ import torch
 import torch.distributed as dist
 from functorch import make_fx
 from torch._inductor.fx_passes.micro_pipeline_tp import (
+    _get_unexposed_collectives,
     find_all_gather_patterns,
     find_reduce_scatter_patterns,
 )
@@ -131,6 +132,31 @@ class MicroPipelineTPTest(TestCase):
 
         self.assertEqual(reduce_scatters[1].reduce_op, "avg")
         self.assertEqual(reduce_scatters[1].scatter_dim, 1)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_inductor_cache()
+    def test_get_unexposed_collectives(self):
+        group = dist.group.WORLD
+
+        def func(inp: torch.Tensor) -> torch.Tensor:
+            a = inp @ inp.T
+            # b is unexposed (hidden by a)
+            b = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
+            c = b @ inp.T
+            # d is unexposed (hidden by c)
+            d = reduce_scatter_tensor(b, "avg", scatter_dim=0, group=group.group_name)
+            # e is exposed
+            e = all_gather_tensor(d, gather_dim=0, group=group.group_name)
+            return a, c, e
+
+        inp = torch.rand(64, 32, device="cuda")
+
+        gm = make_fx(func)(inp)
+        overlappable_collectives = _get_unexposed_collectives(gm.graph)
+        self.assertEqual(
+            list(map(str, overlappable_collectives)),
+            ["all_gather_into_tensor", "reduce_scatter_tensor"],
+        )
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])

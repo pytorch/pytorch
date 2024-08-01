@@ -114,8 +114,8 @@ struct Option {
       : arguments(), is_variadic(is_variadic), has_out(has_out){};
   Option(const Option&) = delete;
   Option(Option&& other) noexcept = default;
-  Option& operator==(const Option&) = delete;
-  Option& operator==(Option&&) = delete;
+  Option& operator=(const Option&) = delete;
+  Option& operator=(Option&&) = delete;
 
   std::vector<Argument> arguments;
   bool is_variadic;

@@ -821,15 +821,12 @@ struct NCCLTraceBuffer {
   }
 
   std::list<json> getCollectiveTraceJson(bool onlyActive) {
-    auto result = dump_entries();
-
     std::list<json> entries;
-    for (auto i : c10::irange(result.size())) {
-      json j;
-      auto& e = result.at(i);
+    for (auto& e : dump_entries()) {
       if (onlyActive && e.time_discovered_completed_.has_value()) {
         continue;
       }
+      json j;
       j[record_id_key_str] = int64_t(e.id_);
       j[pg_id_key_str] = int64_t(e.pg_id_);
       j[pg_name_key_str] = e.pg_name_;
@@ -846,8 +843,7 @@ struct NCCLTraceBuffer {
         auto sizes = std::list<std::list<int>>();
         for (auto dim : dims) {
           auto arg_sizes = std::list<int>();
-          for (auto i : c10::irange(dim)) {
-            (void)i;
+          for (C10_UNUSED auto i : c10::irange(dim)) {
             arg_sizes.push_back(*it++);
           }
           sizes.push_back(arg_sizes);
