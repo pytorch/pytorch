@@ -10781,7 +10781,7 @@ class CommonTemplate:
 
     @skip_if_halide  # need to fix
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_scalar_outputs(self):
+    def test_tensor_item(self):
         def fn(x):
             return x.sum().item()
 
