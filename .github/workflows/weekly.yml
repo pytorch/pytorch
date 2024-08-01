@@ -55,10 +55,12 @@ jobs:
         with:
           python-version: '3.9'
       - name: Install requirements
+        shell: bash
         run: |
           pip install rockset==1.0.3 requests==2.32.2
       - name: Update slow test file
-        with:
+        shell: bash
+        env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
           UPDATEBOT_TOKEN: ${{ secrets.UPDATEBOT_TOKEN}}
