@@ -2301,10 +2301,6 @@ class CppVecKernel(CppKernel):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         assert reduction_type in VECTORIZABLE_RTYPES
         assert dtype == src_dtype
-        if reduction_type == "any":
-            assert dtype == torch.bool
-        else:
-            assert dtype in [torch.float, torch.int64]
         assert isinstance(value, CppCSEVariable), value
 
         if not value.is_vec:
