@@ -10794,6 +10794,16 @@ class CommonTemplate:
         self.common(fn, (x,), check_lowp=False)
         self.common(fn2, (x, y), check_lowp=False)
 
+    @skipIfXpu
+    @requires_gpu()
+    def test_scalar_cpu_tensor_arg(self):
+        def fn(x, y):
+            return x + y.sum()
+
+        x = torch.rand([20], device="cuda")
+        y = torch.rand([4], device="cpu")
+        self.common(fn, (x, y), check_lowp=False)
+
     def test_float16_to_int16(self):
         def fn(x):
             x_view = x.view(dtype=torch.int16)
