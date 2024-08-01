@@ -16,7 +16,6 @@ from unittest.mock import patch
 import numpy as np
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
@@ -28,7 +27,6 @@ from torch._dynamo.testing import (
 from torch._dynamo.utils import ifdynstaticdefault, same
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.lists import RangeVariable
-
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
@@ -38,6 +36,7 @@ from torch.testing._internal.common_utils import (
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
+
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
@@ -181,6 +180,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         for x in itertools.chain.from_iterable([[a, b], [1, 2]]):
             v = v + x
         return v
+
+    def test_itertools_reconstruct(self):
+        def fn(a):
+            it1 = itertools.repeat(1)
+            it2 = itertools.count(2)
+            for _ in range(3):
+                a += next(it1)
+                a += next(it2)
+            return it1, it2, a
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        i1, i2, a = fn(torch.ones(3, 3))
+        it1, it2, b = opt_fn(torch.ones(3, 3))
+        self.assertEqual(next(i1), next(it1))
+        self.assertEqual(next(i2), next(it2))
+        self.assertEqual(a, b)
 
     @make_test
     def test_obj_eq(a, b):
@@ -1038,6 +1053,51 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x * copy_tensordict["a"]
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_unpack_mutable_map(self):
+        from collections.abc import MutableMapping
+
+        class TensorDict(MutableMapping):
+            def __init__(self):
+                self._dict = {}
+
+            def add(self, key, value):
+                self._dict[key] = value
+
+            def items(self):
+                return self._dict.items()
+
+            def __delitem__(self, key):
+                del self._dict[key]
+
+            def __getitem__(self, key):
+                return self._dict[key]
+
+            def __iter__(self):
+                return iter(self._dict)
+
+            def __len__(self):
+                return len(self._dict)
+
+            def __setitem__(self, key, value):
+                self._dict[key] = value
+
+        tensor_dict = TensorDict()
+        tensor_dict.add("a", torch.ones(4) * 2)
+
+        def gn(x, a=1):
+            return x * a
+
+        def fn(x):
+            return gn(x, **tensor_dict)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
         x = torch.randn(4)
 
         ref = fn(x)
@@ -2971,6 +3031,54 @@ class GraphModule(torch.nn.Module):
         l2 = list(m)
         return l1, l2
 
+    @make_test
+    def test_enumerate(a, b):
+        return list(enumerate([a, b], start=1)), a + 1
+
+    @make_test
+    def test_map_enumerate(a, b):
+        return list(enumerate(map(lambda x: x + 1, [a, b]), start=1)), a + 1
+
+    @make_test
+    def test_map_infinite(a, b):
+        return list(map(lambda x, y: x + y, [a, b], itertools.count(3)))
+
+    @make_test
+    def test_map_unpack_vars(a, b):
+        x, y = map(lambda x: x + 1, [a, b])
+        return x + y
+
+    def test_enumerate_custom(self):
+        class MyClass:
+            def __iter__(self):
+                self.a = 1
+                return self
+
+            def __next__(self):
+                if self.a > 3:
+                    raise StopIteration
+                self.a += 1
+                return self.a
+
+        def fn(x):
+            for i, it in enumerate(MyClass()):
+                x += i + it
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3, 3)), opt_fn(torch.ones(3, 3)))
+
+    def test_enumerate_reconstruct(self):
+        def fn(a, b):
+            return enumerate([a, b], start=1)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        inps = (torch.randn(3, 3), torch.randn(3, 3))
+        it1 = fn(*inps)
+        it2 = opt_fn(*inps)
+        self.assertIsInstance(it2, enumerate)
+        self.assertEqual(list(it1), list(it2))
+
 
 def udf_mul(x, y):
     return x * y
@@ -3470,6 +3578,64 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(ValueError, "zip()"):
             opt_fn(x, ys, zs[:1])
+
+    def test_fn_with_attr(self):
+        def fn(x):
+            if fn.pred:
+                return torch.relu(x * 2)
+            else:
+                return torch.abs(x + 3)
+
+        t = torch.ones(3)
+        counter = torch._dynamo.testing.CompileCounter()
+        fn.pred = True
+        opt_fn_0 = torch.compile(fullgraph=True, backend=counter)(fn)
+        self.assertEqual(opt_fn_0(t), fn(t))
+        self.assertEqual(counter.frame_count, 1)
+        fn.pred = False
+        opt_fn_1 = torch.compile(fullgraph=True, backend=counter)(fn)
+        self.assertEqual(opt_fn_1(t), fn(t))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_str_handler_for_user_defined_object(self):
+        """
+        Confirms handler behaviour for `str` is the same between eager and dynamo.
+        Compares a user defined object with custom `__str__` method and without.
+        """
+
+        class CustomStr:
+            def __str__(self):
+                return "ok"
+
+        def foo_custom_str(x):
+            a = CustomStr()
+            return x, str(a)
+
+        eager_custom_str = foo_custom_str(torch.ones(4))
+        dynamo_custom_str = torch.compile(foo_custom_str, fullgraph=True)(torch.ones(4))
+
+        self.assertEqual(eager_custom_str[1], dynamo_custom_str[1])
+        self.assertEqual(eager_custom_str[1], "ok")
+
+        class DefaultStr:
+            pass
+
+        def foo_default_str(x):
+            a = DefaultStr()
+            return x, str(a)
+
+        eager_default_str = foo_default_str(torch.ones(4))
+        dynamo_default_str = torch.compile(foo_default_str, fullgraph=True)(
+            torch.ones(4)
+        )
+
+        # Check that the tensor output from eager and dynamo modes are the same
+        self.assertEqual(eager_default_str[0], dynamo_default_str[0])
+
+        # Check that the class name (without memory address) is the same in both modes
+        eager_class_name = eager_default_str[1].split(" object at")[0]
+        dynamo_class_name = dynamo_default_str[1].split(" object at")[0]
+        self.assertEqual(eager_class_name, dynamo_class_name)
 
 
 instantiate_parametrized_tests(FunctionTests)
