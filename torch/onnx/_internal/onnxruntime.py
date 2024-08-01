@@ -602,7 +602,7 @@ class OrtExecutionInfoPerSession:
 
 @dataclasses.dataclass
 class OrtExecutionInfoForAllGraphModules:
-    def __init__(self):
+    def __init__(self) -> None:
         # All sessions (and their related information) created by exporting the same GraphModule
         # with different inputs.
         self.execution_info_per_graph_module: Dict[

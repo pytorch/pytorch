@@ -53,7 +53,7 @@ class ONNXTorchPatcher:
         `torch.fx._symbolic_trace._wrapped_methods_to_patch`
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # List of file paths processed by torch.load.
         self.paths: List[Union[str, io.BufferedIOBase]] = []
 

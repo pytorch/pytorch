@@ -119,7 +119,7 @@ inner(torch.randn(20, 20, requires_grad=True) + 1)
         backend_name = "relu_compile_error_TESTING_ONLY"
         run_code = f"""\
 class CpuCudaModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.m_x = torch.nn.Linear(20, 20).cuda()
         self.m_y = torch.nn.Linear(20, 20)
@@ -149,7 +149,7 @@ inner(torch.randn(20, 20).cuda(), torch.randn(20, 20))
             res.minifier_module(),
             """\
 class Repro(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.G__mod___m_x = Linear(in_features=20, out_features=20, bias=True).cuda()
         self.G__mod___m_y = Linear(in_features=20, out_features=20, bias=True)
@@ -204,7 +204,7 @@ inner(torch.randn(20, 20))
             res.repro_module(),
             """\
 class Repro(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def forward(self, x_19):
