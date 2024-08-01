@@ -316,14 +316,14 @@ def foreach_reduce(
         # If this cast is real (e.g. bf16 reduction, fp32 parameters), then we
         # still hold onto the `reduce_output` until the end of backward, which
         # may/may not use more memory depending on fragmentation
-        orig_dtype_reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
+        final_reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
         for padded_unsharded_size, fsdp_param in zip(
             padded_unsharded_sizes, fsdp_params
         ):
             new_sharded_grad = torch.as_strided(
-                orig_dtype_reduce_output,
+                final_reduce_output,
                 size=fsdp_param.sharded_size,
                 stride=fsdp_param.contiguous_sharded_stride,
                 storage_offset=flat_grad_offset,
