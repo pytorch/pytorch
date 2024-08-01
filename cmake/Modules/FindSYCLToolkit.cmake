@@ -51,7 +51,7 @@ find_file(
 # Find SYCL library fullname.
 find_library(
   SYCL_LIBRARY
-  NAMES sycl
+  NAMES sycl-preview
   HINTS ${SYCL_LIBRARY_DIR}
   NO_DEFAULT_PATH
 )
