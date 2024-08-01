@@ -6,16 +6,12 @@ import inspect
 import itertools
 import logging
 import types
-
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.base import VariableTracker
@@ -26,14 +22,18 @@ from torch._guards import Source
 from torch._ops import HigherOrderOperator
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
-from .. import variables
 
+from .. import variables
 from ..exc import UncapturedHigherOrderOpError, unimplemented, Unsupported
 from ..source import AttrSource
 from ..utils import proxy_args_kwargs
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 log = logging.getLogger(__name__)
@@ -1467,6 +1467,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     ) -> VariableTracker:
         from torch._higher_order_ops.wrap import TagActivationCheckpoint
         from torch.utils.checkpoint import noop_context_fn
+
         from .builder import wrap_fx_proxy
 
         context_fn = None
@@ -1609,6 +1610,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         fn_name: str,
     ):
         from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
+
         from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx

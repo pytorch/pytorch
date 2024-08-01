@@ -19,7 +19,6 @@ from typing import (
     NoReturn,
     Optional,
     Sequence,
-    Set,
     Tuple,
     TYPE_CHECKING,
     Union,
@@ -51,6 +50,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.utils._mode_utils import no_dispatch
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 
 from . import config, ir
@@ -345,35 +345,39 @@ class GraphLowering(torch.fx.Interpreter):
         self.ras_by_symbol: Dict[
             sympy.Symbol, List[RuntimeAssert]
         ] = shape_env.deferred_runtime_asserts.copy()
-        self.bound_unbacked_symbols: Set[sympy.Symbol] = set()
+        self.bound_unbacked_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: List[str] = []
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
-        self.device_types: Set[str] = (
-            const_module.device_types if const_module else set()
+        self.device_types: OrderedSet[str] = (
+            const_module.device_types if const_module else OrderedSet()
         )
-        self.device_idxs: Set[int] = const_module.device_idxs if const_module else set()
+        self.device_idxs: OrderedSet[int] = (
+            const_module.device_idxs if const_module else OrderedSet()
+        )
         self.cuda = False
         self.buffers: List[ir.Buffer] = []
         self.operations: List[ir.Operation] = []
         self.const_output_index: Dict[str, int] = (
             const_output_index if const_output_index else {}
         )
-        self.folded_constants: Set[str] = (
-            set(const_output_index.keys()) if const_output_index else set()
+        self.folded_constants: OrderedSet[str] = (
+            OrderedSet(const_output_index.keys())
+            if const_output_index
+            else OrderedSet()
         )
         self.constants: Dict[str, torch.Tensor] = (
             const_module.constants if const_module else {}
         )
         self.torchbind_constants: Dict[str, torch._C.ScriptObject] = {}
         self.constant_reprs: Dict[str, str] = {}
-        self.removed_operations: Set[str] = set()
-        self.removed_buffers: Set[str] = set()
-        self.removed_inplace_buffers: Set[str] = set()
-        self.mutated_buffers: Set[str] = set()
-        self.never_reuse_buffers: Set[str] = set()
-        self.inplaced_to_remove: Set[str] = set()
+        self.removed_operations: OrderedSet[str] = OrderedSet()
+        self.removed_buffers: OrderedSet[str] = OrderedSet()
+        self.removed_inplace_buffers: OrderedSet[str] = OrderedSet()
+        self.mutated_buffers: OrderedSet[str] = OrderedSet()
+        self.never_reuse_buffers: OrderedSet[str] = OrderedSet()
+        self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
@@ -389,7 +393,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
         self.lists: Dict[str, List[str]] = {}
-        self.mutated_inputs: Set[str] = set()
+        self.mutated_inputs: OrderedSet[str] = OrderedSet()
         self.mutated_input_idxs: List[int] = []
         self.name_to_buffer: Dict[str, ir.Buffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
@@ -400,7 +404,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         # record multi_kernel choice for cpp_wrapper so the second pass knows
         # which sub-kernel is picked. Copy cpp_wrapper to another variable
-        # since cpp_wrapper flag is set to false for the first pass of codegen.
+        # since cpp_wrapper flag is OrderedSet to false for the first pass of codegen.
         self.record_multi_kernel_choice = cpp_wrapper
         self.multi_kernel_to_choice: Dict[str, int] = {}
 
@@ -409,7 +413,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self.scheduler: torch._inductor.scheduler.Scheduler = None  # type: ignore[assignment]
         self.nodes_prefer_channels_last = (
-            self.find_nodes_prefer_channels_last() if self.layout_opt else set()
+            self.find_nodes_prefer_channels_last() if self.layout_opt else OrderedSet()
         )
         mark_nodes_dislike_padding(gm.graph)
         self._warned_fallback = {"aten.convolution_backward"}
@@ -439,8 +443,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.get_backend_features = functools.lru_cache(None)(get_backend_features)
 
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
-        self.aligned_inputs: Set[str] = set()
-        self.no_fuse_buffer_names: Set[str] = set()
+        self.aligned_inputs: OrderedSet[str] = OrderedSet()
+        self.no_fuse_buffer_names: OrderedSet[str] = OrderedSet()
 
     def has_feature(
         self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
@@ -643,7 +647,7 @@ class GraphLowering(torch.fx.Interpreter):
             name=self.qualify_name(subgraph_name),
         )
 
-    def find_nodes_prefer_channels_last(self) -> Set[Node]:
+    def find_nodes_prefer_channels_last(self) -> OrderedSet[Node]:
         """
         The rule to decide if an node prefer channels last is simple.
         1. if it's input/output of a convolution
@@ -662,7 +666,7 @@ class GraphLowering(torch.fx.Interpreter):
         With rule 2, we makes sure all the tensors in the chain uses channels last layout. So both copies
         can be saved.
         """
-        output_set = set()
+        output_set: OrderedSet[Node] = OrderedSet()
         for n in reversed(self.module.graph.nodes):
             if n.target == torch.ops.aten.convolution.default:
                 output_set.add(n)
@@ -896,7 +900,7 @@ class GraphLowering(torch.fx.Interpreter):
         if self.constants[name].device == device_override or device_override is None:
             return name
         with torch.utils._python_dispatch._disable_current_modes():
-            # caller might have set fake tensor mode which will create a fake tensor
+            # caller might have OrderedSet fake tensor mode which will create a fake tensor
             # when calling .to, so unset modes here
             return self.allocate_non_dup_const_name(
                 f"{name}_{device_override.type}{device_override.index or 0}",
@@ -980,7 +984,7 @@ class GraphLowering(torch.fx.Interpreter):
             # arguments' fx strides
             layout_constraint = None
             if torch._C.Tag.needs_fixed_stride_order in target.tags:
-                # We have to set the current args because call_function will immediately
+                # We have to OrderedSet the current args because call_function will immediately
                 # evaluate this lowering after creating the fallback, without evaluating
                 # the layout constraint
                 args, kwargs = constrain_to_fx_strides(
@@ -1238,9 +1242,11 @@ class GraphLowering(torch.fx.Interpreter):
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-        with ir.IRNode.current_origins(origins), self.set_current_node(
+        with ir.IRNode.current_origins(origins), self.set_current_node(  # type: ignore[arg-type]
             n
-        ), V.set_current_node(n):
+        ), V.set_current_node(
+            n
+        ):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
@@ -1337,7 +1343,7 @@ class GraphLowering(torch.fx.Interpreter):
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
-            num_users = len(set(n.users))
+            num_users = len(OrderedSet(n.users))
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
                     if user.target in needs_realized_inputs:
@@ -1446,7 +1452,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.register_users_of(result)
 
-        new_unbacked_defs = set()
+        new_unbacked_defs: OrderedSet[sympy.Symbol] = OrderedSet()
         for buf in self.buffers[buffer_watermark:]:
             new_unbacked_defs |= buf.get_unbacked_symbol_defs()
         for op in self.operations[operation_watermark:]:
@@ -1540,10 +1546,10 @@ class GraphLowering(torch.fx.Interpreter):
             # end up needing to test equalities on the symbols, and a fresh
             # symbol is likely to hit lots of GuardOnDataDependent errors that
             # we already know facts for.
-            renamed_unbacked_bindings = {
+            renamed_unbacked_bindings = OrderedSet(
                 V.fake_mode.shape_env.unbacked_renamings.get(s, s)
                 for s in unbacked_bindings.keys()
-            }
+            )
             assert new_unbacked_defs >= renamed_unbacked_bindings, (
                 f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
                 f"fx node is: {n.format_node()}\n"
@@ -1611,9 +1617,9 @@ class GraphLowering(torch.fx.Interpreter):
         if "cuda" in self.device_types:
             # first pass
             self.cpp_wrapper = False
-            # Although triton.store_cubin was set in compile_fx, the backward pass didn't pick
+            # Although triton.store_cubin was OrderedSet in compile_fx, the backward pass didn't pick
             # that up. In theory it should work by only setting triton.store_cubin to True here,
-            # but that will cause a problem when use_runtime_constant_folding is set.
+            # but that will cause a problem when use_runtime_constant_folding is OrderedSet.
             with config.patch({"triton.store_cubin": True}):
                 compiled = self.compile_to_module().call
 
@@ -1652,7 +1658,7 @@ class GraphLowering(torch.fx.Interpreter):
                         for x in itertools.chain(params_flat, V.real_inputs)
                     ]
                 else:
-                    # In the backward pass, V.real_inputs is not set.
+                    # In the backward pass, V.real_inputs is not OrderedSet.
                     # Generating random inputs based on self.example_inputs sometimes can be problematic,
                     # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
                     real_inputs = [
