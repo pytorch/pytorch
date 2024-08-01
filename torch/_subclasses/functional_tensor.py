@@ -2,7 +2,7 @@
 import contextlib
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Type, Union
+from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -38,23 +38,6 @@ def _conversion_method_template(**extra_kwargs):
         return self.to(*args, **{**kwargs, **extra_kwargs})
 
     return _
-
-
-class PassThroughDescriptor:
-    _name: str
-
-    def __set_name__(self, owner: str, name: str) -> None:
-        self._name = name
-
-    def __get__(
-        self, obj: "FunctionalTensor", objtype: Optional[Type["FunctionalTensor"]]
-    ):
-        raise AssertionError("Don't expect this to be used today")
-
-    def __set__(self, obj: "FunctionalTensor", value: Optional[object]):
-        inner = torch._from_functional_tensor(obj.elem)
-        assert isinstance(inner, torch._subclasses.FakeTensor)
-        setattr(inner, self._name, value)
 
 
 class FunctionalTensor(torch.Tensor):
@@ -125,8 +108,6 @@ class FunctionalTensor(torch.Tensor):
         torch.ops.aten.feature_alpha_dropout.default,  # type: ignore[has-type]
         torch.ops.aten.unsafe_chunk.default,  # type: ignore[has-type]
     ]
-
-    nested_int_memo = PassThroughDescriptor()
 
     def __new__(cls, elem):
         assert torch._is_functional_tensor(elem)
@@ -260,11 +241,6 @@ class FunctionalTensor(torch.Tensor):
 
     def mark_mutation_hidden_from_autograd(self) -> None:
         torch._functionalize_mark_mutation_hidden_from_autograd(self.elem)
-
-    def get_nested_int(self, *, coeff=1):
-        inner = torch._from_functional_tensor(self.elem)
-        assert isinstance(inner, torch._subclasses.FakeTensor)
-        return inner.get_nested_int(coeff=coeff)
 
     def tolist(self) -> Any:
         if self.elem.dim() == 0:
@@ -748,3 +724,9 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def mark_mutation_hidden_from_autograd(self, tensor) -> None:
         torch._functionalize_mark_mutation_hidden_from_autograd(tensor)
+
+
+def mb_unwrap_functional_tensor(tensor: torch.Tensor):
+    if isinstance(tensor, FunctionalTensor):
+        return torch._from_functional_tensor(tensor.elem)
+    return tensor

@@ -2059,13 +2059,30 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
         self._validate_compile(fn, arg_fn=lambda: (values, offsets))
 
     def test_in_graph_construction_from_intermediate_4(self):
-        # Shared intermediate
+        # Shared intermediate (should be same as case #1)
         def fn(values):
             offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
             nt = torch.nested.nested_tensor_from_jagged(values, offsets)
             values2 = torch.ones_like(values)
             nt2 = torch.nested.nested_tensor_from_jagged(values2, offsets)
             return nt * nt2
+
+        values = torch.randn(10, 5).requires_grad_(True)
+        self._validate_compile(fn, arg_fn=lambda: (values,))
+
+    # AssertionError: s2 (could be from ['<ephemeral: intermediate_offsets_or_lengths>',
+    @unittest.expectedFailure
+    def test_in_graph_construction_from_intermediate_5(self):
+        # non-shared intermediate
+        def fn(values):
+            offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            values2 = torch.ones_like(values)
+            nt2 = torch.nested.nested_tensor_from_jagged(values2, offsets.clone())
+            if nt2.shape[1] != nt.shape[1]:
+                return nt * 2
+            else:
+                return nt * 3
 
         values = torch.randn(10, 5).requires_grad_(True)
         self._validate_compile(fn, arg_fn=lambda: (values,))
@@ -2296,8 +2313,8 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
                     guard_str,
                     """\
 Eq(s5 - 1, s2)
-Eq(s11 - 1, s6)
-Eq(s10, s8)""",
+Eq(s12 - 1, s7)
+Eq(s11, s9)""",
                 )
             elif nt_view_name.startswith("base_is_nt_True"):
                 self.assertExpectedInline(
@@ -2309,8 +2326,8 @@ Eq(s10, s8)""",
                     guard_str,
                     """\
 Eq(s4 - 1, s1)
-Eq(s12 - 1, s7)
-Eq(s11, s9)""",
+Eq(s13 - 1, s8)
+Eq(s12, s10)""",
                 )
             return gm
 
