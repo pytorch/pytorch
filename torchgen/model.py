@@ -1774,7 +1774,7 @@ class Annotation:
         assert not (
             is_write and len(alias_set) > 1
         ), f"alias set larger than 1 is not mutable, got {ann} instead."
-        after_set = tuple(m.group(5).split("|")) if m.group(5) else tuple()
+        after_set = tuple(m.group(5).split("|")) if m.group(5) else ()
         assert not (
             len(before_alias) > 1 and len(after_set) > 1
         ), f"before alias set and after alias set cannot be larger than 1 at the same time, got {ann} instead."
@@ -2283,7 +2283,7 @@ class Arguments:
             # TensorOptions are dropped in signature,
             # so we can pair factory functions with their out= variants.
             tensor_options=None,
-            post_tensor_options_kwarg_only=tuple(),
+            post_tensor_options_kwarg_only=(),
             # out arguments are dropped in signature
             out=(),
         )
