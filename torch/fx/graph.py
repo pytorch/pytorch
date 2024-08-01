@@ -575,8 +575,12 @@ class CodeGen:
                 if isinstance(meta_val, torch.Tensor):
                     stride_annotation = f"{stringify_shape(meta_val.stride())}" if include_stride else ""
                     device_annotation = f"{meta_val.device}" if include_device else ""
+                    # Note: this gets us past test_quantization.py failures (torch.bits8 not in dtype_abbrs)
+                    # but those failures occur even if we don't apply the first PR
+                    # (i.e. if we still check isinstance(meta_val, FakeTensor))
+                    dtype_annotation = dtype_abbrs[meta_val.dtype] if meta_val.dtype in dtype_abbrs else str(meta_val.dtype)
                     maybe_type_annotation = \
-                        f': "{red(dtype_abbrs[meta_val.dtype])}{blue(stringify_shape(meta_val.shape))}' \
+                        f': "{red(dtype_annotation)}{blue(stringify_shape(meta_val.shape))}' \
                         f'{dim_blue(stride_annotation)}{dim_green(device_annotation)}"'
                 elif isinstance(meta_val, py_sym_types):
                     maybe_type_annotation = f': "Sym({meta_val})"'
