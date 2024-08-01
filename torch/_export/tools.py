@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 import warnings
 from typing import Any, Dict, Iterable, Optional, Tuple
@@ -6,6 +7,7 @@ import torch
 import torch.export
 import torch.export._trace
 from torch._utils_internal import log_export_usage
+
 
 log = logging.getLogger(__name__)
 

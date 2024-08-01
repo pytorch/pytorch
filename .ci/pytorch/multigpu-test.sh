@@ -18,8 +18,9 @@ time python test/run_test.py --verbose -i distributed/test_c10d_gloo
 time python test/run_test.py --verbose -i distributed/test_c10d_nccl
 time python test/run_test.py --verbose -i distributed/test_c10d_spawn_gloo
 time python test/run_test.py --verbose -i distributed/test_c10d_spawn_nccl
-time python test/run_test.py --verbose -i distributed/test_cuda_p2p
+time python test/run_test.py --verbose -i distributed/test_compute_comm_reordering
 time python test/run_test.py --verbose -i distributed/test_store
+time python test/run_test.py --verbose -i distributed/test_symmetric_memory
 time python test/run_test.py --verbose -i distributed/test_pg_wrapper
 time python test/run_test.py --verbose -i distributed/rpc/cuda/test_tensorpipe_agent
 # FSDP tests
@@ -53,6 +54,9 @@ time python test/run_test.py --verbose -i distributed/_composable/fsdp/test_full
 
 # Pipelining composability tests
 time python test/run_test.py --verbose -i distributed/pipelining/test_composability.py
+
+# ND composability tests
+time python test/run_test.py --verbose -i distributed/_composable/test_composability/test_2d_composability
 
 # Other tests
 time python test/run_test.py --verbose -i test_cuda_primary_ctx

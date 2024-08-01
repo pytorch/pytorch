@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import logging
-
 import tempfile
-
 from typing import Mapping, Tuple
 
 import onnx
 import onnx.inliner
+
 import pytorch_test_common
 import transformers  # type: ignore[import]
 
@@ -17,7 +16,7 @@ from torch import nn
 from torch._subclasses import fake_tensor
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
-from torch.onnx._internal.diagnostics import infra
+from torch.onnx._internal.diagnostics import infra  # noqa: TCH001
 from torch.onnx._internal.fx import diagnostics, registration
 from torch.testing._internal import common_utils
 
@@ -171,13 +170,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                     torch.argmax(input, dim=1, keepdim=True),
                 )
 
-        # NOTE: KeyError: dim raised in optimizer
-        with self.assertWarnsOnceRegex(
-            UserWarning, "ONNXScript optimizer failed. Skipping optimization."
-        ):
-            _ = dynamo_export(
-                ArgminArgmaxModel(), model_input, export_options=self.export_options
-            )
+        _ = dynamo_export(
+            ArgminArgmaxModel(), model_input, export_options=self.export_options
+        )
 
     def test_multiple_outputs_op_with_evaluator(self):
         class TopKModel(torch.nn.Module):
@@ -411,7 +406,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 super().__init__()
                 self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=False)
                 self.fc1 = nn.Linear(9216, 128, bias=False)
-                self.register_buffer("buffer", torch.randn(1, 128))
+                self.buffer = torch.nn.Buffer(torch.randn(1, 128))
 
             def forward(self, tensor_x: torch.Tensor):
                 tensor_x = self.conv2(tensor_x)

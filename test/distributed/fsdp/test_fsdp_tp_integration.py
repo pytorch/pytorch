@@ -37,6 +37,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     RMSNormPython,
 )
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -424,7 +425,7 @@ class TestTPFSDPIntegration(FSDPTest):
                     torch.randn(8, 8), tp_mesh, [Replicate()], run_check=False
                 )
                 self.param = torch.nn.Parameter(replicated_dt)
-                self.register_buffer("buf", replicated_buffer_dt)
+                self.buf = torch.nn.Buffer(replicated_buffer_dt)
 
             def forward(self, x):
                 return self.param + self.buffer + 1

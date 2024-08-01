@@ -296,7 +296,7 @@ TORCH_API Tensor cached_cast(
     const Tensor& arg,
     c10::DeviceType device_type = c10::DeviceType::CUDA);
 
-// Overload to process optional<Tensor>
+// Overload to process std::optional<Tensor>
 inline std::optional<Tensor> cached_cast(
     at::ScalarType to_type,
     const std::optional<Tensor>& arg,
@@ -304,7 +304,7 @@ inline std::optional<Tensor> cached_cast(
   if (arg.has_value()) {
     return cached_cast(to_type, *arg, device_type);
   } else {
-    return c10::nullopt;
+    return std::nullopt;
   }
 }
 

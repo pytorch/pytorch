@@ -1,13 +1,10 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from functools import partial
 from typing import Any, Callable, Dict, TYPE_CHECKING
 
 import torch
-
-if TYPE_CHECKING:
-    import torch._ops
-
 from .binary import _apply_native_binary, NATIVE_BINARY_FNS, NATIVE_INPLACE_BINARY_FNS
 from .core import (
     _get_data,
@@ -24,6 +21,10 @@ from .reductions import (
     TORCH_REDUCE_FNS,
 )
 from .unary import _apply_native_unary, NATIVE_INPLACE_UNARY_FNS, NATIVE_UNARY_FNS
+
+
+if TYPE_CHECKING:
+    from torch._ops import OpOverload
 
 
 __all__ = []  # type: ignore[var-annotated]
@@ -226,7 +227,7 @@ def _function_to_sparse_csr(func, *args, **kwargs):
     return _MaskedToSparseCsr.apply(args[0])
 
 
-_MASKEDTENSOR_DISPATCH_TABLE: Dict["torch._ops.OpOverload", Callable[..., Any]] = {}
+_MASKEDTENSOR_DISPATCH_TABLE: Dict["OpOverload", Callable[..., Any]] = {}
 
 
 def register_dispatch_func(aten_ops):

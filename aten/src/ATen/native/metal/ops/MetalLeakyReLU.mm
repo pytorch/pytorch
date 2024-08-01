@@ -9,13 +9,11 @@
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
 #include <torch/library.h>
 
-namespace at {
-namespace native {
-namespace metal {
+namespace at::native::metal {
 
 using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
 
-Tensor& leaky_relu_(Tensor& input, const Scalar& negative_slope_val) {
+static Tensor& leaky_relu_(Tensor& input, const Scalar& negative_slope_val) {
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   IntArrayRef outputSize = input.sizes();
@@ -49,7 +47,7 @@ Tensor& leaky_relu_(Tensor& input, const Scalar& negative_slope_val) {
   return input;
 }
 
-Tensor leaky_relu(const at::Tensor& input, const Scalar& negative_slope_val) {
+static Tensor leaky_relu(const at::Tensor& input, const Scalar& negative_slope_val) {
   MPSImage* X = imageFromTensor(input);
   IntArrayRef outputSize = input.sizes();
   MetalTensorImplStorage mt{outputSize.vec()};
@@ -86,8 +84,6 @@ Tensor leaky_relu(const at::Tensor& input, const Scalar& negative_slope_val) {
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::leaky_relu_"), TORCH_FN(leaky_relu_));
   m.impl(TORCH_SELECTIVE_NAME("aten::leaky_relu"), TORCH_FN(leaky_relu));
-};
+}
 
-}
-}
-}
+} // namespace at::native::metal
