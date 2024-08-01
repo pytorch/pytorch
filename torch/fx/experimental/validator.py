@@ -16,7 +16,6 @@ import torch.fx.traceback as fx_traceback
 from torch._dynamo.exc import TorchDynamoException
 from torch.fx.node import Argument, Target
 from torch.utils._sympy.interp import sympy_interp
-from torch._dynamo.utils import dynamo_timed
 
 log = logging.getLogger(__name__)
 
@@ -518,10 +517,8 @@ try:
             self._assertions.add(ref)
 
         def validate(self) -> None:
-            with dynamo_timed("TranslationValidator.validate"):
-                return self._validate()
+            from torch._dynamo.utils import dynamo_timed
 
-        def _validate(self) -> None:
             if len(self._source_exprs) == 0 or len(self._target_exprs) == 0:
                 # If there are no source/target expressions, there's nothing we really
                 # wish to prove. So, we just return.
@@ -551,7 +548,7 @@ try:
             solver.add(*self._target_exprs)
 
             log.debug("translation validation: start")
-            r = solver.check()
+            r = dynamo_timed()(solver.check)()
             if r == z3.sat:
                 # Target expressions are unsound.
                 # Log the found model and the source expressions that failed.
