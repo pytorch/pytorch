@@ -10,6 +10,7 @@ class _ParameterMeta(_TensorMeta):
 class Parameter(Tensor, metaclass=_ParameterMeta):
     def __init__(
         self,
+        *,
         data: Tensor | None = None,
         requires_grad: bool = True,
     ) -> None: ...
@@ -32,12 +33,26 @@ class UninitializedParameter(Parameter):
         dtype: dtype | None = None,
     ) -> None: ...
 
+class _BufferMeta(_TensorMeta):
+    def __instancecheck__(self, instance: object) -> bool: ...
+
+class Buffer(Tensor, metaclass=_BufferMeta):
+    persistent: bool
+    def __init__(
+        self,
+        data: Tensor | None = None,
+        *,
+        persistent: bool = True,
+    ) -> None: ...
+
 class UninitializedBuffer(Tensor):
+    persistent: bool
     def __init__(
         self,
         requires_grad: bool = False,
         device: Device = None,
         dtype: dtype | None = None,
+        persistent: bool = True,
     ) -> None: ...
     def materialize(
         self,

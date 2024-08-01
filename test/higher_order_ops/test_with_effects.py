@@ -76,7 +76,7 @@ def forward(self, arg1_1):
     add = torch.ops.aten.add.Tensor(arg1_1, arg1_1);  arg1_1 = None
     with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops.aten._print.default, 'moo');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
-    _sink_tokens_default = torch.ops.prims._sink_tokens.default((getitem_2,));  getitem_2 = None
+    _sink_tokens_default = torch.ops.prims._sink_tokens.default((getitem_2,));  getitem_2 = _sink_tokens_default = None
     return (add,)""",  # noqa: B950
             )
 
@@ -110,7 +110,7 @@ def forward(self, arg0_1, arg1_1):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.ones(3))
+                self.buf = torch.nn.Buffer(torch.ones(3))
 
             def forward(self, x):
                 torch.ops.aten._print("moo")
