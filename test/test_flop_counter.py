@@ -737,6 +737,31 @@ class TestFlopCounter(TestCase):
         with self.assertWarnsRegex(UserWarning, "not needed"):
             FlopCounterMode(mod)
 
+    def test_custom_op(self):
+        from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
+
+        @torch.library.custom_op("mylib::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        called = 0
+
+        with self.assertRaisesRegex(ValueError, "expected each target to be OpOverloadPacket"):
+            register_flop_formula(torch.ops.mylib.foo.default)(lambda x: x)
+
+        @register_flop_formula(torch.ops.mylib.foo)
+        def formula(*args, **kwargs):
+            nonlocal called
+            called += 1
+            return 9001
+
+        x = torch.randn(3)
+        with FlopCounterMode(display=False) as mode:
+            y = foo(x)
+
+        self.assertEqual(called, 1)
+        self.assertExpectedInline(get_total_flops(mode), """9001""")
+
 
 if __name__ == "__main__":
     run_tests()
