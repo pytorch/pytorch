@@ -127,6 +127,30 @@ class UtilTest(DTensorTestBase):
                     global_tensor[dim0_start:dim0_end, dim1_start:dim1_end],
                 )
 
+    @with_comms
+    def test_fsdp_tp_meta_compute(self):
+        # FSDP + TP sharding
+        tp_size = 2
+        dp_size = self.world_size // tp_size
+        global_mesh = init_device_mesh(
+            self.device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+        )
+        # local shard shape is [2, 2]
+        global_tensor_shape = torch.Size([2 * self.world_size, 2])
+        placements = [_StridedShard(0, split_factor=tp_size), Shard(0)]
+
+        local_shape, global_offset = compute_local_shape_and_global_offset(
+            global_tensor_shape, global_mesh, placements
+        )
+        assert global_mesh.get_coordinate is not None
+        dp_rank = global_mesh.get_local_rank("dp")
+        tp_rank = global_mesh.get_local_rank("tp")
+        shard_idx_on_dim_0 = tp_rank * dp_size + dp_rank
+        expected_local_shape = (2, 2)
+        expected_global_offset = (shard_idx_on_dim_0 * 2, 0)
+        self.assertEqual(local_shape, expected_local_shape)
+        self.assertEqual(global_offset, expected_global_offset)
+
 
 class TestStridedSharding(DTensorTestBase):
     @property

@@ -4,6 +4,7 @@ import torch
 import torch.distributed._tensor.api as dtensor
 from torch._prims_common import ShapeType
 from torch.distributed._tensor.placement_types import (
+    _StridedShard,
     DTensorSpec,
     Partial,
     Placement,
@@ -93,6 +94,10 @@ def compute_local_shape_and_global_offset(
     else:
         local_shape = list(global_shape)
         global_offset = [0] * len(global_shape)
+        shard_idx_stride_by_mesh_dim = [
+            [0] * mesh.ndim for _ in range(len(global_shape))
+        ]  # index by (shard_dim, mesh_dim)
+        num_shards_by_tensor_dim = [1] * len(global_shape)
 
         for idx, placement in enumerate(placements):
             mesh_dim_size = mesh.size(idx)
@@ -120,6 +125,39 @@ def compute_local_shape_and_global_offset(
                     global_offset[shard_dim] = local_offset[shard_dim]
                 else:
                     global_offset[shard_dim] += local_offset[shard_dim]
+
+                num_shards_by_tensor_dim[shard_dim] *= mesh_dim_size
+
+        # TODO: this logic only allows contiguous sharding followed by strided sharding
+        # such as [Shard(0), _StridedShard(0, split_factor=2), Shard(0)] but not
+        # [_StridedShard(0, split_factor=2), Shard(0), Shard(0)]
+        # TODO: this logic can be applied to contiguous sharding as well
+        strided_sharding = any(isinstance(p, _StridedShard) for p in placements)
+        if strided_sharding:
+            for idx, placement in enumerate(placements):
+                mesh_dim_size = mesh.size(idx)
+                if isinstance(placement, Shard):
+                    shard_dim = placement.dim
+                    if isinstance(placement, _StridedShard):
+                        shard_idx_stride_by_mesh_dim[shard_dim][
+                            idx
+                        ] = num_shards_by_tensor_dim[shard_dim] // (
+                            placement.split_factor * mesh_dim_size
+                        )
+                    else:
+                        num_shards_by_tensor_dim[shard_dim] //= mesh_dim_size
+                        shard_idx_stride_by_mesh_dim[shard_dim][
+                            idx
+                        ] = num_shards_by_tensor_dim[shard_dim]
+
+            shard_idx = [
+                sum([x * y for x, y in zip(shard_idx_stride, my_coordinate)])
+                for shard_dim, shard_idx_stride in enumerate(
+                    shard_idx_stride_by_mesh_dim
+                )
+            ]
+
+            global_offset = [x * y for x, y in zip(local_shape, shard_idx)]
 
         return tuple(local_shape), tuple(global_offset)
 
