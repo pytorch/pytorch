@@ -95,6 +95,7 @@ def insert_deferred_runtime_asserts(
         free_symbols,
         InnerTensorKey,
         resolve_unbacked_bindings,
+        _has_unsupported_sympy_function,
     )
     from torch.utils._sympy.numbers import int_oo
     from torch.utils._sympy.reference import PythonReferenceAnalysis
@@ -120,19 +121,6 @@ def insert_deferred_runtime_asserts(
         else:
             placeholders.add(node)
 
-    def _contains_sympy_function(expr):
-        """
-        Checks if sympy expression is or contains any args that are sympy.Functions
-        TODO(pianpwk): remove this eventually
-        """
-        if not isinstance(expr, sympy.Expr):
-            return False
-        if isinstance(expr, sympy.Function):
-            return True
-        if hasattr(expr, "args"):
-            return any(_contains_sympy_function(arg) for arg in expr.args)
-        return False
-
     def _is_intermediate_tensor_sym_call(node: fx.Node) -> bool:
         """
         If a size/stride/storage offset call on an intermediate tensor,
@@ -141,7 +129,7 @@ def insert_deferred_runtime_asserts(
         return (
             (val := _get_sym_val(node)) is not None
             and not isinstance(val, sympy.Number)
-            and not _contains_sympy_function(val)
+            and not _has_unsupported_sympy_function(val)
             # this holds back from reifying anything in torch.utils._sympy.functions.py from input shapes.
             # TODO: figure out missing parts, too many failures on TruncToInt, CeilToInt, etc.
             # see for example:
@@ -204,6 +192,8 @@ def insert_deferred_runtime_asserts(
                 )
                 # if we've already added a constrain_range call for this symbol,
                 # then single-symbol bound asserts like u0 >= 0, u0 <= 5 are redundant.
+                or _has_unsupported_sympy_function(ra.expr)
+                # don't add anything we can't reify
             ):
                 continue
 
