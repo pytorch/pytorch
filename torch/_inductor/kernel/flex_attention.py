@@ -462,18 +462,18 @@ _a100_default_config = {
 }
 
 
-def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
-    dtype = query.get_dtype()
-    head_dim = query.get_size()[-1]
+def get_default_config_fwd(
+    dtype, head_dim, device_capability
+) -> Tuple[int, int, int, int]:
     default_config = None
 
-    if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
+    if head_dim <= 256 and device_capability >= (9, 0):  # H100
         if dtype == torch.float32:
             default_config = (64, 64, 4, 3)
         else:
             default_config = (128, 64, 4, 3)
         default_config = _h100_default_config.get((dtype, head_dim), default_config)
-    elif head_dim <= 256 and torch.cuda.get_device_capability() >= (8, 0):  # A100
+    elif head_dim <= 256 and device_capability >= (8, 0):  # A100
         if dtype == torch.float32:
             default_config = (64, 64, 4, 3)
         else:
@@ -486,6 +486,13 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
             default_config = (64, 32, 4, 3)
 
     return default_config
+
+
+def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
+    dtype = query.get_dtype()
+    head_dim = query.get_size()[-1]
+    device_capability = torch.cuda.get_device_capability()
+    return get_default_config_fwd(dtype, head_dim, device_capability)
 
 
 def _get_default_configs_fwd() -> List[Tuple[int, int, int, int]]:
@@ -675,7 +682,11 @@ def flex_attention(
         configs += _get_default_configs_fwd()
         # autotuning results do not match actual performance for this config
         configs.remove((64, 16, 4, 3))
-        configs = list(set(configs))
+
+        def remove_duplicates(lst):
+            return list(dict.fromkeys(lst))
+
+        configs = remove_duplicates(configs)
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
@@ -780,7 +791,9 @@ def flex_attention(
         )
         choice = autoheuristic.get_choice_caller()
         if choice is not None:
-            choices = [choice]
+            choices.insert(0, choice)
+        if not config.max_autotune:
+            choices = choices[:1]
 
     return (
         autotune_select_algorithm(
