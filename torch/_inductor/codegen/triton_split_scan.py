@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Optional, Set
+from typing import Optional
 
 import torch._inductor.runtime.hints
 from torch._inductor import config
 from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.triton import triton_compute_type, TritonKernel
 from torch._prims_common import prod
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv
 
 
@@ -30,7 +31,7 @@ class TritonSplitScanKernel(TritonKernel):
         self,
         *groups,
         index_dtype: str,
-        mutations: Optional[Set[str]] = None,
+        mutations: Optional[OrderedSet[str]] = None,
         reduction_hint=torch._inductor.runtime.hints.ReductionHint.DEFAULT,
         min_elem_per_thread=0,
     ):
