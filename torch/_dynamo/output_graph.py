@@ -1322,11 +1322,14 @@ class OutputGraph:
             "dynamo_flat_name_to_original_fqn"
         ] = self.dynamo_flat_name_to_original_fqn.copy()
 
-        graph_code_log.warning(
-            "%s",
+        graph_string = str(
             lazy_format_graph_code(
                 name, gm, include_stride=True, include_device=True, colored=True
-            ),
+            )
+        )
+        graph_code_log.debug(
+            "%s",
+            graph_string,
         )
         torch._logging.trace_structured(
             "dynamo_output_graph",
