@@ -334,8 +334,11 @@ CUDAGraph::~CUDAGraph() {
 // hipGraphLaunch are finished before we release any memory. This feature was enabled in rocm6.2. 
 // We need to ensure all async opreations finish before deleting the object. 
 #if (defined(USE_ROCM) && ROCM_VERSION >= 60200)
-  AT_CUDA_CHECK(cudaSetDevice(capture_dev_));
-  AT_CUDA_CHECK(cudaDeviceSynchronize());
+  if (capture_dev_ != UNDEFINED_DEVICE) // check if capture_dev_ contains the real device id
+  {
+    AT_CUDA_CHECK(cudaSetDevice(capture_dev_));
+    AT_CUDA_CHECK(cudaDeviceSynchronize());
+  }
 #endif
 }
 
