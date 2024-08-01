@@ -878,7 +878,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     )
 
     class AOTModule(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.orig_module = mod
 
