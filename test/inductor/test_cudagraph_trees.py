@@ -617,6 +617,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._inductor.config.patch("fx_graph_remote_cache", False)
         def test_cache_hit_forward_miss_backward(self):
             # Test that we don't cache cudagraphs, skipping cudagraphs on backward on a cache miss
+
             @torch.compile(mode="reduce-overhead")
             def foo(x):
                 return x * x * x
@@ -640,7 +641,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                     # Reset dynamo and related caches except for FXGraphCache
                     torch._dynamo.reset()
-
                     # Forwards should be a cache hit now, we still skip cudagraphs
                     inp = torch.rand([20, 20], device="cuda", requires_grad=True)
                     out = foo(inp)
@@ -655,6 +655,45 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
                 out.backward(back_inp)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+
+            # we should not have cudagraph'd anything
+            assert self.get_manager() is None
+
+        @torch._inductor.config.patch("fx_graph_cache", True)
+        @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        def test_backward_gets_cached_cudagraphs(self):
+            # We pass cpu tensors to foo and save that into the cache
+            # On a subsequent run in a new process, cudagraphs should be
+            # disabled properly on both forward and backwards runs.
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            torch._dynamo.reset()
+            counters.clear()
+            FxGraphCache.clear()
+
+            # Use cpu device to disable cudagraphs during compilation
+            inp = torch.rand([20, 20], device="cpu", requires_grad=True)
+            out = foo(inp)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+            back_inp = torch.empty_strided([20, 20], [0, 1], device="cpu")
+            out.backward(back_inp)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+
+            # Run again on new process
+            torch._dynamo.reset()
+
+            # Forward and backward should also disable cudagraphs without compilation
+            inp = torch.rand([20, 20], device="cpu", requires_grad=True)
+            out = foo(inp)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+            back_inp = torch.empty_strided([20, 20], [0, 1], device="cpu")
+            out.backward(back_inp)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
 
             # we should not have cudagraph'd anything
             assert self.get_manager() is None
