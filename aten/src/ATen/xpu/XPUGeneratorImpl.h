@@ -4,7 +4,7 @@
 
 namespace at {
 
-struct TORCH_API XPUGeneratorImpl : public GeneratorImpl {
+struct TORCH_XPU_API XPUGeneratorImpl : public GeneratorImpl {
   // Constructors
   XPUGeneratorImpl(DeviceIndex device_index = -1);
   ~XPUGeneratorImpl() override = default;

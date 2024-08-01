@@ -1,4 +1,6 @@
+# mypy: allow-untyped-defs
 from collections import OrderedDict
+
 
 """
 This file contains helper functions that implement experimental functionality

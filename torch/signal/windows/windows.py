@@ -1,3 +1,5 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 from typing import Optional, Iterable
 
 import torch

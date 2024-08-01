@@ -150,7 +150,7 @@ Generator make_generator(Args&&... args) {
  * the backend generator type (CPU/CUDAGeneratorImpl etc.)
  */
 template <typename T>
-static inline T * check_generator(std::optional<Generator> gen) {
+inline T * check_generator(std::optional<Generator> gen) {
   TORCH_CHECK(gen.has_value(), "Expected Generator but received nullopt");
   TORCH_CHECK(gen->defined(), "Generator with undefined implementation is not allowed");
   TORCH_CHECK(T::device_type() == gen->device().type(), "Expected a '", T::device_type(), "' device type for generator but found '", gen->device().type(), "'");
@@ -164,7 +164,7 @@ static inline T * check_generator(std::optional<Generator> gen) {
  * the backend generator type (CPU/CUDAGeneratorImpl etc.)
  */
 template <typename T>
-static inline T* get_generator_or_default(const std::optional<Generator>& gen, const Generator& default_gen) {
+inline T* get_generator_or_default(const std::optional<Generator>& gen, const Generator& default_gen) {
   return gen.has_value() && gen->defined() ? check_generator<T>(gen) : check_generator<T>(default_gen);
 }
 
@@ -177,7 +177,7 @@ namespace detail {
  * - The new state tensor must be a torch.ByteTensor
  * - Data of the new state tensor must be contiguous
  */
-static inline void check_rng_state(const c10::TensorImpl& new_state) {
+inline void check_rng_state(const c10::TensorImpl& new_state) {
   TORCH_CHECK_TYPE(
     new_state.layout() == kStrided && new_state.device().type() == kCPU && new_state.dtype() == kByte,
     "RNG state must be a torch.ByteTensor"

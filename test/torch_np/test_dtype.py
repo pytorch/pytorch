@@ -5,7 +5,6 @@ from unittest import expectedFailure as xfail
 import numpy
 
 import torch._numpy as tnp
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -18,7 +17,7 @@ from torch.testing._internal.common_utils import (
 dtype_names = [
     "bool_",
     *[f"int{w}" for w in [8, 16, 32, 64]],
-    "uint8",
+    *[f"uint{w}" for w in [8, 16, 32, 64]],
     *[f"float{w}" for w in [16, 32, 64]],
     *[f"complex{w}" for w in [64, 128]],
 ]
