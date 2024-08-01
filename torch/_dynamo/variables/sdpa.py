@@ -50,7 +50,7 @@ class SDPAParamsVariable(VariableTracker):
             tx, param_vars, {}
         )
 
-    def __init__(self, proxy, param_vars, **kwargs):
+    def __init__(self, proxy, param_vars, **kwargs) -> None:
         self.proxy = proxy
         self.param_vars = param_vars
         super().__init__(**kwargs)

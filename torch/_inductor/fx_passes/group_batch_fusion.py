@@ -101,7 +101,7 @@ def update_pointwise_example_value(pointwise_node, input, other, op):
 
 
 class GroupBatchFusionBase:
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         self.graph_search_options = kwargs.pop(
             "graph_search_options", default_graph_search_options
         )
@@ -169,7 +169,7 @@ class BatchFusion(GroupBatchFusionBase):
 
 
 class BatchPointwiseOpsFusionFactory(BatchFusion):
-    def __init__(self, op, **kwargs):
+    def __init__(self, op, **kwargs) -> None:
         super().__init__(**kwargs)
         self.op = op
 
@@ -388,7 +388,7 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
     Batch pointwise math operator (e.g., add, mul) in post grad pass.
     """
 
-    def __init__(self, op, **kwargs):
+    def __init__(self, op, **kwargs) -> None:
         super().__init__(op, **kwargs)
         self.op = op
 
@@ -870,7 +870,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     We fuse it in random place, and the introduced stack node may be merged in split cat.
     """
 
-    def __init__(self, op, **kwargs):
+    def __init__(self, op, **kwargs) -> None:
         super().__init__(op, **kwargs)
         self.op = op
 
@@ -939,7 +939,7 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
     The introduced stack node may be merged in split cat.
     """
 
-    def __init__(self, op, **kwargs):
+    def __init__(self, op, **kwargs) -> None:
         super().__init__(op, **kwargs)
         self.op = op
 
@@ -992,75 +992,75 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
 
 @register_fusion("batch_tanh")
 class BatchTanhPreGradFusion(BatchPointwiseOpsPreGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(torch.tanh, **kwargs)
 
 
 @register_fusion("batch_sigmoid")
 class BatchSigmoidPreGradFusion(BatchPointwiseOpsPreGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(torch.sigmoid, **kwargs)
 
 
 @register_fusion("batch_relu")
 class BatchReLuPreGradFusion(BatchPointwiseOpsPreGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(torch.nn.functional.relu, **kwargs)
 
 
 @register_fusion("batch_aten_tanh", pre_grad=False)
 class BatchTanhPostGradFusion(BatchPointwiseOpsPostGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(aten.tanh.default, **kwargs)
 
 
 @register_fusion("batch_aten_sigmoid", pre_grad=False)
 class BatchSigmoidPostGradFusion(BatchPointwiseOpsPostGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(aten.sigmoid.default, **kwargs)
 
 
 @register_fusion("batch_aten_relu", pre_grad=False)
 class BatchReLuPostGradFusion(BatchPointwiseOpsPostGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(aten.relu.default, **kwargs)
 
 
 @register_fusion("batch_aten_add", pre_grad=False)
 class BatchAddPostGradFusion(BatchPointwiseMathOpsPostGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(aten.add.Tensor, **kwargs)
 
 
 @register_fusion("batch_aten_sub", pre_grad=False)
 class BatchSubPostGradFusion(BatchPointwiseMathOpsPostGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(aten.sub.Tensor, **kwargs)
 
 
 @register_fusion("batch_aten_div", pre_grad=False)
 class BatchDivPostGradFusion(BatchPointwiseMathOpsPostGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(aten.div.Tensor, **kwargs)
 
 
 @register_fusion("batch_aten_mul", pre_grad=False)
 class BatchMulPostGradFusion(BatchPointwiseMathOpsPostGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(aten.mul.Tensor, **kwargs)
 
 
 class _OrderedSet:
-    def __init__(self, param=None):
+    def __init__(self, param=None) -> None:
         if param:
             self.rep = OrderedDict(dict.fromkeys(param))
         else:
             self.rep = OrderedDict()
 
-    def __contains__(self, o):
+    def __contains__(self, o) -> bool:
         return o in self.rep
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.rep.__len__()
 
     def append(self, o):
