@@ -11,7 +11,6 @@ import torch.nn.functional as F
 from torch._dynamo.utils import count_calls, counters
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
-
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
@@ -992,6 +991,7 @@ class TestPatternMatcher(TestCase):
                 "target=torch.ops.aten.sym_size"
             ).run(str(saved_graph))
 
+    @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_with_mutation(self):
         counter = 0
         test_pass = PatternMatcherPass(pass_name="test")
@@ -1149,6 +1149,7 @@ class TestPatternMatcher(TestCase):
                 # of search_fn).
                 self.assertTrue(pattern.pattern_eq(search_fn_pattern))
 
+    @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations1(self):
         counter = 0
         test_pass = PatternMatcherPass()
@@ -1205,6 +1206,7 @@ class TestPatternMatcher(TestCase):
                 # addmm should be replaced
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):
         counter = 0
         test_pass = PatternMatcherPass()
@@ -1250,6 +1252,7 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(counter, 1)
                 torch.testing.assert_close(actual, expected)
 
+    @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations3(self):
         counter = 0
         test_pass = PatternMatcherPass()

@@ -8,7 +8,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
 from functorch.compile import nop
 from torch._dynamo import compiled_autograd
 from torch._functorch.aot_autograd import aot_module_simplified
@@ -768,6 +767,34 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                     # Mimic optimizer.zero_grad() to clear the gradient
                     x.grad = None
                     run(i).sum().backward()
+
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
+    def test_no_recompile_on_same_hook(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fw_hook(inp):
+            return (inp[0] + 1,)
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList()
+                for i in range(10):
+                    layer = torch.nn.Linear(16, 16)
+                    layer.register_forward_pre_hook(lambda _, inp: fw_hook(inp))
+                    layer = torch.compile(layer, backend=cnts)
+                    self.layers.append(layer)
+
+            def forward(self, x):
+                for l in self.layers:
+                    x = l(x)
+                return x
+
+        mod = Mod()
+        x = torch.ones(16, 16, requires_grad=True)
+        mod(x)
+
+        self.assertEqual(cnts.frame_count, 1)
 
 
 if __name__ == "__main__":

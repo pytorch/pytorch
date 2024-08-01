@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
@@ -8,7 +9,6 @@ from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDi
 import torch
 
 from .. import config, ir
-
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -30,6 +30,7 @@ from ..utils import (
 )
 from ..virtualized import V
 from .mm_common import filtered_configs
+
 
 if TYPE_CHECKING:
     from ..ir import TensorBox
@@ -554,17 +555,21 @@ def convolution(
         bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.evaluate_static_shapes(bias.get_size())
-    choices = [
-        aten_convolution.bind(
-            args,
-            layout,
-            ordered_kwargs_for_cpp_kernel,
-            **kwargs,
-        )
-    ]
+
+    choices = []
+    if torch._inductor.utils._use_conv_autotune_backend("ATEN"):
+        choices = [
+            aten_convolution.bind(
+                args,
+                layout,
+                ordered_kwargs_for_cpp_kernel,
+                **kwargs,
+            )
+        ]
 
     if (
-        use_triton_template(layout)
+        torch._inductor.utils._use_conv_autotune_backend("TRITON")
+        and use_triton_template(layout)
         # templates only support these:
         and is_ones(dilation)
         and not transposed

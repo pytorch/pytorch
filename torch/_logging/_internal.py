@@ -14,7 +14,9 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from weakref import WeakSet
 
 import torch._logging.structured
+from torch._utils_internal import log_trace_structured_event
 from torch.utils._traceback import CapturedTraceback
+
 
 log = logging.getLogger(__name__)
 
@@ -176,10 +178,10 @@ log_state = LogState()
 
 # sample usage: torch._logging.set_logs(**torch._logging.DEFAULT_LOGGING)
 DEFAULT_LOGGING = {
-    "dynamo": logging.DEBUG,
-    "aot": logging.DEBUG,
-    "inductor": logging.DEBUG,
-    "fsdp": logging.DEBUG,
+    "dynamo": logging.INFO,
+    "aot": logging.INFO,
+    "inductor": logging.INFO,
+    "fsdp": logging.INFO,
     "ddp_graphs": True,
     "graph_breaks": True,
     "guards": True,
@@ -797,7 +799,7 @@ class TorchLogsFormatter(logging.Formatter):
             record.artifactprefix = f" [__{artifact_name}]"
 
         prefix = (
-            f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs*1000):06d} {record.thread} "
+            f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs*1000):06d} {record.process} "
             f"{os.path.relpath(record.pathname, os.path.dirname(os.path.dirname(torch.__file__)))}:"
             f"{record.lineno}]{record.traceid}{record.artifactprefix}"
         )
@@ -1117,6 +1119,7 @@ def trace_structured(
         trace_log.debug(
             "", extra={"metadata": record, "payload": payload}, stacklevel=2
         )
+        log_trace_structured_event(name, record)
 
 
 import torch._guards

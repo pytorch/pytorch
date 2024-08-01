@@ -29,7 +29,6 @@ from typing import List, Tuple
 import torch
 import torch.autograd._functions
 import torch.autograd.forward_ad as fwAD
-
 from torch import inf, nan, nn
 from torch.autograd import (
     _calculate_shape,
@@ -737,6 +736,21 @@ class TestAutograd(TestCase):
 
         test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
         test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
+
+    def test_multiple_insert_removal_caching(self):
+        torch._C._set_cached_tensors_enabled(True)
+        try:
+            x = torch.rand([4])
+
+            torch._C._add_cached_tensor(x)
+            self.assertTrue(torch._C._is_cached_tensor(x))
+
+            torch._C._add_cached_tensor(x)
+            torch._C._remove_cached_tensor(x)
+
+            self.assertFalse(torch._C._is_cached_tensor(x))
+        finally:
+            torch._C._set_cached_tensors_enabled(False)
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
@@ -13999,6 +14013,31 @@ class TestAutogradMultipleDispatch(TestCase):
         TestFn.apply(inp, None).sum().backward()
         self.assertEqual(local.my_obj[10], 5)
 
+    def test_is_retain_graph(self):
+        retain_graph_set = False
+
+        class TestFn(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                nonlocal retain_graph_set
+                retain_graph_set = (
+                    torch._C._autograd._get_current_graph_task_keep_graph()
+                )
+                return gO, None
+
+        inp = torch.rand(10, requires_grad=True)
+
+        out = TestFn.apply(inp)
+        self.assertFalse(retain_graph_set)
+        out.sum().backward(retain_graph=True)
+        self.assertTrue(retain_graph_set)
+        out.sum().backward(retain_graph=False)
+        self.assertFalse(retain_graph_set)
+
     def test_set_sequence_nr(self):
         x = torch.randn((10,), dtype=torch.float32, requires_grad=True)
         y = torch.randn((10,), dtype=torch.float32, requires_grad=True)
@@ -14048,6 +14087,7 @@ class TestAutogradMultipleDispatch(TestCase):
 from autograd.test_complex import TestAutogradComplex  # noqa: F401
 from autograd.test_functional import TestAutogradFunctional  # noqa: F401
 from autograd.test_logging import TestAutogradLogging  # noqa: F401
+
 
 # e.g., TestAutogradDeviceTypeCPU and TestAutogradDeviceTypeCUDA
 instantiate_device_type_tests(TestAutogradDeviceType, globals(), except_for=None)
