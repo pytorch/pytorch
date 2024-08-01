@@ -59,9 +59,9 @@
       int64_t args_num,                 \
       int64_t* extra_args);
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+
+
+namespace torch::jit::tensorexpr {
 struct QIData final {
   double scale;
   int64_t zero;
@@ -108,8 +108,8 @@ TORCH_API void nnc_aten_free(int64_t bufs_num, void** ptrs) noexcept;
 } // extern "C"
 #endif
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
+
+
 
 #undef DECLARE_EXTERNAL_FUNCTION

@@ -72,7 +72,6 @@ class CudaAnalysis : public IRVisitor {
 // execution parameters, then if those params differ from the max mask each dim.
 class GPUMetaVarRewriter : public IRMutator {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit GPUMetaVarRewriter(const CudaAnalysis* cuda_analysis)
       : cuda_analysis_(cuda_analysis) {
     gpu_block_vars_ = {
@@ -206,7 +205,6 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
     Initialize();
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CudaCodeGen(
       StmtPtr stmt,
       const std::vector<BufferArg>& buffer_args,
