@@ -1378,8 +1378,7 @@ test_operator_benchmark() {
   cd benchmarks/operator_benchmark/pt_extension
   python setup.py install
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
-  taskset -c 0-"$end_core" python -m benchmark_all_test --output-dir "${TEST_REPORTS_DIR} --device cpu"
-  cat ${TEST_REPORTS_DIR}/operator_benchmark.csv
+  taskset -c 0-"$end_core" python -m benchmark_all_test --device cpu --output-dir "${TEST_REPORTS_DIR}"
 }
 
 
