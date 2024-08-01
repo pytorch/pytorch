@@ -317,9 +317,6 @@ graph():
     return (x,)""",
         )
 
-    # Errors because fake mode is not detected from non-tensor inputs
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
-    @testing.expectedFailureTrainingIRToRunDecomp
     def test_no_tensor_computation_3(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -1403,8 +1400,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
         )
 
     @testing.expectedFailureRetraceability  # Unexpected type in sourceless builder torch._higher_order_ops.wrap.WrapWithSetGradEnabled
-    @testing.expectedFailureTrainingIRToRunDecomp  # Encountered autograd state manager op
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_set_grad_empty(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -2138,6 +2133,45 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
+
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # run_decompositions() triggers same error as Dynamo below
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureSerDer  # sympify on deserialization doesn't preserve sympy functions: T197567691
+    def test_solver_unsupported_sympy_function(self):
+        # repro of https://github.com/pytorch/pytorch/issues/131897
+
+        # NOTE: Dynamo errors with unsupported functions in `add_runtime_asserts`:
+        # "symbolically traced variables cannot be used as inputs to control flow"
+        strict = False
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                x = torch.nn.functional.interpolate(
+                    x, scale_factor=0.5, mode="bilinear"
+                )
+                x = torch.nn.functional.interpolate(
+                    x, scale_factor=2.0, mode="bilinear"
+                )
+                x = x + y
+                return x
+
+        model = MyModule().eval()
+
+        inputs = (
+            torch.rand((1, 1, 32, 32)),
+            torch.rand((1, 1, 32, 32)),
+        )
+
+        dim = torch.export.Dim("Dim", min=16, max=64)
+        dynamic_shapes = {"x": {2: dim, 3: dim}, "y": {2: dim, 3: dim}}
+
+        exported_program = export(
+            model, inputs, dynamic_shapes=dynamic_shapes, strict=strict
+        )
+        self.assertEqual(exported_program.module()(*inputs), model(*inputs))
 
     def test_export_mod_constraints(self):
         class BasicDynamiShapeModel(torch.nn.Module):
@@ -4486,8 +4520,6 @@ graph():
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
     @testing.expectedFailureRetraceability  # Retracing tensor constants results in buffers
-    @testing.expectedFailureTrainingIRToRunDecomp  # detach() is not present
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_nested_module_with_constant_buffer(self):
         class M1(torch.nn.Module):
             def __init__(self):
@@ -4509,9 +4541,22 @@ graph():
         self.assertEqual(len(ep.state_dict), 0)
         self.assertEqual(len(ep.constants), 1)
 
-        self.assertExpectedInline(
-            str(ep.graph).strip(),
-            """\
+        if is_training_ir_test(self._testMethodName):
+            self.assertExpectedInline(
+                str(ep.graph).strip(),
+                """\
+graph():
+    %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
+    %x : [num_users=2] = placeholder[target=x]
+    %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %lift_fresh_copy), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
+    return (mul,)""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(ep.graph).strip(),
+                """\
 graph():
     %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
     %x : [num_users=2] = placeholder[target=x]
@@ -4520,7 +4565,7 @@ graph():
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %detach), kwargs = {})
     %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
     return (mul,)""",
-        )
+            )
 
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))

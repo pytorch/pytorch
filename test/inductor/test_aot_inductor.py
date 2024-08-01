@@ -3252,6 +3252,11 @@ CPU_TEST_FAILURES = {
     "test_index_put_with_none_index": fail_minimal_arrayref_interface(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_constant": fail_stack_allocation(is_skip=True),
+    # C++ compile error, need for aoti_torch___scaled_dot_product_flash_attention_for_cpu
+    # https://github.com/pytorch/pytorch/issues/122986
+    "test_sdpa": fail_with_and_without_stack_allocation(is_skip=True),
+    # The same issue as https://github.com/pytorch/pytorch/issues/122986
+    "test_sdpa_2": fail_with_and_without_stack_allocation(is_skip=True),
     # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
