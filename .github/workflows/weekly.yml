@@ -50,6 +50,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
+          token: ${{ secrets.UPDATEBOT_TOKEN }}
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
@@ -63,7 +64,7 @@ jobs:
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
-          UPDATEBOT_TOKEN: ${{ secrets.UPDATEBOT_TOKEN}}
+          UPDATEBOT_TOKEN: ${{ secrets.UPDATEBOT_TOKEN }}
         run: |
           git config --global user.name "PyTorch UpdateBot"
           git config --global user.email "pytorchupdatebot@users.noreply.github.com"
