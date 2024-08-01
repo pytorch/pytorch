@@ -11,7 +11,7 @@ from torch._inductor.fx_passes.pad_mm import pad_mm_operations
 
 
 class AHTrainPadMM(AHTrainRegressionTree):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
 
     def add_new_features(self, results):
