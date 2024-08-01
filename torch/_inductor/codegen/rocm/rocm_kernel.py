@@ -228,7 +228,6 @@ class ROCmTemplateKernel(ROCmKernel):
 
         # Broadcasted bias case, i.e. the shape when initialized is (M, 1)
         # -> torch stride is (1, 0) and bias is col-major from CK POV
-        # There is numerical mismatch which needs debugging, currently this case is disabled for adding CK template choices.
         if node.get_stride() == [1, 0]:
             return "0L"
 
