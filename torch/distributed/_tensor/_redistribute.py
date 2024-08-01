@@ -164,7 +164,6 @@ def redistribute_local_tensor(
         # which should be an empty tensor
         return local_tensor
 
-    # TODO (xilun): need address new StridedShard placement
     transform_infos = _gen_transform_infos(current_spec, target_spec)
 
     for transform_info in transform_infos:

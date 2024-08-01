@@ -399,6 +399,10 @@ class _StridedShard(Shard):
     right-to-left. In the example above, the tensor should first be sharded on the "tp"
     dimension into 2 shards before being sharded on the "dp" dimension. Therefore, the
     `split_factor` of the _StridedShard placement on "dp" dim is 2.
+
+    TODO: strided sharding needs to work fine with uneven sharding. Now it forbids
+    resharding if the tensor is unevenly sharded.
+    TODO: we should remove _StridedShard placement once we can unify it with Shard
     """
 
     split_factor: int
@@ -406,6 +410,11 @@ class _StridedShard(Shard):
     def __eq__(self, other: object) -> bool:
         if isinstance(other, _StridedShard):
             return self.dim == other.dim and self.split_factor == other.split_factor
+        elif isinstance(other, Shard):
+            # TODO: this is to avoid extra all-gather in dtensor op dispatch
+            # note that sharding prop would not produce _StridedShard and an
+            # placement inequality would introduce an all-gather for resharding
+            return self.dim == other.dim
         return False
 
     def __hash__(self) -> int:
@@ -485,7 +494,9 @@ class _StridedShard(Shard):
             local_tensor,
             gather_dim=self.dim,
             group=(mesh, mesh_dim),
-        ).wait()
+        )
+        if isinstance(result, funcol.AsyncCollectiveTensor):
+            result = result.wait()
 
         tensor_shard_list = torch.chunk(result, total_split, dim=self.dim)
         # rearrange the order
@@ -786,29 +797,6 @@ class DTensorSpec:
                         " sharding strategies yet (i.e. [Shard(0), Shard(0)])"
                     )
                 r[shard_dim] = i
-        return r
-
-    @property
-    def num_shards_map(self) -> List[int]:
-        """
-        dim_map is a property we derive from `placements` of
-        the distributed tensor. Unlike `dim_map`, `num_shards_map`
-        denotes how many shards each tensor dim has. Like `dim_map`:
-            len(num_shards_map) == dist_tensor.ndim
-            num_shards_map[i] = 1: means tensor dim i is not sharded
-            num_shards_map[i] = j: means tensor dim i has j shards in total
-
-        For example, we have a dist tensor of shape [18, 20, 30],
-        a device_mesh ([[0, 1, 2, 3], [4, 5, 6, 7]]), and placements
-        ([Shard(1), Shard(0)]), the num_shards_map of this distributed tensor
-        would be: [4, 2, 1].
-        """
-        r = [1] * self.ndim
-        for i, placement in enumerate(self.placements):
-            if placement.is_shard():
-                shard_dim = cast(Shard, placement).dim
-                r[shard_dim] *= self.mesh.size(i)
-
         return r
 
     @property
