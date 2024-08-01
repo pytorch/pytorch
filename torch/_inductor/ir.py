@@ -2008,7 +2008,7 @@ class Sort(Loops):
 
         # Heuristic, smallest rblock where triton usually outperforms aten.sort
         # It also isn't bandwidth bound so fusion is unlikely to help.
-        max_rblock = 256
+        max_rblock = 512
         is_persistent_kernel = (
             config.triton.persistent_reductions
             and sizevars.is_expr_static_and_true(sympy.Le(sort_numel, max_rblock))
@@ -2064,7 +2064,7 @@ class Sort(Loops):
         return results
 
 
-def is_storage_and_layout(x: object) -> bool:
+def is_storage_and_layout(x: IRNode) -> bool:
     try:
         as_storage_and_layout(x, freeze=False)
         return True
@@ -2072,7 +2072,7 @@ def is_storage_and_layout(x: object) -> bool:
         return False
 
 
-def is_contiguous_storage_and_layout(x: object) -> bool:
+def is_contiguous_storage_and_layout(x: IRNode) -> bool:
     try:
         buffer, layout = as_storage_and_layout(x, freeze=False)
         # pad the stride here so we will NOT claim an tensor as contiguous
@@ -2085,7 +2085,7 @@ def is_contiguous_storage_and_layout(x: object) -> bool:
 
 
 def as_storage_and_layout(
-    x: object,
+    x: IRNode,
     freeze: bool = True,
     want_contiguous: bool = False,
     stride_order: Optional[Sequence[Union[int, Integer]]] = None,
@@ -2109,16 +2109,13 @@ def as_storage_and_layout(
         if freeze:
             if want_contiguous:
                 x.data.freeze_layout()
-                assert (
-                    isinstance(x.data.layout, Layout) and x.data.layout.is_contiguous()
-                )
+                assert x.data.layout.is_contiguous()
             elif stride_order is not None:
                 x.data.freeze_layout_with_stride_order(
                     stride_order, allow_padding=allow_padding
                 )
             else:
                 x.data.decide_layout()
-        assert isinstance(x.data.layout, Layout)
         return x, x.data.layout
     if isinstance(x, ReinterpretView):
         # making the base of x contiguous or stride_ordered will not necessarily make
@@ -2137,7 +2134,7 @@ as_contiguous_storage_and_layout = functools.partial(
 
 
 def is_stride_order_storage_and_layout(
-    x: object, stride_order: Sequence[Union[int, Integer]]
+    x: IRNode, stride_order: Sequence[Union[int, Integer]]
 ) -> bool:
     try:
         buffer, layout = as_storage_and_layout(x, freeze=False)
@@ -3260,7 +3257,7 @@ class NonOwningLayout(Layout):
         offset = self.view.get_layout().offset
         if offset == 0:
             return True
-        from .compile_fx import ALIGNMENT
+        from .utils import ALIGNMENT
 
         return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)  # type: ignore[arg-type]
 
@@ -3974,6 +3971,9 @@ class ChoiceCaller:
     def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {}
+
+    def autoheuristic_id(self) -> str:
+        return "unsupported_choice"
 
 
 class TritonTemplateCallerBase(ChoiceCaller):
@@ -4890,8 +4890,21 @@ class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs(skip_out=True)]
+        kernel_name = self.get_kernel_name()
+        if (
+            V.graph.cpp_wrapper
+            and self.cpp_kernel_name == "torch::inductor::_mm_plus_mm"
+        ):
+            # For https://github.com/pytorch/pytorch/issues/128474
+            kernel_name = (
+                "aoti_torch__mm_plus_mm_out"
+                if config.abi_compatible
+                else "torch::inductor::_mm_plus_mm_out"
+            )
+        else:
+            kernel_name = self.get_kernel_name()
         wrapper.generate_extern_kernel_out(
-            self.get_kernel_name(),
+            kernel_name,
             self.codegen_reference(),
             self.output_view.codegen_reference() if self.output_view else None,
             args,
@@ -5255,6 +5268,7 @@ class SetSourceTensorKernel(ExternKernelAlloc):
             self_tensor.get_layout(),
             [self_tensor, storage_tensor],
             python_kernel_name="torch.ops.aten.set_.source_Tensor",
+            op_overload=torch.ops.aten.set_.source_Tensor,
         )
         V.graph.never_reuse_buffers.add(self_tensor.data.get_name())
         V.graph.never_reuse_buffers.add(storage_tensor.get_name())
@@ -6636,7 +6650,7 @@ class InterpreterShim(torch.fx.Interpreter):
         self.graph = graph
         self.submodules = submodules
         self.extra_traceback = False
-        self.fetch_attr = submodules.__getitem__  # type: ignore[method-assign]
+        self.fetch_attr = submodules.__getitem__
         self.current_node = None
 
     def run_node(self, n: torch.fx.Node) -> Any:
