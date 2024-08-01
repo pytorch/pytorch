@@ -931,12 +931,10 @@ class VariableBuilder:
         # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
         elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            result = PythonModuleVariable(
+            return PythonModuleVariable(
                 value,
                 source=self.source,
             )
-            self.tx.output.side_effects.track_object_existing(value, result)
-            return result
         elif isinstance(value, types.MethodType) and isinstance(
             value.__self__, (torch.nn.Module, torch.utils._pytree.TreeSpec)
         ):
