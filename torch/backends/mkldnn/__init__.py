@@ -72,7 +72,7 @@ class verbose:
         return False
 
 
-def set_flags(_enabled=None, _fp32_precision=None):
+def set_flags(_enabled=None, _deterministic=None, _fp32_precision=None):
     orig_flags = (
         torch._C._get_mkldnn_enabled(),
         torch._C._get_mkldnn_deterministic(),
@@ -105,6 +105,7 @@ class MkldnnModule(PropModule):
     enabled = ContextProp(torch._C._get_mkldnn_enabled, torch._C._set_mkldnn_enabled)
     deterministic = ContextProp(
         torch._C._get_mkldnn_deterministic, torch._C._set_mkldnn_deterministic
+    )
     matmul = FP32Precision("mkldnn", "matmul")
     conv = FP32Precision("mkldnn", "conv")
     rnn = FP32Precision("mkldnn", "rnn")
