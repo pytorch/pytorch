@@ -4,10 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 
-#include <unordered_map>
-
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Takes in a TensorExprGraph of static shapes and generalizes the input shapes
 // to symbolic dimensions. Dimensions of value 1 will be preserved, otherwise
@@ -51,5 +48,4 @@ enum class StrideInput {
 TORCH_API std::string toString(StrideInput si);
 TORCH_API StrideInput strideInputFromString(const std::string& si);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
