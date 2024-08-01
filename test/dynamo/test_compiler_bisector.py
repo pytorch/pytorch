@@ -12,6 +12,8 @@ import torch.nn.functional as F
 from torch import nn
 from torch._decomp import decomposition_table
 from torch._dynamo.test_case import TestCase
+
+from torch._inductor.bisect_helper import BisectionManager
 from torch._prims_common.wrappers import elementwise_type_promotion_wrapper, out_wrapper
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -98,10 +100,11 @@ class TestCompilerBisector(TestCase):
 
             return not out_compiled.isnan().any()
 
-        from torch._inductor.bisect_helper import BisectionManager
-
         out = BisectionManager.do_bisect(test_fn)
-        self.assertEqual(out, (["aot_eager_decomp_partition", "decomposition"], 4))
+        self.assertEqual(out.backend, "aot_eager_decomp_partition")
+        self.assertEqual(out.subsystem, "decomposition")
+        self.assertEqual(out.bad_number, 4)
+        self.assertTrue("aten.exponential" in out.debug_info)
 
     def test_bad_lowering(self):
         def test_fn():
@@ -117,11 +120,20 @@ class TestCompilerBisector(TestCase):
 
             return torch.allclose(torch.compile(my_func)(inp), my_func(inp))
 
-        from torch._inductor.bisect_helper import BisectionManager
+        out = BisectionManager.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "lowerings")
+        self.assertEqual(out.bad_number, 2)
+        self.assertTrue("relu" in out.debug_info)
 
-        self.assertEqual(
-            BisectionManager.do_bisect(test_fn), (["inductor", "lowerings"], 2)
-        )
+    def test_eager_backend(self):
+        # should indicate problem with first backend
+        def test_fn():
+            return False
+
+        out = BisectionManager.do_bisect(test_fn)
+        self.assertEqual(out.backend, "eager")
+        self.assertEqual(out.subsystem, None)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import collections
+import dataclasses
 import functools
 import os
 import shutil
@@ -33,6 +34,14 @@ def reset_counters() -> None:
 @functools.lru_cache(None)
 def get_env_val(env_str: str) -> Optional[str]:
     return os.environ.get(env_str, None)
+
+
+@dataclasses.dataclass
+class BisectionResult:
+    backend: str
+    subsystem: Optional[str] = None
+    bad_number: Optional[int] = None
+    debug_info: Optional[str] = None
 
 
 class BisectionManager:
@@ -315,7 +324,7 @@ class BisectionManager:
     @classmethod
     def do_bisect(
         cls, fn: Callable[[], bool], cli_interface: bool = False
-    ) -> Tuple[List[str], int]:
+    ) -> Optional[BisectionResult]:
         if not cli_interface:
             bisection_enabled_orig = cls.bisection_enabled
             cls.delete_bisect_status()
@@ -345,14 +354,19 @@ class BisectionManager:
                 if result:
                     curr_subsystem = cls.get_subsystem()
                     low, _ = cls.get_bisect_range(curr_backend, curr_subsystem)
-                    return ([curr_backend, curr_subsystem], low)
+                    return BisectionResult(
+                        curr_backend,
+                        curr_subsystem,
+                        low,
+                        call_counter_debug_info.get(low, None),
+                    )
 
                 next_subsystem = cls.advance_subsystem(curr_backend, curr_subsystem)
                 if not next_subsystem:
                     print(
                         f"The issue is in the {curr_backend} system, but could not identify subsystem."
                     )
-                    return ([curr_backend], 0)
+                    return BisectionResult(curr_backend)
 
                 curr_subsystem = next_subsystem
             else:
@@ -360,7 +374,8 @@ class BisectionManager:
                     next_backend = cls.advance_backend(curr_backend)
                     if not next_backend:
                         print("All systems have been checked.")
-                        return ([], 0)
+                        return None
+
                     curr_backend = next_backend
                 else:
                     current_subsystems = BACKENDS[curr_backend]
@@ -375,7 +390,7 @@ class BisectionManager:
                         )
                     else:
                         print(f"The issue is in the {curr_backend} system.")
-                        return ([curr_backend], 0)
+                        return BisectionResult(curr_backend)
 
             if cli_interface:
                 sys.exit(0)
