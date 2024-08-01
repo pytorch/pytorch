@@ -351,6 +351,12 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
     }
     return false;
   }
+  if (cudnn_version < 8906 && s_k % 64 != 0 ) {
+    if (debug) {
+      TORCH_WARN("not-multiple-of-64 seq_kv is not supported below 8.9.6");
+    }
+    return false;
+  }
   if (cudnn_version < 90000) {
     if (s_q < 64) {
       if (debug) {
@@ -365,12 +371,6 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       }
       return false;
     }
-  }
-  if (cudnn_version < 8906 && s_k % 64 != 0 ) {
-    if (debug) {
-      TORCH_WARN("not-multiple-of-64 seq_kv is not supported below 8.9.6");
-    }
-    return false;
   }
   if (d_qk % 8 != 0 || d_v % 8 != 0) {
     if (debug) {
