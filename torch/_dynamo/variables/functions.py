@@ -9,9 +9,6 @@ from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
@@ -27,8 +24,6 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 
-if TYPE_CHECKING:
-    from torch._guards import Source
 
 try:
     from torch.distributed._composable.fsdp import _fsdp_param_group
@@ -36,7 +31,12 @@ except ModuleNotFoundError:
     _fsdp_param_group = None
 
 
-def wrap_bound_arg(tx, val, source=None):
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._guards import Source
+
+
+def wrap_bound_arg(tx: "InstructionTranslator", val, source=None):
     # Source propagation is best effort since not every object we encounter has a source to begin with.
     if isinstance(val, VariableTracker):
         return val
@@ -50,7 +50,7 @@ def wrap_bound_arg(tx, val, source=None):
         return variables.LazyVariableTracker.create(val, source)
 
 
-def wrap_args_kwargs(tx, result):
+def wrap_args_kwargs(tx: "InstructionTranslator", result):
     for k, v in list(result.items()):
         if isinstance(v, (tuple, dict)):
             # args/kwargs
@@ -291,6 +291,19 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def export_freevars(self, parent, child):
         pass
 
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        source = AttrSource(self.source, name) if self.source else None
+        try:
+            subobj = inspect.getattr_static(self.fn, name)
+        except AttributeError:
+            options = {"source": source}
+            return variables.GetAttrVariable(self, name, **options)
+        if source:
+            return variables.LazyVariableTracker.create(subobj, source)
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create(tx, subobj)
+
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         result = hasattr(self.fn, name)
         return variables.ConstantVariable.create(result)
@@ -413,7 +426,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         return result
 
 
-def invoke_and_store_as_constant(tx, fn, name, args, kwargs):
+def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kwargs):
     def convert(x):
         if isinstance(x, variables.TensorVariable):
             return x.get_real_value()
@@ -688,6 +701,17 @@ class SkipFunctionVariable(VariableTracker):
                         f"Please file an issue on GitHub "
                         f"so the PyTorch team can add support for it. "
                     )
+                elif (
+                    self.value.__module__ is not None
+                    and self.value.__module__.startswith("optree")
+                ):
+                    msg = (
+                        f"Graph break for an optree C/C++ function {self.value.__module__}.{self.value.__qualname__}."
+                        f" Consider using torch.utils._pytree - "
+                        f"https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
+                    )
+                    # also warn on it because most users won't see the graph break message
+                    torch._dynamo.utils.warn_once(msg)
                 else:
                     msg = (
                         f"Graph break due to unsupported builtin {self.value.__module__}.{self.value.__qualname__}. "
@@ -756,7 +780,7 @@ def _traceable_collective_remaps():
     return {}
 
 
-def _traceable_collectives_source(tx, fn):
+def _traceable_collectives_source(tx: "InstructionTranslator", fn):
     assert torch.distributed.is_available(), "Illegal invocation."
     assert fn in _traceable_collective_remaps().values()
 
@@ -782,7 +806,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         self.replacement_var = replacement_var
 
     @staticmethod
-    def create(tx, old_fn, source, **options):
+    def create(tx: "InstructionTranslator", old_fn, source, **options):
         new_fn, new_source = CollectiveFunctionRewriteVariable.rewrite(tx, old_fn)
         return CollectiveFunctionRewriteVariable(
             old_fn,
@@ -798,7 +822,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         )
 
     @staticmethod
-    def rewrite(tx, fn):
+    def rewrite(tx: "InstructionTranslator", fn):
         new_fn = _traceable_collective_remaps()[fn]
         return new_fn, _traceable_collectives_source(tx, new_fn)
 
@@ -914,6 +938,9 @@ class DynamoTritonHOPifier(TritonHOPifier):
         return isinstance(
             maybe_callable, (NestedUserFunctionVariable, UserFunctionVariable)
         )
+
+    def get_value(self, val):
+        return val.value
 
     def check_grid(self, grid):
         from .lists import BaseListVariable
