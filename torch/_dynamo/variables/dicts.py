@@ -7,9 +7,6 @@ import inspect
 import sys
 from typing import Dict, List, Optional, TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
 from torch._subclasses.fake_tensor import is_fake
 
 from .. import polyfill, variables
@@ -21,6 +18,11 @@ from ..source import AttrSource, GetItemSource
 from ..utils import dict_keys, dict_values, istype, specialize_symnode
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
 
 # [Adding a new supported class within the keys of ConstDictVarialble]
 # - Add its tracker type to is_hashable
@@ -70,7 +72,7 @@ class ConstDictVariable(VariableTracker):
         Note that it's also fine to put VTs into dictionaries and sets, but doing so does not take into account aliasing
         """
 
-        def __init__(self, vt):
+        def __init__(self, vt) -> None:
             # We specialize SymNodes
             vt = specialize_symnode(vt)
             # TODO Temorarily remove to figure out what keys are we breaking on
@@ -127,7 +129,7 @@ class ConstDictVariable(VariableTracker):
 
     def __init__(
         self, items: Dict[VariableTracker, VariableTracker], user_cls=dict, **kwargs
-    ):
+    ) -> None:
         super().__init__(**kwargs)
 
         Hashable = ConstDictVariable._HashableTracker
@@ -169,7 +171,7 @@ class ConstDictVariable(VariableTracker):
     def python_type(self):
         return self.user_cls
 
-    def __contains__(self, vt):
+    def __contains__(self, vt) -> bool:
         assert isinstance(vt, VariableTracker)
         Hashable = ConstDictVariable._HashableTracker
         return (
@@ -239,6 +241,7 @@ class ConstDictVariable(VariableTracker):
             ListIteratorVariable,
             ListVariable,
             TupleVariable,
+            UserDefinedObjectVariable,
         )
 
         Hashable = ConstDictVariable._HashableTracker
@@ -303,6 +306,8 @@ class ConstDictVariable(VariableTracker):
                     ListVariable,
                     TupleVariable,
                     ListIteratorVariable,
+                    variables.IteratorVariable,
+                    UserDefinedObjectVariable,
                 ),
             )
             and self.mutable_local
@@ -331,7 +336,7 @@ class ConstDictVariable(VariableTracker):
 
 
 class DefaultDictVariable(ConstDictVariable):
-    def __init__(self, items, user_cls, default_factory=None, **kwargs):
+    def __init__(self, items, user_cls, default_factory=None, **kwargs) -> None:
         super().__init__(items, user_cls, **kwargs)
         assert user_cls is collections.defaultdict
         self.default_factory = default_factory
@@ -387,7 +392,7 @@ class SetVariable(ConstDictVariable):
         self,
         items: List[VariableTracker],
         **kwargs,
-    ):
+    ) -> None:
         items = dict.fromkeys(items, SetVariable._default_value())
         super().__init__(items, **kwargs)
 
@@ -498,7 +503,7 @@ class DictView(VariableTracker):
 
     kv: Optional[str] = None
 
-    def __init__(self, dv_dict: ConstDictVariable, **kwargs):
+    def __init__(self, dv_dict: ConstDictVariable, **kwargs) -> None:
         super().__init__(**kwargs)
         assert self.kv in ("keys", "values")
         assert isinstance(dv_dict, ConstDictVariable)
@@ -732,7 +737,7 @@ class CustomizedDictVariable(ConstDictVariable):
                     items[key] = var
         return cls(items, user_cls)
 
-    def __init__(self, items, user_cls, **options):
+    def __init__(self, items, user_cls, **options) -> None:
         super().__init__(items, user_cls, **options)
         assert self.is_matching_cls(user_cls)
 
@@ -859,7 +864,7 @@ class HFPretrainedConfigVariable(VariableTracker):
     def is_matching_object(cls, obj):
         return cls.is_matching_cls(type(obj))
 
-    def __init__(self, obj, **kwargs):
+    def __init__(self, obj, **kwargs) -> None:
         super().__init__(**kwargs)
         self.obj = obj
         assert self.is_matching_cls(type(obj))
