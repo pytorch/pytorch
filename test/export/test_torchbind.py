@@ -595,14 +595,14 @@ def forward(self, token, obj_attr, x):
             """\
 def forward(self, arg0_1, arg1_1):
     cos = torch.ops.aten.cos.default(arg1_1)
-    call_torchbind = torch.ops.higher_order.call_torchbind(arg0_1, 'push', cos);  cos = None
+    call_torchbind = torch.ops.higher_order.call_torchbind(arg0_1, 'push', cos);  cos = call_torchbind = None
     sin = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
-    call_torchbind_1 = torch.ops.higher_order.call_torchbind(arg0_1, 'push', sin);  sin = None
+    call_torchbind_1 = torch.ops.higher_order.call_torchbind(arg0_1, 'push', sin);  sin = call_torchbind_1 = None
     call_torchbind_2 = torch.ops.higher_order.call_torchbind(arg0_1, 'pop')
-    call_torchbind_3 = torch.ops.higher_order.call_torchbind(arg0_1, 'size')
+    call_torchbind_3 = torch.ops.higher_order.call_torchbind(arg0_1, 'size');  call_torchbind_3 = None
     add = torch.ops.aten.add.Tensor(call_torchbind_2, 1);  call_torchbind_2 = None
     call_torchbind_4 = torch.ops.higher_order.call_torchbind(arg0_1, 'pop')
-    call_torchbind_5 = torch.ops.higher_order.call_torchbind(arg0_1, 'size')
+    call_torchbind_5 = torch.ops.higher_order.call_torchbind(arg0_1, 'size');  call_torchbind_5 = None
     sub = torch.ops.aten.sub.Tensor(call_torchbind_4, 0);  call_torchbind_4 = None
     return (sub, add, arg0_1)
     """,
@@ -656,11 +656,11 @@ def forward(self, arg0_1, arg1_1):
             """\
 def forward(self, arg0_1, arg1_1):
     call_torchbind = torch.ops.higher_order.call_torchbind(arg0_1, 'pop')
-    call_torchbind_1 = torch.ops.higher_order.call_torchbind(arg0_1, 'size')
+    call_torchbind_1 = torch.ops.higher_order.call_torchbind(arg0_1, 'size');  call_torchbind_1 = None
     add = torch.ops.aten.add.Tensor(call_torchbind, 1);  call_torchbind = None
     add_1 = torch.ops.aten.add.Tensor(add, arg1_1);  add = None
     call_torchbind_2 = torch.ops.higher_order.call_torchbind(arg0_1, 'pop')
-    call_torchbind_3 = torch.ops.higher_order.call_torchbind(arg0_1, 'size')
+    call_torchbind_3 = torch.ops.higher_order.call_torchbind(arg0_1, 'size');  call_torchbind_3 = None
     sub = torch.ops.aten.sub.Tensor(call_torchbind_2, 0);  call_torchbind_2 = None
     add_2 = torch.ops.aten.add.Tensor(sub, arg1_1);  sub = arg1_1 = None
     return (add_2, add_1, arg0_1)
@@ -917,14 +917,14 @@ def forward(self, token, safe_obj):
             """\
 def forward(self, arg0_1, arg1_1):
     cos = torch.ops.aten.cos.default(arg1_1)
-    queue_push = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, cos);  cos = None
+    queue_push = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, cos);  cos = queue_push = None
     sin = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
-    queue_push_1 = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, sin);  sin = None
+    queue_push_1 = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, sin);  sin = queue_push_1 = None
     queue_pop = torch.ops._TorchScriptTesting.queue_pop.default(arg0_1)
-    queue_size = torch.ops._TorchScriptTesting.queue_size.default(arg0_1)
+    queue_size = torch.ops._TorchScriptTesting.queue_size.default(arg0_1);  queue_size = None
     sub = torch.ops.aten.sub.Tensor(queue_pop, 1);  queue_pop = None
     queue_pop_1 = torch.ops._TorchScriptTesting.queue_pop.default(arg0_1)
-    queue_size_1 = torch.ops._TorchScriptTesting.queue_size.default(arg0_1)
+    queue_size_1 = torch.ops._TorchScriptTesting.queue_size.default(arg0_1);  queue_size_1 = None
     add = torch.ops.aten.add.Tensor(queue_pop_1, 0);  queue_pop_1 = None
     return (sub, add, arg0_1)""",
         )
@@ -1005,7 +1005,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             """\
 def forward(self, tq, x):
     tq, x, = fx_pytree.tree_flatten_spec(([tq, x], {}), self._in_spec)
-    queue_push_default = torch.ops._TorchScriptTesting.queue_push.default(tq, x);  x = None
+    queue_push_default = torch.ops._TorchScriptTesting.queue_push.default(tq, x);  x = queue_push_default = None
     return pytree.tree_unflatten((tq,), self._out_spec)""",
         )
         self.assertExpectedInline(
