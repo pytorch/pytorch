@@ -5,12 +5,10 @@ import unittest
 import sympy
 
 import torch
-
 from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
 from torch._inductor.runtime.runtime_utils import do_bench_gpu
-
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_triton_code
@@ -25,6 +23,7 @@ from torch.utils._sympy.functions import (
     RoundDecimal,
     RoundToInt,
 )
+
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
@@ -102,12 +101,12 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(FloorDiv(i0 * 4, 2), i0 * 2)
 
         # Nested modular indexing is correctly simplified
-        var_ranges = {sympy.Symbol("i1"): 13, sympy.Symbol("i2"): 121}
+        var_ranges = {i1: 13, i2: 121}
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784), 1, 28)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784) + 1, 1, 28)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
-        var_ranges = {sympy.Symbol("i2"): 784}
+        var_ranges = {i2: 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
         expected = FloorDiv(ModularIndexing(i2, 1, 28), 7)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
