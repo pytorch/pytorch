@@ -1088,7 +1088,9 @@ class benchmarking:
     # enable lazy benchmarking which postpones benchmarking until timing value
     # is required, allows the benchmarking module to group similar benchmarks
     # together for faster and more accurate timing values
-    enable_lazy_benchmarking: Optional[bool] = False
+    enable_lazy_benchmarking: Optional[bool] = get_config_value(
+        "TORCHINDUCTOR_ENABLE_LAZY_BENCHMARKING"
+    )
 
     # enable early ranking which terminates after the estimation loop for
     # grouped benchmarkings, this significantly reduces benchmarking overhead
