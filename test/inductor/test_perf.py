@@ -887,7 +887,7 @@ class InplacingTests(TestCase):
             matches = re.findall(r"empty_strided_\w+\(", code)
             self.assertEqual(len(matches), 0)
 
-            self.assertExpectedInline(count_numel(f, x, out), """6""")
+            self.assertExpectedInline(count_numel(f, x, out), """21""")
 
     @requires_cuda
     def test_inplace_custom_op_intermediate(self):
@@ -918,7 +918,7 @@ class InplacingTests(TestCase):
             matches = re.findall(r"empty_strided_\w+\(", code)
             self.assertEqual(len(matches), 1)
 
-            self.assertExpectedInline(count_numel(f, x, out), """6""")
+            self.assertExpectedInline(count_numel(f, x, out), """21""")
 
     @requires_cuda
     def test_inplace_custom_op_two_mutated_inputs(self):
@@ -950,7 +950,7 @@ class InplacingTests(TestCase):
             matches = re.findall(r"empty_strided_\w+\(", code)
             self.assertEqual(len(matches), 1)
 
-            self.assertExpectedInline(count_numel(f), """21""")
+            self.assertExpectedInline(count_numel(f), """39""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v1(self):
@@ -962,7 +962,7 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """40""")
+        self.assertExpectedInline(count_numel(f, *inp), """50""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v2(self):
@@ -975,7 +975,7 @@ class InplacingTests(TestCase):
             return output, tmp
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """60""")
+        self.assertExpectedInline(count_numel(f, *inp), """70""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v3(self):
@@ -988,7 +988,7 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """60""")
+        self.assertExpectedInline(count_numel(f, *inp), """80""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v4(self):
@@ -1002,7 +1002,7 @@ class InplacingTests(TestCase):
             return output, output2
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """60""")
+        self.assertExpectedInline(count_numel(f, *inp), """70""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v5(self):
@@ -1016,7 +1016,7 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """60""")
+        self.assertExpectedInline(count_numel(f, *inp), """80""")
 
     @requires_cuda
     def test_inplace_triton_kernel_v6(self):
@@ -1029,7 +1029,7 @@ class InplacingTests(TestCase):
 
         t = T(10)
         inp = (t, t.view(-1))
-        self.assertExpectedInline(count_numel(f, *inp), """40""")
+        self.assertExpectedInline(count_numel(f, *inp), """50""")
 
     def test_inplace_randperm_scatter(self):
         def scaled_index_add(x, y, scale_y):
@@ -1038,7 +1038,7 @@ class InplacingTests(TestCase):
             return out
 
         inp = (T(10, 10), T(5, 10), T(10))
-        self.assertExpectedInline(count_numel(scaled_index_add, *inp), """240""")
+        self.assertExpectedInline(count_numel(scaled_index_add, *inp), """250""")
 
 
 # Test cases where we don't do the right thing yet.

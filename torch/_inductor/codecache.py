@@ -60,9 +60,11 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compiler,
 )
 
+
 T = TypeVar("T")
 
 from _collections_abc import dict_keys  # noqa: TCH003
+
 
 """
 codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
@@ -85,13 +87,25 @@ from torch._inductor.cpp_builder import (
     normalize_path_separator,
 )
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, pick_vec_isa, VecISA
+from torch._inductor.cudagraph_utils import (
+    BoxedDeviceIndex,
+    CudagraphCachedInfo,
+    log_cudagraph_skip_and_bump_counter,
+)
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
     _reload_python_module_in_subproc,
 )
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
-from torch._inductor.utils import ALIGN_BYTES, clear_on_fresh_inductor_cache, is_linux
+from torch._inductor.utils import (
+    ALIGN_BYTES,
+    align_inputs_from_check_idxs,
+    BoxedBool,
+    clear_on_fresh_inductor_cache,
+    is_linux,
+    set_tracing_context_output_strides,
+)
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -780,6 +794,114 @@ def compiled_fx_graph_hash(
     return key, debug_lines
 
 
+def cudagraph_post_compile(
+    example_inputs: List[Any],
+    compiled_graph: CompiledFxGraph,
+    cudagraphs: BoxedBool,
+) -> None:
+    """
+    Checks for any reasons not to run cudagraphs and then
+    runs it on compiled_graph.
+    Mutates the `compiled_graph.current_callable` and `cudagraphs`
+    """
+    assert compiled_graph.current_callable is not None
+    assert compiled_graph.cudagraph_info is not None
+    cached_info = compiled_graph.cudagraph_info
+    cudagraph_fail_reasons = cached_info.cudagraph_fail_reasons
+    inputs_to_check = compiled_graph.inputs_to_check
+    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
+    is_inference = compiled_graph.fx_kwargs["is_inference"]
+    is_backward = compiled_graph.fx_kwargs["is_backward"]
+
+    if not cudagraph_fail_reasons:
+        fx_kwargs = compiled_graph.fx_kwargs
+        static_input_idxs = fx_kwargs["static_input_idxs"]
+
+        placeholders = cached_info.placeholders
+        stack_traces = cached_info.stack_traces
+        if not config.triton.cudagraph_trees:
+            # Force specialize all inputs so that CUDA graphs will work
+            for t in example_inputs:
+                if isinstance(t, torch.SymInt):
+                    int(t)  # guard
+
+        if (
+            boxed_forward_device_index is not None
+            and not is_inference
+            and not is_backward
+        ):
+            boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
+
+        from .compile_fx import cudagraphify
+
+        compiled_graph.current_callable = cudagraphify(
+            compiled_graph.current_callable,
+            static_input_idxs=static_input_idxs,
+            device_index=next(iter(compiled_graph.device_idxs)),
+            stack_traces=stack_traces,
+            is_backward=is_backward,
+            is_inference=is_inference,
+            constants=tuple(compiled_graph.constants.values()),
+            placeholders=placeholders,
+            mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
+        )
+
+    else:
+        BoxedBool.disable(cudagraphs)
+
+        # See [Backward Generation Handling]
+        # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
+        # know we are we running the backward even if we will not run it in cudagraphs
+        if is_backward and config.triton.cudagraph_trees:
+            assert boxed_forward_device_index is not None
+            assert boxed_forward_device_index.value is not None
+            compiled_graph_callable = compiled_graph.current_callable
+
+            manager = torch._inductor.cudagraph_trees.get_manager(
+                boxed_forward_device_index.value, create_if_none_exists=False
+            )
+            # should already exist from forward
+            assert manager is not None
+
+            def compiled_artifact(new_inputs: List[Any]) -> Callable[..., Any]:
+                manager.set_to_running_backward()  # type: ignore[union-attr]
+                return compiled_graph_callable(new_inputs)
+
+            compiled_graph.current_callable = compiled_artifact
+
+        if "cuda" in compiled_graph.device_types:
+            # prefer better disable_cudagraphs_reason bc stack trace
+            # TODO: migrate all disable reasons to stack trace, refactor
+            if compiled_graph.disabled_cudagraphs_reason:
+                log_cudagraph_skip_and_bump_counter(
+                    compiled_graph.disabled_cudagraphs_reason
+                )
+            else:
+                log_cudagraph_skip_and_bump_counter(
+                    f"skipping cudagraphs due to {cudagraph_fail_reasons}"
+                )
+
+
+def maybe_realign_inputs(
+    ran_cudagraphs: BoxedBool,
+    compiled_graph: CompiledFxGraph,
+    inputs_to_check: Sequence[int],
+) -> None:
+    """
+    Realigns input strides from inputs_to_check if
+    we didn't end up running cudagraphs. Mutates
+    `compiled_graph.current_callable` if cudagraphs
+    was run. Otherwise, does nothing.
+    """
+    if not ran_cudagraphs:
+        assert compiled_graph.current_callable is not None
+        new_callable = align_inputs_from_check_idxs(
+            compiled_graph.current_callable, inputs_to_check
+        )
+        if new_callable is not compiled_graph.current_callable:
+            compiled_graph.current_callable = new_callable
+
+
 class FxGraphCache:
     """
     Supports caching and reusing compiled Fx graphs.
@@ -971,8 +1093,53 @@ class FxGraphCache:
             lambda: {"filename": artifact_path},
             payload_fn=lambda: code,
         )
-
         return graph
+
+    @staticmethod
+    def post_compile(
+        compiled_graph: CompiledFxGraph,
+        example_inputs: List[torch.Tensor],
+        cudagraphs: BoxedBool,
+    ) -> CompiledFxGraph:
+        """
+        Run a set of post processing steps after loading from the cache. These involve:
+         - Setting the tracing context output strides
+         - Running cudagraphs if enabled
+         - Realigning inputs
+
+        This runs whether or not we have a cache hit, and always runs directly after we get a CompiledFxGraph.
+        The results of this function are *not* saved in the cache itself.
+        """
+        set_tracing_context_output_strides(example_inputs, compiled_graph)
+
+        if cudagraphs:
+            # It's possible that cudagraphs is enabled, but was disabled
+            # during a previous compilation we're loading from the cache.
+            # If so, we need to disable it on this new process too.
+            if compiled_graph.disabled_cudagraphs_reason:
+                if "cuda" in compiled_graph.device_types:
+                    log_cudagraph_skip_and_bump_counter(
+                        f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
+                    )
+                else:
+                    counters["inductor"]["cudagraph_skips"] += 1
+                BoxedBool.disable(cudagraphs)
+            else:
+                cudagraph_post_compile(
+                    example_inputs,
+                    compiled_graph,
+                    cudagraphs,
+                )
+        inputs_to_check = compiled_graph.inputs_to_check
+        # cudagraphs could have been disabled from the earlier conditions
+        # so we still need to realign inputs if that happens
+        maybe_realign_inputs(
+            cudagraphs,
+            compiled_graph,
+            inputs_to_check,
+        )
+
+        return compiled_graph
 
     @staticmethod
     def _save_graph(
@@ -1121,7 +1288,9 @@ class FxGraphCache:
                 counters["inductor"]["fxgraph_cache_miss"] += 1
                 cache_state = "miss"
                 start_time = time_ns()
-                compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
+                compiled_graph = compile_fx_fn(
+                    gm, example_inputs, inputs_to_check, fx_kwargs
+                )
                 time_taken_ns = time_ns() - start_time
                 FxGraphCache._save_graph(
                     key,
@@ -1140,8 +1309,10 @@ class FxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             cache_state = "bypass"
             if not compiled_graph:
-                compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
-
+                compiled_graph = compile_fx_fn(
+                    gm, example_inputs, inputs_to_check, fx_kwargs
+                )
+        assert compiled_graph is not None
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {
@@ -1152,7 +1323,10 @@ class FxGraphCache:
                 {"key": key, "cache_state": cache_state, "components": debug_lines}
             ),
         )
-
+        # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
+        FxGraphCache.post_compile(
+            compiled_graph, example_inputs, fx_kwargs["cudagraphs"]
+        )
         return compiled_graph
 
     @staticmethod
@@ -1197,6 +1371,11 @@ class CompiledFxGraph:
     # ShapeEnv.produce_guards_expression()
     guards_expr: Optional[str]
 
+    cudagraph_info: Optional[CudagraphCachedInfo]
+    fx_kwargs: Dict[str, Any]
+    inputs_to_check: Sequence[int]
+    boxed_forward_device_index: Optional[BoxedDeviceIndex]
+
     _boxed_call: Optional[bool] = None
     _fx_graph_cache_key: Optional[str] = None
 
@@ -1215,9 +1394,10 @@ class CompiledFxGraph:
             with open(graph.cache_path) as f:
                 self.source_code = f.read()
         self.cache_linemap = graph.cache_linemap
-        self.device_types = graph.device_types
-        self.device_idxs = graph.device_idxs
-        self.mutated_inputs = graph.mutated_inputs
+        # TODO - ordered set
+        self.device_types = set(graph.device_types)
+        self.device_idxs = set(graph.device_idxs)
+        self.mutated_inputs = set(graph.mutated_inputs)
         self.mutated_input_idxs = set(graph.mutated_input_idxs)
         self.constants = graph.constants
         self.torchbind_constants = graph.torchbind_constants
@@ -1509,7 +1689,7 @@ def get_include_and_linking_paths(
     return ipaths, lpaths_str, libs_str, macros, build_arch_flags
 
 
-def deprecated_cpp_compile_command(
+def cpp_compile_command(
     input: Union[str, List[str]],
     output: str,
     warning_all: bool = True,
@@ -1523,13 +1703,6 @@ def deprecated_cpp_compile_command(
     use_mmap_weights: bool = False,
     extra_flags: Sequence[str] = (),
 ) -> str:
-    """
-    Please don't use this function in new development code.
-    It was planed to remove after we switched to new cpp_builder, but I can't access to Meta
-    internal environment to fix AotCodeCompiler fb_code.
-    TODO: need some Meta employee help on fix AotCodeCompiler fb_code, and then delete this
-    deprecated function.
-    """
     ipaths, lpaths, libs, macros, build_arch_flags = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
     )
@@ -1582,20 +1755,6 @@ def deprecated_cpp_compile_command(
             -o {out_name}
         """,
     ).strip()
-
-
-def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]) -> None:
-    """
-    TODO: Will remove the temp code after switch to new cpp_builder
-    """
-    new_diff: List[str] = [x for x in new_cmd if x not in old_cmd]
-    old_diff: List[str] = [y for y in old_cmd if y not in new_cmd]
-    if new_diff or old_diff:
-        print("!!! new_cmd: ", new_cmd)
-        print("!!! old_cmd: ", old_cmd)
-        print("!!! new_diff: ", new_diff)
-        print("!!! old_diff: ", old_diff)
-        raise RuntimeError("Error in new and old command different.")
 
 
 def run_command_and_check(cmd: str) -> None:
@@ -1844,8 +2003,8 @@ class AotCodeCompiler:
                 if specified_so_name
                 else os.path.splitext(input_path)[0] + ".so"
             )
-            output_o = os.path.splitext(input_path)[0] + ".o"
 
+            output_o = os.path.splitext(input_path)[0] + ".o"
             consts_size = sum(
                 torch.ops.mkldnn._nbytes(tensor)
                 if tensor.is_mkldnn
@@ -1884,29 +2043,8 @@ class AotCodeCompiler:
                 object_build_options.save_flags_to_file(compile_flags)
 
             else:
-                (
-                    object_output_name,
-                    object_output_dir,
-                ) = get_name_and_dir_from_output_file_path(input_path)
-                object_build_options = CppTorchCudaOptions(
-                    vec_isa=picked_vec_isa,
-                    cuda=cuda,
-                    aot_mode=graph.aot_mode,
-                    compile_only=True,
-                    use_absolute_path=use_absolute_path,
-                    use_mmap_weights=use_mmap_weights,
-                )
-                object_builder = CppBuilder(
-                    name=object_output_name,
-                    sources=input_path,
-                    output_dir=object_output_dir,
-                    BuildOption=object_build_options,
-                )
-                compile_cmd = object_builder.get_command_line()
-                output_o = object_builder.get_target_file_path()
-
                 # TODO: replace this with using the CppBuilder above
-                compile_cmd_old = deprecated_cpp_compile_command(
+                compile_cmd = cpp_compile_command(
                     input=input_path,
                     output=output_o,
                     vec_isa=picked_vec_isa,
@@ -1916,13 +2054,6 @@ class AotCodeCompiler:
                     use_absolute_path=use_absolute_path,
                     use_mmap_weights=use_mmap_weights,
                 )
-                # TODO: Enable below code to debug in fb_code.
-                """
-                _temp_validate_new_and_old_command(
-                    compile_cmd.split(" "), compile_cmd_old.split(" ")
-                )
-                """
-                compile_cmd = compile_cmd_old
 
                 log.debug("aot compilation command: %s", compile_cmd)
                 if fbcode_aot_cpu_re:
@@ -2020,24 +2151,8 @@ class AotCodeCompiler:
                 archive_path = package_aoti(os.path.split(input_path)[0])
                 return archive_path
 
-            output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
-            so_build_options = CppTorchCudaOptions(
-                vec_isa=picked_vec_isa,
-                cuda=cuda,
-                aot_mode=graph.aot_mode,
-                use_absolute_path=use_absolute_path,
-            )
-            so_builder = CppBuilder(
-                name=output_name,
-                sources=[output_o, consts_o],
-                output_dir=output_dir,
-                BuildOption=so_build_options,
-            )
-            link_cmd = so_builder.get_command_line()
-            output_so = so_builder.get_target_file_path()
-
             # TODO: replace this with using the CppBuilder above
-            link_cmd_old = deprecated_cpp_compile_command(
+            link_cmd = cpp_compile_command(
                 input=[output_o, consts_o],
                 output=output_so,
                 vec_isa=picked_vec_isa,
@@ -2045,13 +2160,6 @@ class AotCodeCompiler:
                 aot_mode=graph.aot_mode,
                 use_absolute_path=use_absolute_path,
             )
-            # TODO: Enable below code to debug in fb_code.
-            """
-            _temp_validate_new_and_old_command(
-                link_cmd.split(" "), link_cmd_old.split(" ")
-            )
-            """
-            link_cmd = link_cmd_old
 
             log.debug("aot linkage command: %s", link_cmd)
             if fbcode_aot_cpu_re:
@@ -2570,6 +2678,120 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         }
         """
     )
+
+
+# TODO: Will remove the temp code after switch to new cpp_builder
+def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]) -> None:
+    new_diff: List[str] = [x for x in new_cmd if x not in old_cmd]
+    old_diff: List[str] = [y for y in old_cmd if y not in new_cmd]
+
+    if new_diff or old_diff:
+        print("!!! new_cmd: ", new_cmd)
+        print("!!! old_cmd: ", old_cmd)
+        print("!!! new_diff: ", new_diff)
+        print("!!! old_diff: ", old_diff)
+        raise RuntimeError("Error in new and old command different.")
+
+
+def _do_validate_cpp_commands(
+    include_pytorch: bool,
+    cuda: bool,
+    compile_only: bool,
+    mmap_weights: bool,
+    use_absolute_path: bool,
+    aot_mode: bool,
+) -> None:
+    # PreCI will failed if test machine can't run cuda.
+    temp_dir = tempfile.TemporaryDirectory()
+    test_dir_path = temp_dir.name
+    test_cuda = torch.cuda.is_available() and cuda
+    input_path = os.path.join(test_dir_path, "dummy_file.cpp")
+    output_path = os.path.join(test_dir_path, "dummy_file.so")
+    extra_flags = ["-D TEST_EXTRA_FLAGS"]
+    if compile_only:
+        output_path = os.path.join(test_dir_path, "dummy_file.o")
+    picked_isa = pick_vec_isa()
+
+    # Simulate fb_code env:
+    if not (aot_mode and not use_absolute_path):
+        input_path = os.path.basename(input_path)
+        output_path = os.path.basename(output_path)
+
+    # Fix test_new_cpp_build_logical failed on MacOS
+    if sys.platform != "linux":
+        aot_mode = False
+
+    old_cmd = cpp_compile_command(
+        input=input_path,
+        output=output_path,
+        include_pytorch=include_pytorch,
+        vec_isa=picked_isa,
+        cuda=test_cuda,
+        aot_mode=aot_mode,
+        compile_only=compile_only,
+        use_absolute_path=use_absolute_path,
+        use_mmap_weights=mmap_weights,
+        extra_flags=extra_flags,
+    ).split(" ")
+
+    name, dir = get_name_and_dir_from_output_file_path(input_path)
+
+    dummy_build_option = CppTorchCudaOptions(
+        vec_isa=picked_isa,
+        include_pytorch=include_pytorch,
+        cuda=test_cuda,
+        aot_mode=aot_mode,
+        compile_only=compile_only,
+        use_absolute_path=use_absolute_path,
+        use_mmap_weights=mmap_weights,
+        extra_flags=extra_flags,
+    )
+
+    dummy_builder = CppBuilder(
+        name=name,
+        sources=input_path,
+        output_dir=dir,
+        BuildOption=dummy_build_option,
+    )
+    new_cmd = dummy_builder.get_command_line().split(" ")
+
+    _temp_validate_new_and_old_command(new_cmd, old_cmd)
+
+    temp_dir.cleanup()
+
+
+# TODO: Will remove the temp code after switch to new cpp_builder
+# It could help on sync new cpp_builder generate same command line as the old one.
+def validate_new_cpp_commands() -> None:
+    cuda = [True, False]
+    use_mmap_weights = [True, False]
+    compile_only = [True, False]
+    include_pytorch = [True, False]
+    use_absolute_path = [True, False]
+    aot_mode = [False, True]
+
+    # Try to pass it in fb_code.
+    if config.is_fbcode():
+        return
+
+    for x in cuda:
+        for y in use_mmap_weights:
+            for z in compile_only:
+                for m in include_pytorch:
+                    for n in use_absolute_path:
+                        for o in aot_mode:
+                            print(
+                                f"!!! cuda:{x}, use_mmap_weights:{y}, compile_only:{z}, include_pytorch:{m},"
+                                f" use_absolute_path:{n}, aot_mode:{o}"
+                            )
+                            _do_validate_cpp_commands(
+                                include_pytorch=m,
+                                cuda=x,
+                                mmap_weights=y,
+                                compile_only=z,
+                                use_absolute_path=n,
+                                aot_mode=o,
+                            )
 
 
 @clear_on_fresh_inductor_cache

@@ -70,6 +70,7 @@ import numbers
 
 from torch.distributions import constraints, transforms
 
+
 __all__ = [
     "ConstraintRegistry",
     "biject_to",

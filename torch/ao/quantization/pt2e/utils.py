@@ -299,15 +299,6 @@ def fold_bn_weights_into_conv_node(
             continue
         user.replace_all_uses_with(conv_node)
 
-    # If the BN node does not have users, erase it from the graph
-    # Note: we need to do this manually because the model can still be in train
-    # mode at this point, in which case DCE won't erase the BN node automatically
-    # since the node refers to a mutating op. Here we still need to call DCE first
-    # to get rid of the unused getitem nodes that consume the BN node.
-    m.graph.eliminate_dead_code()
-    if len(bn_node.users) == 0:
-        m.graph.erase_node(bn_node)
-
 
 # fuse conv bn weights, inplace modification of the graph_module and graph
 def _fuse_conv_bn_(m: GraphModule) -> None:
