@@ -6,6 +6,7 @@
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/Layout.h>
 #include <ATen/Parallel.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/sparse/SparseStubs.h>
@@ -29,6 +30,7 @@
 #include <ATen/ops/_dimV_native.h>
 #include <ATen/ops/_indices_native.h>
 #include <ATen/ops/_nnz_native.h>
+#include <ATen/ops/_pin_memory_native.h>
 #include <ATen/ops/sparse_coo_tensor.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims.h>
@@ -50,6 +52,7 @@
 #include <ATen/ops/index_select.h>
 #include <ATen/ops/indices_native.h>
 #include <ATen/ops/is_coalesced_native.h>
+#include <ATen/ops/is_pinned_native.h>
 #include <ATen/ops/resize_as_sparse.h>
 #include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/sparse_coo_tensor.h>
@@ -205,7 +208,11 @@ SparseTensor new_with_dims_and_tensor_sparse_symint(
       Tensor(values.unsafeGetTensorImpl()->shallow_copy_and_detach(
           /*version_counter=*/values.unsafeGetTensorImpl()->version_counter(),
           /*allow_tensor_metadata_change=*/true));
-  alias_into_sparse(self, indices_shallow_copy, values_shallow_copy);
+  if (pin_memory.value_or(false)) {
+    alias_into_sparse(self, indices_shallow_copy.pin_memory(), values_shallow_copy.pin_memory());
+  } else {
+    alias_into_sparse(self, indices_shallow_copy, values_shallow_copy);
+  }
   // alias_into_sparse overrides coalesced flag, so resetting the flag to
   // the desired state here:
   if (is_coalesced.has_value()) {
@@ -389,6 +396,14 @@ void _validate_sparse_coo_tensor_args(
       "), but got ",
       size.size());
 
+  TORCH_CHECK(
+      indices.is_pinned() == values.is_pinned(),
+      "memory pinning of indices (=",
+      indices.is_pinned(),
+      ") must match memory pinning of values (=",
+      values.is_pinned(),
+      ")");
+
   // Check to make sure all indices are within the boundaries of `size`
   if (indices.numel() > 0) {
     Tensor min_indices =
@@ -491,14 +506,13 @@ Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& val
   // indices dimension because that implies variable dimensionality
   auto sparse_dim = indices.sym_size(0).guard_int(__FILE__, __LINE__);
   auto dense_dim = values.dim() - 1;
-
   return at::_sparse_coo_tensor_with_dims_and_tensors_symint(
       sparse_dim,
       dense_dim,
       size,
       indices,
       values,
-      values.options().layout(kSparse),
+      values.options().layout(kSparse).pinned_memory(pin_memory),
       is_coalesced);
 }
 
@@ -855,6 +869,28 @@ Tensor empty_like_sparse_coo(
   } else {
     return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
   }
+}
+
+bool is_pinned_sparse_coo(const Tensor& self, std::optional<Device> device) {
+  // Assuming that _indices has the same pin memory state as _values
+  return self._values().is_pinned(device);
+}
+
+Tensor _pin_memory_sparse_coo(const Tensor& self, std::optional<Device> device) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_cuda());
+  // pinning of sparse tensor is equivalent to cloning indices and
+  // values that will not change the sparse tensor invariants. Hence,
+  // we can skip checking the sparse tensor invariants for efficiency.
+  at::sparse_csr::CheckSparseTensorInvariants _(false);
+  TensorOptions options = self.options().pinned_memory(true);
+  return at::_sparse_coo_tensor_with_dims_and_tensors(
+      self.sparse_dim(),
+      self.dense_dim(),
+      self.sizes(),
+      self._indices().pin_memory(device),
+      self._values().pin_memory(device),
+      options,
+      self.is_coalesced());
 }
 
 } // namespace at::native
