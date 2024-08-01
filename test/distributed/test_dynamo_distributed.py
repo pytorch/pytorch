@@ -1298,7 +1298,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         for skip_guards, expected_guard_source in (
             (True, "local_fsdp_module"),
-            (False, "local"),
+            (False, "local_unspecialized_nn_module"),
         ):
             torch._dynamo.reset()
 
