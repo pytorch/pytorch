@@ -218,7 +218,36 @@ def in_namespace(op, namespace):
 
 
 def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
+    # 0-dim CPU tensor will be converted to a symbol when it is used in CUDA kernels
+    target_device_cuda = False
+    for arg in args:
+        if hasattr(arg, "layout") and arg.layout.device.type == "cuda":
+            target_device_cuda = True
+            break
+    if target_device_cuda:
+        for i, arg in enumerate(args):
+            if (
+                hasattr(arg, "layout")
+                and arg.layout.device.type == "cpu"
+                and arg.layout.size == []
+            ):
+                if is_float_dtype(arg.dtype):
+                    tmp_sym = V.fake_mode.shape_env.create_unbacked_symfloat().node.expr
+                elif is_integer_dtype(arg.dtype):
+                    tmp_sym = V.fake_mode.shape_env.create_unbacked_symint().node.expr
+                elif is_boolean_dtype(arg.dtype):
+                    tmp_sym = V.fake_mode.shape_env.create_unbacked_symbool().node.expr
+                else:
+                    raise NotImplementedError(
+                        f"the CPU scalar tensor can't be converted because of unknown dtype {arg.dtype}"
+                    )
+                buffer = ir.DynamicScalar(tmp_sym, [], arg)
+                buffer.name = V.graph.register_buffer(buffer)
+                V.graph.register_operation(buffer)
+                args[i] = tmp_sym
+
     indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
+
     if (type_promotion_kind or convert_input_to_bool) and indices:
         if convert_input_to_bool:
             dtype = torch.bool
