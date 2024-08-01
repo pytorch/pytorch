@@ -1031,7 +1031,7 @@ def load(
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
     *,
-    weights_only: Optional[bool] = None,
+    weights_only: Optional[bool] = True,
     mmap: Optional[bool] = None,
     **pickle_load_args: Any,
 ) -> Any:

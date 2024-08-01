@@ -144,6 +144,8 @@ def _tensor_rebuild_functions():
         torch._utils._rebuild_meta_tensor_no_storage,
         torch._utils._rebuild_nested_tensor,
         torch._utils._rebuild_wrapper_subclass,
+        # Allowlisting this, but not allowlisting the numpy functions by default
+        torch._utils._rebuild_device_tensor_from_numpy,
     }
 
 

@@ -185,8 +185,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         b = io.BytesIO()
         torch.save(qlinear, b)
         b.seek(0)
-        # Don't test weights_only here as this is legacy code that saves the model
-        loaded = torch.load(b)
+        # weights_only=False as this is legacy code that saves the model
+        loaded = torch.load(b, weights_only=False)
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.scale, loaded.scale)
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
@@ -368,8 +368,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         b = io.BytesIO()
         torch.save(qconv_module, b)
         b.seek(0)
-        # Don't test weights_only here as this is legacy code that saves the model
-        loaded_conv = torch.load(b)
+        # weights_only=False as this is legacy code that saves the model
+        loaded_conv = torch.load(b, weights_only=False)
 
         self.assertEqual(loaded_conv.bias(), qconv_module.bias())
         self.assertEqual(loaded_conv.scale, qconv_module.scale)
@@ -1482,8 +1482,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         b = io.BytesIO()
         torch.save(dynamic_module, b)
         b.seek(0)
-        # Don't test weights_only here as this is legacy code that saves the model
-        loaded_conv = torch.load(b)
+        # weights_only=False as this is legacy code that saves the model
+        loaded_conv = torch.load(b, weights_only=False)
 
         self.assertEqual(loaded_conv.bias(), dynamic_module.bias())
         self.assertEqual(loaded_conv.scale, dynamic_module.scale)
@@ -1662,8 +1662,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         b = io.BytesIO()
         torch.save(qlinear, b)
         b.seek(0)
-        # Don't test weights_only here as this is legacy code that saves the model
-        loaded = torch.load(b)
+        # weights_only=False as this is legacy code that saves the model
+        loaded = torch.load(b, weights_only=False)
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
 

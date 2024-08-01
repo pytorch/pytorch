@@ -3437,7 +3437,8 @@ class ModuleTest(TestBase):
                     test_case._forward(module, input)
                     torch.save(module, f)
                     f.seek(0)
-                    module_copy = torch.load(f)
+                    # weights_only=False as this is legacy code that saves the model
+                    module_copy = torch.load(f, weights_only=False)
                     test_case.assertEqual(test_case._forward(module, input), test_case._forward(module_copy, input))
 
             self._do_test(test_case, module, input)
