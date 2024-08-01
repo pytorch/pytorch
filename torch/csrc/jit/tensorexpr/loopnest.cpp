@@ -1026,7 +1026,7 @@ class LoadOrStoreUseFinder : public IRVisitor {
   }
 
  private:
-  void visit(StorePtr v) override {
+  void visit(const StorePtr& v) override {
     if (stores_[v->buf()].insert(last_stmt_).second) {
       uses_[v->buf()].push_back({(StmtPtr)v, true});
     }
@@ -1034,7 +1034,7 @@ class LoadOrStoreUseFinder : public IRVisitor {
     IRVisitor::visit(v);
   }
 
-  void visit(ExternalCallPtr v) override {
+  void visit(const ExternalCallPtr& v) override {
     if (stores_[v->buf()].insert(last_stmt_).second) {
       uses_[v->buf()].push_back({(StmtPtr)v, true});
     }
@@ -1049,7 +1049,7 @@ class LoadOrStoreUseFinder : public IRVisitor {
     IRVisitor::visit(v);
   }
 
-  void visit(ExternalCallWithAllocPtr v) override {
+  void visit(const ExternalCallWithAllocPtr& v) override {
     for (const auto& out_buf : v->buf_out_args()) {
       if (stores_[out_buf].insert(last_stmt_).second) {
         uses_[out_buf].push_back({(StmtPtr)v, true});
@@ -1066,7 +1066,7 @@ class LoadOrStoreUseFinder : public IRVisitor {
     IRVisitor::visit(v);
   }
 
-  void visit(LoadPtr v) override {
+  void visit(const LoadPtr& v) override {
     if (loads_[v->buf()].insert(last_stmt_).second) {
       uses_[v->buf()].push_back({last_stmt_, false});
     }
@@ -1097,19 +1097,19 @@ class ContainedStmtsFinder : public IRVisitor {
   }
 
  private:
-  void visit(StorePtr v) override {
+  void visit(const StorePtr& v) override {
     contained_.insert((StmtPtr)v);
     IRVisitor::visit(v);
   }
-  void visit(ExternalCallPtr v) override {
+  void visit(const ExternalCallPtr& v) override {
     contained_.insert((StmtPtr)v);
     IRVisitor::visit(v);
   }
-  void visit(ExternalCallWithAllocPtr v) override {
+  void visit(const ExternalCallWithAllocPtr& v) override {
     contained_.insert((StmtPtr)v);
     IRVisitor::visit(v);
   }
-  void visit(BlockPtr v) override {
+  void visit(const BlockPtr& v) override {
     contained_.insert((StmtPtr)v);
     IRVisitor::visit(v);
   }
