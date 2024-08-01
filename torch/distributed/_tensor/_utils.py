@@ -1,3 +1,4 @@
+from functools import reduce
 from typing import cast, List, Sequence, Tuple
 
 import torch
@@ -226,6 +227,48 @@ def compute_local_stride(
     )
 
 
+def get_shard_idx_on_dim(
+    dim_map: List[List[int]], mesh: DeviceMesh, tensor_dim: int
+) -> int:
+    """
+    Returns the index of the current shard on a given tensor dimension.
+    """
+    shard_mesh_dims = dim_map[tensor_dim]
+    coordinate = mesh.get_coordinate()
+
+    shard_idx_on_tensor_dim = 0
+    for i, mesh_dim in enumerate(shard_mesh_dims):
+        if i != len(shard_mesh_dims) - 1:
+            stride = reduce(
+                lambda a, b: a * b, [mesh.size(j) for j in shard_mesh_dims[i + 1 :]]
+            )
+            shard_idx_on_tensor_dim += coordinate[mesh_dim] * stride
+        else:
+            shard_idx_on_tensor_dim += coordinate[mesh_dim]
+
+    return shard_idx_on_tensor_dim
+
+
+def get_dim_map(
+    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
+) -> List[List[int]]:
+    """
+    Returns a dim_map of list of list such that dim_map[i] includes a list of mesh dimensions
+    that tensor dimension i is sharded on. For example, if we have a dist tensor that have the
+    shape of [18, 20, 30, 40] with a 2*2*2 device_mesh and placements [shard(0), shard(0), shard(1)],
+    we would have a dim_map of [[0, 1], [2], [-1], [-1]].
+    """
+    dim_map = [[-1]] * len(global_shape)
+    for mesh_dim, placement in enumerate(placements):
+        if placement.is_shard():
+            shard_dim = cast(Shard, placement).dim
+            if dim_map[shard_dim] == [-1]:
+                dim_map[shard_dim] = [mesh_dim]
+            else:
+                dim_map[shard_dim].append(mesh_dim)
+    return dim_map
+
+
 def compute_padded_and_unpadded_local_shape(
     global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
 ) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
@@ -233,7 +276,8 @@ def compute_padded_and_unpadded_local_shape(
     This util computes the padded and unpadded local shape of a DTensor. The padded shape is computed by considering
     applying padding to the global tensor such that each padded shard would have the exact same shape across all ranks.
     This means sharding happens after padding.
-
+    
+    # TODO: Remove compute_local_shape once we switch to static padding.
     This differs from `compute_local_shape`. The local shape from `compute_local_shape` considers padding after sharding,
     meaning padding is applied on each placements instead of globally. Therefore, the local shape on each shard
     after padding could be different. The local shape returned from `compute_local_shape` is different from the
@@ -243,15 +287,17 @@ def compute_padded_and_unpadded_local_shape(
     """
 
     # Calculate globally how many chunks a given tensor dim will have globally.
-    num_chunks_by_dim = [1 for _ in enumerate(global_shape)]
+    num_chunks_on_dim = [1 for _ in enumerate(global_shape)]
     for mesh_idx, placement in enumerate(placements):
         if placement.is_shard():
             tensor_dim = placement.dim  # type: ignore[attr-defined]
             mesh_dim_size = mesh.size(mesh_idx)
-            num_chunks_by_dim[tensor_dim] *= mesh_dim_size
+            num_chunks_on_dim[tensor_dim] *= mesh_dim_size
 
+    dim_map = get_dim_map(global_shape, mesh, placements)
     full_shard_size, cur_unpadded_shard_size = [], []
-    for size_on_dim, num_chunks in zip(global_shape, num_chunks_by_dim):
+    for tensor_dim, _ in enumerate(zip(global_shape, num_chunks_on_dim)):
+        size_on_dim, num_chunks = _
         if num_chunks == 1:
             # This means no sharding is happening on the ith dimension of the global tensor.
             # Therefore, the padded and unpadded size of the ith dimension is the same as global_shape[i].
@@ -264,13 +310,7 @@ def compute_padded_and_unpadded_local_shape(
             tail_chunk_size = size_on_dim % full_chunk_size
             full_shard_size.append(full_chunk_size)
 
-            # We can't use get_coordinate() here because get_coordinate() returns the ith shard on each
-            # mesh dimension. When we move to global padding, we need to know the index of the shard on the tensor
-            # dimension, because the ith tensor dimension could be sharded multiple times on different mesh dimension.
-            # TODO: we would need a `get_coordinate_on_tensor_dim()` API to calculate this.
-            # `get_rank()` would only work for 1D and 2D scenario [Shard(0), Shard(0)].
-            # `get_coordinate()` would only when all the placements are on different tensor dimension.
-            cur_chunk = mesh.get_rank()
+            cur_chunk = get_shard_idx_on_dim(dim_map, mesh, tensor_dim)
 
             # If the index of cur chunk is smaller than num_full_chunks,
             # this means cur_chunk would be a full chunk on the given tensor dimension.
