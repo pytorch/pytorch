@@ -697,7 +697,7 @@ class CachingAutotuner(KernelInterface):
     @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
         lazy_benchmarks = [
-            self.bench(launcher, *args, **kwargs) for launcher in self.launchers
+            self.bench(launcher, *args, **kwargs, lazy=True) for launcher in self.launchers
         ]
         timings = {
             launcher: float(timing)
