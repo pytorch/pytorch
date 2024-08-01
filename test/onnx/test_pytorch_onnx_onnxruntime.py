@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import functools
-
 import io
 import itertools
 import os
@@ -12,6 +11,7 @@ from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple, Type, Union
 
 import numpy as np
+
 import onnx
 import onnx_test_common
 import parameterized
@@ -38,7 +38,6 @@ from pytorch_test_common import (
 )
 
 import torch
-
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
 from torch.onnx import errors, verification
@@ -293,7 +292,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 self,
             ):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 scale_1 = self.weight.reshape(1, -1, 1, 1)
@@ -3907,15 +3906,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 ctx.save_for_backward(input)
                 return input.clamp(min=0)
 
-        def symbolic_python_op(
-            ctx: torch.onnx.SymbolicContext, g: torch._C.Graph, *args, **kwargs
-        ):
-            n = ctx.cur_node
+        def symbolic_python_op(g, *args, **kwargs):
             name = kwargs["name"]
             if name == "MyClip":
-                return g.op("Clip", args[0], args[1], outputs=n.outputsSize())
+                return g.op("Clip", args[0], args[1])
             elif name == "MyRelu":
-                return g.op("Relu", args[0], outputs=n.outputsSize())
+                return g.op("Relu", args[0])
             else:
                 # TODO(justinchuby): Remove reference to internal names in symbolic_helper
                 return torch.onnx.symbolic_helper._unimplemented(
@@ -4355,7 +4351,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class GatherModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
                 # torch.nn.Embedding is converted to ONNX::Gather.
                 # Constant folding will be triggerred for constant inputs.
                 # This pattern is common for constant mask inputs in transformer models.
@@ -4374,7 +4370,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class GatherModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(2))
+                self.weight = torch.nn.Buffer(torch.ones(2))
 
             def forward(self, x):
                 # shape is of rank 0
@@ -4389,7 +4385,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class GatherModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("rb", torch.randn(1, 1, 3, 1, 1))
+                self.rb = torch.nn.Buffer(torch.randn(1, 1, 3, 1, 1))
 
             def forward(self, x):
                 x += self.rb[0]
@@ -9663,7 +9659,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class ShapeModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 shape = self.weight.shape[0]
@@ -11164,7 +11160,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self, embedding_dim):
                 super().__init__()
                 self.weights = InnerModule2.get_embedding(embedding_dim)
-                self.register_buffer("_float_tensor", torch.FloatTensor(1))
+                self._float_tensor = torch.nn.Buffer(torch.FloatTensor(1))
                 self.const = 2
 
             @staticmethod
@@ -11226,7 +11222,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 self.embedding_dim = embedding_dim
                 self.const = 2.5
                 self.weights = InnerModule.get_embedding(self.embedding_dim)
-                self.register_buffer("_float_tensor", torch.FloatTensor(1))
+                self._float_tensor = torch.nn.Buffer(torch.FloatTensor(1))
 
             @staticmethod
             def get_embedding(embedding_dim: int):

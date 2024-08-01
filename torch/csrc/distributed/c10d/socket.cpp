@@ -143,8 +143,7 @@ class SocketImpl {
 
   explicit SocketImpl(Handle hnd) noexcept : hnd_{hnd} {}
 
-  explicit SocketImpl(Handle hnd, const ::addrinfo& remote)
-      : hnd_{hnd}, remote_{fmt::format("{}", remote)} {}
+  explicit SocketImpl(Handle hnd, const ::addrinfo& remote);
 
   SocketImpl(const SocketImpl& other) = delete;
 
@@ -292,6 +291,9 @@ struct formatter<c10d::detail::SocketImpl> {
 } // namespace fmt
 
 namespace c10d::detail {
+
+SocketImpl::SocketImpl(Handle hnd, const ::addrinfo& remote)
+    : hnd_{hnd}, remote_{fmt::format("{}", remote)} {}
 
 SocketImpl::~SocketImpl() {
 #ifdef _WIN32
