@@ -25,6 +25,7 @@ __all__ = [
     "mem_efficient_sdp_enabled",
     "math_sdp_enabled",
     "enable_math_sdp",
+    "is_flash_attention_available",
     "can_use_flash_attention",
     "can_use_efficient_attention",
     "can_use_cudnn_attention",
@@ -318,6 +319,19 @@ def enable_math_sdp(enabled: bool):
     Enables or disables math scaled dot product attention.
     """
     torch._C._set_sdp_use_math(enabled)
+
+
+def is_flash_attention_available() -> bool:
+    r"""Check if PyTorch was built with FlashAttention for scaled_dot_product_attention.
+
+    Returns:
+        True if FlashAttention is built and available; otherwise, False.
+
+    Note:
+        This function is dependent on a CUDA-enabled build of PyTorch. It will return False
+        in non-CUDA environments.
+    """
+    return torch._C._is_flash_attention_available()
 
 
 def can_use_flash_attention(params: SDPAParams, debug: bool = False) -> bool:

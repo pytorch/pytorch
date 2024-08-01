@@ -170,9 +170,8 @@ struct TraceEntry {
     SEGMENT_UNMAP, // unmap part of a segment (used with expandable segments)
     SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
               // events
-    OOM, // the allocator threw an OutOfMemoryError (addr_ is the amount of free
-         // bytes reported by cuda)
-    USER_DEFINED // a call made from user defined API such as record_function
+    OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free
+        // bytes reported by cuda)
   };
   TraceEntry(
       Action action,
@@ -199,6 +198,22 @@ struct TraceEntry {
   trace_time_ time_{};
 };
 
+// Calls made by record_function will save annotations
+struct AnnotationEntry {
+  AnnotationEntry(c10::DeviceIndex device, approx_time_t time)
+      : device_(device) {
+    time_.approx_t_ = time;
+  }
+
+  void recordUserMetadata(const std::string& name, std::string value) {
+    metadata_[name] = std::move(value);
+  }
+
+  c10::DeviceIndex device_;
+  trace_time_ time_{};
+  std::unordered_map<std::string, std::string> metadata_;
+};
+
 struct AllocatorConfigInfo {
   double garbage_collection_threshold;
   size_t max_split_size;
@@ -213,6 +228,7 @@ struct AllocatorConfigInfo {
 struct SnapshotInfo {
   std::vector<SegmentInfo> segments;
   std::vector<std::vector<TraceEntry>> device_traces;
+  std::vector<AnnotationEntry> external_annotations;
   AllocatorConfigInfo config_metadata;
 };
 
@@ -296,7 +312,8 @@ class CUDAAllocator : public Allocator {
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
       RecordContext when) = 0;
-  virtual void recordAnnotation(const std::shared_ptr<GatheredContext>& name){};
+  virtual void recordAnnotation(
+      const std::vector<std::pair<std::string, std::string>>& md){};
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
   // Attached AllocatorTraceTracker callbacks will be called while the
@@ -436,8 +453,9 @@ inline void recordHistory(
       enabled, context_recorder, alloc_trace_max_entries, when);
 }
 
-inline void recordAnnotation(const std::shared_ptr<GatheredContext>& name) {
-  return get()->recordAnnotation(name);
+inline void recordAnnotation(
+    const std::vector<std::pair<std::string, std::string>>& md) {
+  return get()->recordAnnotation(md);
 }
 
 inline bool isHistoryEnabled() {
@@ -495,3 +513,51 @@ inline void enablePeerAccess(
 }
 
 } // namespace c10::cuda::CUDACachingAllocator
+
+namespace c10::cuda {
+
+// MemPool represents a pool of memory in a caching allocator. Currently,
+// it's just the ID of the pool object maintained in the CUDACachingAllocator.
+//
+// An allocator pointer can be passed to the MemPool to define how the
+// allocations should be done in the pool. For example: using a different
+// system allocator such as ncclMemAlloc.
+struct C10_CUDA_API MemPool {
+  MemPool(
+      CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
+      bool is_user_created = true);
+
+  MempoolId_t id();
+  CUDACachingAllocator::CUDAAllocator* allocator();
+
+ private:
+  static std::atomic<CaptureId_t> uid_;
+  static std::atomic<CaptureId_t> uuid_;
+  CUDACachingAllocator::CUDAAllocator* allocator_;
+  bool is_user_created_;
+  MempoolId_t id_;
+};
+
+// MemPoolContext holds the currently active pool and stashes the previous
+// pool. On deletion it makes the previous pool active.
+struct C10_CUDA_API MemPoolContext {
+  MemPoolContext(MemPool* mempool);
+
+  ~MemPoolContext();
+
+  // getActiveMemPool() can be used to get the currently active pool.
+  // For instance: in CUDACachingAllocator, we can route allocations
+  // to a user provided allocator, by doing:
+  //
+  //  auto active_pool = MemPoolContext::getActiveMemPool();
+  //  if (active_pool && active_pool->allocator()) {
+  //    ptr = active_pool->allocator()->raw_alloc(size);
+  //  }
+  //
+  static MemPool* getActiveMemPool();
+
+ private:
+  MemPool* prev_mempool_;
+};
+
+} // namespace c10::cuda
