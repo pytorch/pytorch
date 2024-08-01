@@ -92,8 +92,8 @@ class GPUMetaVarRewriter : public IRMutator {
         alloc<IntImm>(1), alloc<IntImm>(1), alloc<IntImm>(1)};
   }
 
-  StmtPtr mutate(ForPtr v) override;
-  StmtPtr mutate(BlockPtr v) override;
+  StmtPtr mutate(const ForPtr& v) override;
+  StmtPtr mutate(const BlockPtr& v) override;
 
   const std::vector<VarPtr>& gpu_block_vars() const {
     return gpu_block_vars_;
