@@ -5,6 +5,7 @@ import torch
 from torch.distributions import Categorical, constraints
 from torch.distributions.distribution import Distribution
 
+
 __all__ = ["MixtureSameFamily"]
 
 

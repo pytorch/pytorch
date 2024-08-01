@@ -2,18 +2,20 @@
 from __future__ import annotations
 
 import contextlib
-
-from typing import Callable
+from typing import Callable, TYPE_CHECKING
 
 import torch
 import torch._ops
 import torch.func
 import torch.fx
-from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.onnx._internal.fx.passes import _utils
 from torch.utils import _pytree as pytree
+
+
+if TYPE_CHECKING:
+    from torch._subclasses import fake_tensor
 
 
 class Functionalize(_pass.Transform):
