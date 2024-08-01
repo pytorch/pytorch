@@ -1113,7 +1113,7 @@ class HelperFunctions:
     _templates_seen: Dict[str, str]  # Template code to function name
     finalized_helpers: List[str]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._templates_seen = {}
         self.finalized_helpers = []
 

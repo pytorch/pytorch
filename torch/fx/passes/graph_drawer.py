@@ -117,7 +117,7 @@ if HAS_PYDOT:
                 >>> # xdoctest: +REQUIRES(module:ubelt)
                 >>> # define module
                 >>> class MyModule(torch.nn.Module):
-                >>>     def __init__(self):
+                >>>     def __init__(self) -> None:
                 >>>         super().__init__()
                 >>>         self.linear = torch.nn.Linear(4, 5)
                 >>>     def forward(self, x):

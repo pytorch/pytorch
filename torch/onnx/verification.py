@@ -1722,7 +1722,7 @@ def find_mismatch(
         ...     opset_version=opset_version,
         ... )
         >>> class Model(torch.nn.Module):
-        ...     def __init__(self):
+        ...     def __init__(self) -> None:
         ...         super().__init__()
         ...         self.layers = torch.nn.Sequential(
         ...             torch.nn.Linear(3, 4),
