@@ -146,7 +146,7 @@ TEST(NetworkFlowTest, overflow) {
   g.add_edge("a", "b", flow1);
   g.add_edge("a", "b", flow2);
   auto res = g.minimum_cut("a", "b");
-  EXPECT_EQ(res.status, c10::MinCutStatus::OVERFLOW);
+  EXPECT_EQ(res.status, c10::MinCutStatus::OVERFLOW_INF);
 }
 
 TEST(NetworkFlowTest, reverse_edge) {

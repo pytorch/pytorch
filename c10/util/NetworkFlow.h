@@ -10,7 +10,7 @@ namespace c10 {
 enum class C10_API_ENUM MinCutStatus {
   SUCCESS = 0,
   UNBOUNDED = 1,
-  OVERFLOW = 2,
+  OVERFLOW_INF = 2,
   INVALID = 3,
 };
 

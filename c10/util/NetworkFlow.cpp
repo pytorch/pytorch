@@ -166,7 +166,7 @@ struct DinicFlowGraph {
       }
       additional_flow += f;
       if (additional_flow >= NetworkFlowGraph::INF) {
-        return {MinCutStatus::OVERFLOW, 0};
+        return {MinCutStatus::OVERFLOW_INF, 0};
       }
     }
 
@@ -185,7 +185,7 @@ struct DinicFlowGraph {
       }
       total_flow += additional_flow;
       if (total_flow >= NetworkFlowGraph::INF) {
-        return {MinCutStatus::OVERFLOW, 0};
+        return {MinCutStatus::OVERFLOW_INF, 0};
       }
     }
     return {MinCutStatus::SUCCESS, total_flow};
