@@ -700,8 +700,8 @@ class CachingAutotuner(KernelInterface):
             self.bench(launcher, *args, **kwargs, lazy=True) for launcher in self.launchers
         ]
         timings = {
-            launcher: float(timing)
-            for launcher, timing in zip(self.launchers, lazy_benchmarks)
+            launcher: float(lazy_benchmark)
+            for launcher, lazy_benchmark in zip(self.launchers, lazy_benchmarks)
         }
 
         for k, v in timings.items():
