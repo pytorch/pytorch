@@ -13,8 +13,10 @@ from ..autotune_process import CppBenchmarkRequest
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
+from .common import CppWrapperKernelArgs
 from .cpp import CppKernel, CppKernelProxy, KernelGroup
 from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext
+from .cpp_wrapper_cpu import CppWrapperCpu
 
 
 def parse_expr_with_index_symbols(expr):
@@ -40,6 +42,8 @@ class CppTemplateKernel(CppKernel):
         self.kernel_name = kernel_name
         self.render_hooks = {}
         self.local_buffers = {}
+        if isinstance(V.graph.wrapper_code, CppWrapperCpu):
+            self.args = CppWrapperKernelArgs()
 
     def render(self, template, **kwargs):
         return PartialRender(
