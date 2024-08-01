@@ -1,15 +1,15 @@
-# - Try to find MKLDNN
+# - Try to find ONEDNN
 #
 # The following variables are optionally searched for defaults
 #  MKL_FOUND             : set to true if a library implementing the CBLAS interface is found
 #
 # The following are set after configuration is done:
-#  MKLDNN_FOUND          : set to true if mkl-dnn is found.
-#  MKLDNN_INCLUDE_DIR    : path to mkl-dnn include dir.
-#  MKLDNN_LIBRARIES      : list of libraries for mkl-dnn
+#  MKLDNN_FOUND          : set to true if oneDNN is found.
+#  MKLDNN_INCLUDE_DIR    : path to oneDNN include dir.
+#  MKLDNN_LIBRARIES      : list of libraries for oneDNN
 #
 # The following variables are used:
-#  MKLDNN_USE_NATIVE_ARCH : Whether native CPU instructions should be used in MKLDNN. This should be turned off for
+#  MKLDNN_USE_NATIVE_ARCH : Whether native CPU instructions should be used in ONEDNN. This should be turned off for
 #  general packaging to avoid incompatible CPU instructions. Default: OFF.
 
 IF(NOT MKLDNN_FOUND)
@@ -98,7 +98,7 @@ IF(NOT MKLDNN_FOUND)
   ENDIF(BUILD_ONEDNN_GRAPH)
 
   IF(NOT IDEEP_INCLUDE_DIR OR NOT MKLDNN_INCLUDE_DIR)
-    MESSAGE(STATUS "MKLDNN source files not found!")
+    MESSAGE(STATUS "ONEDNN source files not found!")
     RETURN()
   ENDIF(NOT IDEEP_INCLUDE_DIR OR NOT MKLDNN_INCLUDE_DIR)
   LIST(APPEND MKLDNN_INCLUDE_DIR ${IDEEP_INCLUDE_DIR})
@@ -115,35 +115,35 @@ IF(NOT MKLDNN_FOUND)
   ENDIF(MKL_FOUND)
 
   SET(MKL_cmake_included TRUE)
-  IF(NOT MKLDNN_CPU_RUNTIME)
-    SET(MKLDNN_CPU_RUNTIME "OMP" CACHE STRING "")
-  ELSEIF(MKLDNN_CPU_RUNTIME STREQUAL "TBB")
+  IF(NOT ONEDNN_CPU_RUNTIME)
+    SET(ONEDNN_CPU_RUNTIME "OMP" CACHE STRING "")
+  ELSEIF(ONEDNN_CPU_RUNTIME STREQUAL "TBB")
     IF(TARGET TBB::tbb)
-      MESSAGE(STATUS "MKL-DNN is using TBB")
+      MESSAGE(STATUS "oneDNN is using TBB")
 
       SET(TBB_cmake_included TRUE)
       SET(Threading_cmake_included TRUE)
 
-      SET(DNNL_CPU_THREADING_RUNTIME ${MKLDNN_CPU_RUNTIME})
+      SET(DNNL_CPU_THREADING_RUNTIME ${ONEDNN_CPU_RUNTIME})
       INCLUDE_DIRECTORIES(${TBB_INCLUDE_DIR})
       LIST(APPEND EXTRA_SHARED_LIBS TBB::tbb)
     ELSE()
-      MESSAGE(FATAL_ERROR "MKLDNN_CPU_RUNTIME is set to TBB but TBB is not used")
+      MESSAGE(FATAL_ERROR "ONEDNN_CPU_RUNTIME is set to TBB but TBB is not used")
     ENDIF()
   ENDIF()
-  MESSAGE(STATUS "MKLDNN_CPU_RUNTIME = ${MKLDNN_CPU_RUNTIME}")
+  MESSAGE(STATUS "ONEDNN_CPU_RUNTIME = ${ONEDNN_CPU_RUNTIME}")
 
-  SET(MKLDNN_CPU_RUNTIME ${MKLDNN_CPU_RUNTIME} CACHE STRING "" FORCE)
+  SET(ONEDNN_CPU_RUNTIME ${ONEDNN_CPU_RUNTIME} CACHE STRING "" FORCE)
   SET(DNNL_BUILD_TESTS FALSE CACHE BOOL "" FORCE)
   SET(DNNL_BUILD_EXAMPLES FALSE CACHE BOOL "" FORCE)
   SET(DNNL_LIBRARY_TYPE STATIC CACHE STRING "" FORCE)
   SET(DNNL_ENABLE_PRIMITIVE_CACHE TRUE CACHE BOOL "" FORCE)
-  SET(DNNL_GRAPH_CPU_RUNTIME ${MKLDNN_CPU_RUNTIME} CACHE STRING "" FORCE)
+  SET(DNNL_GRAPH_CPU_RUNTIME ${ONEDNN_CPU_RUNTIME} CACHE STRING "" FORCE)
 
   IF(BUILD_ONEDNN_GRAPH)
     SET(DNNL_GRAPH_LIBRARY_TYPE STATIC CACHE STRING "" FORCE)
   ENDIF(BUILD_ONEDNN_GRAPH)
-  IF(MKLDNN_USE_NATIVE_ARCH)  # Disable HostOpts in MKLDNN unless MKLDNN_USE_NATIVE_ARCH is set.
+  IF(MKLDNN_USE_NATIVE_ARCH)  # Disable HostOpts in ONEDNN unless MKLDNN_USE_NATIVE_ARCH is set.
     SET(DNNL_ARCH_OPT_FLAGS "HostOpts" CACHE STRING "" FORCE)
   ELSE()
     IF(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -161,7 +161,7 @@ IF(NOT MKLDNN_FOUND)
   ADD_SUBDIRECTORY(${MKLDNN_ROOT})
 
   IF(NOT TARGET dnnl)
-    MESSAGE("Failed to include MKL-DNN target")
+    MESSAGE("Failed to include oneDNN target")
     RETURN()
   ENDIF(NOT TARGET dnnl)
 
@@ -174,6 +174,6 @@ IF(NOT MKLDNN_FOUND)
   LIST(APPEND MKLDNN_LIBRARIES dnnl)
 
   SET(MKLDNN_FOUND TRUE)
-  MESSAGE(STATUS "Found MKL-DNN: TRUE")
+  MESSAGE(STATUS "Found oneDNN: TRUE")
 
 ENDIF(NOT MKLDNN_FOUND)

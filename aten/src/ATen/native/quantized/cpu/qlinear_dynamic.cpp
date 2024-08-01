@@ -489,7 +489,7 @@ void PackedLinearWeightFp16::set_bias(std::optional<at::Tensor> bias) {
 
 #endif // USE_FBGEMM
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 template <bool ReluFused>
 at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
     at::Tensor input,
@@ -607,7 +607,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_relu(
       std::move(input), reduce_range);
 }
 
-#endif // #if AT_MKLDNN_ENABLED()
+#endif // #if AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {

@@ -1,14 +1,14 @@
 #include <ATen/Config.h>
-#include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
+#include <torch/csrc/inductor/aoti_torch/onednn_tensor.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ideep.hpp>
 #endif
 
 namespace torch::aot_inductor {
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 void* data_ptr_from_mkldnn(at::Tensor* mkldnn_tensor) {
   return reinterpret_cast<void*>(
@@ -29,7 +29,7 @@ at::Tensor mkldnn_tensor_from_data_ptr(
 #else
 
 void* data_ptr_from_mkldnn(at::Tensor* mkldnn_tensor) {
-  TORCH_CHECK(false, "MKL-DNN build is disabled");
+  TORCH_CHECK(false, "oneDNN build is disabled");
 }
 
 at::Tensor mkldnn_tensor_from_data_ptr(
@@ -39,7 +39,7 @@ at::Tensor mkldnn_tensor_from_data_ptr(
     at::Device device,
     const uint8_t* opaque_metadata,
     int64_t opaque_metadata_size) {
-  TORCH_CHECK(false, "MKL-DNN build is disabled");
+  TORCH_CHECK(false, "oneDNN build is disabled");
 }
 
 #endif

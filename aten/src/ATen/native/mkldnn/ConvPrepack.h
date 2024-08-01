@@ -4,7 +4,7 @@
 #include <ATen/native/mkldnn/Common.h>
 #include <ATen/native/mkldnn/OpContext.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
@@ -46,4 +46,4 @@ void run(ContextConv& context, const Tensor& input, void* output);
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()

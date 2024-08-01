@@ -145,7 +145,7 @@ class TestConvolutionNN(NNTestCase):
             self.assertFalse(weight.is_contiguous())
             y = torch.nn.functional.conv2d(x, weight, None)
             if torch.backends.mkldnn.is_available():
-                # Disable MKLDNN explicitly, so that either NNPACK or THCNN will be used
+                # Disable ONEDNN explicitly, so that either NNPACK or THCNN will be used
                 with torch.backends.mkldnn.flags(enabled=False):
                     y_ = torch.nn.functional.conv2d(x, weight, None)
                     self.assertEqual(y, y_)
@@ -2974,7 +2974,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             ]
             if torch.backends.mkldnn.is_available():
                 y = conv(x2)
-                # Disable MKLDNN explicitly
+                # Disable ONEDNN explicitly
                 with torch.backends.mkldnn.flags(enabled=False):
                     y_ = conv(x2)
                     self.assertEqual(y, y_)
@@ -2990,7 +2990,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             x = torch.rand(2, 1, 100, 100).to(dtype=dtype)
             if torch.backends.mkldnn.is_available():
                 y = conv(x)
-                # Disable MKLDNN explicitly
+                # Disable ONEDNN explicitly
                 with torch.backends.mkldnn.flags(enabled=False):
                     y_ = conv(x)
                     self.assertEqual(y, y_)

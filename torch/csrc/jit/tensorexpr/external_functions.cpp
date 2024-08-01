@@ -1397,7 +1397,7 @@ void nnc_aten_triangular_solve(
   }
 }
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 void nnc_mkldnn_prepacked_conv_run(
     int64_t bufs_num,
@@ -1419,7 +1419,7 @@ void nnc_mkldnn_prepacked_conv_run(
   context->run(x, buf_data[0]);
 }
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 
 #ifdef USE_XNNPACK
 
@@ -1603,11 +1603,11 @@ const static RegisterNNCExternalFunction nnc_embedding(
     "nnc_aten_embedding",
     nnc_aten_embedding);
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 const static RegisterNNCExternalFunction reg_nnc_mkldnn_prepacked_conv_run(
     "nnc_mkldnn_prepacked_conv_run",
     nnc_mkldnn_prepacked_conv_run);
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 
 #ifdef USE_XNNPACK
 const static RegisterNNCExternalFunction reg_nnc_prepacked_linear_clamp_run(

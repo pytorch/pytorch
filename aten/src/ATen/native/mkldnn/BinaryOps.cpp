@@ -11,7 +11,7 @@
 #include <ATen/ops/mul_native.h>
 #endif
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
@@ -22,33 +22,33 @@ Tensor& mkldnn_add_out(
     const Scalar& alpha,
     Tensor& result
     ) {
-  TORCH_CHECK(false, "mkldnn_add_out: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_add_out: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_add(const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  TORCH_CHECK(false, "mkldnn_add: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_add: ATen not compiled with ONEDNN support");
 }
 
 Tensor& mkldnn_add_(Tensor& self, const Tensor& other, const Scalar& alpha) {
-  TORCH_CHECK(false, "mkldnn_add_: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_add_: ATen not compiled with ONEDNN support");
 }
 
 Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  TORCH_CHECK(false, "mkldnn_mul_out: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_mul_out: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_mul(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(false, "mkldnn_mul: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_mul: ATen not compiled with ONEDNN support");
 }
 
 Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
-  TORCH_CHECK(false, "mkldnn_mul_: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_mul_: ATen not compiled with ONEDNN support");
 }
 
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
@@ -73,7 +73,7 @@ static Tensor emptyBinaryOp(const Tensor& self, const Tensor& other) {
   } else {
     TORCH_CHECK(
         false,
-        "MKLDNN does not support Binary Ops with a 0-dimension Tensor in training");
+        "ONEDNN does not support Binary Ops with a 0-dimension Tensor in training");
   }
 }
 
@@ -158,4 +158,4 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED
