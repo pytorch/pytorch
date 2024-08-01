@@ -2299,16 +2299,7 @@ class CppVecKernel(CppKernel):
         self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        assert reduction_type in {
-            "any",
-            "max",
-            "min",
-            "sum",
-            "prod",
-            "xor_sum",
-            "welford_reduce",
-            "welford_combine",
-        }
+        assert reduction_type in VECTORIZABLE_RTYPES
         assert dtype == src_dtype
         if reduction_type == "any":
             assert dtype == torch.bool
@@ -2817,12 +2808,7 @@ class CppVecKernelChecker(CppVecKernel):
             return self.simd_vec
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        if not (
-            (dtype == torch.bool and reduction_type == "any")
-            or (dtype == torch.float and src_dtype == torch.float)
-            or (dtype == torch.int64 and src_dtype == torch.int64)
-            and reduction_type in VECTORIZABLE_RTYPES
-        ):
+        if reduction_type not in VECTORIZABLE_RTYPES:
             self.disable_vec(
                 f"reduction: dtype {dtype}, src_dtype {src_dtype}, reduction_type {reduction_type}"
             )
