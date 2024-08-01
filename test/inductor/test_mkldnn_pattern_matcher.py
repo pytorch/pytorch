@@ -607,6 +607,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
         )
         out_feature = 30
+
         for binary_fn, input_shape, bias, dtype in options:
             metrics.reset()
             # addmm(mm) + (linear+add)

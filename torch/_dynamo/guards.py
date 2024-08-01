@@ -35,12 +35,6 @@ from typing import (
 )
 from weakref import ReferenceType
 
-
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None  # type: ignore[assignment]
-
 import torch
 import torch.utils._device
 from torch._dynamo.source import (
@@ -60,7 +54,6 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-
 from torch._logging import structured
 from torch.fx.experimental.symbolic_shapes import (
     EqualityConstraint,
@@ -72,7 +65,6 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
-
 from .source import (
     AttrSource,
     ChainedSource,
@@ -95,6 +87,7 @@ from .source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
     TypeSource,
+    UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     WeakRefCallSource,
 )
@@ -115,8 +108,16 @@ from .utils import (
     verify_guard_fn_signature,
 )
 
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+
+
 if TYPE_CHECKING:
     from sympy import Symbol
+
 
 log = logging.getLogger(__name__)
 guards_log = torch._logging.getArtifactLogger(__name__, "guards")
@@ -310,7 +311,6 @@ if sys.version_info[:2] <= (3, 8):
         HAS_UNPARSE_FUNCTIONS = True
     except ImportError:
         HAS_UNPARSE_FUNCTIONS = False
-        pass
 else:
     HAS_UNPARSE_FUNCTIONS = True
 
@@ -864,6 +864,7 @@ class GuardBuilder(GuardBuilderBase):
                 OptimizerSource,
                 NNModuleSource,
                 UnspecializedNNModuleSource,
+                UnspecializedBuiltinNNModuleSource,
                 FSDPNNModuleSource,
             ),
         ):
@@ -1805,7 +1806,7 @@ class GuardBuilder(GuardBuilderBase):
         # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
         # to a new tensor everytime and therefore id differs.
         if (
-            guard.is_nn_module()
+            guard.is_specialized_nn_module()
             and not isinstance(guard.originating_source, NumpyTensorSource)
         ) or match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
@@ -2167,7 +2168,7 @@ class CheckFunctionManager:
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
                 not config.guard_nn_modules
-                and guard.is_nn_module()
+                and guard.is_specialized_nn_module()
                 # Default func args must be guarded on.
                 # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
                 and "__defaults__" not in guard.name
