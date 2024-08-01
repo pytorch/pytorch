@@ -133,7 +133,7 @@ if __name__ == "__main__":
         f"https://api.github.com/repos/pytorch/pytorch/pulls/{result['number']}/reviews",
         data=json.dumps({"event": "APPROVE"}),
         headers={
-            "Authorization": f"token {os.environ['GH_PYTORCHBOT_TOKEN']}",
+            "Authorization": f"token {os.environ['PYTORCHBOT_TOKEN']}",
             "Accept": "application/vnd.github.v3+json",
         },
     )
@@ -142,7 +142,7 @@ if __name__ == "__main__":
         f"https://api.github.com/repos/pytorch/pytorch/issues/{result['number']}/comments",
         data=json.dumps({"body": "@pytorchbot merge"}),
         headers={
-            "Authorization": f"token {os.environ['GH_PYTORCHBOT_TOKEN']}",
+            "Authorization": f"token {os.environ['PYTORCHBOT_TOKEN']}",
             "Accept": "application/vnd.github.v3+json",
         },
     )
