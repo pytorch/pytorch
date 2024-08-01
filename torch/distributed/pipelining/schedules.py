@@ -26,7 +26,6 @@ __all__ = [
     "ScheduleGPipe",
     "ScheduleInterleaved1F1B",
     "ScheduleLoopedBFS",
-    "_ScheduleForwardOnly",
 ]
 
 logger = logging.getLogger(__name__)

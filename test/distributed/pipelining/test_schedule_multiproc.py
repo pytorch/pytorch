@@ -12,11 +12,11 @@ from schedule_registry import ScheduleUnbalanced, ScheduleVShaped
 import torch
 import torch.distributed as dist
 from torch.distributed.pipelining import (
+    _ScheduleForwardOnly,
     pipeline,
     PipelineStage,
     Schedule1F1B,
     ScheduleFlexibleInterleaved1F1B,
-    _ScheduleForwardOnly,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
