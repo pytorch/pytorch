@@ -1098,9 +1098,7 @@ class benchmarking:
     # grouped benchmarkings, this significantly reduces benchmarking overhead
     # when the ordering of kernels by performance is important and the actual
     # timing value is not used
-    enable_early_ranking: Optional[bool] = get_config_value(
-        "TORCHINDUCTOR_ENABLE_EARLY_RANKING"
-    )
+    enable_early_ranking: Optional[bool] = False
 
     # enables early pruning which removes underperforming kernels after the
     # estimation loop, this reduces benchmarking overhead by fully benchmarking
