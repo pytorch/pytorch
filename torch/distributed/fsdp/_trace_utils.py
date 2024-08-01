@@ -96,11 +96,11 @@ class _ExecOrderTracer:
         self.exec_info = _ExecutionInfo(root_module)
         orig_call_module = tracer.call_module
         orig_create_proxy = tracer.create_proxy
-        tracer.call_module = functools.partial(  # type: ignore[method-assign]
+        tracer.call_module = functools.partial(
             self._patched_call_module, orig_call_module, self.exec_info
         )
         fqn_to_param = dict(root_module.named_parameters())
-        tracer.create_proxy = functools.partial(  # type: ignore[method-assign]
+        tracer.create_proxy = functools.partial(
             self._patched_create_proxy,
             orig_create_proxy,
             self.exec_info,
@@ -109,8 +109,8 @@ class _ExecOrderTracer:
         try:
             yield
         finally:
-            tracer.call_module = orig_call_module  # type: ignore[method-assign]
-            tracer.create_proxy = orig_create_proxy  # type: ignore[method-assign]
+            tracer.call_module = orig_call_module
+            tracer.create_proxy = orig_create_proxy
 
     def _patched_call_module(
         self,
@@ -216,8 +216,8 @@ class _ExecOrderTracer:
                         isinstance(arg, torch.fx.Proxy)
                         and arg.node.target in fqn_to_param
                     ):
-                        param = fqn_to_param[arg.node.target]  # type: ignore[index]
-                        named_params.append((arg.node.target, param))  # type: ignore[arg-type]
+                        param = fqn_to_param[arg.node.target]
+                        named_params.append((arg.node.target, param))
                         if param not in exec_info.visited_params:
                             exec_info.visited_params.add(param)
                             exec_info.param_forward_order.append(param)

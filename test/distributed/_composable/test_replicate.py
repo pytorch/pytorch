@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import run_tests
 
 
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = nn.Linear(2, 2)
         self.fc2 = nn.Linear(2, 2)
@@ -154,7 +154,7 @@ class ReplicateTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_replicate_move_args_kwargs_to_device(self):
         class MyNet(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = nn.Linear(2, 2)
 

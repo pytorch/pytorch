@@ -24,6 +24,7 @@ from .cpp_utils import (
     get_gemm_template_output_and_compute_dtype,
 )
 
+
 log = logging.getLogger(__name__)
 
 GEMM_TEMPLATE = r"""
@@ -224,7 +225,7 @@ class CppPackedGemmTemplate(CppTemplate):
         alpha=1,
         has_bias=False,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-    ):
+    ) -> None:
         assert layout.dtype in [torch.float, torch.bfloat16, torch.half, torch.uint8]
         super().__init__(
             "packed_gemm",
@@ -777,7 +778,7 @@ class CppPackedGemmTemplate(CppTemplate):
                     ordered_size, template_buffer.get_size()
                 )
                 reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)
-                reindexers.extend([reindexer] * len(epilogue_nodes))
+                reindexers.extend([reindexer] * len(epilogue_nodes))  # type: ignore[list-item]
                 if isinstance(Y, ir.BaseView):
                     storage = ir.StorageBox(Y.unwrap_view())
                 else:

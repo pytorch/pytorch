@@ -48,11 +48,9 @@ class Scope;
  buffer, including the number of loads and stores and the lowest common parent
  Block.
  */
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class AccessInfo {
  public:
   AccessInfo() = default;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AccessInfo(
       SimplifierHashType h,
       BufPtr b,
@@ -222,7 +220,6 @@ using AccessHashMap =
 // Represents a scope block and holds all accesses contained within it.
 class Scope {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Scope(BlockPtr b, std::shared_ptr<Scope> parent, size_t conditionId = 0)
       : block_(std::move(b)),
         parent_(std::move(parent)),
@@ -326,25 +323,25 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
       : currentScope_(std::make_shared<Scope>(nullptr, nullptr, 0)) {}
   ~RegisterizerAnalysis() override = default;
 
-  void visit(ForPtr v) override;
+  void visit(const ForPtr& v) override;
 
-  void visit(CondPtr v) override;
+  void visit(const CondPtr& v) override;
 
-  void visit(BlockPtr v) override;
+  void visit(const BlockPtr& v) override;
 
-  void visit(StorePtr v) override;
+  void visit(const StorePtr& v) override;
 
-  void visit(LoadPtr v) override;
+  void visit(const LoadPtr& v) override;
 
-  void visit(IfThenElsePtr v) override;
+  void visit(const IfThenElsePtr& v) override;
 
-  void visit(LetPtr v) override;
+  void visit(const LetPtr& v) override;
 
-#define STMT_ON_STACK(Op)          \
-  void visit(Op##Ptr v) override { \
-    stmtStack_.push_front(v);      \
-    IRVisitor::visit(v);           \
-    stmtStack_.pop_front();        \
+#define STMT_ON_STACK(Op)                 \
+  void visit(const Op##Ptr& v) override { \
+    stmtStack_.push_front(v);             \
+    IRVisitor::visit(v);                  \
+    stmtStack_.pop_front();               \
   }
 
   STMT_ON_STACK(AtomicAdd);
@@ -381,17 +378,16 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
  */
 class TORCH_API RegisterizerReplacer : public IRMutator {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   RegisterizerReplacer(std::vector<std::shared_ptr<AccessInfo>>& vec)
       : infoSet_(vec) {
     buildReplacements();
   }
 
-  ExprPtr mutate(LoadPtr v) override;
+  ExprPtr mutate(const LoadPtr& v) override;
 
-  StmtPtr mutate(StorePtr v) override;
+  StmtPtr mutate(const StorePtr& v) override;
 
-  StmtPtr mutate(BlockPtr v) override;
+  StmtPtr mutate(const BlockPtr& v) override;
 
  private:
   struct ReplacerScope {
@@ -405,6 +401,7 @@ class TORCH_API RegisterizerReplacer : public IRMutator {
   void buildReplacements();
 
   // State relating to the accesses yet to be replaced.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   std::vector<std::shared_ptr<AccessInfo>>& infoSet_;
   std::unordered_map<StorePtr, std::shared_ptr<AccessInfo>> storeToAccess_;
   std::unordered_map<LoadPtr, std::shared_ptr<AccessInfo>> loadToAccess_;
@@ -417,7 +414,7 @@ class TORCH_API RegisterizerReplacer : public IRMutator {
   // Tracks the number of times we've seen each buffer, so we can name the
   // scalar Vars appropriately.
   std::unordered_map<BufPtr, unsigned int> bufferAccessCounts_;
-  unsigned int getBufferAccessCount(BufPtr b) {
+  unsigned int getBufferAccessCount(const BufPtr& b) {
     return ++bufferAccessCounts_[b];
   }
 };
