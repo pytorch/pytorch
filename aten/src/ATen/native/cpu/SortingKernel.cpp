@@ -143,8 +143,8 @@ static void parallel_sort1d_kernel(
 
 template <typename scalar_t, typename value_accessor_t, typename indices_accessor_t>
 static inline void sort_kernel_impl(const value_accessor_t& value_accessor,
-				    const indices_accessor_t& indices_accessor,
-				    int64_t dim_size, bool descending, bool stable) {
+            const indices_accessor_t& indices_accessor,
+            int64_t dim_size, bool descending, bool stable) {
   auto composite_accessor = CompositeRandomAccessorCPU<
     value_accessor_t, indices_accessor_t
   >(value_accessor, indices_accessor);
@@ -154,7 +154,7 @@ static inline void sort_kernel_impl(const value_accessor_t& value_accessor,
         KeyValueCompDesc<scalar_t>());
     } else {
       std::sort(composite_accessor, composite_accessor + dim_size,
-	KeyValueCompDesc<scalar_t>());
+        KeyValueCompDesc<scalar_t>());
     }
   } else {
     if (stable) {
