@@ -41,7 +41,7 @@ class InternalTorchDynamoError(TorchDynamoException):
 class RestartAnalysis(TorchDynamoException):
     restart_reason: str
 
-    def __init__(self, *args, restart_reason=None):
+    def __init__(self, *args, restart_reason=None) -> None:
         self.restart_reason = restart_reason
         super().__init__(*args)
 
@@ -67,7 +67,7 @@ class TorchRuntimeError(TorchDynamoException):
 
 
 class InvalidBackend(TorchDynamoException):
-    def __init__(self, name):
+    def __init__(self, name) -> None:
         super().__init__(
             f"Invalid backend: {name!r}, see `torch._dynamo.list_backends()` for available backends."
         )
@@ -86,7 +86,7 @@ class ResetRequired(TorchDynamoException):
 
 
 class BackendCompilerFailed(TorchDynamoException):
-    def __init__(self, backend_fn, inner_exception):
+    def __init__(self, backend_fn, inner_exception) -> None:
         self.backend_name = getattr(backend_fn, "__name__", "?")
         self.inner_exception = inner_exception
         msg = f"backend={self.backend_name!r} raised:\n{type(inner_exception).__name__}: {inner_exception}"
@@ -94,7 +94,7 @@ class BackendCompilerFailed(TorchDynamoException):
 
 
 class Unsupported(TorchDynamoException):
-    def __init__(self, msg, *, case_name=None):
+    def __init__(self, msg, *, case_name=None) -> None:
         super().__init__(msg)
         self.real_stack = torch._guards.TracingContext.extract_stack()
         self.msg = msg
@@ -118,12 +118,12 @@ class RecompileError(TorchDynamoException):
 
 
 class ArgsMismatchError(Unsupported):
-    def __init__(self, msg):
+    def __init__(self, msg) -> None:
         super().__init__(msg)
 
 
 class AttributeMutationError(Unsupported):
-    def __init__(self, msg):
+    def __init__(self, msg) -> None:
         super().__init__(msg)
 
 
@@ -132,7 +132,7 @@ class CondOpArgsMismatchError(ArgsMismatchError):
     Internal error from cond() due to arguments mismatch.
     """
 
-    def __init__(self, msg):
+    def __init__(self, msg) -> None:
         super().__init__(msg)
 
 
@@ -147,7 +147,7 @@ class UserErrorType(Enum):
 
 
 class UserError(Unsupported):
-    def __init__(self, error_type: UserErrorType, msg, case_name=None):
+    def __init__(self, error_type: UserErrorType, msg, case_name=None) -> None:
         """
         Type of errors that would be valid in Eager, but not supported in TorchDynamo.
         The error message should tell user about next actions.
@@ -191,7 +191,7 @@ class ObservedUserStopIteration(ObservedException):
 
     # Reference `StopIteration_init` in CPython
     # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__("unhandled `raise StopIteration`")
         if len(args) > 0:
             self.value = args[0]
@@ -280,10 +280,10 @@ def warning(msg: str) -> None:
 # KeyError has special handling for its args
 # see https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L2534 for details
 class KeyErrorMsg:
-    def __init__(self, value):
+    def __init__(self, value) -> None:
         self.value = value
 
-    def __str__(self):
+    def __str__(self) -> str:
         return str(self.value)
 
     def __repr__(self) -> str:
