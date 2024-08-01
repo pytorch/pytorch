@@ -31,7 +31,6 @@ import torch
 import torch._ops
 import torch.export as torch_export
 import torch.utils._pytree as pytree
-from torch._subclasses import fake_tensor
 
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal.diagnostics import infra
@@ -54,6 +53,8 @@ if TYPE_CHECKING:
     from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
         registration as torchlib_registry,
     )
+
+    from torch._subclasses import fake_tensor
 
     from torch.onnx._internal.fx import diagnostics
 
@@ -759,7 +760,7 @@ class ONNXProgram:
 
             >>> import pprint
             >>> class CustomModule(torch.nn.Module):
-            ...     def __init__(self):
+            ...     def __init__(self) -> None:
             ...         super().__init__()
             ...         self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
             ...         self.register_buffer("my_buffer1", torch.tensor(3.0))

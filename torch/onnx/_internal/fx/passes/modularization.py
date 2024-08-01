@@ -795,7 +795,7 @@ class Modularize(_pass.Transform):
         >>> from torch.onnx._internal.diagnostics import infra
         >>>
         >>> class CustomModule(torch.nn.Module):
-        >>>     def __init__(self):
+        >>>     def __init__(self) -> None:
         >>>         super().__init__()
         >>>         self.embedding = torch.nn.Embedding(10, 32)
         >>>         self.relu = torch.nn.ReLU()
@@ -806,7 +806,7 @@ class Modularize(_pass.Transform):
         >>>         return out
         >>>
         >>> class TestModule(torch.nn.Module):
-        >>>     def __init__(self):
+        >>>     def __init__(self) -> None:
         >>>         super().__init__()
         >>>         self.layer = CustomModule()
         >>>         self.linear = torch.nn.Linear(32, 10)

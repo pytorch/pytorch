@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import warnings
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -53,7 +54,7 @@ class AutoFunctionalized(HigherOrderOperator):
     underscore is to prevent collisions with kwarg names in **kwargs.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("auto_functionalized")
 
     def __call__(
