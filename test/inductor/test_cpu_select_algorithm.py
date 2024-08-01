@@ -52,6 +52,8 @@ def patches(fn):
 
     for patcher in [
         dynamo_config.patch(verbose=True),
+        # Fails due to https://github.com/pytorch/pytorch/issues/131929
+        dynamo_config.patch(inline_inbuilt_nn_modules=False),
         inductor_config.patch(
             debug=True,
             max_autotune=True,
