@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 
 import functools
+import inspect
 import itertools
 import warnings
 import weakref
@@ -24,7 +25,7 @@ from typing_extensions import Self
 import torch
 from torch import device, dtype, Tensor
 from torch._prims_common import DeviceLikeType
-from torch.nn.parameter import Parameter
+from torch.nn.parameter import Buffer, Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.hooks import BackwardHook, RemovableHandle
 
@@ -407,7 +408,7 @@ class Module:
         import torch.nn.functional as F
 
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 20, 5)
                 self.conv2 = nn.Conv2d(20, 20, 5)
@@ -1975,17 +1976,42 @@ class Module:
                 modules[name] = value
             else:
                 buffers = self.__dict__.get("_buffers")
-                if buffers is not None and name in buffers:
+                if isinstance(value, Buffer) or buffers is not None and name in buffers:
                     if value is not None and not isinstance(value, torch.Tensor):
                         raise TypeError(
                             f"cannot assign '{torch.typename(value)}' as buffer '{name}' "
-                            "(torch.Tensor or None expected)"
+                            "(torch.nn.Buffer, torch.Tensor or None expected)"
                         )
-                    for hook in _global_buffer_registration_hooks.values():
-                        output = hook(self, name, value)
-                        if output is not None:
-                            value = output
-                    buffers[name] = value
+                    if isinstance(value, Buffer):
+                        persistent = value.persistent
+                    else:
+                        persistent = name not in self._non_persistent_buffers_set
+                    # === HACK ===
+                    # This whole block below should just be:
+                    # self.register_buffer(name, value, persistent)
+
+                    # But to support subclasses of nn.Module that (wrongfully) implement a
+                    # register_buffer() method that doesn't have the "persistent"
+                    # argument. Only pass it in if it is accepted otherwise assume
+                    # it is always true
+                    if self.register_buffer is torch.nn.Module.register_buffer:
+                        self.register_buffer(name, value, persistent)
+                    else:
+                        sign = inspect.signature(self.register_buffer)
+                        if "persistent" in sign.parameters:
+                            self.register_buffer(name, value, persistent)
+                        else:
+                            if not persistent:
+                                raise RuntimeError(
+                                    "Registering a non-persistent buffer "
+                                    "on a Module subclass that implements "
+                                    "register_buffer() without the persistent "
+                                    "argument is not allowed."
+                                )
+                            # Assume that the implementation without the argument has the
+                            # behavior from before the argument was added: persistent=True
+                            self.register_buffer(name, value)
+                    # === HACK END ===
                 else:
                     super().__setattr__(name, value)
 

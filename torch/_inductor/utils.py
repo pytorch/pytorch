@@ -32,6 +32,7 @@ from typing import (
     NamedTuple,
     Optional,
     Protocol,
+    Sequence,
     Set,
     TypeVar,
     Union,
@@ -62,6 +63,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from . import config
 from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 
+
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
@@ -72,6 +74,7 @@ InputType = Union[torch.Tensor, int]
 
 
 GPU_ALIGN_BYTES = 16
+ALIGNMENT = 16
 
 ALIGN_BYTES = 64
 assert (ALIGN_BYTES & (ALIGN_BYTES - 1)) == 0 and ALIGN_BYTES >= 8, "must be power of 2"
@@ -150,7 +153,7 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
         torch.cuda.synchronize()
 
     log.debug("raw events")
-    log.debug(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
+    log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
 
     filtered_events = EventList(
         [
@@ -937,7 +940,7 @@ class IndentedBuffer:
 
 
 class FakeIndentedBuffer(IndentedBuffer):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def __getattribute__(self, name):
@@ -1026,12 +1029,20 @@ def _use_autotune_backend(backend: str) -> bool:
     ]
 
 
-def use_triton_template(layout, *, enable_int32=False):
+def _use_conv_autotune_backend(backend: str) -> bool:
+    return backend.upper() in [
+        x.strip() for x in config.max_autotune_conv_backends.upper().split(",")
+    ]
+
+
+def use_triton_template(layout, *, enable_int32=False, enable_float8=False):
     from .codegen.common import BackendFeature, has_backend_feature
 
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
+    if enable_float8:
+        layout_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
     return (
         _use_template_for_cuda(layout, layout_dtypes)
         and _use_autotune_backend("TRITON")
@@ -1208,7 +1219,7 @@ class DebugDirManager:
     counter = itertools.count(0)
     prev_debug_name: str
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.id = next(DebugDirManager.counter)
 
     def __enter__(self):
@@ -1235,6 +1246,15 @@ def run_and_get_code(fn, *args, **kwargs):
     return result, source_codes
 
 
+def run_fw_bw_and_get_code(fn):
+    def run_with_backward():
+        result = fn()
+        result.sum().backward()
+        return result
+
+    return run_and_get_code(run_with_backward)
+
+
 def get_code(fn, *args, **kwargs):
     """Get the inductor-generated code, but skip any actual compilation or running."""
     from .graph import GraphLowering
@@ -1248,7 +1268,7 @@ def get_code(fn, *args, **kwargs):
         class DummyModule:
             """This is empty to replace the generated triton module"""
 
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
             def call(self, *args, **kwargs):
@@ -1844,3 +1864,96 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
         output_code_log.setLevel(prev_level)
         output_code_log.removeHandler(ch)
     return result, s
+
+
+def shape_env_from_inputs(inputs: List[torch.Tensor]):
+    shape_env = None
+    fake_mode = detect_fake_mode(inputs)
+
+    # TODO(voz): It would be nice to enable this assert, but there are lots of tests that
+    # pass in real inputs for now.
+    # if len(inputs) > 0:
+    # assert fake_mode is not None, breakpoint()
+
+    if fake_mode is not None:
+        return fake_mode.shape_env
+
+    # When there are no tensor inputs, get shape_env from the first SymInt.
+    for input in inputs:
+        if isinstance(input, torch.SymInt):
+            return input.node.shape_env
+
+    # TODO(voz): Should we always have one anyway?
+    return None
+
+
+def align_inputs_from_check_idxs(
+    model: Callable[[List[InputType]], Any],
+    inputs_to_check: Sequence[int],
+) -> Callable[[List[InputType]], Any]:
+    if len(inputs_to_check) == 0:
+        return model
+
+    def run(new_inputs: List[InputType]):
+        copy_misaligned_inputs(new_inputs, inputs_to_check)
+        return model(new_inputs)
+
+    return run
+
+
+def clone_preserve_strides(x: torch.Tensor):
+    needed_size = (
+        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+    )
+    buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
+    return torch.as_strided(buffer, x.size(), x.stride())
+
+
+def copy_misaligned_inputs(
+    new_inputs: List[InputType], check_inputs_idxs: Sequence[int]
+) -> None:
+    for i in check_inputs_idxs:
+        _inp = new_inputs[i]
+        assert isinstance(_inp, torch.Tensor)
+        if _inp.data_ptr() % ALIGNMENT:
+            new_inputs[i] = clone_preserve_strides(_inp)
+
+
+def remove_unaligned_input_idxs(
+    inputs: List[InputType],
+    static_input_idxs: Sequence[int],
+):
+    """
+    We require all inputs to be aligned, so introduce a copy for any
+    that aren't.
+    """
+    aligned_static_input_idxs = []
+    for idx in static_input_idxs:
+        input = inputs[idx]
+        if isinstance(input, torch.Tensor) and (input.data_ptr() % ALIGNMENT) == 0:
+            aligned_static_input_idxs.append(idx)
+    if len(aligned_static_input_idxs) != len(static_input_idxs):
+        return aligned_static_input_idxs
+    return static_input_idxs
+
+
+def set_tracing_context_output_strides(example_inputs, compiled_graph):
+    # Return the output strides to the caller via TracingContext
+    context = torch._guards.TracingContext.try_get()
+    if context is not None and context.output_strides is not None:
+        assert len(context.output_strides) == 0
+        shape_env = shape_env_from_inputs(example_inputs)
+        for exprs in compiled_graph.output_strides:
+            if exprs is None:
+                context.output_strides.append(None)
+            else:
+                context.output_strides.append(
+                    tuple(
+                        (
+                            shape_env.evaluate_symexpr(e)
+                            if shape_env is not None
+                            else int(e)
+                        )
+                        for e in exprs
+                    )
+                )

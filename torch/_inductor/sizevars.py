@@ -5,6 +5,7 @@ import logging
 from typing import (
     Any,
     Callable,
+    cast,
     Dict,
     Iterable,
     List,
@@ -18,7 +19,7 @@ from typing import (
 import sympy
 from sympy import Expr
 
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, ShapeEnv
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, IntInfinity, ValueRanges
@@ -119,16 +120,42 @@ class SizeVarAllocator:
 
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
-        value_ranges = {
-            k: ValueRanges(
-                0, max(0, v - 1) if not has_free_symbols([v]) else IntInfinity()
+
+        var_to_range = dict(self.shape_env.var_to_range)
+        var_to_range.update(
+            {
+                k: ValueRanges(
+                    0, max(0, v - 1) if not has_free_symbols([v]) else IntInfinity()
+                )
+                for k, v in var_ranges.items()
+            }
+        )
+        for var in expr.free_symbols:
+            if var not in var_to_range:
+                var_to_range[var] = ValueRanges(0, IntInfinity())
+
+        var_to_range_tuple = cast(
+            Tuple[Tuple[sympy.Symbol, ValueRanges[sympy.Expr]]],
+            tuple(var_to_range.items()),
+        )
+
+        axioms = []
+        for var, upper_bound in var_ranges.items():
+            axioms.append(0 <= var)
+            axioms.append(var < upper_bound)
+        axioms = tuple(axioms) + self.shape_env.get_axioms()
+
+        def statically_known(expr):
+            evaluated = self.shape_env._maybe_evaluate_static(
+                expr,
+                axioms=axioms,
+                var_to_range=var_to_range_tuple,
             )
-            for k, v in var_ranges.items()
-        }
+            return bool(evaluated)
 
         def remove_zero_terms(base, divisor):
             """Symbols smaller than the divisor are zero"""
-            if not (bound_sympy(base, value_ranges).lower >= 0):
+            if not statically_known(base >= 0):
                 return base
 
             for v in base.free_symbols:
@@ -140,7 +167,7 @@ class SizeVarAllocator:
                     if m and v not in m[rest].free_symbols:
                         gcd = sympy.gcd(m[rest], divisor)
                         if gcd == divisor:
-                            if self.statically_known_leq(var_ranges[v], divisor):
+                            if statically_known(v < divisor):
                                 base = m[rest]
             return base
 
@@ -150,13 +177,8 @@ class SizeVarAllocator:
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
 
-            max_value = modulus * divisor - 1
-            can_remove_mod = (
-                self.statically_known_geq(base, 0)
-                and self.statically_known_lt(base, max_value)
-            ) or (
-                not has_free_symbols([max_value])
-                and bound_sympy(base, value_ranges) in ValueRanges(0, max_value)
+            can_remove_mod = statically_known(base >= 0) and statically_known(
+                base < modulus * divisor
             )
 
             if can_remove_mod:
@@ -358,6 +380,8 @@ class SizeVarAllocator:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
+        if free_unbacked_symbols(numerator) or free_unbacked_symbols(denominator):
+            return False
         expr = sympy.Eq(numerator % denominator, 0)
         return self.is_expr_static_and_true(expr)  # type: ignore[arg-type]
 
