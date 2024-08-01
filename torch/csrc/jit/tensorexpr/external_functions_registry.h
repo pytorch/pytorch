@@ -5,8 +5,6 @@
 #include <string>
 #include <unordered_map>
 
-
-
 namespace torch::jit::tensorexpr {
 
 // The external functions that could be called from NNC must have the same
@@ -57,5 +55,3 @@ struct RegisterNNCExternalFunction {
 };
 
 } // namespace torch::jit::tensorexpr
-
-

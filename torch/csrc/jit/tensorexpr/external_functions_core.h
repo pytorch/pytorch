@@ -5,8 +5,6 @@
 #include <torch/csrc/Export.h>
 #include <cstdint>
 
-
-
 namespace torch::jit::tensorexpr {
 
 #ifdef C10_MOBILE
@@ -25,5 +23,3 @@ TORCH_API void nnc_aten_free(size_t bufs_num, void** ptrs) noexcept;
 #endif
 
 } // namespace torch::jit::tensorexpr
-
-

@@ -428,17 +428,17 @@ class TORCH_API Ramp : public ExprNode<Ramp> {
   static ExprHandle make(
       const ExprHandle& base,
       const ExprHandle& stride,
-      int lanes) {
+      int64_t lanes) {
     if (stride.dtype() != base.dtype()) {
       throw malformed_input("Bad stride in Ramp");
     }
     return ExprHandle(alloc<Ramp>(base.node(), stride.node(), lanes));
   }
-  int lanes() const {
+  int64_t lanes() const {
     return lanes_;
   }
 
-  Ramp(ExprPtr base, ExprPtr stride, int lanes)
+  Ramp(ExprPtr base, ExprPtr stride, int64_t lanes)
       : ExprNodeBase(Dtype(base->dtype(), lanes)),
         base_(std::move(base)),
         stride_(std::move(stride)),
@@ -447,7 +447,7 @@ class TORCH_API Ramp : public ExprNode<Ramp> {
  private:
   ExprPtr base_;
   ExprPtr stride_;
-  int lanes_;
+  int64_t lanes_;
 };
 
 class TORCH_API Load : public ExprNode<Load> {
@@ -500,20 +500,20 @@ class TORCH_API Broadcast : public ExprNode<Broadcast> {
     value_ = std::move(value);
   }
 
-  int lanes() const {
+  int64_t lanes() const {
     return lanes_;
   }
-  static ExprHandle make(const ExprHandle& value, int lanes) {
+  static ExprHandle make(const ExprHandle& value, int64_t lanes) {
     return ExprHandle(alloc<Broadcast>(value.node(), lanes));
   }
-  Broadcast(ExprPtr value, int lanes)
+  Broadcast(ExprPtr value, int64_t lanes)
       : ExprNodeBase(Dtype(value->dtype(), lanes)),
         value_(std::move(value)),
         lanes_(lanes) {}
 
  private:
   ExprPtr value_;
-  int lanes_;
+  int64_t lanes_;
 };
 
 class TORCH_API IfThenElse : public ExprNode<IfThenElse> {

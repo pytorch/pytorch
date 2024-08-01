@@ -14,8 +14,6 @@
 
 #include <utility>
 
-
-
 namespace torch::jit::tensorexpr {
 
 enum IRNodeType {
@@ -493,5 +491,3 @@ ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f);
 TORCH_API ExprHandle expr_to_vec(ExprHandle v, int lanes);
 
 } // namespace torch::jit::tensorexpr
-
-

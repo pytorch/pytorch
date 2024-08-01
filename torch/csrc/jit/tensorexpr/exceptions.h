@@ -7,21 +7,16 @@
 
 // Forward declarations of types
 
-
 namespace torch::jit::tensorexpr {
 class Expr;
 class Stmt;
 } // namespace torch::jit::tensorexpr
-
-
 
 // Forward declarations of functions
 namespace std {
 TORCH_API std::string to_string(const torch::jit::tensorexpr::ExprPtr&);
 TORCH_API std::string to_string(const torch::jit::tensorexpr::StmtPtr&);
 } // namespace std
-
-
 
 namespace torch::jit::tensorexpr {
 
@@ -86,5 +81,3 @@ class malformed_ir : public std::runtime_error {
 TORCH_API std::string buildErrorMessage(const std::string& s = "");
 
 } // namespace torch::jit::tensorexpr
-
-
