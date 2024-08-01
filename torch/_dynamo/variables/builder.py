@@ -1452,8 +1452,7 @@ class VariableBuilder:
         if (
             isinstance(value, torch.Tensor)
             and is_sparse_any(value)
-            and not self.tx.export
-            and not config.capture_sparse_compute
+            and (not self.tx.export or not config.capture_sparse_compute)
         ):
             # A hot fix for sparse tensors + torch.compile. Support for
             # export + sparsity is being added but we need to create
