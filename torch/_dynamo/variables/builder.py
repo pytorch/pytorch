@@ -15,7 +15,7 @@ import re
 import sys
 import types
 import weakref
-from typing import Any, List, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, List, MutableMapping, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import SymInt
@@ -185,6 +185,7 @@ from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
+    MutableMappingVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
@@ -1078,6 +1079,9 @@ class VariableBuilder:
                 fake_script_obj,
                 source=self.source,
             )
+        elif issubclass(type(value), MutableMapping):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return MutableMappingVariable(value, source=self.source)
         else:
             return self.wrap_user_defined(value)
 
