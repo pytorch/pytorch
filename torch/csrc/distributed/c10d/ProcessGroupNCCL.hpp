@@ -243,7 +243,8 @@ struct DumpPipe {
 //   // Now continue on other work in the current stream.
 class TORCH_API ProcessGroupNCCL : public Backend {
  public:
-  class WorkNCCL : public Work, public std::enable_shared_from_this<WorkNCCL> {
+  class TORCH_API WorkNCCL : public Work,
+                             public std::enable_shared_from_this<WorkNCCL> {
    public:
     friend struct WorkInfo;
 
@@ -344,7 +345,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::chrono::milliseconds opTimeout_;
 
     // timeout to be reduced after this work finishes.
-    std::chrono::milliseconds opTimeoutReduce_;
+    std::chrono::milliseconds opTimeoutReduce_ = std::chrono::milliseconds(0);
 
     // Time point representing when the work started.
     std::chrono::time_point<std::chrono::steady_clock> workStartTime_;

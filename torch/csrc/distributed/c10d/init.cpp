@@ -3039,8 +3039,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       R"(
 A `WorkNCCL` object represents the handle to a `Work` object issued on GPU.)",
       work)
-      .def_property_readonly(
-          "timeout", &::c10d::ProcessGroupNCCL::WorkNCCL::getOpTimeout);
+      .def("timeout", &::c10d::ProcessGroupNCCL::WorkNCCL::getOpTimeout);
 #endif
 
   auto fakeProcessGroup =

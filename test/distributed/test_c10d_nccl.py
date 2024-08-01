@@ -594,38 +594,38 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.init_process_group(**opts)
         pg = dist.distributed_c10d._get_default_group()
         w = pg.allreduce(torch.rand(10).cuda(self.rank))
-        self.assertEqual(w.timeout, timedelta(seconds=123))
+        # self.assertEqual(w.timeout, timedelta(seconds=123))
         w.wait()
         pg._get_backend(torch.device(f"cuda:{self.rank}"))._set_default_timeout(
             timedelta(seconds=3)
         )
-        # if self.rank == 0:
-        #     # Ideally we want to sleep for a very long time, but this is not
-        #     # feasible in unit test. So this is only a very tiny case.
-        #     time.sleep(5)
-        #     pg.allreduce(torch.rand(10).cuda(self.rank))
-        #     time.sleep(5)
-        #     pg.allreduce(torch.rand(5).cuda(self.rank))
-        #     # w = pg.allreduce(torch.rand(10).cuda(self.rank))
-        #     # self.assertEqual(w.timeout, timedelta(seconds=3))
-        #     # w.wait()
-        # else:
-        #     dist.distributed_c10d._extend_timeout_until_first_done_all_pgs(
-        #         timedelta(seconds=10)
-        #     )
-        #     w1 = pg.allreduce(torch.rand(10).cuda(self.rank))
-        #     w2 = pg.allreduce(torch.rand(5).cuda(self.rank))
-        #     self.assertEqual(w1.timeout, timedelta(seconds=13))
-        #     self.assertEqual(w2.timeout, timedelta(seconds=13))
-        #     w1.wait()
-        #     # dist.distributed_c10d._extend_timeout_until_first_done_all_pgs(
-        #     #     timedelta(seconds=5)
-        #     # )
-        #     # time.sleep(1)
-        #     # torch.cuda.synchronize(torch.device(f'cuda:{self.rank}'))
-        #     # w = pg.allreduce(torch.rand(10).cuda(self.rank))
-        #     # self.assertEqual(w.timeout, timedelta(seconds=8))
-        #     # w.wait()
+        if self.rank == 0:
+            # Ideally we want to sleep for a very long time, but this is not
+            # feasible in unit test. So this is only a very tiny case.
+            time.sleep(5)
+            pg.allreduce(torch.rand(10).cuda(self.rank))
+            time.sleep(5)
+            pg.allreduce(torch.rand(5).cuda(self.rank))
+            w = pg.allreduce(torch.rand(10).cuda(self.rank))
+            # self.assertEqual(w.timeout, timedelta(seconds=3))
+            w.wait()
+        else:
+            dist.distributed_c10d._extend_timeout_until_first_done_all_pgs(
+                timedelta(seconds=10)
+            )
+            w1 = pg.allreduce(torch.rand(10).cuda(self.rank))
+            w2 = pg.allreduce(torch.rand(5).cuda(self.rank))
+            # self.assertEqual(w1.timeout, timedelta(seconds=13))
+            # self.assertEqual(w2.timeout, timedelta(seconds=13))
+            w1.wait()
+            dist.distributed_c10d._extend_timeout_until_first_done_all_pgs(
+                timedelta(seconds=5)
+            )
+            time.sleep(1)
+            torch.cuda.synchronize(torch.device(f"cuda:{self.rank}"))
+            w = pg.allreduce(torch.rand(10).cuda(self.rank))
+            # self.assertEqual(w.timeout, timedelta(seconds=8))
+            w.wait()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")

@@ -496,6 +496,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       ncclComm_(w.ncclComm_),
       blockingWait_(w.blockingWait_),
       opTimeout_(w.opTimeout_),
+      opTimeoutReduce_(w.opTimeoutReduce_),
       workStartTime_(w.workStartTime_),
       seq_(w.seq_),
       startTraceUpdated_(w.startTraceUpdated_),
@@ -1790,11 +1791,9 @@ void ProcessGroupNCCL::watchdogHandler() {
         {
           // Reset the timeout and first work if the work is completed.
           std::unique_lock<std::mutex> lock(mtxTimeoutExtension_);
-          LOG(ERROR) << work.opTimeoutReduce_.count() << "CHECK HERE \n\n\n\n\n";
           if (work.opTimeoutReduce_.count() > 0) {
             extendedTimeout_ -= work.opTimeoutReduce_;
             inflightTimeoutExt_ -= work.opTimeoutReduce_;
-            LOG(ERROR) << extendedTimeout_.count() << "HERE \n\n\n\n\n";
           }
         }
         pgStatus_->lastCompletedSeq = work.seq_;
