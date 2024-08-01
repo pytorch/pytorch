@@ -1,6 +1,7 @@
 name: weekly
 
 on:
+  pull_request:
   schedule:
     # Mondays at 7:37am UTC = 12:27am PST
     # Choose a random time near midnight PST because it may be delayed if there are high loads
@@ -12,6 +13,7 @@ permissions: read-all
 
 jobs:
   update-commit-hash:
+    if: false
     runs-on: ubuntu-latest
     environment: update-commit-hash
     steps:
@@ -39,3 +41,38 @@ jobs:
           test-infra-ref: main
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+
+  update-slow-tests:
+    runs-on: linux.2xlarge
+    environment: update-commit-hash
+    steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        if: ${{ !contains(matrix.runner, 'gcp.a100') }}
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            All testing is done inside the container, to start an interactive session run:
+              docker exec -it $(docker container ps --format '{{.ID}}') bash
+      - run: sleep 10000
+    # runs-on: ubuntu-latest
+    # environment: update-slow-tests
+    # steps:
+    #   - name: Checkout repo
+    #     uses: actions/checkout@v3
+    #     with:
+    #       fetch-depth: 0
+    #   - name: Setup Python
+    #     uses: actions/setup-python@v2
+    #     with:
+    #       python-version: '3.9'
+    #   - name: Install requirements
+    #     run: |
+    #       pip install rockset==1.0.3 requests==2.32.2
+    #   - name: Update slow test file
+    #     with:
+    #       ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+    #       PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+    #       UPDATEBOT_TOKEN: ${{ secrets.UPDATEBOT_TOKEN}}
+    #     run: |
+    #       python tools/testing/update_slow_tests.py
