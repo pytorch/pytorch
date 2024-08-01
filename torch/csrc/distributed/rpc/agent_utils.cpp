@@ -1,9 +1,7 @@
 #include <fmt/format.h>
 #include <torch/csrc/distributed/rpc/agent_utils.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 std::unordered_map<std::string, worker_id_t> collectNames(
     ::c10d::PrefixStore store,
@@ -197,6 +195,4 @@ int syncCallCount(
   return totalCallCount;
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

@@ -9,9 +9,7 @@
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 /////////////////////  Pickle/Unpickle Helplers ////////////////////////////
 
@@ -363,6 +361,4 @@ void PyRRef::backward(
   }
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

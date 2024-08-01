@@ -699,6 +699,7 @@ exclusions = {
     "verbose_guards",
     "sym_node",
     "export",
+    "trace_shape_events",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
