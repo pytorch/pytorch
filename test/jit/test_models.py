@@ -39,7 +39,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
 class MnistNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
         self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
@@ -146,7 +146,7 @@ class TestModels(JitTestCase):
     @staticmethod
     def _test_neural_style(self, device, check_export_import=True):
         class TransformerNet(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 # Initial convolution layers
                 self.conv1 = ConvLayer(3, 32, kernel_size=9, stride=1)
@@ -318,7 +318,7 @@ class TestModels(JitTestCase):
     @staticmethod
     def _test_reinforcement_learning(self, device, test_export_import=True):
         class Policy(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.affine1 = nn.Linear(4, 128)
                 self.affine2 = nn.Linear(128, 2)
@@ -492,7 +492,7 @@ class TestModels(JitTestCase):
     @suppress_warnings
     def test_time_sequence_prediction(self):
         class Sequence(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lstm1 = nn.LSTMCell(1, 51)
                 self.lstm2 = nn.LSTMCell(51, 51)
@@ -527,7 +527,7 @@ class TestModels(JitTestCase):
                 return outputs
 
         class Traced(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.seq = Sequence()
 
@@ -542,7 +542,7 @@ class TestModels(JitTestCase):
     @staticmethod
     def _test_vae(self, device, check_export_import=True):
         class VAE(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.fc1 = nn.Linear(784, 400)

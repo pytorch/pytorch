@@ -202,7 +202,7 @@ class TestPeephole(JitTestCase):
         for mod in modules:
 
             class ConvDim(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.conv = mod(3, 32, kernel_size=3, stride=2, bias=False)
 
@@ -216,7 +216,7 @@ class TestPeephole(JitTestCase):
             FileCheck().check_not("conv").check_not("dim").run(conv_dim.graph)
 
             class ConvDimMutate(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.conv = mod(3, 32, kernel_size=3, stride=2, bias=False)
 

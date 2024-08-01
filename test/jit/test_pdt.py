@@ -807,7 +807,7 @@ class TestPDT(JitTestCase):
 
     def test_nn_parameter_as_arg(self):
         class TestNNParameter(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.inp = torch.nn.Parameter(torch.ones(2, 3))
 

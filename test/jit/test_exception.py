@@ -11,7 +11,7 @@ Test TorchScript exception handling.
 class TestException(TestCase):
     def test_pyop_exception_message(self):
         class Foo(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(1, 10, kernel_size=5)
 

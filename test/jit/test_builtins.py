@@ -29,17 +29,17 @@ class TestBuiltins(JitTestCase):
 
     def test_has_attr(self):
         class HasA(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = 0
 
         class HasB(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.b = 1
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mods = torch.nn.ModuleList([HasA(), HasB()])
 
@@ -60,7 +60,7 @@ class TestBuiltins(JitTestCase):
 
     def test_has_attr_invalid_args(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = torch.nn.Linear(1, 1)
 
