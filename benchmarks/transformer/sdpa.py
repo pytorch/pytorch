@@ -122,7 +122,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
                 torch.repeat_interleave,
                 k,
                 config.q_num_heads // config.kv_num_heads,
-                dim=1
+                dim=1,
             )
             k = k.repeat_interleave(config.q_num_heads // config.kv_num_heads, dim=1)
             v = v.repeat_interleave(config.q_num_heads // config.kv_num_heads, dim=1)
@@ -143,7 +143,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
             out_torch.backward, dOut, retain_graph=True
         )
     return ExperimentResults(
-        forward_time=forward_time+kv_repeat_time,
+        forward_time=forward_time + kv_repeat_time,
         backward_time=backward_time,
     )
 
