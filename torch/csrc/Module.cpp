@@ -1112,6 +1112,8 @@ PyObject* THPModule_deviceCount(
   device = r.deviceOptional(0);
   if (device.has_value()) {
     device_type = device->type();
+    TORCH_CHECK(
+        at::isAccelerator(device_type), device_type, " is not an accelerator.");
   } else {
     device_type = at::getAccelerator(true).value();
   }
@@ -1138,6 +1140,8 @@ PyObject* THPModule_isAvailable(
   device = r.deviceOptional(0);
   if (device.has_value()) {
     device_type = device->type();
+    TORCH_CHECK(
+        at::isAccelerator(device_type), device_type, " is not an accelerator.");
   } else {
     device_type = at::getAccelerator(true).value();
   }
@@ -1182,6 +1186,8 @@ PyObject* THPModule_setDevice(
   }
   if (device.has_value()) {
     device_type = device->type();
+    TORCH_CHECK(
+        at::isAccelerator(device_type), device_type, " is not an accelerator.");
   } else {
     device_type = at::getAccelerator(true).value();
   }
@@ -1208,6 +1214,8 @@ PyObject* THPModule_getDevice(
   std::optional<c10::Device> device = r.deviceOptional(0);
   if (device.has_value()) {
     device_type = device->type();
+    TORCH_CHECK(
+        at::isAccelerator(device_type), device_type, " is not an accelerator.");
   } else {
     device_type = at::getAccelerator(true).value();
   }
@@ -1253,6 +1261,8 @@ PyObject* THPModule_exchangeDevice(
   }
   if (device.has_value()) {
     device_type = device->type();
+    TORCH_CHECK(
+        at::isAccelerator(device_type), device_type, " is not an accelerator.");
   } else {
     device_type = at::getAccelerator(true).value();
   }
@@ -1298,6 +1308,8 @@ PyObject* THPModule_maybeExchangeDevice(
   }
   if (device.has_value()) {
     device_type = device->type();
+    TORCH_CHECK(
+        at::isAccelerator(device_type), device_type, " is not an accelerator.");
   } else {
     device_type = at::getAccelerator(true).value();
   }
@@ -1322,6 +1334,8 @@ PyObject* THPModule_setStream(
 
   c10::Stream stream = r.stream(0);
   c10::DeviceType device_type = stream.device_type();
+  TORCH_CHECK(
+      at::isAccelerator(device_type), device_type, " is not an accelerator.");
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
   impl.setStream(stream);
@@ -1363,6 +1377,8 @@ PyObject* THPModule_getStream(
     if (device->has_index()) {
       device_index = device->index();
     }
+    TORCH_CHECK(
+        at::isAccelerator(device_type), device_type, " is not an accelerator.");
   } else {
     device_type = at::getAccelerator(true).value();
   }
@@ -1410,6 +1426,8 @@ PyObject* THPModule_syncStreamsOnDevice(
     if (device->has_index()) {
       device_index = device->index();
     }
+    TORCH_CHECK(
+        at::isAccelerator(device_type), device_type, " is not an accelerator.");
   } else {
     device_type = at::getAccelerator(true).value();
   }
