@@ -41,6 +41,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pandas as pd
 import psutil
+import yaml
 from scipy.stats import gmean, ttest_ind
 from tqdm.auto import tqdm, trange
 
@@ -282,6 +283,36 @@ CI_PRESERVE_COMPILE_DEBUG = {
     # For example:
     # "mnasnet1_0": ["fail_accuracy"],
 }
+
+
+@functools.lru_cache(maxsize=1)
+def load_yaml_file(filename):
+    filepath = os.path.join(os.path.dirname(__file__), filename)
+
+    with open(filepath) as f:
+        data = yaml.safe_load(f)
+
+    internal_file_path = os.path.join(os.path.dirname(__file__), "fb", filename)
+    if os.path.exists(internal_file_path):
+        with open(internal_file_path) as f:
+            internal_data = yaml.safe_load(f)
+            data.update(internal_data)
+
+    def flatten(lst):
+        for item in lst:
+            if isinstance(item, list):
+                yield from flatten(item)
+            else:
+                yield item
+
+    def maybe_list_to_set(obj):
+        if isinstance(obj, dict):
+            return {k: maybe_list_to_set(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return set(flatten(obj))
+        return obj
+
+    return maybe_list_to_set(data)
 
 
 def model_specified_by_path(path_and_class_str):

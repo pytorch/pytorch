@@ -63,7 +63,7 @@ class T(Constraint):
     """
     True
     """
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     def __eq__(self, other):
@@ -76,7 +76,7 @@ class F(Constraint):
     """
     False
     """
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     def __eq__(self, other):

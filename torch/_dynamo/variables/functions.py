@@ -9,9 +9,6 @@ from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
@@ -27,13 +24,16 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 
-if TYPE_CHECKING:
-    from torch._guards import Source
 
 try:
     from torch.distributed._composable.fsdp import _fsdp_param_group
 except ModuleNotFoundError:
     _fsdp_param_group = None
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._guards import Source
 
 
 def wrap_bound_arg(tx: "InstructionTranslator", val, source=None):
@@ -139,7 +139,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             source=source,
         )
 
-    def __init__(self, fn, is_constant=False, **kwargs):
+    def __init__(self, fn, is_constant=False, **kwargs) -> None:
         super().__init__(**kwargs)
         if getattr(fn, "_dynamo_marked_constant", False):
             # This method should be treated as a constant for the purposes of compilation
@@ -291,6 +291,19 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def export_freevars(self, parent, child):
         pass
 
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        source = AttrSource(self.source, name) if self.source else None
+        try:
+            subobj = inspect.getattr_static(self.fn, name)
+        except AttributeError:
+            options = {"source": source}
+            return variables.GetAttrVariable(self, name, **options)
+        if source:
+            return variables.LazyVariableTracker.create(subobj, source)
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create(tx, subobj)
+
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         result = hasattr(self.fn, name)
         return variables.ConstantVariable.create(result)
@@ -312,11 +325,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""
 
-    def __init__(self, fn, obj, **kwargs):
+    def __init__(self, fn, obj, **kwargs) -> None:
         super().__init__(fn=fn, **kwargs)
         self.obj = obj
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.__class__.__name__}({self.fn}, {self.obj})"
 
     def self_args(self):
@@ -374,7 +387,7 @@ class UserMethodVariable(UserFunctionVariable):
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
-    def __init__(self, wrapped, context, **kwargs):
+    def __init__(self, wrapped, context, **kwargs) -> None:
         kwargs.pop("fn", None)
         kwargs.pop("obj", None)
         super().__init__(wrapped.fn, wrapped.obj, **kwargs)
@@ -394,7 +407,7 @@ class WrappedUserMethodVariable(UserMethodVariable):
 
 
 class WrappedUserFunctionVariable(UserFunctionVariable):
-    def __init__(self, wrapped, context, **kwargs):
+    def __init__(self, wrapped, context, **kwargs) -> None:
         kwargs.pop("fn", None)
         kwargs.pop("obj", None)
         super().__init__(wrapped.fn, **kwargs)
@@ -448,7 +461,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         closure_scope,
         wrapped_reconstructible=None,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         assert isinstance(fn_name.as_python_constant(), str)
         assert isinstance(code.as_python_constant(), types.CodeType)
@@ -606,7 +619,7 @@ class SkipFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, value, reason=None, **kwargs):
+    def __init__(self, value, reason=None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
@@ -688,6 +701,17 @@ class SkipFunctionVariable(VariableTracker):
                         f"Please file an issue on GitHub "
                         f"so the PyTorch team can add support for it. "
                     )
+                elif (
+                    self.value.__module__ is not None
+                    and self.value.__module__.startswith("optree")
+                ):
+                    msg = (
+                        f"Graph break for an optree C/C++ function {self.value.__module__}.{self.value.__qualname__}."
+                        f" Consider using torch.utils._pytree - "
+                        f"https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
+                    )
+                    # also warn on it because most users won't see the graph break message
+                    torch._dynamo.utils.warn_once(msg)
                 else:
                     msg = (
                         f"Graph break due to unsupported builtin {self.value.__module__}.{self.value.__qualname__}. "
@@ -776,7 +800,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     than status-quo as we currently graph-break on all distributed.* collectives.
     """
 
-    def __init__(self, fn, *, replacement_var, **kwargs):
+    def __init__(self, fn, *, replacement_var, **kwargs) -> None:
         super().__init__(fn, **kwargs)
         assert isinstance(replacement_var, UserFunctionVariable)
         self.replacement_var = replacement_var
@@ -845,7 +869,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
 
 class FunctoolsPartialVariable(VariableTracker):
-    def __init__(self, func: VariableTracker, args, keywords, **kwargs):
+    def __init__(self, func: VariableTracker, args, keywords, **kwargs) -> None:
         super().__init__(**kwargs)
         self.func = func
         assert isinstance(args, list)
@@ -915,6 +939,9 @@ class DynamoTritonHOPifier(TritonHOPifier):
             maybe_callable, (NestedUserFunctionVariable, UserFunctionVariable)
         )
 
+    def get_value(self, val):
+        return val.value
+
     def check_grid(self, grid):
         from .lists import BaseListVariable
 
@@ -979,7 +1006,7 @@ dynamo_triton_hopifier_singleton = DynamoTritonHOPifier()
 
 
 class TritonKernelVariable(VariableTracker):
-    def __init__(self, kernel, kernel_idx, grid, **kwargs):
+    def __init__(self, kernel, kernel_idx, grid, **kwargs) -> None:
         super().__init__(**kwargs)
         dynamo_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
 

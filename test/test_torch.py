@@ -8681,6 +8681,16 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 dim_order, torch.empty_permuted(shape, dim_order).dim_order()
             )
 
+        for shape in [(2, 2, 2, 2), (2, 1, 2, 2), (2, 2, 1, 2), (2, 2, 2, 1), (2, 2, 1, 1), (2, 1, 1, 2)]:
+            for memory_format in (torch.contiguous_format, torch.channels_last):
+                t = torch.empty(shape).to(memory_format=memory_format)
+                if memory_format == torch.contiguous_format:
+                    dim_order_target = list(range(len(shape)))
+                elif memory_format == torch.channels_last:
+                    dim_order_target = [0, *list(range(2, len(shape))), 1]
+
+                self.assertSequenceEqual(dim_order_target, t.dim_order())
+
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor
         with self.assertRaisesRegex(TypeError, "type 'torch.FloatTensor' is not an acceptable base type"):
