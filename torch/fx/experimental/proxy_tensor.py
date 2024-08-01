@@ -374,10 +374,6 @@ def track_tensor(tensor: Tensor, proxy: Proxy, *, constant: Optional[Tensor], tr
             i)
 
     try_set_proxy_slot(
-        tensor.numel(),
-        lambda x: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_numel.default, (proxy,), {}), x)
-    )
-    try_set_proxy_slot(
         tensor.storage_offset(),
         lambda x: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_storage_offset.default, (proxy,)), x)
     )
