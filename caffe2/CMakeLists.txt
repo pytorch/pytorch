@@ -42,10 +42,10 @@ endif()
 
 # ---[ ATen build
 if(INTERN_BUILD_ATEN_OPS)
-  set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
+  set(__torch_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   add_subdirectory(../aten aten)
-  set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
+  set(CMAKE_POSITION_INDEPENDENT_CODE ${__torch_CMAKE_POSITION_INDEPENDENT_CODE})
 
   # Generate the headers wrapped by our operator
   file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
@@ -574,15 +574,6 @@ if(USE_CUDA)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
 endif()
 
-if(USE_FLASH_ATTENTION AND NOT MSVC)
-  # Cutlass contains a sign-compare violation in its codebase to be fixed by https://github.com/NVIDIA/cutlass/pull/869
-  set_source_files_properties(
-    "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/nested/cuda/NestedTensorMatmul.cu"
-    "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/nested/cuda/NestedTensorTransformerFunctions.cu"
-    "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/transformers/cuda/flash_attn/fmha_bwd_hdim128.cu"
-    PROPERTIES COMPILE_FLAGS "-Wno-sign-compare")
-endif()
-
 if(BUILD_ONEDNN_GRAPH)
   list(APPEND Caffe2_CPU_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/LlgaTensorImpl.cpp
@@ -773,7 +764,6 @@ torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
 # Ignore Wdeprecated-XXX errors from third-party libraries
 if(NOT MSVC)
-  set_source_files_properties(${PROJECT_SOURCE_DIR}/aten/src/ATen/native/QuantizedLinear.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
   set_source_files_properties(${PROJECT_SOURCE_DIR}/torch/csrc/distributed/c10d/socket.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
 endif()
 
@@ -936,7 +926,6 @@ elseif(USE_CUDA)
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
-  target_compile_options_if_supported(torch_cuda "-Wno-deprecated-copy")  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
 
   if(USE_CUSPARSELT)
@@ -1018,7 +1007,6 @@ endif()
 if(USE_XPU)
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
-  target_compile_options_if_supported(torch_xpu "-Wno-deprecated-copy")  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
 
   # ATen XPU implementation
@@ -1059,6 +1047,7 @@ if(USE_XPU)
   # 1. Sources in torch-xpu-ops depend on generated ATen headers.
   # 2. Using add_custom_command in torch-xpu-ops to define sycl device sources
   #    compilation. add_custom_command requires an explicit dependency.
+  list(APPEND ${Caffe2_XPU_INCLUDE} ${TORCH_XPU_OPS_DIR}/src/ATen/)
   set(TORCH_XPU_OPS_PYTORCH_DEPS ATEN_CPU_FILES_GEN_TARGET)
 
   add_subdirectory(${TORCH_ROOT}/third_party/torch-xpu-ops
@@ -1225,6 +1214,7 @@ if(BUILD_TEST)
     )
   else()
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+    add_subdirectory(${TORCH_ROOT}/test/inductor ${CMAKE_BINARY_DIR}/test_inductor)
     add_subdirectory(
       ${TORCH_ROOT}/test/cpp/tensorexpr
       ${CMAKE_BINARY_DIR}/test_tensorexpr
@@ -1447,75 +1437,6 @@ if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
   target_compile_definitions(torch_cpu PUBLIC "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
 endif()
 
-if(MSVC AND NOT BUILD_SHARED_LIBS)
-  # Note [Supporting both static and dynamic libraries on Windows]
-  # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  # A Windows library may be distributed as either a static or dynamic
-  # library.  The chosen distribution mechanism affects how you setup
-  # the headers for the library: if you statically link a function,
-  # all you need is an ordinary signature:
-  #
-  #     void f();
-  #
-  # But if you *dynamically* link it, then you must provide a __declspec
-  # specifying that it should be imported from a DLL:
-  #
-  #     __declspec(dllimport) void f();
-  #
-  # Mixing the two situations will not work: if you specify dllimport
-  # while statically linking, the linker will complain it cannot find
-  # the __imp_f symbol (which serve as the DLL entrypoint); if you
-  # fail to specify dllimport for a symbol that's coming from a DLL,
-  # the linker will complain that it can't find f.  Joy!
-  #
-  # Most places on the Internet, you will find people have written
-  # their headers under the assumption that the application will
-  # only ever be dynamically linked, as they define a macro which
-  # tags a function as __declspec(dllexport) if you are actually
-  # building the library, and __declspec(dllimport) otherwise.  But
-  # if you want these headers to also work if you are linking against
-  # a static library, you need a way to avoid adding these __declspec's
-  # at all.  And that "mechanism" needs to apply to any downstream
-  # libraries/executables which are going to link against your library.
-  #
-  #   As an aside, why do we need to support both modes?
-  #   For historical reasons, PyTorch ATen on Windows is built dynamically,
-  #   while Caffe2 on Windows is built statically (mostly because if
-  #   we build it dynamically, we are over the DLL exported symbol limit--and
-  #   that is because Caffe2 hasn't comprehensively annotated all symbols
-  #   which cross the DLL boundary with CAFFE_API).  So any code
-  #   which is used by both PyTorch and Caffe2 needs to support both
-  #   modes of linking.
-  #
-  # So, you have a macro (call it AT_CORE_STATIC_WINDOWS) which you need to have
-  # set for any downstream library/executable that transitively includes your
-  # headers.  How are you going to do this?  You have two options:
-  #
-  #   1. Write out a config.h header which stores whether or not
-  #      you are linking statically or dynamically.
-  #
-  #   2. Force all of users to set the macro themselves.  If they
-  #      use cmake, you can set -DAT_CORE_STATIC_WINDOWS=1 as a PUBLIC
-  #      compile option, in which case cmake will automatically
-  #      add the macro for you.
-  #
-  # Which one is better? Well, it depends: they trade off implementor
-  # ease versus user ease: (1) is more work for the library author
-  # but the user doesn't have to worry about it; (2) requires the user
-  # to set the macro themselves... but only if they don't use cmake.
-  #
-  # So, which is appropriate in our situation?  In my mind, here is
-  # the distinguishing factor: it is more common to distribute
-  # DLLs, since they don't require you to line up the CRT version
-  # (/MD, /MDd, /MT, /MTd) and MSVC version at the use site.  So,
-  # if a user is already in the business of static linkage, they're
-  # already in "expert user" realm.  So, I've decided that at this
-  # point in time, the simplicity of implementation of (2) wins out.
-  #
-  # NB: This must be target_compile_definitions, not target_compile_options,
-  # as the latter is not respected by nvcc
-  target_compile_definitions(torch_cpu PUBLIC "AT_CORE_STATIC_WINDOWS=1")
-endif()
 if(MSVC AND BUILD_SHARED_LIBS)
   # ONNX is linked statically and needs to be exported from this library
   # to be used externally. Make sure that references match the export.
@@ -1610,7 +1531,21 @@ if(USE_XPU)
   target_link_libraries(
       torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
 
-  target_link_libraries(torch_xpu PUBLIC torch_cpu_library)
+  include(CheckLinkerFlag)
+
+  # Check whether the compiler supports '--no-as-needed' and '--as-needed'
+  check_linker_flag(CXX "-Wl,--no-as-needed" HAVE_NO_AS_NEEDED)
+  check_linker_flag(CXX "-Wl,--as-needed" HAVE_AS_NEEDED)
+
+  # Ensure that torch_cpu is ready before being linked by torch_xpu.
+  add_dependencies(torch_xpu torch_cpu)
+
+  if(HAVE_NO_AS_NEEDED AND HAVE_AS_NEEDED)
+    target_link_libraries(torch_xpu PRIVATE
+        "-Wl,--no-as-needed,\"$<TARGET_FILE:torch_cpu>\" -Wl,--as-needed")
+  else()
+    target_link_libraries(torch_xpu PRIVATE "$<TARGET_FILE:torch_cpu>")
+  endif()
 endif()
 
 # ---[ Metal(OSX) modification

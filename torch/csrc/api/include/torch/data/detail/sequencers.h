@@ -14,7 +14,7 @@ namespace detail {
 template <typename Result>
 bool buffer_contains_result(const std::vector<optional<Result>>& buffer) {
   return std::any_of(
-      buffer.begin(), buffer.end(), [](const optional<Result>& result) {
+      buffer.begin(), buffer.end(), [](const std::optional<Result>& result) {
         return result.has_value();
       });
 }
@@ -29,7 +29,7 @@ template <typename Result>
 struct Sequencer {
   using ResultProducer = std::function<optional<Result>()>;
   virtual ~Sequencer() = default;
-  virtual optional<Result> next(ResultProducer next_result) = 0;
+  virtual std::optional<Result> next(ResultProducer next_result) = 0;
 };
 
 /// A `Sequencer` that does not enforce any ordering. It is effectively the
@@ -37,7 +37,7 @@ struct Sequencer {
 template <typename Result>
 struct NoSequencer final : public Sequencer<Result> {
   using typename Sequencer<Result>::ResultProducer;
-  optional<Result> next(ResultProducer next_result) override {
+  std::optional<Result> next(ResultProducer next_result) override {
     return next_result();
   }
 };
@@ -68,7 +68,7 @@ struct OrderedSequencer : public Sequencer<Result> {
   explicit OrderedSequencer(size_t max_jobs) : buffer_(max_jobs) {}
 
   /// Buffers results until the next one in the expected order is received.
-  optional<Result> next(ResultProducer next_result) override {
+  std::optional<Result> next(ResultProducer next_result) override {
     // If we already have the result for the next sqn, return it.
     if (auto& maybe_result = buffer(next_sequence_number_)) {
       auto result = std::move(*maybe_result);
@@ -97,7 +97,7 @@ struct OrderedSequencer : public Sequencer<Result> {
   }
 
   /// Accesses the buffer at the `index` modulo the buffer size.
-  optional<Result>& buffer(size_t index) {
+  std::optional<Result>& buffer(size_t index) {
     return buffer_.at(index % buffer_.size());
   }
 

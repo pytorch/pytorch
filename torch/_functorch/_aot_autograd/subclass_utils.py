@@ -5,16 +5,17 @@ AOTAutograd's responsibility is to trace through all pytorch capabilities that l
 and this includes tensor subclasses that implement __torch_dispatch__.
 """
 
+import typing
 from typing import Any, List, Optional, Tuple, Union
 
 import torch.utils._pytree as pytree
-
 from torch import Tensor
 from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .schemas import MutationType, SubclassCreationMeta, ViewAndMutationMeta
 from .utils import strict_zip
+
 
 zip = strict_zip
 
@@ -48,14 +49,17 @@ def create_subclass_metadata(a, start_idx):
         )
         attrs[key] = new_subclass_meta
 
+    # It *must* be because is_traceable_wrapper_subclass() - but mypy is not smart.
+    assert isinstance(a, Tensor)
+
     return (
         SubclassCreationMeta(
             flat_tensor_start_idx=start_idx,
             arg_count=new_start_idx - start_idx,
             attrs=attrs,
             meta=metadata,
-            outer_size=a.size(),
-            outer_stride=a.stride(),
+            outer_size=a.size(),  # type: ignore[attr-defined, arg-type]
+            outer_stride=a.stride(),  # type: ignore[arg-type]
             original_subclass=a,
         ),
         new_start_idx,
@@ -83,7 +87,8 @@ def create_subclass_meta(
     idx = 0
     infos: List[Union[int, SubclassCreationMeta]] = []
     for a in curr_args:
-        if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a):
+        if is_traceable_wrapper_subclass(a):
+            assert isinstance(a, Tensor)
             start_idx = idx
             subclass_meta, _ = create_subclass_metadata(a, start_idx)
             infos.append(subclass_meta)
@@ -111,7 +116,7 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
         xs_inner = []
         for x in xs:
             if is_traceable_wrapper_subclass(x):
-                xs_inner.extend(get_plain_tensors(x))
+                xs_inner.extend(get_plain_tensors(typing.cast(Tensor, x)))
             else:
                 xs_inner.append(x)
         return xs_inner
@@ -129,6 +134,24 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
         unwrapped_args_fw = concat_inner_tensors_from_subclasses(wrapped_args)
         unwrapped_args = unwrapped_args_fw
     return unwrapped_args
+
+
+def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
+    static_input_indices = set(static_input_indices)
+    new_ind = 0
+    remapped_static_indices = []
+    for i, arg in enumerate(wrapped_args):
+        num_indices = 1
+        if is_traceable_wrapper_subclass(arg):
+            num_indices = len(get_plain_tensors(typing.cast(Tensor, arg)))
+
+        for _ in range(num_indices):
+            if i in static_input_indices:
+                remapped_static_indices.append(new_ind)
+
+            new_ind += 1
+
+    return remapped_static_indices
 
 
 # Turns a flattened list of tensor arguments into (maybe) subclass tensors.

@@ -30,7 +30,8 @@ __all__ = [
     "ZipperIterDataPipe",
 ]
 
-T_co = TypeVar("T_co", covariant=True)
+
+_T_co = TypeVar("_T_co", covariant=True)
 
 
 @functional_datapipe("concat")
@@ -423,7 +424,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         cls,
         datapipe: IterDataPipe,
         num_instances: int,
-        classifier_fn: Callable[[T_co], Optional[int]],
+        classifier_fn: Callable[[_T_co], Optional[int]],
         drop_none: bool = False,
         buffer_size: int = 1000,
     ):
@@ -451,9 +452,9 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
 
     def __init__(
         self,
-        datapipe: IterDataPipe[T_co],
+        datapipe: IterDataPipe[_T_co],
         num_instances: int,
-        classifier_fn: Callable[[T_co], Optional[int]],
+        classifier_fn: Callable[[_T_co], Optional[int]],
         drop_none: bool,
         buffer_size: int,
     ):
@@ -468,13 +469,13 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 UserWarning,
             )
         self.current_buffer_usage = 0
-        self.child_buffers: List[Deque[T_co]] = [deque() for _ in range(num_instances)]
+        self.child_buffers: List[Deque[_T_co]] = [deque() for _ in range(num_instances)]
         self.classifier_fn = classifier_fn
         self.drop_none = drop_none
         self.main_datapipe_exhausted = False
         self._child_stop: List[bool] = [True for _ in range(num_instances)]
 
-    def _find_next(self, instance_id: int) -> T_co:  # type: ignore[type-var]
+    def _find_next(self, instance_id: int) -> _T_co:  # type: ignore[type-var]
         while True:
             if self.main_datapipe_exhausted or self._child_stop[instance_id]:
                 raise StopIteration
@@ -667,7 +668,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
 
 
 @functional_datapipe("zip")
-class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
+class ZipperIterDataPipe(IterDataPipe[Tuple[_T_co]]):
     r"""
     Aggregates elements into a tuple from each of the input DataPipes (functional name: ``zip``).
 
@@ -694,7 +695,7 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         super().__init__()
         self.datapipes = datapipes  # type: ignore[assignment]
 
-    def __iter__(self) -> Iterator[Tuple[T_co]]:
+    def __iter__(self) -> Iterator[Tuple[_T_co]]:
         iterators = [iter(datapipe) for datapipe in self.datapipes]
         yield from zip(*iterators)
 

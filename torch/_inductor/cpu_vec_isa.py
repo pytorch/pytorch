@@ -1,8 +1,8 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import functools
 import os
 import platform
-
 import re
 import subprocess
 import sys
@@ -11,29 +11,8 @@ from typing import Any, Callable, Dict, List
 import torch
 from torch._inductor import config
 
+
 _IS_WINDOWS = sys.platform == "win32"
-
-
-# TODO: Move to cpp_builder, when optimize it.
-def get_compiler_version_info(compiler: str) -> str:
-    SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
-    env = os.environ.copy()
-    env["LC_ALL"] = "C"  # Don't localize output
-    try:
-        version_string = subprocess.check_output(
-            [compiler, "-v"], stderr=subprocess.STDOUT, env=env
-        ).decode(*SUBPROCESS_DECODE_ARGS)
-    except Exception as e:
-        try:
-            version_string = subprocess.check_output(
-                [compiler, "--version"], stderr=subprocess.STDOUT, env=env
-            ).decode(*SUBPROCESS_DECODE_ARGS)
-        except Exception as e:
-            return ""
-    # Mutiple lines to one line string.
-    version_string = version_string.replace("\r", "_")
-    version_string = version_string.replace("\n", "_")
-    return version_string
 
 
 def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
@@ -43,9 +22,9 @@ def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
     # We just record the compiler version, isa options and pytorch version info,
     # and generated them to output binary hash path.
     # It would optimize and skip compile existing binary.
-    from torch._inductor.cpp_builder import cpp_compiler
+    from torch._inductor.cpp_builder import get_compiler_version_info, get_cpp_compiler
 
-    compiler_info = get_compiler_version_info(cpp_compiler())
+    compiler_info = get_compiler_version_info(get_cpp_compiler())
     torch_version = torch.__version__
     fingerprint = f"{compiler_info}={isa_flags}={torch_version}"
     return fingerprint
@@ -110,7 +89,11 @@ cdll.LoadLibrary("__lib_path__")
 
     def check_build(self, code: str) -> bool:
         from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT, write
-        from torch._inductor.cpp_builder import CppBuilder, CppTorchOptions
+        from torch._inductor.cpp_builder import (
+            CppBuilder,
+            CppTorchOptions,
+            normalize_path_separator,
+        )
 
         key, input_path = write(
             code,
@@ -132,7 +115,9 @@ cdll.LoadLibrary("__lib_path__")
             )
             try:
                 # Check if the output file exist, and compile when not.
-                output_path = x86_isa_help_builder.get_target_file_path()
+                output_path = normalize_path_separator(
+                    x86_isa_help_builder.get_target_file_path()
+                )
                 if not os.path.isfile(output_path):
                     status, target_file = x86_isa_help_builder.build()
 
@@ -143,6 +128,7 @@ cdll.LoadLibrary("__lib_path__")
                         "-c",
                         VecISA._avx_py_load.replace("__lib_path__", output_path),
                     ],
+                    cwd=output_dir,
                     stderr=subprocess.DEVNULL,
                     env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
