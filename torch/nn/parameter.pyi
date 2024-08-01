@@ -19,8 +19,23 @@ class UninitializedParameter(Tensor):
         dtype: dtype | None = None,
     ) -> None: ...
 
+class Buffer(Tensor):
+    persistent: bool
+    def __init__(
+        self,
+        data: Tensor = ...,
+        requires_grad: bool = ...,
+        persistent: bool = ...,
+    ): ...
+
 class UninitializedBuffer(Tensor):
-    def __init__(self, data: Tensor = ..., requires_grad: bool = ...) -> None: ...
+    persistent: bool
+    def __init__(
+        self,
+        data: Tensor = ...,
+        requires_grad: bool = ...,
+        persistent: bool = ...,
+    ): ...
     def materialize(
         self,
         shape: tuple[int, ...],

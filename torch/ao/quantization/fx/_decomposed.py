@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
 from typing import Optional, Tuple
@@ -129,7 +130,7 @@ def quantize_per_tensor_tensor(
         scale.numel() == 1
     ), f"Expecting scale tensor to be one element, but received : {scale.numel()}"
     return quantize_per_tensor(
-        input, scale.item(), zero_point.item(), quant_min, quant_max, dtype  # type: ignore[arg-type]
+        input, scale.item(), zero_point.item(), quant_min, quant_max, dtype
     )
 
 
@@ -188,9 +189,9 @@ def quantize_per_tensor_tensor2(
     return quantize_per_tensor(
         input,
         scale.item(),
-        zero_point.item(),  # type: ignore[arg-type]
-        quant_min.item(),  # type: ignore[arg-type]
-        quant_max.item(),  # type: ignore[arg-type]
+        zero_point.item(),
+        quant_min.item(),
+        quant_max.item(),
         dtype,
     )
 
@@ -205,7 +206,7 @@ def quantize_per_tensor_tensor2_meta(
     dtype: torch.dtype,
 ) -> torch.Tensor:
     return quantize_per_tensor_tensor_meta(
-        input, scale, zero_point, quant_min, quant_max, dtype  # type: ignore[arg-type]
+        input, scale, zero_point, quant_min, quant_max, dtype
     )
 
 
@@ -321,7 +322,7 @@ def dequantize_per_tensor_tensor(
     return dequantize_per_tensor(
         input,
         scale.item(),
-        zero_point.item(),  # type: ignore[arg-type]
+        zero_point.item(),
         quant_min,
         quant_max,
         dtype,
@@ -391,9 +392,9 @@ def dequantize_per_tensor_tensor2(
     return dequantize_per_tensor(
         input,
         scale.item(),
-        zero_point.item(),  # type: ignore[arg-type]
-        quant_min.item(),  # type: ignore[arg-type]
-        quant_max.item(),  # type: ignore[arg-type]
+        zero_point.item(),
+        quant_min.item(),
+        quant_max.item(),
         dtype,
         out_dtype=out_dtype,
     )
