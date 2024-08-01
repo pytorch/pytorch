@@ -34,8 +34,7 @@ class B2BGEMMTest(TestCase):
             m1 = m1.to(torch.float32)
             m2 = m2.to(torch.float32)
             m3 = m3.to(torch.float32)
-            g = torch.nn.GELU()
-            return torch.mm(g(torch.mm(m1, m2)), m3).to(torch.float16)
+            return f(m1, m2, m3).to(torch.float16)
 
         f_opt = torch.compile(f)
         A = torch.randn((256, 32), device="cuda", dtype=torch.float16)
@@ -61,8 +60,7 @@ class B2BGEMMTest(TestCase):
             m1 = m1.to(torch.float32)
             m2 = m2.to(torch.float32)
             m3 = m3.to(torch.float32)
-            g = torch.nn.ReLU()
-            return torch.mm(m1, g(torch.mm(m2, m3))).to(torch.float16)
+            return f(m1, m2, m3).to(torch.float16)
 
         f_opt = torch.compile(f)
         A = torch.randn((32, 256), device="cuda", dtype=torch.float16)
@@ -87,7 +85,7 @@ class B2BGEMMTest(TestCase):
             m1 = m1.to(torch.float32)
             m2 = m2.to(torch.float32)
             m3 = m3.to(torch.float32)
-            return torch.mm(torch.mm(m1, m2), m3).to(torch.float16)
+            return f(m1, m2, m3).to(torch.float16)
 
         f_opt = torch.compile(f)
         A = torch.randn((256, 32), device="cuda", dtype=torch.float16)
@@ -112,7 +110,7 @@ class B2BGEMMTest(TestCase):
             m1 = m1.to(torch.float32)
             m2 = m2.to(torch.float32)
             m3 = m3.to(torch.float32)
-            return torch.mm(m1, torch.mm(m2, m3)).to(torch.float16)
+            return f(m1, m2, m3).to(torch.float16)
 
         f_opt = torch.compile(f)
         A = torch.randn((32, 256), device="cuda", dtype=torch.float16)
