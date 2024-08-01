@@ -1040,6 +1040,40 @@ def _add_unshard_reshard(
     return fsdp_aware_actions
 
 
+def _merge_bw(
+    compute_actions: List[Optional[_Action]],
+) -> List[_Action]:
+    """Given a basic schedule involving only compute actions (F,B,W), merge adjacent B and W ops into BW ops.
+
+    BW refers to running the whole backward (not separating grad_input and grad_weight), which can be more efficient
+    in some cases.
+    """
+    merged_actions = []
+    while compute_actions:
+        action = compute_actions.pop(0)
+        if action is None:
+            continue
+
+        while len(compute_actions) and (next_action := compute_actions[0]) is None:
+            # remove any None actions between 'action' and 'next_action'
+            compute_actions.pop(0)
+
+        if (
+            action.computation_type == B
+            and next_action is not None
+            and next_action.computation_type == W
+            and action.stage_index == next_action.stage_index
+            and action.microbatch_index == next_action.microbatch_index
+        ):
+            merged_actions.append(
+                _Action(action.stage_index, BW, action.microbatch_index)
+            )
+            compute_actions.pop(0)
+        else:
+            merged_actions.append(action)
+    return merged_actions
+
+
 def _batch_send_recv(ops, peer_ops):
     # we intentionally mutate ops, peer_ops so the caller knows we consumed them.  maybe i should revsit that.
     new_ops = []
@@ -1120,7 +1154,7 @@ def _add_send_recv(
     def _has_comms(action: _Action) -> bool:
         if action.computation_type == F:
             return action.stage_index != num_stages - 1
-        elif action.computation_type == B:
+        elif action.computation_type in (B, BW):
             return action.stage_index != 0
         return False
 
@@ -1171,7 +1205,10 @@ def _add_send_recv(
                 ):
                     return True
             return False
-        elif action.computation_type == B and not action.stage_index == num_stages - 1:
+        elif (
+            action.computation_type in (B, BW)
+            and not action.stage_index == num_stages - 1
+        ):
             for p in prev_actions:
                 if (
                     p.computation_type == RECV_B
@@ -1308,7 +1345,7 @@ def _simulate_comms_compute(
                 ):
                     return True
             return False
-        elif action.computation_type == B:
+        elif action.computation_type in (B, BW):
             if action.stage_index == num_stages - 1:
                 return True
             for p in _prev_ops(stage_idx):
@@ -1338,7 +1375,10 @@ def _simulate_comms_compute(
             return expected_send in _prev_ops(peer_stage_idx)
         elif action.computation_type == SEND_B:
             expected_b = _Action(action.stage_index, B, action.microbatch_index)
-            return expected_b in _prev_ops(stage_idx)
+            expected_bw = _Action(action.stage_index, BW, action.microbatch_index)
+            return expected_b in _prev_ops(stage_idx) or expected_bw in _prev_ops(
+                stage_idx
+            )
         elif action.computation_type == RECV_B:
             peer_stage_idx = stage_idx + 1
             expected_send = _Action(peer_stage_idx, SEND_B, action.microbatch_index)

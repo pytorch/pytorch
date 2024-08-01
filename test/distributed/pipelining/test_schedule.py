@@ -15,9 +15,11 @@ from torch.distributed.pipelining.schedules import (
     _add_unshard_reshard,
     _dump_chrometrace,
     _format_pipeline_order,
+    _merge_bw,
     _simulate_comms_compute,
     _validate_pipeline_order,
     B,
+    BW,
     F,
     RECV_F,
     RESHARD,
@@ -182,6 +184,7 @@ class TestScheduleLowering(TestCase):
             ("1F0", _Action(1, F, 0)),
             ("2B1", _Action(2, B, 1)),
             ("0W3", _Action(0, W, 3)),
+            ("0BW3", _Action(0, BW, 3)),
             ("1UNSHARD", _Action(1, UNSHARD, None)),
             ("3RESHARD", _Action(3, RESHARD, None)),
             ("2SEND_B2", _Action(2, SEND_B, 2)),
@@ -222,6 +225,41 @@ class TestScheduleLowering(TestCase):
                 (
                     f"Mismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {comms_sch}"
+                ),
+            )
+
+    @parametrize(
+        "test_info",
+        [
+            {
+                "compute": [
+                    "0F0",
+                    "0F1",
+                    "0F2",
+                    "0B0",
+                    "0B1",
+                    "0W0",
+                    "0B2",
+                    "0W2",
+                    "0W1",
+                ],
+                "comms": ["0F0", "0F1", "0F2", "0B0", "0B1", "0W0", "0BW2", "0W1"],
+            },
+        ],
+    )
+    def test_merge_bw(self, test_info):
+        """Test the pass that merges adjacent B and W operations into a BW operation."""
+        compute_sch = self._parse_actions(test_info["compute"])
+        expected_merged_sch = self._parse_actions(test_info["comms"])
+
+        merged_sch = _merge_bw(compute_sch)
+        for expected, actual in zip(expected_merged_sch, merged_sch):
+            self.assertEqual(
+                expected,
+                actual,
+                (
+                    f"Mismatch: expected action {expected} but found {actual}."
+                    f"\nWhole Schedule: {merged_sch}"
                 ),
             )
 
@@ -310,6 +348,10 @@ class TestScheduleLowering(TestCase):
         num_model_chunks = 3
         pipeline_parallel_size = 8
         num_stages = num_model_chunks * pipeline_parallel_size
+
+        for rank in compute_sch:
+            compute_sch[rank] = _merge_bw(compute_sch[rank])
+
         comms_sch = _add_send_recv(
             compute_sch,
             stage_to_rank=lambda chunk_index: chunk_index % pipeline_parallel_size,
@@ -336,7 +378,7 @@ class TestScheduleLowering(TestCase):
 
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
         # print(_format_pipeline_order(simulated_schedule))
-        self.assertEqual(num_steps, 336)
+        self.assertEqual(num_steps, 271)
 
 
 instantiate_parametrized_tests(TestScheduleLowering)
