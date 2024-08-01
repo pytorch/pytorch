@@ -103,11 +103,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
     @staticmethod
     @functools.lru_cache(None)
     def _in_graph_classes():
-        return set(tensortype_to_dtype.keys()) | {
+        _in_graph_class_list = {
             torch.Tensor,
             torch.cuda.Stream,
             torch.cuda.Event,
         }
+        if hasattr(torch, "hpu"):
+            _in_graph_class_list.update(
+                {
+                    torch.hpu.Stream,
+                    torch.hpu.Event,
+                }
+            )
+
+        return set(tensortype_to_dtype.keys()) | _in_graph_class_list
 
     def can_constant_fold_through(self):
         return self.value in self._constant_fold_classes()
@@ -120,9 +129,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return key in self.value.__dict__
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        from .. import trace_rules
         from . import ConstantVariable, EnumVariable
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         source = AttrSource(self.source, name) if self.source is not None else None
 
@@ -142,9 +150,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if isinstance(obj, staticmethod):
             func = obj.__get__(self.value)
             if source is not None:
-                return trace_rules.lookup(func).create_with_source(func, source=source)
+                return VariableBuilder(tx, source)(func)
             else:
-                return trace_rules.lookup(func)(func)
+                return SourcelessBuilder.create(tx, func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source:
