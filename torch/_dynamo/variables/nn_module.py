@@ -9,9 +9,6 @@ from typing import Any, Dict, List, TYPE_CHECKING
 
 import torch.nn
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
 from .. import trace_rules, variables
 from ..exc import (
     ObservedException,
@@ -47,6 +44,10 @@ from .functions import invoke_and_store_as_constant
 from .lazy import LazyVariableTracker
 from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):

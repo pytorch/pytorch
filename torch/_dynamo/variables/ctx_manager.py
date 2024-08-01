@@ -6,9 +6,6 @@ import warnings
 from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch._C
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._guards import Guard
 
 from .. import variables
@@ -30,6 +27,10 @@ from .functions import (
     WrappedUserMethodVariable,
 )
 from .user_defined import UserDefinedObjectVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 @dataclasses.dataclass
