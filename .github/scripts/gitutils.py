@@ -19,6 +19,7 @@ from typing import (
     Union,
 )
 
+
 T = TypeVar("T")
 
 RE_GITHUB_URL_MATCH = re.compile("^https://.*@?github.com/(.+)/(.+)$")

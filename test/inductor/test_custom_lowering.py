@@ -4,13 +4,11 @@ import unittest
 from functools import partial
 
 import torch
-
 from torch._inductor.ir import Pointwise
 from torch._inductor.lowering import make_pointwise, register_lowering
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import ops
 from torch.testing._internal.common_utils import skipIfRocm
-
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
