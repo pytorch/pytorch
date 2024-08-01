@@ -106,7 +106,6 @@ from torch._inductor.utils import (
     is_linux,
     set_tracing_context_output_strides,
 )
-
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -1395,9 +1394,10 @@ class CompiledFxGraph:
             with open(graph.cache_path) as f:
                 self.source_code = f.read()
         self.cache_linemap = graph.cache_linemap
-        self.device_types = graph.device_types
-        self.device_idxs = graph.device_idxs
-        self.mutated_inputs = graph.mutated_inputs
+        # TODO - ordered set
+        self.device_types = set(graph.device_types)
+        self.device_idxs = set(graph.device_idxs)
+        self.mutated_inputs = set(graph.mutated_inputs)
         self.mutated_input_idxs = set(graph.mutated_input_idxs)
         self.constants = graph.constants
         self.torchbind_constants = graph.torchbind_constants

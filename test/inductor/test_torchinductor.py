@@ -11172,6 +11172,18 @@ class CommonTemplate:
 
         self.common(forward, ())
 
+    def test_flip_cat(self):
+        def forward(unsqueeze, unsqueeze_1):
+            cat_1 = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], 1)
+            view = torch.ops.aten.view.default(cat_1, [4])
+            slice_5 = torch.ops.aten.slice.Tensor(view, 0, 0, 3)
+            rev_1 = torch.ops.aten.flip.default(slice_5, [0])
+            return (rev_1,)
+
+        a = torch.randn(2, 1, requires_grad=True)
+        b = torch.randn(2, 1, requires_grad=True)
+        self.common(forward, (a, b))
+
 
 @dataclasses.dataclass
 class TestFailure:
