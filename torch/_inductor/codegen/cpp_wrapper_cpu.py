@@ -2420,12 +2420,7 @@ if (py_{buf_name}.get() == NULL) {{
                 else:
                     raise AssertionError("Can not map None to a known data type")
             else:
-                if isinstance(type_, torch.TensorType):
-                    var_name = f"var_{next(self.arg_var_id)}"
-                    self.writeline(f"at::Tensor {var_name} = at::Tensor();")
-                    return var_name
-                else:
-                    return "std::nullopt"
+                return "std::nullopt"
 
         if isinstance(type_, torch.OptionalType):
             element_type = type_.getElementType()
