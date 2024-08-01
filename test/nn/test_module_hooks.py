@@ -772,8 +772,7 @@ class TestStateDictHooks(TestCase):
                 # Note that torch.save / torch.load is not recommended to save/load
                 # modules.
                 torch.save(m, f.name)
-                # weights_only=False as this is legacy code that saves the model
-                m = torch.load(f.name, weights_only=False)
+                m = torch.load(f.name)
                 m.load_state_dict(sd)
                 self.assertFalse(called)
 
@@ -856,8 +855,7 @@ class TestStateDictHooks(TestCase):
             # Note that torch.save / torch.load is not recommended
             # to save / load modules.
             torch.save(m, f.name)
-            # weights_only=False as this is legacy code that saves the model
-            m = torch.load(f.name, weights_only=False)
+            m = torch.load(f.name)
 
         # Ensure we can run state_dict without issues
         _ = m.state_dict()

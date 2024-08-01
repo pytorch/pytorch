@@ -374,8 +374,7 @@ class TestTorchbind(JitTestCase):
         b = io.BytesIO()
         torch.save(nt, b)
         b.seek(0)
-        # weights_only=False as trying to load ScriptObject
-        nt_loaded = torch.load(b, weights_only=False)
+        nt_loaded = torch.load(b)
         for exp in [7, 3, 3, 1]:
             self.assertEqual(nt_loaded.pop(), exp)
 

@@ -1031,7 +1031,7 @@ def load(
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
     *,
-    weights_only: Optional[bool] = True,
+    weights_only: Optional[bool] = None,
     mmap: Optional[bool] = None,
     **pickle_load_args: Any,
 ) -> Any:
@@ -1253,7 +1253,7 @@ def load(
                             overall_storage=overall_storage,
                             **pickle_load_args,
                         )
-                    except pickle.UnpicklingError as e:
+                    except RuntimeError as e:
                         raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
                 return _load(
                     opened_zipfile,
@@ -1277,7 +1277,7 @@ def load(
                     _weights_only_unpickler,
                     **pickle_load_args,
                 )
-            except pickle.UnpicklingError as e:
+            except RuntimeError as e:
                 raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
         return _legacy_load(
             opened_file, map_location, pickle_module, **pickle_load_args

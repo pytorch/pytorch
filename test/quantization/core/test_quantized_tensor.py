@@ -1348,8 +1348,8 @@ class TestQuantizedTensor(TestCase):
         torch.save(f, buf)
 
         buf.seek(0)
-        # weights_only=False as this is legacy code that saves the model
-        f2 = torch.load(buf, weights_only=False)
+        # Don't test weights_only here as this is loading a Module (legacy)
+        f2 = torch.load(buf)
 
         self.assertEqual(f2.qscheme, torch.per_tensor_symmetric)
 

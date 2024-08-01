@@ -156,8 +156,7 @@ class TestNN(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/linear.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            # weights_only=False as this is legacy code that saves the model
-            m = torch.load(path, weights_only=False)
+            m = torch.load(path)
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
 
@@ -4329,8 +4328,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     buf = io.BytesIO()
                     rnn_pickle = torch.save(rnn, buf)
                     buf.seek(0)
-                    # weights_only=False as this is legacy code that saves the model
-                    rnn2 = torch.load(buf, weights_only=False)
+                    rnn2 = torch.load(buf)
                     rnn2.flatten_parameters()
                     output3, hy3 = rnn2(input, hx)
 
