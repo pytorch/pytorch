@@ -171,7 +171,6 @@ std::vector<std::shared_ptr<SugaredValue>> PythonValue::asTuple(
     const SourceRange& loc,
     GraphFunction& m,
     const std::optional<size_t>& size_hint) {
-  const std::string type_str = typeString(self);
   std::stringstream ss;
   ss << kind() << " cannot be used as a tuple";
   checkForAddToConstantsError(ss);
@@ -182,7 +181,6 @@ std::shared_ptr<SugaredValue> PythonValue::attr(
     const SourceRange& loc,
     GraphFunction& m,
     const std::string& field) {
-  const std::string type_str = typeString(self);
   std::stringstream ss;
   ss << "attribute lookup is not defined on " << kind();
   checkForAddToConstantsError(ss);
