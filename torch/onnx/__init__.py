@@ -40,7 +40,7 @@ from .utils import (
     unregister_custom_op_symbolic,
 )
 
-from ._internal.exporter import (  # usort:skip. needs to be last to avoid circular import
+from ._internal._exporter_legacy import (  # usort:skip. needs to be last to avoid circular import
     DiagnosticOptions,
     ExportOptions,
     ONNXProgram,
