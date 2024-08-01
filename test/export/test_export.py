@@ -1926,11 +1926,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         M = M_v0
         with self.assertRaisesRegex(
             error_type,
-            "User code(.*\n)+"
+            "The following call raised this error(.*\n)+"
             f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
-            "Suggested fixes.*:\n"
+            "To fix the error, insert one of the following checks before this call.*:\n"
             f".*{re.escape('torch._check(items[2] == (-1))')}.*\n"
-            f".*{re.escape('torch._check(items[2] != (-1))')}",
+            f".*{re.escape('torch._check(items[2] != (-1))')}(.*\n)+"
+            f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in Eq(u2, -1) and its negation.)')}",
         ):
             export(N(), (t,), strict=strict)
 
@@ -1946,11 +1947,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         M = M_v1
         with self.assertRaisesRegex(
             error_type,
-            "User code(.*\n)+"
+            "The following call raised this error(.*\n)+"
             f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
-            "Suggested fixes.*:\n"
+            "To fix the error, insert one of the following checks before this call.*:\n"
             f".*{re.escape('torch._check(items[2] >= 0)')}.*\n"
-            f".*{re.escape('torch._check(items[2] < 0)')}",
+            f".*{re.escape('torch._check(items[2] < 0)')}(.*\n)+"
+            f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in u2 >= 0 and its negation.)')}",
         ):
             export(N(), (t,), strict=strict)
 
@@ -1968,11 +1970,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         M = M_v2
         with self.assertRaisesRegex(
             error_type,
-            "User code(.*\n)+"
+            "The following call raised this error(.*\n)+"
             f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
-            "Suggested fixes.*:\n"
-            f".*{re.escape('torch._check(items[2] == r.shape[1])')}.*\n"
-            f".*{re.escape('torch._check(items[2] != r.shape[1])')}",
+            "To fix the error, insert one of the following checks before this call.*:\n"
+            f".*{re.escape('torch._check(items[2] == items[1])')}.*\n"
+            f".*{re.escape('torch._check(items[2] != items[1])')}(.*\n)+"
+            f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1] or r.shape[1], `u2` with items[2] in Eq(u2, u1) and its negation.)')}",
         ):
             export(N(), (t,), strict=strict)
 
