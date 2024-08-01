@@ -572,7 +572,7 @@ def triton_acc_type(dtype):
 
 
 class TritonCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges[Any]):
+    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
         super().__init__(name, bounds)
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: OrderedSet[str] = OrderedSet()
@@ -1181,7 +1181,7 @@ class TritonKernel(SIMDKernel):
         reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
         override_persistent_reduction=None,
-    ):
+    ) -> None:
         super().__init__(
             *groups,
             index_dtype=index_dtype,
