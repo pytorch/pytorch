@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed._tensor.placement_types import DTensorSpec, Placement
 from torch.distributed.device_mesh import DeviceMesh
 
 
@@ -22,6 +22,9 @@ except ImportError:
 # Common type aliases
 ArgsType = Tuple[object, ...]
 KwargsType = Dict[str, object]
+
+PlacementList = List[Optional[Placement]]
+
 # ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type sould
 # be the same set of possibilities.
 OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
