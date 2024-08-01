@@ -81,8 +81,6 @@ __all__ = [
     "float_qparams_weight_only_qconfig",
     # QAT utilities
     "default_qat_qconfig",
-    "prepare_qat",
-    "quantize_qat",
     # module transformations
     "fuse_modules",
 ]

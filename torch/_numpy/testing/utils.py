@@ -36,7 +36,6 @@ __all__ = [
     "decorate_methods",
     "print_assert_equal",
     "verbose",
-    "assert_",
     "assert_array_almost_equal_nulp",
     "assert_raises_regex",
     "assert_array_max_ulp",
