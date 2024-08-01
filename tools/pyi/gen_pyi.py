@@ -389,9 +389,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                 )
             ],
             "log_sigmoid": [defs("log_sigmoid", ["input: Tensor"], "Tensor")],
-            "gelu": [
-                defs("gelu", ["input: Tensor", "approximate: str = ..."], "Tensor")
-            ],
+            "gelu": [defs("gelu", ["input: Tensor", "approximate: str = ..."], "Tensor")],
             "softplus": [
                 defs(
                     "softplus",
@@ -399,9 +397,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                     "Tensor",
                 )
             ],
-            "softshrink": [
-                defs("softshrink", ["input: Tensor", "lambd: float = ..."], "Tensor")
-            ],
+            "softshrink": [defs("softshrink", ["input: Tensor", "lambd: float = ..."], "Tensor")],
             "hardsigmoid": [
                 defs(
                     "hardsigmoid",
@@ -428,9 +424,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                     "Tensor",
                 )
             ],
-            "one_hot": [
-                defs("one_hot", ["tensor: Tensor", "num_classes: int = ..."], "Tensor")
-            ],
+            "one_hot": [defs("one_hot", ["tensor: Tensor", "num_classes: int = ..."], "Tensor")],
             "scaled_dot_product_attention": [
                 defs(
                     "scaled_dot_product_attention",
@@ -442,6 +436,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                         "dropout_p: float = 0.0",
                         "is_causal: bool = False",
                         "scale: float | None = None",
+                        "enable_gqa: bool = False",
                     ],
                     "Tensor",
                 )
@@ -1296,7 +1291,7 @@ def gen_pyi(
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],
             "is_ipu": ["is_ipu: _bool"],
-            "storage_offset": [defs("storage_offset", ["self"], "_int")],
+            "storage_offset": [defs("storage_offset", ["self"], "_int | SymInt")],
             "to": [
                 (
                     defs(
@@ -1335,7 +1330,7 @@ def gen_pyi(
                     [
                         "self",
                         "storage: Storage | TypedStorage | UntypedStorage",
-                        "offset: _int",
+                        "offset: IntLikeType",
                         "size: _symsize",
                         "stride: _symsize",
                     ],
