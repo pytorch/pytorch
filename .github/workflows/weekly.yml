@@ -44,7 +44,7 @@ jobs:
 
   update-slow-tests:
     runs-on: ubuntu-latest
-    environment: update-slow-tests
+    environment: update-commit-hash
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
