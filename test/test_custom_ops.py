@@ -888,7 +888,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         # Sequence[int] gets automagically turned into int[] in the schema.
         # This test checks that we actually do support arbitrary sequence types.
         class MySequence(collections.abc.Sequence):
-            def __init__(self):
+            def __init__(self) -> None:
                 self._container = [1, 2, 3]
 
             def __getitem__(self, idx):

@@ -260,7 +260,7 @@ class TestTypeSharing(JitTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 # assign a type we know can't be converted to TorchScript
                 self.foo = object
@@ -455,7 +455,7 @@ class TestTypeSharing(JitTestCase):
 
     def test_loaded_modules_work(self):
         class AB(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = 1
                 self.b = 1
@@ -464,7 +464,7 @@ class TestTypeSharing(JitTestCase):
                 return self.a + self.b
 
         class A(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = 1
 
