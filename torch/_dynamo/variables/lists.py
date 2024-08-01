@@ -61,7 +61,7 @@ class BaseListVariable(VariableTracker):
         self,
         items: List[VariableTracker],
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
@@ -157,7 +157,7 @@ class BaseListVariable(VariableTracker):
 
 
 class RangeVariable(BaseListVariable):
-    def __init__(self, items, **kwargs):
+    def __init__(self, items, **kwargs) -> None:
         items_to_map = items
         start = variables.ConstantVariable.create(0)
         stop = None
@@ -401,7 +401,7 @@ class ListVariable(CommonListMethodsVariable):
     def python_type(self):
         return list
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)})"
 
     def debug_repr(self):
@@ -558,7 +558,7 @@ class SizeVariable(TupleVariable):
         items: List[VariableTracker],
         proxy: Optional[torch.fx.Proxy] = None,
         **kwargs,
-    ):
+    ) -> None:
         self.proxy = proxy
         super().__init__(items, **kwargs)
 
@@ -694,7 +694,7 @@ class NamedTupleVariable(TupleVariable):
         *TupleVariable._nonvar_fields,
     }
 
-    def __init__(self, items, tuple_cls, **kwargs):
+    def __init__(self, items, tuple_cls, **kwargs) -> None:
         super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
 
@@ -753,7 +753,7 @@ class NamedTupleVariable(TupleVariable):
 
 
 class SliceVariable(BaseListVariable):
-    def __init__(self, items, **kwargs):
+    def __init__(self, items, **kwargs) -> None:
         items_to_map = items
         start, stop, step = [variables.ConstantVariable.create(None)] * 3
 
@@ -802,7 +802,7 @@ class ListIteratorVariable(IteratorVariable):
         *IteratorVariable._nonvar_fields,
     }
 
-    def __init__(self, items, index: int = 0, **kwargs):
+    def __init__(self, items, index: int = 0, **kwargs) -> None:
         super().__init__(**kwargs)
         assert isinstance(items, list)
         # Removing this check as it slows things down too much
@@ -812,7 +812,7 @@ class ListIteratorVariable(IteratorVariable):
         self.items = items
         self.index = index
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
 
     def next_variable(self, tx):
@@ -916,7 +916,9 @@ class RestrictedListSubclassVariable(ListVariable):
     def is_matching_cls(cls, user_cls: type):
         return cls._is_non_conflicting_subclass(user_cls, list)
 
-    def __init__(self, items, *, user_cls: type, user_cls_source: Source, **kwargs):
+    def __init__(
+        self, items, *, user_cls: type, user_cls_source: Source, **kwargs
+    ) -> None:
         super().__init__(items=items, **kwargs)
         self.user_cls = user_cls
         self.user_cls_source = user_cls_source
