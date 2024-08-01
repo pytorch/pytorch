@@ -1111,6 +1111,7 @@ def _add_send_recv(
     compute_actions: Dict[int, List[_Action]],
     stage_to_rank: Callable[[int], int],
     num_stages: int,
+    enable_batching: bool = False,
 ) -> Dict[int, List[_Action]]:
     comm_actions: Dict[int, List[_Action]] = {rank: [] for rank in compute_actions}
 
@@ -1243,7 +1244,14 @@ def _add_send_recv(
                     ), f"ops was empty but peer_ops was not, {peer_ops}"
 
                 # batched_ops lists include both batched ops and unbatchable ops
-                batched_ops, batched_peer_ops = _batch_send_recv(ops, peer_ops)
+                if enable_batching:
+                    batched_ops, batched_peer_ops = _batch_send_recv(ops, peer_ops)
+                else:
+                    batched_ops = list(ops)
+                    batched_peer_ops = list(peer_ops)
+                    # TODO - refactor so that it is not necessary to consume/clear ops/peer_ops
+                    ops.clear()
+                    peer_ops.clear()
 
                 # now we have consumed ops from this rank and matching ops from peer.
                 # peer will be empty and we will not do anything when we iterate to it
