@@ -6,13 +6,14 @@ import itertools
 import logging
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
 import sympy
 
 import torch
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+from torch.utils._ordered_set import OrderedSet
 
 from .codegen.common import index_prevent_reordering
 from .utils import (
@@ -63,7 +64,7 @@ class MemoryDep(Dep):
     size: Tuple[sympy.Expr, ...]
     mode: Optional[str] = None
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"MemoryDep({self.name!r}, {self.index}, {self.ranges}, {self.mode})"
 
     def get_offset(self):
@@ -109,7 +110,7 @@ class MemoryDep(Dep):
                 reindex([add_var(x) for x in new_simplified_sizes]),
             )
         )
-        new_index = sympy_subs(sympy.expand(self.index), replacement)
+        new_index = sympy_subs(sympy.expand(self.index), replacement)  # type: ignore[arg-type] # next PR
 
         out = MemoryDep(self.name, new_index, tuple(var_ranges.keys()), tuple(var_ranges.values()))  # type: ignore[arg-type]
         return out
@@ -123,12 +124,12 @@ class MemoryDep(Dep):
         if self.is_indirect():
             numel = V.graph.get_numel(self.name)
         else:
-            vars = set(self.index.free_symbols)
+            vars: OrderedSet[sympy.Expr] = OrderedSet(self.index.free_symbols)
             numel = sympy.Integer(1)
             for var, size in zip(self.var_names, self.size):
                 if var in vars:
                     numel = numel * size
-        return numel
+        return numel  # type: ignore[return-value]
 
     def rename(self, renames: Dict[str, str]) -> "MemoryDep":
         if self.name in renames:
@@ -201,7 +202,7 @@ class StarDep(Dep):
         raise NotImplementedError("StarDep does not have an index")
 
     def get_numel(self) -> sympy.Expr:
-        return V.graph.get_numel(self.name)
+        return V.graph.get_numel(self.name)  # type: ignore[return-value]
 
     def rename(self, renames: Dict[str, str]) -> "StarDep":
         if self.name in renames:
@@ -236,7 +237,10 @@ class StarDep(Dep):
 # materialize that buffer
 @dataclasses.dataclass(frozen=True)
 class WeakDep(Dep):
+    # Fake dependency on unused buffer
     name: str
+    # Buffer that is doing the mutation
+    mutating_buf: str
 
     @property
     def index(self):
@@ -247,7 +251,7 @@ class WeakDep(Dep):
 
     def rename(self, renames: Dict[str, str]) -> "WeakDep":
         if self.name in renames:
-            return WeakDep(renames[self.name])
+            return WeakDep(renames[self.name], self.mutating_buf)
         return self
 
     def numbytes_hint(self):
@@ -269,9 +273,9 @@ class IndexExprDep:
 
 @dataclasses.dataclass
 class ReadWrites:
-    reads: Set[Dep]
-    writes: Set[Dep]
-    index_exprs: Set[IndexExprDep]
+    reads: OrderedSet[Dep]
+    writes: OrderedSet[Dep]
+    index_exprs: OrderedSet[IndexExprDep]
     range_vars: Optional[List[sympy.Expr]] = None
     var_ranges: Optional[VarRanges] = None
     op_counts: typing.Counter[str] = dataclasses.field(
@@ -280,8 +284,8 @@ class ReadWrites:
 
     def rename(self, renames: typing.Dict[str, str]) -> "ReadWrites":
         return ReadWrites(
-            {dep.rename(renames) for dep in self.reads},
-            {dep.rename(renames) for dep in self.writes},
+            OrderedSet(dep.rename(renames) for dep in self.reads),
+            OrderedSet(dep.rename(renames) for dep in self.writes),
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
@@ -291,7 +295,7 @@ class ReadWrites:
     def with_read(self, dep: Dep) -> "ReadWrites":
         assert isinstance(dep, (WeakDep, StarDep))
         return ReadWrites(
-            set.union(self.reads, {dep}),
+            OrderedSet.union(self.reads, [dep]),
             self.writes,
             self.index_exprs,
             self.range_vars,
@@ -300,18 +304,18 @@ class ReadWrites:
         )
 
     def merge(self, other: "ReadWrites"):
-        reads = set.union(self.reads, other.reads)
-        writes = set.union(self.writes, other.writes)
-        index_exprs = set.union(self.index_exprs, other.index_exprs)
+        reads = OrderedSet.union(self.reads, other.reads)
+        writes = OrderedSet.union(self.writes, other.writes)
+        index_exprs = OrderedSet.union(self.index_exprs, other.index_exprs)
         op_counts = collections.Counter(self.op_counts)
         op_counts.update(other.op_counts)
         return ReadWrites(reads - writes, writes, index_exprs, op_counts=op_counts)
 
     @staticmethod
     def merge_list(read_writes: List["ReadWrites"]):
-        all_writes = set.union(*[rw.writes for rw in read_writes])
-        all_reads = set.union(*[rw.reads for rw in read_writes]) - all_writes
-        all_index_exprs = set.union(*[rw.index_exprs for rw in read_writes])
+        all_writes = OrderedSet.union(*[rw.writes for rw in read_writes])
+        all_reads = OrderedSet.union(*[rw.reads for rw in read_writes]) - all_writes
+        all_index_exprs = OrderedSet.union(*[rw.index_exprs for rw in read_writes])
 
         op_counts: typing.Counter[Any] = collections.Counter()
         for rw in read_writes:
@@ -336,7 +340,7 @@ class ReadWrites:
         """
         Integer index is used for load_seed.
         """
-        names = set()
+        names: OrderedSet[str] = OrderedSet()
         for dep in self.reads_and_writes():
             if not isinstance(dep, MemoryDep):
                 continue
@@ -348,11 +352,11 @@ class ReadWrites:
 
 
 class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
-    def __init__(self, var_ranges: VarRanges, normalize: bool):
+    def __init__(self, var_ranges: VarRanges, normalize: bool) -> None:
         super().__init__()
-        self._reads: Set[Dep] = set()
-        self._writes: Set[MemoryDep] = set()
-        self._index_exprs: Set[IndexExprDep] = set()
+        self._reads: OrderedSet[Dep] = OrderedSet()
+        self._writes: OrderedSet[MemoryDep] = OrderedSet()
+        self._index_exprs: OrderedSet[IndexExprDep] = OrderedSet()
         self._var_ranges: VarRanges = var_ranges
         self._normalize: bool = normalize
 
@@ -435,7 +439,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 class _OpCounter:
     """Shim to count how many times each op is used"""
 
-    def __init__(self, inner):
+    def __init__(self, inner) -> None:
         super().__init__()
         self.parent_handler = inner
         self._op_counts: typing.Counter[Any] = collections.Counter()
@@ -446,7 +450,7 @@ class _OpCounter:
 
 
 class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
-    def __init__(self, var_ranges: VarRanges, normalize: bool):
+    def __init__(self, var_ranges: VarRanges, normalize: bool) -> None:
         parent_handler = _RecordLoadStoreInner(
             var_ranges=var_ranges, normalize=normalize
         )
@@ -506,8 +510,8 @@ def extract_read_writes(
 
     inner = rw.parent_handler.parent_handler
     return ReadWrites(
-        set(inner._reads),
-        set(inner._writes),
+        OrderedSet(inner._reads),
+        OrderedSet(inner._writes),
         inner._index_exprs,
         range_vars,
         var_ranges,
@@ -547,7 +551,7 @@ def extract_input_node_reduction_ranges(
     reduction_size = None
     size = None
     while reduction_size is None and len(reads) > 0:
-        seen = set()
+        seen: OrderedSet[str] = OrderedSet()
         new_reads = []
         for read in reads:
             if not isinstance(read, MemoryDep):
@@ -555,7 +559,7 @@ def extract_input_node_reduction_ranges(
             if read.name in seen:
                 continue
             seen.add(read.name)
-            buffer = V.graph.get_buffer(read.name)
+            buffer = V.graph.try_get_buffer(read.name)
             if buffer is None:
                 continue
             op = buffer.get_defining_op()
@@ -583,10 +587,10 @@ def canonicalization_prefix():
 
 # ops handler which computes all the free unbacked symbols for an IR
 class FreeUnbackedSymbolsOpsHandler:
-    symbols: Set[sympy.Symbol]
+    symbols: OrderedSet[sympy.Symbol]
 
-    def __init__(self):
-        self.symbols = set()
+    def __init__(self) -> None:
+        self.symbols = OrderedSet()
 
     def __getattr__(self, name: str) -> Callable[..., Any]:
         def inner(*args, **kwargs):
@@ -596,7 +600,9 @@ class FreeUnbackedSymbolsOpsHandler:
 
         return inner
 
-    def indirect_indexing(self, index_var, size, check=True) -> sympy.Symbol:
+    def indirect_indexing(
+        self, index_var, size, check=True, wrap_neg=True
+    ) -> sympy.Symbol:
         assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
         self.symbols |= free_unbacked_symbols(size)
         return sympy_index_symbol(f"({str(index_var)})")

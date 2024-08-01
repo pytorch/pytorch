@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 from __future__ import annotations
 
 import atexit
@@ -10,7 +11,6 @@ import os
 import traceback
 import typing
 import weakref
-
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import (
@@ -35,7 +35,6 @@ from typing_extensions import Self, TypeGuard
 from weakref import ReferenceType
 
 import torch
-
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._prims_common import suggest_memory_format
@@ -61,7 +60,9 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
+
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -151,17 +152,19 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
 
 def get_plain_tensors(subclass: Tensor) -> List[Tensor]:
     assert is_traceable_wrapper_subclass(subclass)
-    plain_tensors = []
+    plain_tensors: List[Tensor] = []
     todo = [subclass]
     while todo:
         curr = todo.pop()
+        if not is_traceable_wrapper_subclass(curr):
+            assert isinstance(curr, Tensor)
+            plain_tensors.append(curr)
+            continue
+
         inner_keys, _ = curr.__tensor_flatten__()
-        for key in inner_keys:
-            val = getattr(curr, key)
-            if not is_traceable_wrapper_subclass(val):
-                plain_tensors.append(val)
-            else:
-                todo.append(val)
+        for key in reversed(inner_keys):
+            todo.append(getattr(curr, key))
+
     return plain_tensors
 
 
@@ -1076,6 +1079,7 @@ class FakeTensorMode(TorchDispatchMode):
         export: bool = False,
     ) -> None:
         log.debug("create_mode 0x%x", id(self))
+        super().__init__()
         self.allow_fallback_kernels = allow_fallback_kernels
 
         import torch._dynamo.config
@@ -1229,6 +1233,10 @@ class FakeTensorMode(TorchDispatchMode):
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
             if maybe_prev_only_lift_cpu_tensors is not None:
                 torch._C._set_only_lift_cpu_tensors(maybe_prev_only_lift_cpu_tensors)
+
+    @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
 
     @classmethod
     def cache_info(cls) -> DispatchCacheInfo:
@@ -1405,6 +1413,11 @@ class FakeTensorMode(TorchDispatchMode):
                     # Does this subsume arg.is_sparse?
                     raise _BypassDispatchCache("sparse tensor layout")
                 # sparse tensors don't have storage, so check is after
+
+                # FIXME: For now back out caching when there are symbolic nbytes
+                # - this doesn't seem to play nice with set(). See T196779132 for examples.
+                if isinstance(arg.untyped_storage().nbytes(), SymInt):
+                    raise _BypassDispatchCache("symbolic nbytes")
                 if is_sparse_compressed(arg):
                     raise _BypassDispatchCache("sparse compressed tensor")
                 metadata = extract_tensor_metadata(arg)
@@ -1579,21 +1592,6 @@ class FakeTensorMode(TorchDispatchMode):
             storage = view_arg.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
                 empty.set_(storage, storage_offset, shape, stride)
-        elif storage_offset != 0:
-            storage = empty.untyped_storage()
-            with in_kernel_invocation_manager(self), maybe_suppress():
-                empty.set_(storage, storage_offset, shape, stride)
-
-        if isinstance(storage_bytes, SymInt):
-            # Do it this way so we don't import symbolic_shapes (which imports
-            # expensive sympy) unless we have to.
-            from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
-            zero_bytes = guard_size_oblivious(storage_bytes == 0)
-        else:
-            zero_bytes = storage_bytes == 0
-        if zero_bytes:
-            empty.untyped_storage().resize_(0)
 
         return FakeTensor(self, empty, metadata.device)
 
@@ -2347,10 +2345,10 @@ _DISPATCH_HANDLE_DIRECTLY = ordered_set(
 )
 
 from torch._subclasses.fake_impls import (  # noqa: F401
-    _device_not_kwarg_ops,  # noqa: F401
-    _is_tensor_constructor,  # noqa: F401
-    _like_tensor_constructors,  # noqa: F401
-    contains_tensor_types,  # noqa: F401
+    _device_not_kwarg_ops,
+    _is_tensor_constructor,
+    _like_tensor_constructors,
+    contains_tensor_types,
     get_fast_op_impls,
     has_meta,
     op_implementations_checks,

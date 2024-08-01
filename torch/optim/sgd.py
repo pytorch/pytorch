@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Gradient Descent optimizer."""
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import torch
 from torch import Tensor
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
+
 from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
@@ -16,6 +17,7 @@ from .optimizer import (
     Optimizer,
 )
 
+
 __all__ = ["SGD", "sgd"]
 
 
@@ -23,7 +25,7 @@ class SGD(Optimizer):  # noqa: D101
     def __init__(
         self,
         params,
-        lr: float = 1e-3,
+        lr: Union[float, Tensor] = 1e-3,
         momentum: float = 0,
         dampening: float = 0,
         weight_decay: float = 0,
@@ -34,6 +36,8 @@ class SGD(Optimizer):  # noqa: D101
         differentiable: bool = False,
         fused: Optional[bool] = None,
     ):  # noqa: D107
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
         if momentum < 0.0:
@@ -187,7 +191,7 @@ SGD.__doc__ = (
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float, optional): learning rate (default: 1e-3)
+        lr (float, Tensor, optional): learning rate (default: 1e-3)
         momentum (float, optional): momentum factor (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
