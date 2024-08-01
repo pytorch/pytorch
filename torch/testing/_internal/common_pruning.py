@@ -52,7 +52,7 @@ class SimpleLinear(nn.Module):
     r"""Model with only Linear layers without biases, some wrapped in a Sequential,
     some following the Sequential. Used to test basic pruned Linear-Linear fusion."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.seq = nn.Sequential(
             nn.Linear(7, 5, bias=False),
@@ -73,7 +73,7 @@ class LinearBias(nn.Module):
     r"""Model with only Linear layers, alternating layers with biases,
     wrapped in a Sequential. Used to test pruned Linear-Bias-Linear fusion."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.seq = nn.Sequential(
             nn.Linear(7, 5, bias=True),
@@ -93,7 +93,7 @@ class LinearActivation(nn.Module):
     Activation functions modules in between each Linear in the Sequential, and each outside layer.
     Used to test pruned Linear(Bias)-Activation-Linear fusion."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.seq = nn.Sequential(
             nn.Linear(7, 5, bias=True),
@@ -122,7 +122,7 @@ class LinearActivationFunctional(nn.Module):
     activationals are called in between each outside layer.
     Used to test pruned Linear(Bias)-Activation-Linear fusion."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.seq = nn.Sequential(
             nn.Linear(7, 5, bias=True),
@@ -151,7 +151,7 @@ class SimpleConv2d(nn.Module):
     r"""Model with only Conv2d layers, all without bias, some in a Sequential and some following.
     Used to test pruned Conv2d-Conv2d fusion."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.seq = nn.Sequential(
             nn.Conv2d(1, 32, 3, 1, bias=False),
@@ -171,7 +171,7 @@ class Conv2dBias(nn.Module):
     r"""Model with only Conv2d layers, some with bias, some in a Sequential and some outside.
     Used to test pruned Conv2d-Bias-Conv2d fusion."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.seq = nn.Sequential(
             nn.Conv2d(1, 32, 3, 1, bias=True),
@@ -194,7 +194,7 @@ class Conv2dActivation(nn.Module):
     in-between each outside layer.
     Used to test pruned Conv2d-Bias-Activation-Conv2d fusion."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.seq = nn.Sequential(
             nn.Conv2d(1, 32, 3, 1, bias=True),
@@ -222,7 +222,7 @@ class Conv2dPadBias(nn.Module):
     Used to test that bias is propagated correctly in the special case of
     pruned Conv2d-Bias-(Activation)Conv2d fusion, when the second Conv2d layer has padding > 0."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.seq = nn.Sequential(
             nn.Conv2d(1, 32, 3, 1, padding=1, bias=True),
@@ -255,7 +255,7 @@ class Conv2dPool(nn.Module):
     Activation function modules in between each layer, Pool2d modules in between each layer.
     Used to test pruned Conv2d-Pool2d-Conv2d fusion."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.seq = nn.Sequential(
             nn.Conv2d(1, 32, kernel_size=3, padding=1, bias=True),
@@ -289,7 +289,7 @@ class Conv2dPoolFlattenFunctional(nn.Module):
     Activation functions and Pool2ds in between each layer also.
     Used to test pruned Conv2d-Pool2d-Flatten-Linear fusion."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.seq = nn.Sequential(
             nn.Conv2d(1, 3, kernel_size=3, padding=1, bias=True),
@@ -323,7 +323,7 @@ class Conv2dPoolFlatten(nn.Module):
     Activation functions and Pool2ds in between each layer also.
     Used to test pruned Conv2d-Pool2d-Flatten-Linear fusion."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.seq = nn.Sequential(
             nn.Conv2d(1, 3, kernel_size=3, padding=1, bias=True),

@@ -25,7 +25,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkRequest):
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Iterable[Any],
         source_code: str,
-    ):
+    ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.source_code = source_code
         self.workspace_size: int = 0
