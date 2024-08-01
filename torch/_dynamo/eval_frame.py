@@ -37,13 +37,25 @@ from typing import (
 )
 from unittest.mock import patch
 
+import sympy
+
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
+
+# see discussion at https://github.com/pytorch/pytorch/issues/120699
+from torch._C._dynamo.eval_frame import (  # noqa: F401
+    reset_code,
+    set_guard_error_hook,
+    skip_code,
+    unsupported,
+)
+from torch._dispatch.python import enable_python_dispatcher
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import _process_dynamic_shapes
+from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -53,37 +65,26 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
-from ..fx import GraphModule
-from .backends.registry import CompilerFn, lookup_backend
-
-from .hooks import Hooks
-
-# see discussion at https://github.com/pytorch/pytorch/issues/120699
-reset_code = torch._C._dynamo.eval_frame.reset_code  # noqa: F401
-
-set_guard_error_hook = torch._C._dynamo.eval_frame.set_guard_error_hook  # noqa: F401
-skip_code = torch._C._dynamo.eval_frame.skip_code  # noqa: F401
-unsupported = torch._C._dynamo.eval_frame.unsupported  # noqa: F401
-
 from . import config, convert_frame, external_utils, trace_rules, utils
+from .backends.registry import CompilerFn, lookup_backend
 from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
+from .hooks import Hooks
 from .mutation_guard import install_generation_tagging_init
 from .utils import common_constant_types, compile_times
 
-log = logging.getLogger(__name__)
-
-from torch._dispatch.python import enable_python_dispatcher
-
-always_optimize_code_objects = utils.ExactWeakKeyDictionary()
-null_context = contextlib.nullcontext
-
-
-import sympy
 
 if TYPE_CHECKING:
     from torch._subclasses import fake_tensor
+
     from .types import CacheEntry, DynamoCallback
+
+
+log = logging.getLogger(__name__)
+
+
+always_optimize_code_objects = utils.ExactWeakKeyDictionary()
+null_context = contextlib.nullcontext
 
 
 # See https://github.com/python/typing/pull/240
@@ -99,7 +100,8 @@ unset = Unset.token
 def _maybe_set_eval_frame(callback: DynamoCallback):
     # A wrapper on set_eval_frame that is guarded by a Justknob.
     # Users can disable torchDynamo by setting the JK to False.
-    set_eval_frame = torch._C._dynamo.eval_frame.set_eval_frame  # noqa: F401
+    from torch._C._dynamo.eval_frame import set_eval_frame
+
     if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
         log.warning(
             "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
@@ -495,7 +497,7 @@ class _TorchDynamoContext:
                         wrapper function.
 
                         >> class CallableClass:
-                        >>     def __init__(self):
+                        >>     def __init__(self) -> None:
                         >>         super().__init__()
                         >>         self.relu = torch.nn.ReLU()
                         >>
@@ -576,7 +578,7 @@ class OptimizeContext(_TorchDynamoContext):
 
 
 class RunOnlyContext(_TorchDynamoContext):
-    def __init__(self):
+    def __init__(self) -> None:
         # cudagraph trees relies on generation increment
         def on_enter():
             torch._dynamo.mutation_guard.GenerationTracker.generation += 1
@@ -588,7 +590,7 @@ class RunOnlyContext(_TorchDynamoContext):
 
 
 class DisableContext(_TorchDynamoContext):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(callback=None)
 
     def __call__(self, fn):
@@ -1627,7 +1629,7 @@ class TorchPatcher:
         )
         torch.distributions.Distribution.set_default_validate_args(False)
 
-        from ..optim import (
+        from torch.optim import (
             adadelta,
             adagrad,
             adam,

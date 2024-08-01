@@ -383,7 +383,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         class MyMod(torch.nn.Module):
             CONSTANT = torch.tensor([[2, 2], [2, 2]])
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.randn([2, 2]))
 
@@ -605,7 +605,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
     def test_nn_module_with_params(self):
         class MyMod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.seq = torch.nn.Parameter(torch.ones((3, 3)))
 
