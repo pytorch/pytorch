@@ -48,7 +48,7 @@ jobs:
         with:
           script: |
               console.log(context.payload.compare)
-              const commitRegex = /.*compare\s([^)\s]+)/;
+              const commitRegex = /.*compare\/([a-f0-9]+)\^\.\.\.([a-f0-9]+)/g;
               const match = context.payload.compare.match(commitRegex);
               if (match && match[1]) {
                 console.log("Base commit: "+match.trim());
