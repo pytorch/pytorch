@@ -1210,7 +1210,7 @@ def forward(self, pred_1, x_1):
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
 
-    def test_generic_associative_scan_simple(self):
+    def test_generic_associative_scan_11simple(self):
         import random
 
         def add(x: torch.Tensor, y: torch.Tensor):
@@ -1222,6 +1222,17 @@ def forward(self, pred_1, x_1):
         def f(op, x, dim, reverse, generic_scan):
             result = associative_scan(op, x, dim, reverse, generic_scan)
             return result
+        
+        x = torch.randn(3, 10, 2, requires_grad=True)
+        # x = torch.randn(3, requires_grad=True)
+        torch.compiler.reset()
+        with torch._dynamo.utils.disable_cache_limit():
+            associative_scan1 = torch.compile(associative_scan, fullgraph=True)
+            associative_scan2 = associative_scan
+        cumsum1 = associative_scan1(
+            add, x, 1, generic_scan=False, reverse=False
+        )
+        
 
         x = torch.arange(5)
         for generic in [False, True]:
@@ -2028,6 +2039,7 @@ class <lambda>(torch.nn.Module):
 
         def fct(x: torch.Tensor, y: torch.Tensor):
             W = torch.ones(2, 2, device=device)
+            # return torch.reshape(torch.reshape(x, (-1, 2)) @ W, (*x.size()[:-1], 2)) + torch.reshape(torch.reshape(y, (-1, 2)) @ W, (*x.size()[:-1], 2))
             return x @ W + y @ W
 
         H = torch.ones(2, 2, device=device, requires_grad=True)
@@ -2035,10 +2047,10 @@ class <lambda>(torch.nn.Module):
         def fct_freevars(x: torch.Tensor, y: torch.Tensor):
             return x @ H + y @ H
 
-        inp = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        inp = torch.randn(10, 10, 2, device=device, requires_grad=True)
 
         for direction in [False, True]:
-            for generic_scan in [True, False]:
+            for generic_scan in [False, True]:
                 torch.compiler.reset()
                 with torch._dynamo.utils.disable_cache_limit():
                     associative_scan1 = torch.compile(associative_scan, fullgraph=True)
@@ -2770,6 +2782,211 @@ class <lambda>(torch.nn.Module):
             ".*_tensor_constant0.*",
         )
 
+        
+    def test_generic_associative_scan_1vmap(self):
+
+        W = torch.ones(4, 4)
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x[0] @ W + y[0] @ W, x[1] + y[1]
+        
+        W = torch.ones(4, 4)
+        def non_pointwise(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+        
+        for device in [torch.device("cpu"), torch.device("cuda")]:
+            x = torch.tile(torch.unsqueeze(torch.unsqueeze(torch.arange(0, 10, device=device, dtype=torch.float32, requires_grad=True), 0), -1), (4, 1, 4))
+            for direction in [False, True]:
+                for generic_scan in [False, True]:
+                    torch.compiler.reset()
+                    def associative_scan_fct(x):
+                        return associative_scan(add, x, 0, reverse=direction, generic_scan=generic_scan)
+                    
+                    with torch._dynamo.utils.disable_cache_limit():
+                        associative_scan1 = torch.compile(torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True)
+                        associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
+                        
+                    result1 = associative_scan1((x,x))
+                    result2 = associative_scan2((x,x))
+                    expected_result = _fake_associative_scan(add, (x,x), 1, reverse=direction)
+                    self.assertEqual(result1, expected_result)
+                    self.assertEqual(result2, expected_result)
+                    
+                    if generic_scan:
+                        grad_out = torch.ones_like(result1)
+                        grads1 = torch.autograd.grad(result1, (x,), grad_out)
+                        grads2 = torch.autograd.grad(result2, (x,), grad_out)
+                        expected_grads = torch.autograd.grad(expected_result, (x,), grad_out)
+                        self.assertEqual(expected_grads, grads1)
+                        self.assertEqual(expected_grads, grads2)
+                        
+                    torch.compiler.reset()
+                    def associative_scan_fct(x):
+                        return associative_scan(add, x, 1, reverse=direction, generic_scan=generic_scan)
+                    
+                    with torch._dynamo.utils.disable_cache_limit():
+                        associative_scan1 = torch.compile(torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True)
+                        associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
+                        
+                    result1 = associative_scan1(x)
+                    result2 = associative_scan2(x)
+                    expected_result = _fake_associative_scan(add, x, 2, reverse=direction)
+                    self.assertEqual(result1, expected_result)
+                    self.assertEqual(result2, expected_result)
+                    
+                    if generic_scan:
+                        grad_out = torch.ones_like(result1)
+                        grads1 = torch.autograd.grad(result1, (x,), grad_out)
+                        grads2 = torch.autograd.grad(result2, (x,), grad_out)
+                        expected_grads = torch.autograd.grad(expected_result, (x,), grad_out)
+                        self.assertEqual(expected_grads, grads1)
+                        self.assertEqual(expected_grads, grads2)
+                        
+                    torch.compiler.reset()
+                    def associative_scan_fct(x):
+                        return associative_scan(add, x, 1, reverse=direction, generic_scan=generic_scan)
+                    
+                    with torch._dynamo.utils.disable_cache_limit():
+                        associative_scan1 = torch.compile(torch.vmap(associative_scan_fct, in_dims=1), fullgraph=True)
+                        associative_scan2 = torch.vmap(associative_scan_fct, in_dims=1)
+                        
+                    result1 = associative_scan1(x)
+                    result2 = associative_scan2(x)
+                    expected_result = torch.transpose(_fake_associative_scan(add, x, 2, reverse=direction), 0, 1)
+                    self.assertEqual(result1, expected_result)
+                    self.assertEqual(result2, expected_result)
+                    
+                    if generic_scan:
+                        grad_out = torch.ones_like(result1)
+                        grads1 = torch.autograd.grad(result1, (x,), grad_out)
+                        grads2 = torch.autograd.grad(result2, (x,), grad_out)
+                        expected_grads = torch.autograd.grad(expected_result, (x,), grad_out)
+                        self.assertEqual(expected_grads, grads1)
+                        self.assertEqual(expected_grads, grads2)
+                    
+                    torch.compiler.reset()
+                    def associative_scan_fct(x):
+                        return associative_scan(non_pointwise, x, 0, reverse=direction, generic_scan=generic_scan)
+                    
+                    with torch._dynamo.utils.disable_cache_limit():
+                        associative_scan1 = torch.compile(torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True)
+                        associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
+                        
+                    result1 = associative_scan1(x)
+                    result2 = associative_scan2(x)
+                    expected_result = _fake_associative_scan(non_pointwise, x, 1, reverse=direction)
+                    self.assertEqual(result1, expected_result)
+                    self.assertEqual(result2, expected_result)
+                    
+                    if generic_scan:
+                        grad_out = torch.ones_like(result1)
+                        grads1 = torch.autograd.grad(result1, (x,), grad_out)
+                        grads2 = torch.autograd.grad(result2, (x,), grad_out)
+                        expected_grads = torch.autograd.grad(expected_result, (x,), grad_out)
+                        self.assertEqual(expected_grads, grads1)
+                        self.assertEqual(expected_grads, grads2)
+                        
+    def test_generic_associative_scan_vmap_pytree(self):
+        def fct_pointwise(x, y):
+            return {
+                "i": x["i"] * y["i"],
+                "j": (x["j"][0] + y["j"][0],),
+            }
+
+        W = torch.diag(torch.ones(2))
+        def fct_nonpointwise(x, y):
+            return {
+                "i": x["i"] @ W * y["i"] @ W,
+                "j": (x["j"][0] @ W + y["j"][0] @ W,),
+            }
+
+        x = torch.tile(torch.unsqueeze(torch.unsqueeze(torch.randn(10, requires_grad=True), 0), -1), (3, 1, 2))
+        y = torch.tile(torch.unsqueeze(torch.unsqueeze(torch.randn(10, requires_grad=True), 0), -1), (3, 1, 2))
+        inp = {"i": x, "j": (y,)}
+
+        for generic_scan in [False, True]:
+            for direction in [False, True]:
+                # def associative_scan_fct(z):
+                #     return associative_scan(fct_pointwise, z, 0, reverse=direction, generic_scan=generic_scan)
+                    
+                # torch.compiler.reset()
+                # with torch._dynamo.utils.disable_cache_limit():
+                #     associative_scan1 = torch.compile(torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True)
+                #     associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
+
+                # result1 = associative_scan1(inp)
+                # result2 = associative_scan2(inp)
+                # expected_result = _fake_associative_scan(
+                #     fct_pointwise, inp, 1, reverse=direction
+                # )
+                # self.assertEqual(result1, expected_result)
+                # self.assertEqual(result2, expected_result)
+
+                
+                # if generic_scan:
+                #     result_flatten1, _ = pytree.tree_flatten(result1)
+                #     result_flatten2, _ = pytree.tree_flatten(result2)
+                #     expected_result_flatten, _ = pytree.tree_flatten(expected_result)
+                #     grad_out = [torch.ones_like(el) for el in result_flatten1]
+
+                #     grads1 = torch.autograd.grad(
+                #         result_flatten1,
+                #         (x, y),
+                #         grad_out,
+                #         retain_graph=True
+                #     )
+                #     grads2 = torch.autograd.grad(
+                #         result_flatten2,
+                #         (x, y),
+                #         grad_out,
+                #         retain_graph=True
+                #     )
+                #     expected_grads = torch.autograd.grad(
+                #         expected_result_flatten, (x, y), grad_out, retain_graph=True
+                #     )
+                #     self.assertEqual(expected_grads, grads1)
+                #     self.assertEqual(expected_grads, grads2)
+                    
+                def associative_scan_fct(z):
+                    return associative_scan(fct_nonpointwise, z, 0, reverse=direction, generic_scan=generic_scan)
+                    
+                torch.compiler.reset()
+                with torch._dynamo.utils.disable_cache_limit():
+                    associative_scan1 = torch.compile(torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True)
+                    associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
+
+                result1 = associative_scan1(inp)
+                result2 = associative_scan2(inp)
+                expected_result = _fake_associative_scan(
+                    fct_nonpointwise, inp, 1, reverse=direction
+                )
+                self.assertEqual(result1, expected_result)
+                self.assertEqual(result2, expected_result)
+                
+                if generic_scan:
+                    result_flatten1, _ = pytree.tree_flatten(result1)
+                    result_flatten2, _ = pytree.tree_flatten(result2)
+                    expected_result_flatten, _ = pytree.tree_flatten(expected_result)
+                    grad_out = [torch.ones_like(el) for el in result_flatten1]
+
+                    grads1 = torch.autograd.grad(
+                        result_flatten1,
+                        (x, y),
+                        grad_out,
+                        retain_graph=True
+                    )
+                    grads2 = torch.autograd.grad(
+                        result_flatten2,
+                        (x, y),
+                        grad_out,
+                        retain_graph=True
+                    )
+                    expected_grads = torch.autograd.grad(
+                        expected_result_flatten, (x, y), grad_out, retain_graph=True
+                    )
+                    self.assertEqual(expected_grads, grads1)
+                    self.assertEqual(expected_grads, grads2)
+        
+
     def test_generic_associative_scan_compile_CPU_no_fullgraph(self):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
@@ -2884,19 +3101,28 @@ class <lambda>(torch.nn.Module):
             associative_scan1 = torch.compile(associative_scan, fullgraph=True)
             associative_scan2 = associative_scan
 
-        for direction in [False, True]:
-            result1 = associative_scan1(add, x, 0, generic_scan=True, reverse=direction)
-            result2 = associative_scan2(add, x, 0, generic_scan=True, reverse=direction)
-            expected_result = _fake_associative_scan(add, x, 0, reverse=direction)
-            self.assertEqual(result1, expected_result)
-            self.assertEqual(result2, expected_result)
+        for generic_scan in [False, True]:
+            for direction in [False, True]:
+                
+                def f(fct, x):
+                    result = associative_scan2(fct, x, 0, generic_scan=generic_scan, reverse=direction)
+                    grad_out = torch.ones_like(result)
+                    return torch.autograd.grad(result, (x,), grad_out)
+                
+                result1 = associative_scan1(add, x, 0, generic_scan=generic_scan, reverse=direction)
+                result2 = associative_scan2(add, x, 0, generic_scan=generic_scan, reverse=direction)
+                expected_result = _fake_associative_scan(add, x, 0, reverse=direction)
+                self.assertEqual(result1, expected_result)
+                self.assertEqual(result2, expected_result)
 
-            grad_out = torch.ones_like(result1)
-            grads1 = torch.autograd.grad(result1, (x,), grad_out)
-            grads2 = torch.autograd.grad(result2, (x,), grad_out)
-            expected_grads = torch.autograd.grad(expected_result, (x,), grad_out)
-            self.assertEqual(expected_grads, grads1)
-            self.assertEqual(expected_grads, grads2)
+                if generic_scan:
+                    grad_out = torch.ones_like(result1)
+                    grads1 = torch.autograd.grad(result1, (x,), grad_out)
+                    grads2 = torch.autograd.grad(result2, (x,), grad_out)
+                    expected_grads = torch.autograd.grad(expected_result, (x,), grad_out)
+                    self.assertEqual(expected_grads, grads1)
+                    # self.assertEqual(torch.zeros_like(grads1), grads1)
+                    self.assertEqual(expected_grads, grads2)
 
         def f(op, x, dim):
             result = associative_scan(op, x, dim, generic_scan=True)
@@ -3179,7 +3405,6 @@ class f(torch.nn.Module):
         torch.compiler.reset()
         with torch._dynamo.utils.disable_cache_limit():
             associative_scan1 = torch.compile(associative_scan, fullgraph=True)
-            # associative_scan1 = associative_scan
             associative_scan2 = associative_scan
 
         for direction in [False, True]:
@@ -3239,51 +3464,84 @@ class f(torch.nn.Module):
         with self.assertRaisesRegex(ValueError, r"."):
             result = associative_scan(fct_wrong_pytree, inp, 0, generic_scan=True)
 
-        for direction in [False, True]:
-            torch.compiler.reset()
-            with torch._dynamo.utils.disable_cache_limit():
-                associative_scan1 = torch.compile(associative_scan, fullgraph=True)
-                associative_scan2 = associative_scan
+        for generic_scan in [True, False]:
+            for direction in [False, True]:
+                torch.compiler.reset()
+                with torch._dynamo.utils.disable_cache_limit():
+                    associative_scan1 = torch.compile(associative_scan, fullgraph=True)
+                    associative_scan2 = associative_scan
 
-            result1 = associative_scan1(
-                fct_pointwise, inp, 0, generic_scan=True, reverse=direction
-            )
-            result2 = associative_scan2(
-                fct_pointwise, inp, 0, generic_scan=True, reverse=direction
-            )
-            expected_result = _fake_associative_scan(
-                fct_pointwise, inp, 0, reverse=direction
-            )
-            self.assertEqual(result1, expected_result)
-            self.assertEqual(result2, expected_result)
+                result1 = associative_scan1(
+                    fct_pointwise, inp, 0, generic_scan=generic_scan, reverse=direction
+                )
+                result2 = associative_scan2(
+                    fct_pointwise, inp, 0, generic_scan=generic_scan, reverse=direction
+                )
+                expected_result = _fake_associative_scan(
+                    fct_pointwise, inp, 0, reverse=direction
+                )
+                self.assertEqual(result1, expected_result)
+                self.assertEqual(result2, expected_result)
+                
+                if generic_scan:
+                    result_flatten1, _ = pytree.tree_flatten(result1)
+                    result_flatten2, _ = pytree.tree_flatten(result2)
+                    expected_result_flatten, _ = pytree.tree_flatten(expected_result)
+                    grad_out = [torch.ones_like(el) for el in result_flatten1]
 
-            result_flatten, _ = pytree.tree_flatten(result1)
-            expected_result_flatten, _ = pytree.tree_flatten(expected_result)
-            grad_out = [torch.ones_like(el) for el in result_flatten]
+                    grads1 = torch.autograd.grad(
+                        result_flatten1,
+                        (x, y, z),
+                        grad_out,
+                        retain_graph=True
+                    )
+                    grads2 = torch.autograd.grad(
+                        result_flatten2,
+                        (x, y, z),
+                        grad_out,
+                        retain_graph=True
+                    )
+                    expected_grads = torch.autograd.grad(
+                        expected_result_flatten, (x, y, z), grad_out, retain_graph=True
+                    )
+                    self.assertEqual(expected_grads, grads1)
+                    self.assertEqual(expected_grads, grads2)
 
-            grads = torch.autograd.grad(
-                result_flatten,
-                (x, y, z),
-                grad_out,
-                retain_graph=True
-                # result_flatten, (x,), grad_out, retain_graph=True
-            )
-            expected_grads = torch.autograd.grad(
-                expected_result_flatten, (x, y, z), grad_out, retain_graph=True
-            )
-            self.assertEqual(expected_grads, grads)
+                result1 = associative_scan1(
+                    fct_nonpointwise, inp, 0, generic_scan=generic_scan, reverse=direction
+                )
+                result2 = associative_scan2(
+                    fct_nonpointwise, inp, 0, generic_scan=generic_scan, reverse=direction
+                )
+                expected_result = _fake_associative_scan(
+                    fct_nonpointwise, inp, 0, reverse=direction
+                )
+                self.assertEqual(result1, expected_result)
+                self.assertEqual(result2, expected_result)
+                
+                if generic_scan:
+                    result_flatten1, _ = pytree.tree_flatten(result1)
+                    result_flatten2, _ = pytree.tree_flatten(result2)
+                    expected_result_flatten, _ = pytree.tree_flatten(expected_result)
+                    grad_out = [torch.ones_like(el) for el in result_flatten1]
 
-            result1 = associative_scan1(
-                fct_nonpointwise, inp, 0, generic_scan=True, reverse=direction
-            )
-            result2 = associative_scan2(
-                fct_nonpointwise, inp, 0, generic_scan=True, reverse=direction
-            )
-            expected_result = _fake_associative_scan(
-                fct_nonpointwise, inp, 0, reverse=direction
-            )
-            self.assertEqual(result1, expected_result)
-            self.assertEqual(result2, expected_result)
+                    grads1 = torch.autograd.grad(
+                        result_flatten1,
+                        (x, y, z),
+                        grad_out,
+                        retain_graph=True
+                    )
+                    grads2 = torch.autograd.grad(
+                        result_flatten2,
+                        (x, y, z),
+                        grad_out,
+                        retain_graph=True
+                    )
+                    expected_grads = torch.autograd.grad(
+                        expected_result_flatten, (x, y, z), grad_out, retain_graph=True
+                    )
+                    self.assertEqual(expected_grads, grads1)
+                    self.assertEqual(expected_grads, grads2)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")

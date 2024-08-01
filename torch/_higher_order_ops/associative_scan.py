@@ -8,7 +8,12 @@ import torch._prims_common as utils
 import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._C._functorch import _add_batch_dim, get_unwrapped, maybe_get_bdim
+from torch._C._functorch import (
+    _add_batch_dim,
+    get_unwrapped,
+    is_batchedtensor,
+    maybe_get_bdim,
+)
 from torch._higher_order_ops.utils import (
     autograd_not_implemented,
     reenter_make_fx,
@@ -254,7 +259,10 @@ def trace_associative_scan(
     with disable_proxy_modes_tracing():
         sample_inputs = [
             torch.empty_like(
-                x[slice_along_axis(0, 1, stride=None, dim=dim)],
+            # torch.empty(
+                x,
+                # tuple([s if n != dim else -1 for n, s in enumerate(x.size)]),
+                #x[slice_along_axis(0, 1, stride=None, dim=dim)],
                 dtype=x.dtype,
                 device=x.device,
                 requires_grad=x.requires_grad,
@@ -307,18 +315,9 @@ def associative_scan_op_dense(combine_fn, input, dim, lifted_args):
     return generic_associative_scan(combine_fn, input, dim, lifted_args)
 
 
-# @associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-# def associative_scan_op_dense(combine_fn, input, dim):
-#     raise NotImplementedError("associative_scan is not implemented for eager")
-
-
 associative_scan_op.py_impl(DispatchKey.Autograd)(
     autograd_not_implemented(associative_scan_op, deferred_error=True)
 )
-
-# @associative_scan_op.py_impl(DispatchKey.Autograd)
-# def associative_scan_op_autograd(combine_fn, input, dim):
-#     return generic_associative_scan(combine_fn, input, dim)
 
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)
@@ -352,25 +351,29 @@ def associative_scan_functionalize(ctx, combine_fn, input, dim, lifted_args):
 
 
 @associative_scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
-def associative_scan_batch_rule(interpreter, input, dim, combine_fn):
-    input_ = [get_unwrapped(x) for x in input]
-    input_bdims = [maybe_get_bdim(x) for x in input]
+def associative_scan_batch_rule(interpreter, combine_fn, input, dim, lifted_args):
+    input_bdims = [maybe_get_bdim(x) if is_batchedtensor(x) else None for x in input]
 
     batch_size = None
     for inp, bdim in zip(input, input_bdims):
         if bdim is not None:
-            batch_size = get_unwrapped(inp).shape[bdim]
+            batch_size = get_unwrapped(inp).shape[bdim] if is_batchedtensor(inp) else inp.shape[bdim]
 
     assert batch_size
     input_unwrapped = []
     for x, bdim in zip(input, input_bdims):
-        unwrap = get_unwrapped(x)
+        unwrap = get_unwrapped(x) if is_batchedtensor(x) else x
         if dim is None:
             unwrap = unwrap.unsqueeze(0).expand(batch_size, *x.shape)
         else:
-            unwrap = unwrap.movedim(bdim, 0)
+            if bdim is None:
+                unwrap = unwrap.unsqueeze(0).expand(batch_size, *x.shape)
+            else:
+                unwrap = unwrap.movedim(bdim, 0)
         input_unwrapped.append(unwrap)
 
-    res = associative_scan_op(combine_fn, input_unwrapped, dim + 1)
+    with interpreter.lower():
+        res = associative_scan_op(combine_fn, input_unwrapped, dim + 1, lifted_args)
+    
     lvl = interpreter.level()
     return [_add_batch_dim(x, 0, lvl) for x in res]
