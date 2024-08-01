@@ -15,10 +15,8 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
 import torch
-
 from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
 from torch import fx as fx
-
 from torch._dynamo.repro.after_aot import save_graph_repro, wrap_compiler_debug
 from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
@@ -35,6 +33,7 @@ from .scheduler import (
     SchedulerNode,
 )
 from .virtualized import V
+
 
 log = logging.getLogger(__name__)
 
@@ -142,12 +141,16 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         kwargs = {}
         if hasattr(snode, "get_device"):
             kwargs = {"device": snode.get_device()}
-        fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)
+        fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)  # type: ignore[arg-type]
 
         def in_output(snode):
             if isinstance(snode, FusedSchedulerNode):
                 return any(in_output(x) for x in snode.snodes)
-            return any(isinstance(user.node, OutputNode) for user in snode.users)
+            return any(
+                isinstance(user.node, OutputNode)
+                for buf in snode.get_outputs()
+                for user in buf.users
+            )
 
         if in_output(snode):
             outputs.append(fx_node)

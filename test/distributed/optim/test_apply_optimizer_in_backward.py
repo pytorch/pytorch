@@ -12,11 +12,11 @@ from copy import deepcopy
 
 import torch
 import torch.nn as nn
-
 from torch.distributed.optim import (
     _apply_optimizer_in_backward,
     _get_in_backward_optimizers,
 )
+
 
 # TODO (rohan-varma): Add FSDP & DDP tests once supported
 

@@ -3,13 +3,25 @@
 import functools
 import itertools
 import operator
-from typing import cast, Iterable, List, Sequence, Tuple, Union
+from typing import (
+    Callable,
+    cast,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union,
+)
+from typing_extensions import ParamSpec
 
 import torch
 from torch.distributed._tensor._collective_utils import redistribute_cost
 from torch.distributed._tensor._op_schema import (
     OpSchema,
     OpStrategy,
+    PlacementList,
     PlacementStrategy,
     RuntimeSchemaInfo,
 )
@@ -23,15 +35,21 @@ from torch.distributed._tensor.placement_types import (
     Shard,
 )
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 
 # convenient wrapper to register sharding propagation rules
 # pyre-fixme[3]: Return type must be annotated.
 # pyre-fixme[2]: Parameter must be annotated.
-def register_prop_rule(op, schema_info=None):
+def register_prop_rule(
+    op: Union[torch._ops.OpOverload, List[torch._ops.OpOverload]],
+    schema_info: Optional[RuntimeSchemaInfo] = None,
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     # pyre-fixme[53]: Captured variable `func` is not annotated.
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
-    def wrapper(impl):
+    def wrapper(impl: Callable[_P, _T]) -> Callable[_P, _T]:
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
             DTensor._op_dispatcher.sharding_propagator.register_sharding_prop_rule(
@@ -42,7 +60,9 @@ def register_prop_rule(op, schema_info=None):
     return wrapper
 
 
-def register_op_strategy(op, schema_info=None):
+def register_op_strategy(
+    op, schema_info=None
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     # pyre-fixme[53]: Captured variable `func` is not annotated.
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
@@ -237,7 +257,7 @@ def generate_redistribute_costs(
 def expand_to_full_mesh_op_strategy(
     mesh: DeviceMesh,
     op_schema: OpSchema,
-    single_mesh_dim_strategies: List[List[Placement]],
+    single_mesh_dim_strategies: List[PlacementList],
     *,
     input_index: int = 1,
     inplace_op: bool = False,
@@ -249,14 +269,21 @@ def expand_to_full_mesh_op_strategy(
 
     all_strategies = []
     for strategy_comb in strategy_combs:
-        spec_list = []
+        spec_list: List[Optional[DTensorSpec]] = []
         for specs in zip(*strategy_comb):
-            spec_list.append(DTensorSpec(mesh, tuple(specs)))
+            if specs[0] is not None:
+                spec_list.append(DTensorSpec(mesh, specs))
+            else:
+                spec_list.append(None)
 
-        input_specs = spec_list[input_index:]
+        input_specs: List[DTensorSpec] = [
+            s for s in spec_list[input_index:] if isinstance(s, DTensorSpec)
+        ]
+
         input_args_strategy = op_schema.args_strategy
         assert len(input_specs) == len(input_args_strategy)
         self_spec = input_args_strategy[0].strategies[0].output_spec
+
         if inplace_op and self_spec.placements != input_specs[0].placements:
             # if it's inplace op, we would only allow the placement strategy to be added when the
             # input_spec matches the first argument's runtime sharding, otherwise we skip
@@ -274,10 +301,15 @@ def expand_to_full_mesh_op_strategy(
                 generate_redistribute_costs(input_strategy, input_spec)
                 for input_strategy, input_spec in zip(input_args_strategy, input_specs)
             ]
+            if input_index > 1:
+                output_specs = tuple(spec_list[:input_index])
+            else:
+                if spec_list[0] is not None:
+                    output_specs = spec_list[0]  # type: ignore[assignment]
+                else:
+                    raise RuntimeError("output spec is None")
             strategy = PlacementStrategy(
-                output_specs=tuple(spec_list[:input_index])
-                if input_index > 1
-                else spec_list[0],
+                output_specs=output_specs,
                 input_specs=input_specs,
                 redistribute_cost=redistribute_cost,
             )
