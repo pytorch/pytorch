@@ -65,4 +65,6 @@ jobs:
           PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
           UPDATEBOT_TOKEN: ${{ secrets.UPDATEBOT_TOKEN}}
         run: |
+          git config --global user.name "PyTorch UpdateBot"
+          git config --global user.email "pytorchupdatebot@users.noreply.github.com"
           python tools/testing/update_slow_tests.py
