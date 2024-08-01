@@ -33,6 +33,7 @@ from torch import inf, SymInt, Tensor
 from torch._C import (
     _aoti,
     _cpu,
+    _dynamo,
     _functorch,
     _lazy,
     _lazy_ts_backend,
@@ -43,6 +44,7 @@ from torch._C import (
 )
 from torch._prims_common import DeviceLikeType
 from torch.autograd.graph import Node as _Node
+from torch.fx.node import Node as FxNode
 from torch.package import PackageExporter
 from torch.storage import TypedStorage, UntypedStorage
 from torch.types import (
@@ -60,6 +62,7 @@ from torch.types import (
     _str,
     _symsize,
     Device,
+    IntLikeType,
     Number,
     Storage,
 )
@@ -1820,6 +1823,7 @@ def _mtia_deviceSynchronize() -> None: ...
 def _mtia_getCurrentStream(device: _int) -> Stream: ...
 def _mtia_setCurrentStream(stream: Stream) -> None: ...
 def _mtia_getDefaultStream(device: _int) -> Stream: ...
+def _mtia_memoryStats(device: _int) -> dict[str, Any]: ...
 
 # Defined in torch/csrc/mps/Module.cpp
 def _mps_deviceSynchronize() -> None: ...
@@ -1917,7 +1921,7 @@ def _set_cached_tensors_enabled(enabled: _bool) -> None: ...
 def _add_cached_tensor(t: Tensor) -> None: ...
 def _remove_cached_tensor(t: Tensor) -> None: ...
 def _tensors_data_ptrs_at_indices_equal(
-    tensors: list[Tensor],
+    tensors: list[Tensor | _int],
     ptrs: list[_int | None],
     indices: list[_int],
 ) -> _bool: ...
@@ -2029,6 +2033,7 @@ class _SDPAParams:
     attn_mask: Tensor | None
     dropout: _float
     is_causal: _bool
+    enable_gqa: _bool
     def __init__(
         self,
         query: Tensor,
@@ -2037,6 +2042,7 @@ class _SDPAParams:
         attn_mask: Tensor | None,
         dropout: _float,
         is_causal: _bool,
+        enable_gqa: _bool,
     ) -> None: ...
 
 class _SDPBackend(Enum):
@@ -2046,6 +2052,7 @@ class _SDPBackend(Enum):
     EFFICIENT_ATTENTION = 2
     CUDNN_ATTENTION = 3
 
+def _is_flash_attention_available() -> _bool: ...
 def _can_use_cudnn_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
 def _can_use_flash_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
 def _can_use_mem_efficient_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
@@ -2133,6 +2140,23 @@ class _CUDAGraph:
     def pool(self) -> tuple[_int, _int]: ...
     def enable_debug_mode(self) -> None: ...
     def debug_dump(self, debug_path: str) -> None: ...
+
+# Defined in torch/csrc/cuda/MemPool.cpp
+class _MemPool:
+    def __init__(
+        self,
+        allocator: _cuda_CUDAAllocator | None = None,
+        is_user_created: _bool = True,
+    ) -> None: ...
+    @property
+    def id(self) -> tuple[_int, _int]: ...
+    @property
+    def allocator(self) -> _cuda_CUDAAllocator | None: ...
+
+class _MemPoolContext:
+    def __init__(self, pool: _MemPool) -> None: ...
+    @staticmethod
+    def active_pool() -> _MemPool | None: ...
 
 def _cuda_isCurrentStreamCapturing() -> _bool: ...
 def _graph_pool_handle() -> tuple[_int, _int]: ...
@@ -2475,10 +2499,10 @@ def _fuse_to_static_module(
 # Defined in torch/csrc/fx/node.cpp
 class _NodeBase:
     _erased: _bool
-    _prev: _NodeBase
-    _next: _NodeBase
+    _prev: FxNode
+    _next: FxNode
 
-class _NodeIter(Iterator[_NodeBase]):
-    def __init__(self, root: _NodeBase, reversed: _bool) -> None: ...
+class _NodeIter(Iterator[FxNode]):
+    def __init__(self, root: FxNode, reversed: _bool) -> None: ...
     def __iter__(self) -> Self: ...
-    def __next__(self) -> _NodeBase: ...
+    def __next__(self) -> FxNode: ...
