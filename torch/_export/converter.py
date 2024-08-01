@@ -513,6 +513,9 @@ class TS2FXGraphConverter:
                     self.fx_graph, name, self.is_top_level_graph()
                 )
             elif name in self.name_to_constant:
+                assert isinstance(
+                    self.name_to_constant[name], torch.ScriptObject
+                ), "Input conversion only handles ScriptObject"
                 normalized_name = normalize_name(name)
                 self.input_specs.append(
                     InputSpec(
