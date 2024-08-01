@@ -1,7 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import itertools
-import operator
 from dataclasses import dataclass
 from typing import Callable, Dict, List, NamedTuple, Optional
 
@@ -10,7 +9,6 @@ import torch.nn.functional as F
 from torch._subclasses import FakeTensor
 from torch.ao.quantization.fx.utils import get_new_attr_name_with_prefix
 from torch.ao.quantization.pt2e.export_utils import _WrapperModule
-from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization.pt2e.utils import (
     _conv1d_bn_example_inputs,
     _conv2d_bn_example_inputs,
@@ -763,21 +761,33 @@ def _annotate_add_relu(
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
-    fused_partitions = find_sequential_partitions(
-        gm, [torch.add, torch.nn.ReLU], filter_fn=filter_fn
-    )
     annotated_partitions = []
-    for fused_partition in fused_partitions:
-        add_partition, relu_partition = fused_partition
-        annotated_partitions.append(add_partition.nodes + relu_partition.nodes)
-        if len(relu_partition.output_nodes) > 1:
-            raise ValueError("Relu partition has more than one output node")
-        relu_node = relu_partition.output_nodes[0]
-        if len(add_partition.output_nodes) > 1:
-            raise ValueError("add partition has more than one output node")
-        add_node = add_partition.output_nodes[0]
+    for node in gm.graph.nodes:
+        if node.op != "call_function" or node.target not in [
+            torch.ops.aten.relu.default,
+            torch.ops.aten.relu_.default,
+        ]:
+            continue
+        relu_node = node
+        maybe_add = node.args[0]
+        if (
+            not isinstance(maybe_add, Node)
+            or maybe_add.op != "call_function"
+            or maybe_add.target
+            not in [
+                torch.ops.aten.add.Tensor,
+                torch.ops.aten.add_.Tensor,
+            ]
+        ):
+            continue
 
-        if _is_annotated([relu_node, add_node]):
+        add_node = maybe_add
+        partition = [relu_node, add_node]
+
+        if _is_annotated(partition):
+            continue
+
+        if filter_fn and any(not filter_fn(n) for n in partition):
             continue
 
         input_act_qspec = get_input_act_qspec(quantization_config)
@@ -790,6 +800,7 @@ def _annotate_add_relu(
                 continue
             if _is_input_non_float_tensor(input_act0):
                 continue
+            partition.append(input_act0)
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = add_node.args[1]
@@ -798,6 +809,7 @@ def _annotate_add_relu(
                 continue
             if _is_input_non_float_tensor(input_act1):
                 continue
+            partition.append(input_act1)
             input_qspec_map[input_act1] = input_act_qspec
 
         add_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -808,6 +820,7 @@ def _annotate_add_relu(
             output_qspec=output_act_qspec,
             _annotated=True,
         )
+        annotated_partitions.append(partition)
     return annotated_partitions
 
 
@@ -817,15 +830,20 @@ def _annotate_add(
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
-    add_partitions = get_source_partitions(
-        gm.graph, [operator.add, torch.add, operator.iadd], filter_fn
-    )
-    add_partitions = list(itertools.chain.from_iterable(add_partitions.values()))
     annotated_partitions = []
-    for add_partition in add_partitions:
-        annotated_partitions.append(add_partition.nodes)
-        add_node = add_partition.output_nodes[0]
-        if _is_annotated([add_node]):
+    for node in gm.graph.nodes:
+        if node.op != "call_function" or node.target not in [
+            torch.ops.aten.add.Tensor,
+            torch.ops.aten.add_.Tensor,
+        ]:
+            continue
+        add_node = node
+        partition = [add_node]
+
+        if _is_annotated(partition):
+            continue
+
+        if filter_fn and any(not filter_fn(n) for n in partition):
             continue
 
         input_act_qspec = get_input_act_qspec(quantization_config)
@@ -839,6 +857,7 @@ def _annotate_add(
             if _is_input_non_float_tensor(input_act0):
                 continue
             input_qspec_map[input_act0] = input_act_qspec
+            partition.append(input_act0)
 
         input_act1 = add_node.args[1]
         if isinstance(input_act1, Node):
@@ -847,12 +866,14 @@ def _annotate_add(
             if _is_input_non_float_tensor(input_act1):
                 continue
             input_qspec_map[input_act1] = input_act_qspec
+            partition.append(input_act1)
 
         add_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
             output_qspec=output_act_qspec,
             _annotated=True,
         )
+        annotated_partitions.append(partition)
     return annotated_partitions
 
 
@@ -862,21 +883,33 @@ def _annotate_mul_relu(
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
-    fused_partitions = find_sequential_partitions(
-        gm, [torch.mul, torch.nn.ReLU], filter_fn=filter_fn
-    )
     annotated_partitions = []
-    for fused_partition in fused_partitions:
-        mul_partition, relu_partition = fused_partition
-        annotated_partitions.append(mul_partition.nodes + relu_partition.nodes)
-        if len(relu_partition.output_nodes) > 1:
-            raise ValueError("Relu partition has more than one output node")
-        relu_node = relu_partition.output_nodes[0]
-        if len(mul_partition.output_nodes) > 1:
-            raise ValueError("mul partition has more than one output node")
-        mul_node = mul_partition.output_nodes[0]
+    for node in gm.graph.nodes:
+        if node.op != "call_function" or node.target not in [
+            torch.ops.aten.relu.default,
+            torch.ops.aten.relu_.default,
+        ]:
+            continue
+        relu_node = node
+        maybe_mul = node.args[0]
+        if (
+            not isinstance(maybe_mul, Node)
+            or maybe_mul.op != "call_function"
+            or maybe_mul.target
+            not in [
+                torch.ops.aten.mul.Tensor,
+                torch.ops.aten.mul_.Tensor,
+            ]
+        ):
+            continue
 
-        if _is_annotated([relu_node, mul_node]):
+        mul_node = maybe_mul
+        partition = [relu_node, mul_node]
+
+        if _is_annotated(partition):
+            continue
+
+        if filter_fn and any(not filter_fn(n) for n in partition):
             continue
 
         input_act_qspec = get_input_act_qspec(quantization_config)
@@ -889,6 +922,7 @@ def _annotate_mul_relu(
                 continue
             if _is_input_non_float_tensor(input_act0):
                 continue
+            partition.append(input_act0)
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = mul_node.args[1]
@@ -897,6 +931,7 @@ def _annotate_mul_relu(
                 continue
             if _is_input_non_float_tensor(input_act1):
                 continue
+            partition.append(input_act1)
             input_qspec_map[input_act1] = input_act_qspec
 
         mul_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -907,6 +942,7 @@ def _annotate_mul_relu(
             output_qspec=output_act_qspec,
             _annotated=True,
         )
+        annotated_partitions.append(partition)
     return annotated_partitions
 
 
@@ -916,15 +952,20 @@ def _annotate_mul(
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
-    mul_partitions = get_source_partitions(
-        gm.graph, ["mul", "mul_", operator.mul, torch.mul, operator.imul], filter_fn
-    )
-    mul_partitions = list(itertools.chain.from_iterable(mul_partitions.values()))
     annotated_partitions = []
-    for mul_partition in mul_partitions:
-        annotated_partitions.append(mul_partition.nodes)
-        mul_node = mul_partition.output_nodes[0]
-        if _is_annotated([mul_node]):
+    for node in gm.graph.nodes:
+        if node.op != "call_function" or node.target not in [
+            torch.ops.aten.mul.Tensor,
+            torch.ops.aten.mul_.Tensor,
+        ]:
+            continue
+
+        mul_node = node
+        partition = [mul_node]
+        if _is_annotated(partition):
+            continue
+
+        if filter_fn and any(not filter_fn(n) for n in partition):
             continue
 
         input_act_qspec = get_input_act_qspec(quantization_config)
@@ -938,6 +979,7 @@ def _annotate_mul(
             if _is_input_non_float_tensor(input_act0):
                 continue
             input_qspec_map[input_act0] = input_act_qspec
+            partition.append(input_act0)
 
         input_act1 = mul_node.args[1]
         if isinstance(input_act1, Node):
@@ -946,12 +988,14 @@ def _annotate_mul(
             if _is_input_non_float_tensor(input_act1):
                 continue
             input_qspec_map[input_act1] = input_act_qspec
+            partition.append(input_act0)
 
         mul_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
             output_qspec=output_act_qspec,
             _annotated=True,
         )
+        annotated_partitions.append(partition)
     return annotated_partitions
 
 

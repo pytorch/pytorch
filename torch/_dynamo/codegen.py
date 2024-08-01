@@ -7,8 +7,8 @@ import types
 from typing import Counter, Dict, List, Optional
 
 import torch.nn
-from . import utils
 
+from . import utils
 from .bytecode_transformation import (
     add_push_null,
     create_call_function,

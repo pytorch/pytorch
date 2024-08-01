@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
-from typing import Any, List, Optional, Set
+from typing import Any, List, Optional
 
 import sympy
 
 import torch
 from torch._prims_common import make_channels_last_strides_for
+from torch.utils._ordered_set import OrderedSet
 
 from .ir import (
     ExternKernelAlloc,
@@ -437,8 +438,8 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             self.cpp_kernel_overload_name,
         )
 
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return set()
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
 
     @classmethod
     def create(
@@ -862,8 +863,8 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
     def get_mutation_names(self):
         return [self.inputs[self.idx_for_inplace_sum].get_name()]
 
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return set()
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
 
     @classmethod
     def create(
