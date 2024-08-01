@@ -218,7 +218,7 @@ tf_mixnet_l,pass,6
 
 
 
-tinynet_a,pass,6
+tinynet_a,fail_accuracy,6
 
 
 

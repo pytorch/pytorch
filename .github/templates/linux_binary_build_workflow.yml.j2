@@ -81,7 +81,7 @@ jobs:
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: !{{ config["build_name"] }}-build
-    {%- if config["gpu_arch_type"] != "rocm" %}
+    {%- if config["gpu_arch_type"] not in ["rocm", "xpu"] %}
     uses: ./.github/workflows/_binary-test-linux.yml
     with:!{{ upload.binary_env_as_input(config) }}
       build_name: !{{ config["build_name"] }}
@@ -101,6 +101,40 @@ jobs:
       {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+    {%- elif config["gpu_arch_type"] == "xpu" %}
+    runs-on: linux.idc.xpu
+    timeout-minutes: !{{ common.timeout_minutes }}
+    !{{ upload.binary_env(config) }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Setup XPU
+        uses: ./.github/actions/setup-xpu
+      - name: configure aws credentials
+        id: aws_creds
+        uses: aws-actions/configure-aws-credentials@v1.7.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+          aws-region: us-east-1
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - uses: !{{ common.download_artifact_action }}
+        name: Download Build Artifacts
+        with:
+          name: !{{ config["build_name"] }}
+          path: "${{ runner.temp }}/artifacts/"
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: !{{ config["container_image"] }}
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown XPU
+        uses: ./.github/actions/teardown-xpu
     {%- else %}
     runs-on: linux.rocm.gpu
     timeout-minutes: !{{ common.timeout_minutes }}

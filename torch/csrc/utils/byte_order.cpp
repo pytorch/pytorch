@@ -110,8 +110,7 @@ static inline uint64_t decodeUInt64ByteSwapped(const uint8_t* data) {
 
 } // anonymous namespace
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 THPByteOrder THP_nativeByteOrder() {
   uint32_t x = 1;
@@ -184,11 +183,7 @@ void THP_decodeBFloat16Buffer(
   }
 }
 
-void THP_decodeBoolBuffer(
-    bool* dst,
-    const uint8_t* src,
-    bool do_byte_swap,
-    size_t len) {
+void THP_decodeBoolBuffer(bool* dst, const uint8_t* src, size_t len) {
   for (const auto i : c10::irange(len)) {
     dst[i] = (int)src[i] != 0 ? true : false;
   }
@@ -319,14 +314,6 @@ void THP_decodeBFloat16Buffer(
     THPByteOrder order,
     size_t len) {
   THP_decodeBFloat16Buffer(dst, src, (order != THP_nativeByteOrder()), len);
-}
-
-void THP_decodeBoolBuffer(
-    bool* dst,
-    const uint8_t* src,
-    THPByteOrder order,
-    size_t len) {
-  THP_decodeBoolBuffer(dst, src, (order != THP_nativeByteOrder()), len);
 }
 
 void THP_decodeFloatBuffer(
@@ -481,5 +468,4 @@ void THP_encodeComplexDoubleBuffer(
   }
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

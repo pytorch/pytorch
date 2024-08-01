@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Any, Dict, List, Optional
 
 import sympy
@@ -79,7 +80,7 @@ def is_unaligned_buffer(arg: TensorArg):
     if V.graph.scheduler:
         layout = V.graph.scheduler.get_buffer_layout(buf_name)
     else:
-        buffer = V.graph.get_buffer(buf_name)
+        buffer = V.graph.try_get_buffer(buf_name)
         # output arg
         if not buffer:
             assert buf_name == V.kernel.output_node.name
