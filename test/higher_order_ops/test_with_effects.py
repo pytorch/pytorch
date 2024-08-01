@@ -368,6 +368,52 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self.assertTrue("MockModule.linear:mean" in recorded_dict)
             self.assertTrue("MockModule:mean" in recorded_dict)
 
+    @skipIfNoDynamoSupport
+    def test_effectful_op_in_backward(self):
+        with torch.library._scoped_library("_mylib", "FRAGMENT") as lib:
+            lib.define("foo(Tensor x) -> Tensor")
+
+            def foo_impl(a):
+                return a.clone()
+
+            def foo_bwd(ctx, grad):
+                return torch.ops._mylib.foo(grad)
+
+            for backend in ["CPU", "CUDA", "Meta"]:
+                lib.impl("foo", foo_impl, backend)
+
+            torch.library.register_autograd("_mylib::foo", foo_bwd)
+
+            from torch._higher_order_ops.effects import (
+                _EffectType,
+                _register_effectful_op,
+            )
+
+            _register_effectful_op(torch.ops._mylib.foo.default, _EffectType.ORDERED)
+
+            def fn(x, y):
+                return torch.ops._mylib.foo(x) + y
+
+            def ins_dense_req_grad():
+                return (
+                    torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+                    torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
+                )
+
+            for ins_fn in [ins_dense_req_grad]:
+                ref_ins = ins_fn()
+
+                ref_out = fn(*ref_ins)
+                ref_out.sum().backward()
+
+                compiled_fn = torch.compile(fn, backend="aot_eager")
+                ins = ins_fn()
+                out = compiled_fn(*ins)
+                self.assertEqual(ref_out, out)
+                out.sum().backward()
+                self.assertEqual(ref_ins[1].grad, ins[1].grad)
+                self.assertEqual(ref_ins[0].grad, ins[0].grad)
+
 
 if __name__ == "__main__":
     run_tests()
