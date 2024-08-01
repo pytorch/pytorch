@@ -20,12 +20,12 @@ from torch._subclasses.fake_tensor import is_fake
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
-
 from .functional_utils import (
     _check_if_mutation_can_be_in_graph,
     FunctionalTensorMetadataEq,
 )
 from .utils import strict_zip
+
 
 zip = strict_zip
 
@@ -184,8 +184,6 @@ class SubclassCreationMeta:
     outer_size: List[Union[int, torch.SymInt]]
     outer_stride: List[Union[int, torch.SymInt]]
     meta: Any
-    # Points to the index of the first size in the list of arguments
-    flat_tensor_extra_sizes_offset: int
     symint_placeholders: List[bool]
     # Stores the original subclass itself.
     # This is needed because we need the autograd metadata on the original subclass
@@ -201,18 +199,15 @@ class SubclassCreationMeta:
         self,
         all_args,
         *,
-        num_fw_outs_saved_for_bw: Optional[int] = None,
+        curr_start_idx: int,
         is_runtime: bool,
     ):
         is_symbolic = any(self.symint_placeholders)
         num_symbolic = sum(self.symint_placeholders)
 
         if is_runtime and is_symbolic:
-            start = len(all_args) - self.flat_tensor_extra_sizes_offset
+            start = curr_start_idx
             end = start + num_symbolic
-            if num_fw_outs_saved_for_bw:
-                start -= num_fw_outs_saved_for_bw
-                end -= num_fw_outs_saved_for_bw
             it = iter(all_args[start:end])
             return pytree.tree_map_only(
                 torch.SymInt, lambda _: next(it), self.outer_size
@@ -223,7 +218,6 @@ class SubclassCreationMeta:
         self,
         all_args,
         *,
-        num_fw_outs_saved_for_bw: Optional[int] = None,
         is_runtime: bool,
     ):
         inner_tensors = {}
@@ -246,7 +240,7 @@ class SubclassCreationMeta:
 
         outer_size = self.compute_outer_size(
             all_args,
-            num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
+            curr_start_idx=curr_start_idx,
             is_runtime=is_runtime,
         )
 

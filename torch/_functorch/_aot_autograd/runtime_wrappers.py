@@ -25,7 +25,6 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
-
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
@@ -34,7 +33,6 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
-
 from .functional_utils import gen_alias_from_base
 from .input_output_analysis import (
     compute_overlapping_inputs,
@@ -52,7 +50,6 @@ from .schemas import (
     TensorAlias,
     ViewAndMutationMeta,
 )
-
 from .subclass_utils import (
     get_types_for_subclass,
     requires_subclass_dispatch,
@@ -60,9 +57,7 @@ from .subclass_utils import (
     unwrap_tensor_subclasses_maybe_joint,
     wrap_tensor_subclasses,
 )
-
 from .traced_function_transforms import aot_dispatch_subclass
-
 from .utils import (
     call_func_at_runtime_with_args,
     make_boxed_func,
@@ -70,6 +65,7 @@ from .utils import (
     partial_flatten_asdict,
     strict_zip,
 )
+
 
 zip = strict_zip
 
@@ -311,7 +307,13 @@ def _create_runtime_wrapper(
             for idx in indices_of_inps_to_detach:
                 if isinstance(args_[idx], torch.Tensor):
                     args_[idx] = args_[idx].detach()
-            with torch.autograd._force_original_view_tracking(True):
+
+            # It's possible to have trace_joint inside user specified with no_grad() region,
+            # if there is a nested with enable_grad(), that forces some outputs to require gradients.
+            # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
+            with torch.autograd._force_original_view_tracking(
+                True
+            ), torch.enable_grad():
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )
@@ -1820,7 +1822,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                     # Get the number of tangents after unwrapping
                     len_tangents = len(
-                        unwrap_tensor_subclasses(tangents, append_symints=False)
+                        unwrap_tensor_subclasses(
+                            tangents,
+                            is_runtime=False,
+                            append_symints=False,
+                            subclass_metas=None,
+                        )
                     )
                     assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
@@ -1845,7 +1852,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         for i, a in enumerate(all_args)
                     ]
 
-                    all_args = unwrap_tensor_subclasses(all_args, append_symints=False)
+                    all_args = unwrap_tensor_subclasses(
+                        all_args,
+                        is_runtime=False,
+                        append_symints=False,
+                        subclass_metas=None,
+                    )
                     tangents_start_idx = len(all_args) - len_tangents - len(rng_args)
                     tangents_end_idx = tangents_start_idx + len_tangents
 

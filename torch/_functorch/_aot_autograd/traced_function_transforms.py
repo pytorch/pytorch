@@ -56,7 +56,7 @@ from .subclass_utils import (
     remap_unwrapped_subclass_arg_indices,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
-    unwrap_tensor_subclasses_maybe_joint,
+    unwrap_tensor_subclasses_joint,
     wrap_tensor_subclasses_maybe_joint,
 )
 from .utils import maybe_to_fresh_input
@@ -704,17 +704,16 @@ def aot_dispatch_subclass(
             subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
 
             assert isinstance(wrapped_outs, tuple) and len(wrapped_outs) == 2
-            return unwrap_tensor_subclasses_maybe_joint(
+            return unwrap_tensor_subclasses_joint(
                 wrapped_outs,
                 is_runtime=False,
-                is_joint_structure=True,
                 append_symints=True,
                 subclass_metas=None,
             )
 
         # Step 3: Unwrap any subclass outputs back into dense tensors
         unwrapped_outs = unwrap_tensor_subclasses(
-            wrapped_outs, append_symints=True, subclass_metas=None
+            wrapped_outs, is_runtime=False, append_symints=True, subclass_metas=None
         )
         return unwrapped_outs
 
@@ -733,11 +732,17 @@ def aot_dispatch_subclass(
 
     if is_joint_structure:
         args_unwrapped = (
-            unwrap_tensor_subclasses(args[0], append_symints=True),
-            unwrap_tensor_subclasses(args[1], append_symints=False),
+            unwrap_tensor_subclasses(
+                args[0], is_runtime=False, append_symints=True, subclass_metas=None
+            ),
+            unwrap_tensor_subclasses(
+                args[1], is_runtime=False, append_symints=False, subclass_metas=None
+            ),
         )
     else:
-        args_unwrapped = unwrap_tensor_subclasses(args, append_symints=True)
+        args_unwrapped = unwrap_tensor_subclasses(
+            args, is_runtime=False, append_symints=True, subclass_metas=None
+        )
     remapped_static_indices = remap_unwrapped_subclass_arg_indices(
         args, meta.static_input_indices
     )
