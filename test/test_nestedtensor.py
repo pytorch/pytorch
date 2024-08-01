@@ -6559,7 +6559,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         torch.manual_seed(0)
 
         class mha(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 torch.manual_seed(0)
                 self.linear = torch.nn.Linear(d2, d3, device=device)

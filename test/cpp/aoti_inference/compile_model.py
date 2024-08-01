@@ -19,7 +19,7 @@ class SimpleModule(torch.nn.Module):
     a simple module to be compiled
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc = torch.nn.Linear(4, 6)
         self.relu = torch.nn.ReLU()
