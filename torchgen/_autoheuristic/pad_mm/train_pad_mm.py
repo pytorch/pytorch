@@ -5,12 +5,12 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from train_regression import AHTrainRegressionTree
+from train import AHTrain
 
 from torch._inductor.fx_passes.pad_mm import pad_mm_operations
 
 
-class AHTrainPadMM(AHTrainRegressionTree):
+class AHTrainPadMM(AHTrain):
     def __init__(self):
         super().__init__()
 

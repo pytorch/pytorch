@@ -8,8 +8,6 @@ from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgor
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
     context_add_strides,
-    get_mixedmm_precondition,
-    mixed_mm_operations,
 )
 from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
@@ -499,8 +497,6 @@ def mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes):
         input_nodes=input_nodes,
         context=context,
         name=name,
-        augment_context=mixed_mm_operations(),
-        precondition=get_mixedmm_precondition,
     )
     return autoheuristic.get_choice_caller()
 
@@ -577,11 +573,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     input_nodes = [mat1, mat2]
     if torch._inductor.config.run_autoheuristic(name):
         choice = mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes)
-        if (
-            not skip_triton
-            and inductor_config.mixed_mm_choice == "heuristic"
-            and choice is not None
-        ):
+        if choice is not None:
             choices.insert(0, choice)
     return autotune_select_algorithm(name, choices, input_nodes, layout)
 
