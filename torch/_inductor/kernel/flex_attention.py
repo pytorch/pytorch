@@ -681,7 +681,9 @@ def flex_attention(
     if config.run_autoheuristic("flex_attention"):
         configs += _get_default_configs_fwd()
         # autotuning results do not match actual performance for this config
-        configs.remove((64, 16, 4, 3))
+        bad_config = (64, 64, 4, 3)
+        if bad_config in configs:
+            configs.remove((64, 16, 4, 3))
 
         def remove_duplicates(lst):
             return list(dict.fromkeys(lst))

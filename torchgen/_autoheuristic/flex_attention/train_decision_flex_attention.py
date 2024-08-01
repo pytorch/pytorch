@@ -16,6 +16,15 @@ class AHTrainDecisionTreeFlexAttention(AHTrainDecisionTree):
     def __init__(self):
         super().__init__()
 
+    def add_base_arguments(self):
+        super().add_base_arguments()
+        self.parser.add_argument(
+            "--gpu",
+            type=str,
+            help="Type of GPU to learn heuristic for.",
+        )
+
+
     def add_new_features(self, results):
         ops = flex_attention_operations()
         added_categorical_features = []
@@ -43,9 +52,14 @@ class AHTrainDecisionTreeFlexAttention(AHTrainDecisionTree):
         return f"type=triton_BLOCK-M={config[0]}_BLOCK-K=-1_BLOCK-N={config[1]}_numstages={config[3]}_numwarps={config[2]}"
 
     def get_default_config(self, row):
-        A100_capability = (8, 0)
+        if self.args.gpu == "A100":
+            capability = (8, 0)
+        elif self.args.gpu == "H100":
+            capability = (9, 0)
+        else:
+            raise ValueError(f"gpu {self.args.gpu} not supported")
         default_config = get_default_config_fwd(
-            self.get_dtype(row), row["n"], A100_capability
+            self.get_dtype(row), row["n"], capability
         )
         return self.config_to_config_name(default_config)
 
