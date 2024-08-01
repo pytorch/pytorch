@@ -319,8 +319,7 @@ def deserialize_torch_artifact(serialized: Union[Dict[str, Any], Tuple[Any, ...]
         return {}
     buffer = io.BytesIO(serialized)
     buffer.seek(0)
-    # weights_only=False as we want to load custom objects here (e.g. ScriptObject)
-    artifact = torch.load(buffer, weights_only=False)
+    artifact = torch.load(buffer)
     assert isinstance(artifact, (tuple, dict))
     return artifact
 

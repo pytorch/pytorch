@@ -1196,9 +1196,7 @@ class TestFX(JitTestCase):
 
         bio.seek(0)
 
-        # weights_only=False as this loads a GraphModule
-        # GLOBAL torch.fx.graph_module.reduce_graph_module was not an allowed global by default
-        loaded = torch.load(bio, weights_only=False)
+        loaded = torch.load(bio)
 
         torch.testing.assert_close(loaded(x), x[0])
 
@@ -4200,9 +4198,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         b = io.BytesIO()
         torch.save(gm, b)
         b.seek(0)
-        # weights_only=False as this loads a GraphModule
-        # GLOBAL torch.fx.graph_module.reduce_graph_module was not an allowed global by default
-        reload_gm = torch.load(b, weights_only=False)
+        reload_gm = torch.load(b)
         self.assertTrue(hasattr(reload_gm, "foo"))
         self.assertTrue(hasattr(reload_gm, "dummy_buffer"))
         self.assertTrue(hasattr(reload_gm, "dummy_parameter"))
