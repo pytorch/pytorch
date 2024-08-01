@@ -10,6 +10,7 @@ import sys
 from copy import copy, deepcopy
 from enum import Enum
 from typing import cast, Dict, List, Optional, Sequence, Set, Tuple, Union
+from unittest.mock import patch
 
 import sympy
 
@@ -3727,6 +3728,113 @@ class CppScheduling(BaseScheduling):
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
 
+    def split_loop(self, nodes):
+        if any(len(node.group[1][1]) != 0 for node in nodes):
+            return nodes
+
+        can_split = False
+        for node in nodes:
+            (
+                (original_index_size, original_reduce_size),
+                _,
+                _,
+            ) = node.node.get_default_sizes_body()
+
+            if not (
+                len(original_index_size) == 4
+                and len(original_reduce_size) == 0
+                and len([*node._body.var_ranges.values()]) == 3
+            ):
+                continue
+
+            # Check index: The split dim has a divider at 1 index_expr
+            split_var = None
+            split_number = None
+            divide_index_name = None
+
+            def has_div(expr, name):
+                if isinstance(expr, torch.utils._sympy.functions.FloorDiv):
+                    nonlocal split_var
+                    nonlocal split_number
+                    nonlocal divide_index_name
+                    split_var = expr.args[0]
+                    split_number = expr.args[1]
+                    divide_index_name = name
+                    return (
+                        isinstance(split_number, sympy.core.numbers.Integer)
+                        and isinstance(split_var, sympy.core.symbol.Symbol)
+                        and divide_index_name is not None
+                    )
+                return any(has_div(arg, name) for arg in expr.args)
+
+            if not any(
+                has_div(expr, name) for name, expr in node._body.indexing_exprs.items()
+            ):
+                continue
+
+            # Check index: The split dim is contiguous at all other index_expr
+            if not all(
+                stride_at_vec_range(
+                    expr, split_var, cpu_vec_isa.pick_vec_isa().nelements(torch.float32)
+                )
+                == 1
+                for name, expr in node._body.indexing_exprs.items()
+                if name != divide_index_name
+            ):
+                continue
+
+            can_split = True
+            break
+
+        if not can_split:
+            return nodes
+
+        for node in nodes:
+            _, original_body, _ = node.node.get_default_sizes_body()
+            current_iter_ranges = [*node._body.var_ranges.values()]
+            current_iter_vars = [*node._body.var_ranges.keys()]
+            split_idx = current_iter_vars.index(split_var)
+            assert split_idx < len(current_iter_vars)
+            iter_ranges = []
+            for idx in range(len(current_iter_ranges)):
+                if idx != split_idx:
+                    iter_ranges.append(current_iter_ranges[idx])
+                else:
+                    val_to_split = current_iter_ranges[idx]
+                    iter_ranges.append(val_to_split // split_number)
+                    iter_ranges.append(split_number)
+            reduce_ranges = []
+            (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+                iter_ranges, reduce_ranges, prefix="z"
+            )
+
+            def new_indexing_from_args(indices):
+                assert len([*node._body.var_ranges.values()]) == 3
+                z3 = sympy.core.symbol.Symbol("z3", integer=True, nonnegative=True)
+                replacements = {split_var: split_var * split_number + z3}
+                return {
+                    name: sympy_subs(expr, replacements)
+                    for name, expr in node._body.indexing_exprs.items()
+                }
+
+            # Here decide the final loop order
+            reduce_vars = []
+            with patch.object(
+                original_body, "indexing_from_args", new_indexing_from_args
+            ):
+                node._body = ir.LoopBody(
+                    original_body, [iter_vars, reduce_vars], var_ranges
+                )
+            node._sizes = (iter_ranges, reduce_ranges)
+            group_fn = node.scheduler.get_backend(node.node.get_device()).group_fn
+            node.group = (node.node.get_device(), group_fn(node._sizes))
+            node.set_read_writes(
+                dependencies.extract_read_writes(
+                    node._body, *node._sizes, normalize=True
+                )
+            )
+        return nodes
+
     def codegen_outer_loop_node(
         self,
         node: OuterLoopFusedSchedulerNode,
@@ -3929,6 +4037,8 @@ class CppScheduling(BaseScheduling):
             self.codegen_outer_loop_node(node)
         else:
             nodes: List[SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
+            # Apply loop split optimization
+            nodes = self.split_loop(nodes)
             cpp_kernel_proxy = CppKernelProxy(kernel_group)
             cpp_kernel_proxy.codegen_nodes(nodes)
             kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
