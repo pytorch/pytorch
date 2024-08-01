@@ -13,8 +13,6 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 from .. import config, variables
 from ..bytecode_transformation import (
     add_push_null_call_function_ex,
@@ -36,6 +34,10 @@ from ..utils import (
 from .base import VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import is_standard_setattr, UserDefinedObjectVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class SuperVariable(VariableTracker):
@@ -578,7 +580,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.needs_input_grad = needs_input_grad
 
     @staticmethod
-    def create(tx, args=None, kwargs=None):
+    def create(tx: "InstructionTranslator", args=None, kwargs=None):
         needs_input_grad = None
         if args and not kwargs:
             needs_input_grad = tuple(

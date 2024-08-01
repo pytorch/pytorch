@@ -38,6 +38,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     IS_MACOS,
     parametrize,
     skipIfRocm,
@@ -352,7 +353,7 @@ class CPUReproTests(TestCase):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("foo", torch.rand((3, 10)))
+                self.foo = torch.nn.Buffer(torch.rand((3, 10)))
 
             def forward(self, x):
                 lx = [x, x.clone(), x.clone()]
@@ -1583,6 +1584,7 @@ class CPUReproTests(TestCase):
             metrics.reset()
             self.common(fn, (value,))
 
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
         platform.machine() != "x86_64" or not cpu_vec_isa.valid_vec_isa_list(),
         "Does not support vectorization or not x86_64 machine",
@@ -1958,6 +1960,7 @@ class CPUReproTests(TestCase):
             with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
                 _internal_check(fn, inps, "aten.scatter_reduce_")
 
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_new_vec_op_cpu_only(self):
@@ -2703,6 +2706,31 @@ class CPUReproTests(TestCase):
                 2,
             )
 
+    def test_local_buffer_with_line_reuse(self):
+        # Test Global buffer which is inplace buffer and replaced by local buffer
+        def fn(x, y):
+            z = torch.matmul(x, y)
+            a_max = torch.amax(x, -1, keepdim=True)
+            # Previous is a inplace buffer and now is a local buffer
+            exp = torch.exp((z - a_max) / z)
+            sum = torch.sum(exp, -1, keepdim=True)
+            return exp - sum
+
+        inputs = [torch.rand(4, 32), torch.rand(32, 32)]
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, inputs)
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                1,
+            )
+
     def test_argmin(self):
         def fn(x):
             return torch.argmin(x, -1)
@@ -2748,6 +2776,7 @@ class CPUReproTests(TestCase):
     # supported, the vectorization will not work and skip this test case. For ARM or
     # other platforms support, we just need to add the ISA info to the supported_vector_isa
     # and include proper aten vectorization head file.
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_kernel_cpu_only(self):
@@ -2816,8 +2845,10 @@ class CPUReproTests(TestCase):
             self.common(fn, (x1, x2))
             check_metrics_vec_kernel_count(1)
 
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
-        sys.platform != "linux", "cpp kernel profile only support linux now"
+        sys.platform not in ["linux", "win32"],
+        "cpp kernel profile only support linux now",
     )
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch({"cpp.enable_kernel_profile": True})
