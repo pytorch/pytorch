@@ -2169,7 +2169,7 @@ def tensor_always_has_static_shape(
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
-    from .source import is_from_param_buffer_source
+    from .source import is_from_unspecialized_param_buffer_source
 
     if (
         tensor_source.guard_source().is_specialized_nn_module()
@@ -2178,7 +2178,8 @@ def tensor_always_has_static_shape(
         return True, TensorStaticReason.NN_MODULE_PROPERTY
 
     if (
-        type(tensor) is torch.nn.Parameter or is_from_param_buffer_source(tensor_source)
+        type(tensor) is torch.nn.Parameter
+        or is_from_unspecialized_param_buffer_source(tensor_source)
     ) and config.force_parameter_static_shapes:
         return True, TensorStaticReason.PARAMETER
     if not is_tensor:

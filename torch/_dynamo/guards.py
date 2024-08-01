@@ -82,7 +82,6 @@ from .source import (
     NumpyTensorSource,
     ODictGetItemSource,
     OptimizerSource,
-    ParamBufferSource,
     ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
     SubclassAttrListSource,
@@ -90,6 +89,7 @@ from .source import (
     TypeSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
+    UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
@@ -878,7 +878,7 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif istype(source, (AttrSource, ParamBufferSource)):
+        elif istype(source, (AttrSource, UnspecializedParamBufferSource)):
             assert base_guard_manager  # to make mypy happy
 
             if (
