@@ -106,7 +106,12 @@ class TestSchedulePlan(TestCase):
                 if num_microbatches % group_size != 0:
                     continue
 
-                print(f"{num_local_stages=} {num_microbatches=} {group_size=}")
+                logger.info(
+                    "num_local_stages=%d num_microbatches=%d group_size=%d",
+                    num_local_stages,
+                    num_microbatches,
+                    group_size,
+                )
                 num_stages = num_local_stages * group_size
                 stages = [
                     MockPipelineStage(group_size=group_size, num_stages=num_stages)
