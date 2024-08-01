@@ -9,9 +9,6 @@ from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
@@ -27,13 +24,16 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 
-if TYPE_CHECKING:
-    from torch._guards import Source
 
 try:
     from torch.distributed._composable.fsdp import _fsdp_param_group
 except ModuleNotFoundError:
     _fsdp_param_group = None
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._guards import Source
 
 
 def wrap_bound_arg(tx: "InstructionTranslator", val, source=None):
