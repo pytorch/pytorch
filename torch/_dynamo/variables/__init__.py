@@ -98,6 +98,7 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
+    MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,

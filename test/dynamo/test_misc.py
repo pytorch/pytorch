@@ -1330,6 +1330,60 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
         # Make sure we just call "list(dict.keys())" once
         self.assertEqual(pycode.count("keys"), 1)
 
+    def test_os_environ_get(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x):
+            if os.environ.get("OS_ENVIRON_TEST") == "1":
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.ones(2, 3)
+        try:
+            original = os.environ.get("OS_ENVIRON_TEST", None)
+
+            os.environ["OS_ENVIRON_TEST"] = "1"
+            res1 = fn(x)
+            self.assertEqual(res1, x + 1)
+            self.assertEqual(cnts.frame_count, 1)
+            os.environ["OS_ENVIRON_TEST"] = "0"
+            res2 = fn(x)
+            self.assertEqual(res2, x - 1)
+            # Ensure re-compile if os.environ items updated
+            self.assertEqual(cnts.frame_count, 2)
+        finally:
+            if original is None:
+                del os.environ["OS_ENVIRON_TEST"]
+            else:
+                os.environ["OS_ENVIRON_TEST"] = original
+
+    def test_os_environ_set_graph_break(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=False)
+        def fn(x):
+            x = x + 1
+            os.environ["OS_ENVIRON_TEST"] = "0"
+            return torch.sin(x)
+
+        x = torch.ones(2, 3)
+        try:
+            original = os.environ.get("OS_ENVIRON_TEST", None)
+
+            os.environ["OS_ENVIRON_TEST"] = "1"
+            res1 = fn(x)
+            self.assertEqual(res1, torch.sin(x + 1))
+            self.assertEqual(os.environ["OS_ENVIRON_TEST"], "0")
+            # Ensure we graph break on os.environ.__setitem__
+            self.assertEqual(cnts.frame_count, 2)
+        finally:
+            if original is None:
+                del os.environ["OS_ENVIRON_TEST"]
+            else:
+                os.environ["OS_ENVIRON_TEST"] = original
+
     def test_sys_modules(self):
         def fn(x, y):
             mod_a = sys.modules.get("aaaaaaaa")
