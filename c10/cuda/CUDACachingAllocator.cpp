@@ -124,6 +124,7 @@ constexpr size_t kMinLargeAlloc =
     10485760; // allocations between 1 and 10 MiB may use kLargeBuffer
 constexpr size_t kRoundLarge = 2097152; // round up large allocations to 2 MiB
 
+char SHAREABLE_HANDLE_VERSION = 1;
 enum ShareableHandleType : char {
   SHAREABLE_CUDA_MALLOC = 'c',
   SHAREABLE_CUDA_EXPANDABLE_SEGMENT = 'e'
@@ -1544,6 +1545,7 @@ class DeviceCachingAllocator {
   ShareableHandle shareIpcHandle(Block* block) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     std::ostringstream ss;
+    ss.put(SHAREABLE_HANDLE_VERSION);
     ptrdiff_t offset = 0;
     if (!block->expandable_segment_) {
       ss.put(SHAREABLE_CUDA_MALLOC);
@@ -3622,8 +3624,16 @@ class NativeCachingAllocator : public CUDAAllocator {
         : device_(device),
           expandable_segment_(nullptr),
           cuda_ipc_ptr_(nullptr) {
+      char type = SHAREABLE_CUDA_MALLOC;
       std::istringstream ss(handle);
-      auto type = ss.get();
+      if (handle.size() != CUDA_IPC_HANDLE_SIZE) {
+        auto version = ss.get();
+        TORCH_CHECK(
+            version <= SHAREABLE_HANDLE_VERSION,
+            "received sharable handle from a future version of torch that this version does not know how to handle")
+        type = ss.get();
+      } // otherwise this is coming from an old pytorch where it has to be a raw
+        // SHARABLE_CUDA_MALLOC
       if (type == SHAREABLE_CUDA_MALLOC) {
         cudaIpcMemHandle_t cuda_handle;
         ss.read((char*)&cuda_handle, CUDA_IPC_HANDLE_SIZE);
