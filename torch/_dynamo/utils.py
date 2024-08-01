@@ -2171,8 +2171,8 @@ def tensor_always_has_static_shape(
     """
     if (
         guard_source.is_specialized_nn_module()
-        and config.force_nn_module_property_static_shapes
-    ):
+        or guard_source.is_unspecialized_builtin_nn_module()
+    ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
     if type(tensor) is torch.nn.Parameter and config.force_parameter_static_shapes:
         return True, TensorStaticReason.PARAMETER

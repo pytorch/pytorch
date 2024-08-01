@@ -434,7 +434,7 @@ class _reduce_op:
     :class:`~torch.distributed.ReduceOp` is recommended to use instead.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # __members__ is a dict storing key-value pairs for enum classes
         for k, v in ReduceOp.RedOpType.__members__.items():
             setattr(self, k, v)
@@ -568,7 +568,7 @@ class _World:
        of c10d and is subject to change..
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._default_pg = None
         self._pg_coalesce_state: Dict[ProcessGroup, List[_CollOp]] = {}
         self._pg_default_device: Dict[ProcessGroup, torch.device] = {}
@@ -2194,7 +2194,7 @@ class _IllegalWork(Work):
 
 
 class _CoalescingManager:
-    def __init__(self):
+    def __init__(self) -> None:
         self.works: List[Work] = []
 
     def append(self, work: Work):

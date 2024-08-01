@@ -5,6 +5,7 @@ import inspect
 import logging
 import operator
 import textwrap
+import traceback
 import types
 import unittest
 from typing import Dict, List, TYPE_CHECKING
@@ -136,7 +137,7 @@ class TensorVariable(VariableTracker):
         is_contiguous=None,
         _is_name_set=None,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         self.proxy = proxy
         self.dtype = dtype
@@ -752,6 +753,8 @@ class TensorVariable(VariableTracker):
     @staticmethod
     @functools.lru_cache(None)
     def _warn_capture_scalar_outputs():
+        user_stack = torch._guards.TracingContext.extract_stack()
+        user_stack_formatted = "".join(traceback.format_list(user_stack))
         log.warning(
             textwrap.dedent(
                 """\
@@ -760,8 +763,12 @@ class TensorVariable(VariableTracker):
                     or:
                         env TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1
                     to include these operations in the captured graph.
+
+                    Graph break: from user code at:
+                    %s
                 """
-            )
+            ),
+            user_stack_formatted,
         )
 
     def method___len__(self):
@@ -1048,7 +1055,7 @@ class SymNodeVariable(VariableTracker):
 
         return SymNodeVariable(proxy, sym_num, **options)
 
-    def __init__(self, proxy, sym_num, **kwargs):
+    def __init__(self, proxy, sym_num, **kwargs) -> None:
         super().__init__(**kwargs)
         self.proxy = proxy
         # TODO: Should we allow non SymTypes here?  Today it is allowed
@@ -1227,7 +1234,7 @@ class UnspecializedPythonVariable(TensorVariable):
 
     def __init__(
         self, proxy: torch.fx.Proxy, *, raw_value=None, need_unwrap=True, **kwargs
-    ):
+    ) -> None:
         super().__init__(proxy, **kwargs)
         self.raw_value = raw_value
         self.need_unwrap = need_unwrap
@@ -1251,7 +1258,7 @@ class FakeItemVariable(TensorVariable):
         *TensorVariable._nonvar_fields,
     }
 
-    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
+    def __init__(self, proxy: torch.fx.Proxy, **kwargs) -> None:
         need_unwrap = kwargs.pop("need_unwrap", False)
         super().__init__(proxy, **kwargs)
         self.need_unwrap = need_unwrap
@@ -1262,7 +1269,7 @@ class FakeItemVariable(TensorVariable):
 
 
 class TensorSubclassVariable(VariableTracker):
-    def __init__(self, value, *args, **kwargs):
+    def __init__(self, value, *args, **kwargs) -> None:
         self.value = value
         super().__init__(*args, **kwargs)
 
@@ -1304,7 +1311,7 @@ class UntypedStorageVariable(VariableTracker):
         from_tensor: TensorVariable,
         example_value: torch.UntypedStorage,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs),
         self.from_tensor = from_tensor
         # Example_value will always have device="meta"

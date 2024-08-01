@@ -359,7 +359,7 @@ graph():
                 return x + x
 
         class Basic(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.external_add = ExternalMethod().add
 
@@ -373,7 +373,7 @@ graph():
 
     def test_colon_parameter(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.register_parameter("foo:bar", torch.nn.Parameter(torch.ones(3, 3)))
 
@@ -445,7 +445,7 @@ graph():
 
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.randn(1, 3))
 
@@ -459,7 +459,7 @@ graph():
 
     def test_basic_non_strict_fake_tensor(self):
         class Basic(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.randn(3, 2))
 
@@ -476,7 +476,7 @@ graph():
 
     def test_non_strict_dynamic_shapes(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.u = torch.nn.Buffer(torch.ones(1))
                 self.v = torch.nn.Buffer(torch.ones(1))
@@ -591,7 +591,7 @@ graph():
 
     def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(2, 3), persistent=False)
 
@@ -615,7 +615,7 @@ graph():
         )
 
         class M(torch.nn.Module):  # simple without register buffer
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buf = torch.ones(2, 3)
 
@@ -635,7 +635,7 @@ graph():
             torch.export.export(M(), (torch.randn(2, 3),), strict=False)
 
         class M(torch.nn.Module):  # complex with register buffer
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 tensors = [torch.ones(2, 3), torch.ones(2, 3)]
                 for i, tensor in enumerate(tensors):
@@ -666,7 +666,7 @@ graph():
         )
 
         class M(torch.nn.Module):  # complex without register buffer
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.tensors = [torch.ones(2, 3), torch.ones(2, 3)]
 
@@ -694,7 +694,7 @@ graph():
 
     def test_state_primitives(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = 1
                 self.y = {"k": 2}
@@ -713,7 +713,7 @@ graph():
 
     def test_torch_fn(self):
         class M1(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
                 self.relu = torch.nn.ReLU()
@@ -741,7 +741,7 @@ graph():
         self.assertEqual(actual_result, expected_result)
 
         class M2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, weight, bias):
@@ -803,7 +803,7 @@ graph():
 
     def test_export_preserve_linear_at_aot_level(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
@@ -852,7 +852,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 return self.foo(x)
 
         class CondBranchClassMethod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.subm = MySubModule()
 
@@ -1191,7 +1191,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
 
     def test_keep_composite_ops_invalid(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
@@ -1228,7 +1228,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
 
     def test_keep_composite_ops_linear_convd(self):
         class MyLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(20, 98)
                 self.bias = torch.randn(20)
@@ -1237,7 +1237,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
                 self.conv1d = torch.nn.Conv1d(16, 33, 3)
@@ -1313,7 +1313,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
 
     def test_keep_composite_ops_linear_convd_for_training_ir(self):
         class MyLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Buffer(torch.randn(20, 98))
                 self.bias = torch.nn.Buffer(torch.randn(20))
@@ -1322,7 +1322,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
                 return torch.nn.functional.linear(x, self.weight, self.bias)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
                 self.conv1d = torch.nn.Conv1d(16, 33, 3)
@@ -1460,7 +1460,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
 
     def test_simple_export_for_training(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
 
@@ -1496,7 +1496,7 @@ def forward(self, x):
 
     def test_export_for_training_with_mutation(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer = torch.nn.Buffer(torch.ones(4, 4))
 
@@ -1540,7 +1540,7 @@ def forward(self, x):
 
     def test_export_for_training_with_dynamic_shapes(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer = torch.nn.Buffer(torch.ones(4, 4))
 
@@ -1577,7 +1577,7 @@ def forward(self, x):
 
     def test_export_for_training_with_container_type(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer = torch.nn.Buffer(torch.ones(4, 4))
 
@@ -1605,7 +1605,7 @@ def forward(self, x):
 
     def test_export_for_training_run_decomp(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer = torch.nn.Buffer(torch.ones(2, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1672,7 +1672,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     def test_static_dim_constraints(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = torch.nn.Linear(6, 4)
 
@@ -1896,7 +1896,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # Just to introduce some indirection: N is a top-level module N that calls
         # module M, defined next.
         class N(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.m = M()
 
@@ -2408,7 +2408,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 return y[:b]
 
         class M2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.m1 = M1()
                 self.m3 = M3()
@@ -2462,7 +2462,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
     @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(20, 98)
                 self.bias = torch.randn(20)
@@ -2471,7 +2471,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
                 self.linear = MyLinear()
@@ -3100,7 +3100,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     def test_param_util(self):
         class Basic(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = torch.nn.Linear(10, 1)
 
@@ -3137,7 +3137,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lstm = torch.nn.LSTM(input_size=4, hidden_size=5, num_layers=1)
 
@@ -3251,7 +3251,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     def test_module(self):
         class MyLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(20, 98)
                 self.bias = torch.randn(20)
@@ -3260,7 +3260,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
                 self.linear = MyLinear()
@@ -3296,7 +3296,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     def test_module_with_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(20, 98)
                 self.bias = torch.randn(20)
@@ -3305,7 +3305,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
                 self.linear = MyLinear()
@@ -3364,7 +3364,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     def test_decomp_batch_norm_functional_predispatch(self):
         class ConvBatchnorm(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(1, 3, 1, 1)
                 self.bn = torch.nn.BatchNorm2d(3)
@@ -3605,7 +3605,7 @@ def forward(self, x):
 
     def test_constrain_decomp(self) -> None:
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.freq = torch.ones(5, 5)
 
@@ -3701,7 +3701,7 @@ def forward(self, x):
 
     def test_to_module_with_mutated_buffer(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.zeros(1))
 
@@ -3730,7 +3730,7 @@ def forward(self, x):
 
     def test_to_module_with_mutated_buffer_multiple(self):
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(1))
 
@@ -3739,7 +3739,7 @@ def forward(self, x):
                 return x.sum() + self.buf.sum()
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.bar = Bar()
@@ -3829,7 +3829,7 @@ def forward(self, x):
 
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(1))
 
@@ -3838,7 +3838,7 @@ def forward(self, x):
                 return x.sum() + self.buf.sum()
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.bar = Bar()
@@ -3882,7 +3882,7 @@ def forward(self, x):
 
     def test_retracable_ep(self):
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(1))
 
@@ -3891,7 +3891,7 @@ def forward(self, x):
                 return x.sum() + self.buf.sum()
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.bar = Bar()
@@ -3938,7 +3938,7 @@ def forward(self, x):
 
     def test_export_cond_symbool_pred(self):
         class A(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer = torch.nn.Buffer(torch.ones(6, 4))
 
@@ -3946,7 +3946,7 @@ def forward(self, x):
                 return self.buffer.cos()
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = A()
 
@@ -3991,7 +3991,7 @@ def forward(self, b_a_buffer, x):
 
     def test_cond_buffers(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.register_parameter(
                     "param", torch.nn.Parameter(torch.ones(2, 3), requires_grad=False)
@@ -4024,7 +4024,7 @@ def forward(self, b_a_buffer, x):
     @unittest.expectedFailure
     def test_map_buffers(self):
         class M1(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.register_parameter(
                     "param", torch.nn.Parameter(torch.tensor(5), requires_grad=False)
@@ -4060,7 +4060,7 @@ def forward(self, b_a_buffer, x):
     @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_retrace_graph_level_meta_preservation(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -4118,7 +4118,7 @@ def forward(self, b_a_buffer, x):
 
     def test_train_eval_on_exported_preautograd_module(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -4150,7 +4150,7 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(len(ep.constants), 1)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.tensor(3)
 
@@ -4252,7 +4252,7 @@ def forward(self, b_a_buffer, x):
 
     def test_export_decomps_simple(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = torch.nn.Linear(10, 1)
 
@@ -4278,7 +4278,7 @@ def forward(self, b_a_buffer, x):
 
     def test_export_decomps_dynamic(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = torch.nn.Linear(10, 1)
 
@@ -4369,7 +4369,7 @@ def forward(self, b_a_buffer, x):
 
     def test_constant_output(self):
         class ModuleConstant(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.b = torch.randn(3, 2)
 
@@ -4377,7 +4377,7 @@ def forward(self, b_a_buffer, x):
                 return self.b
 
         class ModuleNestedConstant(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bff = torch.randn(3, 2)
 
@@ -4486,7 +4486,7 @@ graph():
 
     def test_nested_module_with_init_buffer(self):
         class M1(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.b = torch.ones(3, 3)
 
@@ -4522,7 +4522,7 @@ graph():
     @testing.expectedFailureRetraceability  # Retracing tensor constants results in buffers
     def test_nested_module_with_constant_buffer(self):
         class M1(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.b = torch.tensor(5)
 
@@ -4572,7 +4572,7 @@ graph():
 
     def test_nested_module_with_parameter(self):
         class M1(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.nn.Parameter(torch.ones(3, 3))
                 self.b = torch.nn.Parameter(torch.tensor(5.0))
@@ -4630,7 +4630,7 @@ graph():
 
     def test_retrace_pre_autograd(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer = torch.nn.Buffer(torch.ones(4, 4))
 
@@ -4684,7 +4684,7 @@ graph():
     @unittest.skip("Test is only supposed to work with non-strict mode")
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.tensor(1.0)
 
@@ -4699,7 +4699,7 @@ graph():
         handle = seq.register_forward_hook(forward_hook)
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.seq = seq
 
@@ -4791,7 +4791,7 @@ graph():
 
     def test_run_decomposition_supports_user_input_mutation(self):
         class SingleOp(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.op = torch.ops.aten.native_batch_norm
 
@@ -5052,7 +5052,7 @@ graph():
 
     def test_check_specialized_int(self):
         class SingleOp(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.op = torch.ops.aten.scatter_add
 
@@ -5085,7 +5085,7 @@ graph():
                 return x / x
 
         class Child1(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.nested = NestedChild()
                 self.register_parameter(
@@ -5097,7 +5097,7 @@ graph():
                 return x + self.child1param
 
         class Child2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.child2buffer = torch.nn.Buffer(torch.ones(2, 3))
 
@@ -5105,7 +5105,7 @@ graph():
                 return x - self.child2buffer
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = Child1()
                 self.bar = Child2()
@@ -5148,7 +5148,7 @@ graph():
 
     def test_nn_module_stack(self):
         class Leaf(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -5156,7 +5156,7 @@ graph():
                 return self.linear(x)
 
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.leaf = Leaf()
                 self.buffer = torch.nn.Buffer(torch.randn(4, 4))
@@ -5165,7 +5165,7 @@ graph():
                 return self.buffer.sum() + self.leaf(x).sum()
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bar = Bar()
 
@@ -5205,7 +5205,7 @@ graph():
 
     def test_nn_module_stack_shared_submodule(self):
         class Leaf(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -5213,7 +5213,7 @@ graph():
                 return self.linear(x)
 
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.leaf = Leaf()
                 self.buffer = torch.nn.Buffer(torch.randn(4, 4))
@@ -5222,7 +5222,7 @@ graph():
                 return self.buffer.sum() + self.leaf(x).sum()
 
         class BarDifferent(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.leaf = Leaf()
 
@@ -5232,7 +5232,7 @@ graph():
                 return a + b
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bar = Bar()
                 self.bar_different = BarDifferent()
@@ -5286,7 +5286,7 @@ graph():
 
     def test_stack_trace(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -5318,7 +5318,7 @@ graph():
     # Guard validation upsets the guard
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -5332,7 +5332,7 @@ graph():
                 return torch.cond(x.sum() > 4, true_fn, false_fn, [x])
 
         class CondExport(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bar = Bar()
 
@@ -5371,7 +5371,7 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
     @unittest.expectedFailure
     def test_cond_with_module_stack_export_with_unflatten(self):
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -5385,7 +5385,7 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
                 return torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
 
         class CondExport(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bar = Bar()
 
@@ -5412,7 +5412,7 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
 
     def test_predispatch_cond(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.pred = torch.nn.Buffer(torch.tensor(False))
                 self.t = torch.nn.Buffer(torch.tensor(10))
@@ -5525,7 +5525,7 @@ def forward(self, x, b_t, y):
         N, C, H, W = 1, 2, 2, 3
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 layer = torch.nn.LayerNorm([C, H, W])
                 self.norms = torch.nn.ModuleList(
@@ -5548,7 +5548,7 @@ def forward(self, x, b_t, y):
 
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Buffer(torch.rand(2, 3), persistent=False)
 
@@ -5556,7 +5556,7 @@ def forward(self, x, b_t, y):
                 return self.foo + x
 
         class MyOuterModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.inner = MyModule()
 
@@ -5607,7 +5607,7 @@ def forward(self, x, b_t, y):
 
     def test_nonstrict_retrace_preserves_metadata(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -5625,7 +5625,7 @@ def forward(self, x, b_t, y):
 
     def test_fake_weights(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Parameter(torch.randn(4, 4))
                 self.bar = torch.nn.Buffer(torch.randn(4, 4), persistent=False)
@@ -5645,7 +5645,7 @@ def forward(self, x, b_t, y):
 
     def test_fake_inputs(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Parameter(torch.randn(4, 4))
 
@@ -5664,7 +5664,7 @@ def forward(self, x, b_t, y):
 
     def test_trace_under_fake(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Parameter(torch.randn(4, 4))
 
@@ -5714,7 +5714,7 @@ def forward(self, x, b_t, y):
 
     def test_user_input_and_buffer_mutation(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Buffer(torch.randn(4, 4))
 
@@ -5739,7 +5739,7 @@ def forward(self, x, b_t, y):
 
     def test_custom_op_auto_functionalize(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, z):
@@ -5766,7 +5766,7 @@ def forward(self, x, b_t, y):
 
     def test_custom_op_auto_functionalize_pre_dispatch(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -5800,7 +5800,7 @@ def forward(self, x):
 
     def test_custom_op_auto_warn_pre_dispatch(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -5851,7 +5851,7 @@ def forward(self, x):
 
         # test collisions between user inputs and params, buffers, constants
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.randn(4))
                 self.alpha = torch.nn.Buffer(torch.randn(4), persistent=True)
@@ -6197,7 +6197,7 @@ def forward(self, x, y):
     @testing.expectedFailureSerDer
     def test_preserve_requires_grad_placeholders(self):
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.p = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -6216,7 +6216,7 @@ def forward(self, x, y):
     def test_reshape_view_helper(self):
         # see: https://github.com/pytorch/pytorch/issues/126607
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -6326,7 +6326,7 @@ def forward(self, x, y):
                 return x + self.foo + self.m2(x)
 
         class M2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.ones(3, 3)
 
@@ -6352,7 +6352,7 @@ def forward(self, x, y):
     @testing.expectedFailureRetraceability
     def test_unused_aliases(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 # param
                 self.alpha = torch.nn.Parameter(torch.randn(4))
@@ -6512,7 +6512,7 @@ def forward(self, x, y):
                 return y[d:]
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.m1 = M1()
 
@@ -6539,7 +6539,7 @@ def forward(self, x, y):
 
     def test_split_const_gm_with_lifted_constants(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w_pre = torch.randn(4, 4)
                 self.b = torch.randn(4)
@@ -6599,7 +6599,7 @@ class TestOneOffModelExportResult(TestCase):
         """
 
         class ScaledDotProductAttention(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, q, k, v):
@@ -6640,7 +6640,7 @@ class TestOneOffModelExportResult(TestCase):
         """
 
         class ScaledDotProductAttention(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, q, k, v):
@@ -6866,7 +6866,7 @@ def forward(self, x):
 
     def test_constant_fqn(self):
         class Nested(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.constant = torch.rand(2, 3)
                 self.parameter = torch.nn.Parameter(torch.rand(2, 3))
@@ -6875,7 +6875,7 @@ def forward(self, x):
                 return x + self.constant
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.nested = Nested()
 
@@ -6889,7 +6889,7 @@ def forward(self, x):
 
     def test_constant_name(self):
         class Nested(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.constant = torch.rand(2, 3)
                 self.parameter = torch.nn.Parameter(torch.rand(2, 3))
@@ -6898,7 +6898,7 @@ def forward(self, x):
                 return x + self.constant
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.nested_1 = Nested()
                 self.nested_2 = Nested()
@@ -6933,7 +6933,7 @@ def forward(self, x):
 
     def test_nested_retrace(self):
         class Nested(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.randn(3))
 
@@ -6941,7 +6941,7 @@ def forward(self, x):
                 return x + self.param
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.nested = Nested()
 
