@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import importlib
 from abc import ABC, abstractmethod
 from pickle import (  # type: ignore[attr-defined]  # type: ignore[attr-defined]

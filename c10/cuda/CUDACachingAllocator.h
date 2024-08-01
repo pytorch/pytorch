@@ -198,6 +198,22 @@ struct TraceEntry {
   trace_time_ time_{};
 };
 
+// Calls made by record_function will save annotations
+struct AnnotationEntry {
+  AnnotationEntry(c10::DeviceIndex device, approx_time_t time)
+      : device_(device) {
+    time_.approx_t_ = time;
+  }
+
+  void recordUserMetadata(const std::string& name, std::string value) {
+    metadata_[name] = std::move(value);
+  }
+
+  c10::DeviceIndex device_;
+  trace_time_ time_{};
+  std::unordered_map<std::string, std::string> metadata_;
+};
+
 struct AllocatorConfigInfo {
   double garbage_collection_threshold;
   size_t max_split_size;
@@ -212,6 +228,7 @@ struct AllocatorConfigInfo {
 struct SnapshotInfo {
   std::vector<SegmentInfo> segments;
   std::vector<std::vector<TraceEntry>> device_traces;
+  std::vector<AnnotationEntry> external_annotations;
   AllocatorConfigInfo config_metadata;
 };
 
@@ -240,6 +257,11 @@ using OutOfMemoryObserver = std::function<void(
     size_t device_free)>;
 
 using AllocatorTraceTracker = std::function<void(const TraceEntry&)>;
+
+struct ShareableHandle {
+  ptrdiff_t offset;
+  std::string handle;
+};
 
 class CUDAAllocator : public Allocator {
  public:
@@ -276,6 +298,7 @@ class CUDAAllocator : public Allocator {
         " does not yet support checkPoolLiveAllocations. "
         "If you need it, please file an issue describing your use case.");
   }
+  virtual ShareableHandle shareIpcHandle(void* ptr) = 0;
   virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) = 0;
   virtual bool isHistoryEnabled() {
     TORCH_CHECK(
@@ -289,6 +312,8 @@ class CUDAAllocator : public Allocator {
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
       RecordContext when) = 0;
+  virtual void recordAnnotation(
+      const std::vector<std::pair<std::string, std::string>>& md){};
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
   // Attached AllocatorTraceTracker callbacks will be called while the
@@ -428,6 +453,11 @@ inline void recordHistory(
       enabled, context_recorder, alloc_trace_max_entries, when);
 }
 
+inline void recordAnnotation(
+    const std::vector<std::pair<std::string, std::string>>& md) {
+  return get()->recordAnnotation(md);
+}
+
 inline bool isHistoryEnabled() {
   return get()->isHistoryEnabled();
 }
@@ -454,6 +484,10 @@ inline void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
 inline std::shared_ptr<void> getIpcDevPtr(std::string handle) {
   return get()->getIpcDevPtr(std::move(handle));
+}
+
+inline ShareableHandle shareIpcHandle(void* ptr) {
+  return get()->shareIpcHandle(ptr);
 }
 
 inline std::string name() {

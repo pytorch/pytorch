@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple, Union
@@ -7,6 +8,7 @@ from torch import Tensor
 from torch.ao.quantization import ObserverOrFakeQuantize
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.fx import Node
+
 
 __all__ = [
     "Quantizer",

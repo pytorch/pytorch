@@ -17,7 +17,7 @@ namespace at::functorch {
 // we do not support batch_group_count (which is needed for convolution backwards).
 // Instead, there's a convolution_backward op that needs a batching rule.
 static std::tuple<Tensor,optional<int64_t>>
-convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor& rhs, optional<int64_t> rhs_bdim, const optional<Tensor>& bias, optional<int64_t> bias_bdim, c10::SymIntArrayRef stride, c10::SymIntArrayRef padding, c10::SymIntArrayRef dilation, bool transposed, c10::SymIntArrayRef output_padding, c10::SymInt groups) {
+convolution_batch_rule(const Tensor& lhs, std::optional<int64_t> lhs_bdim, const Tensor& rhs, std::optional<int64_t> rhs_bdim, const std::optional<Tensor>& bias, std::optional<int64_t> bias_bdim, c10::SymIntArrayRef stride, c10::SymIntArrayRef padding, c10::SymIntArrayRef dilation, bool transposed, c10::SymIntArrayRef output_padding, c10::SymInt groups) {
   DimVector lhs_spec(stride.size() + 2);
   std::iota(lhs_spec.begin(), lhs_spec.end(), 0);
   DimVector rhs_spec = lhs_spec;
@@ -28,7 +28,7 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
   }
 
   // If we have a batched bias or weight, we need to perform the computation separately.
-  optional<Tensor> unbatched_bias;
+  std::optional<Tensor> unbatched_bias;
   bool separate_bias = false;
   if ((rhs_bdim && bias && bias->defined()) || bias_bdim) {
     TORCH_INTERNAL_ASSERT(bias.has_value());
@@ -39,7 +39,7 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
     unbatched_bias = bias;
     separate_bias = false;
   }
-  std::tuple<Tensor, optional<int64_t>> result;
+  std::tuple<Tensor, std::optional<int64_t>> result;
   if (lhs_bdim && !rhs_bdim) {
     auto new_x = reshape_dim_into(*lhs_bdim, lhs_spec[0], lhs);
     auto out = at::convolution_symint(new_x, rhs, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
@@ -147,9 +147,9 @@ static Tensor _convolution_decomp(
 // }
 //
 // std::tuple<Tensor,int64_t,Tensor,int64_t> cudnn_conv_per_sample_grad_rule(
-//     const Tensor& self, optional<int64_t> self_bdim,
-//     const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-//     const Tensor& weight, optional<int64_t> weight_bdim,
+//     const Tensor& self, std::optional<int64_t> self_bdim,
+//     const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
+//     const Tensor& weight, std::optional<int64_t> weight_bdim,
 //     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark,
 //     bool deterministic, bool allow_tf32, std::array<bool, 2> output_mask) {
 //   TORCH_INTERNAL_ASSERT(self_bdim && grad_output_bdim && !weight_bdim);
@@ -187,13 +187,13 @@ static Tensor _convolution_decomp(
 //   int64_t cur_level = maybe_layer->layerId();
 //
 //   Tensor self_value;
-//   optional<int64_t> self_bdim;
+//   std::optional<int64_t> self_bdim;
 //   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
 //   Tensor grad_output_value;
-//   optional<int64_t> grad_output_bdim;
+//   std::optional<int64_t> grad_output_bdim;
 //   std::tie(grad_output_value, grad_output_bdim) = unwrapTensorAtLevel(grad_output, cur_level);
 //   Tensor weight_value;
-//   optional<int64_t> weight_bdim;
+//   std::optional<int64_t> weight_bdim;
 //   std::tie(weight_value, weight_bdim) = unwrapTensorAtLevel(weight, cur_level);
 //
 //   if (self_bdim.has_value() && self_value.dim() == 5 && first_dim_has_size_1(self_value, *self_bdim) && grad_output_bdim.has_value() && !weight_bdim.has_value()) {
@@ -227,7 +227,7 @@ static Tensor compute_grad_bias(
 
 // reshapes the batch_size into dim
 static Tensor make_dummy(
-    const Tensor& tensor, optional<int64_t> tensor_bdim,
+    const Tensor& tensor, std::optional<int64_t> tensor_bdim,
     int64_t dim, int64_t batch_size) {
   auto tensor_ = tensor_bdim ? tensor.select(*tensor_bdim, 0) : tensor;
   auto orig_size = tensor_.size(dim);
@@ -241,9 +241,9 @@ static Tensor make_dummy(
 
 static std::tuple<Tensor,optional<int64_t>>
 convolution_backward_input_batch_rule(
-    const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-    const Tensor& input, optional<int64_t> input_bdim,
-    const Tensor& weight, optional<int64_t> weight_bdim,
+    const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
+    const Tensor& input, std::optional<int64_t> input_bdim,
+    const Tensor& weight, std::optional<int64_t> weight_bdim,
     c10::SymIntArrayRef stride, c10::SymIntArrayRef padding, c10::SymIntArrayRef dilation, bool transposed,
     c10::SymIntArrayRef output_padding, const c10::SymInt& groups) {
   const std::array<bool, 3> mask = {true, false, false};
@@ -322,9 +322,9 @@ convolution_backward_input_batch_rule(
 }
 static std::tuple<Tensor,optional<int64_t>>
 convolution_backward_weight_batch_rule(
-    const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-    const Tensor& input, optional<int64_t> input_bdim,
-    const Tensor& weight, optional<int64_t> weight_bdim,
+    const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
+    const Tensor& input, std::optional<int64_t> input_bdim,
+    const Tensor& weight, std::optional<int64_t> weight_bdim,
     c10::SymIntArrayRef stride, c10::SymIntArrayRef padding, c10::SymIntArrayRef dilation, bool transposed,
     c10::SymIntArrayRef output_padding, const c10::SymInt& groups) {
   const std::array<bool, 3> mask = {false, true, false};

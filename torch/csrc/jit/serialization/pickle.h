@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 /// Pickle an IValue by calling a function to handle writing the data.
 ///
@@ -119,5 +118,4 @@ class VectorReader : public caffe2::serialize::ReadAdapterInterface {
   std::vector<char> data_;
 };
 #endif
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

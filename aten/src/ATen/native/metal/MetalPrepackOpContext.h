@@ -3,9 +3,7 @@
 #include <ATen/Tensor.h>
 #include <torch/custom_class.h>
 
-namespace at {
-namespace native {
-namespace metal {
+namespace at::native::metal {
 
 using SerializationTypeConv2dPrePack = std::tuple<
     Tensor,
@@ -197,6 +195,4 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
   std::function<void(void*)> releaseCallback_ = nullptr;
 };
 
-} // namespace metal
-} // namespace native
-} // namespace at
+} // namespace at::native::metal

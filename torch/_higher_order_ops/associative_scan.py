@@ -1,14 +1,12 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 from typing import Callable, List
 
 import torch
-
 import torch._prims_common as utils
 import torch._subclasses.functional_tensor
-
 import torch.utils._pytree as pytree
-
 from torch._C import DispatchKey
 from torch._C._functorch import _add_batch_dim, get_unwrapped, maybe_get_bdim
 from torch._higher_order_ops.utils import (
@@ -17,7 +15,6 @@ from torch._higher_order_ops.utils import (
     reenter_make_fx,
     unique_graph_id,
 )
-
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -25,6 +22,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+
 
 aten = torch._ops.ops.aten
 

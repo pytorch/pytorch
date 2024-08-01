@@ -113,6 +113,24 @@ class uint8(unsignedinteger):
     torch_dtype = torch.uint8
 
 
+class uint16(unsignedinteger):
+    name = "uint16"
+    typecode = "H"
+    torch_dtype = torch.uint16
+
+
+class uint32(signedinteger):
+    name = "uint32"
+    typecode = "I"
+    torch_dtype = torch.uint32
+
+
+class uint64(signedinteger):
+    name = "uint64"
+    typecode = "L"
+    torch_dtype = torch.uint64
+
+
 # floating point
 
 
@@ -160,6 +178,7 @@ _name_aliases = {
     "byte": int8,
     "short": int16,
     "longlong": int64,  # XXX: is this correct?
+    "ulonglong": uint64,
     "ubyte": uint8,
     "half": float16,
     "single": float32,
@@ -180,7 +199,7 @@ for name, obj in _name_aliases.items():
 # cf tests/core/test_scalar_methods.py
 sctypes = {
     "int": [int8, int16, int32, int64],
-    "uint": [uint8],
+    "uint": [uint8, uint16, uint32, uint64],
     "float": [float16, float32, float64],
     "complex": [complex64, complex128],
     "others": [bool_],

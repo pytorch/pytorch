@@ -1,9 +1,11 @@
+# mypy: allow-untyped-defs
 import collections
 from collections import defaultdict
 from typing import Any, Callable, Dict, Optional
 
 import torch
 import torch.utils._pytree as pytree
+
 
 aten = torch.ops.aten
 

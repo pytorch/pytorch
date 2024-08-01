@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import sys
 import warnings
 from typing import cast, List, Optional, Tuple, TYPE_CHECKING, Union
@@ -9,6 +10,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
 
 from . import _functional_collectives_impl as fun_col_impl
+
 
 try:
     from torch.utils._cxx_pytree import tree_map_only
@@ -959,6 +961,69 @@ if not torch._running_with_deploy():
     lib_impl.impl("broadcast", _broadcast_meta, "Meta")
     lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
 
+    # mark these ops has side effect so that they won't be removed by DCE
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)
+    torch.fx.node.has_side_effect(
+        torch.ops._c10d_functional.all_gather_into_tensor_out.default
+    )
+    torch.fx.node.has_side_effect(
+        torch.ops._c10d_functional.all_gather_into_tensor.default
+    )
+    torch.fx.node.has_side_effect(
+        torch.ops._c10d_functional.all_gather_into_tensor_coalesced.default
+    )
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_reduce.default)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_reduce_.default)
+    torch.fx.node.has_side_effect(
+        torch.ops._c10d_functional.all_reduce_coalesced.default
+    )
+    torch.fx.node.has_side_effect(
+        torch.ops._c10d_functional.all_reduce_coalesced_.default
+    )
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_to_all_single.default)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.broadcast.default)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.broadcast_.default)
+    torch.fx.node.has_side_effect(
+        torch.ops._c10d_functional.reduce_scatter_tensor.default
+    )
+    torch.fx.node.has_side_effect(
+        torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default
+    )
+    torch.fx.node.has_side_effect(
+        torch.ops._c10d_functional_autograd.all_to_all_single.default
+    )
+    torch.fx.node.has_side_effect(
+        torch.ops._c10d_functional_autograd.reduce_scatter_tensor.default
+    )
+    torch.fx.node.has_side_effect(
+        torch.ops._c10d_functional_autograd.all_gather_into_tensor.default
+    )
+    # also the no-overload version
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_gather_into_tensor_out)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_gather_into_tensor)
+    torch.fx.node.has_side_effect(
+        torch.ops._c10d_functional.all_gather_into_tensor_coalesced
+    )
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_reduce)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_reduce_)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_reduce_coalesced)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_reduce_coalesced_)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_to_all_single)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.broadcast)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.broadcast_)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.reduce_scatter_tensor)
+    torch.fx.node.has_side_effect(
+        torch.ops._c10d_functional.reduce_scatter_tensor_coalesced
+    )
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional_autograd.all_to_all_single)
+    torch.fx.node.has_side_effect(
+        torch.ops._c10d_functional_autograd.reduce_scatter_tensor
+    )
+    torch.fx.node.has_side_effect(
+        torch.ops._c10d_functional_autograd.all_gather_into_tensor
+    )
+
     # Register legacy ops for backward compatibility
     # TODO(yifu): remove these in functional collective beta release
     legacy_lib = torch.library.Library("c10d_functional", "DEF")
@@ -1132,6 +1197,7 @@ from torch.distributed.distributed_c10d import (
     all_to_all_single as legacy_all_to_all_single,
     reduce_scatter_tensor as legacy_reducescatter,
 )
+
 
 # This dict should contain sets of functions that dynamo is allowed to remap.
 # Functions in this set should accept the same args/kwargs 1:1 as their mapping.

@@ -9,6 +9,8 @@ jobs:
     name: try_merge_pr_${{ github.event.client_payload.pr_num }}
     runs-on: linux.20_04.4x
     environment: mergebot
+    permissions:
+      id-token: write
     env:
         GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
@@ -43,6 +45,7 @@ jobs:
           IGNORE_CURRENT: ${{ github.event.client_payload.ignore_current }}
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           DRCI_BOT_KEY: ${{ secrets.DRCI_BOT_KEY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
           set -x
           if [ -n "${REBASE}" ]; then
@@ -83,6 +86,22 @@ jobs:
         run: |
           set -x
           python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        continue-on-error: true
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/upload_to_ossci_raw_job_status
+          aws-region: us-east-1
+
+      - name: Upload merge record to s3
+        if: always()
+        continue-on-error: true
+        uses: seemethere/upload-artifact-s3@v5
+        with:
+          s3-bucket: ossci-raw-job-status
+          s3-prefix: merges/${{ github.repository }}/${{ github.event.client_payload.pr_num }}/${{ github.event.client_payload.comment_id }}/${{ github.run_id }}
+          path: merge_record.json
 
 # We want newer merge commands to supercede old ones
 concurrency:

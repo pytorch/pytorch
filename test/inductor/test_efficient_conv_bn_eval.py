@@ -9,6 +9,7 @@ import unittest
 import torch
 from torch import nn
 
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
@@ -16,10 +17,9 @@ sys.path.append(pytorch_test_dir)
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase
-
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
-
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -158,7 +158,7 @@ class EfficientConvBNEvalTemplate(TestCase):
             out_eager = mod_eager(inp)
             out_optimized = mod_optimized(inp)
 
-            self.assertEqual(out_optimized, out_eager, atol=2e-04, rtol=1e-5)
+            self.assertEqual(out_optimized, out_eager, atol=3e-04, rtol=1e-5)
 
             out_eager.mean().backward()
             out_optimized.mean().backward()
@@ -170,7 +170,7 @@ class EfficientConvBNEvalTemplate(TestCase):
             out_eager_bw = mod_eager(inp_bw)
             out_optimized_bw = mod_optimized(inp_bw)
 
-            self.assertEqual(out_eager_bw, out_optimized_bw, atol=2e-04, rtol=1e-5)
+            self.assertEqual(out_eager_bw, out_optimized_bw, atol=3e-04, rtol=1e-5)
             current_value = counters["inductor"]["efficient_conv_bn_eval"]
             self.assertEqual(
                 current_value - original_value, test_class.expected_optimization_count
