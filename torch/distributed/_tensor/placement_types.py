@@ -399,6 +399,10 @@ class _StridedShard(Shard):
     right-to-left. In the example above, the tensor should first be sharded on the "tp"
     dimension into 2 shards before being sharded on the "dp" dimension. Therefore, the
     `split_factor` of the _StridedShard placement on "dp" dim is 2.
+
+    TODO: strided sharding needs to work fine with uneven sharding. Now it forbids
+    resharding if the tensor is unevenly sharded.
+    TODO: we should remove _StridedShard placement once we can unify it with Shard
     """
 
     split_factor: int
@@ -406,6 +410,11 @@ class _StridedShard(Shard):
     def __eq__(self, other: object) -> bool:
         if isinstance(other, _StridedShard):
             return self.dim == other.dim and self.split_factor == other.split_factor
+        elif isinstance(other, Shard):
+            # TODO: this is to avoid extra all-gather in dtensor op dispatch
+            # note that sharding prop would not produce _StridedShard and an
+            # placement inequality would introduce an all-gather for resharding
+            return self.dim == other.dim
         return False
 
     def __hash__(self) -> int:
