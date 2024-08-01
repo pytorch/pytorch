@@ -186,7 +186,6 @@ if RUN_CUDA:
         BaseTest("test_sum_dtype"),  # float64
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
-        BaseTest("test_unspec_inputs"),
         BaseTest(
             "test_foreach_cpp_wrapper",
             tests=test_foreach.ForeachTests(),

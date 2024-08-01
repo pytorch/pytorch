@@ -109,7 +109,6 @@ int32_t aoti_torch_layout__mkldnn() {
     });                                                        \
   }
 
-AOTI_TORCH_ITEM_IMPL(float16, c10::Half)
 AOTI_TORCH_ITEM_IMPL(float32, float)
 AOTI_TORCH_ITEM_IMPL(float64, double)
 AOTI_TORCH_ITEM_IMPL(uint8, uint8_t)
@@ -121,7 +120,6 @@ AOTI_TORCH_ITEM_IMPL(int16, int16_t)
 AOTI_TORCH_ITEM_IMPL(int32, int32_t)
 AOTI_TORCH_ITEM_IMPL(int64, int64_t)
 AOTI_TORCH_ITEM_IMPL(bool, bool)
-AOTI_TORCH_ITEM_IMPL(bfloat16, c10::BFloat16)
 #undef AOTI_TORCH_ITEM_IMPL
 
 #define AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(dtype, ctype, ttype)                  \
