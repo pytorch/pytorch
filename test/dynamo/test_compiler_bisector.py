@@ -47,7 +47,10 @@ class TestCompilerBisector(TestCase):
                 rate > 0.0,
                 lambda: f"exponential_ expects lambda > 0.0, but found lambda={rate}",
             )
-            return -1 / rate * torch.log1p(-torch.rand_like(self))
+            # on most hardwares dont need to subtract 1, but rng is device dependent,
+            # so make it always bad for determinism
+            bad_incr_val = -1
+            return (-1 + bad_incr_val) / rate * torch.log1p(-torch.rand_like(self))
 
         @contextmanager
         def patch_exp_decomp():
