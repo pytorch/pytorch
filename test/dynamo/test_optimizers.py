@@ -1,3 +1,4 @@
+# Owner(s): ["module: dynamo"]
 """
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_adam in OptimizerTests)
@@ -5,11 +6,7 @@ with test_adam in OptimizerTests)
 
 import functools
 
-# Owner(s): ["module: dynamo"]
-
-
 import torch
-
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing

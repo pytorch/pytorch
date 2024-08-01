@@ -5,7 +5,6 @@ Test the scalar constructors, which also do type-coercion
 """
 
 import functools
-
 from unittest import skipIf as skipif
 
 import pytest
@@ -19,6 +18,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
+
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
