@@ -194,7 +194,7 @@ class IndexPropagation:
         inner: Any,
         iter_ranges: Dict[sympy.Symbol, sympy.Expr],
         indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr],
-    ):
+    ) -> None:
         self._inner = inner
         self.shape_env = V.graph.sizevars.shape_env
 

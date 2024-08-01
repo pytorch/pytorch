@@ -61,7 +61,7 @@ inline void {{kernel_name}}(
         compute_dtype,
         register_blocking,
         alpha=1,
-    ):
+    ) -> None:
         self.name = name
         self.input_dtype = input_dtype
         assert input2_dtype is not None
@@ -237,7 +237,7 @@ class CppMicroGemmRef(CppMicroGemm):
 
     def __init__(
         self, name, input_dtype, input2_dtype, output_dtype, compute_dtype, alpha
-    ):
+    ) -> None:
         super().__init__(
             name,
             input_dtype,
