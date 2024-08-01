@@ -3034,12 +3034,11 @@ such as `dist.all_reduce(tensor, async_op=True)`.
   py::class_<
       ::c10d::ProcessGroupNCCL::WorkNCCL,
       std::shared_ptr<::c10d::ProcessGroupNCCL::WorkNCCL>>(
-      module,
-      "WorkNCCL",
-      R"(
-A `WorkNCCL` object represents the handle to a `Work` object issued on GPU.)",
-      work)
-      .def("timeout", &::c10d::ProcessGroupNCCL::WorkNCCL::getOpTimeout);
+      processGroupNCCL,
+      "WorkNCCL");
+//       R"(
+// A `WorkNCCL` object represents the handle to a `Work` object issued on GPU.)")
+    //   .def("timeout", &::c10d::ProcessGroupNCCL::WorkNCCL::getOpTimeout);
 #endif
 
   auto fakeProcessGroup =
