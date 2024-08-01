@@ -65,6 +65,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from . import (
     _aoti,
     _cpu,
+    _dynamo,
     _functorch,
     _lazy,
     _lazy_ts_backend,
