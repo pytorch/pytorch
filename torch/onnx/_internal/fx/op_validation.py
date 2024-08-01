@@ -13,7 +13,6 @@ import torch
 import torch.fx
 from torch.fx.experimental import symbolic_shapes
 from torch.onnx import _constants, _type_utils as jit_type_utils
-
 from torch.onnx._internal.fx import (
     diagnostics,
     fx_onnx_interpreter,

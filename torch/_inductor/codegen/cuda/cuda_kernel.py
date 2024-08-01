@@ -45,7 +45,7 @@ class CUDATemplateKernel(CUDAKernel):
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
 
-    def __init__(self, kernel_name):
+    def __init__(self, kernel_name) -> None:
         """
         Initializes a new instance of the CUDATemplateKernel class.
 
@@ -331,7 +331,7 @@ class CUDATemplateCaller(ChoiceCaller):
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
-    ):
+    ) -> None:
         super().__init__(name, input_nodes, layout)
         self.category = category
         self.make_kernel_render = make_kernel_render
@@ -349,7 +349,7 @@ class CUDATemplateCaller(ChoiceCaller):
             *args, output_tensor=out
         )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"CUDATemplateCaller(source_file={self.bmreq.source_file})"
 
     def call_name(self) -> str:
