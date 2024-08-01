@@ -5411,17 +5411,13 @@ class CommonTemplate:
             z = y.item()
             return torch.cat([x, x.new_ones(z)])
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected 2-D tensors, but got 1-D for tensor number 1 in the list",
-        ):
-            self.common(
-                fn,
-                (
-                    torch.randn([2, 3]),
-                    torch.tensor([0]),
-                ),
-            )
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3]),
+                torch.tensor([0]),
+            ),
+        )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cat_unbacked_empty_1d(self):
