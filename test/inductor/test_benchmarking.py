@@ -484,6 +484,7 @@ class TestBenchmarkingGPU(TestBenchmarking):
 
     @gpu_patches
     def test_gpu_queue_limit(self, benchmarker, *args):
+        self.assertEqual(benchmarker.gpu_queue_limit, 1022)
         gpu_queue_limit = benchmarker.gpu_queue_limit
         torch.cuda.synchronize()
         torch.cuda._sleep(
