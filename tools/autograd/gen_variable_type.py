@@ -177,6 +177,7 @@ DONT_REQUIRE_DERIVATIVE = {
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "fill",
     "t",
+    "t_copy",
     "view",
     "reshape",
     "reshape_as",
@@ -188,6 +189,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "diag_embed",
     "repeat",
     "expand",
+    "expand_copy",
     "flip",
     "fliplr",
     "flipud",
@@ -198,6 +200,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "permute",
     "squeeze",
     "unsqueeze",
+    "unsqueeze_copy",
     "resize",
     "resize_as",
     "tril",
