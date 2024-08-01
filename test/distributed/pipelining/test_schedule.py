@@ -280,7 +280,10 @@ class TestScheduleLowering(TestCase):
         }
 
         comms_sch = _add_send_recv(
-            compute_sch, test_info["stage_to_rank"], test_info["num_stages"]
+            compute_sch,
+            test_info["stage_to_rank"],
+            test_info["num_stages"],
+            enable_batching=True,
         )
         for rank in expected_comms_sch:
             for i, (expected, actual) in enumerate(
@@ -319,6 +322,7 @@ class TestScheduleLowering(TestCase):
             compute_sch,
             stage_to_rank=lambda chunk_index: chunk_index % pipeline_parallel_size,
             num_stages=num_stages,
+            enable_batching=True,
         )
 
         simulated_schedule = _simulate_comms_compute(
