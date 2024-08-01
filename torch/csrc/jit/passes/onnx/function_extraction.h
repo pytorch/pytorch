@@ -25,7 +25,7 @@ namespace onnx {
 //
 // clang-format off
 // class M(torch.nn.Module):
-//     def __init__(self):
+//     def __init__(self) -> None:
 //         super().__init__()
 //         self.lns = torch.nn.ModuleList([torch.nn.LayerNorm(3, eps = i) for i in range(2)])
 //         self.celu1 = torch.nn.CELU(1.0)
