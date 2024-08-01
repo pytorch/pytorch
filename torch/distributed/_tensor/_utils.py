@@ -242,9 +242,9 @@ def get_shard_idx_on_dim(
             stride = reduce(
                 lambda a, b: a * b, [mesh.size(j) for j in shard_mesh_dims[i + 1 :]]
             )
-            shard_idx_on_tensor_dim += coordinate[mesh_dim] * stride
+            shard_idx_on_tensor_dim += coordinate[mesh_dim] * stride  # type: ignore[indiex]
         else:
-            shard_idx_on_tensor_dim += coordinate[mesh_dim]
+            shard_idx_on_tensor_dim += coordinate[mesh_dim]  # type: ignore[indiex]
 
     return shard_idx_on_tensor_dim
 
@@ -257,6 +257,9 @@ def get_dim_map(
     that tensor dimension i is sharded on. For example, if we have a dist tensor that have the
     shape of [18, 20, 30, 40] with a 2*2*2 device_mesh and placements [shard(0), shard(0), shard(1)],
     we would have a dim_map of [[0, 1], [2], [-1], [-1]].
+
+    TODO: replace the current dim_map with this updated dim_map, as the current dim_map cannot
+    express a tensor dim being sharded on multiple mesh dims.
     """
     dim_map = [[-1]] * len(global_shape)
     for mesh_dim, placement in enumerate(placements):
@@ -276,7 +279,7 @@ def compute_padded_and_unpadded_local_shape(
     This util computes the padded and unpadded local shape of a DTensor. The padded shape is computed by considering
     applying padding to the global tensor such that each padded shard would have the exact same shape across all ranks.
     This means sharding happens after padding.
-    
+
     # TODO: Remove compute_local_shape once we switch to static padding.
     This differs from `compute_local_shape`. The local shape from `compute_local_shape` considers padding after sharding,
     meaning padding is applied on each placements instead of globally. Therefore, the local shape on each shard
