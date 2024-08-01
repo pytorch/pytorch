@@ -31,7 +31,6 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
-    IS_MACOS,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -1175,7 +1174,7 @@ class DecompOneOffTests(TestCase):
         [
             xfail(
                 "nn.functional.scaled_dot_product_attention",
-                dtypes=[torch.half] + ([torch.bfloat16] if IS_MACOS else []),
+                dtypes=[torch.half],
             ),
         ],
     )
@@ -1185,7 +1184,7 @@ class DecompOneOffTests(TestCase):
         # add support for float16 over there we should update this test as well.
 
         class ScaledDotProductAttention(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(

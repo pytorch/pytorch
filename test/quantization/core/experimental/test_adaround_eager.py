@@ -70,7 +70,7 @@ class TestAdaround(QuantizationTestCase):
 
     def get_feed_forward_wrapper(self):
         class FeedForwardWrapper(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, model, sample):
@@ -81,7 +81,7 @@ class TestAdaround(QuantizationTestCase):
 
     def test_linear_chain(self):
         class LinearChain(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = nn.Linear(3, 4)
                 self.linear2 = nn.Linear(4, 5)
@@ -110,7 +110,7 @@ class TestAdaround(QuantizationTestCase):
 
     def test_conv_chain(self):
         class ConvChain(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv2d1 = nn.Conv2d(3, 4, 5, 5)
                 self.conv2d2 = nn.Conv2d(4, 5, 5, 5)

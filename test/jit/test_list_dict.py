@@ -2191,7 +2191,7 @@ class TestNamedTuple(JitTestCase):
             t: int
 
         class MyModule(types.ModuleType):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__("MyModule")
 
             def __getattr__(self, attr):
@@ -2346,7 +2346,7 @@ class TestNamedTuple(JitTestCase):
             t: "int"
 
         class MyModule(types.ModuleType):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__("MyModule")
 
             def __getattr__(self, attr):
@@ -2976,7 +2976,7 @@ class TestScriptList(JitTestCase):
         class Test(torch.nn.Module):
             segments_groupby_col: Dict[str, List[str]]
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.segments_groupby_col = get_dict()
                 self.col1 = "a"

@@ -33,7 +33,7 @@ class AHTrain:
     torch/_inductor/autoheuristic/artifacts/ directory.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.parser = argparse.ArgumentParser()
         self.add_base_arguments()
         self.args = None

@@ -559,7 +559,7 @@ def add_subgraph(tx: "InstructionTranslator", name, gm):
 class TorchHigherOrderOperatorVariable(VariableTracker):
     def __init__(
         self, value: HigherOrderOperator, source: Optional[Source] = None, **kwargs
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         self.value = value
         self.source = source
@@ -810,7 +810,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def __init__(self, hop, source, script_obj_var, method_name):
+    def __init__(self, hop, source, script_obj_var, method_name) -> None:
         super().__init__(hop, source)
         self.script_obj_var = script_obj_var
         self.method_name = method_name
@@ -1747,7 +1747,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class AutogradFunctionApplyVariable(VariableTracker):
-    def __init__(self, fwd_graph, bwd_graph, parent_source, **kwargs):
+    def __init__(self, fwd_graph, bwd_graph, parent_source, **kwargs) -> None:
         super().__init__(**kwargs)
         self.fwd_graph = fwd_graph
         self.bwd_graph = bwd_graph

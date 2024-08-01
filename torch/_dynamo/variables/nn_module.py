@@ -133,7 +133,7 @@ class NNModuleVariable(VariableTracker):
 
     def __init__(
         self, module_type: type, module_key: str, module: torch.nn.Module, **kwargs
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         self.module_type = module_type
         self.module_key = module_key
@@ -776,7 +776,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     Giving one graph per module class.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         if type(value) is torch.jit._script.RecursiveScriptModule:
             raise Unsupported(
                 "ScriptModules aren't supported in UnspecializedNNModuleVariable"
@@ -1160,7 +1160,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     compilation.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         source = kwargs.get("source", None)
         assert (
             source is not None
