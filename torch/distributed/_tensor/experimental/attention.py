@@ -7,6 +7,7 @@ import itertools
 import logging
 import types
 import weakref
+from abc import ABC, abstractmethod
 from enum import Enum
 from typing import (
     Any,
@@ -35,6 +36,7 @@ from torch.distributed.tensor.parallel.style import ParallelStyle
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 _convert_to_f32 = True
+_enable_load_balance = False
 
 
 class _CausalBehavior(Enum):
@@ -57,7 +59,7 @@ def _is_causal_behavior(
         return _CausalBehavior.IS_CAUSAL
 
     source_rank = (rank - i) % world_size
-    if source_rank < rank:
+    if source_rank < rank or _enable_load_balance:
         return _CausalBehavior.NOT_IS_CAUSAL
     else:
         return _CausalBehavior.SKIP
@@ -73,30 +75,57 @@ def _maybe_wait(tensor: torch.Tensor) -> torch.Tensor:
     return tensor
 
 
+def _partial_update(
+    original: torch.Tensor,
+    new: torch.Tensor,
+    dim: int,
+    n_chunks: int,
+    idx: int,
+    add: bool,
+) -> torch.Tensor:
+    chunks = list(original.chunk(n_chunks, dim=dim))
+    if add:
+        chunks[idx] += new
+    else:
+        chunks[idx] = new
+    return torch.cat(chunks, dim=dim)
+
+
 class _SDPAMerger:
     """A class to help to merge the local SDPA result."""
 
-    def __init__(self, convert_to_f32: bool):
+    def __init__(self, convert_to_f32: bool, seq_dim: int):
+        self._seq_dim = seq_dim
         self._out: Optional[torch.Tensor] = None
         self._lse: Optional[torch.Tensor] = None
         self._convert_to_f32 = convert_to_f32
         self._out_dtype = torch.float32
         self._lse_dtype = torch.float32
 
-    def _merge_one(self, block_out: torch.Tensor, block_lse: torch.Tensor) -> None:
+    def _merge_one(
+        self, block_out: torch.Tensor, block_lse: torch.Tensor, partial: bool
+    ) -> None:
         block_lse = block_lse.unsqueeze(dim=-1)
         if self._lse is None:
             self._lse = block_lse
             self._out = block_out
         else:
-            new_lse = self._lse + torch.log(1 + torch.exp(block_lse - self._lse))
-            self._out = (
-                torch.exp(self._lse - new_lse) * self._out
+            lse = self._lse.chunk(2, dim=self._seq_dim)[1] if partial else self._lse
+            out = self._out.chunk(2, dim=self._seq_dim)[1] if partial else self._out
+
+            new_lse = lse + torch.log(1 + torch.exp(block_lse - lse))
+            out = (
+                torch.exp(lse - new_lse) * out
                 + torch.exp(block_lse - new_lse) * block_out
             )
-            self._lse = new_lse
+            if partial:
+                self._lse = _partial_update(self._lse, new_lse, 2, 2, 1, add=False)
+                self._out = _partial_update(self._out, out, 2, 2, 1, add=False)
+            else:
+                self._lse = new_lse
+                self._out = out
 
-    def step(self, out: torch.Tensor, lse: torch.Tensor) -> None:
+    def step(self, out: torch.Tensor, lse: torch.Tensor, partial: bool) -> None:
         self._out_dtype = out.dtype
         self._lse_dtype = lse.dtype
 
@@ -104,7 +133,7 @@ class _SDPAMerger:
             out = out.to(torch.float32)
             lse = lse.to(torch.float32)
 
-        self._merge_one(out, lse)
+        self._merge_one(out, lse, partial)
 
     def results(self) -> Tuple[torch.Tensor, torch.Tensor]:
         assert self._out is not None
@@ -184,6 +213,7 @@ class AttentionOp(Protocol):
 def _ring_rotate(
     block: torch.Tensor, pg: dist.ProcessGroup, send_to_next: bool
 ) -> torch.Tensor:
+    block = block.contiguous()
     size = dist.get_world_size(pg)
     dsts = (
         list(range(1, size)) + [0]
@@ -242,7 +272,7 @@ def _templated_ring_attention(
     key = key.contiguous()
     value = value.contiguous()
 
-    sdpa_merger = _SDPAMerger(_convert_to_f32)
+    sdpa_merger = _SDPAMerger(_convert_to_f32, seq_dim=2)
 
     rest: List[Any]
     out: torch.Tensor
@@ -263,16 +293,29 @@ def _templated_ring_attention(
             rank=rank, world_size=size, i=i, is_causal=is_causal
         )
 
-        if is_causal_behavior != _CausalBehavior.SKIP:
-            out, logsumexp, *rest = op(
-                query,
-                key,
-                value,
-                is_causal=is_causal_behavior.value,
-                **kwargs,
-            )
+        if is_causal_behavior == _CausalBehavior.SKIP:
+            continue
 
-            sdpa_merger.step(out, logsumexp)
+        if i == 0 or (not _enable_load_balance or not is_causal):
+            q, k, v, partial = (query, key, value, False)
+        elif i <= rank:
+            q, k, v, partial = (
+                query,
+                key.chunk(2, dim=2)[0],
+                value.chunk(2, dim=2)[0],
+                False,
+            )
+        else:
+            q, k, v, partial = query.chunk(2, dim=2)[1], key, value, True
+
+        out, logsumexp, *rest = op(
+            q,
+            k,
+            v,
+            is_causal=is_causal_behavior.value,
+            **kwargs,
+        )
+        sdpa_merger.step(out, logsumexp, partial)
 
     return *sdpa_merger.results(), *rest
 
@@ -395,13 +438,34 @@ def _templated_ring_attention_backward(
         )
 
         if is_causal_behavior != _CausalBehavior.SKIP:
-            kwargs[grad_out_name] = grad_out
+            if i == 0 or (not _enable_load_balance or not is_causal):
+                q, k, v, out_, dout, lse = (query, key, value, out, grad_out, logsumexp)
+            elif i <= rank:
+                q, k, v, out_, dout, lse = (
+                    query,
+                    key.chunk(2, dim=2)[0],
+                    value.chunk(2, dim=2)[0],
+                    out,
+                    grad_out,
+                    logsumexp,
+                )
+            else:
+                q, k, v, out_, dout, lse = (
+                    query.chunk(2, dim=2)[1],
+                    key,
+                    value,
+                    out.chunk(2, dim=2)[1],
+                    grad_out.chunk(2, dim=2)[1],
+                    logsumexp.chunk(2, dim=2)[1].contiguous(),
+                )
+
+            kwargs[grad_out_name] = dout
             grad_query_, grad_key_, grad_value_, *rest = op(
-                query=query,
-                key=key,
-                value=value,
-                out=out,
-                logsumexp=logsumexp,
+                query=q,
+                key=k,
+                value=v,
+                out=out_,
+                logsumexp=lse,
                 is_causal=is_causal_behavior.value,
                 **kwargs,
             )
@@ -411,7 +475,10 @@ def _templated_ring_attention_backward(
             grad_value_ = torch.zeros_like(value)
 
         # Get the grad key and grad value for the i round.
-        if i > 0:
+        if i == 0:
+            grad_key += grad_key_
+            grad_value += grad_value_
+        else:
             buffer = next_grad_kv
             pointer = 0
             grad_key = buffer[pointer : pointer + grad_key.numel()].reshape(
@@ -422,13 +489,21 @@ def _templated_ring_attention_backward(
                 grad_value.shape
             )
 
-        grad_key += grad_key_
-        grad_value += grad_value_
+            if i <= rank and _enable_load_balance:
+                grad_key = _partial_update(grad_key, grad_key_, 2, 2, 0, add=True)
+                grad_value = _partial_update(grad_value, grad_value_, 2, 2, 0, add=True)
+            else:
+                grad_key += grad_key_
+                grad_value += grad_value_
 
         # Send the key, value, grad key, and grad value to the next rank.
         next_grad_kv = torch.cat([grad_key.flatten(), grad_value.flatten()])
         next_grad_kv = _ring_rotate(next_grad_kv, pg, send_to_next=True)
-        grad_query += grad_query_
+
+        if i <= rank or not _enable_load_balance:
+            grad_query += grad_query_
+        else:
+            grad_query = _partial_update(grad_query, grad_query_, 2, 2, 1, add=True)
 
     assert grad_query is not None
     assert grad_key is not None
@@ -812,10 +887,60 @@ def enable_context_parallel(
     )
 
 
-def _get_sequence_shard(
-    buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-) -> torch.Tensor:
-    return buffer.chunk(mesh.size(), dim=seq_dim)[mesh.get_local_rank()]
+class _LoadBalancer(ABC):
+    @classmethod
+    @abstractmethod
+    def shard(cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int):
+        ...
+
+    @classmethod
+    @abstractmethod
+    def unshard(cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int):
+        ...
+
+
+class EvenSharder(_LoadBalancer):
+    @classmethod
+    def shard(cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int):
+        assert buffer.size()[seq_dim] % mesh.size() == 0
+        return buffer.chunk(mesh.size(), dim=seq_dim)[mesh.get_local_rank()]
+
+    @classmethod
+    def unshard(cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int):
+        buffer = buffer.contiguous()
+        all_buffers = [torch.empty_like(buffer) for _ in range(mesh.size())]
+        ft_c.all_gather_inplace(all_buffers, buffer, mesh)
+        return torch.cat(all_buffers, dim=seq_dim)
+
+
+class ZigzagLoadBalancer(_LoadBalancer):
+    @classmethod
+    def shard(cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int):
+        cp_world_size = mesh.size()
+        cp_rank = mesh.get_rank()
+        assert buffer.size()[seq_dim] % (cp_world_size * 2) == 0
+        chunks = buffer.chunk(cp_world_size * 2, dim=seq_dim)
+        return torch.cat(
+            (chunks[cp_rank], chunks[cp_world_size * 2 - cp_rank - 1]),
+            dim=seq_dim,
+        )
+
+    @classmethod
+    def unshard(cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int):
+        buffer = buffer.contiguous()
+        cp_world_size = mesh.size()
+        cp_rank = mesh.get_rank()
+
+        all_buffers = [torch.empty_like(buffer) for _ in range(cp_world_size)]
+        ft_c.all_gather_inplace(all_buffers, buffer, mesh)
+        sliced_buffers = [sb for b in all_buffers for sb in b.chunk(2, dim=seq_dim)]
+        ordered_buffers = list(sliced_buffers)
+        for i, b in enumerate(sliced_buffers):
+            if i % 2 == 0:
+                ordered_buffers[i // 2] = b
+            else:
+                ordered_buffers[cp_world_size * 2 - (i // 2) - 1] = b
+        return torch.cat(ordered_buffers, dim=seq_dim)
 
 
 @contextlib.contextmanager
@@ -846,11 +971,12 @@ def context_parallel_buffers(
             "number of as `buffers`."
         )
 
+    sharder = ZigzagLoadBalancer if _enable_load_balance else EvenSharder
     assert mesh is not None
     new_buffers = []
     for buffer, seq_dim, restore_func in zip(buffers, seq_dims, restore_funcs_tuple):
         original_buffers.append(buffer if restore_func else None)
-        new_buffers.append(_get_sequence_shard(buffer, mesh, seq_dim))
+        new_buffers.append(sharder.shard(buffer, mesh, seq_dim))
 
     yield new_buffers
 
@@ -858,3 +984,13 @@ def context_parallel_buffers(
         if original_buffer is not None:
             assert restore_func is not None
             restore_func(original_buffer)
+
+
+@torch.no_grad()
+def context_parallel_unshard(
+    mesh: DeviceMesh,
+    buffers: List[torch.Tensor],
+    seq_dims: List[int],
+) -> List[torch.Tensor]:
+    sharder = ZigzagLoadBalancer if _enable_load_balance else EvenSharder
+    return [sharder.unshard(b, mesh, dim) for b, dim in zip(buffers, seq_dims)]
