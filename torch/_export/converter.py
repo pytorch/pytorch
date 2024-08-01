@@ -1333,20 +1333,22 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         # Because during conversion, we set tensor constants as GetAttr,
         # retracing cannot recognize them as tensor constants but instead
         # treat them as buffers. We need to set them again here.
-        ep._constants.update({
-            k: v for k, v in name_to_constant.items()
-            if isinstance(v, (torch.Tensor, torch.ScriptObject))
-        })
+        ep._constants.update(
+            {
+                k: v
+                for k, v in name_to_constant.items()
+                if isinstance(v, (torch.Tensor, torch.ScriptObject))
+            }
+        )
         for k in name_to_constant:
             ep.state_dict.pop(k, None)
 
         for i, spec in enumerate(ep.graph_signature.input_specs):
             # Mark as constant tensors for erroneously traced buffers.
-            if (
-                spec.kind == InputKind.BUFFER
-                and spec.target in name_to_constant
-                and isinstance(name_to_constant[spec.target], torch.Tensor)
-            ):
+            if spec.kind == InputKind.BUFFER and spec.target in name_to_constant:
+                assert isinstance(
+                    name_to_constant[spec.target], torch.Tensor
+                ), f"{type(name_to_constant[spec.target])} has been erroneously marked as buffer"
                 spec.kind = InputKind.CONSTANT_TENSOR
         ep.verifier().check(ep)
 
