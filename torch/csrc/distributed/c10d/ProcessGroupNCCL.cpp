@@ -587,10 +587,6 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   return true;
 }
 
-std::chrono::milliseconds ProcessGroupNCCL::WorkNCCL::getOpTimeout() const {
-  return opTimeout_;
-}
-
 bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
     std::optional<std::chrono::milliseconds> timeout) {
   STATIC_SCOPED_WAIT_COUNTER(
@@ -1609,7 +1605,7 @@ const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
 
 void ProcessGroupNCCL::extendTimeoutUntilFirstDone(
     const std::chrono::milliseconds& timeout) {
-  std::unique_lock<std::mutex> lock(mtxTimeoutExtension_);
+  std::lock_guard<std::mutex> lock(mtxTimeoutExtension_);
   extendedTimeout_ += timeout;
 }
 
@@ -1802,7 +1798,7 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (work.isCompleted()) {
         {
           // Reset the timeout and first work if the work is completed.
-          std::unique_lock<std::mutex> lock(mtxTimeoutExtension_);
+          std::lock_guard<std::mutex> lock(mtxTimeoutExtension_);
           if (work.opTimeoutReduce_.count() > 0) {
             extendedTimeout_ -= work.opTimeoutReduce_;
             inflightTimeoutExt_ -= work.opTimeoutReduce_;
@@ -2444,7 +2440,7 @@ void ProcessGroupNCCL::assignTimeoutToWork(
     c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work,
     c10::intrusive_ptr<ProcessGroupNCCL::Options> option) {
   std::chrono::milliseconds timeout = option->timeout;
-  std::unique_lock<std::mutex> lock(mtxTimeoutExtension_);
+  std::lock_guard<std::mutex> lock(mtxTimeoutExtension_);
   if (extendedTimeout_.count() > 0) {
     timeout += extendedTimeout_;
   }

@@ -314,8 +314,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     bool checkTimeout(
         std::optional<std::chrono::milliseconds> timeout = std::nullopt);
 
-    std::chrono::milliseconds getOpTimeout() const;
-
     std::vector<at::Tensor> result() override;
 
    protected:
