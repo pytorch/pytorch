@@ -276,7 +276,7 @@ OPINFO_SAMPLE_INPUT_INDEX: Optional[int] = TestEnvironment.def_setting(
 )
 
 DEFAULT_DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
-DEFAULT_SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
+DEFAULT_SLOW_TESTS_FILE = 'slow_tests.json'
 
 disabled_tests_dict = {}
 slow_tests_dict = {}
