@@ -107,8 +107,8 @@ def _find_q_dq_node_for_user(
 
     q_node = None
     if (
-        dq_node.args[0].op == "call_function"
-        and dq_node.args[0].target in _QUANTIZE_OPS
+        dq_node.args[0].op == "call_function"  # type: ignore[union-attr]
+        and dq_node.args[0].target in _QUANTIZE_OPS  # type: ignore[union-attr]
     ):
         q_node = dq_node.args[0]
     return (q_node, dq_node)
@@ -299,6 +299,15 @@ def fold_bn_weights_into_conv_node(
             continue
         user.replace_all_uses_with(conv_node)
 
+    # If the BN node does not have users, erase it from the graph
+    # Note: we need to do this manually because the model can still be in train
+    # mode at this point, in which case DCE won't erase the BN node automatically
+    # since the node refers to a mutating op. Here we still need to call DCE first
+    # to get rid of the unused getitem nodes that consume the BN node.
+    m.graph.eliminate_dead_code()
+    if len(bn_node.users) == 0:
+        m.graph.erase_node(bn_node)
+
 
 # fuse conv bn weights, inplace modification of the graph_module and graph
 def _fuse_conv_bn_(m: GraphModule) -> None:
@@ -353,7 +362,7 @@ def _get_aten_graph_module_for_pattern(
             [x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs]
         )
     aten_pattern = capture_pre_autograd_graph(
-        pattern,
+        pattern,  # type: ignore[arg-type]
         example_inputs,
         kwargs,
     )
@@ -373,7 +382,7 @@ def _get_aten_graph_module_for_pattern(
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()
 
-    return aten_pattern
+    return aten_pattern  # type: ignore[return-value]
 
 
 def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
