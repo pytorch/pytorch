@@ -1613,7 +1613,7 @@ def _abort_backend(pg: ProcessGroup):
     """
     try:
         backend = pg._get_backend(torch.device("cuda"))
-    except:
+    except RuntimeError:
         backend = None
     if isinstance(backend, ProcessGroupNCCL):
         backend.abort()
@@ -1995,12 +1995,13 @@ def _abort_process_group(group: Optional[ProcessGroup] = None):
 
     pg = group or GroupMember.WORLD
 
+    assert pg is not None
     if _world.pg_map.get(pg, None) is None:
         raise ValueError("Invalid process group specified or has been destroyed.")
 
     try:
         backend = pg._get_backend(torch.device("cuda"))
-    except:
+    except RuntimeError:
         backend = None
 
     if not isinstance(backend, ProcessGroupNCCL):
