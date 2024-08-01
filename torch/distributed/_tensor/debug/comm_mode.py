@@ -2,16 +2,16 @@
 import copy
 import json
 import re
-
+import weakref
 from collections import defaultdict
 from typing import Any, Dict
 
 import torch
-
 import torch.nn
-
+from torch._guards import detect_fake_mode
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed._tensor.api import DTensor
+from torch.distributed._tools.mod_tracker import ModTracker
 from torch.nn.modules.module import (
     register_module_forward_hook,
     register_module_forward_pre_hook,
@@ -19,12 +19,10 @@ from torch.nn.modules.module import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
-from torch.utils.module_tracker import ModuleTracker
+
 
 funcol_native = torch.ops._c10d_functional
 funcol_py = torch.ops.c10d_functional
-from torch._guards import detect_fake_mode
-
 funcol_autograd = torch.ops._c10d_functional_autograd
 c10d_ops = torch.ops.c10d
 
@@ -69,7 +67,7 @@ trivial_ops = {
 }
 
 
-class CommModeModuleTracker(ModuleTracker):
+class CommModeModuleTracker(ModTracker):
     """
     Inherits ModuleTracker and expands on its functionality to track the
     parameters and sharding information of a model at a module-level
@@ -84,6 +82,7 @@ class CommModeModuleTracker(ModuleTracker):
         self.parent_dict = {}
         self.parent_list = []
         self.sharding_dict = {}
+        self.activation_checkpointing = False
         self.name = ""
 
     def _fw_set_module_hook(self, mod, input, output):
@@ -92,11 +91,17 @@ class CommModeModuleTracker(ModuleTracker):
         all other hooks are resolved
         """
 
-        # module is no longer parent of next modules
-        self.parent_list.pop()
+        if self.is_bw:
+            self.activation_checkpointing = True
+        else:
+            self.activation_checkpointing = False
 
-        # set current module to previous parent module
-        self.name = self.parent_list[-1]
+        if not self.activation_checkpointing:
+            # module is no longer parent of next modules
+            self.parent_list.pop()
+
+            # set current module to previous parent module
+            self.name = self.parent_list[-1]
 
     def _fw_pre_hook(self, mod, input):
         """
@@ -104,63 +109,73 @@ class CommModeModuleTracker(ModuleTracker):
         collects the parameters and sharding information of a module and
         stores it in a dictionary.
         """
+        if self.is_bw:
+            self.activation_checkpointing = True
+        else:
+            self.activation_checkpointing = False
+
         self.name = super()._get_mod_name(mod)
+        w_mod = weakref.ref(mod)
 
         # adds current sub-module to module tracker parent class
-        super()._get_append_fn(self.name, False)()
+        super()._get_append_fn(w_mod, self.name, False)()
 
         args, _ = tree_flatten(input)
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
-        if tensors:
-            register_multi_grad_hook(tensors, super()._get_pop_fn(self.name, True))
+        if not self.is_bw and tensors:
+            register_multi_grad_hook(
+                tensors, super()._get_pop_fn(w_mod, self.name, True)
+            )
 
-        # contains information about module ordering and depth in the module tree
-        if self.name not in self.module_helper_dict:
-            self.module_helper_dict[self.name] = {}
+        if not self.activation_checkpointing:
+            # contains information about module ordering and depth in the module tree
+            if self.name not in self.module_helper_dict:
+                self.module_helper_dict[self.name] = {}
 
-        self.module_helper_dict[self.name]["module_type"] = (
-            str(type(mod)).replace("<", "").replace(">", "")
-        )
-        self.module_helper_dict[self.name]["depth"] = len(self.parents) - 1
+            self.module_helper_dict[self.name]["module_type"] = (
+                str(type(mod)).replace("<", "").replace(">", "")
+            )
+            self.module_helper_dict[self.name]["depth"] = len(self.parents) - 1
 
-        for param_name, param in mod.named_parameters(recurse=False):
-            if self.name not in self.module_parameters_dict:
-                self.module_parameters_dict[self.name] = {}
+            for param_name, param in mod.named_parameters(recurse=False):
+                if self.name not in self.module_parameters_dict:
+                    self.module_parameters_dict[self.name] = {}
 
-            self.module_parameters_dict[self.name][param_name] = param.data
+                self.module_parameters_dict[self.name][param_name] = param.data
 
-            if isinstance(param.data, DTensor):
-                key_name = self.name + "." + param_name
-                self.sharding_dict[key_name] = param.data.placements
+                if isinstance(param.data, DTensor):
+                    key_name = self.name + "." + param_name
+                    self.sharding_dict[key_name] = param.data.placements
 
-                if "parameters" not in self.module_helper_dict[self.name]:
-                    self.module_helper_dict[self.name]["parameters"] = {}
+                    if "parameters" not in self.module_helper_dict[self.name]:
+                        self.module_helper_dict[self.name]["parameters"] = {}
 
-                self.module_helper_dict[self.name]["parameters"][param_name] = str(
-                    param.data.placements
-                )
+                    self.module_helper_dict[self.name]["parameters"][param_name] = str(
+                        param.data.placements
+                    )
 
-        # used to store module's parents to ensure correctness in backward pass/checkpointing
-        if self.name not in self.module_parents_dict:
-            self.module_parents_dict[self.name] = copy.deepcopy(self.parents)
+            # used to store module's parents to ensure correctness in backward pass/checkpointing
+            if self.name not in self.module_parents_dict:
+                self.module_parents_dict[self.name] = copy.deepcopy(self.parents)
 
-        # used to create parent-child module associations for json dumps
-        parent = self.parent_list[-1]
-        if parent not in self.parent_dict:
-            self.parent_dict[parent] = []
+            # used to create parent-child module associations for json dumps
+            parent = self.parent_list[-1]
+            if parent not in self.parent_dict:
+                self.parent_dict[parent] = []
 
-        self.parent_dict[parent].append(self.name)
-        self.parent_list.append(self.name)
+            self.parent_dict[parent].append(self.name)
+            self.parent_list.append(self.name)
 
-        self.register_forward_hook_handles[self.name] = mod.register_forward_hook(
-            self._fw_set_module_hook
-        )
+            self.register_forward_hook_handles[self.name] = mod.register_forward_hook(
+                self._fw_set_module_hook
+            )
 
     def _fw_post_hook(self, mod, input, output):
         """
         This function is called when the forward pass of a module is called.
         It updates the module tracker and removes the module from parent data
         """
+
         super()._fw_post_hook(mod, input, output)
 
     def _bw_hook(self, mod, output):
@@ -168,9 +183,11 @@ class CommModeModuleTracker(ModuleTracker):
         This function is called when the backward pass of a module is called. It
         updates the current module for backward passes
         """
+        self.activation_checkpointing = False
         self.name = super()._get_mod_name(mod)
 
     def __enter__(self):
+        self.activation_checkpointing = False
         self.module_parameters_dict.clear()
         self.sharding_dict.clear()
         self.parent_dict.clear()
@@ -189,6 +206,7 @@ class CommModeModuleTracker(ModuleTracker):
         super().__exit__(*args)
         self._bw_handle.remove()
 
+        # removes all forward_hook handles added in the pre-hook
         for handle in self.register_forward_hook_handles.values():
             handle.remove()
 
@@ -235,16 +253,18 @@ class CommDebugMode(TorchDispatchMode):
     def generate_json_dump(self, file_name="comm_mode_log.json", noise_level=3):
         """
         Creates json file used to build browser visual
+        0. prints module-level collective counts
+        1. prints dTensor operations not included in trivial operations
+        2. prints operations not included in trivial operations
+        3. prints all operations
         """
 
-        include_ops = False
-        include_trivial_ops = False
-
-        if noise_level > 1:
-            include_ops = True
-
-        if noise_level > 2:
-            include_trivial_ops = True
+        (
+            include_DTensor_ops,
+            include_module_data,
+            include_ops,
+            include_trivial_ops,
+        ) = self.set_noise_parameters(noise_level)
 
         # recursively builds json data
         def add_json_information(json_dict, fqn):
@@ -257,9 +277,10 @@ class CommDebugMode(TorchDispatchMode):
             json_dict["operations_forward"] = []
             json_dict["operations_backward"] = []
 
+            # adds module layer type and parameters, and their sharding
             if (
                 "module_type" in self.advanced_module_tracker.module_helper_dict[fqn]
-                and include_ops
+                and include_module_data
             ):
                 json_dict[
                     "module_type"
@@ -289,23 +310,30 @@ class CommDebugMode(TorchDispatchMode):
             # adds module operation information
             forward_operations = []
             backward_operations = []
-            if include_ops:
-                if fqn in self.comm_module_operation_counts:
-                    forward_operations = [
-                        op
-                        for op in self.comm_module_operation_counts[fqn][
-                            "operations_list"
-                        ]
-                        if not op["is_bw"]
-                    ]
-                    backward_operations = [
-                        op
-                        for op in self.comm_module_operation_counts[fqn][
-                            "operations_list"
-                        ]
-                        if op["is_bw"]
-                    ]
+            checkpointing_operations = []
 
+            # only get operations if the minimum operation noise level is set to true
+            if include_DTensor_ops:
+                if fqn in self.comm_module_operation_counts:
+                    (
+                        forward_operations,
+                        backward_operations,
+                        checkpointing_operations,
+                    ) = self.get_operations_list(self.comm_module_operation_counts[fqn])
+
+            # remove all operations who don't have DTensor inputs
+            if not include_ops:
+                forward_operations = [
+                    op for op in forward_operations if len(op["input_sharding"])
+                ]
+                backward_operations = [
+                    op for op in backward_operations if len(op["input_sharding"])
+                ]
+                checkpointing_operations = [
+                    op for op in checkpointing_operations if len(op["input_sharding"])
+                ]
+
+            # remove all operations in trivial operations set
             if not include_trivial_ops:
                 forward_operations = [
                     op
@@ -315,6 +343,11 @@ class CommDebugMode(TorchDispatchMode):
                 backward_operations = [
                     op
                     for op in backward_operations
+                    if str(op["name"]) not in trivial_ops
+                ]
+                checkpointing_operations = [
+                    op
+                    for op in checkpointing_operations
                     if str(op["name"]) not in trivial_ops
                 ]
 
@@ -335,8 +368,17 @@ class CommDebugMode(TorchDispatchMode):
                     op["input_sharding"][i] = str(op["input_sharding"][i])
                     op["input_shape"][i] = str(op["input_shape"][i])
 
+            checkpointing_operations = copy.deepcopy(checkpointing_operations)
+            for op in checkpointing_operations:
+                op["name"] = str(op["name"])
+
+                for i in range(len(op["input_sharding"])):
+                    op["input_sharding"][i] = str(op["input_sharding"][i])
+                    op["input_shape"][i] = str(op["input_shape"][i])
+
             json_dict["operations_forward"] = forward_operations
             json_dict["operations_backward"] = backward_operations
+            json_dict["operations_checkpointing"] = checkpointing_operations
 
             if fqn not in self.advanced_module_tracker.parent_dict:
                 return json_dict
@@ -359,18 +401,18 @@ class CommDebugMode(TorchDispatchMode):
         Generates detailed table displaying operations and collective tracing information
         on a module level. Amount of information is dependent on noise_level
 
-        1. prints module-level collective counts
+        0. prints module-level collective counts
+        1. prints dTensor operations not included in trivial operations, module information
         2. prints operations not included in trivial operations
         3. prints all operations
         """
-        include_ops = False
-        include_trivial_ops = False
 
-        if noise_level > 1:
-            include_ops = True
-
-        if noise_level > 2:
-            include_trivial_ops = True
+        (
+            include_DTensor_ops,
+            include_module_data,
+            include_ops,
+            include_trivial_ops,
+        ) = self.set_noise_parameters(noise_level)
 
         table = ""
         for fqn in self.advanced_module_tracker.module_helper_dict:
@@ -380,7 +422,7 @@ class CommDebugMode(TorchDispatchMode):
             )
             table += f"{indent}{fqn}\n"
 
-            if include_ops:
+            if include_module_data:
                 if (
                     "module_type"
                     in self.advanced_module_tracker.module_helper_dict[fqn]
@@ -417,46 +459,68 @@ class CommDebugMode(TorchDispatchMode):
 
             forward_operations = []
             backward_operations = []
-            if include_ops:
-                if fqn in self.comm_module_operation_counts:
-                    forward_operations = [
-                        op
-                        for op in self.comm_module_operation_counts[fqn][
-                            "operations_list"
-                        ]
-                        if not op["is_bw"]
-                    ]
-                    backward_operations = [
-                        op
-                        for op in self.comm_module_operation_counts[fqn][
-                            "operations_list"
-                        ]
-                        if op["is_bw"]
-                    ]
+            checkpointing_operations = []
 
-            # adds tracing information for module's forward or backward
+            if include_DTensor_ops:
+                if fqn in self.comm_module_operation_counts:
+                    (
+                        forward_operations,
+                        backward_operations,
+                        checkpointing_operations,
+                    ) = self.get_operations_list(self.comm_module_operation_counts[fqn])
+
             def add_tracing_information(table, collectives_dict, operation_list):
+                """
+                adds tracing information for module's forward or backward
+                """
                 for collective, count in collectives_dict.items():
                     table += (
                         f"\033[1;33m{collective_indent}*{collective}: {count}\033[0m\n"
                     )
 
+                def add_operations(
+                    table, operation, collective_indent, operation_indent
+                ):
+                    """
+                    adds operation information to the table
+                    """
+                    table += f"\033[1;33m{collective_indent}**{operation_name}\033[0m\n"
+
+                    if len(operation["input_shape"]):
+                        operation_shape = operation["input_shape"]
+                        operation_sharding = operation["input_sharding"]
+                        operation_device_mesh = operation["device_mesh"]
+
+                        table += f"\033[1;31m{operation_indent}shape: {operation_shape}\033[0m\n"
+                        table += f"\033[1;31m{operation_indent}sharding: {operation_sharding}\033[0m\n"
+                        table += f"\033[1;31m{operation_indent}device mesh: {operation_device_mesh}\033[0m\n"
+
+                    return table
+
                 for operation in operation_list:
                     operation_name = str(operation["name"])
 
-                    if operation_name not in trivial_ops or include_trivial_ops:
-                        table += (
-                            f"\033[1;33m{collective_indent}**{operation_name}\033[0m\n"
+                    # include all operations
+                    if include_trivial_ops:
+                        table = add_operations(
+                            table, operation, collective_indent, operation_indent
                         )
 
-                        if len(operation["input_shape"]):
-                            operation_shape = operation["input_shape"]
-                            operation_sharding = operation["input_sharding"]
-                            operation_device_mesh = operation["device_mesh"]
+                    # include all operations not in trivial operations
+                    elif include_ops and operation_name not in trivial_ops:
+                        table = add_operations(
+                            table, operation, collective_indent, operation_indent
+                        )
 
-                            table += f"\033[1;31m{operation_indent}shape: {operation_shape}\033[0m\n"
-                            table += f"\033[1;31m{operation_indent}sharding: {operation_sharding}\033[0m\n"
-                            table += f"\033[1;31m{operation_indent}device mesh: {operation_device_mesh}\033[0m\n"
+                    # only include dTensor operations not in trivial set
+                    elif (
+                        include_DTensor_ops
+                        and (operation_name not in trivial_ops)
+                        and len(operation["input_shape"])
+                    ):
+                        table = add_operations(
+                            table, operation, collective_indent, operation_indent
+                        )
 
                 return table
 
@@ -472,7 +536,28 @@ class CommDebugMode(TorchDispatchMode):
                     table, backward_collectives, backward_operations
                 )
 
+            if len(checkpointing_operations):
+                table += f"{indent}ACTIVATION CHECKPOINTING\n"
+                table = add_tracing_information(table, {}, checkpointing_operations)
+
         return table
+
+    def get_operations_list(self, module_operation_counts):
+        forward_operations = [
+            op for op in module_operation_counts["operations_list"] if not op["is_bw"]
+        ]
+        backward_operations = [
+            op
+            for op in module_operation_counts["operations_list"]
+            if op["is_bw"] and not op["is_activation_checkpointing"]
+        ]
+        checkpointing_operations = [
+            op
+            for op in module_operation_counts["operations_list"]
+            if op["is_activation_checkpointing"]
+        ]
+
+        return forward_operations, backward_operations, checkpointing_operations
 
     def get_total_counts(self) -> int:
         return sum(self.comm_counts.values())
@@ -532,6 +617,32 @@ class CommDebugMode(TorchDispatchMode):
     def print_sharding_info(self):
         self.advanced_module_tracker.print_sharding_info()
 
+    def set_noise_parameters(self, noise_level):
+        """
+        sets variables controlling what information displays based on noise level
+        """
+        include_DTensor_ops = False
+        include_module_data = False
+        include_ops = False
+        include_trivial_ops = False
+
+        if noise_level > 0:
+            include_DTensor_ops = True
+            include_module_data = True
+
+        if noise_level > 1:
+            include_ops = True
+
+        if noise_level > 2:
+            include_trivial_ops = True
+
+        return (
+            include_DTensor_ops,
+            include_module_data,
+            include_ops,
+            include_trivial_ops,
+        )
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         # When running this mode with DTensor, ordinarily all modes will
         # run **before** subclasses get a chance to run.
@@ -553,6 +664,11 @@ class CommDebugMode(TorchDispatchMode):
 
         # tracks if the operation is part of the backward pass
         operation_dict["is_bw"] = self.advanced_module_tracker.is_bw
+
+        # tracks if the operation is part of activation checkpointing
+        operation_dict[
+            "is_activation_checkpointing"
+        ] = self.advanced_module_tracker.activation_checkpointing
 
         if any(t == DTensor for t in types):
             for ele in args:
