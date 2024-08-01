@@ -43,13 +43,10 @@ from torch.ao.quantization.quantize_jit import (
     prepare_jit,
     script_qconfig,
 )
-
 from torch.jit._recursive import wrap_cpp_module
-
 from torch.testing import FileCheck
 
 # Annotated models
-
 from torch.testing._internal.common_quantization import (
     AnnotatedConvBnModel,
     AnnotatedConvModel,
@@ -76,7 +73,6 @@ from torch.testing._internal.common_quantized import (
     qengine_is_fbgemm,
     qengine_is_qnnpack,
 )
-
 from torch.testing._internal.common_utils import set_default_dtype
 from torch.testing._internal.jit_utils import (
     attrs_with_prefix,
