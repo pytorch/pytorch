@@ -1812,9 +1812,15 @@ def tensor_is_aligned(tensor: torch.Tensor):
     # but symbolic storage_offsets are. For consistency, we suppress guard creation
     # upon performing this check: that ensures that we don't add recompiles when we
     # add this logic.
-    return (
-        tensor.storage_offset() * get_dtype_size(tensor.dtype)
-    ) % GPU_ALIGN_BYTES == 0
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    try:
+        return guard_size_oblivious(
+            (tensor.storage_offset() * get_dtype_size(tensor.dtype)) % GPU_ALIGN_BYTES
+            == 0
+        )
+    except torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode:
+        return False
 
 
 def should_assume_input_aligned(example_input: torch.Tensor):
