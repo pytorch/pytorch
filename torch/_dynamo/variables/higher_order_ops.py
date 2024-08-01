@@ -6,16 +6,12 @@ import inspect
 import itertools
 import logging
 import types
-
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.base import VariableTracker
@@ -26,14 +22,18 @@ from torch._guards import Source
 from torch._ops import HigherOrderOperator
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
-from .. import variables
 
+from .. import variables
 from ..exc import UncapturedHigherOrderOpError, unimplemented, Unsupported
 from ..source import AttrSource
 from ..utils import proxy_args_kwargs
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 log = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ def raise_hard_error_if_graph_break(reason):
 
 
 @contextlib.contextmanager
-def dynamo_enable_grad(tx, enable=True):
+def dynamo_enable_grad(tx: "InstructionTranslator", enable=True):
     from . import GradModeVariable
 
     org_value = torch.is_grad_enabled()
@@ -83,7 +83,7 @@ def only_consist_of(var, types, allow_none=False):
 # A more read-able syntax sugar for creating a UserFunctionVariable for f
 # and run call_function on it. Make it return a function to preserve the calling
 # convention of the original f.
-def _make_inlined(tx, f):
+def _make_inlined(tx: "InstructionTranslator", f):
     assert callable(f), "Expect f to be a python callable."
 
     def inline_call(*args, **kwargs):
@@ -131,7 +131,9 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     ), "inputs to function body cannot alias outputs"
 
 
-def _check_supported_callable_arg(tx, func_var: VariableTracker, arg_name):
+def _check_supported_callable_arg(
+    tx: "InstructionTranslator", func_var: VariableTracker, arg_name
+):
     is_callable = (
         BuiltinVariable(callable).call_function(tx, [func_var], {}).as_python_constant()
     )
@@ -526,7 +528,7 @@ def speculate_subgraph(
         raise ex
 
 
-def make_attr(tx, name):
+def make_attr(tx: "InstructionTranslator", name):
     node = tx.output.create_proxy(
         "get_attr",
         name,
@@ -536,7 +538,7 @@ def make_attr(tx, name):
     return node
 
 
-def add_subgraph(tx, name, gm):
+def add_subgraph(tx: "InstructionTranslator", name, gm):
     next_name = None
     i = 0
     while not next_name:
@@ -1263,12 +1265,26 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
                 "jacfwd": "jacfwd",
                 "hessian": "hessian",
                 "linearize": "linearize",
+                "functional_call": "functional_call",
             }.get(name)
             assert name is not None
             unimplemented(
                 f"torch.func.{fn} capture is disabled, "
                 "it can be turned on by setting "
                 "`torch._dynamo.config.capture_func_transforms=True`"
+            )
+        return super().call_function(tx, args, kwargs)
+
+
+class FunctionalCallVariable(FunctorchHigherOrderVariable):
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+            unimplemented(
+                "torch.func.functional_call capture is disabled, "
+                "it can be turned on by setting "
+                "`torch._dynamo.config.inline_inbuilt_nn_modules=True`"
             )
         return super().call_function(tx, args, kwargs)
 
@@ -1451,6 +1467,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     ) -> VariableTracker:
         from torch._higher_order_ops.wrap import TagActivationCheckpoint
         from torch.utils.checkpoint import noop_context_fn
+
         from .builder import wrap_fx_proxy
 
         context_fn = None
@@ -1593,6 +1610,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         fn_name: str,
     ):
         from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
+
         from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx

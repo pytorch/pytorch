@@ -88,7 +88,7 @@ class AbstractTimeoutTest:
             )
             default_store = c10d._get_default_store()
             tik = time.time()
-            with self.assertRaisesRegex(RuntimeError, "Timeout"):
+            with self.assertRaisesRegex(RuntimeError, "(?i)timeout"):
                 default_store.get("nonexistent key")
             tok = time.time()
             dist.destroy_process_group()
