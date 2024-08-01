@@ -445,7 +445,7 @@ class DistTensorOpsTest(DTensorTestBase):
         # case 2 input sharding: input sharded, index replicated, output mask partial
         # only works when index has size 1 on the gather dimension and
         # input is sharded on the gather dimension
-        from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
+        from torch.distributed._tensor.ops._embedding_ops import _MaskPartial
 
         gather_dim = 1
         global_input = torch.randn(12, 8, 16)

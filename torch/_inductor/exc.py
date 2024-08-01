@@ -6,6 +6,7 @@ import tempfile
 import textwrap
 from functools import lru_cache
 
+
 if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":
 
     @lru_cache(None)
@@ -64,7 +65,7 @@ class SubgraphLoweringException(RuntimeError):
 
 
 class InvalidCxxCompiler(RuntimeError):
-    def __init__(self):
+    def __init__(self) -> None:
         from . import config
 
         super().__init__(
