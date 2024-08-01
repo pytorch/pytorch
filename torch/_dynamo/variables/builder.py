@@ -308,7 +308,7 @@ class VariableBuilder:
         self,
         tx,
         source: Source,
-    ):
+    ) -> None:
         assert (
             source is not None
         ), "Consider SourcelessBuilder for ephemeral objects, usually objects created locally."

@@ -175,7 +175,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
     Represents a tensor subclass instance with a __torch_function__ override.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         self.torch_function_fn = kwargs.pop("torch_function_fn")
         super().__init__(*args, **kwargs)
 
