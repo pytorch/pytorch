@@ -19,7 +19,6 @@ from random import randint
 
 import torch
 import torch.cuda
-
 from torch import inf, nan
 from torch.cuda._memory_viz import (
     _profile_to_snapshot,
@@ -41,6 +40,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_optimizers import optim_db, optims, TensorTracker
 from torch.testing._internal.common_utils import (
+    EXPANDABLE_SEGMENTS,
     freeze_rng_state,
     gcIfJetson,
     get_cycles_per_ms,
@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils.checkpoint import checkpoint_sequential
 from torch.utils.viz._cycles import observe_tensor_cycles
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -116,6 +117,10 @@ class TestCuda(TestCase):
     def tearDown(self):
         del self.autocast_lists
         super().tearDown()
+
+    @property
+    def expandable_segments(self):
+        return EXPANDABLE_SEGMENTS
 
     def test_pinned_memory_with_cudaregister(self):
         torch.cuda.memory._set_allocator_settings(
@@ -2978,6 +2983,21 @@ exit(2)
                 for stat, expected in zip(stats_to_check, expecteds):
                     stat = stat + pool_string + ".current"
                     current = postcapture_stats[stat] - precapture_stats[stat]
+
+                    # There will only ever be one expandable segment in each of the small and large pools. The way the
+                    # bookeeping is done in the allocator means that we never increment the number of segments.
+                    if self.expandable_segments and "segment" in stat:
+                        expected = 0
+                    # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an
+                    # expandable segment (and as a result reduce the number of reserved bytes) if the block to unmap is
+                    # smaller than the page size
+                    if (
+                        self.expandable_segments
+                        and "reserved" in stat
+                        and (numel == cases[3][0] or numel == cases[4][0])
+                    ):
+                        expected = 2 * kLargeBuffer
+
                     self.assertEqual(
                         current,
                         expected,
@@ -3004,6 +3024,27 @@ exit(2)
             for stat, expected in zip(stats_to_check, expecteds):
                 stat = stat + pool_string + ".current"
                 current = postdel_stats[stat] - precapture_stats[stat]
+
+                # There will only ever be one expandable segment in each of the small and large pools. The way the
+                # bookeeping is done in the allocator means that we never increment the number of segments.
+                if self.expandable_segments and "segment" in stat:
+                    expected = 0
+                # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an
+                # expandable segment (and as a result reduce the number of reserved bytes) if the block to unmap is
+                # smaller than the page size
+                if (
+                    self.expandable_segments
+                    and "reserved" in stat
+                    and numel == cases[3][0]
+                ):
+                    expected = 2 * kLargeBuffer
+                if (
+                    self.expandable_segments
+                    and "reserved" in stat
+                    and numel == cases[4][0]
+                ):
+                    expected = kLargeBuffer
+
                 self.assertEqual(
                     current,
                     expected,
@@ -3361,7 +3402,7 @@ exit(2)
                 self.assertEqual(p, pg)
                 self.assertEqual(p.grad, pg.grad)
                 self.assertNotEqual(p.data_ptr(), pg.data_ptr())
-                self.assertNotEqual(p.grad.data_ptr, pg.grad.data_ptr)
+                self.assertNotEqual(p.grad.data_ptr(), pg.grad.data_ptr())
 
     def _test_graphed_optimizer(
         self, steps_warmup, steps_train, optimizer_ctor, kwargs
@@ -4595,6 +4636,10 @@ def reconstruct_from_tensor_metadata(metadata):
 @unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "NYI")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBlockStateAbsorption(TestCase):
+    @property
+    def expandable_segments(self):
+        return EXPANDABLE_SEGMENTS
+
     def checkCheckpointedBlock(self, before_block, after_block):
         for field in ("size", "state"):
             self.assertEqual(before_block[field], after_block[field])
@@ -4922,7 +4967,9 @@ class TestBlockStateAbsorption(TestCase):
         graph_thread.join()
         no_graph_thread.join()
 
-        self.assertEqual(len(get_cudagraph_segments(pool)), 4)
+        self.assertEqual(
+            len(get_cudagraph_segments(pool)), 2 if self.expandable_segments else 4
+        )
 
         del graph
 
@@ -4947,6 +4994,101 @@ class TestBlockStateAbsorption(TestCase):
             .decode("ascii")
         )
         self.assertEqual(rc, "False", "Triton was imported when importing torch!")
+
+
+class TestMemPool(TestCase):
+    def test_mempool_id(self):
+        pool1 = torch.cuda.graph_pool_handle()
+        pool2 = torch.cuda.MemPool().id
+
+        # first value of id in a user created pool is always zero
+        self.assertEqual(pool1[0] == 0, pool2[0] == 0)
+
+        # each call to torch.cuda.graph_pool_handle() or torch.cuda.MemPool()
+        # increments the id
+        self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
+
+    def test_mempool_with_allocator(self):
+        pool = torch.cuda.MemPool()
+
+        # MemPool doesn't have an allocator by default
+        self.assertEqual(pool.allocator, None)
+
+        from torch.utils.cpp_extension import load_inline
+
+        dummy_allocator_source = """
+        extern "C" {
+          void* dummy_alloc(size_t size, int device, void* stream) { return nullptr; }
+          void dummy_free(void* ptr) { }
+        }
+        """
+        dummy_allocator_libname = "dummy_allocator"
+        with tempfile.TemporaryDirectory() as tempdir:
+            dummy_allocator = load_inline(
+                name=dummy_allocator_libname,
+                cpp_sources=dummy_allocator_source,
+                is_python_module=False,
+                build_directory=tempdir,
+            )
+            allocator = torch.cuda.memory.CUDAPluggableAllocator(
+                os.path.join(tempdir, f"{dummy_allocator_libname}.so"),
+                "dummy_alloc",
+                "dummy_free",
+            )
+            pool = torch.cuda.MemPool(allocator.allocator())
+
+            # pool should point to the same allocator as the one passed into it
+            self.assertEqual(allocator.allocator(), pool.allocator)
+
+    def test_mempool_context(self):
+        active_pool = torch.cuda.MemPoolContext.active_pool()
+
+        # there is no active pool if none was made active
+        self.assertEqual(active_pool, None)
+
+        pool = torch.cuda.MemPool()
+        ctx = torch.cuda.MemPoolContext(pool)
+        active_pool = torch.cuda.MemPoolContext.active_pool()
+
+        # pool was made active
+        self.assertEqual(active_pool, pool)
+
+        del ctx
+        active_pool = torch.cuda.MemPoolContext.active_pool()
+
+        # ctx was deleted, so active pool is the previous one
+        self.assertEqual(active_pool, None)
+
+    def test_mempool_multithread(self):
+        pool_ids = []
+        active_pool_ids = []
+
+        def create_mempool_and_make_active():
+            pool = torch.cuda.MemPool()
+            pool_ids.extend([pool.id])
+
+            ctx = torch.cuda.MemPoolContext(pool)
+            active_pool = torch.cuda.MemPoolContext.active_pool()
+            active_pool_ids.extend([active_pool.id])
+            del ctx
+
+        num_threads = 4
+        threads = [
+            threading.Thread(target=create_mempool_and_make_active)
+            for t in range(num_threads)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        # each thread should create a unique mempool, since
+        # mempool id creation is atomic
+        self.assertEqual(len(set(pool_ids)), 4)
+
+        # each thread should have different active mempool, since
+        # the pointer to the mempool is thread local
+        self.assertEqual(len(set(active_pool_ids)), 4)
 
 
 class TestCudaOptims(TestCase):
