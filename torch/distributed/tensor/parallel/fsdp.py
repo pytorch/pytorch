@@ -339,8 +339,8 @@ class DTensorExtensions(FSDPExtensions):
     def post_unflatten_transform(
         self, tensor: torch.Tensor, param_extension: Any
     ) -> torch.Tensor:
-        stream = self.compute_stream or self.device_handle.current_stream()
-        with self.device_handle.stream(stream):
+        stream = self.compute_stream or torch.current_stream(tensor.device.type)
+        with torch.StreamGuard(stream):
             # runtime we put the unflattened tensor call on the compute stream since
             # the unflattened tensor might contain computations in fwd/bwd where we
             # need to sync properly.

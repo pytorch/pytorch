@@ -2069,7 +2069,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     def _wait_unshard_streams_on_current_stream(self):
         _wait_for_computation_stream(
-            self._device_handle.current_stream(),
+            torch.current_stream(self.device.type),
             self._unshard_stream,
             self._pre_unshard_stream,
         )
