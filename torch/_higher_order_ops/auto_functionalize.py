@@ -7,7 +7,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
-from torch._ops import HigherOrderOperator
+from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -58,9 +58,10 @@ class AutoFunctionalized(HigherOrderOperator):
         super().__init__("auto_functionalized")
 
     def __call__(
-        self_,  # noqa: B902
-        _mutable_op: torch._ops.OpOverload,
-        **kwargs: Dict[str, Any],
+        self,
+        /,
+        _mutable_op: OpOverload,
+        **kwargs: Any,
     ) -> Tuple[Any, Tuple[Tensor, ...]]:
         assert can_auto_functionalize(_mutable_op)
         assert isinstance(kwargs, dict)
@@ -70,8 +71,8 @@ class AutoFunctionalized(HigherOrderOperator):
 auto_functionalized = AutoFunctionalized()
 
 
-def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
-    if not isinstance(op, torch._ops.OpOverload):
+def can_auto_functionalize(op: OperatorBase) -> bool:
+    if not isinstance(op, OpOverload):
         return False
 
     if torch._library.utils.is_builtin(op):
@@ -120,9 +121,9 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
 
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
-    _mutable_op: torch._ops.OpOverload,
+    _mutable_op: OpOverload,
     _only_clone_these_tensors: Optional[Tuple[str, ...]] = None,
-    **kwargs: Dict[str, Any],
+    **kwargs: Any,
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     new_kwargs = dict(**kwargs)
     result = []
@@ -154,8 +155,8 @@ def auto_functionalized_dense(
 @auto_functionalized.py_impl(FakeTensorMode)
 def auto_functionalized_fake(
     mode,
-    _mutable_op: torch._ops.OpOverload,
-    **kwargs: Dict[str, Any],
+    _mutable_op: OpOverload,
+    **kwargs: Any,
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     with mode:
         result = auto_functionalized_dense(_mutable_op, **kwargs)
@@ -165,8 +166,8 @@ def auto_functionalized_fake(
 @auto_functionalized.py_impl(ProxyTorchDispatchMode)
 def auto_functionalized_proxy(
     mode,
-    _mutable_op: torch._ops.OpOverload,
-    **kwargs: Dict[str, Any],
+    _mutable_op: OpOverload,
+    **kwargs: Any,
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     if not mode.enable_tracing:
         return auto_functionalized(_mutable_op, **kwargs)
@@ -189,7 +190,7 @@ auto_functionalized.fallthrough(DispatchKey.AutogradCPU)
 auto_functionalized.fallthrough(DispatchKey.AutogradCUDA)
 
 
-def get_mutable_arg_names(op: torch._ops.OpOverload) -> List[str]:
+def get_mutable_arg_names(op: OpOverload) -> List[str]:
     """
     Returns the list of argument names that get mutated according to the
     schema.
@@ -203,7 +204,9 @@ def get_mutable_arg_names(op: torch._ops.OpOverload) -> List[str]:
 
 
 def do_auto_functionalize(
-    op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    op: OpOverload,
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
 ) -> Any:
     """Functionalizes a call to op(*args, **kwargs) by emitting a call to
     `outs = auto_functionalized(op, normalized_kwargs)`
