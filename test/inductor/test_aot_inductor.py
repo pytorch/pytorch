@@ -52,6 +52,7 @@ if HAS_CUDA:
         add_kernel_autotuned,
         add_kernel_with_optional_param,
         add_kernel_with_scaling,
+        mul2_inplace_kernel,
     )
 
 if IS_WINDOWS and IS_CI:
@@ -2083,6 +2084,28 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), inputs)
 
+    def test_triton_kernel_sympy_fn_like_arg(self):
+        # This test should hit sympy.expand("sqrt") which crashes with
+        # AttributeError: 'function' object has no attribute 'expand'.
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                out = torch.zeros_like(x)
+                add_kernel_with_optional_param[1,](
+                    in_ptr0=x,
+                    in_ptr1=x,
+                    out_ptr=out,
+                    n_elements=x.numel(),
+                    BLOCK_SIZE=1,
+                    ARGS_PASSED="sqrt",  # sqrt is a valid sympy fn
+                )
+                return out
+
+        inputs = (torch.randn(4, device=self.device),)
+        self.check_model(Model(), inputs)
+
     def test_triton_kernel_with_none_input(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -2270,6 +2293,22 @@ class AOTInductorTestsTemplate:
             )
 
             self.check_model(Model(), inputs)
+
+    def test_repeated_user_defined_triton_kernel(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                for _ in range(3):
+                    mul2_inplace_kernel[4,](x, n_elements=4, BLOCK_SIZE=16)
+                return x
+
+        inputs = (torch.randn(4, 4, device=self.device),)
+        self.check_model(Model(), inputs)
 
     def test_convolution(self):
         class Model(torch.nn.Module):
