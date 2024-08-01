@@ -1105,9 +1105,7 @@ class benchmarking:
     # enables early pruning which removes underperforming kernels after the
     # estimation loop, this reduces benchmarking overhead by fully benchmarking
     # only the most promising of kernels
-    enable_early_pruning: Optional[bool] = get_config_value(
-        "TORCHINDUCTOR_ENABLE_EARLY_PRUNING"
-    )
+    enable_early_pruning: Optional[bool] = False
 
 
 _save_config_ignore = [
