@@ -215,7 +215,7 @@ def get_first_attr(obj, *attrs):
 
 
 try:
-    dynamo_timed = torch._dynamo.utils.dynamo_timed
+    dynamo_timed = torch._dynamo.utils.dynamo_timed  # type: ignore[has-type]
 except AttributeError:  # Compile workers only have a mock version of torch
 
     @contextlib.contextmanager

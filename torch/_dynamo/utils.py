@@ -325,7 +325,7 @@ def compile_times(repr="str", aggregate: bool = False):
     """
     Get metrics about torchdynamo frontend/backend compilation times.
 
-    Accumulates information from functions tagged with `@dynamo_timed`.
+    Accumulates information from functions tagged with `dynamo_timed`.
 
     repr='str' returns a printable string for user interaction, and 'csv'
     returns headers, rows which can be logged for output

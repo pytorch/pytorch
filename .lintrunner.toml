@@ -948,7 +948,7 @@ include_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=@.+(dynamo_timed)',
+    '--pattern=@.*(dynamo_timed)',
     '--linter-name=CONTEXT_DECORATOR',
     '--error-name=avoid context decorator',
     """--error-description=\
