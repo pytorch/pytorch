@@ -1565,7 +1565,7 @@ def choose_saved_values_set(
 
     from torch._inductor.fx_utils import get_node_storage
 
-    input_storages = {get_node_storage(node) for node in node_info.inputs}
+	input_storages = {stg for node in node_info.inputs for stg in get_node_storage(node)}
 
     def get_recomputable_banned_nodes(banned_nodes: List[fx.Node]) -> List[fx.Node]:
         return [
@@ -1574,7 +1574,7 @@ def choose_saved_values_set(
             if (
                 # Only allow recomputing nodes that are actually required for BW
                 i.dist_from_bw < int(1e9)  # type: ignore[attr-defined]
-                and get_node_storage(i) not in input_storages
+				and all(stg not in input_storages for stg in get_node_storage(i))
             )
         ]
 
