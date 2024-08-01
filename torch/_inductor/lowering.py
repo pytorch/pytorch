@@ -221,15 +221,15 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
     # 0-dim CPU tensor will be converted to a symbol when it is used in CUDA kernels
     target_device_cuda = False
     for arg in args:
-        if instance(arg.data, ir.BaseView) and arg.layout.device.type == "cuda":
+        if isinstance(arg, TensorBox) and arg.get_device().type == "cuda":
             target_device_cuda = True
             break
     if target_device_cuda:
         for i, arg in enumerate(args):
             if (
-                hasattr(arg, "layout")
-                and arg.layout.device.type == "cpu"
-                and arg.layout.size == []
+                isinstance(arg, TensorBox)
+                and arg.get_device().type == "cpu"
+                and arg.get_size() == []
             ):
                 if is_float_dtype(arg.dtype):
                     tmp_sym = V.fake_mode.shape_env.create_unbacked_symfloat().node.expr
