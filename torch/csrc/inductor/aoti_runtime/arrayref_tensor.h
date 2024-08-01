@@ -215,7 +215,11 @@ class ArrayRefTensor {
         &result));
     void* dataPtr = nullptr;
     AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(result, &dataPtr));
-    std::memcpy(dataPtr, data(), strides_.data()[strides_.size() - 1] * numel() * sizeof(T));
+    if (strides_.size() == 0){
+      std::memcpy(dataPtr, data(), numel() * sizeof(T));
+    } else {
+      std::memcpy(dataPtr, data(), strides_.data()[strides_.size() - 1] * numel() * sizeof(T));
+    }
     return result;
   }
 
