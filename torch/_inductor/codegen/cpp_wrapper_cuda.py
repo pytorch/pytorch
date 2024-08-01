@@ -29,7 +29,7 @@ class CppWrapperCuda(CppWrapperCpu):
     Generates cpp wrapper for running on GPU and calls CUDA kernels
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.device = "cuda"
         super().__init__()
         self.grid_id = count()

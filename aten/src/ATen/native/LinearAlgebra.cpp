@@ -280,7 +280,7 @@ TORCH_META_FUNC(_linalg_slogdet)(const Tensor& A) {
 }
 
 template <typename Meta>
-void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const std::optional<Tensor>& self_baddbmm = nullopt) {
+void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const std::optional<Tensor>& self_baddbmm = std::nullopt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 

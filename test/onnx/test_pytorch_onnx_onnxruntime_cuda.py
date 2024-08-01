@@ -49,7 +49,7 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
     @skipScriptTest()
     def test_layer_norm_fp16(self):
         class LayerNormModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer_norm = torch.nn.LayerNorm([10, 10])
 
@@ -73,7 +73,7 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
     @skipScriptTest()
     def test_softmaxCrossEntropy_fusion_fp16(self):
         class FusionModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.loss = torch.nn.NLLLoss(reduction="none")
                 self.m = torch.nn.LogSoftmax(dim=1)
@@ -97,7 +97,7 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
     @skipScriptTest()
     def test_apex_o2(self):
         class LinearModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 5)
 
@@ -133,7 +133,7 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
     @skipIfNoCuda
     def test_deduplicate_initializers_diff_devices(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w = torch.nn.Parameter(
                     torch.ones(2, 3, device=torch.device("cpu"))
