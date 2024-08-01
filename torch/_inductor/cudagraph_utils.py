@@ -9,6 +9,7 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.utils import InputType
 
+
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 
@@ -305,3 +306,14 @@ def maybe_warning_due_to_dynamic_shape(
         > torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit
     ):
         perf_hint_log.warning(warn_msg())
+
+
+@dataclasses.dataclass(frozen=True)
+class CudagraphCachedInfo:
+    """
+    Info needed to realign inputs
+    """
+
+    placeholders: Sequence[PlaceholderInfo]
+    stack_traces: List[Optional[str]]
+    cudagraph_fail_reasons: List[str]

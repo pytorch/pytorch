@@ -7,7 +7,6 @@ from typing import Dict, List
 
 import torch
 import torch.utils.bundled_inputs
-
 from torch.jit.mobile import _export_operator_list, _load_for_lite_interpreter
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantization import (
