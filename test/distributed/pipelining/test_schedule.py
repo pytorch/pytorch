@@ -8,6 +8,7 @@ from torch.distributed.pipelining import (
     ScheduleFlexibleInterleaved1F1B,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
+    ZeroBubbleAlgorithm,
 )
 from torch.distributed.pipelining.schedules import (
     _Action,
@@ -36,6 +37,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+
 logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 
@@ -60,14 +62,10 @@ class MockPipelineStage(_PipelineStageBase):
 
 
 class TestSchedulePlan(TestCase):
-    @parametrize(
-        "ScheduleClass",
-        [ScheduleFlexibleInterleaved1F1B, ScheduleInterleaved1F1B, ScheduleLoopedBFS],
-    )
-    def test_pipeline_order(self, ScheduleClass):
+    def setUp(self):
         # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
         # These should succeed since num_microbatches % group_size == 0
-        test_cases = [
+        self.test_cases = [
             # small number of stages
             (2, 2, 2),
             (2, 4, 4),
@@ -98,19 +96,27 @@ class TestSchedulePlan(TestCase):
             (2, 10, 4),
             (2, 15, 4),
         ]
-        for num_local_stages, num_microbatches, group_size in test_cases:
+
+    @parametrize(
+        "ScheduleClass",
+        [ScheduleInterleaved1F1B, ScheduleLoopedBFS],
+    )
+    def test_pipeline_order(self, ScheduleClass):
+        for num_local_stages, num_microbatches, group_size in self.test_cases:
             with self.subTest(
                 num_local_stages=num_local_stages,
                 num_microbatches=num_microbatches,
                 group_size=group_size,
             ):
-                only_run_in_flex_pp = num_microbatches % group_size != 0
-                if only_run_in_flex_pp and not isinstance(
-                    ScheduleClass, ScheduleFlexibleInterleaved1F1B
-                ):
+                if num_microbatches % group_size != 0:
                     continue
 
-                print(f"{num_local_stages=} {num_microbatches=} {group_size=}")
+                logger.info(
+                    "num_local_stages=%d num_microbatches=%d group_size=%d",
+                    num_local_stages,
+                    num_microbatches,
+                    group_size,
+                )
                 num_stages = num_local_stages * group_size
                 stages = [
                     MockPipelineStage(group_size=group_size, num_stages=num_stages)
@@ -125,6 +131,50 @@ class TestSchedulePlan(TestCase):
                 _validate_pipeline_order(
                     schedule.pipeline_order, num_microbatches, num_stages
                 )
+
+    @parametrize(
+        "ScheduleClass",
+        [ScheduleFlexibleInterleaved1F1B],
+    )
+    def test_pipeline_order_flex_and_zero_bubble(self, ScheduleClass):
+        for num_local_stages, num_microbatches, group_size in self.test_cases:
+            with self.subTest(
+                num_local_stages=num_local_stages,
+                num_microbatches=num_microbatches,
+                group_size=group_size,
+            ):
+                warmups_ops_last_stage = (num_local_stages - 1) * (
+                    num_microbatches // max(1, num_microbatches // group_size)
+                )
+                warmup_ops = warmups_ops_last_stage + 2 * (group_size - 1)
+                warmup_ops = min(warmup_ops, num_microbatches * num_local_stages)
+
+                zero_bubble_algorithms = [
+                    None,
+                    ZeroBubbleAlgorithm.ZB1P,
+                    ZeroBubbleAlgorithm.ZB2P,
+                ]
+                for i in range(len(zero_bubble_algorithms)):
+                    num_stages = num_local_stages * group_size
+                    stages = [
+                        MockPipelineStage(group_size=group_size, num_stages=num_stages)
+                        for i in range(num_local_stages)
+                    ]
+                    schedule = ScheduleClass(
+                        stages,
+                        num_microbatches,
+                        zero_bubble_algorithm=zero_bubble_algorithms[i],
+                    )
+                    formatted_pipeline_order = _format_pipeline_order(
+                        schedule.pipeline_order
+                    )
+                    # print(formatted_pipeline_order)
+                    _validate_pipeline_order(
+                        schedule.pipeline_order,
+                        num_microbatches,
+                        num_stages,
+                        enable_zero_bubble=(zero_bubble_algorithms[i] is not None),
+                    )
 
 
 instantiate_parametrized_tests(TestSchedulePlan)
@@ -148,6 +198,7 @@ class TestScheduleLowering(TestCase):
             ("2SEND_B2", _Action(2, SEND_B, 2)),
             ("1RECV_F1", _Action(1, RECV_F, 1)),
             ("1SEND_B2_0RECV_F4", _Action(1, SEND_B_RECV_F, 2, 0, 4)),
+            ("17SEND_B0_1RECV_F14", _Action(17, SEND_B_RECV_F, 0, 1, 14)),
         ],
     )
     def test_action_parse(self, action_str_and_ref):
@@ -241,38 +292,8 @@ class TestScheduleLowering(TestCase):
                     ],
                     1: [
                         "1RECV_F0",
-                        "1RECV_F1",
                         "1F0",
-                        "1B0",
-                        "1SEND_B0",
-                        "1F1",
-                        "1B1",
-                        "1SEND_B1",
-                    ],
-                },
-                "stage_to_rank": lambda stage_idx: stage_idx,
-                "num_stages": 2,
-            },
-            {
-                "compute": {
-                    0: ["0F0", "0F1", "   ", "0B0", "   ", "0B1"],
-                    1: ["   ", "1F0", "1B0", "1F1", "1B1", "   "],
-                },
-                "comms": {
-                    0: [
-                        "0F0",
-                        "0SEND_F0",
-                        "0F1",
-                        "0SEND_F1",
-                        "0RECV_B0",
-                        "0B0",
-                        "0RECV_B1",
-                        "0B1",
-                    ],
-                    1: [
-                        "1RECV_F0",
                         "1RECV_F1",
-                        "1F0",
                         "1B0",
                         "1SEND_B0",
                         "1F1",
@@ -326,14 +347,16 @@ class TestScheduleLowering(TestCase):
 
         compute_sch = {}
         with open("lowered_compute.csv", newline="") as csvfile:
-            reader = csv.reader(csvfile)
-            for rank, row in enumerate(reader):
+            for rank, row in enumerate(csv.reader(csvfile)):
                 compute_sch[rank] = [_Action.from_str(s) for s in row]
-        print("schedule loaded: ")
-        print(_format_pipeline_order(compute_sch))
+        # print(_format_pipeline_order(compute_sch))
         num_model_chunks = 3
         pipeline_parallel_size = 8
         num_stages = num_model_chunks * pipeline_parallel_size
+
+        for rank in compute_sch:
+            compute_sch[rank] = _merge_bw(compute_sch[rank])
+
         comms_sch = _add_send_recv(
             compute_sch,
             stage_to_rank=lambda chunk_index: chunk_index % pipeline_parallel_size,
@@ -346,10 +369,20 @@ class TestScheduleLowering(TestCase):
             num_stages=num_stages,
         )
         _dump_chrometrace(simulated_schedule, "lowered_comms.json")
+        # _dump_csv(comms_sch, "lowered_comms.csv")
+
+        sch_ref = {}
+        with open("lowered_comms.csv", newline="") as ref:
+            for rank, row in enumerate(csv.reader(ref)):
+                sch_ref[rank] = [_Action.from_str(s) for s in row]
+
+        for rank in sch_ref:
+            for timestep, (a, b) in enumerate(zip(comms_sch[rank], sch_ref[rank])):
+                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
+
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
-        print(_format_pipeline_order(simulated_schedule))
-        self.assertEqual(num_steps, 336)
-        _dump_csv(comms_sch, "lowered_comms.csv")
+        # print(_format_pipeline_order(simulated_schedule))
+        self.assertEqual(num_steps, 271)
 
 
 instantiate_parametrized_tests(TestScheduleLowering)

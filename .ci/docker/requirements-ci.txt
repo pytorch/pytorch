@@ -134,9 +134,9 @@ opt-einsum==3.3
 #Pinned versions: 3.3
 #test that import: test_linalg.py
 
-optree==0.11.0
+optree==0.12.1
 #Description: A library for tree manipulation
-#Pinned versions: 0.11.0
+#Pinned versions: 0.12.1
 #test that import: test_vmap.py, test_aotdispatch.py, test_dynamic_shapes.py,
 #test_pytree.py, test_ops.py, test_control_flow.py, test_modules.py,
 #common_utils.py, test_eager_transforms.py, test_python_dispatch.py,
