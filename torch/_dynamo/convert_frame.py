@@ -23,6 +23,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
+import torch.fx.experimental._sym_dispatch_mode
+
 from torch._utils_internal import maybe_upload_prof_stats_to_manifold
 
 from torch.fx._lazy_graph_module import _use_lazy_graph_module
@@ -1177,7 +1179,9 @@ class CatchErrorsWrapper:
                         frame, cache_entry, self.hooks, frame_state
                     )
 
-        with compile_lock, _disable_current_modes():
+        with (
+            compile_lock
+        ), _disable_current_modes(), torch.fx.experimental._sym_dispatch_mode.disable_sym_dispatch():
             # skip=1: skip this frame
             return self._torchdynamo_orig_callable(
                 frame, cache_entry, self.hooks, frame_state, skip=1

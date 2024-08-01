@@ -997,9 +997,6 @@ class TestSymbolicTracing(TestCase):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(3, 4), 12).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, x_1, y_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1)
-    sym_stride_int = torch.ops.aten.sym_stride.int(x_1, 0)
     view = torch.ops.aten.view.default(x_1, [y_1]);  x_1 = y_1 = None
     return view""")
 
@@ -1010,11 +1007,8 @@ def forward(self, x_1, y_1):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(0), torch.empty(2)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, x_1, y_1):
-    sym_size_int = torch.ops.aten.sym_size.int(y_1, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(y_1);  y_1 = None
+    sym_size_int = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
     resize_ = torch.ops.aten.resize_.default(x_1, [sym_size_int]);  x_1 = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(resize_, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(resize_);  resize_ = None
     eq = 0 == sym_size_int;  sym_size_int = None
     return None""")
 
@@ -1025,13 +1019,11 @@ def forward(self, x_1, y_1):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(3, 1), torch.empty(5)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, x_1, y_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(x_1);  x_1 = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(y_1);  y_1 = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
     lt = sym_size_int < 0
     eq = sym_size_int == 1
     eq_1 = sym_size_int == 1
+    sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
     lt_1 = sym_size_int_1 < 0
     eq_2 = sym_size_int_1 == 1
     eq_3 = sym_size_int_1 == 1
@@ -1073,19 +1065,15 @@ def forward(self, s0_1, s1_1, x_1, y_1):
             r = str(make_fx(f, tracing_mode="real")(x, y).code).strip()
             self.assertExpectedInline(r, """\
 def forward(self, x_1, y_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(x_1);  x_1 = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(y_1);  y_1 = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
     lt = sym_size_int < 0
     eq = sym_size_int == 1
     eq_1 = sym_size_int == 1
+    sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
     lt_1 = sym_size_int_1 < 0
     eq_2 = sym_size_int_1 == 1
     eq_3 = sym_size_int_1 == 1
     empty = torch.ops.aten.empty.memory_format([sym_size_int], device = device(type='cpu'), pin_memory = False)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(empty, 0)
-    sym_numel_default_2 = torch.ops.aten.sym_numel.default(empty)
     return ((sym_size_int, sym_size_int_1), empty)""")
 
     def test_unary(self):
@@ -1132,23 +1120,12 @@ def forward(self, x_1, y_1):
         r = str(make_fx(f, tracing_mode="symbolic")(y, x).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, y_1, x_1):
-    sym_size_int = torch.ops.aten.sym_size.int(y_1, 0)
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    eq = sym_size_int == 1
     sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 1)
-    sym_stride_int = torch.ops.aten.sym_stride.int(y_1, 0)
-    mul = sym_size_int * sym_size_int_1;  sym_size_int = None
-    sym_numel_default = torch.ops.aten.sym_numel.default(y_1)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(x_1, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(x_1)
-    eq = sym_size_int_2 == 1
-    eq_1 = sym_size_int_2 == sym_size_int_1;  sym_size_int_2 = sym_size_int_1 = None
+    eq_1 = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
     repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(x_1);  x_1 = None
-    sym_size_int_3 = torch.ops.aten.sym_size.int(repeat_interleave, 0)
-    sym_numel_default_2 = torch.ops.aten.sym_numel.default(repeat_interleave)
     index_select = torch.ops.aten.index_select.default(y_1, 1, repeat_interleave);  y_1 = repeat_interleave = None
-    sym_size_int_4 = torch.ops.aten.sym_size.int(index_select, 0)
-    sym_size_int_5 = torch.ops.aten.sym_size.int(index_select, 1)
-    sym_stride_int_1 = torch.ops.aten.sym_stride.int(index_select, 0)
-    sym_numel_default_3 = torch.ops.aten.sym_numel.default(index_select)
     return index_select""")
 
     def test_mod_gcd_unbacked(self):
@@ -1178,21 +1155,11 @@ def forward(self, _a_1, _b_1, _stride_1):
     ge_2 = _local_scalar_dense_2 >= 0
     mul = _local_scalar_dense * _local_scalar_dense_2
     randn = torch.ops.aten.randn.default([mul], device = device(type='cpu'), pin_memory = False);  mul = None
-    sym_size_int = torch.ops.aten.sym_size.int(randn, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(randn)
     mul_1 = _local_scalar_dense_1 * _local_scalar_dense_2
     randn_1 = torch.ops.aten.randn.default([mul_1], device = device(type='cpu'), pin_memory = False);  mul_1 = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(randn_1, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(randn_1)
     cat = torch.ops.aten.cat.default([randn, randn_1]);  randn = randn_1 = None
-    sym_size_int_2 = torch.ops.aten.sym_size.int(cat, 0)
-    sym_numel_default_2 = torch.ops.aten.sym_numel.default(cat)
     add = _local_scalar_dense + _local_scalar_dense_1;  _local_scalar_dense = _local_scalar_dense_1 = None
     view = torch.ops.aten.view.default(cat, [add, _local_scalar_dense_2]);  cat = add = _local_scalar_dense_2 = None
-    sym_size_int_3 = torch.ops.aten.sym_size.int(view, 0)
-    sym_size_int_4 = torch.ops.aten.sym_size.int(view, 1)
-    sym_stride_int = torch.ops.aten.sym_stride.int(view, 0)
-    sym_numel_default_3 = torch.ops.aten.sym_numel.default(view)
     return view""")
 
     def test_cumsum_unbacked(self):
@@ -1207,13 +1174,7 @@ def forward(self, _a_1, _b_1, _stride_1):
 def forward(self, x_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     randn = torch.ops.aten.randn.default([3, _local_scalar_dense, 3], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    sym_size_int = torch.ops.aten.sym_size.int(randn, 1)
-    sym_stride_int = torch.ops.aten.sym_stride.int(randn, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(randn)
     cumsum = torch.ops.aten.cumsum.default(randn, 0);  randn = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(cumsum, 1)
-    sym_stride_int_1 = torch.ops.aten.sym_stride.int(cumsum, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(cumsum)
     return cumsum"""  # noqa: B950
         )
 
@@ -1227,20 +1188,14 @@ def forward(self, x_1):
         self.assertExpectedInline(
             r, """\
 def forward(self, x_1, y_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(x_1)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(y_1)
     sum_1 = torch.ops.aten.sum.default(x_1)
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(sum_1);  sum_1 = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
     eq = sym_size_int == 1
+    sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0)
     eq_1 = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
     repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(x_1, output_size = _local_scalar_dense);  x_1 = _local_scalar_dense = None
-    sym_size_int_2 = torch.ops.aten.sym_size.int(repeat_interleave, 0)
-    sym_numel_default_2 = torch.ops.aten.sym_numel.default(repeat_interleave)
     index_select = torch.ops.aten.index_select.default(y_1, 0, repeat_interleave);  y_1 = repeat_interleave = None
-    sym_size_int_3 = torch.ops.aten.sym_size.int(index_select, 0)
-    sym_numel_default_3 = torch.ops.aten.sym_numel.default(index_select)
     return index_select"""  # noqa: B950
         )
 
@@ -1254,8 +1209,6 @@ def forward(self, x_1, y_1):
 def forward(self, x_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     arange = torch.ops.aten.arange.start(0, _local_scalar_dense, device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    sym_size_int = torch.ops.aten.sym_size.int(arange, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(arange)
     return arange"""  # noqa: B950
         )
 
@@ -1292,21 +1245,8 @@ def forward(self, x_1):
         ).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1, b_1):
-    sym_size_int = torch.ops.aten.sym_size.int(b_1, 0)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(b_1, 1)
-    sym_stride_int = torch.ops.aten.sym_stride.int(b_1, 0)
-    mul = sym_size_int * sym_size_int_1;  sym_size_int = sym_size_int_1 = None
-    sym_numel_default = torch.ops.aten.sym_numel.default(b_1)
-    mul_1 = torch.ops.aten.mul.Tensor(a_1, b_1);  a_1 = None
-    sym_size_int_2 = torch.ops.aten.sym_size.int(mul_1, 0)
-    sym_size_int_3 = torch.ops.aten.sym_size.int(mul_1, 1)
-    sym_stride_int_1 = torch.ops.aten.sym_stride.int(mul_1, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(mul_1)
-    mm = torch.ops.aten.mm.default(mul_1, b_1);  mul_1 = b_1 = None
-    sym_size_int_4 = torch.ops.aten.sym_size.int(mm, 0)
-    sym_size_int_5 = torch.ops.aten.sym_size.int(mm, 1)
-    sym_stride_int_2 = torch.ops.aten.sym_stride.int(mm, 0)
-    sym_numel_default_2 = torch.ops.aten.sym_numel.default(mm)
+    mul = torch.ops.aten.mul.Tensor(a_1, b_1);  a_1 = None
+    mm = torch.ops.aten.mm.default(mul, b_1);  mul = b_1 = None
     return mm""")
 
     def test_binary_broadcast(self):
@@ -1327,12 +1267,9 @@ def forward(self, a_1, b_1):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
-    sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(a_1);  a_1 = None
+    sym_size_int = torch.ops.aten.sym_size.int(a_1, 0);  a_1 = None
     mul = sym_size_int * 2;  sym_size_int = None
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(empty, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(empty)
     return empty""")
 
     def test_item(self):
@@ -1359,8 +1296,7 @@ def forward(self, a_1):
         # dtype inference is correct
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
-    sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(a_1);  a_1 = None
+    sym_size_int = torch.ops.aten.sym_size.int(a_1, 0);  a_1 = None
     sym_float = torch.sym_float(sym_size_int);  sym_size_int = None
     ge = sym_float >= 0.0
     pow_1 = sym_float ** 2.0;  sym_float = None
@@ -1380,8 +1316,6 @@ def forward(self, a_1):
 def forward(self, a_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1);  a_1 = None
     empty = torch.ops.aten.empty.memory_format([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    sym_size_int = torch.ops.aten.sym_size.int(empty, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(empty)
     return empty"""  # noqa: B950
         )
 
@@ -1398,7 +1332,6 @@ def forward(self, a_1):
             r, """\
 def forward(self, x_1):
     sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(x_1)
     scalar_tensor = torch.ops.aten.scalar_tensor.default(sym_size_int, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
     gt = sym_size_int > -1
     gt_1 = sym_size_int > 0;  sym_size_int = None
@@ -1417,36 +1350,18 @@ def forward(self, x_1):
         ).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, gravity_1, mask_1):
-    sym_size_int = torch.ops.aten.sym_size.int(gravity_1, 0)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(gravity_1, 1)
-    sym_stride_int = torch.ops.aten.sym_stride.int(gravity_1, 0)
-    mul = sym_size_int * sym_size_int_1;  sym_size_int = None
-    sym_numel_default = torch.ops.aten.sym_numel.default(gravity_1)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(mask_1, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(mask_1)
-    gt = sym_size_int_1 > -1
-    gt_1 = sym_size_int_1 > 0
+    sym_size_int = torch.ops.aten.sym_size.int(gravity_1, 1)
+    gt = sym_size_int > -1
+    gt_1 = sym_size_int > 0
     select = torch.ops.aten.select.int(gravity_1, 1, 0)
-    sym_size_int_3 = torch.ops.aten.sym_size.int(select, 0)
-    sym_stride_int_1 = torch.ops.aten.sym_stride.int(select, 0)
-    sym_numel_default_2 = torch.ops.aten.sym_numel.default(select)
     index = torch.ops.aten.index.Tensor(select, [mask_1]);  select = None
-    sym_size_int_4 = torch.ops.aten.sym_size.int(index, 0)
-    sym_numel_default_3 = torch.ops.aten.sym_numel.default(index)
-    mul_1 = torch.ops.aten.mul.Tensor(index, -1);  index = None
-    sym_size_int_5 = torch.ops.aten.sym_size.int(mul_1, 0)
-    sym_numel_default_4 = torch.ops.aten.sym_numel.default(mul_1)
-    gt_2 = sym_size_int_1 > -1
-    gt_3 = sym_size_int_1 > 0;  sym_size_int_1 = None
+    mul = torch.ops.aten.mul.Tensor(index, -1)
+    gt_2 = sym_size_int > -1
+    gt_3 = sym_size_int > 0;  sym_size_int = None
     select_1 = torch.ops.aten.select.int(gravity_1, 1, 0);  gravity_1 = None
-    sym_size_int_6 = torch.ops.aten.sym_size.int(select_1, 0)
-    sym_stride_int_2 = torch.ops.aten.sym_stride.int(select_1, 0)
-    sym_numel_default_5 = torch.ops.aten.sym_numel.default(select_1)
-    eq = sym_size_int_4 == sym_size_int_4;  sym_size_int_4 = None
-    index_put_ = torch.ops.aten.index_put_.default(select_1, [mask_1], mul_1);  select_1 = mask_1 = mul_1 = None
-    sym_size_int_7 = torch.ops.aten.sym_size.int(index_put_, 0)
-    sym_stride_int_3 = torch.ops.aten.sym_stride.int(index_put_, 0)
-    sym_numel_default_6 = torch.ops.aten.sym_numel.default(index_put_);  index_put_ = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(index, 0);  index = None
+    eq = sym_size_int_1 == sym_size_int_1;  sym_size_int_1 = None
+    index_put_ = torch.ops.aten.index_put_.default(select_1, [mask_1], mul);  select_1 = mask_1 = mul = None
     return None""")
 
     def test_reflect_r_over_x(self):
@@ -1464,89 +1379,46 @@ def forward(self, gravity_1, mask_1):
         ).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, crop_camera_1, mask_1):
-    sym_size_int = torch.ops.aten.sym_size.int(crop_camera_1, 0)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(crop_camera_1, 1)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(crop_camera_1, 2)
-    sym_stride_int = torch.ops.aten.sym_stride.int(crop_camera_1, 0)
-    sym_stride_int_1 = torch.ops.aten.sym_stride.int(crop_camera_1, 1)
-    mul = sym_size_int * sym_size_int_1;  sym_size_int = None
-    mul_1 = mul * sym_size_int_2;  mul = None
-    sym_numel_default = torch.ops.aten.sym_numel.default(crop_camera_1)
-    sym_size_int_3 = torch.ops.aten.sym_size.int(mask_1, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(mask_1)
     index = torch.ops.aten.index.Tensor(crop_camera_1, [mask_1])
-    sym_size_int_4 = torch.ops.aten.sym_size.int(index, 0)
-    sym_size_int_5 = torch.ops.aten.sym_size.int(index, 1)
-    sym_size_int_6 = torch.ops.aten.sym_size.int(index, 2)
-    sym_stride_int_2 = torch.ops.aten.sym_stride.int(index, 0)
-    sym_stride_int_3 = torch.ops.aten.sym_stride.int(index, 1)
-    sym_numel_default_2 = torch.ops.aten.sym_numel.default(index)
     eye = torch.ops.aten.eye.default(3, device = device(type='cpu'), pin_memory = False)
     _tensor_constant0 = self._tensor_constant0
     lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
     select = torch.ops.aten.select.int(eye, 0, 0)
     select_1 = torch.ops.aten.select.int(select, 0, 0);  select = None
     copy_ = torch.ops.aten.copy_.default(select_1, lift_fresh_copy);  select_1 = lift_fresh_copy = None
-    lt = sym_size_int_4 < 0
-    eq = sym_size_int_4 == 1
-    eq_1 = sym_size_int_4 == 1
-    expand = torch.ops.aten.expand.default(eye, [sym_size_int_4, 3, 3])
-    sym_size_int_7 = torch.ops.aten.sym_size.int(expand, 0)
-    sym_numel_default_3 = torch.ops.aten.sym_numel.default(expand)
-    eq_2 = sym_size_int_4 == -1
-    ge = sym_size_int_4 >= 0
-    mul_2 = sym_size_int_4 * 3
+    sym_size_int = torch.ops.aten.sym_size.int(index, 0)
+    lt = sym_size_int < 0
+    eq = sym_size_int == 1
+    eq_1 = sym_size_int == 1
+    expand = torch.ops.aten.expand.default(eye, [sym_size_int, 3, 3])
+    eq_2 = sym_size_int == -1
+    ge = sym_size_int >= 0
+    mul = sym_size_int * 3
+    mul_1 = mul * 3;  mul = None
+    sym_numel_default = torch.ops.aten.sym_numel.default(expand)
+    eq_3 = sym_numel_default == mul_1;  sym_numel_default = mul_1 = None
+    mul_2 = sym_size_int * 3
     mul_3 = mul_2 * 3;  mul_2 = None
-    eq_3 = sym_numel_default_3 == mul_3;  sym_numel_default_3 = mul_3 = None
-    mul_4 = sym_size_int_4 * 3
-    mul_5 = mul_4 * 3;  mul_4 = None
-    eq_4 = mul_5 == 0;  mul_5 = None
-    ne = sym_size_int_4 != 1
-    eq_5 = sym_size_int_4 == 1
-    lt_1 = 1 < sym_size_int_4
-    ne_1 = sym_size_int_4 != sym_size_int_4
-    view = torch.ops.aten.view.default(expand, [sym_size_int_4, 3, 3]);  expand = None
-    sym_size_int_8 = torch.ops.aten.sym_size.int(view, 0)
-    sym_numel_default_4 = torch.ops.aten.sym_numel.default(view)
-    expand_1 = torch.ops.aten.expand.default(index, [sym_size_int_4, sym_size_int_1, sym_size_int_2]);  index = None
-    sym_size_int_9 = torch.ops.aten.sym_size.int(expand_1, 0)
-    sym_size_int_10 = torch.ops.aten.sym_size.int(expand_1, 1)
-    sym_size_int_11 = torch.ops.aten.sym_size.int(expand_1, 2)
-    sym_stride_int_4 = torch.ops.aten.sym_stride.int(expand_1, 0)
-    sym_stride_int_5 = torch.ops.aten.sym_stride.int(expand_1, 1)
-    sym_numel_default_5 = torch.ops.aten.sym_numel.default(expand_1)
-    view_1 = torch.ops.aten.view.default(expand_1, [sym_size_int_4, sym_size_int_1, sym_size_int_2]);  expand_1 = sym_size_int_1 = sym_size_int_2 = None
-    sym_size_int_12 = torch.ops.aten.sym_size.int(view_1, 0)
-    sym_size_int_13 = torch.ops.aten.sym_size.int(view_1, 1)
-    sym_size_int_14 = torch.ops.aten.sym_size.int(view_1, 2)
-    sym_stride_int_6 = torch.ops.aten.sym_stride.int(view_1, 0)
-    sym_stride_int_7 = torch.ops.aten.sym_stride.int(view_1, 1)
-    sym_numel_default_6 = torch.ops.aten.sym_numel.default(view_1)
+    eq_4 = mul_3 == 0;  mul_3 = None
+    ne = sym_size_int != 1
+    eq_5 = sym_size_int == 1
+    lt_1 = 1 < sym_size_int
+    ne_1 = sym_size_int != sym_size_int
+    view = torch.ops.aten.view.default(expand, [sym_size_int, 3, 3]);  expand = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(crop_camera_1, 1)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(crop_camera_1, 2)
+    expand_1 = torch.ops.aten.expand.default(index, [sym_size_int, sym_size_int_1, sym_size_int_2]);  index = None
+    view_1 = torch.ops.aten.view.default(expand_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  expand_1 = sym_size_int_1 = sym_size_int_2 = None
     bmm = torch.ops.aten.bmm.default(view, view_1);  view = view_1 = None
-    sym_size_int_15 = torch.ops.aten.sym_size.int(bmm, 0)
-    sym_numel_default_7 = torch.ops.aten.sym_numel.default(bmm)
-    view_2 = torch.ops.aten.view.default(bmm, [sym_size_int_4, 3, 3]);  bmm = None
-    sym_size_int_16 = torch.ops.aten.sym_size.int(view_2, 0)
-    sym_numel_default_8 = torch.ops.aten.sym_numel.default(view_2)
-    eq_6 = sym_numel_default_8 == 0;  sym_numel_default_8 = None
-    mul_6 = sym_size_int_4 * 3
-    view_3 = torch.ops.aten.view.default(view_2, [mul_6, 3]);  view_2 = mul_6 = None
-    sym_size_int_17 = torch.ops.aten.sym_size.int(view_3, 0)
-    sym_numel_default_9 = torch.ops.aten.sym_numel.default(view_3)
+    view_2 = torch.ops.aten.view.default(bmm, [sym_size_int, 3, 3]);  bmm = None
+    sym_numel_default_1 = torch.ops.aten.sym_numel.default(view_2)
+    eq_6 = sym_numel_default_1 == 0;  sym_numel_default_1 = None
+    mul_4 = sym_size_int * 3
+    view_3 = torch.ops.aten.view.default(view_2, [mul_4, 3]);  view_2 = mul_4 = None
     mm = torch.ops.aten.mm.default(view_3, eye);  view_3 = eye = None
-    sym_size_int_18 = torch.ops.aten.sym_size.int(mm, 0)
-    sym_numel_default_10 = torch.ops.aten.sym_numel.default(mm)
-    view_4 = torch.ops.aten.view.default(mm, [sym_size_int_4, 3, 3]);  mm = None
-    sym_size_int_19 = torch.ops.aten.sym_size.int(view_4, 0)
-    sym_numel_default_11 = torch.ops.aten.sym_numel.default(view_4)
-    eq_7 = sym_size_int_4 == sym_size_int_4;  sym_size_int_4 = None
+    view_4 = torch.ops.aten.view.default(mm, [sym_size_int, 3, 3]);  mm = None
+    eq_7 = sym_size_int == sym_size_int;  sym_size_int = None
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_4);  crop_camera_1 = mask_1 = view_4 = None
-    sym_size_int_20 = torch.ops.aten.sym_size.int(index_put_, 0)
-    sym_size_int_21 = torch.ops.aten.sym_size.int(index_put_, 1)
-    sym_size_int_22 = torch.ops.aten.sym_size.int(index_put_, 2)
-    sym_stride_int_8 = torch.ops.aten.sym_stride.int(index_put_, 0)
-    sym_stride_int_9 = torch.ops.aten.sym_stride.int(index_put_, 1)
-    sym_numel_default_12 = torch.ops.aten.sym_numel.default(index_put_);  index_put_ = None
     return None""")  # noqa: B950
 
     def test_unbacked_slice(self):
@@ -1594,60 +1466,18 @@ def forward(self, crop_camera_1, mask_1):
         ).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, images_1, handedness_1, valid_1):
-    sym_size_int = torch.ops.aten.sym_size.int(images_1, 0)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(images_1, 2)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(images_1, 3)
-    sym_stride_int = torch.ops.aten.sym_stride.int(images_1, 0)
-    sym_stride_int_1 = torch.ops.aten.sym_stride.int(images_1, 1)
-    sym_stride_int_2 = torch.ops.aten.sym_stride.int(images_1, 2)
-    mul = sym_size_int * sym_size_int_1;  sym_size_int = None
-    mul_1 = mul * sym_size_int_2;  mul = None
-    sym_numel_default = torch.ops.aten.sym_numel.default(images_1)
-    sym_size_int_3 = torch.ops.aten.sym_size.int(handedness_1, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(handedness_1)
-    sym_size_int_4 = torch.ops.aten.sym_size.int(valid_1, 0)
-    sym_numel_default_2 = torch.ops.aten.sym_numel.default(valid_1)
-    index = torch.ops.aten.index.Tensor(images_1, [valid_1]);  images_1 = None
-    sym_size_int_5 = torch.ops.aten.sym_size.int(index, 0)
-    sym_size_int_6 = torch.ops.aten.sym_size.int(index, 2)
-    sym_size_int_7 = torch.ops.aten.sym_size.int(index, 3)
-    sym_stride_int_3 = torch.ops.aten.sym_stride.int(index, 0)
-    sym_stride_int_4 = torch.ops.aten.sym_stride.int(index, 1)
-    sym_stride_int_5 = torch.ops.aten.sym_stride.int(index, 2)
-    sym_numel_default_3 = torch.ops.aten.sym_numel.default(index)
+    index = torch.ops.aten.index.Tensor(images_1, [valid_1])
     index_1 = torch.ops.aten.index.Tensor(handedness_1, [valid_1]);  handedness_1 = valid_1 = None
-    sym_size_int_8 = torch.ops.aten.sym_size.int(index_1, 0)
-    sym_numel_default_4 = torch.ops.aten.sym_numel.default(index_1)
     eq = torch.ops.aten.eq.Scalar(index_1, 1);  index_1 = None
-    sym_size_int_9 = torch.ops.aten.sym_size.int(eq, 0)
-    sym_numel_default_5 = torch.ops.aten.sym_numel.default(eq)
     index_2 = torch.ops.aten.index.Tensor(index, [eq])
-    sym_size_int_10 = torch.ops.aten.sym_size.int(index_2, 0)
-    sym_size_int_11 = torch.ops.aten.sym_size.int(index_2, 2)
-    sym_size_int_12 = torch.ops.aten.sym_size.int(index_2, 3)
-    sym_stride_int_6 = torch.ops.aten.sym_stride.int(index_2, 0)
-    sym_stride_int_7 = torch.ops.aten.sym_stride.int(index_2, 1)
-    sym_stride_int_8 = torch.ops.aten.sym_stride.int(index_2, 2)
-    sym_numel_default_6 = torch.ops.aten.sym_numel.default(index_2)
-    flip = torch.ops.aten.flip.default(index_2, [-1]);  index_2 = None
-    sym_size_int_13 = torch.ops.aten.sym_size.int(flip, 0)
-    sym_size_int_14 = torch.ops.aten.sym_size.int(flip, 2)
-    sym_size_int_15 = torch.ops.aten.sym_size.int(flip, 3)
-    sym_stride_int_9 = torch.ops.aten.sym_stride.int(flip, 0)
-    sym_stride_int_10 = torch.ops.aten.sym_stride.int(flip, 1)
-    sym_stride_int_11 = torch.ops.aten.sym_stride.int(flip, 2)
-    sym_numel_default_7 = torch.ops.aten.sym_numel.default(flip)
-    eq_1 = sym_size_int_10 == sym_size_int_10;  sym_size_int_10 = None
+    flip = torch.ops.aten.flip.default(index_2, [-1])
+    sym_size_int = torch.ops.aten.sym_size.int(index_2, 0);  index_2 = None
+    eq_1 = sym_size_int == sym_size_int;  sym_size_int = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(images_1, 2)
     eq_2 = sym_size_int_1 == sym_size_int_1;  sym_size_int_1 = None
+    sym_size_int_2 = torch.ops.aten.sym_size.int(images_1, 3);  images_1 = None
     eq_3 = sym_size_int_2 == sym_size_int_2;  sym_size_int_2 = None
     index_put_ = torch.ops.aten.index_put_.default(index, [eq], flip);  index = eq = flip = None
-    sym_size_int_16 = torch.ops.aten.sym_size.int(index_put_, 0)
-    sym_size_int_17 = torch.ops.aten.sym_size.int(index_put_, 2)
-    sym_size_int_18 = torch.ops.aten.sym_size.int(index_put_, 3)
-    sym_stride_int_12 = torch.ops.aten.sym_stride.int(index_put_, 0)
-    sym_stride_int_13 = torch.ops.aten.sym_stride.int(index_put_, 1)
-    sym_stride_int_14 = torch.ops.aten.sym_stride.int(index_put_, 2)
-    sym_numel_default_8 = torch.ops.aten.sym_numel.default(index_put_);  index_put_ = None
     return None""")
 
     def test_neg_shape(self):
@@ -1657,13 +1487,10 @@ def forward(self, images_1, handedness_1, valid_1):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(2)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
-    sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(a_1);  a_1 = None
+    sym_size_int = torch.ops.aten.sym_size.int(a_1, 0);  a_1 = None
     neg = -sym_size_int;  sym_size_int = None
     add = neg + 10;  neg = None
     empty = torch.ops.aten.empty.memory_format([add], device = device(type='cpu'), pin_memory = False);  add = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(empty, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(empty)
     return empty""")
 
     def test_unbacked_unification(self):
@@ -1674,15 +1501,9 @@ def forward(self, a_1):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.randn(10)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, x_1, y_1):
-    sym_size_int = torch.ops.aten.sym_size.int(y_1, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(y_1)
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(zeros, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(zeros)
     add = torch.ops.aten.add.Tensor(zeros, y_1);  zeros = y_1 = None
-    sym_size_int_2 = torch.ops.aten.sym_size.int(add, 0)
-    sym_numel_default_2 = torch.ops.aten.sym_numel.default(add)
     return add""")  # noqa: B950
 
     def test_reshape_divisibility_unbacked(self):
@@ -1724,17 +1545,12 @@ def forward(self, x_1, y_1):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.randn(10)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, x_1, y_1):
-    sym_size_int = torch.ops.aten.sym_size.int(y_1, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(y_1)
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(zeros, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(zeros);  zeros = None
+    sym_size_int = torch.ops.aten.sym_size.int(y_1, 0)
     eq = _local_scalar_dense == sym_size_int;  sym_size_int = None
     eq_1 = _local_scalar_dense == 4;  _local_scalar_dense = None
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
-    sym_size_int_2 = torch.ops.aten.sym_size.int(add, 0)
-    sym_numel_default_2 = torch.ops.aten.sym_numel.default(add)
     return add""")  # noqa: B950
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
@@ -1872,13 +1688,10 @@ def forward(self, lengths_1, values_1):
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(a_1)
     sym_float = torch.sym_float(sym_size_int);  sym_size_int = None
     ge = sym_float >= 0.0
     pow_1 = sym_float ** 0.5;  sym_float = None
     div = torch.ops.aten.div.Tensor(a_1, pow_1);  a_1 = pow_1 = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(div, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(div)
     return div""")
 
     def test_make_fx_with_custom_tracer_preserving_nn_module_stack(self):
@@ -1938,23 +1751,17 @@ def forward(self, a_1):
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(a_1)
     div = torch.ops.aten.div.Tensor(a_1, sym_size_int);  a_1 = sym_size_int = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(div, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(div)
     return div""")
 
         r = str(make_fx(f, tracing_mode="symbolic", decomposition_table=decomposition_table)(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(a_1)
     sym_float = torch.sym_float(sym_size_int)
     lt = sym_size_int < 0
     ne = sym_size_int != sym_size_int;  sym_size_int = None
     div = torch.ops.prims.div.default(a_1, sym_float);  a_1 = sym_float = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(div, 0)
-    sym_numel_default_1 = torch.ops.aten.sym_numel.default(div)
     return div""")
 
     def test_cat(self):
@@ -2002,8 +1809,6 @@ def forward(self, a_1):
 def forward(self, x_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    sym_size_int = torch.ops.aten.sym_size.int(zeros, 0)
-    sym_numel_default = torch.ops.aten.sym_numel.default(zeros)
     return zeros""")  # noqa: B950
 
     def test_expand(self):
@@ -2398,10 +2203,6 @@ filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestProxyTensorOpInfo(TestCase):
-    def setUp(self):
-        TestCase.setUp(self)
-        torch._dynamo.reset()
-
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures.union(only_real_tensor_failures))
     def test_make_fx_exhaustive(self, device, dtype, op):

@@ -341,7 +341,7 @@ def extract_val(val: _ExtractValType) -> _ExtractValType:
     typing_extensions.assert_never(val)
 
 @contextmanager
-def enable_thunkify(tracer):
+def enable_thunkify(tracer: _ProxyTracer) -> Generator[None, None, None]:
     old = tracer.enable_thunkify
     tracer.enable_thunkify = True
     try:
@@ -359,7 +359,7 @@ def enable_thunkify(tracer):
 def set_meta(proxy: Proxy, val: _ExtractValType) -> Proxy:
     proxy.node.meta['val'] = extract_val(val)
 
-    with enable_thunkify(proxy.tracer):
+    with enable_thunkify(proxy.tracer):  # type: ignore[arg-type]
         # Best effort tensor_meta setting; prefer using val!
         if is_fake(val):
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
@@ -387,7 +387,8 @@ def track_tensor(tensor: Tensor, proxy: Proxy, *, constant: Optional[Tensor], tr
     ) -> None:
         assert callable(proxy_callable)
         if isinstance(outer_s, SymInt):
-            set_proxy_slot(outer_s, tracer, thunkify(tracer, proxy_callable, outer_s, *args, **kwargs))
+            with enable_thunkify(tracer):
+                set_proxy_slot(outer_s, tracer, thunkify(tracer, proxy_callable, outer_s, *args, **kwargs))
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
     # the proxy on the proxy slot of the object, keyed on the tracer
@@ -411,7 +412,7 @@ def track_tensor(tensor: Tensor, proxy: Proxy, *, constant: Optional[Tensor], tr
     )
     try_set_proxy_slot(
         tensor.storage_offset(),
-        lambda x: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_storage_offset.default, (proxy,)), x)
+        lambda x: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_storage_offset.default, (proxy,), {}), x)
     )
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
@@ -943,7 +944,7 @@ def wrap_key(f: Callable[_P, R], tensors: _P.args, tracer: _ProxyTracer, pre_dis
     def wrapped(*proxies: _P.args, **_unused: _P.kwargs) -> R:
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
-        with disable_proxy_modes_tracing() as m:
+        with disable_proxy_modes_tracing() as m, m.sym_mode.enable(False):
             assert isinstance(m, ProxyTorchDispatchMode)
             track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
