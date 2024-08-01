@@ -28,6 +28,15 @@ class AHTrainDecisionTree(AHTrain):
         choices_feedback = json.loads(row["choice2time"])
         return choices_feedback.get(choice, None)
 
+    def debug_time(self, row, top_k_choices):
+        choices_feedback = json.loads(row["choice2time"])
+        timings = sorted(choices_feedback.items(), key=lambda x: x[1])
+        for choice, time in timings:
+            result = f"{choice} {time}"
+            if choice in top_k_choices:
+                result += " TOPK"
+            print(result)
+
     def top_k_classes(self, model, probas, k, avail_choices):
         # Get classes and their corresponding probabilities
         classes = model.classes_
@@ -41,7 +50,10 @@ class AHTrainDecisionTree(AHTrain):
         ]
 
         # Return top k choices
-        return sorted_classes[:k]
+        top_k_choices = sorted_classes[:k]
+        top_k_choices += self.ranking_always_included_choices()
+        top_k_choices = list(dict.fromkeys(top_k_choices))
+        return top_k_choices
 
     def is_unsafe_leaf(self, row, predicted_config, choice2time):
         """
@@ -345,10 +357,11 @@ class AHTrainDecisionTree(AHTrain):
         (df, choices, cat_feature2cats, dummy_col_2_col_val, metadata) = self.get_df(
             log_path, nrows=nrows, apply_filters=False, add_near_best=ranking
         )
-        print(df["winner"].value_counts())
+        self.dummy_col_2_col_val = dummy_col_2_col_val
         datasets = self.prepare_datasets(df, other_datasets, cat_feature2cats, ranking)
         df_train = self.add_training_data(datasets["train"], datasets)
         datasets["train"] = df_train
+        print(datasets["train"]["winner"].value_counts().to_string())
 
         feature_columns = self.get_feature_columns(df)
         grid_search_values = self.get_grid_search_values()
@@ -372,6 +385,9 @@ class AHTrainDecisionTree(AHTrain):
         if ranking:
             columns_to_keep = [
                 "set",
+                "crit",
+                "max_depth",
+                "min_samples_leaf",
                 "total",
                 "top_k_correct",
                 "top_k_wrong",
@@ -383,12 +399,12 @@ class AHTrainDecisionTree(AHTrain):
         # prints results for all models and datasets
         print(results_df.to_string())
 
-        if not ranking:
-            # prints results grouped by dataset
-            for set_name in results_df["set"].unique():
-                dataset_results = results_df[results_df["set"] == set_name]
-                dataset_results = dataset_results.sort_values(by="correct")
-                print(dataset_results.to_string() + "\n")
+        sort_metric = "top_k_correct" if ranking else "correct"
+        # prints results grouped by dataset
+        for set_name in results_df["set"].unique():
+            dataset_results = results_df[results_df["set"] == set_name]
+            dataset_results = dataset_results.sort_values(by=sort_metric)
+            print(dataset_results.to_string() + "\n")
 
         if best_model is not None:
             if save_dot:
@@ -510,7 +526,7 @@ class AHTrainDecisionTree(AHTrain):
                         breakpoint()
                     new_row["actual_winner"] = row["winner"]
                     new_row["winner"] = key
-                    if relative_performance >= 0.95:
+                    if relative_performance >= 0.98:
                         new_rows.append(new_row)
 
             return pd.DataFrame(new_rows).reset_index(drop=True)
@@ -528,6 +544,9 @@ class AHTrainDecisionTree(AHTrain):
             cat_feature2cats, categorical_features, results
         )
         return (results, choices, cat_feature2cats, dummy_col_2_col_val, metadata)
+
+    def ranking_always_included_choices(self):
+        return []
 
     def get_results(
         self,
