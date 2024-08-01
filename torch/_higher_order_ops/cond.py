@@ -147,10 +147,15 @@ def cond(pred, true_fn, false_fn, operands):
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("torch.cond requires dynamo support.")
 
+    # Dynamo is expecting a callable with "__code__" attribute.
+    # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
+    def _cond_op_wrapper(*args, **kwargs):
+        return cond_op(*args, **kwargs)
+
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
             with _temp_remove_pre_dispatch_torch_function_mode():
-                return torch.compile(cond_op, backend="eager", fullgraph=True)(
+                return torch.compile(_cond_op_wrapper, backend="eager", fullgraph=True)(
                     pred, true_fn, false_fn, operands
                 )
 

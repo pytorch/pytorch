@@ -847,10 +847,15 @@ def flex_attention(
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support")
 
+    # Dynamo is expecting a callable with "__code__" attribute.
+    # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
+    def _flex_attention_hop_wrapper(*args, **kwargs):
+        return flex_attention_hop(*args, **kwargs)
+
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
             with _temp_remove_pre_dispatch_torch_function_mode():
                 out, _ = torch.compile(
-                    flex_attention_hop, backend="eager", fullgraph=True
+                    _flex_attention_hop_wrapper, backend="eager", fullgraph=True
                 )(query, key, value, score_mod, block_mask.as_tuple(), scale=scale)
                 return out
