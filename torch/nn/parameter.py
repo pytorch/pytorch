@@ -1,6 +1,7 @@
 from typing import Any
 
 from torch._parameter import (
+    Buffer,
     is_lazy,
     Parameter,
     UninitializedBuffer,
@@ -8,7 +9,13 @@ from torch._parameter import (
 )
 
 
-__all__ = ["Parameter", "is_lazy", "UninitializedParameter", "UninitializedBuffer"]
+__all__ = [
+    "Parameter",
+    "Buffer",
+    "is_lazy",
+    "UninitializedParameter",
+    "UninitializedBuffer",
+]
 
 
 def __getattr__(name: str) -> Any:

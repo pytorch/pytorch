@@ -11,6 +11,7 @@ from torch.nn import (
 from torch.nn.modules import *  # noqa: F403
 from torch.nn.parallel import DataParallel as DataParallel
 from torch.nn.parameter import (
+    Buffer as Buffer,
     Parameter as Parameter,
     UninitializedBuffer as UninitializedBuffer,
     UninitializedParameter as UninitializedParameter,
