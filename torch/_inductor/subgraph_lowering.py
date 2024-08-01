@@ -47,7 +47,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
     def call_function(
         self,
-        target: torch.fx.node.Target,
+        target: Callable[[Any], Any],
         args: Any,
         kwargs: Dict[str, Any],
     ) -> Any:
@@ -70,14 +70,9 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
         return lowerings[target](*args, **kwargs)
 
-    def output(
-        self,
-        target: torch.fx.node.Target,
-        args: Tuple[torch.fx.node.Argument, ...],
-        kwargs: Dict[str, Any],
-    ) -> None:
+    def output(self, target: str, args: Tuple[Any], kwargs: Dict[str, Any]) -> None:
         assert len(args) == 1
-        self.graph_outputs = args[0]  # type: ignore[assignment]
+        self.graph_outputs = args[0]
 
 
 @dataclass

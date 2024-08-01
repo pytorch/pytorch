@@ -4,8 +4,8 @@ import functools
 from typing import Dict
 
 import torch
-from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
 
+from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
 from .base import VariableTracker
 from .user_defined import UserDefinedObjectVariable
 
@@ -49,6 +49,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     )
     def var_getattr(self, tx, name: str) -> VariableTracker:
         from torch._higher_order_ops.torchbind import call_torchbind
+
         from ..source import AttrSource
         from .higher_order_ops import TorchHigherOrderOperatorVariable
 
