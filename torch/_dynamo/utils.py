@@ -9,6 +9,7 @@ import dis
 import enum
 import functools
 import gc
+import importlib
 import inspect
 import itertools
 import linecache
@@ -37,18 +38,36 @@ from typing import (
     DefaultDict,
     Deque,
     Dict,
+    Iterable,
     Iterator,
     KeysView,
     List,
     Optional,
+    overload,
     Set,
     Tuple,
     Type,
+    TypeVar,
     Union,
     ValuesView,
 )
+from typing_extensions import Literal, ParamSpec, TypeGuard
 
-from ..utils.hooks import RemovableHandle
+import torch
+import torch._functorch.config
+import torch._inductor.config as inductor_config
+import torch.fx.experimental.symbolic_shapes
+import torch.utils._pytree as pytree
+from torch import fx
+from torch._dispatch.python import enable_python_dispatcher
+from torch._guards import TracingContext
+from torch._subclasses.meta_utils import is_sparse_compressed
+from torch._utils_internal import log_compilation_event
+from torch.fx._utils import _format_graph_code, lazy_format_graph_code
+from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils._triton import has_triton, has_triton_package
+from torch.utils.hooks import RemovableHandle
+
 
 try:
     import numpy as np
@@ -60,6 +79,7 @@ try:
     import torch._numpy as tnp
     from torch._guards import detect_fake_mode  # noqa: F401n
     from torch._logging import LazyString
+
     from . import config
 
     # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
@@ -85,23 +105,9 @@ try:
 except ImportError:
     pass
 
-import importlib
 
-import torch
-import torch._functorch.config
-import torch._inductor.config as inductor_config
-import torch.fx.experimental.symbolic_shapes
-import torch.utils._pytree as pytree
-from torch import fx
-from torch._dispatch.python import enable_python_dispatcher
-from torch._guards import TracingContext
-from torch._subclasses.meta_utils import is_sparse_compressed
-from torch._utils_internal import log_compilation_event
-
-from torch.fx._utils import _format_graph_code, lazy_format_graph_code
-from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._triton import has_triton, has_triton_package
-
+T = TypeVar("T")
+_P = ParamSpec("_P")
 
 unpatched_nn_module_getattr = torch.nn.Module.__getattr__
 
@@ -125,7 +131,10 @@ frame_phase_timing: Dict[str, Dict[str, float]] = collections.defaultdict(
 timer_counter = itertools.count()
 
 
-def tabulate(rows, headers):
+def tabulate(
+    rows: Union[List[Tuple[str, object]], List[List[object]]],
+    headers: Union[Tuple[str, ...], List[str]],
+) -> str:
     try:
         import tabulate
 
@@ -140,13 +149,13 @@ curr_frame = 0
 
 
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
-def increment_frame():
+def increment_frame() -> None:
     global curr_frame
     curr_frame = curr_frame + 1
 
 
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
-def reset_frame_count():
+def reset_frame_count() -> None:
     global curr_frame
     frame_phase_timing.clear()
     compilation_time_metrics.clear()
@@ -156,14 +165,14 @@ def reset_frame_count():
 op_count = 0
 
 
-def increment_op_count(cnt):
+def increment_op_count(cnt: int) -> None:
     global op_count
     op_count += cnt
 
 
 # Calculate total time spent so far for each phase
 # For example, {'entire_frame_compile':8.574629999999999, 'backend_compile':5.26806}
-def calculate_time_spent():
+def calculate_time_spent() -> Dict[str, float]:
     total_wall_time = 0.0
     total_by_key = {}
     for timings in frame_phase_timing.values():
@@ -188,7 +197,7 @@ def calculate_time_spent():
 # TIMING:
 # entire_frame_compile:8.574629999999999
 # backend_compile:5.26806
-def print_time_report():
+def print_time_report() -> None:
     total_by_key = calculate_time_spent()
 
     out = "TIMING:"
@@ -198,7 +207,7 @@ def print_time_report():
     print(out)
 
 
-def _add_time_spent(key, phase_name, time_spent):
+def _add_time_spent(key: str, phase_name: str, time_spent: float) -> None:
     frame_phase_timing[key][phase_name] += time_spent
 
 
@@ -223,10 +232,32 @@ def _add_time_spent(key, phase_name, time_spent):
 # The other phases (`inductor_compile` and `code_gen`) are called for both fwd and bwd graphs.
 
 
-def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
-    def dynamo_timed_inner(func):
+@overload
+def dynamo_timed(
+    original_function: Callable[_P, T],
+    phase_name: Optional[str] = None,
+    fwd_only: bool = True,
+) -> Callable[_P, T]:
+    ...
+
+
+@overload
+def dynamo_timed(
+    original_function: Literal[None] = None,
+    phase_name: Optional[str] = None,
+    fwd_only: bool = True,
+) -> Callable[[Callable[_P, T]], Callable[_P, T]]:
+    ...
+
+
+def dynamo_timed(
+    original_function: Optional[Callable[_P, T]] = None,
+    phase_name: Optional[str] = None,
+    fwd_only: bool = True,
+):
+    def dynamo_timed_inner(func: Callable[_P, T]) -> Callable[_P, T]:
         @wraps(func)
-        def time_wrapper(*args, **kwargs):
+        def time_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> T:
             key = func.__qualname__
             if key not in compilation_time_metrics:
                 compilation_time_metrics[key] = []
@@ -303,7 +334,19 @@ def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
     return dynamo_timed_inner
 
 
-def compile_times(repr="str", aggregate=False):
+@overload
+def compile_times(repr: Literal["str"], aggregate: bool = False) -> str:
+    ...
+
+
+@overload
+def compile_times(
+    repr: Literal["csv"], aggregate: bool = False
+) -> Tuple[List[str], List[object]]:
+    ...
+
+
+def compile_times(repr="str", aggregate: bool = False):
     """
     Get metrics about torchdynamo frontend/backend compilation times.
 
@@ -337,10 +380,11 @@ def compile_times(repr="str", aggregate=False):
         ]
         headers = list(compilation_time_metrics.keys())
         return headers, values
+    return None
 
 
 @atexit.register
-def dump_compile_times():
+def dump_compile_times() -> None:
     log.info(compile_times(repr="str", aggregate=True))
 
 
@@ -359,14 +403,14 @@ tensortype_to_dtype = {
 
 
 class DuplicateWarningChecker:
-    def __init__(self, maxsize=4096):
+    def __init__(self, maxsize: int = 4096) -> None:
         self.maxsize = maxsize
         self.reset()
 
     def reset(self):
         self.set = collections.OrderedDict()
 
-    def add(self, key):
+    def add(self, key: Union[str, Tuple[object, object]]) -> bool:
         if key in self.set:
             self.set.move_to_end(key, last=True)
             if not config.verbose:
@@ -390,7 +434,7 @@ def setup_compile_debug():
     return contextlib.ExitStack()
 
 
-def reset_graph_break_dup_checker():
+def reset_graph_break_dup_checker() -> None:
     graph_break_dup_warning_checker.reset()
 
 
@@ -419,12 +463,12 @@ def setup_log_file():
     return exitstack
 
 
-def gen_record_file_name(exc, code):
+def gen_record_file_name(exc, code) -> str:
     return f"{get_debug_dir()}/error_recordings/\
 {code.co_name}_{type(exc).__name__}_{code.co_firstlineno}.rec"
 
 
-def write_record_to_file(filename, exec_record):
+def write_record_to_file(filename: str, exec_record) -> None:
     try:
         if os.path.exists(filename):
             log.warning(
@@ -438,7 +482,7 @@ def write_record_to_file(filename, exec_record):
         log.exception("Unable to write execution record %s", filename)
 
 
-def count_calls(g: fx.Graph):
+def count_calls(g: fx.Graph) -> int:
     c = 0
     for n in g.nodes:
         if "call" in n.op:
@@ -496,6 +540,23 @@ class ExactWeakKeyDictionary:
     def clear(self):
         self.refs.clear()
         self.values.clear()
+
+
+@overload
+def istype(obj: object, allowed_types: Type[T]) -> TypeGuard[T]:
+    ...
+
+
+@overload
+def istype(
+    obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
+) -> TypeGuard[T]:
+    ...
+
+
+@overload
+def istype(obj: object, allowed_types: Iterable[type]) -> bool:
+    ...
 
 
 def istype(obj, allowed_types):
@@ -631,7 +692,7 @@ def is_numpy_ndarray(value):
 
 def istensor(obj):
     """Check of obj is a tensor"""
-    tensor_list = (
+    tensor_list: Tuple[type, ...] = (
         torch.Tensor,
         torch.nn.Parameter,
         *config.traceable_tensor_subclasses,
@@ -1061,7 +1122,7 @@ def rot_n_helper(n):
     return fn
 
 
-common_constant_types = {
+common_constant_types: Set[type] = {
     int,
     float,
     complex,
@@ -1351,8 +1412,12 @@ def same(
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
         fp64_ref = ref
-    if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
-        assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
+    if isinstance(
+        ref, (list, tuple, collections.deque, torch.nn.ParameterList, torch.Size)
+    ):
+        assert isinstance(
+            res, (list, tuple, collections.deque)
+        ), f"type mismatch {type(ref)} {type(res)}"
         if len(ref) != len(res):
             log_error("Length mismatch")
             return False
@@ -1409,6 +1474,10 @@ def same(
             ):
                 log_error("Accuracy failed for key name %s", k)
                 return False
+        return True
+    elif isinstance(ref, set):
+        assert isinstance(res, set)
+        assert set(ref) == set(res), f"elements mismatch {set(ref)} == {set(res)}"
         return True
     elif isinstance(ref, (torch.Tensor, float)):
         assert not isinstance(ref, torch._subclasses.FakeTensor)
@@ -1780,6 +1849,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         by further wrapping them as this graph's fakes.
     """
     from torch.utils._sympy.value_ranges import ValueRangeError
+
     from .exc import (
         TorchRuntimeError,
         unimplemented,
@@ -2099,7 +2169,10 @@ def tensor_always_has_static_shape(
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
-    if guard_source.is_nn_module() and config.force_nn_module_property_static_shapes:
+    if (
+        guard_source.is_specialized_nn_module()
+        and config.force_nn_module_property_static_shapes
+    ):
         return True, TensorStaticReason.NN_MODULE_PROPERTY
     if type(tensor) is torch.nn.Parameter and config.force_parameter_static_shapes:
         return True, TensorStaticReason.PARAMETER
@@ -2158,7 +2231,6 @@ def nn_module_get_all_hooks(
     check_backward_hooks=False,
     check_state_dict_hooks=False,
 ):
-    reset_code = torch._C._dynamo.eval_frame.reset_code
     """
     Sometimes its useful to differentiate between types of hooks such as forward/backward/pre
     hooks executed during module.__call__, and state_dict hooks which are executed separately.
@@ -2333,6 +2405,7 @@ def is_utils_checkpoint(obj):
 
 def build_checkpoint_variable(**options):
     import torch._higher_order_ops.wrap as higher_order_ops
+
     from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
 
     # TODO - This is a temporary situation where we have two versions of
@@ -2840,3 +2913,24 @@ def _disable_saved_tensors_hooks_during_tracing():
         yield
     finally:
         torch._C._autograd._saved_tensors_hooks_set_tracing(prior)
+
+
+def is_parameter_freezing():
+    return torch._inductor.config.freezing and not torch.is_grad_enabled()
+
+
+def verify_guard_fn_signature(value):
+    fn = value.__metadata_guard__
+    sig = inspect.signature(fn)
+    if len(sig.parameters) != 2:
+        from .exc import InternalTorchDynamoError
+
+        raise InternalTorchDynamoError(
+            "Tensor subclass method __metadata_guard__ must take exactly two subclass metadata arguments"
+        )
+    if fn.__self__ != value.__class__:
+        from .exc import InternalTorchDynamoError
+
+        raise InternalTorchDynamoError(
+            "Tensor subclass method __metadata_guard__ must be a classmethod"
+        )

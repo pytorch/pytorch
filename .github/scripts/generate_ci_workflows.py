@@ -8,8 +8,8 @@ from typing import Dict, Iterable, List, Literal, Set
 from typing_extensions import TypedDict  # Python 3.11+
 
 import generate_binary_build_matrix  # type: ignore[import]
-
 import jinja2
+
 
 Arch = Literal["windows", "linux", "macos"]
 
