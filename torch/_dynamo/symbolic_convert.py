@@ -3258,6 +3258,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 unimplemented("Storing handles in globals - NYI")
             name = inst.argval
             fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
+            fglobals_vt = self.output.side_effects.track_object_existing(
+                fglobals_value, fglobals_vt
+            )
             self.output.side_effects.store_attr(fglobals_vt, name, value)
 
 
