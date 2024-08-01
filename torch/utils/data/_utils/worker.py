@@ -28,7 +28,7 @@ if IS_WINDOWS:
     # is gone, and the only way to check it through OS is to let the worker have a process handle
     # of the manager and ask if the process status has changed.
     class ManagerWatchdog:
-        def __init__(self):
+        def __init__(self) -> None:
             self.manager_pid = os.getppid()
 
             # mypy cannot detect this code is windows only
@@ -60,7 +60,7 @@ if IS_WINDOWS:
 else:
 
     class ManagerWatchdog:  # type: ignore[no-redef]
-        def __init__(self):
+        def __init__(self) -> None:
             self.manager_pid = os.getppid()
             self.manager_dead = False
 

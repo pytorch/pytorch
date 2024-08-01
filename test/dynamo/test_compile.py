@@ -12,7 +12,7 @@ from torch._dynamo.testing import CompileCounter
 
 
 class ToyModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear = torch.nn.Linear(10, 10)
         self.relu = torch.nn.ReLU()

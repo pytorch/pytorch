@@ -16,6 +16,7 @@ from torch._library.fake_class_registry import FakeScriptObject
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
+
 KNOWN_TYPES = [
     torch.Tensor,
     BackwardState,
