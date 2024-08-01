@@ -264,6 +264,10 @@ class CKGemmTemplate(CKTemplate):
 
         op = copy.deepcopy(op)
 
+        op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
+            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,
+        )
+
         if Bias is not None:
             op.ds_layouts = (torch_layout_to_ck_layout(Bias.get_layout()),)
             op.ds_element_dtypes = ((self._TORCH_DTYPE_TO_CK[Bias.get_layout().dtype]),)
@@ -271,10 +275,12 @@ class CKGemmTemplate(CKTemplate):
             # this dtype is also used for adding bias to matmul result
             # before converting down to the result dtype
             op.c_shuffle_dtype = "F32"
-
-        op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
-            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,
-        ) * (2 if Bias else 1)
+            # this parameter needs to be set accordingly to bias stride for correct accumulation
+            if op.ds_layouts[0] == "Row":
+                bias_shuffle_block_transfer_scalar_per_vector_n_per_block = op.c_shuffle_block_transfer_scalar_per_vector_n_per_block
+            else:
+                bias_shuffle_block_transfer_scalar_per_vector_n_per_block = (1,)
+            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block += bias_shuffle_block_transfer_scalar_per_vector_n_per_block
 
         instance_definition, instance_type = self.emit_ck_instance(op)
 

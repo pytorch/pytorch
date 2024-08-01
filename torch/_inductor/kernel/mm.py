@@ -347,18 +347,13 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             )
 
     if static_shape and is_nonzero and use_ck_template(layout, m, n, k):
-        # disable columnwise broadcasted bias in the CK backend until numeric mismatch is fixed
-        if (
-            WrapperCodeGen.statically_known_int_or_none(inp_expanded.layout.stride[-1])
-            != 0
-        ):
-            CKGemmTemplate.add_ck_gemm_choices(
-                choices,
-                layout,
-                [mat1, mat2, inp_expanded],
-                alpha=alpha,
-                beta=beta,
-            )
+        CKGemmTemplate.add_ck_gemm_choices(
+            choices,
+            layout,
+            [mat1, mat2, inp_expanded],
+            alpha=alpha,
+            beta=beta,
+        )
 
     if use_cpp_packed_gemm_template(layout, mat1, mat2):
         CppPackedGemmTemplate.add_choices(
