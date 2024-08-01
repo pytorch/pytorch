@@ -240,7 +240,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             import torch.nn as nn
 
             class Model(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
 
                 def forward(self, input, other, out):
@@ -327,7 +327,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             # mutation on parameters/buffers hits cudagraphs
             class Mod(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.buf = torch.ones([10], device="cuda")
 
@@ -744,7 +744,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return [torch.rand([6, 5], device="cuda")[1:] for _ in range(2)]
 
             class CloneCounterMode(TorchDispatchMode):
-                def __init__(self):
+                def __init__(self) -> None:
                     self.count = 0
 
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -827,7 +827,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._inductor.config.patch("freezing", True)
         def test_constant_output(self):
             class Mod(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.param = torch.nn.Parameter(
                         torch.tensor([float(i) for i in range(10)], device="cuda")
@@ -1501,7 +1501,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         def test_alias_of_parameter(self):
             class AliasMod(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.param = torch.nn.Parameter(torch.rand([20, 20], device="cuda"))
 
@@ -2276,7 +2276,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
         def test_skip_if_dynamic_shape_limit_reached1(self):
             class Mod(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.linear = torch.nn.Linear(3, 3, device="cuda")
 
@@ -2308,7 +2308,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
         def test_skip_if_dynamic_shape_limit_reached2(self):
             class Mod(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.attn = torch.nn.MultiheadAttention(
                         embed_dim=3, num_heads=3, device="cuda"
