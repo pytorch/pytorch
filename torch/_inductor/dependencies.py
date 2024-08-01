@@ -109,7 +109,7 @@ class MemoryDep(Dep):
                 reindex([add_var(x) for x in new_simplified_sizes]),
             )
         )
-        new_index = sympy_subs(sympy.expand(self.index), replacement)
+        new_index = sympy_subs(sympy.expand(self.index), replacement)  # type: ignore[arg-type] # next PR
 
         out = MemoryDep(self.name, new_index, tuple(var_ranges.keys()), tuple(var_ranges.values()))  # type: ignore[arg-type]
         return out

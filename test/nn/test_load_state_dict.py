@@ -574,7 +574,7 @@ class TestLoadStateDictSwap(TestCase):
     def test_swap_subclass(self, assign):
         def _create_model(subclass=None):
             m = torch.nn.Linear(2, 3, bias=False)
-            m.register_buffer("buf", torch.randn(2, 3))
+            m.buf = torch.nn.Buffer(torch.randn(2, 3))
             if subclass is not None:
                 m.weight = torch.nn.Parameter(subclass(m.weight))
                 m.buf = subclass(m.buf)
