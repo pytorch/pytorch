@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from torch.autograd import Function, Variable
 from torch.testing import FileCheck
 
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
@@ -42,6 +43,7 @@ from torch.testing._internal.jit_utils import (
     RUN_CUDA,
     RUN_CUDA_MULTI_GPU,
 )
+
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -1482,7 +1484,7 @@ class TestTracer(JitTestCase):
                 return x + 2
 
             def forward(self, input):
-                return (lambda a: a + 1)(input)
+                return (lambda a: a + 1)(input)  # noqa: PLC3002
 
         # When tracing Bar as a submodule, we only want to script the
         # exported methods, and we want to keep the forwards still

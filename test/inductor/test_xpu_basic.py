@@ -7,6 +7,7 @@ import unittest
 import torch
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 
+
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
         "Windows CI does not have necessary dependencies for test_xpu_basic yet\n"

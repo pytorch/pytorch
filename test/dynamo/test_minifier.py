@@ -5,6 +5,7 @@ import torch._dynamo
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch.testing._internal.common_utils import skipIfNNModuleInlined
 
+
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
@@ -124,8 +125,8 @@ class CpuCudaModule(torch.nn.Module):
         self.m_y = torch.nn.Linear(20, 20)
         self.p_x = torch.nn.Parameter(torch.randn(20, 20).cuda())
         self.p_y = torch.nn.Parameter(torch.randn(20, 20))
-        self.register_buffer("b_x", torch.ones(20, 20).cuda())
-        self.register_buffer("b_y", torch.ones(20, 20))
+        self.b_x = torch.nn.Buffer(torch.ones(20, 20).cuda())
+        self.b_y = torch.nn.Buffer(torch.ones(20, 20))
 
     def forward(self, x, y):
         return self.m_x(x) + self.p_x + self.b_x, self.m_y(y) + self.p_y + self.b_y
