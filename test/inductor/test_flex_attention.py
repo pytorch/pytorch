@@ -1622,16 +1622,16 @@ class GraphModule(torch.nn.Module):
         l_kwargs_block_mask_full_q_num_blocks = L_kwargs_block_mask_full_q_num_blocks
         l_kwargs_block_mask_full_q_indices = L_kwargs_block_mask_full_q_indices
 
-        child_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child: "f64[]" = l_args_0_.new_empty([], requires_grad = True)
+        child_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_1 = None
+        child_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_2 = None
+        child_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_3 = None
+        child_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_4 = None
+        child: "f64[]" = l_args_0_.new_empty([], requires_grad = True);  child = None
         score_mod_0 = self.score_mod_0
-        child_5: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_6: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        child_5: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_5 = None
+        child_6: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_6 = None
+        child_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_7 = None
+        child_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_8 = None
         mask_fn_0 = self.mask_fn_0
         flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (l_kwargs_block_mask_kv_num_blocks, l_kwargs_block_mask_kv_indices, l_kwargs_block_mask_full_kv_num_blocks, l_kwargs_block_mask_full_kv_indices, l_kwargs_block_mask_q_num_blocks, l_kwargs_block_mask_q_indices, l_kwargs_block_mask_full_q_num_blocks, l_kwargs_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = l_kwargs_block_mask_kv_num_blocks = l_kwargs_block_mask_kv_indices = l_kwargs_block_mask_full_kv_num_blocks = l_kwargs_block_mask_full_kv_indices = l_kwargs_block_mask_q_num_blocks = l_kwargs_block_mask_q_indices = l_kwargs_block_mask_full_q_num_blocks = l_kwargs_block_mask_full_q_indices = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
@@ -1686,7 +1686,7 @@ class GraphModule(torch.nn.Module):
 
     class joint_graph(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]", arg5_1: "f64[]"):
-            mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1)
+            mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  mul = None
             mul_1: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1)
             mul_2: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1);  arg5_1 = arg0_1 = None
             add: "f64[]" = torch.ops.aten.add.Tensor(mul_2, mul_1);  mul_2 = mul_1 = None
