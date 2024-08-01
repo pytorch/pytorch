@@ -2,16 +2,17 @@
 
 import collections
 from enum import Enum
-from typing import Any, Callable, Dict, List, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
 from ..source import AttrSource, Source
 from ..utils import istype
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class MutableLocalSource(Enum):
@@ -69,7 +70,7 @@ class MutableLocal(MutableLocalBase):
     state.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(MutableLocalSource.Local)
 
     def __hash__(self):
@@ -142,9 +143,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def visit(
         cls,
         fn: Callable[["VariableTracker"], None],
-        value,
-        cache=None,
-    ):
+        value: Any,
+        cache: Optional[Dict[int, Any]] = None,
+    ) -> None:
         """
         Walk value and call fn on all the VariableTracker instances
         """
