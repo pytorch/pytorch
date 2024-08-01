@@ -2217,7 +2217,7 @@ if (custom_op_wrapper.get() == NULL) {
                     return f"PyComplex_FromDoubles({raw_arg.real, raw_arg.imag})"
                 else:
                     raise NotImplementedError(
-                        f"arg type {arg_type} with raw_arg {raw_arg} is not yet supported by custom_op_wrapper"
+                        f"arg type {arg_type} with raw_arg {raw_arg}, {type(raw_arg)} is not yet supported by custom_op_wrapper"
                     )
             else:
                 raise NotImplementedError(
