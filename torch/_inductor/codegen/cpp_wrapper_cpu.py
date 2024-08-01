@@ -170,8 +170,6 @@ class CppWrapperCpu(WrapperCodeGen):
                     #include <torch/csrc/inductor/aoti_runtime/model.h>
                     """
                 )
-            self.header.splice("typedef at::Half half;")
-            self.header.splice("typedef at::BFloat16 bfloat16;")
         else:
             self.header.splice(
                 """
