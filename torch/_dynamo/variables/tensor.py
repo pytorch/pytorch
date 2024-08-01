@@ -5,6 +5,7 @@ import inspect
 import logging
 import operator
 import textwrap
+import traceback
 import types
 import unittest
 from typing import Dict, List, TYPE_CHECKING
@@ -752,6 +753,8 @@ class TensorVariable(VariableTracker):
     @staticmethod
     @functools.lru_cache(None)
     def _warn_capture_scalar_outputs():
+        user_stack = torch._guards.TracingContext.extract_stack()
+        user_stack_formatted = "".join(traceback.format_list(user_stack))
         log.warning(
             textwrap.dedent(
                 """\
@@ -760,8 +763,12 @@ class TensorVariable(VariableTracker):
                     or:
                         env TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1
                     to include these operations in the captured graph.
+
+                    Graph break: from user code at:
+                    %s
                 """
-            )
+            ),
+            user_stack_formatted,
         )
 
     def method___len__(self):

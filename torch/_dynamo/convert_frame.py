@@ -25,6 +25,7 @@ from weakref import ReferenceType
 
 import torch
 import torch._logging
+from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
@@ -121,7 +122,7 @@ if typing.TYPE_CHECKING:
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
-GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
+
 
 compile_lock = threading.RLock()
 
