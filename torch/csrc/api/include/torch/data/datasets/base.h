@@ -50,7 +50,7 @@ class BatchDataset {
   virtual Batch get_batch(BatchRequest request) = 0;
 
   /// Returns the size of the dataset, or an empty optional if it is unsized.
-  virtual optional<size_t> size() const = 0;
+  virtual std::optional<size_t> size() const = 0;
 
   /// Creates a `MapDataset` that applies the given `transform` to this dataset.
   template <typename TransformType>

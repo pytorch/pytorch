@@ -4,6 +4,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/Parallel.h>
 #include <c10/core/ScalarType.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Unroll.h>
 #include <c10/util/complex.h>
@@ -16,6 +17,7 @@
 #include <arm_neon.h>
 #endif
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")
 namespace {
 
 /// Wrapper for const_cast<T*> with type-inference.
@@ -109,6 +111,23 @@ void fp16_gemv_trans(
 float fp16_dot_with_fp32_arith(
     const float16_t* vec1,
     const float16_t* vec2,
+    int64_t len);
+
+void bf16_gemv_trans(
+    const int m,
+    const int n,
+    const at::BFloat16 alpha,
+    const at::BFloat16* a,
+    const int lda,
+    const at::BFloat16* x,
+    const int incx,
+    const at::BFloat16 beta,
+    at::BFloat16* y,
+    const int incy);
+
+float bf16_dot_with_fp32_arith(
+    const at::BFloat16* vec1,
+    const at::BFloat16* vec2,
     int64_t len);
 #endif
 
@@ -950,3 +969,4 @@ INSTANTIATE_VDOT_IMPL(c10::complex<double>);
 #undef INSTANTIATE_DOT_IMPL
 
 } // namespace at::native
+C10_DIAGNOSTIC_POP()

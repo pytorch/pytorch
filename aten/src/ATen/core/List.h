@@ -8,7 +8,7 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <vector>
 
 namespace at {
@@ -477,8 +477,6 @@ namespace impl {
 // public API. Kernels should use Lists with concrete types instead
 // (maybe except for some internal prim ops).
 using GenericList = List<IValue>;
-
-const IValue* ptr_to_first_element(const GenericList& list);
 
 }
 }

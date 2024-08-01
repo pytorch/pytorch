@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from functools import lru_cache as _lru_cache
 
 from typing import Optional

@@ -12,6 +12,7 @@ import torch.autograd
 import torch.distributed as dist
 from torch._C._distributed_c10d import ReduceOp
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)

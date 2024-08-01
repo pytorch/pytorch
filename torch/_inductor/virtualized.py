@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This file provides a number of "global" variables/handlers that are actually
 thread local and dynamically scoped, with Inductor patching them to various
@@ -69,8 +70,10 @@ from .ops_handler import (  # noqa: F401
     WrapperHandler,
 )
 
+
 if TYPE_CHECKING:
     import torch
+    from torch._inductor.codegen.cpp_utils import LocalBufferContext
     from torch._inductor.debug import DebugContext
     from torch._inductor.graph import GraphLowering
     from torch._inductor.ir import InterpreterShim
@@ -161,6 +164,9 @@ _debug: Virtualized[DebugContext] = Virtualized("debug", NullHandler)
 _interpreter: Virtualized[InterpreterShim] = Virtualized("interpreter", NullHandler)
 _aot_compilation: Virtualized[bool] = Virtualized("aot_compilation", NullHandler)
 _current_node: Virtualized[torch.fx.Node] = Virtualized("current_node", NullHandler)
+_local_buffer_context: Virtualized[LocalBufferContext] = Virtualized(
+    "local_buffer_context", NullHandler
+)
 
 
 class OpsValue:
@@ -277,10 +283,10 @@ class OpsWrapper:
         return OpsValue(x)
 
     @staticmethod
-    def indirect_indexing(index, size, check=True):
+    def indirect_indexing(index, size, check=True, wrap_neg=True):
         # Returns a sympy value, not IR value
         index = OpsWrapper._unwrap(index)
-        return _ops.indirect_indexing(index, size, check)
+        return _ops.indirect_indexing(index, size, check, wrap_neg)
 
 
 ops = OpsWrapper()
@@ -305,6 +311,8 @@ class _V:
     get_aot_compilation: Callable[[], Any] = _aot_compilation._get_handler
     set_current_node: Callable[[Any], Any] = _current_node._set_handler
     get_current_node: Callable[[], Any] = _current_node._get_handler
+    set_local_buffer_context: Callable[[Any], Any] = _local_buffer_context._set_handler
+    get_local_buffer_context: Callable[[], Any] = _local_buffer_context._get_handler
 
     @property
     def ops(self) -> OpsHandler[Any]:
@@ -346,6 +354,10 @@ class _V:
     @property
     def current_node(self):
         return _current_node._get_handler()
+
+    @property
+    def local_buffer_context(self):
+        return _local_buffer_context._get_handler()
 
 
 V = _V()

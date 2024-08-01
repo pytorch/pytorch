@@ -47,12 +47,14 @@ ncclResult_t to_nccl_result(torch::cuda::nccl::ncclResult var) {
       return ncclResult_t::ncclInvalidArgument;
     case torch::cuda::nccl::ncclResult::InvalidUsage:
       return ncclResult_t::ncclInvalidUsage;
-    case torch::cuda::nccl::ncclResult::NumResults:
-      return ncclResult_t::ncclNumResults;
+    case torch::cuda::nccl::ncclResult::RemoteError:
+      return ncclResult_t::ncclRemoteError;
 #ifdef NCCL_HAS_COMM_NONBLOCKING
     case torch::cuda::nccl::ncclResult::InProgress:
       return ncclResult_t::ncclInProgress;
 #endif
+    case torch::cuda::nccl::ncclResult::NumResults:
+      return ncclResult_t::ncclNumResults;
     default:
       throw std::runtime_error("Unconvertible NCCL type");
   }
@@ -72,12 +74,14 @@ torch::cuda::nccl::ncclResult from_nccl_result(ncclResult_t var) {
       return torch::cuda::nccl::ncclResult::InvalidArgument;
     case ncclInvalidUsage:
       return torch::cuda::nccl::ncclResult::InvalidUsage;
-    case ncclNumResults:
-      return torch::cuda::nccl::ncclResult::NumResults;
+    case ncclRemoteError:
+      return torch::cuda::nccl::ncclResult::RemoteError;
 #ifdef NCCL_HAS_COMM_NONBLOCKING
     case ncclInProgress:
       return torch::cuda::nccl::ncclResult::InProgress;
 #endif
+    case ncclNumResults:
+      return torch::cuda::nccl::ncclResult::NumResults;
     default:
       throw std::runtime_error("Unconvertible NCCL type");
   }
@@ -287,7 +291,7 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
 
 static inline void check_tensor(
     const at::Tensor& input,
-    const at::optional<at::Tensor>& output,
+    const std::optional<at::Tensor>& output,
     int input_multiplier,
     int output_multiplier,
     int64_t ref_numel,
@@ -392,8 +396,8 @@ void check_inputs(
     check_tensor(
         input,
         i == static_cast<std::remove_cv_t<decltype(i)>>(root)
-            ? at::optional<at::Tensor>{output}
-            : at::nullopt,
+            ? std::optional<at::Tensor>{output}
+            : std::nullopt,
         input_multiplier,
         output_multiplier,
         numel,
