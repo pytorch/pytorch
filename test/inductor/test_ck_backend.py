@@ -176,7 +176,7 @@ class TestCKBackend(TestCase):
     def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
-        m, k, n = 4096, 256, 2048
+        m, k, n = 4096, 224, 2048
         alpha, beta = 1.0, 1.0
 
         tensor_options = {"device": "cuda", "dtype": torch.float16}
