@@ -4,14 +4,22 @@ MAX_CYCLE = 3000
 
 import itertools
 import operator
+import sys
 
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 from .. import polyfill, variables
-from ..exc import ObservedUserStopIteration, unimplemented
+from ..bytecode_transformation import create_call_function, create_instruction
+from ..exc import (
+    handle_observed_user_stop_iteration,
+    ObservedUserStopIteration,
+    raise_observed_user_stop_iteration,
+    unimplemented,
+    UserError,
+)
 
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
@@ -52,6 +60,7 @@ class ItertoolsVariable(VariableTracker):
             and not kwargs
             and all(arg.has_unpack_var_sequence(tx) for arg in args)
         ):
+            # TODO support itertools.chain with arbitrary iterables
             seqs = [arg.unpack_var_sequence(tx) for arg in args]
             items = list(itertools.chain.from_iterable(seqs))
             return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
@@ -188,6 +197,10 @@ class ItertoolsVariable(VariableTracker):
             return variables.UserFunctionVariable(polyfill.dropwhile).call_function(
                 tx, args, kwargs
             )
+        elif self.value is itertools.zip_longest:
+            return variables.UserFunctionVariable(polyfill.zip_longest).call_function(
+                tx, args, kwargs
+            )
         else:
             return super().call_function(tx, args, kwargs)
 
@@ -199,6 +212,25 @@ class IteratorVariable(VariableTracker):
     def next_variable(self, tx):
         unimplemented("abstract method, must implement")
 
+    # NOTE: only call when unpacking this iterator safely done eagerly!
+    # Normally, iterators are accessed lazily.
+    # Example of safe eager unpacking: list(map(f, seq))
+    # Example of unsafe eager unpacking: list(islice(map(f, seq), 5))
+    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
+        result = []
+        while True:
+            try:
+                result.append(self.next_variable(tx))
+            except ObservedUserStopIteration:
+                handle_observed_user_stop_iteration(tx)
+                break
+        return result
+
+    # don't call force_unpack_var_sequence since it can mutate
+    # IteratorVariable state!
+    def has_force_unpack_var_sequence(self, tx) -> bool:
+        return True
+
 
 class RepeatIteratorVariable(IteratorVariable):
     def __init__(self, item: VariableTracker, **kwargs):
@@ -208,6 +240,18 @@ class RepeatIteratorVariable(IteratorVariable):
     # Repeat needs no mutation, clone self
     def next_variable(self, tx):
         return self.item
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(itertools),
+                    codegen.create_load_attr("repeat"),
+                ]
+            )
+        )
+        codegen(self.item)
+        codegen.extend_output(create_call_function(1, False))
 
 
 class CountIteratorVariable(IteratorVariable):
@@ -222,10 +266,23 @@ class CountIteratorVariable(IteratorVariable):
 
     def next_variable(self, tx):
         assert self.mutable_local
+        old_item = self.item
         tx.output.side_effects.mutation(self)
-        next_item = self.item.call_method(tx, "__add__", [self.step], {})
-        self.item = next_item
-        return self.item
+        self.item = self.item.call_method(tx, "__add__", [self.step], {})
+        return old_item
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(itertools),
+                    codegen.create_load_attr("count"),
+                ]
+            )
+        )
+        codegen(self.item)
+        codegen(self.step)
+        codegen.extend_output(create_call_function(2, False))
 
 
 class CycleIteratorVariable(IteratorVariable):
@@ -262,6 +319,7 @@ class CycleIteratorVariable(IteratorVariable):
                     return self.next_variable(tx)
                 return self.item
             except ObservedUserStopIteration:
+                handle_observed_user_stop_iteration(tx)
                 self.iterator = None
                 return self.next_variable(tx)
         elif len(self.saved) > 0:
@@ -269,10 +327,177 @@ class CycleIteratorVariable(IteratorVariable):
             self.saved_index = (self.saved_index + 1) % len(self.saved)
             return self.item
         else:
-            # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
-            # stack and raise the exception.
-            exception_vt = variables.BuiltinVariable(StopIteration).call_function(
-                self, [], {}
+            raise_observed_user_stop_iteration(self, tx)
+
+
+class ZipVariable(IteratorVariable):
+    """
+    Represents zip(*iterables)
+    """
+
+    _nonvar_fields = {
+        "index",
+        "strict",
+        *IteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        iterables: List[Union[List[VariableTracker], VariableTracker]],
+        strict: bool = False,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        assert isinstance(iterables, list)
+        # can be list[Variable] or VariableTracker (with next_variable implemented)
+        self.iterables = iterables
+        self.index = 0
+        self.strict = strict
+
+    def python_type(self):
+        return zip
+
+    def has_unpack_var_sequence(self, tx) -> bool:
+        return all(
+            isinstance(it, list) or it.has_unpack_var_sequence(tx)
+            for it in self.iterables
+        )
+
+    def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+        assert self.has_unpack_var_sequence(tx)
+        iterables = []
+        for it in self.iterables:
+            if isinstance(it, list):
+                iterables.append(it[self.index :])
+            else:
+                iterables.append(it.unpack_var_sequence(tx))
+        kwargs = {"strict": self.strict} if self.strict else {}
+        zipped = zip(*iterables, **kwargs)
+        return [variables.TupleVariable(list(var)) for var in zipped]
+
+    def next_variable(self, tx):
+        assert self.mutable_local
+        old_index = self.index
+        args = []
+
+        def get_item(it):
+            if isinstance(it, list):
+                if old_index >= len(it):
+                    raise_observed_user_stop_iteration(self, tx)
+                return it[old_index]
+            else:
+                return it.next_variable(tx)
+
+        try:
+            for idx, it in enumerate(self.iterables):
+                args.append(get_item(it))
+        except ObservedUserStopIteration:
+            if self.strict:
+                if idx == 0:
+                    # all other iterables should be exhausted
+                    for it in self.iterables:
+                        try:
+                            get_item(it)
+                        except ObservedUserStopIteration:
+                            handle_observed_user_stop_iteration(tx)
+                            continue
+                        # no ObservedUserStopIteration - fall through to UserError
+                        break
+                    else:
+                        # all iterables exhausted, raise original error
+                        raise
+                handle_observed_user_stop_iteration(tx)
+                raise UserError(
+                    ValueError,
+                    "zip() has one argument of len differing from others",
+                ) from None
+            raise
+
+        tx.output.side_effects.mutation(self)
+        self.index += 1
+        return variables.TupleVariable(args)
+
+    def reconstruct_items(self, codegen):
+        for it in self.iterables:
+            if isinstance(it, list):
+                remaining_items = it[self.index :]
+                codegen.foreach(remaining_items)
+                codegen.append_output(
+                    create_instruction("BUILD_TUPLE", arg=len(remaining_items))
+                )
+            else:
+                codegen(it)
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "zip"))
+        self.reconstruct_items(codegen)
+        codegen.append_output(
+            create_instruction("BUILD_TUPLE", arg=len(self.iterables))
+        )
+        if sys.version_info >= (3, 10):
+            codegen.extend_output(
+                [
+                    codegen.create_load_const("strict"),
+                    codegen.create_load_const(self.strict),
+                    create_instruction("BUILD_MAP", arg=1),
+                    create_instruction("CALL_FUNCTION_EX", arg=1),
+                ]
             )
-            tx.exn_vt_stack.append(exception_vt)
-            raise ObservedUserStopIteration
+        else:
+            codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=0))
+
+
+class MapVariable(ZipVariable):
+    """
+    Represents map(fn, *iterables)
+    """
+
+    def __init__(
+        self,
+        fn: VariableTracker,
+        iterables: List[Union[List[VariableTracker], VariableTracker]],
+        **kwargs,
+    ):
+        super().__init__(iterables, **kwargs)
+        self.fn = fn
+
+    def python_type(self):
+        return map
+
+    def has_unpack_var_sequence(self, tx) -> bool:
+        return False
+
+    def next_variable(self, tx):
+        args = super().next_variable(tx)
+        return self.fn.call_function(tx, args.items, {})
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "map"))
+        codegen(self.fn)
+        self.reconstruct_items(codegen)
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_TUPLE", arg=len(self.iterables) + 1),
+                create_instruction("CALL_FUNCTION_EX", arg=0),
+            ]
+        )
+
+
+class EnumerateVariable(ZipVariable):
+    def __init__(
+        self,
+        iterable: Union[List[VariableTracker], VariableTracker],
+        start: int = 0,
+        **kwargs,
+    ):
+        super().__init__(
+            [CountIteratorVariable(start, mutable_local=MutableLocal()), iterable],
+            **kwargs,
+        )
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "enumerate"))
+        codegen(self.iterables[1])
+        assert isinstance(self.iterables[0], CountIteratorVariable)
+        codegen(self.iterables[0].item)
+        codegen.extend_output(codegen.create_call_function_kw(2, ("start",), False))

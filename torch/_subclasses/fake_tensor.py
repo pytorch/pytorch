@@ -1406,6 +1406,11 @@ class FakeTensorMode(TorchDispatchMode):
                     # Does this subsume arg.is_sparse?
                     raise _BypassDispatchCache("sparse tensor layout")
                 # sparse tensors don't have storage, so check is after
+
+                # FIXME: For now back out caching when there are symbolic nbytes
+                # - this doesn't seem to play nice with set(). See T196779132 for examples.
+                if isinstance(arg.untyped_storage().nbytes(), SymInt):
+                    raise _BypassDispatchCache("symbolic nbytes")
                 if is_sparse_compressed(arg):
                     raise _BypassDispatchCache("sparse compressed tensor")
                 metadata = extract_tensor_metadata(arg)
@@ -1580,30 +1585,6 @@ class FakeTensorMode(TorchDispatchMode):
             storage = view_arg.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
                 empty.set_(storage, storage_offset, shape, stride)
-        else:
-            if isinstance(storage_offset, SymInt):
-                # Do it this way so we don't import symbolic_shapes (which imports
-                # expensive sympy) unless we have to.
-                from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
-                zero_offset = guard_size_oblivious(storage_offset == 0)
-            else:
-                zero_offset = storage_offset == 0
-            if not zero_offset:
-                storage = empty.untyped_storage()
-                with in_kernel_invocation_manager(self), maybe_suppress():
-                    empty.set_(storage, storage_offset, shape, stride)
-
-        if isinstance(storage_bytes, SymInt):
-            # Do it this way so we don't import symbolic_shapes (which imports
-            # expensive sympy) unless we have to.
-            from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
-            zero_bytes = guard_size_oblivious(storage_bytes == 0)
-        else:
-            zero_bytes = storage_bytes == 0
-        if zero_bytes:
-            empty.untyped_storage().resize_(0)
 
         return FakeTensor(self, empty, metadata.device)
 
