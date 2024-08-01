@@ -168,7 +168,7 @@ class GraphModule(torch.nn.Module):
             y = torch.tensor([0.5, 0.5], requires_grad=True)
 
             class MyObj:
-                def __init__(self) -> None:
+                def __init__(self):
                     self.counter = 0
 
             obj = MyObj()

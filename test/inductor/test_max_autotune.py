@@ -300,7 +300,7 @@ class TestMaxAutotune(TestCase):
         from unittest.mock import Mock, patch
 
         class FakeChoiceCaller(ChoiceCaller):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__("none", [], Mock())
                 self.thread_id = None
 

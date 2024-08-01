@@ -17,7 +17,7 @@ from torch.testing._internal.distributed.common_state_dict import VerifyStateDic
 
 
 class Dummymodel(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
 
     def forward(self, x):

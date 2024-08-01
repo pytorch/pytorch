@@ -24,7 +24,7 @@ def foo_1():
 
 
 class TestMetricsHandler(MetricHandler):
-    def __init__(self) -> None:
+    def __init__(self):
         self.metric_data = {}
 
     def emit(self, metric_data: MetricData):

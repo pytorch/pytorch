@@ -270,7 +270,7 @@ class StageTest(MultiProcContinousTest):
         target = torch.randn(batch_size, d_hid, device=self.device)
 
         class CustomState:
-            def __init__(self) -> None:
+            def __init__(self):
                 self.i = 0
 
             def dw_builder(self):
