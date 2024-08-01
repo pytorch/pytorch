@@ -1693,7 +1693,7 @@ static mpy::object dot(Arena& A, TensorInfo lhs, TensorInfo rhs, Slice<DimEntry>
     DotPart ro_dims;
     DotPart lr_dims;
 
-    auto insert_dim = [&] (mpy::hdl<Dim> d, at::optional<int> lhs_idx, at::optional<int> rhs_idx) {
+    auto insert_dim = [&] (mpy::hdl<Dim> d, std::optional<int> lhs_idx, std::optional<int> rhs_idx) {
         bool reduced = sum.contains(d);
         int64_t lhs_stride = lhs_idx ? lhs_strides[*lhs_idx] : 0;
         int64_t rhs_stride = rhs_idx ? rhs_strides[*rhs_idx] : 0;
@@ -1732,7 +1732,7 @@ static mpy::object dot(Arena& A, TensorInfo lhs, TensorInfo rhs, Slice<DimEntry>
             continue;
         }
         auto d = rhs.levels[i];
-        insert_dim(d.dim(), at::nullopt, i);
+        insert_dim(d.dim(), std::nullopt, i);
     }
 
     if (lr_dims.dims.size() != sum.size()) {
