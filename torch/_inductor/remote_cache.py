@@ -8,7 +8,7 @@ class RemoteCacheBackend:
     A backend implementation for accessing a remote/distributed cache.
     """
 
-    def __init__(self, cache_id: str):
+    def __init__(self, cache_id: str) -> None:
         pass
 
     @abstractmethod
@@ -25,7 +25,7 @@ class RedisRemoteCacheBackend(RemoteCacheBackend):
     A Redis implementation of a remote/distributed cache.
     """
 
-    def __init__(self, cache_id: str):
+    def __init__(self, cache_id: str) -> None:
         import redis
 
         self._key_fmt = f"pt2:{cache_id}:{{key}}"

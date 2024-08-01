@@ -649,7 +649,7 @@ std::vector<std::shared_ptr<AccessInfo>> RegisterizerAnalysis::getCandidates() {
 
 // RegisterizerReplacer
 
-ExprPtr RegisterizerReplacer::mutate(LoadPtr v) {
+ExprPtr RegisterizerReplacer::mutate(const LoadPtr& v) {
   auto it = loadToAccess_.find(v);
   if (it == loadToAccess_.end()) {
     // This access cannot be registerized.
@@ -661,7 +661,7 @@ ExprPtr RegisterizerReplacer::mutate(LoadPtr v) {
   return info->replacement().var;
 }
 
-StmtPtr RegisterizerReplacer::mutate(StorePtr v) {
+StmtPtr RegisterizerReplacer::mutate(const StorePtr& v) {
   if (eliminatedIntializers_.count(v) != 0) {
     // This store is the initializer for a scalar var that is already inserted.
     return nullptr;
@@ -683,7 +683,7 @@ StmtPtr RegisterizerReplacer::mutate(StorePtr v) {
   return v;
 }
 
-StmtPtr RegisterizerReplacer::mutate(BlockPtr v) {
+StmtPtr RegisterizerReplacer::mutate(const BlockPtr& v) {
   auto& scope = parentToAccesses_[v];
 
   std::vector<StmtPtr> stmts;

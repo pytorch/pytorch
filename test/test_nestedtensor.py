@@ -6559,7 +6559,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         torch.manual_seed(0)
 
         class mha(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 torch.manual_seed(0)
                 self.linear = torch.nn.Linear(d2, d3, device=device)
@@ -6994,13 +6994,6 @@ BACKWARD_FAILURES = {
     "special.i1e",
 }
 
-COMPILE_BACKWARD_FAILURES = {
-    *BACKWARD_FAILURES,
-    # mvlgamma_backward calls arange() passing self.options() and layout=torch.jagged
-    # is not supported for the arange() decomp. Backward function should be fixed
-    *(f"mvlgamma.mvlgamma_p_{p}" for p in [1, 3, 5]),
-}
-
 
 def withXFails(failure_list):
     return decorateIf(
@@ -7080,7 +7073,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
             self.assertEqual(out_compile, out_ref)
 
-    @withXFails(COMPILE_BACKWARD_FAILURES)
+    @withXFails(BACKWARD_FAILURES)
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
         allowed_dtypes=(torch.float32,),
