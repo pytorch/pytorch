@@ -7,7 +7,7 @@ import operator
 import textwrap
 import types
 import unittest
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
 import sympy
 
@@ -24,6 +24,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented, UserError, UserErrorType
@@ -46,10 +47,16 @@ from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
 
+
 try:
     import numpy as np
 except ModuleNotFoundError:
     np = None
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
 
 log = logging.getLogger(__name__)
 
@@ -209,7 +216,7 @@ class TensorVariable(VariableTracker):
                 )
         return props
 
-    def dynamic_getattr(self, tx, name):
+    def dynamic_getattr(self, tx: "InstructionTranslator", name):
         fake_val = self.proxy.node.meta["example_value"]
         # For getattrs on tensors without sources,
         # we can do better than the default (creating a GetAttrVariable)
@@ -318,7 +325,9 @@ class TensorVariable(VariableTracker):
             return ConstantVariable.create(self.is_sparse)
 
     def method_attr_data(self, tx):
-        return self.call_method(tx, "detach", [], {})
+        return variables.TorchInGraphFunctionVariable(
+            torch._C._autograd._get_data_attr
+        ).call_function(tx, [self], {})
 
     def method_attr_grad_fn(self, tx):
         if self.has_grad_fn:
@@ -333,7 +342,7 @@ class TensorVariable(VariableTracker):
             tx, [self], {}
         )
 
-    def call_hasattr(self, tx, name):
+    def call_hasattr(self, tx: "InstructionTranslator", name):
         from . import GetAttrVariable
         from .builtin import BuiltinVariable
 
@@ -354,7 +363,7 @@ class TensorVariable(VariableTracker):
 
         return ConstantVariable(ret_val)
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         from . import UserDefinedClassVariable
 
         if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
@@ -437,7 +446,7 @@ class TensorVariable(VariableTracker):
     def has_unpack_var_sequence(self, tx):
         return self.ndim > 0
 
-    def unpack_var_sequence(self, tx, idxes=None):
+    def unpack_var_sequence(self, tx: "InstructionTranslator", idxes=None):
         from .builder import wrap_fx_proxy_cls
 
         if self.size:
@@ -1100,7 +1109,7 @@ class NumpyNdarrayVariable(TensorVariable):
     """
 
     @staticmethod
-    def create(tx, proxy, **options):
+    def create(tx: "InstructionTranslator", proxy, **options):
         from .builder import wrap_fx_proxy_cls
 
         return wrap_fx_proxy_cls(
@@ -1110,7 +1119,7 @@ class NumpyNdarrayVariable(TensorVariable):
             **options,
         )
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         # NB: This INTENTIONALLY does not call super(), because there is
         # no intrinsic reason ndarray properties are related to Tensor
         # properties.  The inheritance here is for implementation sharing.
@@ -1258,7 +1267,10 @@ class TensorSubclassVariable(VariableTracker):
         super().__init__(*args, **kwargs)
 
     def call_function(
-        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+        self,
+        tx: "InstructionTranslator",
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         if len(args) == 1 and isinstance(args[0], TensorVariable):
             from .builder import VariableBuilder
