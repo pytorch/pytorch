@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 from torch.overrides import is_tensor_like
 
+
 euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
 
 __all__ = [
