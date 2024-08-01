@@ -519,7 +519,7 @@ try:
 
         def validate(self) -> None:
             with dynamo_timed("TranslationValidator.validate"):
-                return self.validate()
+                return self._validate()
 
         def _validate(self) -> None:
             if len(self._source_exprs) == 0 or len(self._target_exprs) == 0:
