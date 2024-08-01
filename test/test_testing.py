@@ -2062,7 +2062,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         # Create a test module, ModuleInfo entry, and decorator to apply.
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = torch.nn.Parameter(torch.randn(3))
 

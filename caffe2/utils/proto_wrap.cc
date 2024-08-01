@@ -1,7 +1,15 @@
 #include "caffe2/utils/proto_wrap.h"
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Winconsistent-missing-override")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Winconsistent-missing-destructor-override")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-dynamic-exception-spec")
 #include <google/protobuf/stubs/common.h>
 #include <google/protobuf/generated_message_util.h>
+C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
 
 namespace ONNX_NAMESPACE {
 
