@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
 import logging
@@ -10,9 +11,7 @@ from typing import (
     Iterable,
     Iterator,
     List,
-    Literal,
     Optional,
-    overload,
     Sequence,
     Set,
     Tuple,
@@ -29,32 +28,6 @@ device_types_t = Optional[Union[str, Sequence[str]]]
 log = logging.getLogger(__name__)
 
 
-@overload
-def custom_op(
-    name: str,
-    fn: Literal[None] = None,
-    /,
-    *,
-    mutates_args: Union[str, Iterable[str]],
-    device_types: device_types_t = None,
-    schema: Optional[str] = None,
-) -> Callable[[Callable[..., object]], "CustomOpDef"]:
-    ...
-
-
-@overload
-def custom_op(
-    name: str,
-    fn: Callable[..., object],
-    /,
-    *,
-    mutates_args: Union[str, Iterable[str]],
-    device_types: device_types_t = None,
-    schema: Optional[str] = None,
-) -> "CustomOpDef":
-    ...
-
-
 @exposed_in("torch.library")
 def custom_op(
     name: str,
@@ -64,7 +37,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
-) -> Union[Callable[[Callable[..., object]], "CustomOpDef"], "CustomOpDef"]:
+) -> Callable:
     """Wraps a function into custom operator.
 
     Reasons why you may want to create a custom op include:
@@ -152,13 +125,11 @@ def custom_op(
 
     """
 
-    def inner(fn: Callable[..., object]) -> CustomOpDef:
+    def inner(fn):
         import torch
 
         if schema is None:
-            import torch._custom_op.impl
-
-            schema_str = torch._custom_op.impl.infer_schema(fn, mutates_args)
+            schema_str = torch.library.infer_schema(fn, mutates_args=mutates_args)
         else:
             schema_str = schema
 
