@@ -2,7 +2,6 @@
 import unittest
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.backends.debugging import ExplainWithBackend
@@ -12,11 +11,12 @@ from torch._dynamo.testing import same
 from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
+
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 class Seq(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = torch.nn.Sequential(
             torch.nn.Linear(10, 10),

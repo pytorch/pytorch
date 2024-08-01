@@ -37,6 +37,7 @@ from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 from .utils import _sum_rightmost, euler_constant as _euler_gamma
 
+
 # Source of truth mapping a few general (type, type) pairs to functions.
 _KL_REGISTRY: Dict[Tuple[Type, Type], Callable] = {}
 # Memoized version mapping many specific (type, type) pairs to functions.
