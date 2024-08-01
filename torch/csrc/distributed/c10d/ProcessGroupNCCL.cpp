@@ -1613,6 +1613,18 @@ void ProcessGroupNCCL::extendTimeoutUntilFirstDone(
   extendedTimeout_ += timeout;
 }
 
+bool ProcessGroupNCCL::checkWorkTimeout(
+    const c10::intrusive_ptr<Work> work,
+    const std::chrono::milliseconds& timeout) {
+  // Since collective returns a c10d::Work, we need to cast it to WorkNCCL.
+  if (auto workNCCL = c10::dynamic_intrusive_pointer_cast<WorkNCCL>(work)) {
+    // workNCCL is now a c10::intrusive_ptr<WorkNCCL>
+    return workNCCL->opTimeout_ == timeout;
+  }
+  C10_THROW_ERROR(
+      DistBackendError, "Non c10d::WorkNCCL object returned from collective");
+}
+
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
