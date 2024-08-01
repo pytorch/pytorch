@@ -47,12 +47,13 @@ jobs:
         id: get_pr_data
         with:
           script: |
+              console.log( github.event)
               console.log(context);
               console.log(
                 await github.rest.repos.listPullRequestsAssociatedWithCommit({
                   commit_sha: context.sha,
-                  owner: github.repository_owner,
-                  repo: 'pytorch',
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
                 })
               )
   manywheel-py3_9-cpu-build:
