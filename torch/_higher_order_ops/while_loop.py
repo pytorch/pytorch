@@ -18,7 +18,7 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 
 
 class WhileLoopOp(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("while_loop")
 
     def __call__(

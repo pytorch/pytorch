@@ -14,6 +14,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     _identity,
+    create_block_mask,
     flex_attention,
 )
 from torch.testing import FileCheck
@@ -25,7 +26,6 @@ from torch.utils._triton import has_triton
 # Skip tests if Triton is not available
 supported_platform = skipUnless(
     torch.cuda.is_available()
-    and torch.version.hip is None
     and has_triton()
     and torch.cuda.get_device_capability() >= (8, 0),
     "Requires CUDA and Triton",
@@ -38,8 +38,37 @@ index = torch.ops.aten.index
 Tensor = torch.Tensor
 
 
+# score_mod / gqa_mask convert for GQA inputs before GQA is explictly supported
+def get_gqa_score_mod(score_mod, G, q_seq_len):
+    def score_mod_gqa(score, b, hkv, m, n):
+        g = m // q_seq_len
+        g = torch.where(g < G, g, 0)
+        new_m = m % q_seq_len
+        hq = hkv * G + g
+        return score_mod(score, b, hq, new_m, n)
+
+    return score_mod_gqa
+
+
+def get_gqa_mask_mod(mask_fn, G, q_seq_len):
+    def mask_mod_gqa(b, hkv, m, n):
+        g = m // q_seq_len
+        new_m = m % q_seq_len
+        hq = hkv * G + g
+        return mask_fn(b, hq, new_m, n)
+
+    return mask_mod_gqa
+
+
 def create_attention(score_mod, block_mask):
     return functools.partial(flex_attention, score_mod=score_mod, block_mask=block_mask)
+
+
+def create_block_mask_test(score_mod, query, key):
+    block_mask = create_block_mask(
+        score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
+    )
+    return block_mask
 
 
 test_dtypes = (
@@ -60,6 +89,19 @@ def _causal(
     token_kv: Tensor,
 ) -> Tensor:
     return torch.where(token_q >= token_kv, score, float("-inf"))
+
+
+def _generate_windowed(offset):
+    def _windowed(score, b, h, q, kv):
+        return torch.where(q + offset >= kv, score, float("-inf"))
+
+    return _windowed
+
+
+def _get_windowed_sdpa_mask(Mq, Mkv, offset):
+    return torch.tril(torch.ones(Mkv, Mkv, dtype=torch.bool, device="cuda"))[
+        offset : offset + Mq
+    ]
 
 
 def _rel_bias(
@@ -112,7 +154,7 @@ def _squared(score, b, h, m, n):
 
 def _head_offset(dtype: torch.dtype):
     """Captured Buffer"""
-    head_offset = torch.rand(Hkv, device="cuda", dtype=dtype)
+    head_offset = torch.rand(Hq, device="cuda", dtype=dtype)
 
     def score_mod(score, b, h, m, n):
         return score * head_offset[h]
@@ -142,6 +184,7 @@ test_score_mods = [
     _rel_bias,
     _rel_causal,
     _generate_alibi_bias(8),
+    _generate_windowed(1000),
 ]
 
 captured_buffers_map = {
@@ -264,6 +307,7 @@ class TestFlexAttention(InductorTestCase):
         KV_D: int = D,
     ):
         assert Q_H % KV_H == 0
+        score_mod = get_gqa_score_mod(score_mod, G=Q_H // KV_H, q_seq_len=Q_S)
 
         q = torch.randn(
             (Q_B, KV_H, Q_S * (Q_H // KV_H), Q_D),
@@ -295,6 +339,57 @@ class TestFlexAttention(InductorTestCase):
         # golden_out.backward(backward_grad.to(torch.float64))
         # ref_out.backward(backward_grad)
         # compiled_out.backward(backward_grad)
+
+        self._check_out_and_grad(
+            golden_out,
+            ref_out,
+            compiled_out,
+            q_gold,
+            q_ref,
+            q,
+            k_gold,
+            k_ref,
+            k,
+            v_gold,
+            v_ref,
+            v,
+        )
+
+    def run_test_with_call(
+        self,
+        sdpa_call: Callable,
+        golden_call: Optional[Callable] = None,
+        dtype: torch.dtype = torch.float16,
+        Q_B: int = B,
+        Q_H: int = Hq,
+        Q_S: int = 1,
+        Q_D: int = D,
+        KV_B: int = B,
+        KV_H: int = Hkv,
+        KV_S: int = S,
+        KV_D: int = D,
+    ):
+        if not golden_call:
+            golden_call = sdpa_call
+        q = torch.randn(
+            (Q_B, KV_H, Q_S * (Q_H // KV_H), Q_D),
+            dtype=dtype,
+            device="cuda",
+            requires_grad=False,
+        )
+        k = torch.randn(
+            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=False
+        )
+        v = torch.randn(
+            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=False
+        )
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+
+        compiled_sdpa = torch.compile(sdpa_call)
+        golden_out = golden_call(q_gold, k_gold, v_gold)
+        ref_out = golden_call(q_ref, k_ref, v_ref)
+        compiled_out = compiled_sdpa(q, k, v)
 
         self._check_out_and_grad(
             golden_out,
@@ -444,7 +539,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     def test_captured_buffers(self, dtype: torch.dtype):
-        head_offset = torch.rand(Hkv, device="cuda", dtype=dtype)
+        head_offset = torch.rand(Hq, device="cuda", dtype=dtype)
 
         def score_mod(score, b, h, m, n):
             return score + head_offset[h]
@@ -454,17 +549,16 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     def test_captured_buffers_all_dims(self, dtype: torch.dtype):
-        head_scale = torch.randn(Hkv, device="cuda")
+        head_scale = torch.randn(Hq, device="cuda")
         batch_scale = torch.randn(B, device="cuda")
         kv_scale = torch.randn(S, device="cuda")
-        q_scale = torch.randn(Hq // Hkv, device="cuda")
-        if q_scale.shape[-1] < 16:
-            q_scale = torch.nn.functional.pad(q_scale, (0, 16 - Hq // Hkv))
+        q_scale = torch.randn(1, device="cuda")
 
         def all_bias(score, batch, head, token_q, token_kv):
             score = score + kv_scale[token_kv]
             score = score + q_scale[token_q]
             score = score + head_scale[head]
+            score = score + batch_scale[batch]
             return score
 
         self.run_test(all_bias, dtype)
@@ -483,9 +577,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_seq_only(self, dtype):
-        bias = torch.randn(Hq // Hkv, S, device="cuda", dtype=dtype)
-        if bias.shape[-2] < 16:
-            bias = torch.nn.functional.pad(bias, (0, 16 - Hq // Hkv))
+        bias = torch.randn(1, S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
             return score + bias[q, kv]
@@ -495,10 +587,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_seq_batch(self, dtype):
-        bias = torch.randn(B, Hq // Hkv, S, device="cuda", dtype=dtype)
-
-        if bias.shape[-2] < 16:
-            bias = torch.nn.functional.pad(bias, (0, 16 - Hq // Hkv, 0, 0))
+        bias = torch.randn(B, 1, S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
             return score + bias[b, q, kv]
@@ -510,14 +599,12 @@ class TestFlexAttention(InductorTestCase):
     def test_load_from_bias_head_seq_batch(self, dtype):
         bias = torch.randn(
             B,
-            Hkv,
-            Hq // Hkv,
+            Hq,
+            1,
             S,
             device="cuda",
             dtype=dtype,
         )
-        if bias.shape[-2] < 16:
-            bias = torch.nn.functional.pad(bias, (0, 16 - Hq // Hkv, 0, 0))
 
         def bias_mod(score, b, h, q, kv):
             return score + bias[b, h, q, kv]
@@ -752,6 +839,53 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(bias_mod)
 
     @supported_platform
+    def test_windowed_no_mask_vs_sdpa(self):
+        score_mod = _generate_windowed(1000)
+        attention = functools.partial(flex_attention, score_mod=score_mod)
+
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
+
+        sdpa_attention = functools.partial(
+            torch.nn.functional.scaled_dot_product_attention, attn_mask=sdpa_mask
+        )
+
+        self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
+
+    @supported_platform
+    def test_windowed_full_mask_vs_sdpa(self):
+        def mask_mod(b, h, q, kv):
+            return q + 1000 >= kv
+
+        score_mod = _generate_windowed(1000)
+
+        block_mask = create_block_mask(mask_mod, 1, 1, 8, S)
+        attention = functools.partial(
+            flex_attention, block_mask=block_mask, score_mod=score_mod
+        )
+
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
+        sdpa_attention = functools.partial(
+            torch.nn.functional.scaled_dot_product_attention, attn_mask=sdpa_mask
+        )
+
+        self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
+
+    @supported_platform
+    def test_windowed_partial_block_vs_sdpa(self):
+        def mask_mod(b, h, q, kv):
+            return q + 1000 >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, 8, S)
+        attention = functools.partial(flex_attention, block_mask=block_mask)
+
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
+        sdpa_attention = functools.partial(
+            torch.nn.functional.scaled_dot_product_attention, attn_mask=sdpa_mask
+        )
+
+        self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
+
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", [_identity, _causal])
     def test_logsumexp_correctness(self, dtype, score_mod):
@@ -827,15 +961,22 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_logsumexp_only_return(self):
-        make_tensor = functools.partial(
+        make_q = functools.partial(
             torch.randn,
             (B, Hkv, Hq // Hkv, D),
             dtype=torch.float32,
             device="cuda",
             requires_grad=True,
         )
+        make_kv = functools.partial(
+            torch.randn,
+            (B, Hkv, S, D),
+            dtype=torch.float32,
+            device="cuda",
+            requires_grad=True,
+        )
 
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        q, k, v = make_q(), make_kv(), make_kv()
         block_mask = _create_empty_block_mask(q, k)
 
         @torch.compile
@@ -857,14 +998,21 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_logsumexp_is_not_fused(self):
-        make_tensor = functools.partial(
+        make_q = functools.partial(
             torch.randn,
             (B, Hkv, Hq // Hkv, D),
             dtype=torch.float32,
             device="cuda",
             requires_grad=True,
         )
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        make_kv = functools.partial(
+            torch.randn,
+            (B, Hkv, S, D),
+            dtype=torch.float32,
+            device="cuda",
+            requires_grad=True,
+        )
+        q, k, v = make_q(), make_kv(), make_kv()
         block_mask = _create_empty_block_mask(q, k)
 
         @torch.compile

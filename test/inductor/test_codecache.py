@@ -58,7 +58,7 @@ torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
 
 class MyModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = torch.nn.Linear(10, 10)
 
@@ -201,7 +201,7 @@ class TestFxGraphCache(TestCase):
                 num_put += 1
 
         cache_module = (
-            "triton.fb.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend"
+            "torch._inductor.fb.remote_cache.FbRemoteFxGraphCacheBackend"
             if config.is_fbcode()
             else "torch._inductor.remote_cache.RedisRemoteCacheBackend"
         )
