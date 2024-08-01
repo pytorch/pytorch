@@ -1197,6 +1197,7 @@ def _add_send_recv(
             rank: defaultdict(list) for rank in sorted(compute_actions)
         }
         for rank in sorted(compute_actions):
+            # TODO delete me?
             if rank not in compute_actions:
                 continue
 
