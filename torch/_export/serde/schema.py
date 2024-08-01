@@ -27,13 +27,10 @@ class ScalarType(IntEnum):
     COMPLEXDOUBLE = 11
     BOOL = 12
     BFLOAT16 = 13
-    UINT16 = 28
+    FLOAT8_E5M2 = 23
     FLOAT8_E4M3FN = 24
-    FLOAT_E5M2 = 14
-    FLOAT8_E5M2 = 14
-    FLOAT8_E4M3FN = 15
-    FLOAT8_E5M2FNUZ = 16
-    FLOAT8_E4M3FNUZ = 17
+    FLOAT8_E5M2FNUZ = 25
+    FLOAT8_E4M3FNUZ = 26
 
 
 class Layout(IntEnum):
