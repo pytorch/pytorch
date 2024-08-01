@@ -141,8 +141,12 @@ def run_single_experiment(
         requires_grad=config.calculate_bwd_time,
     )
 
+    kwargs = {}
+    if get_func_name(config.mask_mod) == "causal":
+        kwargs["is_causal"] = True
+
     def eager_sdpa(query, key, value, _):
-        return F.scaled_dot_product_attention(query, key, value)
+        return F.scaled_dot_product_attention(query, key, value, **kwargs)
 
     if max_autotune:
         compiled_sdpa = torch.compile(
