@@ -277,10 +277,14 @@ class CKGemmTemplate(CKTemplate):
             op.c_shuffle_dtype = "F32"
             # this parameter needs to be set accordingly to bias stride for correct accumulation
             if op.ds_layouts[0] == "Row":
-                bias_shuffle_block_transfer_scalar_per_vector_n_per_block = op.c_shuffle_block_transfer_scalar_per_vector_n_per_block
+                bias_shuffle_block_transfer_scalar_per_vector_n_per_block = (
+                    op.c_shuffle_block_transfer_scalar_per_vector_n_per_block
+                )
             else:
                 bias_shuffle_block_transfer_scalar_per_vector_n_per_block = (1,)
-            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block += bias_shuffle_block_transfer_scalar_per_vector_n_per_block
+            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block += (
+                bias_shuffle_block_transfer_scalar_per_vector_n_per_block
+            )
 
         instance_definition, instance_type = self.emit_ck_instance(op)
 
