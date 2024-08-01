@@ -2215,6 +2215,9 @@ if (custom_op_wrapper.get() == NULL) {
                     return f"PyBool_FromLong({1 if raw_arg else 0})"
                 elif isinstance(raw_arg, complex):
                     return f"PyComplex_FromDoubles({raw_arg.real, raw_arg.imag})"
+                elif isinstance(raw_arg, torch.SymInt):
+                    expr = raw_arg.node.expr
+                    return f"PyLong_FromLongLong({self.expr_printer(expr)})"
                 else:
                     raise NotImplementedError(
                         f"arg type {arg_type} with raw_arg {raw_arg}, {type(raw_arg)} is not yet supported by custom_op_wrapper"
