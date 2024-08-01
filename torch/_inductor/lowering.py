@@ -221,7 +221,7 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
     # 0-dim CPU tensor will be converted to a symbol when it is used in CUDA kernels
     target_device_cuda = False
     for arg in args:
-        if hasattr(arg, "layout") and arg.layout.device.type == "cuda":
+        if instance(arg.data, ir.BaseView) and arg.layout.device.type == "cuda":
             target_device_cuda = True
             break
     if target_device_cuda:
