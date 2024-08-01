@@ -100,7 +100,7 @@ FOR_ALL_EXTERNAL_FUNCTIONS(DECLARE_EXTERNAL_FUNCTION)
 DECLARE_EXTERNAL_FUNCTION(nnc_mkldnn_prepacked_conv_run);
 #endif
 
-TORCH_API void nnc_aten_free(int64_t bufs_num, void** ptrs) noexcept;
+TORCH_API void nnc_aten_free(size_t bufs_num, void** ptrs) noexcept;
 
 #ifdef C10_MOBILE
 } // extern "C"
