@@ -199,6 +199,20 @@ def get_node_storage(node: torch.fx.Node) -> Optional[int]:
     return get_storage(node.meta["val"])
 
 
+def _get_storage_from_obj(obj: Any) -> List[int]:
+    if isinstance(obj, torch.Tensor) and torch._C._has_storage(obj):
+        return [get_storage(obj)]
+    if isinstance(obj, (list, tuple)):
+        return [i for e in obj for i in _get_storage_from_obj(e)]
+    return []
+
+
+def get_node_storages(node: torch.fx.Node) -> List[int]:
+    if "val" not in node.meta:
+        return []
+    return _get_storage_from_obj(node.meta["val"])
+
+
 def get_fake(x):
     if isinstance(x, torch.fx.Node):
         if "val" not in x.meta:
