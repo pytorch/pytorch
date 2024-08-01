@@ -1763,6 +1763,30 @@ def _accelerator_hooks_get_current_device() -> _int: ...
 def _accelerator_hooks_exchange_device(device_index: _int) -> _int: ...
 def _accelerator_hooks_maybe_exchange_device(device_index: _int) -> _int: ...
 def _get_accelerator(check: _bool = False) -> _device: ...
+def device_count(device_type: Optional[str]) -> _int: ...  #THPModule_deviceCount
+def is_available(device_type: Optional[str]) -> _bool: ...  #THPModule_isAvailable
+@overload
+def set_device(device: _device) -> None: ...  #THPModule_setDevice
+@overload
+def set_device(device_type: Optional[str], device_index: _int) -> None: ...  #THPModule_setDevice
+def current_device(device_type: Optional[str]) -> _int: ...  #THPModule_getDevice
+def set_stream(stream: Stream) -> None: ...  #THPModule_setStream
+@overload
+def current_stream(device:_device) -> Stream: ...  #THPModule_getStream
+@overload
+def current_stream(device_type: Optional[str], device_index: Optional[_int]) -> Stream: ...  #THPModule_getStream
+@overload
+def synchronize(device: _device) -> None: ...  #THPModule_syncStreamsOnDevice
+@overload
+def synchronize(device_type: Optional[str], device_index: Optional[_int]) -> None: ...  #THPModule_syncStreamsOnDevice
+@overload
+def _exchange_device(device: _device) -> _int: ...  #THPModule_exchangeDevice
+@overload
+def _exchange_device(device_type: Optional[str], device_index: _int) -> _int: ...  #THPModule_exchangeDevice
+@overload
+def _maybe_exchange_device(device: _device) -> _int: ...  #THPModule_maybeExchangeDevice
+@overload
+def _maybe_exchange_device(device_type: Optional[str], device_index: _int) -> _int: ...  #THPModule_maybeExchangeDevice
 
 # Defined in torch/csrc/mtia/Module.cpp
 def _mtia_init() -> None: ...

@@ -26,6 +26,7 @@ from typing import (
     TypeVar,
 )
 
+import torch
 from torch.utils import _pytree as pytree
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -36,11 +37,6 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import sympy
-
-    # Import the following modules during type checking to enable code intelligence features,
-    # such as auto-completion in tools like pylance, even when these modules are not explicitly
-    # imported in user code.
-    import torch
 
 
 """
@@ -898,3 +894,43 @@ def active_fake_mode():
             return m
 
     return None
+
+
+class DeviceGuard:
+    def __init__(self, device_type: Optional[str], device_index: int):
+        self.device_type = device_type
+        self.idx = device_index
+        self.prev_idx = -1
+
+    def __enter__(self):
+        self.prev_idx = torch._C._exchange_device(self.device_type, self.idx)
+
+    def __exit__(self, type: Any, value: Any, traceback: Any):
+        self.idx = torch._C._maybe_exchange_device(self.device_type, self.prev_idx)
+        return False
+
+
+class StreamGuard:
+    def __init__(self, stream: torch.Stream):
+        self.stream = stream
+        self.src_prev_stream = None
+        self.dst_prev_stream = None
+
+    def __enter__(self):
+        self.src_prev_stream = torch.current_stream(self.stream.device.type, None)  # type: ignore[assignment]
+
+        # If the stream is not on the current device, then
+        # set the current stream on the device
+        if self.src_prev_stream.device != self.stream.device:  # type: ignore[attr-defined]
+            with DeviceGuard(self.stream.device.type, self.stream.device.index):
+                self.dst_prev_stream = torch.current_stream(  # type: ignore[assignment]
+                    self.stream.device.type, None
+                )
+        torch.set_stream(self.stream)
+
+    def __exit__(self, type: Any, value: Any, traceback: Any):
+        # Reset the stream on the original device and destination device
+        if self.src_prev_stream.device != self.stream.device:  # type: ignore[attr-defined]
+            torch.set_stream(self.dst_prev_stream)  # type: ignore[arg-type]
+        torch.set_stream(self.src_prev_stream)  # type: ignore[arg-type]
+        return False

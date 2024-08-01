@@ -71,10 +71,13 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
-    CUDAStream cs(s);
     auto old_stream = getCurrentCUDAStream(s.device().index());
-    setCurrentCUDAStream(cs);
+    setStream(s);
     return old_stream.unwrap();
+  }
+  void setStream(Stream s) const override {
+    const CUDAStream stream(s);
+    setCurrentCUDAStream(stream);
   }
   DeviceIndex deviceCount() const noexcept override {
     return device_count();
@@ -217,6 +220,18 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     }
     // Note: cudaEventSynchronize can be safely called from any device
     C10_CUDA_CHECK(cudaEventSynchronize(cuda_event));
+  }
+
+  void syncStreamsOnDevice(const c10::DeviceIndex device_index) const override {
+    DeviceIndex orig_device{-1};
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
+    C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_device_synchronization(c10::kCUDA);
+    }
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
+    C10_CUDA_CHECK(c10::cuda::SetDevice(orig_device));
   }
 
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)

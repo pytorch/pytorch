@@ -55,6 +55,10 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
     return c10::Stream(c10::Stream::DEFAULT, g_device);
   }
 
+  void setStream(c10::Stream s) const override {
+    TORCH_INTERNAL_ASSERT(s.device_type() == c10::DeviceType::Lazy);
+  }
+
   c10::DeviceIndex deviceCount() const noexcept override {
     // This will get called when autograd initializes its device pool
     // regardless whether we have a backend registered aforehand.
