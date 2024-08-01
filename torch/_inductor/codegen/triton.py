@@ -16,7 +16,6 @@ from typing import (
     Iterable,
     List,
     Optional,
-    Set,
     Tuple,
     TYPE_CHECKING,
     Union,
@@ -29,6 +28,7 @@ import torch._logging
 from torch._dynamo.utils import preserve_rng_state
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._prims_common import is_integer_dtype
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._triton import has_triton_package
 
@@ -136,7 +136,7 @@ block_sizes = {
 @dataclasses.dataclass
 class IndexingOptions:
     index_str: str
-    mask_vars: Set[str]
+    mask_vars: OrderedSet[str]
     mask_str: str
     expand_str: Optional[str]
     _has_rindex: bool
@@ -163,7 +163,7 @@ class BlockPtrOptions:
     params: BlockParameters
     constant_offset: sympy.Expr
     order: List[int]
-    mask_vars: Set[str]
+    mask_vars: OrderedSet[str]
     reshape_suffix: List[str]
 
     @property
@@ -188,7 +188,7 @@ class BlockPtrOptions:
         params: BlockParameters,
         constant_offset: sympy.Expr,
         range_trees: List[IterationRangesEntry],
-        mask_vars: Set[str],
+        mask_vars: OrderedSet[str],
     ) -> BlockPtrOptions:
         """Helper to create a  BlockPtrOptions instance"""
         reshape_suffix = [f"{t.prefix.upper()}BLOCK" for t in range_trees]
@@ -454,7 +454,7 @@ class TritonPrinter(PythonPrinter):
         # Use a macro so we can propagate constexprs.
         # https://github.com/triton-lang/triton/issues/3815
         a, b = tuple(f"({x})" for x in (a, b))
-        assert cmp in {">", "<"}, f"Unexpected comparator: '{cmp}'"
+        assert cmp in (">", "<"), f"Unexpected comparator: '{cmp}'"
         return f"({a} * ({a} {cmp}= {b}) + {b} * ({b} {cmp} {a}))"
 
     def _print_Min(self, expr):
@@ -575,7 +575,7 @@ class TritonCSEVariable(CSEVariable):
     def __init__(self, name, bounds: ValueRanges[Any]):
         super().__init__(name, bounds)
         # We'll use this to track which masks the variable needs when used for indirect indexing
-        self.mask_vars: Set[str] = set()
+        self.mask_vars: OrderedSet[str] = OrderedSet()
 
     def update_on_args(self, name, args, kwargs):
         for arg in args:
@@ -608,10 +608,10 @@ class TritonOverrides(OpOverrides):
             # fp8 data type conversions has min_elem_per_thread requirements.
             # Refer to Triton implementations here:
             # https://github.com/openai/triton/blob/10f59d8ce04052521c1bc0cb3a3f8b98918fc7e3/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L10.
-            fp8_dtypes = {
+            fp8_dtypes = (
                 torch.float8_e4m3fn,
                 torch.float8_e5m2,
-            }
+            )
             # Triton doesn't support type conversions between fp8_e4m3 and fp8_e5m2.
             assert not (
                 src_dtype in fp8_dtypes
@@ -1037,7 +1037,7 @@ class TritonKernelOverrides(TritonOverrides):
             V.kernel.compute, indexing.index_str, bounds=get_bounds_index_expr(expr)
         )
 
-        if dtype not in {torch.int32, torch.int64}:
+        if dtype not in (torch.int32, torch.int64):
             var = V.kernel.cse.generate(V.kernel.compute, cls.to_dtype(var, dtype))
         var.mask_vars = indexing.mask_vars
         return var
@@ -1176,7 +1176,7 @@ class TritonKernel(SIMDKernel):
         self,
         *groups,
         index_dtype: str,
-        mutations: Optional[Set[str]] = None,
+        mutations: Optional[OrderedSet[str]] = None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
@@ -1191,13 +1191,13 @@ class TritonKernel(SIMDKernel):
             override_persistent_reduction=override_persistent_reduction,
         )
         self.suffix: IndentedBuffer = IndentedBuffer()  # type: ignore[assignment]
-        self.outside_loop_vars: Set[Any] = set()
+        self.outside_loop_vars: OrderedSet[Any] = OrderedSet()
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.helper_functions = HelperFunctions()
 
         # A set of autotuning hints to pass as part of triton_meta
-        self.autotune_hints: Set[AutotuneHint] = set()
+        self.autotune_hints: OrderedSet[AutotuneHint] = OrderedSet()
         self.triton_meta: Optional[Dict[str, object]] = None
 
         self.codegen_range_tree()
@@ -1285,7 +1285,7 @@ class TritonKernel(SIMDKernel):
         index_vars = index.free_symbols
         has_rindex = False
 
-        mask_vars: Set[str] = set()
+        mask_vars: OrderedSet[str] = OrderedSet()
         for var in index_vars:
             assert isinstance(var, sympy.Symbol)
             has_rindex = has_rindex or symbol_is_type(var, SymT.RINDEX)
@@ -1322,7 +1322,7 @@ class TritonKernel(SIMDKernel):
 
         have_dense = True
         have_loop_vars = False
-        dense_mask_vars = set()
+        dense_mask_vars: OrderedSet[str] = OrderedSet()
 
         for tree in self.active_range_trees():
             if index_vars.intersection(tree.var_list):
@@ -1584,7 +1584,7 @@ class TritonKernel(SIMDKernel):
             expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             return IndexingOptions(
-                index_str, set(), "None", expand_str, has_rindex, index
+                index_str, OrderedSet(), "None", expand_str, has_rindex, index
             )
 
         if need_dense and not have_dense:
@@ -1596,7 +1596,7 @@ class TritonKernel(SIMDKernel):
             mask_vars = dense_mask_vars
 
         if override_mask:
-            mask_vars = {override_mask}
+            mask_vars = OrderedSet([override_mask])
 
         if self._load_mask:
             mask_vars.add(self._load_mask)
@@ -1721,9 +1721,11 @@ class TritonKernel(SIMDKernel):
             ep = ", eviction_policy='evict_last'"
         elif self.inside_reduction and self.range_trees[-1].is_loop:
             if name in self.args.inplace_buffers:
-                names = set(self.args.inplace_buffers[name].other_names)
+                names: OrderedSet[str] = OrderedSet(
+                    self.args.inplace_buffers[name].other_names
+                )
             else:
-                names = {name}
+                names = OrderedSet([name])
             last_use = len(names & self.last_usage) > 0
             evict_last = not last_use and (has_rindex or indirect_indexing)
             if evict_last:
@@ -1881,7 +1883,7 @@ class TritonKernel(SIMDKernel):
         value: Union[CSEVariable, Tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
         assert self.inside_reduction
-        masks = {f"{tree.prefix}mask" for tree in self.range_trees}
+        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
         self.filter_masks(masks)
         masks = sorted(masks)
         if self._load_mask:
@@ -1929,7 +1931,7 @@ class TritonKernel(SIMDKernel):
         dim = self.triton_tensor_ndim() - 1
         acc_type = triton_acc_type(src_dtype)
         result_var: Any = self.cse.newvar()
-        result_var.mask_vars = {var for var in masks if var[0] != "r"}
+        result_var.mask_vars = OrderedSet(var for var in masks if var[0] != "r")
         cond = " & ".join(masks)
 
         def where_cond(tval, fval):
@@ -2090,7 +2092,7 @@ class TritonKernel(SIMDKernel):
 
         if isinstance(result_var, tuple):
             assert all(isinstance(x, TritonCSEVariable) for x in result_var)
-            self.outside_loop_vars |= set(result_var)
+            self.outside_loop_vars |= OrderedSet(result_var)
         else:
             assert isinstance(result_var, TritonCSEVariable)
             self.outside_loop_vars.add(result_var)
@@ -2172,7 +2174,7 @@ class TritonKernel(SIMDKernel):
         values: Tuple[CSEVariable, ...],
     ) -> Tuple[CSEVariable, ...]:
         assert self.inside_reduction
-        masks = {f"{tree.prefix}mask" for tree in self.range_trees}
+        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
         self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
@@ -2284,7 +2286,7 @@ class TritonKernel(SIMDKernel):
         descending: bool,
     ) -> Tuple[CSEVariable, ...]:
         assert self.inside_reduction
-        masks = {f"{tree.prefix}mask" for tree in self.range_trees}
+        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
         self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.sort not supported inside ops.masked"
@@ -2586,7 +2588,7 @@ class TritonKernel(SIMDKernel):
                         arg.name, V.graph.sizevars.inv_precomputed_replacements[symbol]
                     )
 
-        mutated_args = set()
+        mutated_args: OrderedSet[str] = OrderedSet()
         for mutation in self.mutations:
             if mutation in self.args.input_buffers:
                 mutated_args.add(self.args.input_buffers[mutation])
