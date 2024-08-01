@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 Contains utils for logging in AOTAutograd, including managing the names of the graphs under
 compilation, capturing user-friendly tracebacks, and debug messages.
@@ -9,6 +10,7 @@ from typing import List, Tuple
 
 import torch
 import torch.fx.traceback as fx_traceback
+
 
 # This is a list since looking forward, we can have this arbitrarily nested.
 graph_being_compiled: List[str] = []

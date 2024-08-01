@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Example use of Timer and op fuzzers to measure kernel performance.
 
 $ python -m examples.op_benchmark

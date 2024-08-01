@@ -35,7 +35,7 @@ BENCHMARKS: FlatIntermediateDefinition = flatten(
                 // @Setup
                 auto options_empty = c10::TensorOptions();
                 auto options_full = c10::TensorOptions().dtype(at::kFloat).device(at::kCPU);
-                auto optional_float = c10::make_optional(at::kFloat);
+                auto optional_float = std::make_optional(at::kFloat);
 
                 // @TensorOptions overload
                 at::empty({0}, options_empty);
@@ -43,9 +43,9 @@ BENCHMARKS: FlatIntermediateDefinition = flatten(
                 at::empty({0}, at::kFloat); // implicit conversion
 
                 // @Faithful overload
-                at::empty({0}, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
-                at::empty({0}, at::kFloat, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
-                at::empty({0}, optional_float, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
+                at::empty({0}, std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
+                at::empty({0}, at::kFloat, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
+                at::empty({0}, optional_float, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
             """
             ),
         },

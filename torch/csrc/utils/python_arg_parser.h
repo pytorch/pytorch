@@ -66,6 +66,7 @@
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/six.h>
 
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/core/Tensor.h>
 #include <c10/util/Exception.h>
@@ -77,8 +78,6 @@
 #include <c10/core/DispatchKeySet.h>
 #include <array>
 #include <cstddef>
-#include <memory>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -224,6 +223,7 @@ struct PythonArgs {
 
   int idx;
   bool traceable;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const FunctionSignature& signature;
   PyObject** args;
   std::vector<PyObject*> overloaded_args; // NOTE: borrowed references
@@ -400,7 +400,7 @@ inline std::optional<at::Tensor> PythonArgs::optionalTensor(int i) {
   if (t.defined()) {
     return t;
   } else {
-    return c10::nullopt;
+    return std::nullopt;
   }
 }
 
@@ -436,7 +436,7 @@ inline at::Scalar PythonArgs::scalarWithDefault(
 
 inline std::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return scalar_slow(i);
 }
 
@@ -504,7 +504,7 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
   return intlistWithDefault(i, signature.params[i].default_intlist);
 }
 
-inline PyObject* toPyObject(c10::SymInt symint) {
+inline PyObject* toPyObject(const c10::SymInt& symint) {
   if (symint.is_symbolic()) {
     auto r = py::cast(symint).release().ptr();
     TORCH_INTERNAL_ASSERT(r);
@@ -756,6 +756,9 @@ inline at::ScalarType toScalarType(PyObject* obj) {
   if (obj == (PyObject*)&PyLong_Type) {
     return at::ScalarType::Long;
   }
+  if (obj == (PyObject*)&PyComplex_Type) {
+    return at::ScalarType::ComplexDouble;
+  }
   return reinterpret_cast<THPDtype*>(obj)->scalar_type;
 }
 
@@ -772,7 +775,7 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
 
 inline std::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return scalartype(i);
 }
 
@@ -797,8 +800,15 @@ inline at::Layout PythonArgs::layoutWithDefault(
 
 inline std::optional<at::Layout> PythonArgs::layoutOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return layout(i);
+}
+
+inline at::Device deviceFromLong(int64_t device_index) {
+  TORCH_CHECK(device_index >= 0, "Device index must not be negative");
+  return at::Device(
+      at::getAccelerator(true).value(),
+      static_cast<c10::DeviceIndex>(device_index));
 }
 
 inline at::Device toDevice(PyObject* obj) {
@@ -807,15 +817,12 @@ inline at::Device toDevice(PyObject* obj) {
     return device->device;
   }
   if (THPUtils_checkLong(obj)) {
-    const auto device_index = THPUtils_unpackLong(obj);
-    TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    if (c10::is_privateuse1_backend_registered()) {
-      return at::Device(
-          c10::DeviceType::PrivateUse1,
-          static_cast<c10::DeviceIndex>(device_index));
-    }
-    return at::Device(
-        c10::DeviceType::CUDA, static_cast<c10::DeviceIndex>(device_index));
+    return deviceFromLong(THPUtils_unpackLong(obj));
+  }
+  if (torch::is_symint(py::handle(obj))) {
+    auto device_index =
+        py::cast<c10::SymInt>(py::handle(obj)).guard_int(__FILE__, __LINE__);
+    return deviceFromLong(device_index);
   }
   const std::string& device_str = THPUtils_unpackString(obj);
   return at::Device(device_str);
@@ -838,7 +845,7 @@ inline at::Device PythonArgs::deviceWithDefault(
 
 inline std::optional<at::Device> PythonArgs::deviceOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return device(i);
 }
 
@@ -864,7 +871,7 @@ inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
 inline std::optional<std::vector<at::Dimname>> PythonArgs::
     toDimnameListOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return parseDimnameList(args[i]);
 }
 
@@ -891,7 +898,7 @@ inline at::MemoryFormat PythonArgs::memoryformat(int i) {
 
 inline std::optional<at::MemoryFormat> PythonArgs::memoryformatOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return memoryformat(i);
 }
 
@@ -919,7 +926,7 @@ inline std::string PythonArgs::stringWithDefault(
 
 inline std::optional<std::string> PythonArgs::stringOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return THPUtils_unpackString(args[i]);
 }
 
@@ -937,7 +944,7 @@ inline c10::string_view PythonArgs::stringViewWithDefault(
 
 inline std::optional<c10::string_view> PythonArgs::stringViewOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return THPUtils_unpackStringView(args[i]);
 }
 
@@ -991,26 +998,26 @@ inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {
 
 inline std::optional<int64_t> PythonArgs::toInt64Optional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return toInt64(i);
 }
 
 inline std::optional<c10::SymInt> PythonArgs::toSymIntOptional(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return toSymInt(i);
 }
 
 inline std::optional<bool> PythonArgs::toBoolOptional(int i) {
   if (!args[i]) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return toBool(i);
 }
 
 inline std::optional<double> PythonArgs::toDoubleOptional(int i) {
   if (!args[i]) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return toDouble(i);
 }
@@ -1072,7 +1079,7 @@ inline bool PythonArgs::isNone(int i) {
 
 inline std::optional<at::Generator> PythonArgs::generator(int i) {
   if (!args[i])
-    return c10::nullopt;
+    return std::nullopt;
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 
@@ -1257,7 +1264,7 @@ bool is_tensor_and_append_overloaded(
 bool is_tensor_list_and_append_overloaded(
     PyObject* obj,
     std::vector<PyObject*>* overloaded_args,
-    int argnum,
+    size_t argnum,
     bool throw_error);
 
 /* Given an argument that is definitely a tensor and is definitely overloaded,

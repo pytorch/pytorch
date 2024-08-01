@@ -1,10 +1,12 @@
-from .module import Module
-from .. import functional as F
-
+import torch.nn.functional as F
 from torch import Tensor
-from ..common_types import _size_any_t
+from torch.nn.common_types import _size_any_t
 
-__all__ = ['Fold', 'Unfold']
+from .module import Module
+
+
+__all__ = ["Fold", "Unfold"]
+
 
 class Fold(Module):
     r"""Combines an array of sliding local blocks into a large containing tensor.
@@ -118,8 +120,7 @@ class Fold(Module):
 
     """
 
-    __constants__ = ['output_size', 'kernel_size', 'dilation', 'padding',
-                     'stride']
+    __constants__ = ["output_size", "kernel_size", "dilation", "padding", "stride"]
     output_size: _size_any_t
     kernel_size: _size_any_t
     dilation: _size_any_t
@@ -132,7 +133,7 @@ class Fold(Module):
         kernel_size: _size_any_t,
         dilation: _size_any_t = 1,
         padding: _size_any_t = 0,
-        stride: _size_any_t = 1
+        stride: _size_any_t = 1,
     ) -> None:
         super().__init__()
         self.output_size = output_size
@@ -142,14 +143,22 @@ class Fold(Module):
         self.stride = stride
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.fold(input, self.output_size, self.kernel_size, self.dilation,
-                      self.padding, self.stride)
+        return F.fold(
+            input,
+            self.output_size,
+            self.kernel_size,
+            self.dilation,
+            self.padding,
+            self.stride,
+        )
 
     def extra_repr(self) -> str:
-        return 'output_size={output_size}, kernel_size={kernel_size}, ' \
-            'dilation={dilation}, padding={padding}, stride={stride}'.format(
+        return (
+            "output_size={output_size}, kernel_size={kernel_size}, "
+            "dilation={dilation}, padding={padding}, stride={stride}".format(
                 **self.__dict__
             )
+        )
 
 
 class Unfold(Module):
@@ -275,7 +284,7 @@ class Unfold(Module):
 
     """
 
-    __constants__ = ['kernel_size', 'dilation', 'padding', 'stride']
+    __constants__ = ["kernel_size", "dilation", "padding", "stride"]
     kernel_size: _size_any_t
     dilation: _size_any_t
     padding: _size_any_t
@@ -286,7 +295,7 @@ class Unfold(Module):
         kernel_size: _size_any_t,
         dilation: _size_any_t = 1,
         padding: _size_any_t = 0,
-        stride: _size_any_t = 1
+        stride: _size_any_t = 1,
     ) -> None:
         super().__init__()
         self.kernel_size = kernel_size
@@ -295,9 +304,12 @@ class Unfold(Module):
         self.stride = stride
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.unfold(input, self.kernel_size, self.dilation,
-                        self.padding, self.stride)
+        return F.unfold(
+            input, self.kernel_size, self.dilation, self.padding, self.stride
+        )
 
     def extra_repr(self) -> str:
-        return 'kernel_size={kernel_size}, dilation={dilation}, padding={padding},' \
-            ' stride={stride}'.format(**self.__dict__)
+        return (
+            "kernel_size={kernel_size}, dilation={dilation}, padding={padding},"
+            " stride={stride}".format(**self.__dict__)
+        )

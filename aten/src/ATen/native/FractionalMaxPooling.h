@@ -6,7 +6,7 @@
 namespace at::native {
 
 template<typename scalar_t>
-static inline std::vector<int> generate_intervals(
+inline std::vector<int> generate_intervals(
     scalar_t sample,
     int64_t inputSize,
     int64_t outputSize,
@@ -28,7 +28,7 @@ static inline std::vector<int> generate_intervals(
 }
 
 template <int64_t ndim>
-static inline void fractional_max_pool_check_shape(
+inline void fractional_max_pool_check_shape(
     const Tensor& input,
     const Tensor& randomSamples) {
 

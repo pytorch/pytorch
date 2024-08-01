@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Adds docstrings to Tensor functions"""
 
 import torch._C
@@ -1400,6 +1401,28 @@ then no copy is performed and the original object is returned.
 Args:
     device (:class:`torch.device`): The destination GPU device.
         Defaults to the current CUDA device.
+    non_blocking (bool): If ``True`` and the source is in pinned memory,
+        the copy will be asynchronous with respect to the host.
+        Otherwise, the argument has no effect. Default: ``False``.
+    {memory_format}
+""".format(
+        **common_args
+    ),
+)
+
+add_docstr_all(
+    "mtia",
+    r"""
+mtia(device=None, non_blocking=False, memory_format=torch.preserve_format) -> Tensor
+
+Returns a copy of this object in MTIA memory.
+
+If this object is already in MTIA memory and on the correct device,
+then no copy is performed and the original object is returned.
+
+Args:
+    device (:class:`torch.device`): The destination MTIA device.
+        Defaults to the current MTIA device.
     non_blocking (bool): If ``True`` and the source is in pinned memory,
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
@@ -4158,7 +4181,7 @@ In-place version of :meth:`~Tensor.renorm`
 add_docstr_all(
     "repeat",
     r"""
-repeat(*sizes) -> Tensor
+repeat(*repeats) -> Tensor
 
 Repeats this tensor along the specified dimensions.
 
@@ -4173,8 +4196,7 @@ Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
     For the operator similar to `numpy.repeat`, see :func:`torch.repeat_interleave`.
 
 Args:
-    sizes (torch.Size or int...): The number of times to repeat this tensor along each
-        dimension
+    repeat (torch.Size, int..., tuple of int or list of int): The number of times to repeat this tensor along each dimension
 
 Example::
 

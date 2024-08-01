@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 import inspect
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
 
 import torch
 from torch._streambase import _EventBase, _StreamBase
+
 
 get_cuda_stream: Optional[Callable[[int], int]]
 if torch.cuda._is_compiled():
