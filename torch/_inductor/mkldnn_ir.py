@@ -992,7 +992,7 @@ class MKLPackedLinear(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.mkl._mkl_linear,
+            op_overload=torch.ops.mkl._mkl_linear.default,
         )
         self.cpp_op_schema = """
             at::Tensor(
