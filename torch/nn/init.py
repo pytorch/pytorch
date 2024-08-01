@@ -601,7 +601,7 @@ def orthogonal_(
         return tensor
     rows = tensor.size(0)
     cols = tensor.numel() // rows
-    flattened = tensor.new(rows, cols).normal_(0, 1, generator=generator)
+    flattened = tensor.new_empty((rows, cols)).normal_(0, 1, generator=generator)
 
     if rows < cols:
         flattened.t_()
