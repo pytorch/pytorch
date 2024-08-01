@@ -15,9 +15,7 @@
 #include <torch/csrc/jit/tensorexpr/types.h>
 #include <torch/csrc/jit/tensorexpr/var_substitutor.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 class InterpValue {
  public:
@@ -310,20 +308,22 @@ inline StmtPtr Substitute(const StmtPtr& stmt, const VarMapping& var_mapping) {
 // their corresponding expressions in the clone.
 // NOTE: This works because cloning reuses variables and does not create new
 // ones, and `VarMapping` input has variables as the key.
-inline ExprPtr SubstituteInClone(ExprPtr expr, const VarMapping& var_mapping) {
+inline ExprPtr SubstituteInClone(
+    const ExprPtr& expr,
+    const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
-  return Expr::clone(std::move(expr))->accept_mutator(&var_sub);
+  return Expr::clone(expr)->accept_mutator(&var_sub);
 }
 
 // Creates a clone of the input statement and substitutes the given vars with
 // their corresponding expressions in the clone.
 // NOTE: This works because cloning reuses variables and does not create new
 // ones, and `VarMapping` input has variables as the key.
-inline StmtPtr SubstituteInClone(StmtPtr stmt, const VarMapping& var_mapping) {
+inline StmtPtr SubstituteInClone(
+    const StmtPtr& stmt,
+    const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
-  return Stmt::clone(std::move(stmt))->accept_mutator(&var_sub);
+  return Stmt::clone(stmt)->accept_mutator(&var_sub);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

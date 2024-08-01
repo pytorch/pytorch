@@ -1010,7 +1010,7 @@ class TestConverter(TestCase):
         # Since self.data is only read but not written, it is lifted as
         # constant tensors.
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.data = torch.randn(3, 2)
 
@@ -1018,7 +1018,7 @@ class TestConverter(TestCase):
                 return x + self.data
 
         class Goo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.data = torch.randn(3, 2)
                 self.foo = Foo()
@@ -1032,7 +1032,7 @@ class TestConverter(TestCase):
 
     def test_prim_SetAttr(self):
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.data = torch.nn.Buffer(torch.ones(3, 2))
 
@@ -1046,7 +1046,7 @@ class TestConverter(TestCase):
         )
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.data = torch.nn.Buffer(torch.ones(3, 2))
 
@@ -1064,7 +1064,7 @@ class TestConverter(TestCase):
         # In converter, we change tensor constants that are assigned as a buffer automatically,
         # since it might be hard to manually register them as buffers.
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.data = torch.ones(3, 2)
 
@@ -1082,7 +1082,7 @@ class TestConverter(TestCase):
         )
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.count = 0
 
@@ -1165,7 +1165,7 @@ class TestConverter(TestCase):
 
     def test_context_manager(self):
         class ContextManager:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.count = 0
                 return
 
@@ -1211,7 +1211,7 @@ class TestConverter(TestCase):
 
     def test_ts2ep_multi_outputs_on_call_ops(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.pool = torch.nn.AdaptiveMaxPool2d((2, 2), return_indices=True)
 

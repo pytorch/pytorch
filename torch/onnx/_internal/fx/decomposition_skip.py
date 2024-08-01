@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import abc
 import contextlib
-
 from typing import Callable, Sequence
 
 from onnxscript.function_libs.torch_lib.ops import (  # type: ignore[import-not-found]
@@ -25,6 +24,7 @@ from onnxscript.function_libs.torch_lib.ops import (  # type: ignore[import-not-
 
 import torch
 from torch._decomp import decompositions
+
 
 _NEW_OP_NAMESPACE: str = "onnx_export"
 """The namespace for the custom operator."""

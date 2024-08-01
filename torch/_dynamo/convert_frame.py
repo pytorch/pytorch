@@ -25,6 +25,7 @@ from weakref import ReferenceType
 
 import torch
 import torch._logging
+from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
@@ -40,7 +41,10 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.nn.parallel.distributed import DistributedDataParallel
-from torch.utils._python_dispatch import _disable_current_modes
+from torch.utils._python_dispatch import (
+    _disable_current_modes,
+    is_in_torch_dispatch_mode,
+)
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
 from . import config, exc, trace_rules
@@ -121,7 +125,7 @@ if typing.TYPE_CHECKING:
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
-GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
+
 
 compile_lock = threading.RLock()
 
@@ -1150,18 +1154,23 @@ class CatchErrorsWrapper:
             has_started_execution
             or is_skipfile
             or config.disable
+            or (
+                is_in_torch_dispatch_mode(include_infra_modes=False)
+                and not getattr(self._torchdynamo_orig_callable, "_export", False)
+            )
         ):
             if log.isEnabledFor(logging.DEBUG):
                 print(frame.f_lasti, first_real_inst_idx(frame.f_code))
-                skip_reason = (
-                    "traced frame already"
-                    if has_started_execution
-                    else (
-                        "in skipfiles"
-                        if trace_rules.check(frame.f_code)
-                        else "dynamo tracing is disabled"
-                    )
-                )
+
+                if has_started_execution:
+                    skip_reason = "traced frame already"
+                elif trace_rules.check(frame.f_code):
+                    skip_reason = "in skipfiles"
+                elif is_in_torch_dispatch_mode(include_infra_modes=False):
+                    skip_reason = "non-infra torch dispatch mode present, this is not supported today in torch.compile"
+                else:
+                    skip_reason = "dynamo tracing is disabled"
+
                 log.debug(
                     "skipping: %s (reason: %s, file: %s)",
                     frame.f_code.co_name,
@@ -1169,6 +1178,7 @@ class CatchErrorsWrapper:
                     frame.f_code.co_filename,
                 )
             return None
+
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
             return None
