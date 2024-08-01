@@ -1618,7 +1618,7 @@ class MockModule(torch.nn.Module):
         super().__init__()
         self.relu = torch.nn.ReLU()
         self.linear = torch.nn.Linear(10, 10)
-        self.register_buffer("buf0", torch.randn(10, 10))
+        self.buf0 = torch.nn.Buffer(torch.randn(10, 10))
 
     def forward(self, x):
         return self.relu(self.linear(x) + self.buf0)
@@ -1749,8 +1749,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("b1", torch.ones([1]))
-                self.register_buffer("b2", torch.ones([2]))
+                self.b1 = torch.nn.Buffer(torch.ones([1]))
+                self.b2 = torch.nn.Buffer(torch.ones([2]))
 
             def forward(self, x):
                 return x
@@ -1831,7 +1831,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
-                self.register_buffer("buf0", torch.randn(10, 10))
+                self.buf0 = torch.nn.Buffer(torch.randn(10, 10))
 
             def forward(self, x):
                 return self.r(torch.sin(x)) + self.buf0
@@ -1858,7 +1858,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
-                self.register_buffer("buf0", torch.randn(10, 10))
+                self.buf0 = torch.nn.Buffer(torch.nn.Buffer(torch.randn(10, 10)))
                 self.register_parameter(
                     name="param0", param=torch.nn.Parameter(torch.randn(10, 10))
                 )
@@ -2700,6 +2700,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         class TestModule(torch.nn.Module):
             def __init__(self, buf) -> None:
                 super().__init__()
+                # Changing this one to nn.Buffer fails because `nn.Buffer` does a .detach()
+                # so the value in self.tx.output.side_effects will no longer evaluate to True
                 self.register_buffer("buf", buf)
 
             def forward(self, x):
@@ -2739,7 +2741,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         class TestModule(torch.nn.Module):
             def __init__(self, buf) -> None:
                 super().__init__()
-                self.register_buffer("buf", buf)
+                self.buf = torch.nn.Buffer(buf)
 
             def forward(self, x):
                 return self.buf * x
