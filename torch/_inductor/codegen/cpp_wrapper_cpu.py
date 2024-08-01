@@ -171,7 +171,6 @@ class CppWrapperCpu(WrapperCodeGen):
                     """
                 )
 
-            self.header.splice("typedef c10::complex<float> complex64;")
             self.header.splice("typedef at::Half half;")
             self.header.splice("typedef at::BFloat16 bfloat16;")
 
