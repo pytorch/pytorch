@@ -36,12 +36,16 @@ class _ComputationType(Enum):
     FORWARD = 1
     BACKWARD = 2
     WEIGHT = 3
+    UNSHARD = 4
+    RESHARD = 5
 
     def __str__(self):
         str_map = {
             _ComputationType.FORWARD: "F",
             _ComputationType.BACKWARD: "B",
             _ComputationType.WEIGHT: "W",
+            _ComputationType.UNSHARD: "UNSHARD",
+            _ComputationType.RESHARD: "RESHARD",
         }
         return str_map[self]
 
@@ -53,6 +57,10 @@ class _ComputationType(Enum):
             return _ComputationType.BACKWARD
         elif action == "W":
             return _ComputationType.WEIGHT
+        elif action == "UNSHARD":
+            return _ComputationType.UNSHARD
+        elif action == "RESHARD":
+            return _ComputationType.RESHARD
         else:
             raise RuntimeError(f"Invalid computation type {action}")
 
@@ -60,8 +68,10 @@ class _ComputationType(Enum):
 F = _ComputationType.FORWARD
 B = _ComputationType.BACKWARD
 W = _ComputationType.WEIGHT
+UNSHARD = _ComputationType.UNSHARD
+RESHARD = _ComputationType.RESHARD
 
-_action_regex = re.compile(r"(\d+)([F,B,W])(\d*)")
+_action_regex = re.compile(r"(\d+)([F,B,W]|UNSHARD|RESHARD)(\d*)")
 
 
 class _Action(NamedTuple):
@@ -88,7 +98,7 @@ class _Action(NamedTuple):
                 _ComputationType.from_str(computation_type),
                 int(microbatch_index) if len(microbatch_index) else None,
             )
-        elif str == "":
+        elif str == "" or str.isspace():
             return None
         raise RuntimeError(
             f"Invalid action string: {str}, should be formatted as [stage][action type][microbatch] e.g. 2F0"
@@ -833,6 +843,76 @@ class Schedule1F1B(PipelineScheduleSingle):
 
         # Return losses if there is a container passed in
         self._update_losses(self._stage, losses)
+
+
+def _add_unshard_reshard(
+    compute_actions: List[Optional[_Action]],
+    max_active_stages: int = 3,
+) -> List[Optional[_Action]]:
+    """Given a basic schedule involving only compute actions (F,B,W), add UNSHARD/RESHARD actions for FSDP.
+
+    UNSHARD refers to fetching the full contents of an FSDP-sharded layer, requiring an all-gather operation.
+    RESHARD does the opposite, releasing memory (but doing no commmunication)
+
+    We abandon the "timestep lock"  during lowering
+
+    max_active_stages controls how many prefetches we allow. It should be measured in mb and tuneable but in practice
+    3 stages is probably the thing we want?
+    (to account for having one f and one b active, and something else prefetching?)
+    """
+
+    def next_stage_indices(
+        count: int, next_actions: List[Optional[_Action]]
+    ) -> List[int]:
+        """Remove duplicates (same stage, different microbatch), find next 'count' stages that will do compute."""
+        seen: Set[int] = set()
+        ret: List[int] = []
+
+        for a in next_actions:
+            if a is not None and a.stage_index not in seen:
+                seen.add(a.stage_index)
+                ret.append(a.stage_index)
+                if len(ret) == count:
+                    break
+        return ret
+
+    active_stages: Set[int] = set()
+    fsdp_aware_actions: List[Optional[_Action]] = []
+
+    def _unshard(stage_index: int):
+        active_stages.add(stage_index)
+        fsdp_aware_actions.append(_Action(stage_index, UNSHARD))
+
+    def _reshard(stage_index: int):
+        active_stages.remove(stage_index)
+        fsdp_aware_actions.append(_Action(stage_index, RESHARD))
+
+    for i, action in enumerate(compute_actions):
+        if action is None:
+            continue
+
+        # We prefetch the next N stages we'll see, dropping existing stages to make room
+        next_n = next_stage_indices(max_active_stages, compute_actions[i:])
+        # Fetch needs to be ordered correctly, so don't use a set
+        fetch = list(filter(lambda s: s not in active_stages, next_n))
+        # Unclear what the best policy is for eviction, but we can maintain order so we do
+        evict = list(filter(lambda s: s not in next_n, active_stages))
+
+        logger.debug(
+            "_add_unshard_reshard Step %d active: %s fetch %s, evict %s",
+            i,
+            active_stages,
+            fetch,
+            evict,
+        )
+
+        for stage in evict:
+            _reshard(stage)
+        for stage in fetch:
+            _unshard(stage)
+        fsdp_aware_actions.append(action)
+
+    return fsdp_aware_actions
 
 
 class PipelineScheduleMulti(_PipelineSchedule):
