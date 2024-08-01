@@ -407,7 +407,8 @@ class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
             self.assertEqual(sharded_param.stride(), orig_param.stride())
             if "in_proj" in orig_param_name:
                 expected_placements = (
-                    _StridedShard(0, split_factor=tp_mesh.size()), Shard(0)
+                    _StridedShard(0, split_factor=tp_mesh.size()),
+                    Shard(0),
                 )
             elif "out_proj" in orig_param_name and "weight" in orig_param_name:
                 expected_placements = (Shard(0), Shard(1))
