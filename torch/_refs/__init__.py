@@ -7,14 +7,12 @@ import itertools
 import math
 import operator
 import warnings
-
 from collections.abc import Iterable
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
 from typing import Any, Callable, Dict, List, Optional, overload, Sequence, Tuple, Union
 
 import torch
-
 import torch._prims as prims
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
@@ -50,6 +48,7 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
+
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -261,6 +260,7 @@ __all__ = [
     "dstack",
     "expand",
     "expand_as",
+    "expand_copy",
     "flatten",
     "flip",
     "fliplr",
@@ -293,6 +293,7 @@ __all__ = [
     "unfold",
     "unfold_copy",
     "unsqueeze",
+    "unsqueeze_copy",
     "view",
     "view_as",
     "view_copy",
@@ -445,6 +446,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
 
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
+
 
 #
 # Elementwise unary references
@@ -1049,7 +1051,7 @@ def _make_elementwise_binary_reference(
             return handle_noncontiguous_outputs([a, b], output)
 
         if has_out:
-            _ref = out_wrapper()(_ref)
+            _ref = out_wrapper()(_ref)  # type: ignore[assignment]
 
         _ref.__name__ = name
         if aten_op is infer_aten_op:
@@ -2797,9 +2799,14 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
         # TODO: fix this to work with meta tensors
         try:
-            requires_grad = any(x.requires_grad for x in tensors)
+            # BUG? This looks like it wants to call builtins.any() but is
+            # actually calling .any() (in this file). Changing to builtins.any()
+            # causes tests to fail:
+            # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 python test/test_ops.py -k \
+            #   TestFakeTensorCUDA.test_fake_crossref_backward_amp_cat_cuda_float32
+            requires_grad = bool(any(x.requires_grad for x in tensors))  # type: ignore[arg-type]
         except Exception:
-            requires_grad = False
+            requires_grad = False  # type: ignore[assignment]
 
         return empty(
             (0,),
@@ -4419,7 +4426,7 @@ def block_diag(*tensors: List[TensorLikeType]) -> TensorLikeType:
     expects arguments splatted, but `aten.block_diag` expects only
     one argument that is a list of Tensors.
     """
-    return _block_diag_iterable(tensors)
+    return _block_diag_iterable(tensors)  # type: ignore[arg-type]
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -6310,10 +6317,12 @@ zero_ = _make_inplace(zero)
 alias_copy = _make_copy_from_view(aten.alias)
 as_strided_copy = _make_copy_from_view(aten.as_strided)
 diagonal_copy = _make_copy_from_view(aten.diagonal)
+expand_copy = _make_copy_from_view(aten.expand)
 # TODO: This must return a sparse tensor if the input is sparse, but refs have
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(aten.narrow)
 t_copy = _make_copy_from_view(aten.t)
+unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
 view_copy = _make_copy_from_view(aten.view)
 
 

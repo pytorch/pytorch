@@ -451,6 +451,12 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
     def can_inplace(node, mutated_arg):
         if isinstance(mutated_arg, (list, tuple)):
+            unique_storages = {get_node_storage(arg) for arg in mutated_arg}
+            if len(unique_storages) != len(mutated_arg):
+                # at least two Tensors in mutated_arg alias each other, so we can't reinplace it.
+                # We can probably do better (that is, reinplace one of them and clone the other)
+                # but that requires more work and mutable List[Tensor] are not that common.
+                return False
             return all(can_inplace(node, arg) for arg in mutated_arg)
 
         if get_node_storage(mutated_arg) is None:
@@ -484,16 +490,44 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
     def reinplace_and_refine_tensors_to_clone(old_tensors_to_clone, kwargs):
         tensors_to_clone: List[str] = []
+        storage_of_reinplaced_args = set()
+
+        def tensor_with_same_storage_already_reinplaced(arg):
+            if isinstance(arg, (list, tuple)):
+                return any(
+                    get_node_storage(a) in storage_of_reinplaced_args for a in arg
+                )
+            return get_node_storage(mutated_arg) in storage_of_reinplaced_args
+
         for arg in old_tensors_to_clone:
             assert arg in kwargs
             mutated_arg = kwargs[arg]
-            if can_inplace(node, mutated_arg):
+            if (
+                # Let's say we have:
+                # - op(x, y) that mutates both x and y
+                # - new_x, new_y = functional_op(x, y) is the functional variant
+                # If we are presented with functional_op(x, x), we must not reinplace
+                # this into op(x, x), because then it would be writing to the same Tensor.
+                # Instead, it's OK to reinplace one of them and to clone the other:
+                # >>> y = x.clone()
+                # >>> op(x, y)
+                # This also applies if we have views: functional_op(x, x[0])
+                # should not reinplace into op(x, x[0]).
+                not tensor_with_same_storage_already_reinplaced(mutated_arg)
+                and can_inplace(node, mutated_arg)
+            ):
                 copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                 if copy_node is not None:
                     replace_dict[copy_node] = copy_node.args[0]
                 for user in node.users:
                     if user.target == operator.getitem and user.args[1] == arg:
                         replace_dict[user] = mutated_arg
+
+                if isinstance(mutated_arg, (list, tuple)):
+                    for a in mutated_arg:
+                        storage_of_reinplaced_args.add(get_node_storage(a))
+                else:
+                    storage_of_reinplaced_args.add(get_node_storage(mutated_arg))
             else:
                 tensors_to_clone.append(arg)
         return tensors_to_clone

@@ -317,9 +317,6 @@ graph():
     return (x,)""",
         )
 
-    # Errors because fake mode is not detected from non-tensor inputs
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
-    @testing.expectedFailureTrainingIRToRunDecomp
     def test_no_tensor_computation_3(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -426,6 +423,26 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
 
+    # Traced graph contains a WrapWithSetGradEnabled hop but
+    # dynamo doesn't support the hop yet so the test fails in strict_mode when re-tracing.
+    @testing.expectedFailureRetraceability
+    def test_setgrad_lifted_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                with torch.enable_grad():
+                    c = torch.tensor(4)
+                    z = c + x + y
+
+                return z * z
+
+        m = M()
+        x = torch.randn(4)
+        y = torch.randn(4)
+        # Need to surround export with no_grad to bypass AutogradStateOpsFailSafeguard.
+        with torch.no_grad():
+            ep = export(m, (x, y))
+        self.assertEqual(ep.module()(x, y), m(x, y))
+
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self):
@@ -461,8 +478,8 @@ graph():
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("u", torch.ones(1))
-                self.register_buffer("v", torch.ones(1))
+                self.u = torch.nn.Buffer(torch.ones(1))
+                self.v = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x, ys, zs, c):
                 y = ys[0] + ys[1] + zs["a"] + zs["b"]
@@ -576,7 +593,7 @@ graph():
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.ones(2, 3), persistent=False)
+                self.buf = torch.nn.Buffer(torch.ones(2, 3), persistent=False)
 
             def forward(self, x):
                 # x = 2
@@ -1298,8 +1315,8 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         class MyLinear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("weight", torch.randn(20, 98))
-                self.register_buffer("bias", torch.randn(20))
+                self.weight = torch.nn.Buffer(torch.randn(20, 98))
+                self.bias = torch.nn.Buffer(torch.randn(20))
 
             def forward(self, x):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
@@ -1383,8 +1400,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
         )
 
     @testing.expectedFailureRetraceability  # Unexpected type in sourceless builder torch._higher_order_ops.wrap.WrapWithSetGradEnabled
-    @testing.expectedFailureTrainingIRToRunDecomp  # Encountered autograd state manager op
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_set_grad_empty(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -1483,7 +1498,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(4, 4))
+                self.buffer = torch.nn.Buffer(torch.ones(4, 4))
 
             def forward(self, x):
                 x.add_(5)
@@ -1527,7 +1542,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(4, 4))
+                self.buffer = torch.nn.Buffer(torch.ones(4, 4))
 
             def forward(self, x):
                 x.add_(5)
@@ -1564,7 +1579,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(4, 4))
+                self.buffer = torch.nn.Buffer(torch.ones(4, 4))
 
             def forward(self, container):
                 x = container[0][0]
@@ -1592,7 +1607,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(2, 2))
+                self.buffer = torch.nn.Buffer(torch.ones(2, 2))
                 self.linear = torch.nn.Linear(2, 2)
 
             def forward(self, x):
@@ -1873,6 +1888,223 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
 
+    def test_suggested_fixes_for_data_dependent_errors_basic(self):
+        # suggested fixes for data-dependent errors only work in non-strict mode
+        strict = False
+        error_type = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+
+        # Just to introduce some indirection: N is a top-level module N that calls
+        # module M, defined next.
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = M()
+
+            def forward(self, t):
+                return self.m(t) + 1
+
+        # example input
+        t = torch.tensor([1, 4, 4], dtype=torch.int32)
+
+        # We define a series of versions of M() below. Each version has
+        # raises a data-dependent error that the next version fixes, by
+        # copy-pasting a suggested fix in the error message. The fix is
+        # always a torch.check() on an unresolved condition (or its negation)
+        # on unbacked symints mentioned in the error message.
+        # Note that the suggested fixes are in terms of local variables
+        # near the location of error that "contain" the unbacked symints
+        # in the unresolved condition (either directly or indirectly, e.g.,
+        # inside a list or inside the shape of a tensor).
+
+        class M_v0(torch.nn.Module):
+            def forward(self, t):
+                items = [t[i].item() for i in range(t.numel())]
+                r = torch.randn([items[0], items[1]])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                return r.view(items[0], items[2])
+
+        M = M_v0
+        with self.assertRaisesRegex(
+            error_type,
+            "User code(.*\n)+"
+            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
+            "Suggested fixes.*:\n"
+            f".*{re.escape('torch._check(items[2] == (-1))')}.*\n"
+            f".*{re.escape('torch._check(items[2] != (-1))')}",
+        ):
+            export(N(), (t,), strict=strict)
+
+        class M_v1(torch.nn.Module):
+            def forward(self, t):
+                items = [t[i].item() for i in range(t.numel())]
+                r = torch.randn([items[0], items[1]])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                torch._check(items[2] != -1)
+                # Could not guard on data-dependent expression u2 >= 0
+                return r.view(items[0], items[2])
+
+        M = M_v1
+        with self.assertRaisesRegex(
+            error_type,
+            "User code(.*\n)+"
+            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
+            "Suggested fixes.*:\n"
+            f".*{re.escape('torch._check(items[2] >= 0)')}.*\n"
+            f".*{re.escape('torch._check(items[2] < 0)')}",
+        ):
+            export(N(), (t,), strict=strict)
+
+        class M_v2(torch.nn.Module):
+            def forward(self, t):
+                items = [t[i].item() for i in range(t.numel())]
+                r = torch.randn([items[0], items[1]])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                torch._check(items[2] != -1)
+                # Could not guard on data-dependent expression u2 >= 0
+                torch._check(items[2] >= 0)
+                # Could not guard on data-dependent expression Eq(u1, u2)
+                return r.view(items[0], items[2])
+
+        M = M_v2
+        with self.assertRaisesRegex(
+            error_type,
+            "User code(.*\n)+"
+            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
+            "Suggested fixes.*:\n"
+            f".*{re.escape('torch._check(items[2] == r.shape[1])')}.*\n"
+            f".*{re.escape('torch._check(items[2] != r.shape[1])')}",
+        ):
+            export(N(), (t,), strict=strict)
+
+        class M_v3(torch.nn.Module):
+            def forward(self, t):
+                items = [t[i].item() for i in range(t.numel())]
+                r = torch.randn([items[0], items[1]])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                torch._check(items[2] != -1)
+                # Could not guard on data-dependent expression u2 >= 0
+                torch._check(items[2] >= 0)
+                # Could not guard on data-dependent expression Eq(u1, u2)
+                torch._check(items[2] == r.shape[1])
+                return r.view(items[0], items[2])
+
+        M = M_v3
+        export(N(), (t,), strict=strict)
+
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?
+    @testing.expectedFailureSerDer  # T195866111
+    def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
+        # suggested fixes for data-dependent errors only work in non-strict mode
+        strict = False
+        error_type = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+
+        def retry_export(m, inp, fixes):
+            # API that applies a series of fixes, retrying export after applying each fix,
+            # and asserting the applied fix was suggested in the previous try.
+            # Using this API avoids the need to define multiple versions of the same test
+            # module, as in `test_suggested_fixes_for_data_dependent_errors_basic` above.
+            import re
+
+            def code(snippets):
+                return f"[{', '.join(snippets)}]"
+
+            for i in range(len(fixes)):
+                with self.assertRaisesRegex(error_type, re.escape(fixes[i])):
+                    export(m, (*inp, code(fixes[:i])), strict=strict)
+            export(m, (*inp, code(fixes)), strict=strict)
+
+        # The following examples are lifted from @ezyang's "Data-dependent shape puzzlers"
+        # notebook at https://www.internalfb.com/intern/anp/view/?id=5330476
+
+        # These test modules are written in a way that works well with retry_export above.
+        # Specifically, they take an extra `fixes` argument and `eval` it at the location
+        # that is expected to raise errors.
+
+        class cf_implicitsize(torch.nn.Module):
+            def forward(self, x, y, fixes):
+                i = x.item()
+                eval(fixes)
+                # instead of y[i]
+                return y.narrow(0, i, 1).squeeze()
+
+        retry_export(
+            cf_implicitsize(),
+            (torch.tensor(2), torch.randn(10)),
+            fixes=[
+                # Could not guard on data-dependent expression u0 < 0
+                "torch._check(i >= 0)",
+            ],
+        )
+
+        class cf_nomemo(torch.nn.Module):
+            def forward(self, x, y, fixes):
+                i = y[0].item()
+                eval(fixes)
+                return x.unsqueeze(1).expand(-1, i)
+
+        retry_export(
+            cf_nomemo(),
+            (torch.randn(8), torch.tensor([2])),
+            fixes=[
+                # Could not guard on data-dependent expression Eq(u0, 1)
+                "torch._check(i != 1)",
+                # Could not guard on data-dependent expression Ne(u0, -1)
+                "torch._check(i != (-1))",
+            ],
+        )
+
+        class cf_changevar(torch.nn.Module):
+            def forward(self, x, fixes):
+                i = x.item()
+                eval(fixes)
+                r = torch.arange(i // 2)
+                return r + r
+
+        retry_export(
+            cf_changevar(),
+            (torch.tensor(20),),
+            fixes=[
+                # Could not guard on data-dependent expression Eq((u0//2), 0)
+                "torch._check(((i//2)) != 0)",
+                # Could not guard on data-dependent expression Eq((u0//2), 1)
+                "torch._check(((i//2)) != 1)",
+            ],
+        )
+
+        class cf_stacklist(torch.nn.Module):
+            def forward(self, xs, y, fixes):
+                i = y.item()
+                eval(fixes)
+                # instead of xs[i]
+                return torch.stack(xs, 0).narrow(0, i, 1).squeeze()
+
+        retry_export(
+            cf_stacklist(),
+            ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
+            fixes=[
+                # Could not guard on data-dependent expression u0 < 0
+                "torch._check(i >= 0)",
+            ],
+        )
+
+        class cf_tensorsplit(torch.nn.Module):
+            def forward(self, x, offsets_t, fixes):
+                lengths = torch.diff(offsets_t).tolist()
+                rs = []
+                start = 0
+                for length in lengths:
+                    eval(fixes)
+                    rs.append(x.narrow(0, start, length))
+                    start += length
+                return rs
+
+        retry_export(
+            cf_tensorsplit(),
+            (torch.arange(10), torch.tensor([0, 2, 5, 7, 10])),
+            fixes=[],  # nothing to fix!
+        )
+
     def test_if_functional(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -1901,6 +2133,45 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
+
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # run_decompositions() triggers same error as Dynamo below
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureSerDer  # sympify on deserialization doesn't preserve sympy functions: T197567691
+    def test_solver_unsupported_sympy_function(self):
+        # repro of https://github.com/pytorch/pytorch/issues/131897
+
+        # NOTE: Dynamo errors with unsupported functions in `add_runtime_asserts`:
+        # "symbolically traced variables cannot be used as inputs to control flow"
+        strict = False
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                x = torch.nn.functional.interpolate(
+                    x, scale_factor=0.5, mode="bilinear"
+                )
+                x = torch.nn.functional.interpolate(
+                    x, scale_factor=2.0, mode="bilinear"
+                )
+                x = x + y
+                return x
+
+        model = MyModule().eval()
+
+        inputs = (
+            torch.rand((1, 1, 32, 32)),
+            torch.rand((1, 1, 32, 32)),
+        )
+
+        dim = torch.export.Dim("Dim", min=16, max=64)
+        dynamic_shapes = {"x": {2: dim, 3: dim}, "y": {2: dim, 3: dim}}
+
+        exported_program = export(
+            model, inputs, dynamic_shapes=dynamic_shapes, strict=strict
+        )
+        self.assertEqual(exported_program.module()(*inputs), model(*inputs))
 
     def test_export_mod_constraints(self):
         class BasicDynamiShapeModel(torch.nn.Module):
@@ -3432,7 +3703,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.zeros(1))
+                self.buf = torch.nn.Buffer(torch.zeros(1))
 
             def forward(self, x):
                 self.buf.add_(1)
@@ -3461,7 +3732,7 @@ def forward(self, x):
         class Bar(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.ones(1))
+                self.buf = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x):
                 self.buf.add_(1)
@@ -3470,7 +3741,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.zeros(1))
+                self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.bar = Bar()
 
             def forward(self, x):
@@ -3560,7 +3831,7 @@ def forward(self, x):
         class Bar(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.ones(1))
+                self.buf = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x):
                 self.buf.add_(1)
@@ -3569,7 +3840,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.zeros(1))
+                self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.bar = Bar()
 
             def forward(self, x):
@@ -3613,7 +3884,7 @@ def forward(self, x):
         class Bar(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.ones(1))
+                self.buf = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x):
                 self.buf.add_(1)
@@ -3622,7 +3893,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buf", torch.zeros(1))
+                self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.bar = Bar()
 
             def forward(self, x):
@@ -3669,7 +3940,7 @@ def forward(self, x):
         class A(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(6, 4))
+                self.buffer = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self):
                 return self.buffer.cos()
@@ -3725,7 +3996,7 @@ def forward(self, b_a_buffer, x):
                 self.register_parameter(
                     "param", torch.nn.Parameter(torch.ones(2, 3), requires_grad=False)
                 )
-                self.register_buffer("buffer", torch.ones(2, 3) + 1)
+                self.buffer = torch.nn.Buffer(torch.ones(2, 3) + 1)
 
             def true_fn(self, x):
                 return x + self.param
@@ -3758,7 +4029,7 @@ def forward(self, b_a_buffer, x):
                 self.register_parameter(
                     "param", torch.nn.Parameter(torch.tensor(5), requires_grad=False)
                 )
-                self.register_buffer("buffer", torch.tensor(6) + 1)
+                self.buffer = torch.nn.Buffer(torch.tensor(6) + 1)
 
         m1 = M1()
 
@@ -4249,8 +4520,6 @@ graph():
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
     @testing.expectedFailureRetraceability  # Retracing tensor constants results in buffers
-    @testing.expectedFailureTrainingIRToRunDecomp  # detach() is not present
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_nested_module_with_constant_buffer(self):
         class M1(torch.nn.Module):
             def __init__(self):
@@ -4272,9 +4541,22 @@ graph():
         self.assertEqual(len(ep.state_dict), 0)
         self.assertEqual(len(ep.constants), 1)
 
-        self.assertExpectedInline(
-            str(ep.graph).strip(),
-            """\
+        if is_training_ir_test(self._testMethodName):
+            self.assertExpectedInline(
+                str(ep.graph).strip(),
+                """\
+graph():
+    %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
+    %x : [num_users=2] = placeholder[target=x]
+    %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %lift_fresh_copy), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
+    return (mul,)""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(ep.graph).strip(),
+                """\
 graph():
     %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
     %x : [num_users=2] = placeholder[target=x]
@@ -4283,7 +4565,7 @@ graph():
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %detach), kwargs = {})
     %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
     return (mul,)""",
-        )
+            )
 
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
@@ -4350,7 +4632,7 @@ graph():
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(4, 4))
+                self.buffer = torch.nn.Buffer(torch.ones(4, 4))
 
             def forward(self, x):
                 self.buffer.add_(4)
@@ -4817,7 +5099,7 @@ graph():
         class Child2(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("child2buffer", torch.ones(2, 3))
+                self.child2buffer = torch.nn.Buffer(torch.ones(2, 3))
 
             def forward(self, x):
                 return x - self.child2buffer
@@ -4877,7 +5159,7 @@ graph():
             def __init__(self):
                 super().__init__()
                 self.leaf = Leaf()
-                self.register_buffer("buffer", torch.randn(4, 4))
+                self.buffer = torch.nn.Buffer(torch.randn(4, 4))
 
             def forward(self, x):
                 return self.buffer.sum() + self.leaf(x).sum()
@@ -4934,7 +5216,7 @@ graph():
             def __init__(self):
                 super().__init__()
                 self.leaf = Leaf()
-                self.register_buffer("buffer", torch.randn(4, 4))
+                self.buffer = torch.nn.Buffer(torch.randn(4, 4))
 
             def forward(self, x):
                 return self.buffer.sum() + self.leaf(x).sum()
@@ -5132,8 +5414,8 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("pred", torch.tensor(False))
-                self.register_buffer("t", torch.tensor(10))
+                self.pred = torch.nn.Buffer(torch.tensor(False))
+                self.t = torch.nn.Buffer(torch.tensor(10))
 
             def forward(self, x, y):
                 def true_fn(x, y):
@@ -5268,32 +5550,44 @@ def forward(self, x, b_t, y):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("foo", torch.rand(2, 3), persistent=False)
+                self.foo = torch.nn.Buffer(torch.rand(2, 3), persistent=False)
 
             def forward(self, x):
                 return self.foo + x
 
+        class MyOuterModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = MyModule()
+
+            def forward(self, x):
+                return self.inner(x)
+
         inp = torch.rand(2, 3)
-        m = MyModule()
-        ep = export(m, (inp,), {})
 
-        self.assertEqual(ep.module()(inp), m(inp))
-        # Non-persistent buffers should not show up in the state dict
-        self.assertNotIn("foo", ep.state_dict)
-        named_buffers = {name: buffer for (name, buffer) in ep.named_buffers()}
-        # But they should show up in named_buffers()
-        self.assertIn("foo", named_buffers)
-        self.assertIn("foo", ep.constants)
-        self.assertEqual(len(ep.constants), 1)
+        def _test(m, non_persistent_buffer):
+            ep = export(m, (inp,), {})
 
-        # Check the same properties of the unlifted module
-        mod = ep.module()
-        self.assertNotIn("foo", mod.state_dict())
-        mod_named_buffers = {name: buffer for (name, buffer) in mod.named_buffers()}
-        self.assertIn("foo", mod_named_buffers)
-        self.assertIn("foo", ep.constants)
-        self.assertEqual(len(ep.constants), 1)
-        self.assertEqual(mod(inp), m(inp))
+            self.assertEqual(ep.module()(inp), m(inp))
+            # Non-persistent buffers should not show up in the state dict
+            self.assertNotIn(non_persistent_buffer, ep.state_dict)
+            named_buffers = {name: buffer for (name, buffer) in ep.named_buffers()}
+            # But they should show up in named_buffers()
+            self.assertIn(non_persistent_buffer, named_buffers)
+            self.assertIn(non_persistent_buffer, ep.constants)
+            self.assertEqual(len(ep.constants), 1)
+
+            # Check the same properties of the unlifted module
+            mod = ep.module()
+            self.assertNotIn(non_persistent_buffer, mod.state_dict())
+            mod_named_buffers = {name: buffer for (name, buffer) in mod.named_buffers()}
+            self.assertIn(non_persistent_buffer, mod_named_buffers)
+            self.assertIn(non_persistent_buffer, ep.constants)
+            self.assertEqual(len(ep.constants), 1)
+            self.assertEqual(mod(inp), m(inp))
+
+        _test(MyModule(), "foo")
+        _test(MyOuterModule(), "inner.foo")
 
     def test_export_as_backend(self):
         def f(x, y):
@@ -5334,8 +5628,8 @@ def forward(self, x, b_t, y):
             def __init__(self):
                 super().__init__()
                 self.foo = torch.nn.Parameter(torch.randn(4, 4))
-                self.register_buffer("bar", torch.randn(4, 4), persistent=False)
-                self.register_buffer("baz", torch.randn(4, 4), persistent=True)
+                self.bar = torch.nn.Buffer(torch.randn(4, 4), persistent=False)
+                self.baz = torch.nn.Buffer(torch.randn(4, 4), persistent=True)
 
             def forward(self, x):
                 return self.foo + x + self.bar + self.baz
@@ -5422,7 +5716,7 @@ def forward(self, x, b_t, y):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("foo", torch.randn(4, 4))
+                self.foo = torch.nn.Buffer(torch.randn(4, 4))
 
             def forward(self, x):
                 self.foo.add_(1)
@@ -5560,8 +5854,8 @@ def forward(self, x):
             def __init__(self):
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.randn(4))
-                self.register_buffer("alpha", torch.randn(4), persistent=True)
-                self.register_buffer("beta", torch.randn(4), persistent=False)
+                self.alpha = torch.nn.Buffer(torch.randn(4), persistent=True)
+                self.beta = torch.nn.Buffer(torch.randn(4), persistent=False)
                 self.gamma = torch.randn(4)
 
             def forward(self, p, b_alpha, b, c_gamma):

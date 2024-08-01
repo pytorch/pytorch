@@ -1,4 +1,15 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from ._IR import Pipe, pipe_split, pipeline, SplitPoint
+from .schedules import (
+    Schedule1F1B,
+    ScheduleFlexibleInterleaved1F1B,
+    ScheduleGPipe,
+    ScheduleInterleaved1F1B,
+    ScheduleLoopedBFS,
+)
+from .stage import build_stage, PipelineStage
+
+
 __all__ = [
     "Pipe",
     "pipe_split",
@@ -11,16 +22,4 @@ __all__ = [
     "ScheduleGPipe",
     "ScheduleInterleaved1F1B",
     "ScheduleLoopedBFS",
-    "ZeroBubbleAlgorithm",
 ]
-
-from ._IR import Pipe, pipe_split, pipeline, SplitPoint
-from .schedules import (
-    Schedule1F1B,
-    ScheduleFlexibleInterleaved1F1B,
-    ScheduleGPipe,
-    ScheduleInterleaved1F1B,
-    ScheduleLoopedBFS,
-    ZeroBubbleAlgorithm,
-)
-from .stage import build_stage, PipelineStage

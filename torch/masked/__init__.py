@@ -1,10 +1,3 @@
-__all__ = [
-    "MaskedTensor",
-    "as_masked_tensor",
-    "is_masked_tensor",
-    "masked_tensor",
-]
-
 from torch.masked._ops import (
     _canonical_dim,
     _combine_input_and_mask,
@@ -35,3 +28,30 @@ from torch.masked._ops import (
 )
 from torch.masked.maskedtensor.core import is_masked_tensor, MaskedTensor
 from torch.masked.maskedtensor.creation import as_masked_tensor, masked_tensor
+
+
+__all__ = [
+    "amax",
+    "amin",
+    "argmax",
+    "argmin",
+    "as_masked_tensor",
+    "cumprod",
+    "cumsum",
+    "is_masked_tensor",
+    "log_softmax",
+    "logaddexp",
+    "logsumexp",
+    "masked_tensor",
+    "MaskedTensor",
+    "mean",
+    "median",
+    "norm",
+    "normalize",
+    "prod",
+    "softmax",
+    "softmin",
+    "std",
+    "sum",
+    "var",
+]

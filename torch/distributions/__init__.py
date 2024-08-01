@@ -71,75 +71,7 @@ derivative would be as follows::
     loss.backward()
 """
 
-__all__ = [
-    "AbsTransform",
-    "AffineTransform",
-    "Bernoulli",
-    "Beta",
-    "Binomial",
-    "CatTransform",
-    "Categorical",
-    "Cauchy",
-    "Chi2",
-    "ComposeTransform",
-    "ContinuousBernoulli",
-    "CorrCholeskyTransform",
-    "CumulativeDistributionTransform",
-    "Dirichlet",
-    "Distribution",
-    "ExpTransform",
-    "Exponential",
-    "ExponentialFamily",
-    "FisherSnedecor",
-    "Gamma",
-    "Geometric",
-    "Gumbel",
-    "HalfCauchy",
-    "HalfNormal",
-    "Independent",
-    "IndependentTransform",
-    "InverseGamma",
-    "Kumaraswamy",
-    "LKJCholesky",
-    "Laplace",
-    "LogNormal",
-    "LogisticNormal",
-    "LowRankMultivariateNormal",
-    "LowerCholeskyTransform",
-    "MixtureSameFamily",
-    "Multinomial",
-    "MultivariateNormal",
-    "NegativeBinomial",
-    "Normal",
-    "OneHotCategorical",
-    "OneHotCategoricalStraightThrough",
-    "Pareto",
-    "Poisson",
-    "PositiveDefiniteTransform",
-    "PowerTransform",
-    "RelaxedBernoulli",
-    "RelaxedOneHotCategorical",
-    "ReshapeTransform",
-    "SigmoidTransform",
-    "SoftmaxTransform",
-    "SoftplusTransform",
-    "StackTransform",
-    "StickBreakingTransform",
-    "StudentT",
-    "TanhTransform",
-    "Transform",
-    "TransformedDistribution",
-    "Uniform",
-    "VonMises",
-    "Weibull",
-    "Wishart",
-    "biject_to",
-    "identity_transform",
-    "kl_divergence",
-    "register_kl",
-    "transform_to",
-]
-
+from . import transforms
 from .bernoulli import Bernoulli
 from .beta import Beta
 from .binomial import Binomial
@@ -180,16 +112,61 @@ from .relaxed_categorical import RelaxedOneHotCategorical
 from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
 from .transforms import *  # noqa: F403
-from . import transforms
 from .uniform import Uniform
 from .von_mises import VonMises
 from .weibull import Weibull
 from .wishart import Wishart
 
+
 _add_kl_info()
 del _add_kl_info
 
-# ensure all exports from transforms are included in __all__
-assert set(__all__) >= set(transforms.__all__)
-# keep this list sorted
-assert __all__ == sorted(__all__)
+__all__ = [
+    "Bernoulli",
+    "Beta",
+    "Binomial",
+    "Categorical",
+    "Cauchy",
+    "Chi2",
+    "ContinuousBernoulli",
+    "Dirichlet",
+    "Distribution",
+    "Exponential",
+    "ExponentialFamily",
+    "FisherSnedecor",
+    "Gamma",
+    "Geometric",
+    "Gumbel",
+    "HalfCauchy",
+    "HalfNormal",
+    "Independent",
+    "InverseGamma",
+    "Kumaraswamy",
+    "LKJCholesky",
+    "Laplace",
+    "LogNormal",
+    "LogisticNormal",
+    "LowRankMultivariateNormal",
+    "MixtureSameFamily",
+    "Multinomial",
+    "MultivariateNormal",
+    "NegativeBinomial",
+    "Normal",
+    "OneHotCategorical",
+    "OneHotCategoricalStraightThrough",
+    "Pareto",
+    "RelaxedBernoulli",
+    "RelaxedOneHotCategorical",
+    "StudentT",
+    "Poisson",
+    "Uniform",
+    "VonMises",
+    "Weibull",
+    "Wishart",
+    "TransformedDistribution",
+    "biject_to",
+    "kl_divergence",
+    "register_kl",
+    "transform_to",
+]
+__all__.extend(transforms.__all__)

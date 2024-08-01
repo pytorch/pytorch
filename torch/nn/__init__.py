@@ -181,6 +181,7 @@ __all__ = [
 ]
 
 from torch.nn.parameter import (
+    Buffer as Buffer,
     Parameter as Parameter,
     UninitializedBuffer as UninitializedBuffer,
     UninitializedParameter as UninitializedParameter,
