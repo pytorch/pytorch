@@ -1348,7 +1348,7 @@ struct TORCH_API SymIntType : public Type {
   std::string str() const override {
     return "SymInt";
   }
-  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
+  std::string annotation_str_impl(const TypePrinter& printer [[maybe_unused]] = nullptr) const override {
     return "int";
   }
   static const TypeKind Kind = TypeKind::SymIntType;
@@ -1368,7 +1368,7 @@ struct TORCH_API SymFloatType : public Type {
   std::string str() const override {
     return "SymFloat";
   }
-  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
+  std::string annotation_str_impl(const TypePrinter& printer [[maybe_unused]] = nullptr) const override {
     return "float";
   }
   static const TypeKind Kind = TypeKind::SymFloatType;
@@ -1388,7 +1388,7 @@ struct TORCH_API SymBoolType : public Type {
   std::string str() const override {
     return "SymBool";
   }
-  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
+  std::string annotation_str_impl(const TypePrinter& printer [[maybe_unused]] = nullptr) const override {
     return "bool";
   }
   static const TypeKind Kind = TypeKind::SymBoolType;
@@ -2043,7 +2043,7 @@ template <class T, bool fake>
 struct getMaybeFakeTypePtr_<std::optional<T>, fake> final {
   static const auto& call() {
     static auto inner_type = getMaybeFakeTypePtr_<T, fake>::call();
-    // The "per optional<T>" static singleton needs to live in a .cpp file,
+    // The "per std::optional<T>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     static auto type = OptionalType::get(inner_type);
     return type;
@@ -2055,7 +2055,7 @@ template<>
 struct getTypePtr_<at::OptionalIntArrayRef> final {
   static const auto& call() {
     static auto inner_type = getMaybeFakeTypePtr_<IntArrayRef, false>::call();
-    // The "per optional<T>" static singleton needs to live in a .cpp file,
+    // The "per std::optional<T>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     static auto type = OptionalType::get(inner_type);
     return type;
@@ -2065,7 +2065,7 @@ struct getTypePtr_<at::OptionalIntArrayRef> final {
 template <bool fake>
 struct getMaybeFakeTypePtr_<at::OptionalSymIntArrayRef, fake> final {
   static const auto& call() {
-    // The "per optional<T>" static singleton needs to live in a .cpp file,
+    // The "per std::optional<T>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
     static auto inner_type = getMaybeFakeTypePtr_<SymIntArrayRef, fake>::call();
     static auto type = OptionalType::get(inner_type);

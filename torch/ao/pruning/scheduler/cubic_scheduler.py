@@ -3,7 +3,9 @@ import warnings
 
 from .base_scheduler import BaseScheduler
 
+
 __all__ = ["CubicSL"]
+
 
 def _clamp(x, lo, hi):
     return max(lo, min(hi, x))
@@ -36,16 +38,18 @@ class CubicSL(BaseScheduler):
         verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
     """
-    def __init__(self,
-                 sparsifier,
-                 init_sl=0.0,
-                 init_t=0,
-                 delta_t=10,
-                 total_t=100,
-                 initially_zero=False,
-                 last_epoch=-1,
-                 verbose=False
-                 ):
+
+    def __init__(
+        self,
+        sparsifier,
+        init_sl=0.0,
+        init_t=0,
+        delta_t=10,
+        total_t=100,
+        initially_zero=False,
+        last_epoch=-1,
+        verbose=False,
+    ):
         self.sparsifier = sparsifier
 
         self.init_sl = self._make_sure_a_list(init_sl)
@@ -59,7 +63,7 @@ class CubicSL(BaseScheduler):
 
     @staticmethod
     def sparsity_compute_fn(s_0, s_f, t, t_0, dt, n, initially_zero=False):
-        r""""Computes the current level of sparsity.
+        r""" "Computes the current level of sparsity.
 
         Based on https://arxiv.org/pdf/1710.01878.pdf
 
@@ -86,7 +90,8 @@ class CubicSL(BaseScheduler):
         if not self._get_sl_called_within_step:
             warnings.warn(
                 "To get the last sparsity level computed by the scheduler, "
-                "please use `get_last_sl()`.")
+                "please use `get_last_sl()`."
+            )
         return [
             self.sparsity_compute_fn(
                 s_0=initial_sparsity,
@@ -95,14 +100,14 @@ class CubicSL(BaseScheduler):
                 t_0=initial_epoch,
                 dt=delta_epoch,
                 n=interval_epochs,
-                initially_zero=initially_zero
-            ) for initial_sparsity, final_sparsity, initial_epoch, delta_epoch, interval_epochs, initially_zero in
-            zip(
+                initially_zero=initially_zero,
+            )
+            for initial_sparsity, final_sparsity, initial_epoch, delta_epoch, interval_epochs, initially_zero in zip(
                 self.init_sl,
                 self.base_sl,
                 self.init_t,
                 self.delta_t,
                 self.total_t,
-                self.initially_zero
+                self.initially_zero,
             )
         ]

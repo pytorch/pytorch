@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 functionalize_rng_ops = False
 
 # can be useful for debugging if we are incorrectly creating meta fake tensors
-fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
+fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", "1") != "0"
 
 # Enables optional asserts in hotpath code to check for errors.  If
 # you are seeing weird accuracy problems, try turning this on.
@@ -24,7 +24,7 @@ fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
 # but it is on by default for aot_eager.
 debug_assert = False
 
-debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", False)
+debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", "0") != "0"
 
 # Today, if you are in a situation where there is "false aliasing"
 # (e.g. you have a bunch of model parameters that all alias the same underlying buffer),
@@ -177,6 +177,10 @@ unlift_effect_tokens = False
 # AOTAutograd will only use the fake tensor to determine leafness/etc
 # of tensors in question.
 fake_tensor_propagate_real_tensors = False
+
+# This controls whether we collect donated buffer. This flag must be set
+# False if a user wants to retain_graph=True for backward.
+donated_buffer = False
 
 # Controls the default graph output format used by draw_graph
 # Supported formats are defined here https://graphviz.org/docs/outputs/

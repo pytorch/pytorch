@@ -9,7 +9,6 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.nn.functional as F
-
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, same
 from torch.testing._internal.logging_utils import logs_to_string
@@ -643,6 +642,22 @@ def forward(self):
         o1_2_ref = main_model(x2, 2)
         o1_2 = opt_model(x2, 2)
         self.assertEqual(o1_2_ref, o1_2)
+
+    @torch._dynamo.config.patch(error_on_recompile=True)
+    def test_mark_unbacked_hint_consistency(self):
+        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+        x = torch.randn(1)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        @torch.compile()
+        def f(x):
+            if guard_size_oblivious(x.size(0) != 1):
+                return x + 3
+            else:
+                return x + 4
+
+        self.assertEqual(f(x), x + 3)
 
     @torch._dynamo.config.patch(error_on_recompile=True)
     def test_mark_unbacked_channels_last(self):

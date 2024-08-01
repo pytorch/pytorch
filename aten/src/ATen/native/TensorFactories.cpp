@@ -261,7 +261,7 @@ Tensor empty_names(
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory,
-    optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
@@ -1767,7 +1767,7 @@ Tensor clone(const Tensor& src, std::optional<c10::MemoryFormat> optional_memory
 Tensor full(
     IntArrayRef size,
     const Scalar& fill_value,
-    optional<DimnameList> names,
+    std::optional<DimnameList> names,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
@@ -1785,7 +1785,7 @@ Tensor full(
 
 Tensor ones(
     IntArrayRef size,
-    optional<DimnameList> names,
+    std::optional<DimnameList> names,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
@@ -1798,7 +1798,7 @@ Tensor ones(
 
 Tensor zeros(
     IntArrayRef size,
-    optional<DimnameList> names,
+    std::optional<DimnameList> names,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
@@ -1808,7 +1808,7 @@ Tensor zeros(
 
 Tensor randn(
     IntArrayRef size,
-    optional<DimnameList> names,
+    std::optional<DimnameList> names,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
@@ -1819,7 +1819,7 @@ Tensor randn(
 Tensor randn(
     IntArrayRef size,
     std::optional<Generator> generator,
-    optional<DimnameList> names,
+    std::optional<DimnameList> names,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
@@ -1833,7 +1833,7 @@ Tensor randn(
 
 Tensor rand(
     IntArrayRef size,
-    optional<DimnameList> names,
+    std::optional<DimnameList> names,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
@@ -1844,7 +1844,7 @@ Tensor rand(
 Tensor rand(
     IntArrayRef size,
     std::optional<Generator> generator,
-    optional<DimnameList> names,
+    std::optional<DimnameList> names,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,

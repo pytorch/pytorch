@@ -51,6 +51,7 @@ from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 
 from .variables import (
     BuiltinVariable,
+    FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     NestedUserFunctionVariable,
     SkipFunctionVariable,
@@ -273,6 +274,9 @@ manual_torch_name_rule_map = {
     "torch._functorch.eager_transforms.safe_unflatten": UserFunctionVariable,
     # functorch/hessian
     "torch._functorch.eager_transforms.hessian": FunctorchHigherOrderVariable,
+    # functional_call
+    "torch._functorch.functional_call.functional_call": FunctionalCallVariable,
+    "torch.nn.utils.stateless._groupby_tensor": TorchInGraphFunctionVariable,
     # functorch/deprecated
     "torch._functorch.deprecated.jvp": UserFunctionVariable,
     "torch._functorch.deprecated.hessian": UserFunctionVariable,
@@ -281,7 +285,7 @@ manual_torch_name_rule_map = {
     "torch._functorch.deprecated.grad": UserFunctionVariable,
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
-    #
+    # everything else
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
@@ -2260,9 +2264,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms.functionalize",
         "torch._functorch.eager_transforms.lazy_dynamo_disable",
         "torch._functorch.eager_transforms.noop",
-        "torch._functorch.functional_call.construct_stacked_leaf",
-        "torch._functorch.functional_call.functional_call",
-        "torch._functorch.functional_call.stack_module_state",
         "torch._functorch.pyfunctorch.coerce_cinterpreter",
         "torch._functorch.pyfunctorch.dispatch_functorch",
         "torch._functorch.pyfunctorch.nested",
@@ -2841,7 +2842,7 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 
 @functools.lru_cache(None)
 def get_torch_obj_rule_map():
-    d: Dict[Any, VariableTracker] = dict()
+    d: Dict[Any, VariableTracker] = {}
     for m in torch_name_rule_map:
         for k, v in m.items():  # type: ignore[attr-defined]
             if ".py#" not in k:
@@ -2998,7 +2999,7 @@ def _builtin_function_ids() -> Dict[int, str]:
 
 @FunctionIdSet
 def _numpy_function_ids() -> Dict[int, str]:
-    rv = dict()
+    rv = {}
     for mod in NP_SUPPORTED_MODULES:
         rv.update(
             {
@@ -3233,6 +3234,7 @@ MOD_INLINELIST = {
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
     "torch._higher_order_ops.associative_scan",
+    "torch._functorch.functional_call",
 }
 
 
@@ -3263,6 +3265,7 @@ def get_mod_inlinelist():
 # skip some standard python builtin libs
 SKIP_DIRS = [
     "<frozen importlib",
+    "<frozen abc",
     "<__array_function__ internals>",
     _config_module.__file__,
     "triton/backends",
@@ -3428,7 +3431,7 @@ def check_verbose(obj, is_inlined_call=False):
     rule = torch._dynamo.trace_rules.lookup_inner(
         fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons
     )
-    if rule in [UserFunctionVariable, FunctorchHigherOrderVariable]:
+    if issubclass(rule, UserFunctionVariable):
         return SkipResult(
             False,
             f"inlined according trace_rules.lookup {reasons.pop()}",

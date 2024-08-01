@@ -36,6 +36,8 @@ struct TORCH_API KinetoEvent {
   const c10::ArrayRef<std::string> dtypes() const;
   bool hasConcreteInputs() const;
   const c10::ArrayRef<c10::IValue> concreteInputs() const;
+  bool hasKwinputs() const;
+  const std::unordered_map<std::string, c10::IValue> kwinputs() const;
   uint64_t flops() const;
   int64_t sequenceNr() const;
   bool hasStack() const;
@@ -73,6 +75,7 @@ struct TORCH_API KinetoEvent {
   std::vector<std::vector<int64_t>> shapes_;
   std::vector<std::string> dtypes_;
   std::vector<c10::IValue> concrete_inputs_;
+  std::unordered_map<std::string, c10::IValue> kwinputs_;
 };
 
 // Consolidating events returned directly from Kineto
