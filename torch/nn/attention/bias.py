@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from torch.backends.cuda import (
     can_use_efficient_attention,
     can_use_flash_attention,
+    is_flash_attention_available,
     SDPAParams,
 )
 from torch.nn.attention import _raise_kernel_warnings
@@ -23,6 +24,7 @@ from torch.nn.attention._utils import (
 __all__ = ["causal_upper_left", "causal_lower_right", "CausalVariant", "CausalBias"]
 
 
+torch._dynamo.allow_in_graph(is_flash_attention_available)
 torch._dynamo.allow_in_graph(can_use_flash_attention)
 torch._dynamo.allow_in_graph(can_use_efficient_attention)
 torch._dynamo.allow_in_graph(SDPAParams)
