@@ -4,7 +4,6 @@
 
 """
 import functools
-
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 import pytest
@@ -33,7 +32,7 @@ if TEST_WITH_TORCHDYNAMO:
         flipud,
         histogram2d,
         ones,
-        tri,  # mask_indices,
+        tri,
         tril_indices,
         tril_indices_from,
         triu_indices,
@@ -44,7 +43,7 @@ if TEST_WITH_TORCHDYNAMO:
     from numpy.testing import (
         assert_allclose,
         assert_array_almost_equal,
-        assert_array_equal,  # assert_array_max_ulp,
+        assert_array_equal,
         assert_equal,
     )
 else:
@@ -58,7 +57,7 @@ else:
         flipud,
         histogram2d,
         ones,
-        tri,  # mask_indices,
+        tri,
         tril_indices,
         tril_indices_from,
         triu_indices,
@@ -69,7 +68,7 @@ else:
     from torch._numpy.testing import (
         assert_allclose,
         assert_array_almost_equal,
-        assert_array_equal,  # assert_array_max_ulp,
+        assert_array_equal,
         assert_equal,
     )
 

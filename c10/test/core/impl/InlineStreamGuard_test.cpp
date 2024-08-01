@@ -116,7 +116,7 @@ TEST(InlineOptionalStreamGuard, Constructor) {
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
   {
-    OptionalTestGuard g(make_optional(stream(1, 2)));
+    OptionalTestGuard g(std::make_optional(stream(1, 2)));
     ASSERT_EQ(TestGuardImpl::getDeviceIndex(), 1);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 2);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);

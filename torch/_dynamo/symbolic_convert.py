@@ -14,13 +14,12 @@ import logging
 import operator
 import re
 import sys
-import textwrap
 import threading
 import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -111,6 +110,7 @@ from .variables.user_defined import (
     UserDefinedObjectVariable,
 )
 
+
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
@@ -135,6 +135,7 @@ class SpeculationEntry:
     filename: str
     lineno: int
     instruction_pointer: int
+    inst: Instruction  # for debugging only
     failed: bool = False
     reason: Optional[GraphCompileReason] = None
 
@@ -170,27 +171,48 @@ class SpeculationLog:
         self.entries.clear()
         self.index = 0
 
-    def next(self, filename: str, lineno: int, instruction_pointer) -> SpeculationEntry:
+    def next(
+        self, filename: str, lineno: int, instruction_pointer, inst
+    ) -> SpeculationEntry:
         """
         Lookup or create a SpeculationEntry() that is shared across
         RestartAnalysis calls.  Args are used only for debug checks.
         """
         if len(self.entries) == self.index:
-            self.entries.append(SpeculationEntry(filename, lineno, instruction_pointer))
+            self.entries.append(
+                SpeculationEntry(filename, lineno, instruction_pointer, inst)
+            )
         entry = self.entries[self.index]
-        self.index += 1
+        prev_entry_msg = ""
+        if self.index != 0:
+            prev_entry = self.entries[self.index - 1]
+            prev_entry_msg = (
+                f"Previous instruction: {prev_entry.filename}:{prev_entry.lineno}"
+                f"({prev_entry.inst.opname} @ {prev_entry.instruction_pointer})\n"
+            )
         assert (
             entry.instruction_pointer == instruction_pointer
             and entry.filename == filename
             and entry.lineno == lineno
-        ), textwrap.dedent(
-            f"""
-            SpeculationLog diverged at {self.index} of {len(self.entries)}:
-            - Run1: {entry.filename}:{entry.lineno} (ip={entry.instruction_pointer})
-            - Run2: {filename}:{lineno} (ip={instruction_pointer})
-            Please submit a bug report.
-            """
-        )
+        ), f"""
+SpeculationLog diverged at index {self.index} (log had {len(self.entries)} entries):
+- Expected: {entry.filename}:{entry.lineno} ({entry.inst.opname} at ip={entry.instruction_pointer})
+- Actual: {filename}:{lineno} ({inst.opname} at ip={instruction_pointer})
+{prev_entry_msg}
+There are two usual reasons why this may have occured:
+- When Dynamo analysis restarted, the second run took a different path than
+  the first.  If this occurred, the previous instruction is the critical instruction that
+  behaved differently.
+- Speculation entries are only added under certain conditions (as seen in
+  step()), e.g., there must exist operators in the graph; those conditions may
+  have changed on restart.
+
+If this divergence was intentional, clear the speculation log before restarting (do NOT
+do this for graph breaks, you will infinite loop).
+
+Otherwise, please submit a bug report, ideally including the contents of TORCH_LOGS=+dynamo
+"""
+        self.index += 1
         return entry
 
 
@@ -219,14 +241,20 @@ class BlockStackEntry:
     inst: Instruction
     target: Instruction
     stack_index: Optional[int] = None
-    with_context: Optional[ContextWrappingVariable] = None
+    with_context: Optional[
+        Union[ContextWrappingVariable, GenericContextWrappingVariable]
+    ] = None
 
     def can_restore(self):
         return self.with_context is not None
 
     def resume_fn(self):
         assert self.stack_index is not None
-        if self.with_context and self.with_context.target_values:
+        if (
+            self.with_context
+            and hasattr(self.with_context, "target_values")
+            and self.with_context.target_values
+        ):
             return ReenterWith(self.stack_index, tuple(self.with_context.target_values))
         else:
             return ReenterWith(self.stack_index)
@@ -599,6 +627,7 @@ def break_graph_if_unsupported(*, push):
             # Reconstruct the context variable CLASS in the block stack
             for b in self.block_stack:
                 assert b.with_context is not None
+                assert isinstance(b.with_context, ContextWrappingVariable)
                 b.with_context.reconstruct_type(cg)
                 cg.extend_output(b.resume_fn().try_except(cg.code_options, cleanup))
             self.output.add_output_instructions(cg.get_instructions())
@@ -803,6 +832,9 @@ class InstructionTranslatorBase(
         TracingContext.set_current_loc(
             self.f_code.co_filename, lineno, self.f_code.co_name
         )
+        from torch._logging.structured import dump_file
+
+        dump_file(self.f_code.co_filename)
         if trace_source_log.isEnabledFor(logging.DEBUG):
             trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
 
@@ -1577,11 +1609,28 @@ class InstructionTranslatorBase(
                 # aten.random.from, again causing syntax errors. Since this
                 # usecase is uncommon, graph break.
                 unimplemented("random_ op is called with from keyword")
+            elif (
+                fn.name == "uniform_"
+                and isinstance(argsvars, TupleVariable)
+                and len(argsvars.items) == 0
+                and isinstance(kwargsvars, ConstDictVariable)
+                and ConstantVariable.create("from") in kwargsvars
+            ):
+                # `from`` is python keyword. Adding uniform_ with `from` in the
+                # Fx graph causes syntax error. Even if we convert the kwargs to
+                # args, aot_autograd/inductor while lowering generates
+                # aten.uniform.from, again causing syntax errors. Since this
+                # usecase is uncommon, graph break.
+                unimplemented("uniform_ op is called with from keyword")
 
         if not isinstance(
             argsvars, BaseListVariable
         ) and argsvars.has_force_unpack_var_sequence(self):
             argsvars = TupleVariable(argsvars.force_unpack_var_sequence(self))
+
+        # Unpack for cases like fn(**obj) where obj is a map
+        if isinstance(kwargsvars, UserDefinedObjectVariable):
+            kwargsvars = BuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
 
         if not isinstance(argsvars, BaseListVariable) or not isinstance(
             kwargsvars, ConstDictVariable
@@ -1746,7 +1795,7 @@ class InstructionTranslatorBase(
         items = []
         for seq in seqs:
             try:
-                items.extend(seq.unpack_var_sequence(self))
+                items.extend(seq.force_unpack_var_sequence(self))
             except NotImplementedError:
                 unimplemented(f"BUILD_LIST_UNPACK {seq}")
         self.push(cls(items, mutable_local=MutableLocal()))
@@ -1784,7 +1833,7 @@ class InstructionTranslatorBase(
         assert isinstance(keys, TupleVariable)
         assert keys.is_python_constant()
 
-        keys = keys.unpack_var_sequence(self)
+        keys = keys.force_unpack_var_sequence(self)
         assert len(keys) == len(values)
 
         self.push(
@@ -1874,8 +1923,8 @@ class InstructionTranslatorBase(
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             val = [wrap_fx_proxy(self, proxy[i]) for i in range(inst.argval)]
-        elif seq.has_unpack_var_sequence(self):
-            val = seq.unpack_var_sequence(self)
+        elif seq.has_force_unpack_var_sequence(self):
+            val = seq.force_unpack_var_sequence(self)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
         if len(val) != inst.argval:
@@ -1888,8 +1937,8 @@ class InstructionTranslatorBase(
         prefix = inst.argval & 0xFF  # low byte
         suffix = inst.argval >> 8  # high byte
         seq = self.pop()
-        if seq.has_unpack_var_sequence(self):
-            vals = list(seq.unpack_var_sequence(self))
+        if seq.has_force_unpack_var_sequence(self):
+            vals = list(seq.force_unpack_var_sequence(self))
             assert len(vals) >= prefix + suffix
             vals_prefix = vals[:prefix]
             vals_list = vals[prefix : len(vals) - suffix]
@@ -2180,8 +2229,12 @@ class InstructionTranslatorBase(
             args = args + contents[2:]
             kwargs = {}
 
-        self.call_function(fn, args, kwargs)
-        self.kw_names = None
+        try:
+            # if call_function fails, need to set kw_names to None, otherwise
+            # a subsequent call may have self.kw_names set to an old value
+            self.call_function(fn, args, kwargs)
+        finally:
+            self.kw_names = None
 
     @break_graph_if_unsupported(push=1)
     def CALL(self, inst):
@@ -2209,11 +2262,18 @@ class InstructionTranslatorBase(
 
     def setup_or_before_with(self, inst):
         ctx = self.pop()
-        if not isinstance(ctx, ContextWrappingVariable):
+        if not isinstance(
+            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+        ):
             unimplemented(f"{inst.opname} {ctx}")
 
         if isinstance(ctx, GenericContextWrappingVariable):
             self.generic_context_manager_depth += 1
+
+        # Need this redundant check for mypy
+        assert isinstance(
+            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+        )
 
         exit = WithExitFunctionVariable(
             ctx,
@@ -2302,7 +2362,7 @@ class InstructionTranslatorBase(
             self.UNARY_POSITIVE(inst)
         elif inst.argval == 6:
             # INTRINSIC_LIST_TO_TUPLE
-            self.push(TupleVariable(self.pop().unpack_var_sequence(self)))
+            self.push(TupleVariable(self.pop().force_unpack_var_sequence(self)))
         else:
             unimplemented(f"missing CALL_INTRINSIC_1 operand {inst.argval}")
 
@@ -2431,8 +2491,13 @@ class InstructionTranslatorBase(
             self.strict_checks_fn = prior
 
     def speculate(self) -> SpeculationEntry:
+        assert self.instruction_pointer is not None
+        assert self.instruction_pointer > 0
         return self.speculation_log.next(
-            self.f_code.co_filename, self.lineno, self.instruction_pointer
+            self.f_code.co_filename,
+            self.lineno,
+            self.instruction_pointer - 1,
+            self.instructions[self.instruction_pointer - 1],
         )
 
     def __init__(
@@ -3193,9 +3258,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 unimplemented("Storing handles in globals - NYI")
             name = inst.argval
             fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
-            fglobals_vt = self.output.side_effects.track_object_existing(
-                fglobals_value, fglobals_vt
-            )
             self.output.side_effects.store_attr(fglobals_vt, name, value)
 
 

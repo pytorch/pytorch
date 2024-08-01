@@ -1036,7 +1036,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init(
           [](const std::vector<TypePtr>& a) { return UnionType::create(a); }));
   py::class_<ListType, Type, ListTypePtr>(m, "ListType")
-      .def(py::init([](TypePtr a) { return ListType::create(a); }))
+      .def(py::init([](const TypePtr& a) { return ListType::create(a); }))
       .def_static("ofInts", &ListType::ofInts)
       .def_static("ofTensors", &ListType::ofTensors)
       .def_static("ofFloats", &ListType::ofFloats)
