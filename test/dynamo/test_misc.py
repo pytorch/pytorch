@@ -10575,6 +10575,44 @@ fn
             self.assertTrue(args1)
             self.assertTrue(kwargs1)
 
+    def test_inspect_signature_bind_non_user_function(self):
+        import inspect
+
+        class Foo:
+            def __init__(self, a, b, *ar, c=10, d=11, **kw):
+                pass
+
+        def fn(x):
+            sig = inspect.signature(Foo)
+            bound = sig.bind(1, 2, 3, d=12, e=15)
+            return bound, x + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        bound0, _ = fn(torch.ones(3, 3))
+        bound1, _ = opt_fn(torch.ones(3, 3))
+
+        self.assertEqual(bound0, bound1)
+
+        import traceback
+
+        # choose a function that is skipped but has defaults
+        self.assertTrue(hasattr(traceback.print_exc, "__kwdefaults__"))
+        self.assertIs(
+            torch._dynamo.trace_rules.lookup(traceback.print_exc),
+            torch._dynamo.variables.SkipFunctionVariable,
+        )
+
+        def gn(x):
+            sig = inspect.signature(traceback.print_exc)
+            bound = sig.bind()
+            return bound, x + 1
+
+        opt_gn = torch.compile(gn, backend="eager", fullgraph=True)
+        bound0, _ = gn(torch.ones(3, 3))
+        bound1, _ = opt_gn(torch.ones(3, 3))
+
+        self.assertEqual(bound0, bound1)
+
     def test_grad_none(self):
         def fn(x, y):
             x.grad = torch.abs(y)

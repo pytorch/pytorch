@@ -353,7 +353,12 @@ class InspectSignatureVariable(VariableTracker):
     def __init__(self, inspected: VariableTracker, **kwargs):
         super().__init__(**kwargs)
         self.inspected = inspected
-        self.signature = inspect.signature(inspected.get_function())
+
+        if isinstance(self.inspected, UserFunctionVariable):
+            self.fn = self.inspected.get_function()
+        else:
+            self.fn = self.inspected.as_python_constant()
+        self.signature = inspect.signature(self.fn)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if name == "parameters":
@@ -374,22 +379,25 @@ class InspectSignatureVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "bind":
-            obj = inspect.signature(self.inspected.get_function()).bind(*args, **kwargs)
-            fn = self.inspected.get_function()
+            if not hasattr(self.fn, "__kwdefaults__"):
+                unimplemented(
+                    f"inspect.signature.bind with {self.fn} without __kwdefaults__"
+                )
+            obj = self.signature.bind(*args, **kwargs)
 
             # wrap function defaults in VTs
             defaults = {}
-            if fn.__kwdefaults__:
+            if self.fn.__kwdefaults__:
                 wrap = functools.partial(wrap_bound_arg, tx=tx)
                 kwdefaults_sources = {
                     k: None
                     if self.source is None
                     else DefaultsSource(self.source, k, is_kw=True)
-                    for k in fn.__kwdefaults__
+                    for k in self.fn.__kwdefaults__
                 }
                 defaults = {
                     k: wrap(val=v, source=kwdefaults_sources[k])
-                    for k, v in fn.__kwdefaults__.items()
+                    for k, v in self.fn.__kwdefaults__.items()
                 }
 
             return InspectBoundArgumentsVariable(
