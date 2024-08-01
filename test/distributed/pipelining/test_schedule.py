@@ -13,13 +13,16 @@ from torch.distributed.pipelining.schedules import (
     _Action,
     _add_send_recv,
     _add_unshard_reshard,
+    _dump_chrometrace,
     _format_pipeline_order,
+    _simulate_comms_compute,
     _validate_pipeline_order,
     B,
     F,
     RECV_F,
     RESHARD,
     SEND_B,
+    SEND_B_RECV_F,
     UNSHARD,
     W,
 )
@@ -183,6 +186,8 @@ class TestScheduleLowering(TestCase):
             ("3RESHARD", _Action(3, RESHARD, None)),
             ("2SEND_B2", _Action(2, SEND_B, 2)),
             ("1RECV_F1", _Action(1, RECV_F, 1)),
+            ("1SEND_B2_0RECV_F4", _Action(1, SEND_B_RECV_F, 2, 0, 4)),
+            ("17SEND_B0_1RECV_F14", _Action(17, SEND_B_RECV_F, 0, 1, 14)),
         ],
     )
     def test_action_parse(self, action_str_and_ref):
@@ -241,8 +246,8 @@ class TestScheduleLowering(TestCase):
                     ],
                     1: [
                         "1RECV_F0",
-                        "1RECV_F1",
                         "1F0",
+                        "1RECV_F1",
                         "1B0",
                         "1SEND_B0",
                         "1F1",
@@ -267,7 +272,10 @@ class TestScheduleLowering(TestCase):
         }
 
         comms_sch = _add_send_recv(
-            compute_sch, test_info["stage_to_rank"], test_info["num_stages"]
+            compute_sch,
+            test_info["stage_to_rank"],
+            test_info["num_stages"],
+            enable_batching=True,
         )
         for rank in expected_comms_sch:
             for i, (expected, actual) in enumerate(
@@ -283,6 +291,52 @@ class TestScheduleLowering(TestCase):
                     ),
                 )
             self.assertEqual(len(comms_sch[rank]), len(expected_comms_sch[rank]))
+
+    def test_csv(self):
+        def _dump_csv(pipeline_order_with_comms, filename: str):
+            """Dump a CSV representation of the compute + comms schedule into a file with the provided filename."""
+            with open(filename, "w", newline="") as csvfile:
+                writer = csv.writer(csvfile)
+                for rank in pipeline_order_with_comms:
+                    writer.writerow(pipeline_order_with_comms[rank])
+
+        import csv
+
+        compute_sch = {}
+        with open("lowered_compute.csv", newline="") as csvfile:
+            for rank, row in enumerate(csv.reader(csvfile)):
+                compute_sch[rank] = [_Action.from_str(s) for s in row]
+        # print(_format_pipeline_order(compute_sch))
+        num_model_chunks = 3
+        pipeline_parallel_size = 8
+        num_stages = num_model_chunks * pipeline_parallel_size
+        comms_sch = _add_send_recv(
+            compute_sch,
+            stage_to_rank=lambda chunk_index: chunk_index % pipeline_parallel_size,
+            num_stages=num_stages,
+            enable_batching=True,
+        )
+
+        simulated_schedule = _simulate_comms_compute(
+            comms_sch,
+            stage_to_rank=lambda s: s % pipeline_parallel_size,
+            num_stages=num_stages,
+        )
+        _dump_chrometrace(simulated_schedule, "lowered_comms.json")
+        # _dump_csv(comms_sch, "lowered_comms.csv")
+
+        sch_ref = {}
+        with open("lowered_comms.csv", newline="") as ref:
+            for rank, row in enumerate(csv.reader(ref)):
+                sch_ref[rank] = [_Action.from_str(s) for s in row]
+
+        for rank in sch_ref:
+            for timestep, (a, b) in enumerate(zip(comms_sch[rank], sch_ref[rank])):
+                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
+
+        num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
+        # print(_format_pipeline_order(simulated_schedule))
+        self.assertEqual(num_steps, 336)
 
 
 instantiate_parametrized_tests(TestScheduleLowering)
