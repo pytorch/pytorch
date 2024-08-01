@@ -564,6 +564,57 @@ class PipelineScheduleSingle(_PipelineSchedule):
             return None
 
 
+class _ScheduleForwardOnly(PipelineScheduleSingle):
+    """
+    The forward-only schedule.
+    Will go through all the microbatches and perform only the forward pass
+    """
+
+    def _step_microbatches(
+        self,
+        arg_mbs: Optional[List] = None,
+        kwarg_mbs: Optional[List] = None,
+        target_mbs: Optional[List] = None,
+        losses: Optional[List] = None,
+    ):
+        """
+        Run one iteration of the pipeline schedule
+        """
+        if target_mbs is not None or losses is not None:
+            raise RuntimeError(
+                "Forward-only schedule does not support loss computation"
+            )
+
+        arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
+
+        # Delay send waits
+        fwd_sends_to_wait: List[dist.Work] = []
+
+        # Run microbatches
+        for i in range(self._n_microbatches):
+            with record_function(f"Forward {i}"):
+                ops = self._stage.get_fwd_recv_ops(i)
+                works = _sorted_batch_p2p(ops, desc="fwd_recv")
+                for work in works.values():
+                    work.wait()
+
+                self._stage.forward_one_chunk(i, arg_mbs[i], kwarg_mbs[i])  # type: ignore[index]
+
+                ops = self._stage.get_fwd_send_ops(i)
+                works = _sorted_batch_p2p(ops, desc="fwd_send")
+                fwd_sends_to_wait.extend(works.values())
+
+            logger.debug(
+                f"[{self._stage.stage_index}] Forwarded microbatch {i}"  # noqa: G004
+            )
+
+        # Wait for all forward sends to finish
+        # This should not have performance impact because by the time the first
+        # backward arrives all the forward sends should have been finished.
+        for work in fwd_sends_to_wait:
+            work.wait()
+
+
 class ScheduleGPipe(PipelineScheduleSingle):
     """
     The GPipe schedule.
