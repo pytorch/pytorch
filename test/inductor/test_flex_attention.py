@@ -17,9 +17,12 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     _identity,
+    and_masks,
     BlockMask,
     create_block_mask,
     flex_attention,
+    noop_mask,
+    or_masks,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -199,6 +202,7 @@ class TestFlexAttention(InductorTestCase):
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
+        # TODO: Make this check stricter after updating eager SDPA masked_softmax semantics
         if torch.isnan(compiled_error).any() and not torch.isnan(ref_error).any():
             self.assertTrue(False, "Output/Grad with NaN")
         if compiled_error > ref_error * fudge_factor:
@@ -1011,6 +1015,35 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertEqual(block_mask_a.q_num_blocks, block_mask_b.q_num_blocks)
 
     @supported_platform
+    def test_mask_mod_combiners(self):
+        def causal_mask(b, h, q, kv):
+            return q >= kv
+
+        def neg_causal_mask(b, h, q, kv):
+            return q < kv
+
+        def sliding_window(b, h, q, kv):
+            return (q - kv) <= 512
+
+        block_mask = create_block_mask(
+            and_masks(causal_mask, sliding_window), 1, 1, S, S
+        )
+        self.assertExpectedInline(block_mask.kv_num_blocks.sum().item(), """28""")
+        attention = functools.partial(flex_attention, block_mask=block_mask)
+        self.run_test_with_call(attention)
+
+        block_mask = create_block_mask(
+            and_masks(causal_mask, neg_causal_mask), 1, 1, S, S
+        )
+        self.assertEqual(block_mask.kv_num_blocks.sum(), 0)
+
+        block_mask1 = create_block_mask(
+            or_masks(causal_mask, neg_causal_mask), 1, 1, S, S
+        )
+        block_mask2 = create_block_mask(noop_mask, 1, 1, S, S)
+        self.assertEqual(block_mask1.sparsity(), block_mask2.sparsity())
+
+    @supported_platform
     def test_epilogue_fused(self):
         @torch.compile
         def f(q, k, v):
@@ -1352,6 +1385,35 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out.sum().backward()
 
     @supported_platform
+    def test_fully_masked_out_rows(self):
+        # Ensure fully masked out rows won't cause NaNs.
+        query = torch.randn(
+            (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        key = torch.randn(
+            (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        value = torch.randn(
+            (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        do = torch.randn((B, H, S, D), dtype=torch.float32, device="cuda")
+
+        M = S // 2
+
+        def mask_mod(b, h, q, kv):
+            return q < M
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        out = torch.compile(flex_attention, dynamic=False)(
+            query, key, value, block_mask=block_mask
+        )
+        # TODO: Switch to self.run_test_with_call after updating eager SDPA masked_softmax semantics
+        self.assertEqual(out[:, :, M:, :].sum(), 0)
+
+        out.backward(do)
+        self.assertEqual(query.grad[:, :, M:, :].sum(), 0)
+
+    @supported_platform
     def test_comparison_vs_sdpa(self):
         def causal(score, b, h, q_idx, kv_idx):
             return torch.where(q_idx >= kv_idx, score, -float("inf"))
@@ -1590,7 +1652,7 @@ class GraphModule(torch.nn.Module):
         getitem_4: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
-        return [getitem_4, getitem_5, getitem_6]
+        return (getitem_4, getitem_5, getitem_6)
 
     class <lambda>(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]"):

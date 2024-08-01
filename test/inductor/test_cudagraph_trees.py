@@ -614,6 +614,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
         @torch._inductor.config.patch("fx_graph_cache", True)
+        @torch._inductor.config.patch("fx_graph_remote_cache", False)
         def test_cache_hit_forward_miss_backward(self):
             # Test that we don't cache cudagraphs, skipping cudagraphs on backward on a cache miss
             @torch.compile(mode="reduce-overhead")
@@ -2232,6 +2233,78 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 )
 
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
+        def test_skip_if_dynamic_shape_limit_reached1(self):
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(3, 3, device="cuda")
+
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    return self.linear(x)
+
+            def iter(batch_size: int, mod: torch.nn.Module):
+                x = torch.rand((batch_size, 3), device="cuda")
+                for _ in range(3):
+                    mod(x)
+
+            mod = torch.compile(Mod(), mode="reduce-overhead")
+
+            with capture_stderr() as captured_output:
+                for batch_size in range(10, 40, 10):
+                    iter(batch_size, mod)
+
+            FileCheck().check(
+                "CUDAGraph supports dynamic shapes by recording a new graph for each "
+                "distinct input size. Recording too many CUDAGraphs may lead to "
+                "extra overhead. We have observed 2 distinct sizes. "
+                "Please consider the following options for better performance: "
+                "a) padding inputs to a few fixed number of shapes; or b) set "
+                "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
+                "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
+                "to silence this warning."
+            ).run("\n".join(captured_output))
+
+        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
+        def test_skip_if_dynamic_shape_limit_reached2(self):
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.attn = torch.nn.MultiheadAttention(
+                        embed_dim=3, num_heads=3, device="cuda"
+                    )
+
+                def forward(
+                    self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+                ) -> torch.Tensor:
+                    return self.attn(q, k, v)
+
+            mod = torch.compile(Mod(), mode="reduce-overhead")
+
+            def iter(batch_size: int, length: int):
+                q = torch.rand((batch_size, length, 3), device="cuda")
+                k = torch.rand((batch_size, length, 3), device="cuda")
+                v = torch.rand((batch_size, length, 3), device="cuda")
+                for _ in range(3):
+                    mod(q, k, v)
+
+            with capture_stderr() as captured_output:
+                for batch_size in range(10, 40, 10):
+                    for length in range(10, 30, 10):
+                        iter(batch_size, length)
+
+            print(captured_output)
+            FileCheck().check(
+                "CUDAGraph supports dynamic shapes by recording a new graph for each "
+                "distinct input size. Recording too many CUDAGraphs may lead to "
+                "extra overhead. We have observed 2 distinct sizes. "
+                "Please consider the following options for better performance: "
+                "a) padding inputs to a few fixed number of shapes; or b) set "
+                "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
+                "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
+                "to silence this warning."
+            ).run(captured_output[0])
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
 

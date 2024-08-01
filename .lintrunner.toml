@@ -15,6 +15,7 @@ exclude_patterns = [
     'functorch/examples/**',
     'functorch/notebooks/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
+    'torch/_inductor/autoheuristic/artifacts/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
     # Tests from the NumPy test suite
@@ -1010,6 +1011,7 @@ exclude_patterns = [
     'third_party/**/*.py',
     'third_party/**/*.pyi',
     'torch/_inductor/fx_passes/serialized_patterns/**',
+    'torch/_inductor/autoheuristic/artifacts/**',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
     'test/_nvfuser/__init__.py',
@@ -1521,6 +1523,7 @@ exclude_patterns = [
     'functorch/docs/**',
     'functorch/notebooks/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
+    'torch/_inductor/autoheuristic/artifacts/**',
     'scripts/**',
     'third_party/**',
     'fb/**',
