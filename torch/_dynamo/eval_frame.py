@@ -158,7 +158,7 @@ class OptimizedModule(torch.nn.Module):
         "named_children_walk",
     }
 
-    def __init__(self, mod: torch.nn.Module, dynamo_ctx):
+    def __init__(self, mod: torch.nn.Module, dynamo_ctx) -> None:
         super().__init__()
         # Installs the params/buffer
         self._orig_mod = mod
@@ -218,7 +218,7 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
-    def __setattr__(self, name, val):
+    def __setattr__(self, name, val) -> None:
         # Allow patching over class attributes
         if hasattr(type(self), name):
             return super().__setattr__(name, val)
@@ -304,7 +304,7 @@ class _TorchDynamoContext:
         export=False,
         dynamic=None,
         compiler_config=None,
-    ):
+    ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
         self.callback: DynamoCallback = callback
@@ -539,7 +539,7 @@ class OptimizeContext(_TorchDynamoContext):
         rebuild_ctx: Optional[
             Callable[[], Union[OptimizeContext, _NullDecorator]]
         ] = None,
-    ):
+    ) -> None:
         def on_enter():
             install_generation_tagging_init()
 
@@ -879,7 +879,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         example_fake_inputs: List[torch.Tensor],
         flat_args_dynamic_dims: List[Set[int]],
         fake_mode: Optional[fake_tensor.FakeTensorMode] = None,
-    ):
+    ) -> None:
         super().__init__(m)
 
         assert len(flat_args_dynamic_dims) == len(flat_args)
