@@ -1,15 +1,16 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 import collections
 import functools
 from typing import Optional
 
 from .base import VariableTracker
+from .tensor import SymNodeVariable
 
 
 class LazyCache:
     """Container to cache the real VariableTracker"""
 
-    def __init__(self, value, source):
+    def __init__(self, value, source) -> None:
         if not isinstance(value, LazySymNodeFormatString):
             assert source
         self.value = value
@@ -51,7 +52,7 @@ class LazyVariableTracker(VariableTracker):
     def create(value, source, **options):
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
 
-    def __init__(self, _cache, **kwargs):
+    def __init__(self, _cache, **kwargs) -> None:
         assert isinstance(_cache, LazyCache)
         super().__init__(**kwargs)
         self._cache = _cache
@@ -60,6 +61,7 @@ class LazyVariableTracker(VariableTracker):
         """Force construction of the real VariableTracker"""
         if self._cache.vt is None:
             self._cache.realize()
+            assert self._cache.vt is not None
         return self._cache.vt
 
     def unwrap(self):
@@ -77,7 +79,7 @@ class LazyVariableTracker(VariableTracker):
             self.realize()
         return VariableTracker.clone(self.unwrap(), **kwargs)
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.is_realized():
             return self.unwrap().__str__()
         return VariableTracker.__str__(self.unwrap())
@@ -86,7 +88,7 @@ class LazyVariableTracker(VariableTracker):
         return getattr(self.realize(), item)
 
     # most methods are auto-generated below, these are the ones we want to exclude
-    visit = VariableTracker.visit
+    visit = VariableTracker.visit  # type: ignore[assignment]
     __repr__ = VariableTracker.__repr__
 
     @classmethod
@@ -132,8 +134,8 @@ class LazyVariableTracker(VariableTracker):
 
 class LazySymNodeFormatString:
     def __init__(
-        self, sym_node_variable: VariableTracker, fmt_spec_var: VariableTracker
-    ):
+        self, sym_node_variable: SymNodeVariable, fmt_spec_var: VariableTracker
+    ) -> None:
         from .constant import ConstantVariable
 
         self.sym_node_var = sym_node_variable
@@ -141,7 +143,7 @@ class LazySymNodeFormatString:
             "{:" + fmt_spec_var.as_python_constant() + "}"
         )
 
-    def __str__(self):
+    def __str__(self) -> str:
         return str.format(
             self.fmt_var.as_python_constant(),
             str(self.sym_node_var.evaluate_expr()),
