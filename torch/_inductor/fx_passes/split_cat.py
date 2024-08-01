@@ -438,7 +438,7 @@ class TorchSplit(CallFunction):
     splits are unique getitems.
     """
 
-    def __init__(self, arg, sizes, func=torch.split):
+    def __init__(self, arg, sizes, func=torch.split) -> None:
         # using KeywordArg("dim") for `dim` checks they all match
         super().__init__(func, arg, sizes, _users=MULTIPLE, dim=KeywordArg("dim"))
 
@@ -1050,7 +1050,7 @@ class UnbindCatRemover(SplitCatSimplifier):
 
 
 class GetItem(CallFunction):
-    def __init__(self, arg, index, _users=1):
+    def __init__(self, arg, index, _users=1) -> None:
         super().__init__(operator.getitem, arg, index, _users=_users)
 
     def find_anchor_nodes(self, ctx: MatchContext, searched: Set[torch.fx.Node]):
