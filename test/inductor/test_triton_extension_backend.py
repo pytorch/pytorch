@@ -8,6 +8,7 @@ import torch
 import torch._dynamo
 import torch.utils.cpp_extension
 
+
 try:
     from extension_backends.triton.device_interface import DeviceInterface
     from extension_backends.triton.extension_codegen_backend import (
@@ -34,6 +35,7 @@ from torch._inductor.codegen.common import (
 )
 from torch._inductor.utils import get_triton_code
 from torch.testing._internal.common_utils import IS_MACOS
+
 
 try:
     try:

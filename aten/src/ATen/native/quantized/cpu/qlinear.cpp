@@ -556,9 +556,9 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl_xnnp(
   at::Tensor output = at::native::empty_affine_quantized(
       out_sizes,
       c10::CppTypeToScalarType<scalar_t>::value,
-      c10::nullopt /* layout */,
+      std::nullopt /* layout */,
       c10::kCPU,
-      c10::nullopt /* pin_memory */,
+      std::nullopt /* pin_memory */,
       output_scale,
       output_zero_point,
       input.suggest_memory_format());
@@ -989,7 +989,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   auto output_size = input.sizes().vec();
   output_size[dim - 1] = N;
 
-  std::optional<ideep::tensor> onednn_bias{c10::nullopt};
+  std::optional<ideep::tensor> onednn_bias{std::nullopt};
   bool with_bias = bias.has_value();
   at::Tensor bias_val_float;
   if (with_bias) {
@@ -1206,7 +1206,7 @@ class QLinearOnednn final {
       torch::List<std::optional<at::Scalar>> post_op_args,
       c10::string_view post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
-    static std::optional<at::Tensor> other = c10::nullopt;
+    static std::optional<at::Tensor> other = std::nullopt;
     static const c10::string_view binary_post_op = "none";
     return linear_int8_with_onednn_weight(
         act, act_scale, act_zero_point,
@@ -1237,7 +1237,7 @@ class QLinearOnednn final {
 #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
         "onednn int8 linear: act scale/zp size should be 1");
-    static std::optional<at::Tensor> other = c10::nullopt;
+    static std::optional<at::Tensor> other = std::nullopt;
     static const c10::string_view binary_post_op = "none";
     return linear_int8_with_onednn_weight(
         act, act_scale.item().toDouble(), act_zero_point.item().toLong(),

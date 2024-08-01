@@ -532,10 +532,10 @@ def run_gen_lazy_tensor(
                 for path in [
                     "ATen/core/Formatting.h",
                     "c10/core/ScalarType.h",
-                    "c10/util/Optional.h",
                     "torch/csrc/lazy/core/hash.h",
                     "torch/csrc/lazy/core/ir.h",
                     "torch/csrc/lazy/core/shape.h",
+                    "optional",
                     "vector",
                 ]
             ],

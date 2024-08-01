@@ -385,7 +385,7 @@ class _PipelineStageBase(ABC):
             else:
                 if not (grad is None and grad_recv_stage is None):
                     raise RuntimeError(
-                        f"[{self.stage_index}] for chunk {bwd_chunk_id - 1} has gradients {grad} "
+                        f"[{self.stage_index}] for chunk {bwd_chunk_id} has gradients {grad} "
                         f"and is expecting to send gradients to stage {grad_recv_stage}"
                     )
         return ops

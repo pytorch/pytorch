@@ -129,7 +129,7 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
     Tensor& bag_size, Tensor* max_indices,
     const Tensor &weight, const Tensor &indices,
     const Tensor &offsets, const int64_t mode = 0,
-    const std::optional<Tensor>& per_sample_weights = c10::nullopt,
+    const std::optional<Tensor>& per_sample_weights = std::nullopt,
     bool include_last_offset = false,
     int64_t padding_idx = -1,
     _EmbeddingBagKernelCache* fbgemm_kernel_cache = nullptr);

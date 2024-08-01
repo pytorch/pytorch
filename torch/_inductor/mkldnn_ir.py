@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
-from typing import Any, List, Optional, Set
+from typing import Any, List, Optional
 
 import sympy
 
 import torch
-
 from torch._prims_common import make_channels_last_strides_for
+from torch.utils._ordered_set import OrderedSet
 
 from .ir import (
     ExternKernelAlloc,
@@ -22,9 +22,7 @@ from .ir import (
     NoneLayout,
     TensorBox,
 )
-
 from .utils import convert_shape_to_inductor, pad_listlike
-
 from .virtualized import V
 
 
@@ -113,7 +111,7 @@ def _prepare_convolution_fusion_create(
         else:
             assert 0 < len(output_padding) <= dims
             output_padding = pad_listlike(output_padding, dims)
-        assert isinstance(groups, int)
+        assert isinstance(groups, (int, sympy.core.numbers.Integer))
         if transposed:
             # When transposed, the size of the prepacked oneDNN weight is different
             # from the PyTorch weight. We're not able to run aten conv with such
@@ -440,8 +438,8 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             self.cpp_kernel_overload_name,
         )
 
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return set()
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
 
     @classmethod
     def create(
@@ -865,8 +863,8 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
     def get_mutation_names(self):
         return [self.inputs[self.idx_for_inplace_sum].get_name()]
 
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return set()
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
 
     @classmethod
     def create(

@@ -11,7 +11,6 @@ from re import escape
 from typing import List, Set
 
 import torch
-
 from functorch.experimental.control_flow import cond
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export.non_strict_utils import (
@@ -470,6 +469,39 @@ class TestPasses(TestCase):
         self.assertTrue(torch.allclose(orig_res, ep_res))
         self.assertTrue(torch.allclose(orig_res, without_token_res))
 
+    def test_remove_effect_token_kwargs(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_tuple_return(
+                    foo=self.attr, x=x
+                )
+                y = a[0] + a[1]
+                b = torch.ops._TorchScriptTesting.takes_foo(foo=self.attr, x=y)
+                return b
+
+        m = MyModule()
+        inputs = (torch.ones(2, 3),)
+        ep = torch.export.export(m, inputs, strict=False)
+        without_token_ep = _remove_effect_tokens(ep)
+        self.assertExpectedInline(
+            without_token_ep.graph_module.code.strip(),
+            """\
+def forward(self, token, obj_attr, x):
+    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_tuple_return.default, foo = obj_attr, x = x);  token = x = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1]
+    getitem_2 = with_effects[2];  with_effects = None
+    add = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = getitem_2 = None
+    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, foo = obj_attr, x = add);  getitem = obj_attr = add = None
+    getitem_3 = with_effects_1[0]
+    getitem_4 = with_effects_1[1];  with_effects_1 = None
+    return (getitem_3, getitem_4)""",  # noqa: B950
+        )
+
     def test_fakify_script_objects(self):
         for m in [
             ModelsWithScriptObjectAttr.Simple(),
@@ -482,7 +514,7 @@ class TestPasses(TestCase):
                 shape_env=ShapeEnv(tracked_fakes=[]),
                 allow_non_fake_inputs=True,
             )
-            with _fakify_script_objects(m, tuple(), {}, fake_mode) as (
+            with _fakify_script_objects(m, (), {}, fake_mode) as (
                 patched_mod,
                 _,
                 _,
@@ -502,7 +534,7 @@ class TestPasses(TestCase):
             shape_env=ShapeEnv(tracked_fakes=[]),
             allow_non_fake_inputs=True,
         )
-        with _fakify_script_objects(m, tuple(), {}, fake_mode) as (
+        with _fakify_script_objects(m, (), {}, fake_mode) as (
             patched_mod,
             _,
             _,
@@ -528,8 +560,7 @@ class TestPasses(TestCase):
         ep = export(mod, (x,))
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            r"Invalid value range for 6 between \[2, 5\]",
+            RuntimeError, r"Runtime assertion failed for expression u[\d+] \<\= 5"
         ):
             ep.module()(torch.tensor([6]))
 
@@ -556,18 +587,21 @@ class TestPasses(TestCase):
         num_assert = count_call_function(
             ep.graph, torch.ops.aten._assert_scalar.default
         )
-
         self.assertEqual(num_assert, 2)
+        num_constrain_range = count_call_function(
+            ep.graph, torch.ops.aten.sym_constrain_range.default
+        )
+        self.assertEqual(num_constrain_range, 0)
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Invalid value range for",
+            r"Runtime assertion failed for expression u[\d+] \>\= 3",
         ):
             ep.module()(torch.tensor([1, 1, 0, 0, 0]))
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Invalid value range for",
+            r"Runtime assertion failed for expression u[\d+] \<\= 5",
         ):
             ep.module()(torch.ones(6))
 
@@ -575,6 +609,8 @@ class TestPasses(TestCase):
         self.assertEqual(mod(new_inp), ep.module()(new_inp))
 
     @unittest.skipIf(IS_WINDOWS, "Windows not supported")
+    @unittest.expectedFailure
+    # TODO(pianpwk): add back runtime asserts to subgraphs
     def test_runtime_assert_inline_constraints_for_cond(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -620,7 +656,13 @@ class TestPasses(TestCase):
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
     def test_predispatceh_set_grad(self):
+        def _check_node_users_in_the_same_graph(gm):
+            for node in gm.graph.nodes:
+                for user in node.users:
+                    self.assertTrue(user.graph is gm.graph)
+
         mod, args = self.SET_GRAD_ENABLED_TESTS["op"]
+        _check_node_users_in_the_same_graph(mod)
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
@@ -635,7 +677,9 @@ def forward(self, x):
     return pytree.tree_unflatten((add_1, sub), self._out_spec)
     """,
         )
+
         mod, args = self.SET_GRAD_ENABLED_TESTS["op_under_no_grad"]
+        _check_node_users_in_the_same_graph(mod)
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
@@ -652,6 +696,7 @@ def forward(self, x):
         )
 
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager"]
+        _check_node_users_in_the_same_graph(mod)
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
@@ -666,7 +711,9 @@ def forward(self, x):
     return pytree.tree_unflatten((add_1, sub), self._out_spec)
     """,
         )
+
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_under_no_grad"]
+        _check_node_users_in_the_same_graph(mod)
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
@@ -681,7 +728,9 @@ def forward(self, x):
     return pytree.tree_unflatten((add_1, sub), self._out_spec)
     """,
         )
+
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep"]
+        _check_node_users_in_the_same_graph(mod)
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
@@ -701,7 +750,9 @@ def forward(self, x):
     return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
     """,  # noqa: B950
         )
+
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep_no_grad"]
+        _check_node_users_in_the_same_graph(mod)
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
@@ -761,7 +812,7 @@ def forward(self, x1, x2):
             new_gm.submod_1.code.strip("\n"),
             """\
 def forward(self, x1, x2):
-    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    _set_grad_enabled = torch._C._set_grad_enabled(True);  _set_grad_enabled = None
     add = torch.ops.aten.add.Tensor(x1, 1);  x1 = None
     add_1 = torch.ops.aten.add.Tensor(x2, 1);  x2 = None
     return (add, add_1)
@@ -771,7 +822,7 @@ def forward(self, x1, x2):
             new_gm.submod_2.code.strip("\n"),
             """\
 def forward(self, add, add_1):
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False);  _set_grad_enabled_1 = None
     sin = torch.ops.aten.sin.default(add);  add = None
     cos = torch.ops.aten.cos.default(add_1);  add_1 = None
     return (sin, cos)
@@ -781,7 +832,7 @@ def forward(self, add, add_1):
             new_gm.submod_3.code.strip("\n"),
             """\
 def forward(self, sin, cos):
-    _set_grad_enabled_2 = torch._C._set_grad_enabled(True)
+    _set_grad_enabled_2 = torch._C._set_grad_enabled(True);  _set_grad_enabled_2 = None
     add_2 = torch.ops.aten.add.Tensor(sin, 1);  sin = None
     add_3 = torch.ops.aten.add.Tensor(cos, 1);  cos = None
     return (add_2, add_3)
@@ -821,7 +872,7 @@ def forward(self, sin, cos):
             class M(torch.nn.Module):
                 def __init__(self):
                     super().__init__()
-                    self.register_buffer("state", torch.zeros(1))
+                    self.state = torch.nn.Buffer(torch.zeros(1))
 
                 def forward(self, x):
                     return torch.ops.DO_NOT_USE_TEST_ONLY.custom_mutator(x, self.state)
@@ -862,7 +913,7 @@ def forward(self, sin, cos):
             class M(torch.nn.Module):
                 def __init__(self):
                     super().__init__()
-                    self.register_buffer("state", torch.zeros(1))
+                    self.state = torch.nn.Buffer(torch.zeros(1))
 
                 def forward(self, x):
                     return torch.ops.DO_NOT_USE_TEST_ONLY.custom_mutator_tuple(

@@ -1141,10 +1141,11 @@ class FSDPTest(MultiProcessTestCase):
         return run_subtests(self, *args, **kwargs)
 
     @classmethod
-    def _run(cls, rank, test_name, file_name, pipe):
+    def _run(cls, rank, test_name, file_name, pipe, **kwargs):
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
+        fake_pg = kwargs.get("fake_pg", False)
 
         print(f"dist init r={self.rank}, world={self.world_size}")
 
@@ -1153,12 +1154,21 @@ class FSDPTest(MultiProcessTestCase):
         backend = "nccl" if torch.cuda.is_available() else "gloo"
 
         try:
-            dist.init_process_group(
-                init_method=self.init_method,
-                backend=backend,
-                world_size=int(self.world_size),
-                rank=self.rank,
-            )
+            if fake_pg:
+                store = torch.testing._internal.distributed.fake_pg.FakeStore()
+                dist.init_process_group(
+                    backend="fake",
+                    world_size=self.world_size,
+                    rank=rank,
+                    store=store,
+                )
+            else:
+                dist.init_process_group(
+                    init_method=self.init_method,
+                    backend=backend,
+                    world_size=int(self.world_size),
+                    rank=self.rank,
+                )
         except RuntimeError as e:
             if "recompile" in e.args[0]:
                 sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
@@ -1210,7 +1220,7 @@ class FSDPTest(MultiProcessTestCase):
         optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
         for _ in range(num_steps):
             optim.zero_grad()
-            with torch.cuda.amp.autocast(enabled=autocast):
+            with torch.amp.autocast("cuda", enabled=autocast):
                 # Inputs always cuda regardless of cpu offloading, or model.device
                 input = model.module.get_input(torch.device("cuda"))
                 if use_pure_fp16 or (mixed_precision and not isinstance(model, FSDP)):

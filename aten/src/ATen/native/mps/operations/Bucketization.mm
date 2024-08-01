@@ -255,8 +255,8 @@ Tensor& searchsorted_out_mps(const Tensor& sorted_sequence,
                              const Tensor& self,
                              bool out_int32,
                              bool right,
-                             const c10::optional<c10::string_view> side_opt,
-                             const c10::optional<Tensor>& sorter_opt,
+                             const std::optional<c10::string_view> side_opt,
+                             const std::optional<Tensor>& sorter_opt,
                              Tensor& result) {
   // See [Note: hacky wrapper removal for optional tensor]
   auto sorter_maybe_owned = at::borrow_from_optional_tensor(sorter_opt);
@@ -300,8 +300,8 @@ Tensor& searchsorted_out_mps(const Tensor& sorted_sequence,
                              const Scalar& self,
                              bool out_int32,
                              bool right,
-                             const c10::optional<c10::string_view> side_opt,
-                             const c10::optional<Tensor>& sorter_opt,
+                             const std::optional<c10::string_view> side_opt,
+                             const std::optional<Tensor>& sorter_opt,
                              Tensor& result) {
   const Tensor& scalar_tensor = mps::wrapped_scalar_tensor_mps(self, sorted_sequence.device());
   return searchsorted_out_mps(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter_opt, result);
@@ -311,8 +311,8 @@ Tensor searchsorted_mps(const Tensor& sorted_sequence,
                         const Tensor& self,
                         bool out_int32,
                         bool right,
-                        const c10::optional<c10::string_view> side_opt,
-                        const c10::optional<Tensor>& sorter) {
+                        const std::optional<c10::string_view> side_opt,
+                        const std::optional<Tensor>& sorter) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
@@ -324,15 +324,15 @@ Tensor searchsorted_mps(const Tensor& sorted_sequence,
                         const Scalar& self,
                         bool out_int32,
                         bool right,
-                        const c10::optional<c10::string_view> side_opt,
-                        const c10::optional<Tensor>& sorter) {
+                        const std::optional<c10::string_view> side_opt,
+                        const std::optional<Tensor>& sorter) {
   const Tensor& scalar_tensor = mps::wrapped_scalar_tensor_mps(self, sorted_sequence.device());
   return searchsorted_mps(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter);
 }
 
 Tensor& bucketize_out_mps(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right, Tensor& result) {
   TORCH_CHECK(boundaries.dim() == 1, "boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
-  at::native::searchsorted_out_mps(boundaries, self, out_int32, right, c10::nullopt, c10::nullopt, result);
+  at::native::searchsorted_out_mps(boundaries, self, out_int32, right, std::nullopt, std::nullopt, result);
   return result;
 }
 
