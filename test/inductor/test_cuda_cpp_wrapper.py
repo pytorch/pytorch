@@ -186,6 +186,7 @@ if RUN_CUDA:
         BaseTest("test_sum_dtype"),  # float64
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
+        BaseTest("test_unspec_inputs"),
         BaseTest(
             "test_foreach_cpp_wrapper",
             tests=test_foreach.ForeachTests(),
@@ -203,16 +204,14 @@ if RUN_CUDA:
         #     device=None,
         #     tests=test_select_algorithm.TestSelectAlgorithm(),
         # ),
-        # TODO: Re-enable this test after fixing cpp wrapper for mm_plus_mm2.
-        # This test is unstable: it succeeds when an Triton kernel is used, and fails when a Aten kernel is used.
-        # The current state is that it's unstable, depending on the autotune result.
-        # The failing code generates aoti_torch_cuda__mm_plus_mm (likely some bug when generating ExternKernel)
-        # More information check:
-        # https://hud.pytorch.org/pytorch/pytorch/commit/b6982bf2b25d2d3ba5d82488a39721d6013a838f?fbclid=IwAR23OCV2rCALsGQk6kmkOqT8DfgQedYDt_Gs2R-t9ejSJNjRskkS1rzncDE
-        # BaseTest(
-        #     "test_mm_plus_mm2",
-        #     tests=test_select_algorithm.TestSelectAlgorithm(),
-        # ),
+        BaseTest(
+            "test_mm_plus_mm2",
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest(
+            "test_mm_plus_mm3",
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
         BaseTest("test_fft_real_input"),
         BaseTest("test_fft_real_input_real_output"),
         BaseTest("test_dtypeview"),
@@ -248,6 +247,7 @@ if RUN_CUDA:
         DynamicShapesCudaWrapperCudaTests,
         "cuda_wrapper",
         test_failures_cuda_wrapper,
+        xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
 if __name__ == "__main__":

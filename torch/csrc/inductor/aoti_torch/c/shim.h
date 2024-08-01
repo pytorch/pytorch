@@ -51,6 +51,9 @@
 #endif // _WIN32
 #endif // __GNUC__
 
+#include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -117,6 +120,8 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_layout__mkldnn();
 
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_float16(AtenTensorHandle tensor, c10::Half* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_float32(AtenTensorHandle tensor, float* ret_value);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_float64(AtenTensorHandle tensor, double* ret_value);
@@ -138,6 +143,8 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_int64(AtenTensorHandle tensor, int64_t* ret_value);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_bool(AtenTensorHandle tensor, bool* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_bfloat16(AtenTensorHandle tensor, c10::BFloat16* ret_value);
 
 // Functions for wrapping a scalar value to a single-element tensor
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_float32(
@@ -459,6 +466,13 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
     AtenTensorHandle mat2);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__mm_plus_mm_out(
+    AtenTensorHandle out,
+    AtenTensorHandle a,
+    AtenTensorHandle b,
+    AtenTensorHandle c,
+    AtenTensorHandle d);
 
 // This will soon be deprecated after ao_quantization is complete.
 // Please refrain from using this or increasing callsites.
