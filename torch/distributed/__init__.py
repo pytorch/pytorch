@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-
 __all__ = [
     # distributed_c10d
     "Backend",
