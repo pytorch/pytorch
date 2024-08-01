@@ -241,7 +241,7 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
                     raise NotImplementedError(
                         f"the CPU scalar tensor can't be converted because of unknown dtype {arg.dtype}"
                     )
-                buffer = ir.DynamicScalar(tmp_sym, [], arg)
+                buffer = ir.DynamicScalar(tmp_sym, (), arg)
                 buffer.name = V.graph.register_buffer(buffer)
                 V.graph.register_operation(buffer)
                 args[i] = tmp_sym
