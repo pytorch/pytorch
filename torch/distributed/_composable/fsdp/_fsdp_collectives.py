@@ -239,7 +239,13 @@ def foreach_reduce(
     all_reduce_stream: torch.cuda.Stream,
     all_reduce_grads: bool,
     partial_reduce_output: Optional[torch.Tensor],  # only used for HSDP
-) -> Tuple[torch.Tensor, torch.cuda.Event, torch.cuda.Event, Optional[torch.Tensor]]:
+) -> Tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.cuda.Event,
+    torch.cuda.Event,
+    Optional[torch.Tensor],
+]:
     """
     ``unsharded_grads`` owns the references to the gradients computed by
     autograd, so clearing the list frees the gradients.
@@ -269,9 +275,9 @@ def foreach_reduce(
     current_stream = torch.cuda.current_stream()
     # Only after the copy-in finishes can we free the gradients
     unsharded_grads.clear()
+    reduce_output = reduce_scatter_input.new_empty((reduce_scatter_output_numel,))
     reduce_scatter_stream.wait_stream(current_stream)
     with torch.cuda.stream(reduce_scatter_stream):
-        reduce_output = reduce_scatter_input.new_empty((reduce_scatter_output_numel,))
         _div_if_needed(reduce_scatter_input, predivide_factor)
         dist.reduce_scatter_tensor(
             output=reduce_output,
@@ -290,6 +296,7 @@ def foreach_reduce(
                     partial_reduce_output = reduce_output
                 return (
                     reduce_scatter_input,
+                    reduce_output,
                     reduce_scatter_event,
                     post_reduce_stream.record_event(),
                     partial_reduce_output,
@@ -306,14 +313,17 @@ def foreach_reduce(
                 )
     with torch.cuda.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
-        reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
+        # If this cast is real (e.g. bf16 reduction, fp32 parameters), then we
+        # still hold onto the `reduce_output` until the end of backward, which
+        # may/may not use more memory depending on fragmentation
+        orig_dtype_reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
         for padded_unsharded_size, fsdp_param in zip(
             padded_unsharded_sizes, fsdp_params
         ):
             new_sharded_grad = torch.as_strided(
-                reduce_output,
+                orig_dtype_reduce_output,
                 size=fsdp_param.sharded_size,
                 stride=fsdp_param.contiguous_sharded_stride,
                 storage_offset=flat_grad_offset,
@@ -351,11 +361,13 @@ def foreach_reduce(
             padded_sharded_numel = padded_unsharded_size.numel() // world_size
             flat_grad_offset += padded_sharded_numel
         post_reduce_event = post_reduce_stream.record_event()
-    # The RS output is allocated in the RS stream and used in the default
-    # stream (for optimizer). To ensure its memory is not reused for later
-    # RSs, we do not need extra synchronization since the sharded parameters
-    # hold refs through the end of backward.
-    return reduce_scatter_input, reduce_scatter_event, post_reduce_event, None
+    return (
+        reduce_scatter_input,
+        reduce_output,
+        reduce_scatter_event,
+        post_reduce_event,
+        None,
+    )
 
 
 def foreach_reduce_scatter_copy_in(
