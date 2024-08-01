@@ -3006,11 +3006,13 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dtype", [torch.float16])
     @parametrize("scale", [None, "l1"])
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
-    def test_fused_attention_vs_math_ref_grads_cudagraph(self, device, batch_size: int, sequence_legnths: Tuple[int, int],
+    def test_fused_attention_vs_math_ref_grads_cudagraph(self, device, batch_size: int,
+                                                         seq_len_q: int, seq_len_k: int,
                                                          head_dim: int,
                                                          is_causal: bool,
                                                          dropout_p: float,
                                                          dtype: torch.dtype,
+                                                         scale: str,
                                                          fused_kernel: SDPBackend):
         def _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len, dropout_p, seed, offset, device=device):
             mask = torch.empty((batch_size, n_heads, q_len, kv_len), device=device, dtype=torch.float32)
@@ -3039,7 +3041,6 @@ class TestSDPACudaOnly(NNTestCase):
                 dropout_mask = softmax_mask >= 0
                 return dropout_mask
 
-        seq_len_q, seq_len_k = sequence_legnths
         if fused_kernel == SDPBackend.FLASH_ATTENTION and is_causal and seq_len_q != seq_len_k:
             self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
 
