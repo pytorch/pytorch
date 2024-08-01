@@ -48,6 +48,9 @@ TEST_CUDA_IPC = (
 
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
+if TEST_CUDA_IPC:
+    torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+
 
 class SubProcess(mp.Process):
     def __init__(self, tensor):

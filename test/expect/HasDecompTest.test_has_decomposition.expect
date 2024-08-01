@@ -496,6 +496,7 @@ aten::_resize_output.out
 aten::_resize_output_
 aten::_sample_dirichlet
 aten::_sample_dirichlet.out
+aten::_scaled_dot_product_attention_math_for_mps
 aten::_scaled_dot_product_cudnn_attention
 aten::_scaled_dot_product_cudnn_attention_backward
 aten::_scaled_dot_product_efficient_attention
@@ -777,8 +778,6 @@ aten::empty_permuted.out
 aten::empty_quantized
 aten::empty_quantized.out
 aten::equal
-aten::expand_copy
-aten::expand_copy.out
 aten::fake_quantize_per_channel_affine_cachemask
 aten::fake_quantize_per_channel_affine_cachemask.out
 aten::fake_quantize_per_tensor_affine_cachemask
@@ -1295,8 +1294,6 @@ aten::squeeze_copy.dims_out
 aten::squeeze_copy.out
 aten::sspaddmm.out
 aten::t_
-aten::t_copy
-aten::t_copy.out
 aten::to_mkldnn
 aten::to_mkldnn.out
 aten::to_padded_tensor
@@ -1319,8 +1316,6 @@ aten::unique_dim_consecutive.out
 aten::unsafe_split.Tensor_out
 aten::unsafe_split_with_sizes.out
 aten::unsqueeze_
-aten::unsqueeze_copy
-aten::unsqueeze_copy.out
 aten::upsample_bicubic2d_backward
 aten::upsample_bicubic2d_backward.grad_input
 aten::upsample_bilinear2d_backward
