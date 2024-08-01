@@ -1021,7 +1021,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         from collections.abc import MutableMapping
 
         class TensorDict(MutableMapping):
-            def __init__(self):
+            def __init__(self) -> None:
                 self._dict = {}
 
             def add(self, key, value):
@@ -1063,7 +1063,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         from collections.abc import MutableMapping
 
         class TensorDict(MutableMapping):
-            def __init__(self):
+            def __init__(self) -> None:
                 self._dict = {}
 
             def add(self, key, value):
@@ -1150,7 +1150,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             x = 4
             y = 5
 
-            def __init__(self):
+            def __init__(self) -> None:
                 self.a = 6
 
         a = A()
@@ -3120,7 +3120,7 @@ class ModuleWithDefaultTensorArgsMethod(torch.nn.Module):
 
 
 class WrapperModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.m = ModuleWithDefaultTensorArgsMethod()
 

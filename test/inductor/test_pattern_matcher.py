@@ -638,7 +638,7 @@ class TestPatternMatcher(TestCase):
 
     def test_addmm_broadcasting_bias(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.functional.linear
                 self.linear_weight = torch.randn(4, 4).cuda()
@@ -931,7 +931,7 @@ class TestPatternMatcher(TestCase):
         saved_graph = None
 
         class _CustomPass(PatternMatcherPass):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def __call__(self, g: torch.fx.graph.Graph):
