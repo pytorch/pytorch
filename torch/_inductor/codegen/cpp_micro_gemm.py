@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
+import sys
 from enum import Enum
 from typing import Callable, Dict, List, Optional, Type
 
@@ -22,6 +23,17 @@ class LayoutType(Enum):
     VNNI4 = 2
 
 
+_IS_WINDOWS = sys.platform == "win32"
+
+
+def get_restrict_keyword() -> str:
+    if _IS_WINDOWS:
+        # https://learn.microsoft.com/en-us/cpp/cpp/extension-restrict?view=msvc-170
+        return "__restrict"
+    else:
+        return "__restrict__"
+
+
 class CppMicroGemm:
     """
     A class that codegens a kernel that computes small-sized matrix multiplication.
@@ -40,9 +52,9 @@ inline void {{kernel_name}}(
 {%- if kernel_extra_args_declare %}
     {{kernel_extra_args_declare}}
 {%- endif %}
-    const {{input_t}}* __restrict__ A,
-    const {{input2_t}}* __restrict__ B,
-    {{output_t}}* __restrict__ C,
+    const {{input_t}}* {{restrict_keyword}} A,
+    const {{input2_t}}* {{restrict_keyword}} B,
+    {{output_t}}* {{restrict_keyword}} C,
     int64_t M,
     int64_t N,
     int64_t K,
@@ -90,6 +102,7 @@ inline void {{kernel_name}}(
             "kernel_extra_args_declare": self.get_kernel_extra_args_declare(),
             "int8_gemm": self.input_dtype == torch.uint8,
             "vnni_size": 4 if self.input_dtype == torch.uint8 else 2,
+            "restrict_keyword": get_restrict_keyword(),
         }
 
     def get_kernel_declaration(self):

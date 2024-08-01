@@ -188,9 +188,31 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_dynamo_undo_kw_names(self):
+        def g(x, k=None):
+            if k:
+                raise TypeError("error")
+            return x.sin()
+
+        def fn(x):
+            d = {"a": x}
+            try:
+                g(x, k=True)
+            except Exception:
+                y = 0
+                for _, b in d.items():  # noqa: PERF102
+                    y += b.sum()
+            return y
+
+        x = torch.randn(2, 3)
+        expected = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        got = opt_fn(x)
+        self.assertEqual(expected, got)
+
     def test_nn_module_getattr(self):
         class A:
-            def __init__(self):
+            def __init__(self) -> None:
                 self._b = 20
 
             def __getattr__(self, name):
@@ -200,7 +222,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise AttributeError(f"{name} absent")
 
         class B(A):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.a = 10
 
             def __getattr__(self, name):

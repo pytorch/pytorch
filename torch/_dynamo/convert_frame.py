@@ -23,23 +23,18 @@ from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
-from torch._utils_internal import maybe_upload_prof_stats_to_manifold
-
-from torch.fx._lazy_graph_module import _use_lazy_graph_module
-from torch.utils._traceback import CapturedTraceback
-
-np: Optional[ModuleType]
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
-
 import torch
 import torch._logging
+from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
-from torch._utils_internal import compile_time_strobelight_meta, signpost_event
+from torch._utils_internal import (
+    compile_time_strobelight_meta,
+    maybe_upload_prof_stats_to_manifold,
+    signpost_event,
+)
+from torch.fx._lazy_graph_module import _use_lazy_graph_module
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -47,7 +42,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils._python_dispatch import _disable_current_modes
-from torch.utils._traceback import format_traceback_short
+from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
 from . import config, exc, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
@@ -109,16 +104,25 @@ from .utils import (
     write_record_to_file,
 )
 
+
+np: Optional[ModuleType]
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
+
 if typing.TYPE_CHECKING:
     from .backends.registry import CompilerFn
     from .repro.after_dynamo import WrapBackendDebug
     from .types import BytecodeHook, CacheEntry
     from .variables.builder import FrameStateSizeEntry
 
+
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
-GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
+
 
 compile_lock = threading.RLock()
 
@@ -536,6 +540,7 @@ from collections import OrderedDict
 
 from torch.utils.hooks import RemovableHandle
 
+
 if typing.TYPE_CHECKING:
     from .output_graph import OutputGraph
 
@@ -844,12 +849,25 @@ def _compile(
         # # 2 extra here
         # torch/_logging/_internal.py:1064 in trace_structured
         # torch/_dynamo/convert_frame.py:780 in <lambda>
+        convert_frame_intern = structured.intern_string(__file__)
         torch._logging.trace_structured(
             "dynamo_start",
             lambda: {
-                "stack": structured.from_traceback(
-                    CapturedTraceback.extract(skip=4 + skip).summary()
+                "stack": list(
+                    itertools.takewhile(
+                        lambda f: f["filename"] != convert_frame_intern,
+                        structured.from_traceback(
+                            CapturedTraceback.extract(skip=4 + skip).summary()
+                        ),
+                    )
                 )
+                + [
+                    {
+                        "line": code.co_firstlineno,
+                        "name": code.co_name,
+                        "filename": structured.intern_string(code.co_filename),
+                    }
+                ]
             },
         )
         start_time = time.time()

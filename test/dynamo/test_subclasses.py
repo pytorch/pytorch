@@ -388,7 +388,7 @@ def func(a):
 
 
 class EagerRecordGraphAndInputs:
-    def __init__(self):
+    def __init__(self) -> None:
         self.graphs = []
         self.example_inputs = []
 
@@ -732,7 +732,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
     def test_user_overidden_property_unsupported(self):
         class LocalSubclass(torch.Tensor):
-            def __init__(self):
+            def __init__(self) -> None:
                 self._ndim = 10
 
             @classmethod
@@ -1090,7 +1090,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[3, 4]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[3, 4]"):
             add_: "f32[3, 4]" = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
@@ -1114,7 +1114,7 @@ class GraphModule(torch.nn.Module):
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
@@ -1144,7 +1144,7 @@ class GraphModule(torch.nn.Module):
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
