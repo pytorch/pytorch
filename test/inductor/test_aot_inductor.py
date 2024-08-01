@@ -3001,15 +3001,7 @@ class AOTInductorTestsTemplate:
     def test_fft_c2c(self):
         class Model(torch.nn.Module):
             def forward(self, x):
-                return torch.fft.fftn(x)
-
-        example_inputs = (torch.randn(16, 16, 16, device=self.device),)
-        self.check_model(Model(), example_inputs)
-
-    def test_fft_c2c_real(self):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return torch.fft.fftn(x).real
+                return torch.fft.fftn(x), torch.fft.fftn(x).real
 
         example_inputs = (torch.randn(16, 16, 16, device=self.device),)
         self.check_model(Model(), example_inputs)
