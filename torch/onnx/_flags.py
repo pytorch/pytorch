@@ -42,7 +42,7 @@ def _load_boolean_flag(
     return state
 
 
-USE_EXPORTED_PROGRAM: bool = _load_boolean_flag(
-    "TORCH_ONNX_USE_EXPORTED_PROGRAM",
+USE_EXPERIMENTAL_LOGIC: bool = _load_boolean_flag(
+    "TORCH_ONNX_USE_EXPERIMENTAL_LOGIC",
     this_will="use ExportedProgram and the new torch.onnx export logic",
 )
