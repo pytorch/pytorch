@@ -90,7 +90,7 @@ ORDER BY
 if __name__ == "__main__":
     if (
         "ROCKSET_API_KEY" not in os.environ
-        or "GH_PYTORCHBOT_TOKEN" not in os.environ
+        or "PYTORCHBOT_TOKEN" not in os.environ
         or "UPDATEBOT_TOKEN" not in os.environ
     ):
         print("env keys are not set")
