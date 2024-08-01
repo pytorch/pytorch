@@ -733,6 +733,10 @@ class triton:
     # note: we are conservative here and choose a large limit.
     cudagraph_unexpected_rerecord_limit = 128
 
+    # Warn loudly when the number of cudagraphs due to dynamic shape
+    # exceeds this limit
+    cudagraph_dynamic_shape_warn_limit: Optional[int] = 50
+
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
 
