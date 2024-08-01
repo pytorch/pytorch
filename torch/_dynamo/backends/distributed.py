@@ -13,6 +13,7 @@ from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch._logging import trace_structured
 from torch.fx.node import Node
 
+
 # Regular log messages should go through 'log'.
 # ddp_graph_log is a separate artifact logger reserved for dumping graphs.
 # See docs/source/logging.rst for more info.
@@ -246,7 +247,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # This gives us the appropriately strided outputs here which will reflect runtime strides.
 
             class FakeifyFirstAOTInvocationGuard:
-                def __init__(self):
+                def __init__(self) -> None:
                     self.tc = torch._guards.TracingContext.try_get()
                     assert self.tc
                     torch._guards.TracingContext.try_get().fakify_first_call = True

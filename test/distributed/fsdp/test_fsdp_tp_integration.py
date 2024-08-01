@@ -51,7 +51,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class SimpleModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = torch.nn.Linear(5, 8)
         self.relu = torch.nn.ReLU()
@@ -361,7 +361,7 @@ class TestTPFSDPIntegration(FSDPTest):
         )
 
         class TestModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mlp = MLPModule("cuda")
                 self.mlp_norm = RMSNormPython(10)
@@ -418,7 +418,7 @@ class TestTPFSDPIntegration(FSDPTest):
         torch.manual_seed(mesh_2d.get_rank())
 
         class TestModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 replicated_dt = DTensor.from_local(
                     torch.randn(8, 8), tp_mesh, [Replicate()], run_check=False
@@ -427,7 +427,7 @@ class TestTPFSDPIntegration(FSDPTest):
                     torch.randn(8, 8), tp_mesh, [Replicate()], run_check=False
                 )
                 self.param = torch.nn.Parameter(replicated_dt)
-                self.register_buffer("buf", replicated_buffer_dt)
+                self.buf = torch.nn.Buffer(replicated_buffer_dt)
 
             def forward(self, x):
                 return self.param + self.buffer + 1
