@@ -35,6 +35,7 @@ from ..utils import (
     extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
+    is_wrapper_or_member_descriptor,
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
@@ -1055,10 +1056,11 @@ class BuiltinVariable(VariableTracker):
                 except AttributeError:
                     # Graph break
                     return
+            elif is_wrapper_or_member_descriptor(str_method):
+                unimplemented(f"{type(arg.value)} has a C/C++ based str method")
             else:
                 # Overrides for custom str method
                 # Pass method as function to call tx.inline_user_function_return
-
                 bound_method = str_method.__func__
 
                 try:
