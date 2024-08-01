@@ -1083,9 +1083,7 @@ def get_config_value(name: str) -> Optional[bool]:
 # None: Enable in OSS (expect for fallbacks), JK-based for internal
 class benchmarking:
     # emergency fallback to original implementation of benchmarking
-    fallback_to_original_benchmarking: Optional[bool] = get_config_value(
-        "TORCHINDUCTOR_FALLBACK_TO_ORIGINAL_BENCHMARKING"
-    )
+    fallback_to_original_benchmarking: Optional[bool] = True
 
     # enable lazy benchmarking which postpones benchmarking until timing value
     # is required, allows the benchmarking module to group similar benchmarks
