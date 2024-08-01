@@ -751,7 +751,7 @@ class CompModuleTestSameNameWithCompiler(JitBackendTestCase):
         A module with two lowered submodules.
         """
 
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             compile_spec = {
                 "forward": {
