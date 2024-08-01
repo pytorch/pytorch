@@ -8,6 +8,7 @@ from torch import nn
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import _inline_everything, JitTestCase, RUN_CUDA
 
+
 if __name__ == "__main__":
     raise RuntimeError(
         "This test file is not meant to be run directly, use:\n\n"
@@ -202,7 +203,7 @@ class TestPeephole(JitTestCase):
         for mod in modules:
 
             class ConvDim(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.conv = mod(3, 32, kernel_size=3, stride=2, bias=False)
 
@@ -216,7 +217,7 @@ class TestPeephole(JitTestCase):
             FileCheck().check_not("conv").check_not("dim").run(conv_dim.graph)
 
             class ConvDimMutate(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.conv = mod(3, 32, kernel_size=3, stride=2, bias=False)
 

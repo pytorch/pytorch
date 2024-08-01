@@ -5,6 +5,7 @@ import logging
 from typing import (
     Any,
     Callable,
+    cast,
     Dict,
     Iterable,
     List,
@@ -18,13 +19,14 @@ from typing import (
 import sympy
 from sympy import Expr
 
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, ShapeEnv
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import bound_sympy
+from torch.utils._sympy.value_ranges import bound_sympy, IntInfinity, ValueRanges
 
 from .runtime.runtime_utils import is_power_of_2
 from .utils import (
+    has_free_symbols,
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
     sympy_subs,
@@ -119,8 +121,43 @@ class SizeVarAllocator:
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
 
+        var_to_range = dict(self.shape_env.var_to_range)
+        var_to_range.update(
+            {
+                k: ValueRanges(
+                    0, max(0, v - 1) if not has_free_symbols([v]) else IntInfinity()
+                )
+                for k, v in var_ranges.items()
+            }
+        )
+        for var in expr.free_symbols:
+            if var not in var_to_range:
+                var_to_range[var] = ValueRanges(0, IntInfinity())
+
+        var_to_range_tuple = cast(
+            Tuple[Tuple[sympy.Symbol, ValueRanges[sympy.Expr]]],
+            tuple(var_to_range.items()),
+        )
+
+        axioms = []
+        for var, upper_bound in var_ranges.items():
+            axioms.append(0 <= var)
+            axioms.append(var < upper_bound)
+        axioms = tuple(axioms) + self.shape_env.get_axioms()
+
+        def statically_known(expr):
+            evaluated = self.shape_env._maybe_evaluate_static(
+                expr,
+                axioms=axioms,
+                var_to_range=var_to_range_tuple,
+            )
+            return bool(evaluated)
+
         def remove_zero_terms(base, divisor):
             """Symbols smaller than the divisor are zero"""
+            if not statically_known(base >= 0):
+                return base
+
             for v in base.free_symbols:
                 if v in var_ranges:
                     # var smaller than divisor can be removed
@@ -130,7 +167,7 @@ class SizeVarAllocator:
                     if m and v not in m[rest].free_symbols:
                         gcd = sympy.gcd(m[rest], divisor)
                         if gcd == divisor:
-                            if self.statically_known_leq(var_ranges[v], divisor):
+                            if statically_known(v < divisor):
                                 base = m[rest]
             return base
 
@@ -139,25 +176,12 @@ class SizeVarAllocator:
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
-            base_pos = True
-            if isinstance(base, ModularIndexing):
-                # for modular indexing, biggest values from the ranges don't necessarily result in
-                # the biggest result, the biggest result is modulus - 1
-                base_s = base.args[2] - 1
-            elif not base.has(ModularIndexing):
-                # actual iteration range is to size-1
-                iter_ranges_zero = {k: 0 for k, v in var_ranges.items()}
-                base_lowest = sympy_subs(base, iter_ranges_zero)
-                if self.statically_known_leq(0, base_lowest):  # type: ignore[arg-type]
-                    # can't replace with indexing div if base can be negative
-                    base_pos = True
-                else:
-                    base_pos = False
-                iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
-                base_s = sympy_subs(base, iter_ranges)
-            else:
-                base_s = base
-            if self.statically_known_lt(base_s, modulus * divisor) and base_pos:
+
+            can_remove_mod = statically_known(base >= 0) and statically_known(
+                base < modulus * divisor
+            )
+
+            if can_remove_mod:
                 return FloorDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
@@ -356,6 +380,8 @@ class SizeVarAllocator:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
+        if free_unbacked_symbols(numerator) or free_unbacked_symbols(denominator):
+            return False
         expr = sympy.Eq(numerator % denominator, 0)
         return self.is_expr_static_and_true(expr)  # type: ignore[arg-type]
 
