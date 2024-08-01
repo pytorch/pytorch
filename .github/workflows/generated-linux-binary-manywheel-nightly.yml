@@ -51,8 +51,8 @@ jobs:
               console.log(
                 await github.rest.repos.listPullRequestsAssociatedWithCommit({
                   commit_sha: context.sha,
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
+                  owner: github.repository_owner,
+                  repo: 'pytorch',
                 })
               )
   manywheel-py3_9-cpu-build:
