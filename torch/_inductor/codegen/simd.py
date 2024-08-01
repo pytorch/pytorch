@@ -19,7 +19,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Set,
     Tuple,
     Union,
 )
@@ -28,6 +27,7 @@ import sympy
 
 import torch
 import torch._logging
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
@@ -311,7 +311,7 @@ class SIMDKernel(Kernel):
         self,
         *groups,
         index_dtype: str,
-        mutations: Optional[Set[str]] = None,
+        mutations: Optional[OrderedSet[str]] = None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
         override_persistent_reduction=None,
@@ -322,14 +322,16 @@ class SIMDKernel(Kernel):
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
-        self.mutations: Set[str] = mutations if mutations is not None else set()
+        self.mutations: OrderedSet[str] = (
+            mutations if mutations is not None else OrderedSet()
+        )
         self.range_trees: List[IterationRangesRoot] = []
         self.range_tree_nodes: Dict[sympy.Symbol, IterationRangesEntry] = {}
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
         self.reduction_hint = reduction_hint
         self.index_dtype: str = index_dtype
-        self.last_usage: Set[str] = set()
+        self.last_usage: OrderedSet[str] = OrderedSet()
         self.buf_accesses: DefaultDict[str, List[Dep]] = collections.defaultdict(list)
         self.persistent_reduction: bool = (
             override_persistent_reduction
@@ -483,7 +485,7 @@ class SIMDKernel(Kernel):
     def set_last_usage(self, nodes):
         if not self.inside_reduction or self.persistent_reduction:
             return
-        self.last_usage = set(
+        self.last_usage = OrderedSet(
             itertools.chain.from_iterable(
                 n.last_usage for n in nodes if n is not EnableReduction
             )
@@ -832,7 +834,7 @@ class SIMDKernel(Kernel):
                 # This arg points to a buf that has been sliced.
                 # We need to count each individual slice to have
                 # a better estimation.
-                indices: Set[Any] = set()
+                indices: OrderedSet[Any] = OrderedSet()
                 no_index_dep_count = 0
                 for dep in self.buf_accesses[arg]:
                     if isinstance(dep, (StarDep, WeakDep)):
@@ -1063,13 +1065,13 @@ class SIMDScheduling(BaseScheduling):
 
     def generate_node_schedule(self, nodes, numel, rnumel):
         node_schedule: List[Any] = []
-        current_loop_writes: Set[str] = set()
+        current_loop_writes: OrderedSet[str] = OrderedSet()
 
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
-        current_loop_reduced_writes = set()
+        current_loop_reduced_writes: OrderedSet[str] = OrderedSet()
         current_loop_has_writes = False
-        done = set()
+        done: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
@@ -1221,7 +1223,7 @@ class SIMDScheduling(BaseScheduling):
     @classmethod
     def select_index_dtype(cls, node_schedule, numel, reduction_numel):
         # Gather all used buffer names
-        buffer_names = set()
+        buffer_names: OrderedSet[str] = OrderedSet()
         for node in node_schedule:
             if not isinstance(node, scheduler.BaseSchedulerNode):
                 continue
@@ -1296,7 +1298,7 @@ class SIMDScheduling(BaseScheduling):
         else:
             reduction_hint_val = ReductionHint.DEFAULT
 
-        mutations = set()
+        mutations: OrderedSet[str] = OrderedSet()
         for node in node_schedule:
             if node in (DisableReduction, EnableReduction):
                 continue
@@ -1523,87 +1525,43 @@ class SIMDScheduling(BaseScheduling):
     def codegen_sync(self):
         V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
 
-    def generate_combo_kernel_code(
-        self,
-        subkernel_nodes: List[BaseSchedulerNode],
-        custom_part_algorithm: bool,
-        enable_autotune: bool,
-        only_gen_src_code: bool = False,
-    ) -> List[Tuple[str, Any, Any]]:
-        from .triton_combo_kernel import ComboKernel
+    def codegen_foreach(self, foreach_node):
+        from .triton_foreach import ForeachKernel
 
-        fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
-        subkernel_map, node_schedule_map = {}, {}
-        for pn, nodes in zip(subkernel_nodes, fused_node_lists):
-            _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
-            node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-            tiled_groups = self.select_tiling(node_schedule, numel, rnumel)
-            node_schedule_map[pn] = node_schedule, tiled_groups, numel, rnumel
-            (
-                reduction_hint_val,
-                mutations,
-                index_dtype,
-            ) = self.get_kernel_args(node_schedule, numel, rnumel)
-            subkernel_map[pn] = ComboKernel.create_triton_kernel(
-                *tiled_groups,
-                reduction_hint=reduction_hint_val,
-                mutations=mutations,
-                index_dtype=index_dtype,
-            )
+        for partitions_with_metadata in ForeachKernel.horizontal_partition(
+            foreach_node.get_subkernel_nodes(), self
+        ):
+            kernel = ForeachKernel()
+            for nodes, tiled_groups, numel, rnumel in partitions_with_metadata:
+                node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
+                (
+                    reduction_hint_val,
+                    mutations,
+                    index_dtype,
+                ) = self.get_kernel_args(node_schedule, numel, rnumel)
 
-        partitions = ComboKernel.horizontal_partition(
-            nodes=subkernel_nodes,
-            triton_scheduling=self,
-            custom_algorithm=custom_part_algorithm,
-            kernel_map=subkernel_map,
-            node_info_map=node_schedule_map,
-        )
-        log.debug(
-            "ComboKernels: %d nodes partitioned into %s groups",
-            len(subkernel_nodes),
-            [len(p) for p in partitions],
-        )
-        kernel_code_list = []
-        for node_group in partitions:
-            fused_node_lists = [node.get_nodes() for node in node_group]
-            kernel = ComboKernel(enable_autotune=enable_autotune)
-
-            for pn, nodes in zip(node_group, fused_node_lists):
-                if only_gen_src_code:
-                    # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
-                    for n in nodes:
-                        n.last_usage = set()
-                self.codegen_node_schedule_with_kernel(
-                    node_schedule_map[pn][0],
-                    kernel.create_sub_kernel(subkernel_map[pn]),
+                subkernel = kernel.create_sub_kernel(
+                    *tiled_groups,
+                    reduction_hint=reduction_hint_val,
+                    mutations=mutations,
+                    index_dtype=index_dtype,
                 )
-                subkernel = subkernel_map[pn]
-                node_schedule = node_schedule_map[pn][0]
-                if not only_gen_src_code:
-                    with V.set_kernel_handler(subkernel):  # type: ignore[call-arg]
-                        for node in node_schedule:
-                            if node not in (EnableReduction, DisableReduction):
-                                node.mark_run()
+
+                self.codegen_node_schedule_with_kernel(
+                    node_schedule,
+                    subkernel,
+                )
+
+                with V.set_kernel_handler(subkernel):
+                    for node in node_schedule:
+                        if node not in (EnableReduction, DisableReduction):
+                            node.mark_run()
                 V.graph.removed_buffers |= subkernel.removed_buffers
                 V.graph.inplaced_to_remove |= subkernel.inplaced_to_remove
 
             src_code = kernel.codegen_kernel()
-            kernel_code_list.append((src_code, kernel, node_group))
-        return kernel_code_list
-
-    def codegen_combo_kernel(self, combo_kernel_node):
-        subkernel_nodes = combo_kernel_node.get_subkernel_nodes()
-        custom_part_algorithm = combo_kernel_node.use_custom_partition_algo
-        enable_autotune = combo_kernel_node.enable_autotune
-
-        kernel_code_list = self.generate_combo_kernel_code(
-            subkernel_nodes, custom_part_algorithm, enable_autotune
-        )
-
-        for src_code, kernel, _ in kernel_code_list:
-            kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
-            self.codegen_comment([combo_kernel_node])
-            log.debug("ComboKernels: generated kernel %s.", kernel_name)
+            kernel_name = self.define_kernel(src_code, [foreach_node], kernel)
+            self.codegen_comment([foreach_node])
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
         self.scheduler.free_buffers()
@@ -1697,7 +1655,7 @@ class SIMDScheduling(BaseScheduling):
                         break
             return (numel, reduction_numel)
 
-        seen_names = set()
+        seen_names: OrderedSet[str] = OrderedSet()
         candidate_tiles: Counter[Any] = collections.Counter()
         for node in EnableReduction.filter(node_schedule):
             for tiling in cls.candidate_tilings(node):
@@ -1764,7 +1722,7 @@ class SIMDScheduling(BaseScheduling):
 
         # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
         for n in nodes:
-            n.last_usage = set()
+            n.last_usage = OrderedSet()
 
         if not nodes[0].is_template():
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group

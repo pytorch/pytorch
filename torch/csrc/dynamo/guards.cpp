@@ -18,7 +18,6 @@
 #endif
 
 #include <sstream>
-#include <tuple>
 #include <utility>
 
 // For TupleIteratorGetItemAccessor, we need a fast way to retrieve the
@@ -852,6 +851,12 @@ bool is_immutable_object(py::handle example_value) {
       PyUnicode_Check(example_value.ptr()) ||
       THPVariable_Check(example_value.ptr());
 }
+
+bool is_parameter(py::handle tensor) {
+  py::object parameter = py::module::import("torch.nn").attr("Parameter");
+  return py::isinstance(tensor, parameter);
+}
+
 /**
  * Stores relevant guard debug information, e.g., failure str for a LeafGuard
  * failure. The data structure is also accessible in Python.
@@ -2422,24 +2427,14 @@ std::unique_ptr<GuardManager> make_guard_manager(
     std::string source,
     py::handle example_value,
     py::handle guard_manager_enum) {
-  using fourobjects =
-      std::tuple<py::object, py::object, py::object, py::object>;
-  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<fourobjects>
-      storage;
-
-  auto& [guard_manager_enum_class, base_guard_manager_enum, dict_guard_manager_enum, dict_subclass_guard_manager_enum] =
-      storage
-          .call_once_and_store_result([]() -> fourobjects {
-            py::object guard_manager_enum_class =
-                py::module_::import("torch._dynamo.guards")
-                    .attr("GuardManagerType");
-            return {
-                guard_manager_enum_class,
-                guard_manager_enum_class.attr("GUARD_MANAGER"),
-                guard_manager_enum_class.attr("DICT_GUARD_MANAGER"),
-                guard_manager_enum_class.attr("DICT_SUBCLASS_GUARD_MANAGER")};
-          })
-          .get_stored();
+  static py::object guard_manager_enum_class =
+      py::module_::import("torch._dynamo.guards").attr("GuardManagerType");
+  static py::object base_guard_manager_enum =
+      guard_manager_enum_class.attr("GUARD_MANAGER");
+  static py::object dict_guard_manager_enum =
+      guard_manager_enum_class.attr("DICT_GUARD_MANAGER");
+  static py::object dict_subclass_guard_manager_enum =
+      guard_manager_enum_class.attr("DICT_SUBCLASS_GUARD_MANAGER");
   if (py::isinstance<py::dict>(example_value)) {
     // The purpose of having both DictGuardManager and DictSubclassGuardManager
     // is to handle the variability in how dictionaries and their subclasses
@@ -2551,6 +2546,12 @@ class TENSOR_MATCH : public LeafGuard {
         _tensor_name);
 
     if (!fail_reason.empty()) {
+      if (is_parameter(py::handle(value))) {
+        fail_reason += ". Guard failed on a parameter, consider using ";
+        fail_reason +=
+            "torch._dynamo.config.force_parameter_static_shapes = False ";
+        fail_reason += "to allow dynamism on parameters.";
+      }
       return GuardDebugInfo(false, fail_reason, 0);
     }
     return GuardDebugInfo(true, 1);

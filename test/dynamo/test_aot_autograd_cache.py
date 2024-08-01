@@ -7,7 +7,6 @@ from unittest.mock import patch
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
-
 import torch._functorch._aot_autograd
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
@@ -384,7 +383,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         class MyMod(torch.nn.Module):
             CONSTANT = torch.tensor([[2, 2], [2, 2]])
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.randn([2, 2]))
 
@@ -606,7 +605,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
     def test_nn_module_with_params(self):
         class MyMod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.seq = torch.nn.Parameter(torch.ones((3, 3)))
 

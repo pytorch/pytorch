@@ -6,14 +6,16 @@ from typing import Dict, List, TYPE_CHECKING
 import torch
 from torch._dynamo.source import GetItemSource
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
 from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
 
 _type_to_assert_reason = {
     # NB - We CAN have ConstantVariable.create(set) because of how sets interact with guards.
@@ -145,6 +147,14 @@ class ConstantVariable(VariableTracker):
             return variables.BuiltinVariable(str.format).call_function(
                 tx, [self, *args], kwargs
             )
+        elif name == "join" and istype(self.value, str):
+            assert len(args) == 1 and len(kwargs) == 0
+            arg_unpacked = args[0].force_unpack_var_sequence(tx)
+            try:
+                arg_const = [x.as_python_constant() for x in arg_unpacked]
+                return ConstantVariable.create(self.value.join(arg_const))
+            except NotImplementedError:
+                return super().call_method(tx, name, args, kwargs)
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.

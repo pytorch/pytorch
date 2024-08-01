@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import dataclasses
 import importlib
@@ -601,7 +602,7 @@ class OrtExecutionInfoPerSession:
 
 @dataclasses.dataclass
 class OrtExecutionInfoForAllGraphModules:
-    def __init__(self):
+    def __init__(self) -> None:
         # All sessions (and their related information) created by exporting the same GraphModule
         # with different inputs.
         self.execution_info_per_graph_module: Dict[
@@ -646,7 +647,7 @@ Examples::
 """
 
 
-@dataclasses.dataclass(frozen=True)  # type: ignore[arg-type]
+@dataclasses.dataclass(frozen=True)
 @compatibility(is_backward_compatible=False)
 class OrtBackendOptions:
     """Options for constructing an ``OrtBackend``, the ONNX Runtime

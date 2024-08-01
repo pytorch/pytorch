@@ -121,7 +121,7 @@ class TestSerialize(TestCase):
 
     def test_predispatch_export_with_autograd_op(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -148,7 +148,7 @@ class TestSerialize(TestCase):
         class MyModule(torch.nn.Module):
             """A test module with that has multiple args and uses kwargs"""
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.p = torch.nn.Parameter(torch.ones(2, 3))
 
@@ -178,7 +178,7 @@ class TestSerialize(TestCase):
         # Tests that modules with more complicated layer patterns can be serialized
         # and deserialized correctly.
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = torch.nn.Sequential(
                     torch.nn.SiLU(),
@@ -209,7 +209,7 @@ class TestSerialize(TestCase):
 
     def test_serialize_constant_outputs(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -231,7 +231,7 @@ class TestSerialize(TestCase):
 
     def test_serialize_multiple_returns_from_node(self) -> None:
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, w, b):
@@ -267,7 +267,7 @@ class TestSerialize(TestCase):
 
     def test_serialize_list_returns(self) -> None:
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -309,7 +309,7 @@ class TestSerialize(TestCase):
         """
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -636,7 +636,7 @@ class TestDeserialize(TestCase):
         """
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, w, b):
@@ -657,7 +657,7 @@ class TestDeserialize(TestCase):
 
     def test_basic(self) -> None:
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -671,7 +671,7 @@ class TestDeserialize(TestCase):
 
     def test_dynamic(self) -> None:
         class DynamicShapeSimpleModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b, c) -> torch.Tensor:
@@ -709,7 +709,7 @@ class TestDeserialize(TestCase):
 
     def test_module(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(3, 3)
                 self.relu = torch.nn.ReLU()
@@ -727,7 +727,7 @@ class TestDeserialize(TestCase):
 
     def test_module_meta(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.p = torch.nn.Parameter(torch.ones(3, 3))
 
@@ -803,7 +803,7 @@ class TestDeserialize(TestCase):
 
     def test_list_of_optional_tensors(self) -> None:
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y, z):
@@ -906,7 +906,7 @@ def forward(self, x):
     @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
     def test_device(self) -> None:
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 16, 3, stride=1, bias=True)
                 self.relu = torch.nn.ReLU()
@@ -923,7 +923,7 @@ def forward(self, x):
 
     def test_custom_obj_tuple_out(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -939,7 +939,7 @@ def forward(self, x):
 
     def test_custom_obj(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -954,7 +954,7 @@ def forward(self, x):
 
     def test_custom_obj_list_out(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -970,7 +970,7 @@ def forward(self, x):
 
     def test_export_no_inputs(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.p = torch.ones(3, 3)
 
@@ -1019,7 +1019,7 @@ class TestSaveLoad(TestCase):
         inp = (torch.tensor([0.1, 0.1]),)
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
 
@@ -1118,7 +1118,7 @@ class TestSaveLoad(TestCase):
 
     def test_save_constants(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.tensor(3)
 
@@ -1192,7 +1192,7 @@ class TestSerializeCustomClass(TestCase):
 
     def test_custom_class_containing_fake_tensor(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.custom_obj = torch.classes._TorchScriptTesting._ContainsTensor(
                     torch.rand(2, 3)

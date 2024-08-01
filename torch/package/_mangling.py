@@ -12,7 +12,7 @@ class PackageMangler:
     Used on import, to ensure that all modules imported have a shared mangle parent.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         global _mangle_index
         self._mangle_index = _mangle_index
         # Increment the global index

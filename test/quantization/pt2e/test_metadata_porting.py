@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: quantization"]
 import copy
-
 import unittest
 from typing import List
 
@@ -12,16 +11,14 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
 )
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import OP_TO_ANNOTATOR
-
 from torch.fx import Node
-
 from torch.testing._internal.common_quantization import QuantizationTestCase
 from torch.testing._internal.common_utils import IS_WINDOWS
 
 
 class TestHelperModules:
     class Conv2dWithObsSharingOps(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.conv = torch.nn.Conv2d(3, 3, 3)
             self.hardtanh = torch.nn.Hardtanh()
@@ -466,7 +463,7 @@ class TestMetaDataPorting(QuantizationTestCase):
         """
 
         class MatmulWithConstInput(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.register_parameter("w", torch.nn.Parameter(torch.rand(8, 16)))
 

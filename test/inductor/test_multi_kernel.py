@@ -21,7 +21,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class TransformerSnippet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.ln1 = nn.LayerNorm(64)
         self.ln2 = nn.LayerNorm(64)
