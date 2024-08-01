@@ -46,12 +46,12 @@ flex_decoding_template = TritonTemplate(
     # BLOCK_N: block size of K & V along N dimension.
     #
     # change of base out of the loop
-    # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row
+    # rows_guaranteed_safe: Is it guaranteed that at least one value in each row
     # is not masked out? If so, we can skip an extra safety check
     # SAFE_M_BOUNDARY: Is Q seqlen a multiple of BLOCK_M? If so, we can skip an extra boundary check for loading query.
     # SAFE_N_BOUNDARY: Is KV seqlen a multiple of BLOCK_N? If so, we can skip an extra boundary check for loading key/value.
 
-    # PRESCALE_QK: Whether to pre-scale QK by 1/sqrt(d) and change of base.
+    # prescale_qk: Whether to pre-scale QK by 1/sqrt(d) and change of base.
     #
     # SPARSE_KV_BLOCK_SIZE: sparse mask block size along KV seqlen dim.
     # KV_NUM_BLKS: The number of KV blocks (that may or may not require masking) for each query.
@@ -195,8 +195,8 @@ flex_decoding_template = TritonTemplate(
         q = tl.load(Q_block_ptr, boundary_check=(0, ))
     RCP_LN2 = 1.44269504
 
-    if PRESCALE_QK:
-        q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
+    if prescale_qk:
+        q = (q * scale * RCP_LN2).to(MATMUL_PRECISION)
 
 
     # loop over k, v and update accumulator
@@ -207,8 +207,8 @@ flex_decoding_template = TritonTemplate(
         # -- compute qk ---
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         qk = tl.dot(q, k, acc=qk)
-        if not PRESCALE_QK:
-            qk *= SM_SCALE
+        if not prescale_qk:
+            qk *= scale
 
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
@@ -225,7 +225,7 @@ flex_decoding_template = TritonTemplate(
             out="qk"
         ) | indent_except_first(2) }}
         # TODO: In the case that score_mod is linear, this can be LICMed
-        if not PRESCALE_QK:
+        if not prescale_qk:
             post_mod_scores *= RCP_LN2
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -235,7 +235,7 @@ flex_decoding_template = TritonTemplate(
 
         alpha = tl.math.exp2(m_i - m_i_new)
         p = tl.math.exp2(post_mod_scores - m_i_new[:, None])
-        if not ROWS_GUARANTEED_SAFE:
+        if not rows_guaranteed_safe:
             masked_out_rows = (m_i_new == float("-inf"))
             alpha = tl.where(masked_out_rows, 0, alpha)
             p = tl.where(masked_out_rows[:, None], 0, p)
@@ -311,7 +311,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         value,
         subgraph,
         block_mask,
-        kernel_params,
+        kernel_options,
         *other_buffers,
     ) = args
     (
@@ -348,9 +348,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
     #     ]
     # TODO: fix autotuning.
 
-    SPLIT_KV = get_split_k(key.get_size()[0], key.get_size()[1], key.get_size()[2])
-    MAX_SPLIT_KV = SPLIT_KV
-    assert SPLIT_KV <= MAX_SPLIT_KV
+    kernel_options = dict(kernel_options)
+    kernel_options["SPLIT_KV"] = get_split_k(
+        key.get_size()[0], key.get_size()[1], key.get_size()[2]
+    )
+    MAX_SPLIT_KV = kernel_options["SPLIT_KV"]
+    assert kernel_options["SPLIT_KV"] <= MAX_SPLIT_KV
 
     # create config dependent intermediate buffers
     buf_ML_shape = query.get_size()[:-2] + [
@@ -381,8 +384,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
         FlexibleLayout.contiguous_strides(buf_ACC_shape),
     )
 
+    kernel_options["BLOCK_DMODEL"] = query.get_size()[-1]
+
     m = query.get_size()[-2]
-    BLOCK_M = (
+    kernel_options["BLOCK_M"] = (
         # m
         # if V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 0))
         # else  # Always use a BLOCK_M > 16 before Triton fix https://github.com/triton-lang/triton/pull/4061 is in pin
@@ -395,8 +400,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
             16,
         )
     )
+    V.graph.sizevars.guard_leq(m, sympy.Integer(kernel_options["BLOCK_M"]))
 
-    V.graph.sizevars.guard_leq(m, sympy.Integer(BLOCK_M))
+    kernel_options["SAFE_M_BOUNDARY"] = (
+        query.get_size()[-2] % kernel_options["BLOCK_M"]
+    ) == 0
+    kernel_options["SAFE_N_BOUNDARY"] = True
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
@@ -404,6 +413,11 @@ def create_flex_decoding_kernel(*args, **kwargs):
     for BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0:
             continue
+
+        # Performance tuning
+        kernel_options["BLOCK_N"] = BLOCK_N
+        kernel_options["SPARSE_KV_BLOCK_SIZE"] = SPARSE_KV_BLOCK_SIZE
+
         flex_decoding_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
@@ -423,18 +437,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
             num_stages=num_stages,
             num_warps=num_warps,
             call_sizes=query.get_size(),
-            BLOCK_M=BLOCK_M,
-            SPLIT_KV=SPLIT_KV,
-            BLOCK_DMODEL=query.get_size()[-1],
-            SM_SCALE=kernel_params["scale"],
-            # Performance tuning
-            BLOCK_N=BLOCK_N,
-            # For now, we always assume the "sound" option
-            ROWS_GUARANTEED_SAFE=kernel_params["rows_guaranteed_safe"],
-            SAFE_M_BOUNDARY=(query.get_size()[-2] % BLOCK_M) == 0,
-            SAFE_N_BOUNDARY=True,
-            PRESCALE_QK=kernel_params["prescale_qk"],
-            SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
+            **kernel_options,
         )
 
     inputs_for_flex_decoding = [

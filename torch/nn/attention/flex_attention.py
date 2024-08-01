@@ -775,10 +775,6 @@ def flex_attention(
     Kwargs:
         scale (float): Scaling factor applied prior to softmax. If
         none, the default value is set to :math`\frac{1}{\sqrt{E}}`
-        rows_guaranteed_safe (bool): For all rows, is it guaranteed into a (BLOCK_M, BLOCK_N) block that at least one value
-        in each row is not masked out? If so, we can skip an extra safety check. Defaults to ``False``.
-        prescale_qk (bool): Whether to pre-scale QK by 1/sqrt(d) and change of base in Triton kernel.
-        Has about 20% more numerical error, but slightly faster. Defaults to ``False``.
 
     Returns:
         output (Tensor): Attention output; shape :math:`(B, H, L, Ev)`.
