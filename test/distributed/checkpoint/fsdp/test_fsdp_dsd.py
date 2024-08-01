@@ -240,7 +240,9 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             # init device mesh
             dp_size = 2
             global_mesh = init_device_mesh(
-                "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+                "cuda",
+                (dp_size, self.world_size // dp_size),
+                mesh_dim_names=("dp", "tp"),
             )
             dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
 
