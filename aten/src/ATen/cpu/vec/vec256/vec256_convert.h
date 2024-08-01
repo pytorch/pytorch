@@ -133,6 +133,32 @@ struct VecConvert<int32_t, 1, uint8_t, 1> {
   }
 };
 
+
+template <>
+struct VecConvert<int32_t, 1, float, 1> {
+  static inline VectorizedN<int32_t, 1> apply(
+      const VectorizedN<float, 1>& src) {
+    return  Vectorized<int32_t>(_mm256_cvttps_epi32(src[0]));
+  }
+};
+
+template <>
+struct VecConvert<float, 1, int32_t, 1> {
+  static inline VectorizedN<float, 1> apply(
+      const VectorizedN<int32_t, 1>& src) {
+    return  Vectorized<float>(_mm256_cvtepi32_ps(src[0]));
+  }
+};
+
+template <>
+struct VecConvert<int16_t, 1, uint8_t, 1> {
+  static inline VectorizedN<int16_t, 1> apply(
+      const VectorizedN<uint8_t, 1>& src) {
+    auto src128 = _mm256_castsi256_si128(src[0]);
+    return Vectorized<int16_t>(_mm256_cvtepu8_epi16(src128));
+  }
+};
+
 template <typename dst_t, typename src_t>
 struct VecConvert<
     dst_t,

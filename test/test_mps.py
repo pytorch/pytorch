@@ -19,7 +19,7 @@ import torch.nn.functional as F
 import itertools
 from collections import defaultdict
 from torch import inf
-from torch.nn import Parameter
+from torch.nn import Buffer, Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, IS_CI,
@@ -277,6 +277,7 @@ def mps_ops_modifier(ops):
         'exp',
         'expand',
         'expand_as',
+        'expand_copy',
         'flatten',
         'fill',
         'full',
@@ -351,6 +352,7 @@ def mps_ops_modifier(ops):
         'unsafe_chunk',
         'unsafe_split',
         'unsqueeze',
+        'unsqueeze_copy',
         'view_as',
         'view_as_real',
         'view',
@@ -2319,43 +2321,36 @@ class TestMPS(TestCaseMPS):
         device = "mps"
         dtype = torch.float32
         mask_dtype = torch.bool
+        num_dest = 10
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            num_dest = 10
-            dst = torch.zeros(num_dest, dtype=dtype, device=device)
-            mask = torch.randint(2, (num_dest,), dtype=mask_dtype, device=device)
-            val = random.random()
-            dst2 = torch.zeros(num_dest, dtype=dtype)
-            mask_cpu = mask.to("cpu")
+        dst = torch.zeros(num_dest, dtype=dtype, device=device)
+        mask = torch.randint(2, (num_dest,), dtype=mask_dtype, device=device)
+        val = random.random()
+        dst2 = torch.zeros(num_dest, dtype=dtype)
+        mask_cpu = mask.to("cpu")
 
-            dst.masked_fill_(mask, val)
-            for i in range(num_dest):
-                if mask_cpu[i]:
-                    dst2[i] = val
-            self.assertEqual(dst.to("cpu"), dst2, atol=0, rtol=0)
+        dst.masked_fill_(mask, val)
+        for i in range(num_dest):
+            if mask_cpu[i]:
+                dst2[i] = val
+        self.assertEqual(dst.to("cpu"), dst2, atol=0, rtol=0)
 
-            # test non-contiguous case
-            dst = ((torch.randn(num_dest, num_dest, num_dest) * 10).to(dtype)).permute((2, 0, 1))
-            dst2 = dst.contiguous()
-            if dtype.is_complex:
-                mask = dst.abs() > 0
-            else:
-                mask = dst > 0
-            self.assertFalse(dst.is_contiguous())
-            self.assertTrue(dst2.is_contiguous())
-            dst.masked_fill_(mask.to(mask_dtype), val)
-            dst2.masked_fill_(mask.to(mask_dtype), val)
-            self.assertEqual(dst, dst2, atol=0, rtol=0)
+    def test_masked_fill__non_contiguous(self):
+        shape = (3, 5)
 
-            if mask_dtype == torch.uint8:
-                self.assertEqual(len(w), 3)
+        x_mps = torch.randn(shape, device="mps")
+        x_cpu = x_mps.detach().clone().cpu()
+        mask_mps = torch.zeros(shape, device="mps", dtype=torch.bool)
+        mask_cpu = mask_mps.detach().clone().cpu()
 
-                warn = 'masked_fill_ received a mask with dtype torch.uint8,'
-                for wi in w:
-                    self.assertEqual(str(wi.message)[0:52], str(warn))
-            else:
-                self.assertEqual(len(w), 0)
+        x_mps_strided = x_mps.T
+        x_cpu_strided = x_cpu.T
+
+        x_mps_strided.masked_fill_(mask_mps.T, float("-inf"))
+        x_cpu_strided.masked_fill_(mask_cpu.T, float("-inf"))
+
+        self.assertEqual(x_mps_strided, x_cpu_strided)
+        self.assertFalse((x_mps_strided == float("-inf")).any())
 
     def test_nhwc_operation(self):
         def helper(shape, channels_last=False):
@@ -8298,6 +8293,29 @@ class TestLogical(TestCaseMPS):
 
         [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8, torch.bool]]
 
+    def test_min_max_nan_propagation(self):
+        def helper(dtype):
+            cpu_x = torch.tensor([1.0, float("nan"), 3.0], device="cpu")
+            mps_x = cpu_x.detach().clone().to('mps')
+
+            cpu_max = torch.max(cpu_x)
+            mps_max = torch.max(mps_x).to('cpu')
+
+            cpu_amax = torch.amax(cpu_x)
+            mps_amax = torch.amax(mps_x).to('cpu')
+
+            cpu_min = torch.min(cpu_x)
+            mps_min = torch.min(mps_x).to('cpu')
+
+            cpu_amin = torch.amin(cpu_x)
+            mps_amin = torch.amin(mps_x).to('cpu')
+
+            self.assertEqual(cpu_max, mps_max)
+            self.assertEqual(cpu_amax, mps_amax)
+            self.assertEqual(cpu_min, mps_min)
+            self.assertEqual(cpu_amin, mps_amin)
+        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.bfloat16]]
+
     def test_isin(self):
         def helper(dtype):
             shapes = [([2, 5], [3, 5, 2]), ([10, 3, 5], [20, 1, 3]),
@@ -8583,14 +8601,14 @@ class TestNNMPS(NNTestCase):
             def __init__(self):
                 super().__init__()
                 self.layer_dummy_param = Parameter(torch.empty(3, 5))
-                self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
+                self.layer_dummy_buf = Buffer(torch.zeros(1, 3, 3, 7))
 
         class Net(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.l1 = Layer()
                 self.dummy_param = Parameter(torch.empty(3, 5))
-                self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
+                self.dummy_buf = Buffer(torch.zeros(7, 3, 3, 1))
 
         l = Layer()
         n = Net()
@@ -10654,6 +10672,7 @@ class TestAdvancedIndexing(TestCaseMPS):
     supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
     supported_np_dtypes = [np.float32, np.float16, np.int64, np.int32, np.int16, np.uint8]
 
+    @unittest.skipIf(product_version < 14.0, "Skipped on macOS < 14")
     def test_nonzero_no_warning(self):
         device = "mps"
         t = torch.randn((2, 2), device=device)
