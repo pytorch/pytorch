@@ -179,8 +179,6 @@ _SYM_INT_OPS = {
     torch.sym_max,
     torch.sym_min,
     torch.sym_sqrt,
-    torch.ops.aten.sym_size.int,
-    torch.ops.aten.sym_stride.int,
 }
 
 
@@ -193,6 +191,10 @@ _SYM_BOOL_OPS = {
     operator.gt,
     torch.sym_not,
 }
+
+
+assert not any(isinstance(op, torch._ops.OpOverload) for op in _SYM_INT_OPS)
+assert not any(isinstance(op, torch._ops.OpOverload) for op in _SYM_BOOL_OPS)
 
 
 @dataclass
@@ -608,8 +610,12 @@ class GraphModuleSerializer(metaclass=Final):
         )
 
     def serialize_sym_op_inputs(self, op, args) -> List[NamedArgument]:
+        if isinstance(op, torch._ops.OpOverload):
+            args_names = [arg.name for arg in op._schema.arguments]
+        else:
+            assert op in _SYM_INT_OPS or op in _SYM_BOOL_OPS
+            args_names = list(inspect.signature(op).parameters.keys())
         serialized_args = []
-        args_names = inspect.signature(op).parameters.keys()
         for args_name, arg in zip(args_names, args):
             serialized_args.append(
                 NamedArgument(name=args_name, arg=self.serialize_input(arg))
@@ -1413,7 +1419,7 @@ class GraphModuleDeserializer(metaclass=Final):
         constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]]
         example_inputs: Optional[Tuple[Tuple[torch.Tensor, ...], Dict[str, Any]]]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.serialized_name_to_node: Dict[str, torch.fx.Node] = {}
         self.serialized_name_to_meta: Dict[str, MetaType] = {}
         self.graph = torch.fx.Graph()

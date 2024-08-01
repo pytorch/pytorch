@@ -227,7 +227,8 @@ class RowwiseParallel(ParallelStyle):
             "weight",
             nn.Parameter(distribute_tensor(module.weight, device_mesh, [Shard(1)])),
         )
-        if module.bias is not None:
+        if getattr(module, "bias", None) is not None:
+            # The Linear module has bias
             module.register_parameter(
                 "bias",
                 nn.Parameter(

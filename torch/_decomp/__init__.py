@@ -12,6 +12,7 @@ from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._prims_common import CustomOutParamAnnotation
 from torch.utils import _pytree as pytree
 
+
 __all__ = [
     "decomposition_table",
     "pre_autograd_decomposition_table",
@@ -301,6 +302,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.empty_like,
             aten._euclidean_dist.default,
             aten.expand_as,
+            aten.expand_copy,
             aten.eye,
             aten.fill,
             aten.fill_,
@@ -459,6 +461,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten._unsafe_masked_index_put_accumulate,
             aten.unsafe_split.Tensor,
             aten.unsafe_split_with_sizes,
+            aten.unsqueeze_copy,
             aten._unsafe_view,
             aten.upsample_linear1d,
             aten.upsample_bilinear2d,

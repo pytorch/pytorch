@@ -860,9 +860,9 @@ parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAUL
 parser.add_argument('--rerun-disabled-tests', action='store_true')
 parser.add_argument('--pytest-single-test', type=str, nargs=1)
 if sys.version_info >= (3, 9):
-    parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=False)
 else:
-    parser.add_argument('--showlocals', action='store_true', default=True)
+    parser.add_argument('--showlocals', action='store_true', default=False)
     parser.add_argument('--no-showlocals', dest='showlocals', action='store_false')
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
@@ -899,7 +899,7 @@ TEST_IN_SUBPROCESS = args.subprocess
 TEST_SAVE_XML = args.save_xml
 REPEAT_COUNT = args.repeat
 SEED = args.seed
-SHOW_LOCALS = args.showlocals
+SHOWLOCALS = args.showlocals
 if not getattr(expecttest, "ACCEPT", False):
     expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
@@ -1092,7 +1092,7 @@ def sanitize_pytest_xml(xml_file: str):
 
 def get_pytest_test_cases(argv: List[str]) -> List[str]:
     class TestCollectorPlugin:
-        def __init__(self):
+        def __init__(self) -> None:
             self.tests = []
 
         def pytest_collection_finish(self, session):
@@ -1137,7 +1137,7 @@ def run_tests(argv=UNITTEST_ARGS):
     if not lint_test_case_extension(suite):
         sys.exit(1)
 
-    if SHOW_LOCALS:
+    if SHOWLOCALS:
         argv = [
             argv[0],
             *(["--showlocals", "--tb=long", "--color=yes"] if USE_PYTEST else ["--locals"]),
@@ -1810,6 +1810,20 @@ def skipIfNotMiopenSuggestNHWC(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows stack"):
+    def dec_fn(fn):
+        reason = f"skipIfWindows: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if IS_WINDOWS:  # noqa: F821
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
 
 # Reverts the linalg backend back to default to make sure potential failures in one
 # test do not affect other tests
@@ -2917,6 +2931,7 @@ class TestCase(expecttest.TestCase):
         compiled = TEST_WITH_TORCHDYNAMO or TEST_WITH_AOT_EAGER or TEST_WITH_TORCHINDUCTOR
         # Is the class strict and compiling?
         strict_default = False
+        should_reset_dynamo = False
         if compiled:
             try:
                 path = inspect.getfile(type(test_cls))
@@ -2927,6 +2942,9 @@ class TestCase(expecttest.TestCase):
                     if TEST_WITH_TORCHINDUCTOR:
                         from .dynamo_test_failures import FIXME_inductor_non_strict
                         strict_default = filename not in FIXME_inductor_non_strict
+
+                        from .dynamo_test_failures import FIXME_inductor_dont_reset_dynamo
+                        should_reset_dynamo = filename not in FIXME_inductor_dont_reset_dynamo
                     else:
                         strict_default = True
             # inspect.getfile can fail with these
@@ -2947,7 +2965,7 @@ class TestCase(expecttest.TestCase):
                 strict_mode = strict_default
         nopython = getattr(test_cls, "dynamo_strict_nopython", False) and compiled
 
-        if strict_mode:
+        if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
 
         # TODO: Remove this; this is grandfathered in because we suppressed errors
@@ -3004,7 +3022,7 @@ class TestCase(expecttest.TestCase):
 
             super_run(result=result)
 
-        if strict_mode:
+        if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
 
         # Early terminate test if necessary.  If using pytest, use the -x flag instead
@@ -3747,11 +3765,10 @@ class TestCase(expecttest.TestCase):
         elif isinstance(x, Sequence) and isinstance(y, torch.Tensor):
             x = torch.as_tensor(x, dtype=y.dtype, device=y.device)
 
-        # If x or y are tensors and nested then we unbind them to a list of tensors this should allow us to compare
-        # a nested tensor to a nested tensor and a nested tensor to a list of expected tensors
-        if isinstance(x, torch.Tensor) and x.is_nested:
+        # unbind NSTs to compare them; don't do this for NJTs
+        if isinstance(x, torch.Tensor) and x.is_nested and x.layout == torch.strided:
             x = x.unbind()
-        if isinstance(y, torch.Tensor) and y.is_nested:
+        if isinstance(y, torch.Tensor) and y.is_nested and y.layout == torch.strided:
             y = y.unbind()
 
         error_metas = not_close_error_metas(
@@ -4125,8 +4142,8 @@ class TestCase(expecttest.TestCase):
         env["PYTORCH_API_USAGE_STDERR"] = "1"
         # remove CI flag since this is a wrapped test process.
         # CI flag should be set in the parent process only.
-        if "CI" in env.keys():
-            del env["CI"]
+        env.pop("CI", None)
+        env.pop("TEST_SHOWLOCALS", None)
         (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
         return stderr.decode('ascii')
 
