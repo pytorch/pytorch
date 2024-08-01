@@ -339,26 +339,13 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   const auto d_qk = params.query.sym_size(3);
   const auto d_v = params.value.sym_size(3);
   long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
-  if (d_qk % 8 != 0 || d_v % 8 != 0) {
-    if (debug) {
-      TORCH_WARN("head_dim should be a multiple of 8");
-    }
-    return false;
-  }
-  constexpr auto head_dim_limit = 128;
-  if (d_qk > head_dim_limit || d_v > head_dim_limit) {
-    if (debug) {
-      TORCH_WARN("head_dim should be no more than ", head_dim_limit);
-    }
-    return false;
-  }
   if (cudnn_version < 8903) {
     if (debug) {
       TORCH_WARN("SDPA fprop requires cudnn 8.9.3 or higher");
     }
     return false;
   }
-  if (params.dropout != 0.0 && cudnn_version < 8906) {
+  if (cudnn_version < 8906 && params.dropout != 0.0) {
     if (debug) {
       TORCH_WARN("Dropout reference is only supported on 8.9.6 onwards.");
     }
@@ -371,7 +358,7 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       }
       return false;
     }
-    if ((s_q % 64 != 0 || s_k % 64 != 0) && params.dropout != 0.0) {
+    if (params.dropout != 0.0 && (s_q % 64 != 0 || s_k % 64 != 0)) {
       if (debug) {
         TORCH_WARN(
             "s_q not a multiple of 64 with padding/dropout is not supported with cudnn version 9.0.0");
@@ -379,9 +366,22 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       return false;
     }
   }
-  if (s_k % 64 != 0 && cudnn_version < 8906) {
+  if (cudnn_version < 8906 && s_k % 64 != 0 ) {
     if (debug) {
       TORCH_WARN("not-multiple-of-64 seq_kv is not supported below 8.9.6");
+    }
+    return false;
+  }
+  if (d_qk % 8 != 0 || d_v % 8 != 0) {
+    if (debug) {
+      TORCH_WARN("head_dim should be a multiple of 8");
+    }
+    return false;
+  }
+  constexpr auto head_dim_limit = 128;
+  if (d_qk > head_dim_limit || d_v > head_dim_limit) {
+    if (debug) {
+      TORCH_WARN("head_dim should be no more than ", head_dim_limit);
     }
     return false;
   }
