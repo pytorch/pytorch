@@ -7,7 +7,6 @@ from typing import Dict, List, NamedTuple
 
 import torch
 import torch.utils.bundled_inputs
-
 from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing._internal.common_utils import run_tests, TestCase
 

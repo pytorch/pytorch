@@ -2,8 +2,6 @@
 
 #include <cmath>
 #include <cstring>
-#include <type_traits>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -23,7 +21,6 @@ namespace tensorexpr {
 
 class InterpValue {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   InterpValue() : dtype_(kInt) {
     Intvalues.push_back(0);
   }
@@ -44,7 +41,6 @@ class InterpValue {
   InterpValue(Type v) : dtype_(k##Name) { \
     Name##values.push_back(v);            \
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_CTOR);
 #undef VALUE_CTOR
 
@@ -61,11 +57,8 @@ class InterpValue {
 #define VALUE_VEC_CTOR(Type, Name)        \
   InterpValue(const std::vector<Type>& v) \
       : dtype_(Dtype(k##Name, v.size())), Name##values(v) {}
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_VEC_CTOR);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   VALUE_VEC_CTOR(c10::quint8, QUInt8)
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   VALUE_VEC_CTOR(c10::qint8, QInt8)
 #undef VALUE_VEC_CTOR
 
@@ -89,7 +82,7 @@ class InterpValue {
   VALUE_STORAGE(c10::qint8, QInt8);
   VALUE_STORAGE(c10::quint8, QUInt8);
 #undef VALUE_STORAGE
-  void* ptr;
+  void* ptr{nullptr};
 };
 
 #define VALUE_AS_DISPATCH(Type, Name)         \
@@ -157,12 +150,11 @@ class TORCH_API SimpleIREvaluator : public CodeGen {
 
   template <typename... Ts>
   void operator()(const Ts&... ts) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<CallArg> args({CallArg(ts)...});
     call(args);
   }
 
-  void bindVar(VarPtr v, ExprPtr e);
+  void bindVar(const VarPtr& v, const ExprPtr& e);
   InterpValue value() const;
 
  private:
@@ -182,17 +174,13 @@ class ExprEval {
   using CallArg = CodeGen::CallArg;
 
   template <typename... Ts>
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ExprEval(const ExprHandle& expr, Ts... ts)
       : ExprEval(expr, {BufferArg(ts)...}) {}
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ExprEval(const ExprHandle& expr, const std::vector<BufferArg>& buffer_args)
       : dtype_(expr.dtype()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<BufferArg> buffer_args_extended = buffer_args;
     BufHandle ret_buf("ret_val", {1}, dtype_);
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<ExprHandle> indices;
     ExprHandle zero = IntImm::make(0);
     for (size_t i = 0; i < ret_buf.ndim(); i++) {
@@ -226,21 +214,17 @@ class ExprEval {
   }
 
   void call(const std::vector<CallArg>& call_args) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<CallArg> call_args_extended = call_args;
     switch (dtype_.scalar_type()) {
-#define TYPE_CASE(Type, Name)                           \
-  case ScalarType::Name: {                              \
-    std::vector<Type> ret_val_arg(1);                   \
-    call_args_extended.push_back(CallArg(ret_val_arg)); \
-    codegen_->call(call_args_extended);                 \
-    ret_value_ = InterpValue(ret_val_arg[0]);           \
+#define TYPE_CASE(Type, Name)                     \
+  case ScalarType::Name: {                        \
+    std::vector<Type> ret_val_arg(1);             \
+    call_args_extended.emplace_back(ret_val_arg); \
+    codegen_->call(call_args_extended);           \
+    ret_value_ = InterpValue(ret_val_arg[0]);     \
   } break;
-      // NOLINTNEXTLINE(modernize-use-emplace)
       AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TYPE_CASE);
-      // NOLINTNEXTLINE(modernize-use-emplace)
       TYPE_CASE(c10::quint8, QUInt8);
-      // NOLINTNEXTLINE(modernize-use-emplace)
       TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
       case ScalarType::Bool: {
@@ -310,14 +294,14 @@ std::optional<int64_t> evalInt(ExprPtr e);
 
 // Substitutes the given vars with their corresponding expressions in the input
 // expression.
-inline ExprPtr Substitute(ExprPtr expr, const VarMapping& var_mapping) {
+inline ExprPtr Substitute(const ExprPtr& expr, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return expr->accept_mutator(&var_sub);
 }
 
 // Substitutes the given vars with their corresponding expressions in the input
 // statement.
-inline StmtPtr Substitute(StmtPtr stmt, const VarMapping& var_mapping) {
+inline StmtPtr Substitute(const StmtPtr& stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return stmt->accept_mutator(&var_sub);
 }

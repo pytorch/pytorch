@@ -3,12 +3,11 @@ import builtins
 import logging
 import operator
 import warnings
-
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.export._trace
-
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     ConstantArgument,
@@ -20,6 +19,7 @@ from torch.export.graph_signature import (
 )
 from torch.fx import subgraph_rewriter
 from torch.onnx.utils import _create_jit_graph
+
 
 log = logging.getLogger(__name__)
 
@@ -964,6 +964,16 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
             self.unsupported_node_list.append(node)
 
 
+@contextmanager
+def disable_logging(log):
+    disabled = log.disabled
+    log.disabled = True
+    try:
+        yield
+    finally:
+        log.disabled = disabled
+
+
 class TS2EPConverter:
     # TorchScript model to ExportedProgram converter
     def __init__(
@@ -972,21 +982,8 @@ class TS2EPConverter:
         sample_args: Tuple[Any, ...],
         sample_kwargs: Optional[Dict[str, Any]] = None,
     ):
-        log.info(
-            """
-TS2EPConverter logging starts from here.
-
-INFO: (TORCH_LOGS="export" <cmd>)
-    * Log TorchScript IR.
-
-DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
-    * Log conversion IR by IR in a format of [<conversion handler name>] converts [<IR>].
-        """
-        )
-
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
-        log.info("TorchScript graph\n\n%s\n", self.ts_graph)
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
@@ -1015,6 +1012,19 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         self.lift_tensor_constants_to_buffer()
 
     def convert(self) -> ExportedProgram:
+        log.info(
+            """
+TS2EPConverter logging starts from here.
+
+INFO: (TORCH_LOGS="export" <cmd>)
+    * Log TorchScript IR.
+
+DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
+    * Log conversion IR by IR in a format of [<conversion handler name>] converts [<IR>].
+        """
+        )
+        log.info("TorchScript graph\n\n%s\n", self.ts_graph)
+
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
 
         graph_converter = TS2FXGraphConverter(
@@ -1045,6 +1055,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
 
         return ep
 
+    @disable_logging(log)
     def explain(self, print_output=True):
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
 
