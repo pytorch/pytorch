@@ -1075,7 +1075,7 @@ class VariableBuilder:
                 fake_script_obj,
                 source=self.source,
             )
-        elif isinstance(value, MutableMapping):
+        elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return MutableMappingVariable(value, source=self.source)
         else:
