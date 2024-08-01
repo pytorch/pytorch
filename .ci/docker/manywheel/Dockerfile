@@ -114,8 +114,9 @@ RUN yum install -y \
         xz \
         yasm
 RUN yum install -y \
-    https://repo.ius.io/ius-release-el7.rpm
-RUN yum --enablerepo=extras install -y epel-release
+    https://repo.ius.io/ius-release-el7.rpm \
+    https://ossci-linux.s3.amazonaws.com/epel-release-7-14.noarch.rpm
+
 RUN yum swap -y git git236-core
 # git236+ would refuse to run git commands in repos owned by other users
 # Which causes version check to fail, as pytorch repo is bind-mounted into the image
