@@ -15,9 +15,6 @@ import torch._numpy as tnp
 import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -27,6 +24,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented, UserError, UserErrorType
@@ -49,10 +47,16 @@ from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
 
+
 try:
     import numpy as np
 except ModuleNotFoundError:
     np = None
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
 
 log = logging.getLogger(__name__)
 
