@@ -12387,9 +12387,10 @@ if __name__ == '__main__':
             torch.testing.assert_close(result, ref_output, atol=atol, rtol=rtol)
             mask = torch.tensor([[1]], device=device) == 1
             result = model(encoder_input, src_key_padding_mask=mask)
+            fast_path_device = result.is_cuda or result.is_cpu
             result = result.cpu().detach().numpy()
             # Non Fast Paths
-            if training or not batch_first or TEST_WITH_CROSSREF:
+            if training or not batch_first or TEST_WITH_CROSSREF or not fast_path_device:
                 # We changed the semenatic, on the non fast path so that fully masked out rows return
                 # 0 from attention thus NaNs should no longer be present and the output should be nonzero
                 # due to skip connections
