@@ -79,7 +79,7 @@ class TestUnflatten(TestCase):
         class Child2(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("child2buffer", torch.ones(2, 3))
+                self.child2buffer = torch.nn.Buffer(torch.ones(2, 3))
 
             def forward(self, x):
                 return x - self.child2buffer
@@ -121,7 +121,7 @@ class TestUnflatten(TestCase):
         class Child(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("child2buffer", torch.ones(2, 3))
+                self.child2buffer = torch.nn.Buffer(torch.ones(2, 3))
 
             def forward(self, x):
                 self.child2buffer.add_(x)
@@ -157,7 +157,7 @@ class TestUnflatten(TestCase):
         class Child(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("child2buffer", torch.ones(2, 3))
+                self.child2buffer = torch.nn.Buffer(torch.ones(2, 3))
 
             def forward(self, x):
                 return x - self.child2buffer
@@ -388,7 +388,7 @@ class TestUnflatten(TestCase):
         class Child2(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("child2buffer", torch.ones(2, 3))
+                self.child2buffer = torch.nn.Buffer(torch.ones(2, 3))
 
             def forward(self, x):
                 return x - self.child2buffer
@@ -481,7 +481,7 @@ class TestUnflatten(TestCase):
             def __init__(self):
                 super().__init__()
                 self.leaf = Leaf()
-                self.register_buffer("buffer", torch.randn(4, 4))
+                self.buffer = torch.nn.Buffer(torch.randn(4, 4))
 
             def forward(self, x, z):
                 return self.buffer.sum() + self.leaf(x).sum() + z[0].sum() + z[1].sum()
@@ -663,7 +663,7 @@ class TestUnflatten(TestCase):
         class Module2(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.rand(3, 4))
+                self.buffer = torch.nn.Buffer(torch.rand(3, 4))
                 self.register_parameter("param", torch.nn.Parameter(torch.rand(3, 4)))
 
             def forward(self, x):
@@ -672,7 +672,7 @@ class TestUnflatten(TestCase):
         class Module1(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.rand(3, 4))
+                self.buffer = torch.nn.Buffer(torch.rand(3, 4))
                 self.register_parameter("param", torch.nn.Parameter(torch.rand(3, 4)))
 
             def forward(self, x):
@@ -778,7 +778,7 @@ class TestUnflatten(TestCase):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("const", torch.ones(4, 8))
+                self.const = torch.nn.Buffer(torch.ones(4, 8))
                 self.layers = torch.nn.ModuleList([layer() for _ in range(2)])
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
