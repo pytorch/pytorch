@@ -29,6 +29,7 @@ Documentation
    elastic/metrics
    elastic/events
    elastic/subprocess_handler
+   elastic/control_plane
 
 .. toctree::
    :maxdepth: 1

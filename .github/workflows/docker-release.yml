@@ -149,3 +149,10 @@ jobs:
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
+
+  validate:
+    needs: build
+    uses: pytorch/builder/.github/workflows/validate-docker-images.yml@main
+    with:
+      channel: nightly
+      ref: main

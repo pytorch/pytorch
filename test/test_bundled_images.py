@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # Owner(s): ["oncall: mobile"]
+# mypy: allow-untyped-defs
 
 import io
 
@@ -8,6 +9,7 @@ import cv2
 import torch
 import torch.utils.bundled_inputs
 from torch.testing._internal.common_utils import TestCase
+
 
 torch.ops.load_library("//caffe2/torch/fb/operators:decode_bundled_image")
 

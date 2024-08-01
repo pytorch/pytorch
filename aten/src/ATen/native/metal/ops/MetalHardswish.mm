@@ -9,13 +9,11 @@
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
 #include <torch/library.h>
 
-namespace at {
-namespace native {
-namespace metal {
+namespace at::native::metal {
 
 using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
 
-Tensor& hardswish_(Tensor& input) {
+static Tensor& hardswish_(Tensor& input) {
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   IntArrayRef outputSize = input.sizes();
@@ -47,7 +45,7 @@ Tensor& hardswish_(Tensor& input) {
   return input;
 }
 
-Tensor hardswish(const at::Tensor& input) {
+static Tensor hardswish(const at::Tensor& input) {
   MPSImage* X = imageFromTensor(input);
   IntArrayRef outputSize = input.sizes();
   MetalTensorImplStorage mt{outputSize.vec()};
@@ -82,8 +80,6 @@ Tensor hardswish(const at::Tensor& input) {
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::hardswish_"), TORCH_FN(hardswish_));
   m.impl(TORCH_SELECTIVE_NAME("aten::hardswish"), TORCH_FN(hardswish));
-};
+}
 
-}
-}
-}
+} // namespace at::native::metal
