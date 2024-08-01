@@ -248,7 +248,7 @@ class ExportGraphSignature:
     e.g. If following module is exported::
 
         class CustomModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super(CustomModule, self).__init__()
 
                 # Define a parameter
