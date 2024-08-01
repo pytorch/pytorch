@@ -186,7 +186,7 @@ def _extract_graph_with_inputs_outputs(
             # joint_graph.nodes).
             continue
         elif node.op == "placeholder":
-            env[node] = InvalidNode
+            env[node] = InvalidNode  # type: ignore[assignment]
         elif node.op == "call_function":
             all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             all_args = [
@@ -195,7 +195,7 @@ def _extract_graph_with_inputs_outputs(
                 if isinstance(x, fx.Node)
             ]
             if any(all_args):
-                env[node] = InvalidNode
+                env[node] = InvalidNode  # type: ignore[assignment]
                 continue
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == "get_attr":
@@ -213,7 +213,7 @@ def _extract_graph_with_inputs_outputs(
             output_values.append(env[x])
         else:
             output_values.append(x)
-    new_graph.output(output_values)
+    new_graph.output(tuple(output_values))
 
     new_graph.eliminate_dead_code()
     new_graph.lint()
@@ -739,7 +739,7 @@ def functionalize_rng_ops(
     sym_node_start_idx = len(fw_outputs) - num_sym_nodes
     outputs = (
         fw_outputs[:sym_node_start_idx]
-        + fw_rng_state_outputs
+        + tuple(fw_rng_state_outputs)
         + fw_outputs[sym_node_start_idx:]
     )
     fw_module.graph.output(outputs)

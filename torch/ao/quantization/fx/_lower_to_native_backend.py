@@ -499,9 +499,7 @@ def fold_weight(
 
     quantized_model = GraphModule(quantized_model, folded_graph)
     quantized_model._register_state_dict_hook(_save_packed_weight)
-    quantized_model._register_load_state_dict_pre_hook(
-        _load_packed_weight, with_module=True
-    )
+    quantized_model.register_load_state_dict_pre_hook(_load_packed_weight)
     return quantized_model
 
 
@@ -571,7 +569,7 @@ def _match_static_pattern(
         match_key = type(_get_module(ref_node, modules))
     else:
         expected_op = "call_function"
-        match_key = ref_node.target
+        match_key = ref_node.target  # type: ignore[assignment]
     if ref_node.op != expected_op or match_key not in matching_modules_or_ops:
         return SKIP_LOWERING_VALUE
 
@@ -591,7 +589,7 @@ def _match_static_pattern(
     if not matched_dequantize:
         return SKIP_LOWERING_VALUE
 
-    return (q_node, relu_node, ref_node)
+    return (q_node, relu_node, ref_node)  # type: ignore[return-value]
 
 
 def _match_static_pattern_with_two_inputs(
@@ -689,8 +687,8 @@ def _lower_static_weighted_ref_module(
                 continue
         else:
             q_class = STATIC_LOWER_MODULE_MAP[ref_class]
-        output_scale = getattr(model, scale_node.target)
-        output_zero_point = getattr(model, zero_point_node.target)
+        output_scale = getattr(model, scale_node.target)  # type: ignore[arg-type]
+        output_zero_point = getattr(model, zero_point_node.target)  # type: ignore[arg-type]
         q_module = q_class.from_reference(ref_module, output_scale, output_zero_point)
         # replace reference module with quantized module
         parent_name, module_name = _parent_name(ref_node.target)
@@ -700,7 +698,7 @@ def _lower_static_weighted_ref_module(
         assert len(ref_node.args) == 1
         dq_node = ref_node.args[0]
         assert isinstance(dq_node, Node)
-        ref_node.replace_input_with(dq_node, dq_node.args[0])
+        ref_node.replace_input_with(dq_node, dq_node.args[0])  # type: ignore[arg-type]
         q_node.replace_all_uses_with(ref_node)
         model.graph.erase_node(q_node)
         model.graph.erase_node(scale_node)
@@ -749,8 +747,8 @@ def _lower_static_weighted_ref_module_with_two_inputs(
                 continue
         else:
             continue
-        output_scale = getattr(model, scale_node.target)
-        output_zero_point = getattr(model, zero_point_node.target)
+        output_scale = getattr(model, scale_node.target)  # type: ignore[arg-type]
+        output_zero_point = getattr(model, zero_point_node.target)  # type: ignore[arg-type]
         q_module = q_class.from_reference(ref_module, output_scale, output_zero_point)
         # replace reference module with quantized module
         parent_name, module_name = _parent_name(ref_node.target)
@@ -763,7 +761,7 @@ def _lower_static_weighted_ref_module_with_two_inputs(
                 continue
             dq_node = arg
             assert isinstance(dq_node, Node)
-            ref_node.replace_input_with(dq_node, dq_node.args[0])
+            ref_node.replace_input_with(dq_node, dq_node.args[0])  # type: ignore[arg-type]
 
         q_node.replace_all_uses_with(ref_node)
         model.graph.erase_node(q_node)
@@ -906,7 +904,7 @@ def _lower_static_weighted_ref_functional(
                 prepack_args[5], prepack_args[6] = prepack_args[6], prepack_args[5]
         else:
             raise ValueError(f"Lowering is not supported for op '{func_node.target}'")
-        with model.graph.inserting_before(output_scale_node):
+        with model.graph.inserting_before(output_scale_node):  # type: ignore[arg-type]
             # kwargs of the func node are needed for prepack op (i.e., quantized::linear_prepack)
             # They are not needed for compute op (i.e., quantized::linear)
             kwargs = func_node.kwargs
@@ -1107,7 +1105,7 @@ def _lower_quantized_binary_op(model: GraphModule, qconfig_map: Dict[str, QConfi
             dq_node = arg
             assert isinstance(dq_node, Node)
             dn_input = dq_node.args[0]
-            bop_node.replace_input_with(dq_node, dn_input)
+            bop_node.replace_input_with(dq_node, dn_input)  # type: ignore[arg-type]
             num_dq_nodes += 1
         assert num_dq_nodes > 0
 

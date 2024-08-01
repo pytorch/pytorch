@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+from typing import Any, Callable
 
 import torch
 from torch._inductor.compile_fx import fake_tensor_prop
@@ -14,6 +15,7 @@ from ..pattern_matcher import (
     init_once_fakemode,
     KeywordArg,
     Match,
+    PatternExpr,
     PatternMatcherPass,
     register_graph_pattern,
     register_replacement,
@@ -96,7 +98,11 @@ def lazy_init():
     binary_folding_init()
 
 
-def register_freezing_graph_pattern(pattern, extra_check=_return_true, pass_number=0):
+def register_freezing_graph_pattern(
+    pattern: PatternExpr,
+    extra_check: Callable[[Match], bool] = _return_true,
+    pass_number: int = 0,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     return register_graph_pattern(
         pattern,
         extra_check=extra_check,
@@ -223,5 +229,5 @@ def unnecessary_dtype_convert(match: Match, **kwargs):
     """Remove unnecessary dtype conversion op, probably left as a result of Conv-Bn folding"""
     graph = match.graph
     node = match.output_node()
-    node.replace_all_uses_with(node.args[0])
+    node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
     graph.erase_node(node)
