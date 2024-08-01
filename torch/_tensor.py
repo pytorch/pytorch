@@ -269,9 +269,9 @@ class Tensor(torch._C.TensorBase):
             # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
             # this would reconstruct the BFloat16 tensor from numpy.
             numpy_tensor = (
-                self.cpu().numpy()
+                self.cpu()
                 if self.dtype != torch.bfloat16
-                else self.cpu().to(torch.float32).numpy()
+                else self.cpu().to(torch.float32)
             )
             return (
                 torch._utils._rebuild_device_tensor_from_numpy,
