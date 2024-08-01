@@ -92,8 +92,9 @@ else:
                     if start is None:
                         start = i
                     end = i
-                    mesh_dim_names.pop(i)
-                mesh_dim_names.insert(start, name)
+                mesh_dim_names[start] = name
+                for i in range(start + 1, end + 1):
+                    mesh_dim_names.pop(start + 1)
                 mesh_tensor = mesh_tensor.flatten(start_dim=start, end_dim=end)
 
             # submesh_dims are the mesh dimension of the submesh in the parent mesh.
@@ -127,9 +128,24 @@ else:
                 if cur_rank in mesh_nd:
                     res_submesh = submesh
 
-            res_submesh._dim_group_infos = [  # type: ignore[possibly-undefined]
-                parent_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims
-            ]
+            if name in parent_mesh.view_dim_submesh_names:
+                backend, pg_options = None, None
+                dim_group = new_group(
+                    ranks=mesh_nd,
+                    backend=backend,
+                    pg_options=pg_options,
+                )
+                res_submesh._dim_group_infos = [
+                    (
+                        _get_group_tag(not_none(dim_group)),
+                        mesh_nd,
+                        dim_group.group_name,
+                    )
+                ]
+            else:
+                res_submesh._dim_group_infos = [  # type: ignore[possibly-undefined]
+                    parent_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims
+                ]
             self.child_to_parent_mapping[res_submesh] = parent_mesh
 
             return res_submesh

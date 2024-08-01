@@ -412,14 +412,26 @@ def _templated_ring_attention_backward(
     next_kv = None
     next_grad_kv = None
     rest: List[Any]
-    grad_query, grad_key, grad_value = None, None, None
     grad_query_, grad_key_, grad_value_ = None, None, None
 
+    grad_query = torch.zeros_like(query, dtype=torch.float32)
+    grad_key = torch.zeros_like(key, dtype=torch.float32)
+    grad_value = torch.zeros_like(value, dtype=torch.float32)
+
+    key = key.contiguous()
+    value = value.contiguous()
     for i in range(size):
-        if i == 0:
+        if next_kv is not None:
+            buffer = _maybe_wait(next_kv)
+            pointer = 0
+            key = buffer[pointer : pointer + key.numel()].reshape(key.shape)
+            pointer += key.numel()
+            value = buffer[pointer : pointer + value.numel()].reshape(value.shape)
+            pointer += value.numel()
+
+        if i != size - 1:
             next_kv = torch.cat([key.flatten(), value.flatten()])
             next_kv = _ring_rotate(next_kv, pg, send_to_next=True)
-            grad_query = torch.zeros_like(query, dtype=torch.float32)
 
         is_causal_behavior = _is_causal_behavior(
             rank=rank, world_size=size, i=i, is_causal=is_causal
@@ -462,23 +474,13 @@ def _templated_ring_attention_backward(
             grad_key_ = torch.zeros_like(key)
             grad_value_ = torch.zeros_like(value)
 
-        buffer = next_kv if i == 0 else next_grad_kv
-        assert buffer is not None
-        buffer = _maybe_wait(buffer)
-        pointer = 0
-
-        # Get the new key and value for the (i + 1) round.
-        if i != size - 1:
-            key = buffer[pointer : pointer + key.numel()].reshape(key.shape)
-            pointer += key.numel()
-            value = buffer[pointer : pointer + value.numel()].reshape(value.shape)
-            pointer += value.numel()
-
         # Get the grad key and grad value for the i round.
         if i == 0:
-            grad_key = grad_key_
-            grad_value = grad_value_
+            grad_key += grad_key_
+            grad_value += grad_value_
         else:
+            buffer = next_grad_kv
+            pointer = 0
             grad_key = buffer[pointer : pointer + grad_key.numel()].reshape(
                 grad_key.shape
             )
@@ -495,18 +497,7 @@ def _templated_ring_attention_backward(
                 grad_value += grad_value_
 
         # Send the key, value, grad key, and grad value to the next rank.
-        if i >= size - 2:
-            next_grad_kv = torch.cat([grad_key.flatten(), grad_value.flatten()])
-        else:
-            next_grad_kv = torch.cat(
-                [
-                    key.flatten(),
-                    value.flatten(),
-                    grad_key.flatten(),
-                    grad_value.flatten(),
-                ]
-            )
-
+        next_grad_kv = torch.cat([grad_key.flatten(), grad_value.flatten()])
         next_grad_kv = _ring_rotate(next_grad_kv, pg, send_to_next=True)
 
         if i <= rank or not _enable_load_balance:
@@ -521,7 +512,7 @@ def _templated_ring_attention_backward(
     assert grad_key_ is not None
     assert grad_value_ is not None
     grad_query = grad_query.to(query.dtype)
-    next_grad_kv = _maybe_wait(next_grad_kv)
+    next_grad_kv = _maybe_wait(next_grad_kv).to(key.dtype)
     grad_key = next_grad_kv[: grad_key.numel()].reshape(grad_key.shape)
     grad_value = next_grad_kv[grad_value.numel() :].reshape(grad_value.shape)
     return (
@@ -699,7 +690,7 @@ class AttentionContextParallel(ParallelStyle):
         for input in inputs:
             if isinstance(input, torch.Tensor) and not isinstance(input, DTensor):
                 input = DTensor.from_local(
-                    input, device_mesh, placement, run_check=False
+                    input.contiguous(), device_mesh, placement, run_check=False
                 )
 
             if isinstance(input, torch.Tensor) and input.requires_grad:

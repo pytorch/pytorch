@@ -50,8 +50,7 @@ if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
 class RingAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
-        # Cap to 4 as the more GPUs we use the more numerical errors we get.
-        return min(torch.cuda.device_count(), 2)
+        return torch.cuda.device_count()
 
     @skip_if_lt_x_gpu(2)
     @skipIfRocm  # Missing _c10d_functional_autograd::all_to_all_single
@@ -89,10 +88,6 @@ class RingAttentionTest(DTensorTestBase):
         torch.distributed._tensor.experimental.attention._enable_load_balance = (
             load_balance
         )
-
-        if is_causal and compiled:
-            # TODO: remove this after we fix the wait_tensor being removed issue.
-            return
 
         q = torch.rand(
             (bs, nheads, self.world_size * query_tokens, dim),
@@ -148,7 +143,10 @@ class RingAttentionTest(DTensorTestBase):
                         # Compiler and CommDebugMode do not work well together.
                         self.assertDictEqual(
                             comm_mode.get_comm_counts(),
-                            {c10d_functional.all_to_all_single: self.world_size * 2},
+                            {
+                                c10d_functional.all_to_all_single: self.world_size * 3
+                                - 2
+                            },
                         )
 
             # Due to numerical error, we need to choose different atol for different
@@ -168,7 +166,7 @@ class RingAttentionTest(DTensorTestBase):
             atol = (
                 2e-06
                 if backend == SDPBackend.EFFICIENT_ATTENTION
-                else 2e-2 * self.world_size
+                else 8e-3 * self.world_size
             )
             self.assertTrue(torch.allclose(q.grad, cp_dq, atol=atol))
             self.assertTrue(torch.allclose(k.grad, cp_dk, atol=atol))
