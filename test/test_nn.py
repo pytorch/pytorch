@@ -12388,7 +12388,8 @@ if __name__ == '__main__':
             mask = torch.tensor([[1]], device=device) == 1
             result = model(encoder_input, src_key_padding_mask=mask)
             result = result.cpu().detach().numpy()
-            if training or not batch_first:
+            # Non Fast Paths
+            if training or not batch_first or TEST_WITH_CROSSREF:
                 # We changed the semenatic, on the non fast path so that fully masked out rows return
                 # 0 from attention thus NaNs should no longer be present and the output should be nonzero
                 # due to skip connections
