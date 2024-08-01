@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <limits>
 
 #ifdef _MSC_VER
 #include <cstdio>
@@ -14,10 +15,10 @@
 #endif
 
 /* Library header */
-#include "caffe2/core/logging.h"
 #include "caffe2/utils/fixed_divisor.h"
 #include "caffe2/utils/threadpool/pthreadpool.h"
 
+#include <c10/util/Logging.h>
 
 static inline size_t divide_round_up(size_t dividend, size_t divisor) {
   if (dividend % divisor == 0) {

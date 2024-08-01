@@ -30,7 +30,7 @@ void PrePackingOpsFolder(
           if (optional_outputs) {
             auto outputs = optional_outputs.value();
             TORCH_CHECK(outputs.size() == 1, "Prepack ops have single output");
-            auto attr_name = attr_name_base + c10::to_string(uid++);
+            auto attr_name = attr_name_base + std::to_string(uid++);
             TORCH_CHECK(
                 !(m.type()->findAttributeSlot(attr_name)),
                 "Attribute name ",

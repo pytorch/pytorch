@@ -340,7 +340,7 @@ std::unique_ptr<AnyModulePlaceholder> AnyModule::make_holder(
       "AnyModule cannot store modules that return void "
       "(you can return a dummy value).");
   return std::make_unique<
-      AnyModuleHolder<decay_t<ModuleType>, ArgumentTypes...>>(
+      AnyModuleHolder<std::decay_t<ModuleType>, ArgumentTypes...>>(
       std::move(module));
 }
 

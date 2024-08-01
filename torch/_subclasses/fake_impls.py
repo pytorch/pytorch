@@ -9,7 +9,7 @@ from typing import Callable, Union
 import torch
 import torch._custom_op
 import torch._logging
-
+from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
     elementwise_dtypes,
@@ -18,7 +18,6 @@ from torch._prims_common import (
     is_float_dtype,
     is_integer_dtype,
 )
-
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
     DynamicOutputShapeException,
@@ -28,8 +27,8 @@ from torch._subclasses.fake_tensor import (
     UnsupportedOperatorException,
 )
 from torch.fx.operator_schemas import normalize_function
-
 from torch.utils._stats import count_label
+
 
 pytree = torch.utils._pytree
 
@@ -54,9 +53,7 @@ def ordered_set(*items):
 # This function indicates if the backend device
 # supports non-contiguous tensors
 def is_noncontiguous_supported(device):
-    if device.type == "hpu":
-        return False
-    return True
+    return device.type != "hpu"
 
 
 _like_tensor_constructors = ordered_set(
@@ -764,6 +761,62 @@ def meta__scaled_dot_product_flash(fake_mode, func, *args, **kwargs):
     )
 
 
+@register_op_impl(aten._scaled_dot_product_cudnn_attention.default)
+def meta__scaled_dot_product_cudnn(fake_mode, func, *args, **kwargs):
+    _, kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    query = kwargs["query"]
+    key = kwargs["key"]
+    value = kwargs["value"]
+    compute_log_sumexp = kwargs["compute_log_sumexp"]
+    # unused: attn_bias, dropout_p, is_causal, return_debug_mask, scale
+
+    def convert_tensor(t, device):
+        return FakeTensor(fake_mode, t, device)
+
+    B = query.size(0)
+    H = query.size(1)
+    S_Q = query.size(2)
+    S_KV = key.size(2)
+    D_QK = query.size(-1)
+    D_V = value.size(-1)
+
+    res = convert_tensor(
+        torch.empty(B, H, S_Q, D_V, dtype=query.dtype, device="meta"),
+        query.device,
+    )
+
+    logsum_exp = convert_tensor(
+        torch.empty(
+            (B, H, S_Q),
+            dtype=torch.float,
+            device="meta",
+        ),
+        query.device,
+    )
+
+    # See Note [Seed and Offset]:
+    seed = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
+    offset = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
+    return (
+        res,
+        logsum_exp,
+        None,
+        None,
+        S_Q,
+        S_KV,
+        seed,
+        offset,
+        None,
+    )
+
+
 @register_op_impl(aten._scaled_dot_product_efficient_attention.default)
 def meta__scaled_dot_product_efficient(fake_mode, func, *args, **kwargs):
     _, kwargs = normalize_function(
@@ -903,7 +956,7 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     max_seqlen_q = kwargs["max_seqlen_q"]
     max_seqlen_k = kwargs["max_seqlen_k"]
     compute_log_sumexp = kwargs["compute_log_sumexp"]
-    # unused: bias, cu_seqlens_k, dropout_p, custom_mask_type, scale, causal_diagonal, seqlen_k
+    # unused: bias, cu_seqlens_k, dropout_p, custom_mask_type, scale, seqlen_k
 
     def convert_tensor(t, device):
         return FakeTensor(fake_mode, t, device)
@@ -1162,6 +1215,14 @@ def make_fast_binary_impl(slow_ref):
     return fast_binary_impl
 
 
+# disable the python dispatcher to avoid decomposing detach() further
+# (proxy_mode should still decompose detach() though)
+def fast_detach(fake_mode, x):
+    with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
+        out = torch.ops.aten.detach.default(x)
+    return FakeTensor(fake_mode, out, x.device)
+
+
 @functools.lru_cache(None)
 def get_fast_op_impls():
     import torch._refs
@@ -1176,4 +1237,5 @@ def get_fast_op_impls():
     register_fast_op_impl(torch.ops.aten.div.Tensor)(
         make_fast_binary_impl(torch._refs.div)
     )
+    register_fast_op_impl(torch.ops.aten.detach.default)(fast_detach)
     return FAST_OP_IMPLEMENTATIONS
