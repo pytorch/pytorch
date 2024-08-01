@@ -29,6 +29,7 @@ __all__ = [
     "impl_abstract",
     "register_fake",
     "register_torch_dispatch",
+    "register_vmap",
     "get_ctx",
     "custom_op",
     "infer_schema",
