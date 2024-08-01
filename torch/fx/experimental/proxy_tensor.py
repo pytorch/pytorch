@@ -44,7 +44,7 @@ from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakTensorKeyDictionary, WeakIdKeyDictionary, _WeakHashRef
 from typing import (
-    Any, Callable, Dict, List, Optional, Tuple, Union, Mapping, Sequence,
+    Any, Callable, Dict, List, Optional, Tuple, Union, Mapping, Sequence, Generic,
     TypeVar, Generator, Protocol, overload, Type, TYPE_CHECKING)
 from typing_extensions import Concatenate, ParamSpec, Self
 from weakref import WeakKeyDictionary
@@ -174,7 +174,25 @@ def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
     return bool(get_proxy_slot(obj, tracer, False, lambda _: True))
 
 
-_PySymProxyType = Callable[[], Proxy]
+class Thunk(Generic[R]):
+    f: Optional[Callable[[], R]]
+    r: Optional[R]
+
+    __slots__ = ['f', 'r']
+
+    def __init__(self, f: Callable[[], R]):
+        self.f = f
+        self.r = None
+
+    def force(self) -> R:
+        if self.f is None:
+            return self.r  # type: ignore[return-value]
+        self.r = self.f()
+        self.f = None
+        return self.r
+
+
+_PySymProxyType = Thunk[Proxy]
 
 
 @overload
@@ -339,12 +357,12 @@ def set_meta(proxy: Proxy, val: _ExtractValType) -> Proxy:
         proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     return proxy
 
-def thunkify(f: Callable[_P, R], *args: _P.args, **kwargs: _P.kwargs) -> Callable[[], R]:
+def thunkify(f: Callable[_P, R], *args: _P.args, **kwargs: _P.kwargs) -> Thunk[R]:
     """
     Delays computation of f until it's called again
     Also caches the result
     """
-    return functools.lru_cache(1)(functools.partial(f, *args, **kwargs))
+    return Thunk(functools.partial(f, *args, **kwargs))
 
 def track_tensor(tensor: Tensor, proxy: Proxy, *, constant: Optional[Tensor], tracer: _ProxyTracer) -> None:
     def try_set_proxy_slot(
@@ -405,7 +423,7 @@ def track_tensor_tree(
             assert isinstance(proxy, Proxy)
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
-            set_proxy_slot(e, tracer, lambda: proxy)
+            set_proxy_slot(e, tracer, thunkify(lambda: proxy))
         elif isinstance(e, _AnyScriptObject):
             assert isinstance(proxy, Proxy)
             set_proxy_slot(e, tracer, proxy)
@@ -483,7 +501,7 @@ def fetch_sym_proxy(tracer: _ProxyTracer) -> Callable[[PySymType], Union[bool, i
         else:
             assert isinstance(e, py_sym_types)
             # NB: we REQUIRE all symints to be tracked
-            return get_proxy_slot(e, tracer)()
+            return get_proxy_slot(e, tracer).force()
     return inner
 
 @overload
@@ -849,7 +867,7 @@ class PythonKeyTracer(Tracer):
         if isinstance(e, Tensor):
             return get_proxy_slot(e, self, e, lambda x: x.proxy)
         elif isinstance(e, py_sym_types):
-            return get_proxy_slot(e, self, e, lambda e: e())
+            return get_proxy_slot(e, self, e, lambda e: e.force())
         elif isinstance(e, _AnyScriptObject):
             return get_proxy_slot(e, self, e)
         else:
@@ -929,7 +947,7 @@ def wrap_key(f: Callable[_P, R], tensors: _P.args, tracer: _ProxyTracer, pre_dis
         )
 
         def get_sym_proxy_slot(t: PySymType) -> Proxy:
-            return get_proxy_slot(t, tracer)()
+            return get_proxy_slot(t, tracer).force()
 
         out = pytree.tree_map_only(
             py_sym_types,
@@ -1115,7 +1133,7 @@ class ProxySymDispatchMode(SymDispatchMode):
 
     def _compute_proxy(self, func: OpOverload, args: Tuple[object, ...], out: PySymType) -> Proxy:
         n_args = tuple(
-            get_proxy_slot(a, self.tracer)().node if isinstance(a, py_sym_types) else a
+            get_proxy_slot(a, self.tracer).force().node if isinstance(a, py_sym_types) else a
             for a in args
         )
 
@@ -1155,7 +1173,6 @@ class ProxySymDispatchMode(SymDispatchMode):
         # were symbolic) and it is no longer necessary to trace the
         # computation.  This could occur if func triggered some guards.
         if isinstance(out, py_sym_types):
-            # Delays tracing out the proxies on this op until we actually need it
             p_out_thunk = thunkify(self._compute_proxy, func=func, args=args, out=out)
             set_proxy_slot(out, self.tracer, p_out_thunk)
 
