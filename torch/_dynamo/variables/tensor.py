@@ -767,8 +767,8 @@ class TensorVariable(VariableTracker):
                     Graph break: from user code at:
                     %s
                 """
-            )
-            % user_stack_formatted,
+            ),
+            user_stack_formatted,
         )
 
     def method___len__(self):
