@@ -1,6 +1,6 @@
 import functools
-
 from typing import Any, Callable, Dict, List, Tuple
+
 
 Feedback = float
 Choice = str
@@ -106,7 +106,6 @@ class AHMetadata:
         return {
             "shared_memory": self.shared_memory,
             "device_capa": self.device_capa,
-            "choices": self.choices,
             "name": self.name,
         }
 
@@ -267,3 +266,8 @@ def get_is_contig_ops() -> List[AHOperation]:
     )
 
     return [mat1_is_contig_op, mat2_is_contig_op]
+
+
+def context_add_strides(context: AHContext, name: str, stride: Tuple[int, ...]) -> None:
+    for i, s in enumerate(stride):
+        context.add_feature(f"{name}_stride_{i}", s)

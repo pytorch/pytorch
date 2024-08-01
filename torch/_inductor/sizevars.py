@@ -18,7 +18,7 @@ from typing import (
 import sympy
 from sympy import Expr
 
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, ShapeEnv
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy
@@ -31,6 +31,7 @@ from .utils import (
     VarRanges,
 )
 from .virtualized import V
+
 
 log = logging.getLogger(__name__)
 
@@ -299,7 +300,9 @@ class SizeVarAllocator:
 
         return False
 
-    def statically_known_equals(self, left: Expr, right: Union[Expr, int]) -> bool:
+    def statically_known_equals(
+        self, left: Union[Expr, int], right: Union[Expr, int]
+    ) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
@@ -353,6 +356,8 @@ class SizeVarAllocator:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
+        if free_unbacked_symbols(numerator) or free_unbacked_symbols(denominator):
+            return False
         expr = sympy.Eq(numerator % denominator, 0)
         return self.is_expr_static_and_true(expr)  # type: ignore[arg-type]
 
