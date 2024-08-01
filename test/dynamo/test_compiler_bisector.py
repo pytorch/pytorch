@@ -26,6 +26,7 @@ i64 = torch.int64
 i32 = torch.int32
 
 
+@requires_cuda
 class TestCompilerBisector(TestCase):
     def test_bad_decomp(self):
         @out_wrapper()
