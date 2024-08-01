@@ -141,7 +141,9 @@ def run_single_experiment(
     )
 
     def eager_sdpa(query, key, value, attn_mask):
-        return F.scaled_dot_product_attention(query, key, value, attn_mask)
+        flattened_query = query.reshape(batch_size, kv_heads, -1, head_dim)
+        out = F.scaled_dot_product_attention(flattened_query, key, value, attn_mask)
+        return out.reshape(batch_size, q_heads, q_seq_len, head_dim)
 
     if max_autotune:
         compiled_sdpa = torch.compile(
@@ -162,15 +164,12 @@ def run_single_experiment(
 
     if mask_mod:
         attn_mask = create_mask(mask_mod, 1, 1, query.shape[-2], key.shape[-2])
-        # attn_mask = attn_mask.repeat_interleave(q_heads // kv_heads, dim=-2)
+        attn_mask = attn_mask.repeat_interleave(q_heads // kv_heads, dim=-2)
     else:
         attn_mask = None
 
-    interleave_k = key.repeat_interleave(q_heads // kv_heads, dim=1)
-    interleave_v = value.repeat_interleave(q_heads // kv_heads, dim=1)
-
     forward_eager_time = benchmark_torch_function_in_microseconds(
-        eager_sdpa, query, interleave_k, interleave_v, attn_mask
+        eager_sdpa, query, key, value, attn_mask
     )
     forward_compiled_time = benchmark_torch_function_in_microseconds(
         compiled_sdpa,
@@ -182,7 +181,7 @@ def run_single_experiment(
         enable_gqa=True,
     )
 
-    out_eager = eager_sdpa(query, interleave_k, interleave_v, attn_mask)
+    out_eager = eager_sdpa(query, key, value, attn_mask)
     out_compile = compiled_sdpa(
         query, key, value, score_mod=score_mod, block_mask=block_mask, enable_gqa=True
     )
