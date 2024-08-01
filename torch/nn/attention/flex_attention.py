@@ -742,8 +742,8 @@ def create_block_mask(
     if Q_LEN < 128:
         Q_BLOCK_SIZE = Q_LEN
     else:
-        Q_LEN = round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
-    KV_LEN = round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
+        Q_LEN = _round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
+    KV_LEN = _round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
     with TransformGetItemToIndex():
