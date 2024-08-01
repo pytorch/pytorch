@@ -1,11 +1,10 @@
-# mypy: allow-untyped-decorators
 import socket
 import uuid
 
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import partial
-from typing import Callable, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -259,7 +258,7 @@ lib.define(
 )
 lib.define(
     "fused_all_gather_scaled_matmul("
-    "Tensor A, Tensor[] Bs, Tensor A_scale, Tensor[] B_scales, int gather_dim, str group_name"
+    "Tensor A, Tensor[] Bs, Tensor A_scale, Tensor[] B_scales, ScalarType?[] out_dtypes, int gather_dim, str group_name"
     ") -> (Tensor, Tensor[])"
 )
 lib.define(
@@ -482,15 +481,63 @@ def restride_A_for_fused_matmul_reduce_scatter(
     return make_contiguous_for_perm(t, perm)
 
 
+def _maybe_convert_scalar_types_to_dtypes(
+    scalar_types: List[Any],
+) -> List[Optional[torch.dtype]]:
+    """
+    When a list of `torch.dtype`s is passed through the dispatcher as
+    `ScalarType[]`, it is converted to a list of scalar type enum values. This
+    function converts it back to a list of `torch.dtype`s.
+    """
+    # Order defined in https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
+    _SCALAR_TYPE_TO_DTYPE = {
+        0: torch.uint8,
+        1: torch.int8,
+        2: torch.short,
+        3: torch.int,
+        4: torch.int64,
+        5: torch.half,
+        6: torch.float,
+        7: torch.double,
+        8: torch.complex32,
+        9: torch.complex64,
+        10: torch.complex128,
+        11: torch.bool,
+        12: torch.qint8,
+        13: torch.quint8,
+        14: torch.qint32,
+        15: torch.bfloat16,
+        16: torch.float8_e5m2,
+        17: torch.float8_e4m3fn,
+        18: torch.float8_e5m2fnuz,
+        19: torch.float8_e4m3fnuz,
+    }
+    if any(not isinstance(x, (type(None), int)) for x in scalar_types):
+        return scalar_types
+
+    dtypes: List[Optional[torch.dtype]] = []
+    for scalar_type in scalar_types:
+        if scalar_type is None:
+            dtypes.append(scalar_type)
+        elif scalar_type not in _SCALAR_TYPE_TO_DTYPE:
+            raise ValueError("Unrecognized scalar type {scalar_type}")
+        else:
+            dtypes.append(_SCALAR_TYPE_TO_DTYPE[scalar_type])
+    return dtypes
+
+
 @torch.library.impl(lib, "fused_all_gather_scaled_matmul", "Meta")
 def _fused_all_gather_scaled_matmul_fallback(
     A_shard: torch.Tensor,
     Bs: List[torch.Tensor],
     A_scale: torch.Tensor,
     B_scales: List[torch.Tensor],
+    out_dtypes: List[Optional[torch.dtype]],
     gather_dim: int,
     group_name: str,
 ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+    out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
+
     group_size = c10d._get_group_size_by_name(group_name)
     A = torch.ops._c10d_functional.all_gather_into_tensor(
         A_shard.contiguous(), group_size, group_name
@@ -499,15 +546,21 @@ def _fused_all_gather_scaled_matmul_fallback(
     A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
 
     def scaled_matmul(
-        A: torch.Tensor, B: torch.Tensor, A_scale: torch.Tensor, B_scale: torch.Tensor
+        A: torch.Tensor,
+        B: torch.Tensor,
+        A_scale: torch.Tensor,
+        B_scale: torch.Tensor,
+        out_dtype: Optional[torch.dtype],
     ) -> torch.Tensor:
         leading_dims = A.shape[:-1]
-        res = torch.ops.aten._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale)
+        res = torch.ops.aten._scaled_mm(
+            A.flatten(0, -2), B, A_scale, B_scale, out_dtype=out_dtype
+        )
         return res.unflatten(0, leading_dims)
 
     return A.movedim(0, gather_dim), [
-        scaled_matmul(A, B, A_scale, B_scale).movedim(0, gather_dim)
-        for B, B_scale in zip(Bs, B_scales)
+        scaled_matmul(A, B, A_scale, B_scale, out_dtype).movedim(0, gather_dim)
+        for B, B_scale, out_dtype in zip(Bs, B_scales, out_dtypes)
     ]
 
 
@@ -516,7 +569,8 @@ def _fused_all_gather_scaled_matmul(
     A_shard: torch.Tensor,
     Bs: List[torch.Tensor],
     A_scale: torch.Tensor,
-    B_scales: torch.Tensor,
+    B_scales: List[torch.Tensor],
+    out_dtypes: List[Optional[torch.dtype]],
     gather_dim: int,
     group_name: str,
 ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
@@ -533,6 +587,8 @@ def _fused_all_gather_scaled_matmul(
     contiguous, no extra copy is required for input layout transformation.
     Otherwise A_shard needs to be copied once.
     """
+    out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
+
     if _is_test_mode:
         return _fused_all_gather_matmul_fallback(A_shard, Bs, gather_dim, group_name)
     if A_shard.dim() < 2:
@@ -566,16 +622,24 @@ def _fused_all_gather_scaled_matmul(
             x.new_empty(
                 x.shape[0] * group.size(),
                 B.shape[1],
+                dtype=out_dtype if out_dtype is not None else A_shard.dtype,
             )
-            for B in Bs
+            for B, out_dtype in zip(Bs, out_dtypes)
         ]
         output_shards = [output.chunk(group.size()) for output in outputs]
 
         # Computing block-wise matmul along the first dim of A
         def shard_consumer(shard: torch.Tensor, rank: int) -> None:
-            for idx, (B, B_scale) in enumerate(zip(Bs, B_scales)):
+            for idx, (B, B_scale, out_dtype) in enumerate(
+                zip(Bs, B_scales, out_dtypes)
+            ):
                 torch.ops.aten._scaled_mm(
-                    shard, B, A_scale, B_scale, out=output_shards[idx][rank]
+                    shard,
+                    B,
+                    A_scale,
+                    B_scale,
+                    out_dtype=out_dtype,
+                    out=output_shards[idx][rank],
                 )
 
         _pipelined_all_gather_and_consume(
