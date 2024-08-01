@@ -1,11 +1,5 @@
 # mypy: allow-untyped-defs
 """Display class to aggregate and print the results of many measurements."""
-
-__all__ = [
-    "Colorize",
-    "Compare",
-]
-
 import collections
 import enum
 import itertools as it
@@ -15,6 +9,7 @@ from torch.utils.benchmark.utils import common
 from torch import tensor as _tensor
 import operator
 
+__all__ = ["Colorize", "Compare"]
 
 BEST = "\033[92m"
 GOOD = "\033[34m"

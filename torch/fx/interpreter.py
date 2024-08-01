@@ -1,10 +1,5 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-__all__ = [
-    "Interpreter",
-    "Transformer",
-]
-
 from .graph_module import GraphModule
 from ._lazy_graph_module import _make_graph_module
 from .graph import Graph
@@ -20,6 +15,7 @@ import inspect
 from contextlib import contextmanager
 from torch.hub import tqdm
 
+__all__ = ['Interpreter', 'Transformer']
 
 @compatibility(is_backward_compatible=True)
 class Interpreter:

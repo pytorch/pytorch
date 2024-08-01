@@ -1,3 +1,6 @@
+from .modules import *  # noqa: F403
+
+
 __all__ = [
     "BNReLU2d",
     "BNReLU3d",
@@ -10,5 +13,3 @@ __all__ = [
     "ConvAdd2d",
     "ConvAddReLU2d",
 ]
-
-from .modules import *  # noqa: F403

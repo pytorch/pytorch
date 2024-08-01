@@ -1,3 +1,7 @@
+import torch
+from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
+from torch._torch_docs import common_args, multi_dim_common
+
 __all__ = [
     'airy_ai',
     'bessel_j0',
@@ -56,10 +60,6 @@ __all__ = [
     'xlogy',
     'zeta',
 ]
-
-import torch
-from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
-from torch._torch_docs import common_args, multi_dim_common
 
 Tensor = torch.Tensor
 

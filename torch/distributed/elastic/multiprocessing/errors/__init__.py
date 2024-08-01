@@ -49,14 +49,6 @@ sets this env var on each child it launches, then aggregates the error files for
 children, and propagates the one with the **smallest** timestamp (e.g. the **first** error).
 """
 
-__all__ = [
-    "ChildFailedError",
-    "ErrorHandler",
-    "ProcessFailure",
-    "get_error_handler",
-    "record",
-]
-
 import json
 import os
 import signal
@@ -73,6 +65,15 @@ from torch.distributed.elastic.utils.logging import get_logger
 
 from .error_handler import ErrorHandler  # noqa: F401
 from .handlers import get_error_handler  # noqa: F401
+
+
+__all__ = [
+    "ProcessFailure",
+    "ChildFailedError",
+    "record",
+    "ErrorHandler",
+    "get_error_handler",
+]
 
 logger = get_logger(__name__)
 

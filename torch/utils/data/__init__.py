@@ -1,38 +1,3 @@
-__all__ = [
-    # Classes
-    "BatchSampler",
-    "ChainDataset",
-    "ConcatDataset",
-    "DFIterDataPipe",
-    "DataChunk",
-    "DataLoader",
-    "Dataset",
-    "DistributedSampler",
-    "IterDataPipe",
-    "IterableDataset",
-    "MapDataPipe",
-    "RandomSampler",
-    "Sampler",
-    "SequentialSampler",
-    "StackDataset",
-    "Subset",
-    "SubsetRandomSampler",
-    "TensorDataset",
-    "WeightedRandomSampler",
-    "_DatasetKind",
-    # Functions
-    "argument_validation",
-    "default_collate",
-    "default_convert",
-    "functional_datapipe",
-    "get_worker_info",
-    "guaranteed_datapipes_determinism",
-    "non_deterministic",
-    "random_split",
-    "runtime_validation",
-    "runtime_validation_disabled",
-]
-
 from torch.utils.data.dataloader import (
     _DatasetKind,
     DataLoader,
@@ -73,6 +38,40 @@ from torch.utils.data.sampler import (
     SubsetRandomSampler,
     WeightedRandomSampler,
 )
+
+
+__all__ = [
+    "BatchSampler",
+    "ChainDataset",
+    "ConcatDataset",
+    "DFIterDataPipe",
+    "DataChunk",
+    "DataLoader",
+    "Dataset",
+    "DistributedSampler",
+    "IterDataPipe",
+    "IterableDataset",
+    "MapDataPipe",
+    "RandomSampler",
+    "Sampler",
+    "SequentialSampler",
+    "StackDataset",
+    "Subset",
+    "SubsetRandomSampler",
+    "TensorDataset",
+    "WeightedRandomSampler",
+    "_DatasetKind",
+    "argument_validation",
+    "default_collate",
+    "default_convert",
+    "functional_datapipe",
+    "get_worker_info",
+    "guaranteed_datapipes_determinism",
+    "non_deterministic",
+    "random_split",
+    "runtime_validation",
+    "runtime_validation_disabled",
+]
 
 # Please keep this list sorted
 assert __all__ == sorted(__all__)

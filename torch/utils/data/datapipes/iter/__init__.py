@@ -1,25 +1,3 @@
-__all__ = [
-    "Batcher",
-    "Collator",
-    "Concater",
-    "Demultiplexer",
-    "FileLister",
-    "FileOpener",
-    "Filter",
-    "Forker",
-    "Grouper",
-    "IterableWrapper",
-    "Mapper",
-    "Multiplexer",
-    "RoutedDecoder",
-    "Sampler",
-    "ShardingFilter",
-    "Shuffler",
-    "StreamReader",
-    "UnBatcher",
-    "Zipper",
-]
-
 from torch.utils.data.datapipes.iter.callable import (
     CollatorIterDataPipe as Collator,
     MapperIterDataPipe as Mapper,
@@ -59,6 +37,29 @@ from torch.utils.data.datapipes.iter.streamreader import (
 from torch.utils.data.datapipes.iter.utils import (
     IterableWrapperIterDataPipe as IterableWrapper,
 )
+
+
+__all__ = [
+    "Batcher",
+    "Collator",
+    "Concater",
+    "Demultiplexer",
+    "FileLister",
+    "FileOpener",
+    "Filter",
+    "Forker",
+    "Grouper",
+    "IterableWrapper",
+    "Mapper",
+    "Multiplexer",
+    "RoutedDecoder",
+    "Sampler",
+    "ShardingFilter",
+    "Shuffler",
+    "StreamReader",
+    "UnBatcher",
+    "Zipper",
+]
 
 # Please keep this list sorted
 assert __all__ == sorted(__all__)

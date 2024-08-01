@@ -1,14 +1,3 @@
-__all__ = [
-    "DerivedQuantizationSpec",
-    "EdgeOrNode",
-    "FixedQParamsQuantizationSpec",
-    "QuantizationAnnotation",
-    "QuantizationSpec",
-    "QuantizationSpecBase",
-    "Quantizer",
-    "SharedQuantizationSpec",
-]
-
 from .quantizer import (
     DerivedQuantizationSpec,
     EdgeOrNode,
@@ -19,3 +8,15 @@ from .quantizer import (
     Quantizer,
     SharedQuantizationSpec,
 )
+
+
+__all__ = [
+    "EdgeOrNode",
+    "Quantizer",
+    "QuantizationSpecBase",
+    "QuantizationSpec",
+    "FixedQParamsQuantizationSpec",
+    "SharedQuantizationSpec",
+    "DerivedQuantizationSpec",
+    "QuantizationAnnotation",
+]

@@ -1,4 +1,11 @@
 # mypy: allow-untyped-defs
+from .modules import *  # noqa: F403
+from .modules.fused import _FusedModule  # noqa: F403
+
+
+# # Subpackages
+# from . import qat  # noqa: F403
+# from . import quantized  # noqa: F403
 
 __all__ = [
     "ConvBn1d",
@@ -19,13 +26,6 @@ __all__ = [
     "ConvAdd2d",
     "ConvAddReLU2d",
 ]
-
-from .modules import *  # noqa: F403
-from .modules.fused import _FusedModule  # noqa: F403
-
-# # Subpackages
-# from . import qat  # noqa: F403
-# from . import quantized  # noqa: F403
 
 
 # We are exposing all subpackages to the end-user.

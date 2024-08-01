@@ -1,13 +1,5 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-__all__ = [
-    # Classes
-    "HolderModule",
-    # Functions
-    "lift_subgraph_as_module",
-    "compare_graphs",
-]
-
 from typing import Dict, Tuple
 
 from torch.fx._compatibility import compatibility
@@ -16,6 +8,9 @@ from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 from torch.nn import Module
+
+
+__all__ = ["HolderModule", "lift_subgraph_as_module", "compare_graphs"]
 
 
 @compatibility(is_backward_compatible=False)

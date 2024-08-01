@@ -1,22 +1,3 @@
-__all__ = [
-    "BackwardPrefetch",
-    "CPUOffload",
-    "FullOptimStateDictConfig",
-    "FullStateDictConfig",
-    "FullyShardedDataParallel",
-    "LocalOptimStateDictConfig",
-    "LocalStateDictConfig",
-    "MixedPrecision",
-    "OptimStateDictConfig",
-    "OptimStateKeyType",
-    "ShardedOptimStateDictConfig",
-    "ShardedStateDictConfig",
-    "ShardingStrategy",
-    "StateDictConfig",
-    "StateDictSettings",
-    "StateDictType",
-]
-
 from ._flat_param import FlatParameter as FlatParameter
 from .fully_sharded_data_parallel import (
     BackwardPrefetch,
@@ -36,3 +17,23 @@ from .fully_sharded_data_parallel import (
     StateDictSettings,
     StateDictType,
 )
+
+
+__all__ = [
+    "BackwardPrefetch",
+    "CPUOffload",
+    "FullOptimStateDictConfig",
+    "FullStateDictConfig",
+    "FullyShardedDataParallel",
+    "LocalOptimStateDictConfig",
+    "LocalStateDictConfig",
+    "MixedPrecision",
+    "OptimStateDictConfig",
+    "OptimStateKeyType",
+    "ShardedOptimStateDictConfig",
+    "ShardedStateDictConfig",
+    "ShardingStrategy",
+    "StateDictConfig",
+    "StateDictSettings",
+    "StateDictType",
+]

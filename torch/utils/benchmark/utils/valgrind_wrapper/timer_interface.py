@@ -1,12 +1,4 @@
 """Intermediate layer between `Timer` and `valgrind`."""
-
-__all__ = [
-    "CallgrindStats",
-    "CopyIfCallgrind",
-    "FunctionCount",
-    "FunctionCounts",
-]
-
 import collections
 import enum
 import dataclasses
@@ -26,6 +18,10 @@ import torch
 from torch.utils.benchmark.utils import common, cpp_jit
 from torch.utils.benchmark.utils._stubs import CallgrindModuleType
 import operator
+
+
+__all__ = ["FunctionCount", "FunctionCounts", "CallgrindStats", "CopyIfCallgrind"]
+
 
 if TYPE_CHECKING:
     CompletedProcessType = subprocess.CompletedProcess[str]

@@ -1,4 +1,11 @@
 # mypy: allow-untyped-defs
+import contextlib
+
+from typing import Union
+from typing_extensions import deprecated
+
+import torch
+
 __all__ = [
     "is_built",
     "cuFFTPlanCacheAttrContextProp",
@@ -24,13 +31,6 @@ __all__ = [
     "can_use_cudnn_attention",
     "sdp_kernel",
 ]
-
-import contextlib
-
-from typing import Union
-from typing_extensions import deprecated
-
-import torch
 
 
 def is_built():

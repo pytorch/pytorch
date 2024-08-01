@@ -1,20 +1,4 @@
 # mypy: allow-untyped-defs
-__all__ = [
-    # Classes
-    "SparseSemiStructuredTensor",
-    "SparseSemiStructuredTensorCUSPARSELT",
-    "SparseSemiStructuredTensorCUTLASS",
-    # Functions
-    "addmm",
-    "as_sparse_gradcheck",
-    "check_sparse_tensor_invariants",
-    "log_softmax",
-    "mm",
-    "softmax",
-    "sum",
-    "to_sparse_semi_structured",
-]
-
 # The Tensor classes are added to this module by python_tensor.cpp
 # A workaround to support both TorchScript and MyPy:
 from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
@@ -40,6 +24,20 @@ else:
     DType = int
     DimOrDims = Optional[Tuple[int]]
 
+
+__all__ = [
+    "addmm",
+    "check_sparse_tensor_invariants",
+    "mm",
+    "sum",
+    "softmax",
+    "log_softmax",
+    "SparseSemiStructuredTensor",
+    "SparseSemiStructuredTensorCUTLASS",
+    "SparseSemiStructuredTensorCUSPARSELT",
+    "to_sparse_semi_structured",
+    "as_sparse_gradcheck",
+]
 
 addmm = _add_docstr(
     _sparse._sparse_addmm,
