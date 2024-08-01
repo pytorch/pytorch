@@ -1066,7 +1066,6 @@ def _batch_send_recv(ops, peer_ops):
         )
 
     # no more batches. just deal with single ops now
-    # TODO - this is bad, i need to match them so they are ordered safely
     while ops:
         new_ops.append(ops.pop())
     while peer_ops:
@@ -1160,9 +1159,6 @@ def _add_send_recv(
             rank: defaultdict(list) for rank in sorted(compute_actions)
         }
         for rank in sorted(compute_actions):
-            if rank not in compute_actions:
-                continue
-
             assert len(compute_actions[rank]) > 0
             action = compute_actions[rank][0]
             if not _ready_to_schedule(action, comm_actions[rank]):
