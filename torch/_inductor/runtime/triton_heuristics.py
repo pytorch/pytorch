@@ -1328,7 +1328,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
         num_warps = conditional_product(x, r) // 128
     # On AMD GPU each warp has 64 lanes which is double the size on NV GPU,
     # therefore using half the number of warps here correspondingly.
-    default_num_warps = 4 if torch.version.hip else 8
+    default_num_warps = 4 if torch.version.hip else 16
     min_num_warps = 1 if torch.version.hip else 2
     num_warps = next_power_of_2(min(max(num_warps, min_num_warps), default_num_warps))
     check_config(cfg, xnumel=size_hints[0])
