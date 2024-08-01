@@ -222,6 +222,21 @@ struct TensorQueue : torch::CustomClassHolder {
   at::Tensor init_tensor_;
 };
 
+struct ConstantTensorContainer : torch::CustomClassHolder {
+  explicit ConstantTensorContainer(at::Tensor x) : x_(x) {}
+
+  at::Tensor get() {
+    return x_;
+  }
+
+  std::string tracing_mode() {
+    return "real";
+  }
+
+ private:
+  at::Tensor x_;
+};
+
 at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
   return torch::zeros({instance->vals.back(), 4});
 }
@@ -467,6 +482,11 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def(torch::init<at::Tensor>())
       .def("get", &FlattenWithTensorOp::get)
       .def("__obj_flatten__", &FlattenWithTensorOp::__obj_flatten__);
+
+  m.class_<ConstantTensorContainer>("_ConstantTensorContainer")
+      .def(torch::init<at::Tensor>())
+      .def("get", &ConstantTensorContainer::get)
+      .def("tracing_mode", &ConstantTensorContainer::tracing_mode);
 
   m.def(
       "takes_foo(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> Tensor");

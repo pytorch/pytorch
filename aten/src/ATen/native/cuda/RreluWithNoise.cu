@@ -80,7 +80,8 @@ inline void _rrelu_with_noise_cuda_train(
   Tensor tmp_output = output.contiguous();
 
   int64_t numel = input.numel();
-  auto execution_policy = calc_execution_policy(numel);
+  const int unroll_factor = std::is_same<scalar_t, double>::value ? 2 : 4;
+  auto execution_policy = calc_execution_policy(numel, unroll_factor);
 
   auto counter_offset = std::get<0>(execution_policy);
   auto grid = std::get<1>(execution_policy);

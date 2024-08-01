@@ -256,51 +256,40 @@ class CppMicroGemmRef(CppMicroGemm):
         return KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(options)
 
 
-def check_fp32_vec_extra(config, m, n, k, alpha, num_threads):
-    # TODO(jgong5): support n % n_block_size != 0
-    return n % config.register_blocking.block_n == 0
-
-
 @register_micro_gemm(
     *generate_gemm_config(
         VecAVX512,
         [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
         input_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX512,
         [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
         input_dtype=torch.bfloat16,
         output_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX512,
         [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
         input_dtype=torch.half,
         output_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX2,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX2,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.bfloat16,
         output_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX2,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.half,
         output_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
 )
 class CppMicroGemmFP32Vec(CppMicroGemm):
@@ -444,9 +433,7 @@ inline void {{kernel_name}}_kernel(
 # extra check for CppMicroGemmAMX
 def check_amx_extra(config, m, n, k, alpha, num_threads):
     vnni_size = 4 if config.input_dtype == torch.uint8 else 2
-    return (
-        n % config.register_blocking.block_n == 0 and k % vnni_size == 0 and alpha == 1
-    )
+    return k % vnni_size == 0 and alpha == 1
 
 
 @register_micro_gemm(
@@ -578,7 +565,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         {%- set tile_idx_b = tile_offset_b + tile_col %}
         {%- set tile_idx_c = tile_row * num_columns + tile_col %}
         {%- if tile_col == 0 %}
-        _tile_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k, lda * sizeof({{input_t}}));
+        _tile_stream_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k, lda * sizeof({{input_t}}));
         {%- endif %}
         {%- if tile_row == 0 %}
         _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
