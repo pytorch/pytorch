@@ -207,7 +207,7 @@ pip install -r requirements.txt
 **On Linux**
 
 ```bash
-conda install intel::mkl-static intel::mkl-include
+pip install mkl-static mkl-include
 # CUDA only: Add LAPACK support for the GPU if needed
 conda install -c pytorch magma-cuda121  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
 
@@ -221,7 +221,7 @@ make triton
 
 ```bash
 # Add this package on intel x86 processor machines only
-conda install intel::mkl-static intel::mkl-include
+pip install mkl-static mkl-include
 # Add these packages if torch.distributed is needed
 conda install pkg-config libuv
 ```
@@ -229,7 +229,7 @@ conda install pkg-config libuv
 **On Windows**
 
 ```bash
-conda install intel::mkl-static intel::mkl-include
+pip install mkl-static mkl-include
 # Add these packages if torch.distributed is needed.
 # Distributed package support on Windows is a prototype feature and is subject to changes.
 conda install -c conda-forge libuv=1.39

@@ -431,8 +431,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
 }
 
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale){
-  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal};
+        const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale, bool enable_gqa){
+  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal, enable_gqa};
   auto backend = sdp::select_sdp_backend_cpp(kernel_params);
   if (backend == sdp::SDPBackend::error) {
     TORCH_CHECK(
@@ -456,12 +456,13 @@ int64_t _fused_sdp_choice_meta(
     const std::optional<Tensor>& attn_mask_,
     double dropout_p,
     bool is_causal,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    bool enable_gqa) {
   auto query_key_set = query_.key_set();
 #if defined(USE_ROCM)
   bool has_rocm = query_key_set.has(c10::DispatchKey::HIP);
   if (has_rocm) {
-    auto choice_int = _fused_sdp_choice_stub(at::kHIP, query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+    auto choice_int = _fused_sdp_choice_stub(at::kHIP, query_, key, value, attn_mask_, dropout_p, is_causal, scale, enable_gqa);
     return choice_int;
   }
 #else
@@ -475,7 +476,8 @@ int64_t _fused_sdp_choice_meta(
         attn_mask_,
         dropout_p,
         is_causal,
-        scale);
+        scale,
+        enable_gqa);
     return choice_int;
   }
 #endif
@@ -608,6 +610,36 @@ bool should_compute_logsumexp(const Tensor& query, const Tensor& key, const Tens
   return any_inputs_require_grad && gradmode_enabled;
 }
 
+std::tuple<at::Tensor, at::Tensor> pre_process_group_query_attention_input(
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    const bool enable_gqa) {
+
+  if (!enable_gqa) {
+    return std::make_tuple(key, value);
+  }
+  const auto q_num_heads = query.sym_size(-3);
+  const auto k_num_heads = key.sym_size(-3);
+  const auto v_num_heads = value.sym_size(-3);
+
+  bool all_equal = q_num_heads == k_num_heads && k_num_heads == v_num_heads;
+  bool key_divisible = q_num_heads % k_num_heads == 0;
+  bool value_divisible = q_num_heads % v_num_heads == 0;
+  TORCH_CHECK(all_equal || (key_divisible && value_divisible),
+              "Number of heads in key and value must divide the number of heads in ");
+
+  if (all_equal){
+    return std::make_tuple(key, value);
+  }
+  auto repeat_key_shape = query.sym_size(-3) / key.sym_size(-3);
+  auto repeat_value_shape = query.sym_size(-3) / value.sym_size(-3);
+
+  at::Tensor key_repeated = key.repeat_interleave_symint(repeat_key_shape, -3);
+  at::Tensor value_repeated = value.repeat_interleave_symint(repeat_value_shape, -3);
+  return std::make_tuple(std::move(key_repeated), std::move(value_repeated));
+}
+
 } // namespace
 
 // Computes scaled dot product attention on query, key and value tensors, using
@@ -646,12 +678,13 @@ Tensor scaled_dot_product_attention(
     const std::optional<Tensor>& attn_mask_,
     double dropout_p,
     bool is_causal,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    bool enable_gqa) {
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (_fused_sdp_choice_stub.is_device_supported(query_.device().type())) {
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
-          query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+          query_, key, value, attn_mask_, dropout_p, is_causal, scale, enable_gqa);
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
   std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
@@ -703,7 +736,7 @@ Tensor scaled_dot_product_attention(
             attn_mask,
             dropout_p,
             is_causal,
-            c10::nullopt, /*dropout_mask*/
+            std::nullopt, /*dropout_mask*/
             scale));
       }
       return std::get<0>(at::_scaled_dot_product_attention_math(
@@ -714,7 +747,8 @@ Tensor scaled_dot_product_attention(
           dropout_p,
           is_causal,
           std::nullopt, /*dropout_mask*/
-          scale));
+          scale,
+          enable_gqa));
     default:
       TORCH_CHECK(
           false,
@@ -726,7 +760,7 @@ Tensor scaled_dot_product_attention(
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal,
-        const std::optional<Tensor>& dropout_mask, std::optional<double> scale) {
+        const std::optional<Tensor>& dropout_mask, std::optional<double> scale, bool enable_gqa) {
   C10_LOG_API_USAGE_ONCE("torch.sdpa.math_fallback");
   if (query_.is_nested() || key.is_nested() || value.is_nested()) {
     TORCH_CHECK(
@@ -753,7 +787,11 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         attn_mask = at::ones_symint({L, S}, query.options().dtype(at::kBool)).tril();
         attn_mask = convert_boolean_attn_mask(attn_mask, query.dtype());
     }
-    auto attn = at::matmul(query, key.transpose(-2, -1) * scaling_factor);
+
+
+    // MQA/GQA handling
+    auto [key_expanded, value_expanded] = pre_process_group_query_attention_input(query, key, value, enable_gqa);
+    auto attn = at::matmul(query, key_expanded.transpose(-2, -1) * scaling_factor);
     if (attn_mask.has_value()) {
       if (at::areAnyTensorSubclassLike({attn, *attn_mask})) {
         attn = attn.add(*attn_mask);
@@ -769,13 +807,13 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         TORCH_WARN_ONCE("Dropout mask should only be used for testing purposes.");
         attn = attn.masked_fill(dropout_mask->logical_not(), 0.0);
         auto dropout_scaling = 1.0 / (1 - dropout_p);
-        return std::make_tuple(at::matmul(attn, value * dropout_scaling), attn);
+        return std::make_tuple(at::matmul(attn, value_expanded * dropout_scaling), attn);
       } else {
         attn = at::dropout(attn, dropout_p, true);
       }
     }
 
-    return std::make_tuple(at::matmul(attn, value), attn);
+    return std::make_tuple(at::matmul(attn, value_expanded), attn);
 }
 
 std::tuple<at::Tensor, at::Tensor>

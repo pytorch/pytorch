@@ -936,7 +936,7 @@ class SymPyValueRangeAnalysis:
 
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
-    def __init__(self):
+    def __init__(self) -> None:
         self.name = "ValueRangeAnalysis"
         boolean_operators = (
             "xor",
