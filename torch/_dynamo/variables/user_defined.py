@@ -34,7 +34,7 @@ import torch._dynamo.config
 import torch.nn
 from torch._guards import TracingContext
 
-from .. import variables
+from .. import polyfill, variables
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import ObservedException, unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -1210,3 +1210,16 @@ class RemovableHandleVariable(VariableTracker):
 
     def python_type(self):
         return RemovableHandleClass
+
+
+class MutableMappingVariable(UserDefinedObjectVariable):
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+
+    def __init__(self, value, **kwargs):
+        super().__init__(value, **kwargs)
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        if name == "get" and type(self.value).get is collections.abc.Mapping.get:
+            return variables.UserMethodVariable(polyfill.mapping_get, self)
+        else:
+            return super().var_getattr(tx, name)

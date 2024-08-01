@@ -17,7 +17,6 @@ import linecache
 import logging
 import multiprocessing
 import operator
-import os
 import posixpath
 import random
 import re
@@ -3103,7 +3102,6 @@ BUILTIN_SKIPLIST = (
     logging,
     multiprocessing,
     operator,
-    os,
     posixpath,
     random,
     re,
