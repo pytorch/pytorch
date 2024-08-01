@@ -3,7 +3,6 @@
 import unittest
 
 import onnx_test_common
-
 import onnxruntime  # noqa: F401
 import parameterized
 from onnx_test_common import MAX_ONNX_OPSET_VERSION, MIN_ONNX_OPSET_VERSION

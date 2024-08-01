@@ -1,11 +1,11 @@
 # Owner(s): ["module: inductor"]
 
 import sys
-
 import unittest
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -65,7 +65,7 @@ class TestMemoryPlanning(TestCase):
     def test_cpp_wrapper(self):
         f, args = self._generate(device="cuda")
         compiled = torch.compile(f, dynamic=True)
-        with config.patch("cpp_wrapper", True):
+        with config.patch({"cpp_wrapper": True, "abi_compatible": False}):
             result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(

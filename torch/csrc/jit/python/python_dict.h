@@ -17,7 +17,7 @@ class ScriptDictKeyIterator final {
       c10::impl::GenericDict::iterator iter,
       c10::impl::GenericDict::iterator end)
       : iter_(std::move(iter)), end_(std::move(end)) {}
-  IValue next();
+  at::IValue next();
 
  private:
   c10::impl::GenericDict::iterator iter_;
@@ -32,7 +32,7 @@ class ScriptDictIterator final {
       c10::impl::GenericDict::iterator iter,
       c10::impl::GenericDict::iterator end)
       : iter_(std::move(iter)), end_(std::move(end)) {}
-  IValue next();
+  at::IValue next();
 
  private:
   c10::impl::GenericDict::iterator iter_;
@@ -46,14 +46,15 @@ class ScriptDictIterator final {
 class ScriptDict final {
  public:
   // Constructor.
-  ScriptDict(IValue data) : dict_(AnyType::get(), AnyType::get()) {
+  ScriptDict(const at::IValue& data)
+      : dict_(at::AnyType::get(), at::AnyType::get()) {
     TORCH_INTERNAL_ASSERT(data.isGenericDict());
     dict_ = data.toGenericDict();
   }
 
   // Get the type of the dictionary.
-  DictTypePtr type() const {
-    return DictType::create(dict_.keyType(), dict_.valueType());
+  at::DictTypePtr type() const {
+    return at::DictType::create(dict_.keyType(), dict_.valueType());
   }
 
   // Return a string representation that can be used
@@ -95,22 +96,22 @@ class ScriptDict final {
 
   // Get the value for the given key. Throws std::out_of_range if the key does
   // not exist.
-  IValue getItem(const IValue& key) {
+  at::IValue getItem(const at::IValue& key) {
     return dict_.at(key);
   };
 
   // Set the value for the given key.
-  void setItem(const IValue& key, const IValue& value) {
+  void setItem(const at::IValue& key, const at::IValue& value) {
     dict_.insert_or_assign(key, value);
   };
 
   // Check whether the dictionary contains the given key.
-  bool contains(const IValue& key) {
+  bool contains(const at::IValue& key) {
     return dict_.contains(key);
   }
 
   // Delete the given key from the dictionary.
-  bool delItem(const IValue& key) {
+  bool delItem(const at::IValue& key) {
     return dict_.erase(key);
   }
 

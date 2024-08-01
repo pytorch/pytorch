@@ -44,8 +44,9 @@ Non-PT2 usage (check out test/test_fake_tensor.py for more examples):
     # Create a fake mode
     from torch._subclasses.fake_tensor import FakeTensorMode
     fake_mode = FakeTensorMode()
+    converter = fake_mode.fake_tensor_converter
     # Fakeify some real tensors
-    fake_x = fake_mode.from_real_tensor(x)
+    fake_x = converter.from_real_tensor(fake_mode, x)
     with fake_mode:
         # Do some operations on the fake tensors
         fake_y = fake_x * 2
@@ -64,7 +65,9 @@ PT2 pre-AOTAutograd usage (this is unusual, you probably don't want to do this):
     # Fake mode is not enabled!
     from torch._guards import detect_fake_mode
     fake_mode = detect_fake_mode(args)
-    fake_args = [fake_mode.from_real_tensor(arg) for arg in args]
+    # if fake_mode isn't None
+    converter = fake_mode.fake_tensor_converter
+    fake_args = [converter.from_real_tensor(fake_mode, arg) for arg in args]
     with fake_mode:
     ... do stuff with the fake args, if needed ...
 
