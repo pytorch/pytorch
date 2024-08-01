@@ -2139,6 +2139,45 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # run_decompositions() triggers same error as Dynamo below
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureSerDer  # sympify on deserialization doesn't preserve sympy functions: T197567691
+    def test_solver_unsupported_sympy_function(self):
+        # repro of https://github.com/pytorch/pytorch/issues/131897
+
+        # NOTE: Dynamo errors with unsupported functions in `add_runtime_asserts`:
+        # "symbolically traced variables cannot be used as inputs to control flow"
+        strict = False
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                x = torch.nn.functional.interpolate(
+                    x, scale_factor=0.5, mode="bilinear"
+                )
+                x = torch.nn.functional.interpolate(
+                    x, scale_factor=2.0, mode="bilinear"
+                )
+                x = x + y
+                return x
+
+        model = MyModule().eval()
+
+        inputs = (
+            torch.rand((1, 1, 32, 32)),
+            torch.rand((1, 1, 32, 32)),
+        )
+
+        dim = torch.export.Dim("Dim", min=16, max=64)
+        dynamic_shapes = {"x": {2: dim, 3: dim}, "y": {2: dim, 3: dim}}
+
+        exported_program = export(
+            model, inputs, dynamic_shapes=dynamic_shapes, strict=strict
+        )
+        self.assertEqual(exported_program.module()(*inputs), model(*inputs))
+
     def test_export_mod_constraints(self):
         class BasicDynamiShapeModel(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
