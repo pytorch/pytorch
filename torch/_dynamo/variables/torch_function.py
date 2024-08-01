@@ -4,11 +4,8 @@ import inspect
 from typing import Dict, List, TYPE_CHECKING
 
 import torch.utils._pytree as pytree
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
 from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
+
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalSource, TypeSource
@@ -18,7 +15,10 @@ from .lists import TupleVariable
 from .tensor import TensorSubclassVariable, TensorVariable
 from .user_defined import UserDefinedObjectVariable
 
+
 if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
     from .base import VariableTracker
 
 
@@ -223,6 +223,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # [Note: __torch_function__] We currently only support attributes that are defined on
         # base tensors, custom attribute accesses will graph break.
         import torch
+
         from .builder import SourcelessBuilder
 
         if name in banned_attrs:
@@ -277,6 +278,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # of `call_method`.
         if tx.output.torch_function_enabled:
             import torch
+
             from .builder import SourcelessBuilder, VariableBuilder
 
             if _is_attr_overidden(tx, self, name):
