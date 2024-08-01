@@ -9,7 +9,7 @@ import math
 import operator
 import types
 from collections import defaultdict, OrderedDict
-from collections.abc import KeysView, MutableMapping
+from collections.abc import KeysView
 from typing import Dict, List, TYPE_CHECKING
 
 import torch
@@ -1366,9 +1366,7 @@ class BuiltinVariable(VariableTracker):
                     for x in arg.force_unpack_var_sequence(tx)
                 )
                 return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
-            elif isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
-                arg.value, MutableMapping
-            ):
+            elif isinstance(arg, variables.MutableMappingVariable):
                 # This is applicable for user defined objects which seem like dict, but are not really dicts. For
                 # example, TensorDict derives from MutableMapping. For such cases, we can directly inline the .items
                 # method and create a new dict.
