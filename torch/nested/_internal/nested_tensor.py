@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import contextlib
 from typing import Tuple
 
 import torch
@@ -27,21 +26,6 @@ def get_tensor_symint(tensor, *, coeff=1):
         _tensor_id_counter += 1
         _tensor_symint_registry[tensor] = tensor_symint
     return tensor_symint
-
-
-# Utility for testing
-@contextlib.contextmanager
-def branch_nested_state():
-    # Copy the global state for now since we imagine the registry to be small
-    global _tensor_id_counter, _tensor_symint_registry
-    original_tensor_symint_registry = _tensor_symint_registry
-    _tensor_symint_registry = _tensor_symint_registry.copy()
-    original_tensor_id_counter = _tensor_id_counter
-    try:
-        yield
-    finally:
-        _tensor_id_counter = original_tensor_id_counter
-        _tensor_symint_registry = original_tensor_symint_registry
 
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash
@@ -283,7 +267,7 @@ class NestedTensor(torch.Tensor):
         ragged_source = offsets if lengths is None else lengths
         if isinstance(ragged_source, FakeTensor):
             ragged_size = outer_size[ragged_idx]
-            ragged_source.set_nested_int(ragged_size)
+            ragged_source.nested_int_memo = ragged_size
 
         return NestedTensor(
             values,

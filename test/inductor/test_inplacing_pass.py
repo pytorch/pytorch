@@ -5,6 +5,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
+
 aten = torch.ops.aten
 
 

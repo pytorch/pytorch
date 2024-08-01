@@ -2,7 +2,7 @@
 import contextlib
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Union
+from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Type, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -14,6 +14,7 @@ from torch.utils._python_dispatch import (
     return_and_correct_aliasing,
     TorchDispatchMode,
 )
+
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
@@ -37,6 +38,23 @@ def _conversion_method_template(**extra_kwargs):
         return self.to(*args, **{**kwargs, **extra_kwargs})
 
     return _
+
+
+class PassThroughDescriptor:
+    _name: str
+
+    def __set_name__(self, owner: str, name: str) -> None:
+        self._name = name
+
+    def __get__(
+        self, obj: "FunctionalTensor", objtype: Optional[Type["FunctionalTensor"]]
+    ):
+        raise AssertionError("Don't expect this to be used today")
+
+    def __set__(self, obj: "FunctionalTensor", value: Optional[object]):
+        inner = torch._from_functional_tensor(obj.elem)
+        assert isinstance(inner, torch._subclasses.FakeTensor)
+        setattr(inner, self._name, value)
 
 
 class FunctionalTensor(torch.Tensor):
@@ -107,6 +125,8 @@ class FunctionalTensor(torch.Tensor):
         torch.ops.aten.feature_alpha_dropout.default,  # type: ignore[has-type]
         torch.ops.aten.unsafe_chunk.default,  # type: ignore[has-type]
     ]
+
+    nested_int_memo = PassThroughDescriptor()
 
     def __new__(cls, elem):
         assert torch._is_functional_tensor(elem)
@@ -245,11 +265,6 @@ class FunctionalTensor(torch.Tensor):
         inner = torch._from_functional_tensor(self.elem)
         assert isinstance(inner, torch._subclasses.FakeTensor)
         return inner.get_nested_int(coeff=coeff)
-
-    def set_nested_int(self, val):
-        inner = torch._from_functional_tensor(self.elem)
-        assert isinstance(inner, torch._subclasses.FakeTensor)
-        inner.set_nested_int(val)
 
     def tolist(self) -> Any:
         if self.elem.dim() == 0:
