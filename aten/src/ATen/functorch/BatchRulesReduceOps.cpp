@@ -24,12 +24,12 @@ static Tensor sum_decomp(
 
 static std::tuple<Tensor, std::optional<int64_t>> _is_all_true_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim) {
-  return std::make_tuple(at::_is_all_true(self), nullopt);
+  return std::make_tuple(at::_is_all_true(self), std::nullopt);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> _is_any_true_batch_rule(
      const Tensor& self, std::optional<int64_t> self_bdim) {
-   return std::make_tuple(at::_is_any_true(self), nullopt);
+   return std::make_tuple(at::_is_any_true(self), std::nullopt);
  }
 
 static Tensor mean_decomp(
@@ -410,7 +410,7 @@ static Tensor bucketize_decomp_Tensor(
     bool right) {
   // checking logical rank
   TORCH_CHECK(boundaries.dim() == 1, "bucketize: boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
-  return at::searchsorted(boundaries, self, out_int32, right, nullopt, nullopt);
+  return at::searchsorted(boundaries, self, out_int32, right, std::nullopt, std::nullopt);
 }
 
 static Tensor bucketize_decomp_Scalar(
@@ -420,7 +420,7 @@ static Tensor bucketize_decomp_Scalar(
     bool right) {
   // checking logical rank
   TORCH_CHECK(boundaries.dim() == 1, "bucketize: boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
-  return at::searchsorted(boundaries, self, out_int32, right, nullopt, nullopt);
+  return at::searchsorted(boundaries, self, out_int32, right, std::nullopt, std::nullopt);
 }
 
 // Use when the other macros don't work out.

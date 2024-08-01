@@ -1621,6 +1621,8 @@ __all__ = [
     "memory_stats_as_nested_dict",
     "memory_summary",
     "memory_usage",
+    "MemPool",
+    "MemPoolContext",
     "temperature",
     "power_draw",
     "clock_rate",
