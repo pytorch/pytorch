@@ -79,6 +79,7 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
       transpose_tensor = tensor.is_contiguous();
       return resolve_conj_if_indicated(tensor, true);
   }
+
   IntArrayRef tensor_strides = tensor.strides();
   IntArrayRef tensor_sizes = tensor.sizes();
   if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {

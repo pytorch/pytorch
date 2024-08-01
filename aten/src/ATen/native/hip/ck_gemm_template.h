@@ -58,6 +58,25 @@ struct CkMathType<at::Half> {
   using dtype = ck::half_t;
 };
 
+
+template <bool B>
+struct CkTensorLayout {
+  // default goes to row-wise for now
+  using layout = Row;
+};
+
+// True denotes transpose is necessary. Default is Col, so return Row
+template <>
+struct CkTensorLayout<true> {
+  using layout = Row;
+};
+
+template <>
+struct CkTensorLayout<false> {
+  using layout = Col;
+};
+
+
 // Elementwise Operators
 struct AlphaBetaAdd
 {
@@ -104,8 +123,27 @@ template <
     int NPER_XDL,
     int MPER_WAVE,
     int NPER_WAVE,
-    int CNPER_WAVE = 1,
-    bool PADDING = false>
+    typename ABLOCK_CLUSTER_LENS,
+    typename ABLOCK_CLUSTER_ORDER,
+    typename ABLOCK_SRC_ORDER,
+    int ABLOCK_VECTOR_DIM,
+    int ABLOCK_SCALAR_VEC,
+    int ABLOCK_SCALAR_VEC_AK1,
+    bool ABLOCK_LDS_EXTRAM,
+    typename BBLOCK_CLUSTER_LENS,
+    typename BBLOCK_CLUSTER_ORDER,
+    typename BBLOCK_SRC_ORDER,
+    int BBLOCK_VECTOR_DIM,
+    int BBLOCK_SCALAR_VEC,
+    int BBLOCK_SCALAR_VEC_AK1,
+    bool BBLOCK_LDS_EXTRAN,
+    int CMPER_WAVE,
+    int CNPER_WAVE,
+    typename BLOCK_CLUSTER_LENS,
+    typename CDE_SCALAR_VEC,
+    bool PADDING = false,
+    bool TRANSA = false,
+    bool TRANSB = false>
 void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   // Get input information.
   int M = m;
@@ -119,7 +157,6 @@ void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   float falpha = alpha;
   float fbeta = beta;
 
-
   using ADataType = typename CkMathType<Dtype>::dtype;
   using BDataType = typename CkMathType<Dtype>::dtype;
   using CDataType = typename CkMathType<Dtype>::dtype;
@@ -128,18 +165,20 @@ void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   using AccDataType = float;
   using CShuffleDataType = typename CkMathType<Dtype>::dtype;
 
-
   // NOTE: in our example, transa = t and transb = n;
   // since default for cublas is Column-major, since the value is T, ALayout is Row
   // same for B. transb = N = NO Transpose so B is column Major
-  using ALayout = Row;
-  using BLayout = Col;
+
+  using ALayout = typename CkTensorLayout<TRANSA>::layout;
+  using BLayout = typename CkTensorLayout<TRANSB>::layout;
+
   using DLayout = Row;
   using CLayout = Row;
 
   using AElementOp = PassThrough;
   using BElementOp = PassThrough;
   using CElementOp = AlphaBetaAdd;
+
 
   static constexpr auto GemmDefault =
       ck::tensor_operation::device::GemmSpecialization::Default;
@@ -148,7 +187,6 @@ void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   static constexpr auto GemmSpec = PADDING ? GemmMNKPadding : GemmDefault;
 
 
-  // TODO: Flesh out template parameters
   using DeviceGemmInstance =
     ck::tensor_operation::device::DeviceGemmMultiD_Xdl_CShuffle_V3<ALayout,
                                                                    BLayout,
@@ -164,34 +202,34 @@ void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
                                                                    BElementOp,
                                                                    CElementOp,
                                                                    GemmSpec,
-                                                                   BLOCK_SIZE, //256,
-                                                                   MBLOCK, //256,
-                                                                   NBLOCK, //128,
-                                                                   KBLOCK, //32,
-                                                                   AK1, //4,
-                                                                   BK1, //4,
-                                                                   MPER_XDL, //32,
-                                                                   NPER_XDL, //32,
-                                                                   MPER_WAVE, //4,
-                                                                   NPER_WAVE, //2,
-                                                                   S<8, 32, 1>,
-                                                                   S<1, 0, 2>,
-                                                                   S<1, 0, 2>,
-                                                                   2,
-                                                                   4,
-                                                                   4,
-                                                                   0,
-                                                                   S<8, 32, 1>,
-                                                                   S<1, 0, 2>,
-                                                                   S<1, 0, 2>,
-                                                                   2,
-                                                                   4,
-                                                                   4,
-                                                                   0,
-                                                                   1,
-                                                                   1,
-                                                                   S<1, 32, 1, 8>,
-                                                                   S<4>>;
+                                                                   BLOCK_SIZE,
+                                                                   MBLOCK,
+                                                                   NBLOCK,
+                                                                   KBLOCK,
+                                                                   AK1,
+                                                                   BK1,
+                                                                   MPER_XDL,
+                                                                   NPER_XDL,
+                                                                   MPER_WAVE,
+                                                                   NPER_WAVE,
+                                                                   ABLOCK_CLUSTER_LENS,
+                                                                   ABLOCK_CLUSTER_ORDER,
+                                                                   ABLOCK_SRC_ORDER,
+                                                                   ABLOCK_VECTOR_DIM,
+                                                                   ABLOCK_SCALAR_VEC,
+                                                                   ABLOCK_SCALAR_VEC_AK1,
+                                                                   ABLOCK_LDS_EXTRAM,
+                                                                   BBLOCK_CLUSTER_LENS,
+                                                                   BBLOCK_CLUSTER_ORDER,
+                                                                   BBLOCK_SRC_ORDER,
+                                                                   BBLOCK_VECTOR_DIM,
+                                                                   BBLOCK_SCALAR_VEC,
+                                                                   BBLOCK_SCALAR_VEC_AK1,
+                                                                   BBLOCK_LDS_EXTRAN,
+                                                                   CMPER_WAVE,
+                                                                   CNPER_WAVE,
+                                                                   BLOCK_CLUSTER_LENS,
+                                                                   CDE_SCALAR_VEC>;
 
 
   auto gemm = DeviceGemmInstance{};
