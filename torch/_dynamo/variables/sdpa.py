@@ -1,15 +1,15 @@
 # mypy: ignore-errors
 
 from inspect import getattr_static
-
 from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 from ..bytecode_transformation import create_call_function
 from ..exc import Unsupported
 from .base import VariableTracker
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class SDPAParamsVariable(VariableTracker):
@@ -19,6 +19,7 @@ class SDPAParamsVariable(VariableTracker):
     @staticmethod
     def create(tx: "InstructionTranslator", value, source):
         from torch.backends.cuda import SDPAParams
+
         from ..source import AttrSource
         from .builder import VariableBuilder
         from .torch import TorchInGraphFunctionVariable
@@ -33,6 +34,9 @@ class SDPAParamsVariable(VariableTracker):
         is_causal_var = VariableBuilder(tx, AttrSource(source, "is_causal"))(
             value.is_causal
         )
+        enable_gqa_var = VariableBuilder(tx, AttrSource(source, "enable_gqa"))(
+            value.enable_gqa
+        )
         param_vars = [
             query_var,
             key_var,
@@ -40,6 +44,7 @@ class SDPAParamsVariable(VariableTracker):
             attn_mask_var,
             dropout_var,
             is_causal_var,
+            enable_gqa_var,
         ]
         return TorchInGraphFunctionVariable(SDPAParams).call_function(
             tx, param_vars, {}
@@ -64,6 +69,7 @@ class SDPAParamsVariable(VariableTracker):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         import torch._C
+
         from ..source import AttrSource
         from .builder import wrap_fx_proxy
         from .misc import GetAttrVariable

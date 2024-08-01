@@ -190,7 +190,7 @@ template <typename ModuleType>
 std::vector<Tensor> parallel_apply(
     std::vector<ModuleType>& modules,
     const std::vector<Tensor>& inputs,
-    const std::optional<std::vector<Device>>& devices = nullopt) {
+    const std::optional<std::vector<Device>>& devices = std::nullopt) {
   TORCH_CHECK(
       modules.size() == inputs.size(), "Must have as many inputs as modules");
   if (devices) {
@@ -253,8 +253,8 @@ template <typename ModuleType>
 Tensor data_parallel(
     ModuleType module,
     Tensor input,
-    std::optional<std::vector<Device>> devices = nullopt,
-    std::optional<Device> output_device = nullopt,
+    std::optional<std::vector<Device>> devices = std::nullopt,
+    std::optional<Device> output_device = std::nullopt,
     int64_t dim = 0) {
   if (!devices) {
     const auto device_count = torch::cuda::device_count();

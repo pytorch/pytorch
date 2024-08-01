@@ -136,7 +136,7 @@ class AnyModule {
 
   /// Creates a deep copy of an `AnyModule` if it contains a module, else an
   /// empty `AnyModule` if it is empty.
-  AnyModule clone(optional<Device> device = nullopt) const;
+  AnyModule clone(optional<Device> device = std::nullopt) const;
 
   /// Assigns a module to the `AnyModule` (to circumvent the explicit
   /// constructor).
