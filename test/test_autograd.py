@@ -14080,6 +14080,25 @@ class TestAutogradMultipleDispatch(TestCase):
         self.assertEqual(z.grad, torch.ones_like(x))
 
 
+class TestAutogradDataTypePyFn(TestCase):
+    def test_torch_fn_override(self):
+        types = [torch.Tensor, torch.nn.Parameter]
+        for t in types:
+            x = self.get_test_class(t)
+            self.assertEqual(x.get_device(), torch.get_device(x))
+    
+    def get_test_class(self, t):
+        class PyClass(t):
+            @classmethod  
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return func.__name__
+        
+        return PyClass(torch.rand(1))
+
+
+
+
+
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
 # the suppressions.
