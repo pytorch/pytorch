@@ -47,7 +47,7 @@ jobs:
         id: get_pr_data
         with:
           script: |
-              console.log( github.event)
+              console.log(context.payload.compare)
               console.log(context);
               console.log(
                 await github.rest.repos.listPullRequestsAssociatedWithCommit({
