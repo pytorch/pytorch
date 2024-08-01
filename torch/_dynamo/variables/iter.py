@@ -8,9 +8,9 @@ from typing import Dict, List, Optional, TYPE_CHECKING, Union
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import (
-    handle_observed_user_stop_iteration,
+    handle_observed_exception,
     ObservedUserStopIteration,
-    raise_observed_user_stop_iteration,
+    raise_observed_exception,
     unimplemented,
     UserError,
 )
@@ -222,7 +222,7 @@ class IteratorVariable(VariableTracker):
             try:
                 result.append(self.next_variable(tx))
             except ObservedUserStopIteration:
-                handle_observed_user_stop_iteration(tx)
+                handle_observed_exception(tx)
                 break
         return result
 
@@ -319,7 +319,7 @@ class CycleIteratorVariable(IteratorVariable):
                     return self.next_variable(tx)
                 return self.item
             except ObservedUserStopIteration:
-                handle_observed_user_stop_iteration(tx)
+                handle_observed_exception(tx)
                 self.iterator = None
                 return self.next_variable(tx)
         elif len(self.saved) > 0:
@@ -327,7 +327,7 @@ class CycleIteratorVariable(IteratorVariable):
             self.saved_index = (self.saved_index + 1) % len(self.saved)
             return self.item
         else:
-            raise_observed_user_stop_iteration(self, tx)
+            raise_observed_exception(StopIteration, tx, self)
 
 
 class ZipVariable(IteratorVariable):
@@ -383,7 +383,7 @@ class ZipVariable(IteratorVariable):
         def get_item(it):
             if isinstance(it, list):
                 if old_index >= len(it):
-                    raise_observed_user_stop_iteration(self, tx)
+                    raise_observed_exception(StopIteration, tx, self)
                 return it[old_index]
             else:
                 return it.next_variable(tx)
@@ -399,14 +399,14 @@ class ZipVariable(IteratorVariable):
                         try:
                             get_item(it)
                         except ObservedUserStopIteration:
-                            handle_observed_user_stop_iteration(tx)
+                            handle_observed_exception(tx)
                             continue
                         # no ObservedUserStopIteration - fall through to UserError
                         break
                     else:
                         # all iterables exhausted, raise original error
                         raise
-                handle_observed_user_stop_iteration(tx)
+                handle_observed_exception(tx)
                 raise UserError(
                     ValueError,
                     "zip() has one argument of len differing from others",

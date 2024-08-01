@@ -1321,7 +1321,7 @@ class InstructionTranslatorBase(
             self.push(val)
         except (StopIteration, exc.ObservedUserStopIteration) as e:
             if isinstance(e, exc.ObservedUserStopIteration):
-                exc.handle_observed_user_stop_iteration(self)
+                exc.handle_observed_exception(self)
 
             # leave iterator upon exhaustion in 3.12
             if sys.version_info >= (3, 12):
@@ -3295,7 +3295,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             val = tos.next_variable(self)
         except (StopIteration, exc.ObservedUserStopIteration) as ex:
             if isinstance(ex, exc.ObservedUserStopIteration):
-                exc.handle_observed_user_stop_iteration(self)
+                exc.handle_observed_exception(self)
 
             # The iterator is exhausted. Stop the loop and return.
             self.pop()

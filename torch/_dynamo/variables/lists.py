@@ -13,7 +13,7 @@ from torch._guards import Source
 
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import raise_observed_user_stop_iteration, unimplemented
+from ..exc import raise_observed_exception, unimplemented
 from ..source import AttrSource, GetItemSource
 from ..utils import (
     get_fake_value,
@@ -819,7 +819,7 @@ class ListIteratorVariable(IteratorVariable):
         assert self.mutable_local
         old_index = self.index
         if old_index >= len(self.items):
-            raise_observed_user_stop_iteration(self, tx)
+            raise_observed_exception(StopIteration, tx, self)
 
         tx.output.side_effects.mutation(self)
         self.index += 1
