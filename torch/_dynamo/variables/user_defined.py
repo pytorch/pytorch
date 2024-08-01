@@ -27,6 +27,7 @@ from ..source import (
     GetItemSource,
     ODictGetItemSource,
     RandomValueSource,
+    UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
 from ..utils import (
@@ -1022,6 +1023,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     return trace_rules.lookup(func)(func)
 
         if source and isinstance(self, variables.UnspecializedNNModuleVariable):
+            # Recalculate source for params/buffers
+            if name in ("_buffers", "_parameters"):
+                source = UnspecializedParamBufferSource(self.source, name)
             source = self._wrap_source(source)
 
         if subobj is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(subobj):
