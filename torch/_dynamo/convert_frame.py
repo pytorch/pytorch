@@ -651,18 +651,10 @@ def _compile(
             check_inst_exn_tab_entries_valid(instructions)
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-    def compile_inner(
-        code: CodeType,
-        one_graph: bool,
-        hooks: Hooks,
-        transform: Callable[[List[Instruction], Dict[str, Any]], Any],
-    ) -> Optional[GuardedCode]:
-        with dynamo_timed("_compile.compile_inner", phase_name="entire_frame_compile"):
-            return _compile_inner(code, one_graph, hooks, transform)
-
+    @dynamo_timed(phase_name="entire_frame_compile")
     @compile_time_strobelight_meta(phase_name="compile_inner")
     @maybe_cprofile
-    def _compile_inner(
+    def compile_inner(
         code: CodeType,
         one_graph: bool,
         hooks: Hooks,
