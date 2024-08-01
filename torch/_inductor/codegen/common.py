@@ -17,7 +17,6 @@ from typing import (
     List,
     NamedTuple,
     Optional,
-    Set,
     Tuple,
     Union,
 )
@@ -29,6 +28,7 @@ import torch
 import torch.fx
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
@@ -306,6 +306,47 @@ DTYPE_TO_COMPUTATION_DTYPE = {
 }
 
 
+def deduce_output_dtype_by_name(
+    op_name: str,
+    *args,
+    **kwargs,
+) -> Optional[torch.dtype]:
+    """
+    Given op name and a list of input dtypes, deduce the output dtype
+    """
+    if op_name in boolean_ops():
+        return torch.bool
+    elif op_name in (
+        "to_dtype",
+        "index_expr",
+    ):
+        return kwargs["dtype"] if "dtype" in kwargs else args[-1]
+    elif op_name in (
+        "rand",
+        "randn",
+    ):
+        return torch.float
+    elif op_name in (
+        "get_index",
+        "randint64",
+        "load_seed",
+    ):
+        return torch.int64
+    elif op_name == "reduction":
+        return kwargs["dtype"] if "dtype" in kwargs else args[1]
+    elif op_name == "constant":
+        dtype = kwargs["dtype"] if "dtype" in kwargs else args[-1]
+        return DTYPE_TO_COMPUTATION_DTYPE[dtype]  # type: ignore[index]
+    elif op_name in (
+        "load",
+        "store",
+        "store_reduction",
+    ):
+        buf_name = args[1]
+        return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
+    return None
+
+
 class DataTypePropagation:
     def __init__(self, body) -> None:
         self.body = body
@@ -343,57 +384,29 @@ class DataTypePropagation:
         return dtype
 
     def deduce_node_dtype(self, node: torch.fx.Node):
-        if node.target in boolean_ops():
-            return torch.bool
-
         if node.op == "placeholder":
             return None
 
-        if node.target == "output":
+        if node.target == "output" and len(node.args) != 1:
             # we can infer output node if it only have 1 arg
-            if len(node.args) != 1:
-                return None
-
-        if node.target in (
-            "to_dtype",
-            "index_expr",
-        ):
-            return node.args[-1]
-
-        if node.target in (
-            "rand",
-            "randn",
-        ):
-            return torch.float
-
-        if node.target in (
-            "get_index",
-            "index_expr",
-            "randint64",
-        ):
-            return torch.int64
-
-        if node.target in (
-            "load",
-            "store",
-            "store_reduction",
-        ):
-            buf_name = node.args[1]
-            return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
+            return None
 
         if node.target == operator.getitem:
             return self.deduce_node_dtype(node.args[0])  # type: ignore[arg-type]
 
         assert isinstance(node.target, str)
 
-        if node.target == "reduction":
-            return node.args[1]
-
-        if node.target == "constant":
-            return DTYPE_TO_COMPUTATION_DTYPE[node.args[-1]]  # type: ignore[index]
-
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
+
+        if (
+            output_dtype := deduce_output_dtype_by_name(
+                node.target,
+                *node.args,
+                **node.kwargs,
+            )
+        ) is not None:
+            return output_dtype
 
         return self.deduce_node_dtype_by_inputs(node)
 
@@ -1357,7 +1370,7 @@ class KernelArgs:
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(outer)
-            arg_types.append(type(outer))
+            arg_types.append(type(outer))  # type: ignore[arg-type]
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
@@ -1394,7 +1407,7 @@ class KernelArgs:
     # after you do a call into this kernel, which buffers actually contain
     # updated data?  Modeled off of python_argdefs.
     def live_output_buffers(self):
-        live_outs = set()
+        live_outs = OrderedSet()  # type: ignore[var-annotated]
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
                 continue
@@ -1470,10 +1483,10 @@ class CSE:
         self.store_cache = store_cache or {}
         self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
-        self.invalidated_stores = set()
+        self.invalidated_stores = OrderedSet()  # type: ignore[var-annotated]
         self.varname_map = varname_map or {}
 
-    def invalidate(self, keep_vars: Set[str]):
+    def invalidate(self, keep_vars: OrderedSet[str]):
         for name, tmp in list(self.store_cache.items()):
             if tmp not in keep_vars:
                 del self.store_cache[name]
@@ -1547,7 +1560,7 @@ class CSE:
 
 
 class CodeGen:
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.exit_stack = contextlib.ExitStack()
 
@@ -1602,16 +1615,16 @@ class Kernel(CodeGen):
         self.num_reduction = 0
 
         self.cse: CSE = CSE(self.newvar_prefix, self.suffix)
-        self.must_keep_buffers = set()
-        self.store_buffer_names = set()
+        self.must_keep_buffers = OrderedSet()  # type: ignore[var-annotated]
+        self.store_buffer_names = OrderedSet()  # type: ignore[var-annotated]
         self._load_mask = None
         self._load_other = None
-        # set in set_current_node
+        # OrderedSet in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None
 
-        self.removed_buffers = set()
-        self.inplaced_to_remove = set()
+        self.removed_buffers = OrderedSet()  # type: ignore[var-annotated]
+        self.inplaced_to_remove = OrderedSet()  # type: ignore[var-annotated]
 
         # key: the buffer to write
         # value: the buffer to read and whose memory can be reused for
@@ -1834,7 +1847,10 @@ class Kernel(CodeGen):
 
             @staticmethod
             def indirect_indexing(
-                var: CSEVariable, size: Union[sympy.Expr, int], check: bool = True
+                var: CSEVariable,
+                size: Union[sympy.Expr, int],
+                check: bool = True,
+                wrap_neg=True,
             ):
                 if isinstance(size, int):
                     size = sympy.Integer(size)
@@ -1842,11 +1858,14 @@ class Kernel(CodeGen):
                 # Skip CSE since this doesn't return an expression
 
                 if var.bounds.lower < 0:  # type: ignore[operator]
-                    stm = ops.add(var, ops.index_expr(size, torch.long))
-                    # Mixed negative and non-negative
-                    if var.bounds.upper >= 0:  # type: ignore[operator]
-                        lt = ops.lt(var, 0)
-                        stm = ops.where(lt, stm, var)
+                    if wrap_neg:
+                        stm = ops.add(var, ops.index_expr(size, torch.long))
+                        # Mixed negative and non-negative
+                        if var.bounds.upper >= 0:  # type: ignore[operator]
+                            lt = ops.lt(var, 0)
+                            stm = ops.where(lt, stm, var)
+                    else:
+                        stm = var
 
                     # Propagate bounds as we know how to compute them properly
                     new_bounds = ValueRanges.unknown()

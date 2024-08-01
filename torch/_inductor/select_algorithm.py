@@ -6,7 +6,6 @@ import inspect
 import itertools
 import json
 import logging
-
 import math
 import operator
 import os
@@ -16,7 +15,6 @@ import time
 from collections import namedtuple
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
-
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
@@ -32,7 +30,6 @@ from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer, KernelTemplate
-
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -40,7 +37,6 @@ from .codegen.triton import (
     TritonPrinter,
     TritonScheduling,
 )
-
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
@@ -57,6 +53,7 @@ from .utils import (
     unique,
 )
 from .virtualized import V
+
 
 log = logging.getLogger(__name__)
 
@@ -387,7 +384,7 @@ class TritonTemplateKernel(TritonKernel):
 
                     return f"({fixed_inputs[name]})"
 
-                def indirect_indexing(self, index_var, size, check):
+                def indirect_indexing(self, index_var, size, check, wrap_neg=True):
                     return sympy_index_symbol(str(index_var))
 
             with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
@@ -403,7 +400,7 @@ class TritonTemplateKernel(TritonKernel):
             self.body.writeline(f"{output_name} = {out.value}")
 
             body_val = self.body.getvalue()
-            self.cse.invalidate(set())
+            self.cse.invalidate(set())  # type: ignore[arg-type]
             return body_val
 
     def store_output(
@@ -603,7 +600,7 @@ class TritonTemplate(KernelTemplate):
         self.all_templates[name] = self
         self.debug = debug
 
-    def generate(
+    def generate(  # type: ignore[override]
         self,
         input_nodes,
         layout,
@@ -754,7 +751,7 @@ class TritonTemplate(KernelTemplate):
             num_stages=num_stages,
             num_warps=num_warps,
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
-            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),
+            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
 
@@ -910,6 +907,19 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
     def get_make_kernel_render(self):
         return self.make_kernel_render
 
+    def autoheuristic_id(self):
+        type_name = "triton"
+        info = self.info_dict()
+        # TODO(AlnisM): Does tile_shape always exist?
+        tile = info["tile_shape"]
+        tile_vals = eval(tile)  # type: ignore[arg-type]
+        BLOCK_M = tile_vals[0]
+        BLOCK_K = tile_vals[1]
+        BLOCK_N = tile_vals[2]
+        num_stages = info["num_stages"]
+        num_warps = info["num_warps"]
+        return f"type={type_name}_BLOCK-M={BLOCK_M}_BLOCK-K={BLOCK_K}_BLOCK-N={BLOCK_N}_numstages={num_stages}_numwarps={num_warps}"
+
 
 class ExternKernelCaller(ChoiceCaller):
     def __init__(
@@ -993,6 +1003,9 @@ class ExternKernelCaller(ChoiceCaller):
             "backend": "extern",
             "kernel_call_name": self.choice.call_name(),
         }
+
+    def autoheuristic_id(self):
+        return f"extern_{self.choice.name}"
 
 
 @functools.lru_cache(None)
@@ -1121,6 +1134,23 @@ def get_env_num_workers() -> Optional[int]:
     return None
 
 
+def create_inputs_key(input_nodes) -> str:
+    return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes])
+
+
+def create_precompile_key(
+    name: str, inputs_key: str, choices: List[ChoiceCaller]
+) -> str:
+    return ":".join(
+        [
+            name,
+            inputs_key,
+            torch.get_float32_matmul_precision(),
+        ]
+        + [choice.hash_key() for choice in choices]
+    )
+
+
 class AlgorithmSelectorCache(PersistentCache):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1130,6 +1160,12 @@ class AlgorithmSelectorCache(PersistentCache):
         # first to benchmark it. share a single precompilation function for all lowerings
         # of a particular key
         self.precompile_cache: Dict[str, Callable[[], None]] = {}
+        # list of callbacks that are called after benchmarking
+        self.feedback_saver_fns: List[
+            Callable[
+                [Dict[ChoiceCaller, float], str, List[Any], List[ChoiceCaller]], None
+            ]
+        ] = []
 
     def __call__(
         self,
@@ -1165,8 +1201,13 @@ class AlgorithmSelectorCache(PersistentCache):
             append_to_log(mm_file_name, {"invoke": str((M, K, N))})
 
         if len(choices) == 0:
+            backend_config = (
+                "max_autotune_gemm_backends"
+                if name != "convolution"
+                else "max_autotune_conv_backends"
+            )
             raise NoValidChoicesError(
-                "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
+                f"No choices to select, please consider adding ATEN into {backend_config} "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
         log.debug("Max autotune selects from %s choices.", str(len(choices)))
@@ -1180,7 +1221,7 @@ class AlgorithmSelectorCache(PersistentCache):
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
-        inputs_key = repr([self.key_of(x) for x in input_nodes])
+        inputs_key = create_inputs_key(input_nodes)
 
         def precompile(choices) -> Callable[[], None]:
             def no_op(*args, **kwargs):
@@ -1222,14 +1263,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
-            precompile_key = ":".join(
-                [
-                    name,
-                    inputs_key,
-                    torch.get_float32_matmul_precision(),
-                ]
-                + [choice.hash_key() for choice in choices]
-            )
+            precompile_key = create_precompile_key(name, inputs_key, choices)
             if precompile_func := self.precompile_cache.get(precompile_key):
                 return precompile_func
 
@@ -1317,6 +1351,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 self.log_results(
                     name, input_nodes, timings, autotune_elapse, precompile_elapse
                 )
+
+            for feedback_fn in self.feedback_saver_fns:
+                feedback_fn(timings, name, input_nodes, choices)
 
             return timings
 
@@ -1669,6 +1706,14 @@ class AlgorithmSelectorCache(PersistentCache):
             ),
         )
 
+    def add_feedback_saver(
+        self,
+        fn: Callable[
+            [Dict[ChoiceCaller, float], str, List[Any], List[ChoiceCaller]], None
+        ],
+    ):
+        self.feedback_saver_fns.append(fn)
+
 
 _ALGORITHM_SELECTOR_CACHE: Optional[AlgorithmSelectorCache] = None
 
@@ -1684,6 +1729,15 @@ def autotune_select_algorithm(*args, **kwargs):
         )
 
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
+
+
+def add_feedback_saver(
+    fn: Callable[[Dict[ChoiceCaller, float], str, List[Any], List[ChoiceCaller]], None]
+):
+    global _ALGORITHM_SELECTOR_CACHE
+    if _ALGORITHM_SELECTOR_CACHE is None:
+        _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
+    _ALGORITHM_SELECTOR_CACHE.add_feedback_saver(fn)
 
 
 def realize_inputs(*args):
