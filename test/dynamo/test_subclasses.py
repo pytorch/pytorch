@@ -35,7 +35,6 @@ from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
-
 class DoubleSizeTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, inner):
@@ -408,8 +407,6 @@ class CtxSubclassTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
-        from torch.utils._python_dispatch import return_and_correct_aliasing
-
         if kwargs is None:
             kwargs = {}
         biggest_constant = max(
@@ -2252,7 +2249,6 @@ class GraphModule(torch.nn.Module):
         return [mul_1]
 """,  # noqa: B950
         )
-
 
     @unittest.expectedFailure
     def test_tensor_subclass_DoubleTensor_simple(self):
