@@ -52,6 +52,7 @@ jobs:
     name: linux-jammy-aarch64-py3.10-inductor
     uses: ./.github/workflows/_linux-build.yml
     with:
+      runner: linux.arm64.m7g.4xlarge
       build-environment: linux-jammy-aarch64-py3.10
       docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks
       test-matrix: |

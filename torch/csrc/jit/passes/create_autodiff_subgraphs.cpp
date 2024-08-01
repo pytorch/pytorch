@@ -10,8 +10,7 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -374,9 +373,9 @@ std::optional<bool> findRequiresGradForOutput(
     }
 
     if (use.user->kind() == prim::profile) {
-      std::optional<bool> req_grad_use;
-      if ((req_grad_use = getProfileNodeRequiresGrad(use.user)).has_value()) {
-        return req_grad_use.value();
+      auto req_grad_use = getProfileNodeRequiresGrad(use.user);
+      if (req_grad_use.has_value()) {
+        return req_grad_use;
       }
     }
 
@@ -393,10 +392,9 @@ std::optional<bool> findRequiresGradForOutput(
         }
 
         if (dg_use.user->kind() == prim::profile) {
-          std::optional<bool> req_grad_use;
-          if ((req_grad_use = getProfileNodeRequiresGrad(dg_use.user))
-                  .has_value()) {
-            return req_grad_use.value();
+          auto req_grad_use = getProfileNodeRequiresGrad(dg_use.user);
+          if (req_grad_use.has_value()) {
+            return req_grad_use;
           }
         }
       }
@@ -474,5 +472,4 @@ std::vector<Node*> CreateAutodiffSubgraphs(
   GRAPH_DEBUG("diff_nodes.size() ", diff_nodes.size());
   return diff_nodes;
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
