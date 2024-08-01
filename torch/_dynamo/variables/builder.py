@@ -1453,9 +1453,10 @@ class VariableBuilder:
             isinstance(value, torch.Tensor)
             and is_sparse_any(value)
             and not self.tx.export
+            and not config.capture_sparse_compute
         ):
-            # A hot fix for sparse tensors + torch.compile. There is some
-            # support for export + coo tensor. We need to create
+            # A hot fix for sparse tensors + torch.compile. Support for
+            # export + sparsity is being added but we need to create
             # SPARSE_TENSOR_GUARDS for guards to work propertly.
             unimplemented("torch.compile does not support sparse Tensors")
 

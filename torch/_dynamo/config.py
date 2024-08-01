@@ -338,6 +338,12 @@ error_on_nested_fx_trace = True
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
 
+# If true, enables feature that captures PyTorch sparsity in the
+# exported FX graph. This flag should become the default eventually
+# and be removed, but currently provides a way to fall back to old
+# graph breaking behavior.
+capture_sparse_compute = False if is_fbcode() else True
+
 # If true, error if we try to compile a function that has
 # been seen before.
 # [@compile_ignored: runtime_behaviour]
