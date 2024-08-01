@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import builtins
 import functools
@@ -33,6 +34,7 @@ from torch._prims_common.wrappers import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
+
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 

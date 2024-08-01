@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from typing import Callable, Tuple, Union
 
@@ -37,7 +38,7 @@ class TransformGetItemToIndex(TorchFunctionMode):
 
 
 class FlexAttentionHOP(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("flex_attention")
 
     def __call__(
@@ -73,7 +74,7 @@ flex_attention.__module__ = "torch.ops.higher_order"
 
 
 class FlexAttentionBackwardHOP(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("flex_attention_backward")
 
     def __call__(
@@ -145,8 +146,6 @@ def _math_attention_inner(
     mask_mod_in_dim_buffers = (None,) * len(mask_mod_other_buffers)
     mask_mod = _vmap_for_bhqkv(mask_mod, prefix=(), suffix=mask_mod_in_dim_buffers)
 
-    # todo: We wouldn't need these overrides in this file if Dynamo always did the
-    # rewriting.
     with TransformGetItemToIndex():
         scores = (scores * scale).to(working_precision)
         post_mod_scores = torch.where(

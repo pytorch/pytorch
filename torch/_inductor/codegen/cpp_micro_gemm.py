@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
+import sys
 from enum import Enum
 from typing import Callable, Dict, List, Optional, Type
 
@@ -22,6 +23,17 @@ class LayoutType(Enum):
     VNNI4 = 2
 
 
+_IS_WINDOWS = sys.platform == "win32"
+
+
+def get_restrict_keyword() -> str:
+    if _IS_WINDOWS:
+        # https://learn.microsoft.com/en-us/cpp/cpp/extension-restrict?view=msvc-170
+        return "__restrict"
+    else:
+        return "__restrict__"
+
+
 class CppMicroGemm:
     """
     A class that codegens a kernel that computes small-sized matrix multiplication.
@@ -40,9 +52,9 @@ inline void {{kernel_name}}(
 {%- if kernel_extra_args_declare %}
     {{kernel_extra_args_declare}}
 {%- endif %}
-    const {{input_t}}* __restrict__ A,
-    const {{input2_t}}* __restrict__ B,
-    {{output_t}}* __restrict__ C,
+    const {{input_t}}* {{restrict_keyword}} A,
+    const {{input2_t}}* {{restrict_keyword}} B,
+    {{output_t}}* {{restrict_keyword}} C,
     int64_t M,
     int64_t N,
     int64_t K,
@@ -90,6 +102,7 @@ inline void {{kernel_name}}(
             "kernel_extra_args_declare": self.get_kernel_extra_args_declare(),
             "int8_gemm": self.input_dtype == torch.uint8,
             "vnni_size": 4 if self.input_dtype == torch.uint8 else 2,
+            "restrict_keyword": get_restrict_keyword(),
         }
 
     def get_kernel_declaration(self):
@@ -256,51 +269,40 @@ class CppMicroGemmRef(CppMicroGemm):
         return KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(options)
 
 
-def check_fp32_vec_extra(config, m, n, k, alpha, num_threads):
-    # TODO(jgong5): support n % n_block_size != 0
-    return n % config.register_blocking.block_n == 0
-
-
 @register_micro_gemm(
     *generate_gemm_config(
         VecAVX512,
         [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
         input_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX512,
         [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
         input_dtype=torch.bfloat16,
         output_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX512,
         [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
         input_dtype=torch.half,
         output_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX2,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX2,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.bfloat16,
         output_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
     *generate_gemm_config(
         VecAVX2,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.half,
         output_dtype=torch.float,
-        extra_check=check_fp32_vec_extra,
     ),
 )
 class CppMicroGemmFP32Vec(CppMicroGemm):
@@ -444,9 +446,7 @@ inline void {{kernel_name}}_kernel(
 # extra check for CppMicroGemmAMX
 def check_amx_extra(config, m, n, k, alpha, num_threads):
     vnni_size = 4 if config.input_dtype == torch.uint8 else 2
-    return (
-        n % config.register_blocking.block_n == 0 and k % vnni_size == 0 and alpha == 1
-    )
+    return k % vnni_size == 0 and alpha == 1
 
 
 @register_micro_gemm(

@@ -12,6 +12,8 @@
 #include <cuda_runtime.h>
 #include <mutex>
 
+#include <nlohmann/json.hpp>
+
 namespace {
 constexpr int64_t kCommInitBusyWaitMillis = 10;
 } // namespace
@@ -370,6 +372,97 @@ void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
       "debugInfoWriter already registered");
   hasWriterRegistered_.store(true);
   writer_ = std::move(writer);
+}
+
+std::string NCCLTraceBuffer::dump_json(
+    const std::optional<std::unordered_map<
+        std::string,
+        std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+    bool includeCollectives,
+    bool onlyActive) {
+  using json = nlohmann::json;
+  json result;
+  result[version_key_str] = version_val_str;
+  result[pg_config_key_str] = getPgConfigJson();
+  result[pg_status_key_str] = getPgStatusJson();
+
+  // collective trace
+  if (includeCollectives) {
+    std::list<json> entries;
+    for (auto& e : dump_entries()) {
+      json j;
+      if (onlyActive && e.time_discovered_completed_.has_value()) {
+        continue;
+      }
+      j[record_id_key_str] = int64_t(e.id_);
+      j[pg_id_key_str] = int64_t(e.pg_id_);
+      j[pg_name_key_str] = e.pg_name_;
+      j[collective_seq_id_key_str] = int64_t(e.collective_seq_id_);
+      j[p2p_seq_id_key_str] = int64_t(e.p2p_seq_id_);
+      j[op_id_key_str] = int64_t(e.op_id_);
+      j[profiling_name_key_str] = e.profiling_name_;
+      j[time_created_key_str] = int64_t(e.time_created_);
+      if (e.duration_) {
+        j[duration_key_str] = *e.duration_;
+      }
+      auto it = e.sizes_.begin();
+      auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
+        auto sizes = std::list<std::list<int>>();
+        for (auto dim : dims) {
+          auto arg_sizes = std::list<int>();
+          for (auto i : c10::irange(dim)) {
+            (void)i;
+            arg_sizes.push_back(*it++);
+          }
+          sizes.push_back(arg_sizes);
+        }
+        return sizes;
+      };
+      j[input_sizes_key_str] = read_sizes(e.input_dims_);
+      std::vector<std::string> input_dtypes_strs;
+      input_dtypes_strs.reserve(e.input_dtypes_.size());
+      for (const auto& input_dtype : e.input_dtypes_) {
+        input_dtypes_strs.push_back(c10::toString(input_dtype));
+      }
+      j[input_dtypes_key_str] = input_dtypes_strs;
+      j[output_sizes_key_str] = read_sizes(e.output_dims_);
+      std::vector<std::string> output_dtypes_strs;
+      output_dtypes_strs.reserve(e.output_dtypes_.size());
+      for (const auto& output_dtype : e.output_dtypes_) {
+        output_dtypes_strs.push_back(c10::toString(output_dtype));
+      }
+      j[output_dtypes_key_str] = output_dtypes_strs;
+      if (e.time_discovered_completed_.has_value()) {
+        j[state_key_str] = completed_state_str;
+      } else if (e.time_discovered_started_.has_value()) {
+        j[state_key_str] = started_state_str;
+      } else {
+        j[state_key_str] = scheduled_state_str;
+      }
+      j[time_discovered_started_key_str] =
+          e.time_discovered_started_.has_value()
+          ? int64_t(*e.time_discovered_started_)
+          : 0;
+      j[time_discovered_completed_key_str] =
+          e.time_discovered_completed_.has_value()
+          ? int64_t(*e.time_discovered_completed_)
+          : 0;
+      j[retired_key_str] = e.retired_;
+      j[timeout_key_str] = e.timeout_ms_;
+      j[is_p2p_key_str] = e.isP2P_;
+      entries.emplace_back(j);
+    }
+
+    if (entries.size() > 0) {
+      result[entries_key_str] = entries;
+    }
+  }
+
+  if (ncclDumpMap.has_value()) {
+    result[nccl_comm_key_str] = ncclDumpMap.value();
+  }
+
+  return result.dump();
 }
 
 std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
