@@ -4323,10 +4323,12 @@ class DistributedTest:
                 if sys.platform == "win32":
                     torch.save(model_DDP, tmp)
                     tmp.seek(0)
-                    model_DDP = torch.load(tmp)
+                    # weights_only=False as this is legacy code that saves the model
+                    model_DDP = torch.load(tmp, weights_only=False)
                 else:
                     torch.save(model_DDP, tmp.name)
-                    model_DDP = torch.load(tmp.name)
+                    # weights_only=False as this is legacy code that saves the model
+                    model_DDP = torch.load(tmp.name, weights_only=False)
 
             # dummy data initialization
             local_bs = len(gpu_subset)
@@ -5601,10 +5603,12 @@ class DistributedTest:
                 if sys.platform == "win32":
                     torch.save(model_DDP, tmp)
                     tmp.seek(0)
-                    model_DDP = torch.load(tmp)
+                    # weights_only=False as this is legacy code that saves the model
+                    model_DDP = torch.load(tmp, weights_only=False)
                 else:
                     torch.save(model_DDP, tmp.name)
-                    model_DDP = torch.load(tmp.name)
+                    # weights_only=False as this is legacy code that saves the model
+                    model_DDP = torch.load(tmp.name, weights_only=False)
 
             # data initialization
             input_cpu = torch.randn(global_bs, 2)

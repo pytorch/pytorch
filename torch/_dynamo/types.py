@@ -4,6 +4,9 @@ import types
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Protocol, Union
 from typing_extensions import TypeAlias
 
+import torch
+from torch._guards import CompileId
+
 
 if sys.version_info >= (3, 11):
     from torch._C._dynamo import eval_frame
@@ -12,8 +15,6 @@ if sys.version_info >= (3, 11):
 else:
     DynamoFrameType: TypeAlias = types.FrameType
 
-import torch
-from torch._guards import CompileId
 
 # This class has a `check_fn` field for the guard,
 #  and a `code` field for the code object.

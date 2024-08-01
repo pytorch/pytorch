@@ -4329,7 +4329,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     buf = io.BytesIO()
                     rnn_pickle = torch.save(rnn, buf)
                     buf.seek(0)
-                    rnn2 = torch.load(buf)
+                    # weights_only=False as this is legacy code that saves the model
+                    rnn2 = torch.load(buf, weights_only=False)
                     rnn2.flatten_parameters()
                     output3, hy3 = rnn2(input, hx)
 
