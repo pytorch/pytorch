@@ -216,7 +216,7 @@ op2.node.kernel = extern_kernels.mm""",
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_debug_multi_tempalte(self):
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = torch.nn.Linear(100, 100)
                 self.relu = torch.nn.ReLU()

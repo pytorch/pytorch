@@ -892,7 +892,7 @@ class TestFullyShardPrefetch(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_multi_module_unused_module(self):
         class ModuleWithUnusedLinear(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.unused_lin = nn.Linear(1, 1)
                 self.lin = nn.Linear(16, 16)
