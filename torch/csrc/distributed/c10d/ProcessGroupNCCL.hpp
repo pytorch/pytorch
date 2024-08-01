@@ -243,8 +243,7 @@ struct DumpPipe {
 //   // Now continue on other work in the current stream.
 class TORCH_API ProcessGroupNCCL : public Backend {
  public:
-  class TORCH_API WorkNCCL : public Work,
-                             public std::enable_shared_from_this<WorkNCCL> {
+  class WorkNCCL : public Work, public std::enable_shared_from_this<WorkNCCL> {
    public:
     friend struct WorkInfo;
 
