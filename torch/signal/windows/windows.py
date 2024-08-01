@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Iterable
+from typing import Optional, Iterable, TypeVar, Callable
 
 import torch
 from math import sqrt
@@ -21,6 +21,8 @@ __all__ = [
     'nuttall',
 ]
 
+_T = TypeVar("_T")
+
 window_common_args = merge_dicts(
     parse_kwargs(
         """
@@ -38,7 +40,7 @@ window_common_args = merge_dicts(
 )
 
 
-def _add_docstr(*args):
+def _add_docstr(*args: str) -> Callable[[_T], _T]:
     r"""Adds docstrings to a given decorated function.
 
     Specially useful when then docstrings needs string interpolation, e.g., with
@@ -50,7 +52,7 @@ def _add_docstr(*args):
         args (str):
     """
 
-    def decorator(o):
+    def decorator(o: _T) -> _T:
         o.__doc__ = "".join(args)
         return o
 

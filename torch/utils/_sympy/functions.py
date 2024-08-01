@@ -6,6 +6,7 @@ import sys
 
 import sympy
 from sympy import S
+from sympy.core.numbers import equal_valued
 
 from .numbers import int_oo
 
@@ -117,9 +118,9 @@ class FloorDiv(sympy.Function):
 
         if base.is_zero:
             return sympy.S.Zero
-        if base.is_integer and divisor == 1:
+        if base.is_integer and equal_valued(divisor, 1):
             return base
-        if base.is_integer and divisor == -1:
+        if base.is_integer and equal_valued(divisor, -1):
             return sympy.Mul(base, -1)
         if (
             isinstance(base, sympy.Number)
@@ -155,7 +156,7 @@ class FloorDiv(sympy.Function):
 
         try:
             gcd = sympy.gcd(base, divisor)
-            if gcd != 1:
+            if not equal_valued(gcd, 1):
                 return FloorDiv(
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
