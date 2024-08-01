@@ -1,15 +1,9 @@
 # mypy: ignore-errors
 
-MAX_CYCLE = 3000
-
 import itertools
 import operator
 import sys
-
 from typing import Dict, List, Optional, TYPE_CHECKING, Union
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -20,17 +14,23 @@ from ..exc import (
     unimplemented,
     UserError,
 )
-
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
 
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
+
+MAX_CYCLE = 3000
+
+
 class ItertoolsVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"ItertoolsVariable({self.value})"
 
     def python_type(self):
@@ -60,6 +60,7 @@ class ItertoolsVariable(VariableTracker):
             and not kwargs
             and all(arg.has_unpack_var_sequence(tx) for arg in args)
         ):
+            # TODO support itertools.chain with arbitrary iterables
             seqs = [arg.unpack_var_sequence(tx) for arg in args]
             items = list(itertools.chain.from_iterable(seqs))
             return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
@@ -205,7 +206,7 @@ class ItertoolsVariable(VariableTracker):
 
 
 class IteratorVariable(VariableTracker):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
     def next_variable(self, tx):
@@ -232,7 +233,7 @@ class IteratorVariable(VariableTracker):
 
 
 class RepeatIteratorVariable(IteratorVariable):
-    def __init__(self, item: VariableTracker, **kwargs):
+    def __init__(self, item: VariableTracker, **kwargs) -> None:
         super().__init__(**kwargs)
         self.item = item
 
@@ -254,7 +255,7 @@ class RepeatIteratorVariable(IteratorVariable):
 
 
 class CountIteratorVariable(IteratorVariable):
-    def __init__(self, item: int = 0, step: int = 1, **kwargs):
+    def __init__(self, item: int = 0, step: int = 1, **kwargs) -> None:
         super().__init__(**kwargs)
         if not isinstance(item, VariableTracker):
             item = ConstantVariable.create(item)
@@ -292,7 +293,7 @@ class CycleIteratorVariable(IteratorVariable):
         saved_index: int = 0,
         item: Optional[VariableTracker] = None,
         **kwargs,
-    ):
+    ) -> None:
         if saved is None:
             saved = []
         super().__init__(**kwargs)
@@ -345,7 +346,7 @@ class ZipVariable(IteratorVariable):
         iterables: List[Union[List[VariableTracker], VariableTracker]],
         strict: bool = False,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         assert isinstance(iterables, list)
         # can be list[Variable] or VariableTracker (with next_variable implemented)
@@ -456,7 +457,7 @@ class MapVariable(ZipVariable):
         fn: VariableTracker,
         iterables: List[Union[List[VariableTracker], VariableTracker]],
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(iterables, **kwargs)
         self.fn = fn
 
@@ -488,7 +489,7 @@ class EnumerateVariable(ZipVariable):
         iterable: Union[List[VariableTracker], VariableTracker],
         start: int = 0,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(
             [CountIteratorVariable(start, mutable_local=MutableLocal()), iterable],
             **kwargs,
