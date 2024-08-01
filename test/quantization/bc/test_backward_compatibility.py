@@ -12,7 +12,6 @@ import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.quantization.quantize_fx as quantize_fx
 import torch.nn as nn
-
 from torch.ao.quantization import MinMaxObserver, PerChannelMinMaxObserver
 from torch.fx import GraphModule
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
@@ -515,7 +514,7 @@ class TestSerialization(TestCase):
     )
     def test_lstm(self):
         class LSTMModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lstm = nnqd.LSTM(input_size=3, hidden_size=7, num_layers=1).to(
                     dtype=torch.float
@@ -545,7 +544,7 @@ class TestSerialization(TestCase):
 
     def test_default_qat_qconfig(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(5, 5)
                 self.relu = nn.ReLU()

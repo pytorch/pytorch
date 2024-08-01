@@ -3,8 +3,8 @@ import logging
 from typing import Any, Dict, Optional, Protocol, Tuple, Union
 
 import torch
-
 from torch._library.utils import parse_namespace
+
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class HasStaticMethodFromReal(Protocol):
 
 
 class FakeClassRegistry:
-    def __init__(self):
+    def __init__(self) -> None:
         self._registered_class: Dict[str, Any] = {}
 
     def has_impl(self, full_qualname: str) -> bool:

@@ -16,7 +16,6 @@ from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
 import torch
 import torch.fx
 from torch.onnx import _type_utils as jit_type_utils
-
 from torch.onnx._internal.fx import (
     _pass,
     diagnostics,

@@ -24,6 +24,7 @@ import torch.nn as nn
 from torch import Tensor
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
 
+
 # Utilities to make nn.Module "functional"
 # In particular the goal is to be able to provide a function that takes as input
 # the parameters and evaluate the nn.Module using fixed inputs.
