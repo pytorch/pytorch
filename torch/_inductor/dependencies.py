@@ -589,7 +589,7 @@ def canonicalization_prefix():
 class FreeUnbackedSymbolsOpsHandler:
     symbols: OrderedSet[sympy.Symbol]
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.symbols = OrderedSet()
 
     def __getattr__(self, name: str) -> Callable[..., Any]:

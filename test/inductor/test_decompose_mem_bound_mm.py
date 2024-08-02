@@ -31,7 +31,7 @@ class MyModule(torch.nn.Module):
 
 
 class MyModule2(torch.nn.Module):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
 
     def forward(self, input1, input2):
@@ -40,7 +40,7 @@ class MyModule2(torch.nn.Module):
 
 
 class MyModule3(torch.nn.Module):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
 
     def forward(self, input1, input2):

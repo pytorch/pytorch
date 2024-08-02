@@ -42,7 +42,7 @@ def get_embedding_operators_config() -> OperatorConfig:
 
 
 class EmbeddingQuantizer(Quantizer):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
 
     @classmethod

@@ -5,7 +5,7 @@ from .utils import ExactWeakKeyDictionary
 
 
 class CodeContextDict:
-    def __init__(self) -> None:
+    def __init__(self):
         self.code_context = ExactWeakKeyDictionary()
 
     def has_context(self, code: types.CodeType):

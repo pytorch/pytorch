@@ -70,7 +70,7 @@ class MutableLocal(MutableLocalBase):
     state.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__(MutableLocalSource.Local)
 
     def __hash__(self):

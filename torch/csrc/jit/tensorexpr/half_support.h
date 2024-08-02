@@ -59,7 +59,7 @@ class HalfChecker : public IRVisitor {
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class HalfRewriter : public IRMutator {
-  ExprPtr mutate(const LoadPtr& v) override {
+  ExprPtr mutate(LoadPtr v) override {
     ExprPtr child = IRMutator::mutate(v);
     if (!isHalf(child)) {
       return child;
@@ -72,7 +72,7 @@ class HalfRewriter : public IRMutator {
     return ret;
   }
 
-  StmtPtr mutate(const StorePtr& v) override {
+  StmtPtr mutate(StorePtr v) override {
     // Since mutation changes the `value()` expression in-place, we need to
     // get the dtype of the `value()` before that is mutated.
     auto newType = v->value()->dtype();
@@ -95,15 +95,15 @@ class HalfRewriter : public IRMutator {
     return v;
   }
 
-  ExprPtr mutate(const HalfImmPtr& v) override {
+  ExprPtr mutate(HalfImmPtr v) override {
     return alloc<Cast>(kFloat, v);
   }
 
-  ExprPtr mutate(const BFloat16ImmPtr& v) override {
+  ExprPtr mutate(BFloat16ImmPtr v) override {
     return alloc<Cast>(kFloat, v);
   }
 
-  ExprPtr mutate(const CastPtr& v) override {
+  ExprPtr mutate(CastPtr v) override {
     ExprPtr child = v->src_value()->accept_mutator(this);
 
     // just don't allow half casts we didn't insert.
@@ -136,7 +136,7 @@ class HalfRewriter : public IRMutator {
     return alloc<Cast>(v->dtype(), child);
   }
 
-  StmtPtr mutate(const LetPtr& v) override {
+  StmtPtr mutate(LetPtr v) override {
     if (isHalf(v->var()->dtype().scalar_type())) {
       VarPtr load_new_var = alloc<Var>(v->var()->name_hint(), kFloat);
       ExprPtr new_value = alloc<Cast>(
@@ -150,7 +150,7 @@ class HalfRewriter : public IRMutator {
     return IRMutator::mutate(v);
   }
 
-  ExprPtr mutate(const VarPtr& v) override {
+  ExprPtr mutate(VarPtr v) override {
     auto it = var_map.find(v);
     if (it != var_map.end()) {
       return it->second;
@@ -168,34 +168,34 @@ class HalfRewriter : public IRMutator {
     return v;
   }
 
-  ExprPtr mutate(const AddPtr& v) override {
+  ExprPtr mutate(AddPtr v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(const SubPtr& v) override {
+  ExprPtr mutate(SubPtr v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(const MulPtr& v) override {
+  ExprPtr mutate(MulPtr v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(const DivPtr& v) override {
+  ExprPtr mutate(DivPtr v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(const MaxPtr& v) override {
+  ExprPtr mutate(MaxPtr v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(const MinPtr& v) override {
+  ExprPtr mutate(MinPtr v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(const CompareSelectPtr& v) override {
+  ExprPtr mutate(CompareSelectPtr v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(const BroadcastPtr& v) override {
+  ExprPtr mutate(BroadcastPtr v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(const IfThenElsePtr& v) override {
+  ExprPtr mutate(IfThenElsePtr v) override {
     return mutateArithmetic(v);
   }
-  ExprPtr mutate(const IntrinsicsPtr& v) override {
+  ExprPtr mutate(IntrinsicsPtr v) override {
     return mutateArithmetic(v);
   }
 

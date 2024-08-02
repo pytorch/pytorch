@@ -48,9 +48,9 @@ std::string IRPrinter::to_string(CompareSelectOperation op) {
 // we need to look at the operator precedence to make the output simpler.
 template <
     typename Op,
-    std::enable_if_t<std::is_same_v<
+    typename std::enable_if<std::is_same<
         decltype(detail::bin_op_deducer(std::declval<Op>())),
-        void>>* = nullptr>
+        void>::value>::type* = nullptr>
 void visitBinaryOp(
     NodePtr<Op> v,
     const std::string& op_str,
@@ -167,7 +167,7 @@ void IRPrinter::visit(const CompareSelectPtr& v) {
   }
   os() << " ? ";
 
-  auto withParens = [&](const ExprPtr& e) {
+  auto withParens = [&](ExprPtr e) {
     auto prec = getPrecedence(e->expr_type());
     if (prec >= self_prec) {
       os() << "(";
@@ -191,7 +191,9 @@ static void formatFPSuffix(std::ostream& os, T v) {
   os << (v == std::ceil(v) ? ".f" : "f");
 }
 
-template <typename T, std::enable_if_t<std::is_floating_point_v<T>>* = nullptr>
+template <
+    typename T,
+    std::enable_if_t<std::is_floating_point<T>::value>* = nullptr>
 static void formatImm(std::ostream& os, T v) {
   const int precision = 16;
   if (std::isnan(v)) {
@@ -211,7 +213,9 @@ static void formatIntSuffix(std::ostream& os, int64_t v) {
 template <typename T>
 static void formatIntSuffix(std::ostream& os, T v) {}
 
-template <typename T, std::enable_if_t<!std::is_floating_point_v<T>>* = nullptr>
+template <
+    typename T,
+    std::enable_if_t<!std::is_floating_point<T>::value>* = nullptr>
 static void formatImm(std::ostream& os, T v) {
   os << +v;
   formatIntSuffix(os, v);
@@ -640,7 +644,7 @@ std::ostream& operator<<(std::ostream& stream, const Tensor& t) {
   return stream;
 }
 
-void print(const ExprPtr& expr) {
+void print(ExprPtr expr) {
   if (expr) {
     IRPrinter p(std::cout);
     p.print(*expr);
@@ -650,7 +654,7 @@ void print(const ExprPtr& expr) {
   std::cout << "\n";
 }
 
-void print(const StmtPtr& stmt) {
+void print(StmtPtr stmt) {
   if (stmt) {
     IRPrinter p(std::cout);
     p.print(*stmt);

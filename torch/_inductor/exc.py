@@ -65,7 +65,7 @@ class SubgraphLoweringException(RuntimeError):
 
 
 class InvalidCxxCompiler(RuntimeError):
-    def __init__(self) -> None:
+    def __init__(self):
         from . import config
 
         super().__init__(

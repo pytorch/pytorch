@@ -1848,7 +1848,7 @@ class IntegrationTest(TestCase):
 
 
 class _InMemoryRendezvousBackend(RendezvousBackend):
-    def __init__(self) -> None:
+    def __init__(self):
         self._lock = threading.Lock()
         self._state = None
         self._token = None

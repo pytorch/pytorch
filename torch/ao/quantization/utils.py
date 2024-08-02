@@ -513,7 +513,7 @@ def _get_path_of_module(
     Example::
 
     >> class M(torch.nn.Module):
-           def __init__(self) -> None:
+           def __init__(self):
                self.linear = torch.nn.Linear(5, 5)
            def forward(self, x):
                return self.linear(x)

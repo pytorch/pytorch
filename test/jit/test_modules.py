@@ -31,7 +31,7 @@ class TestModules(JitTestCase):
         class Net(torch.nn.Linear):
             x: torch.jit.Final[int]
 
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__(5, 10)
                 self.x = 0
 

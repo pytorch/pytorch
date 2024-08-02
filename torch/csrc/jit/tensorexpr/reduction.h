@@ -10,7 +10,9 @@
 #include <utility>
 #include <vector>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 using ParameterList = const std::vector<VarHandle>;
 using ReduceInteraction = std::function<ExprHandle(ExprHandle, ExprHandle)>;
@@ -46,9 +48,9 @@ class TORCH_API Reducer {
       const std::vector<VarPtr>& inner) const;
 
   ExprHandle operator()(
-      const BufHandle& result_buf,
+      BufHandle result_buf,
       BufHandle acc_buf,
-      const ExprHandle& body,
+      ExprHandle body,
       const std::vector<ExprHandle>& output,
       const std::vector<VarHandle>& inner) const;
 
@@ -105,8 +107,8 @@ class TORCH_API Reducer {
   // Completes the reduction operator by applying the interaction function to
   // the accumulation and the body expression.
   static ExprPtr complete(
-      const BufPtr& accumulator,
-      const ReduceInteraction& interaction,
+      BufPtr accumulator,
+      ReduceInteraction interaction,
       ExprHandle body,
       const std::vector<ExprPtr>& output_args,
       const std::vector<VarPtr>& reduce_args) {
@@ -116,8 +118,8 @@ class TORCH_API Reducer {
     return e.node();
   }
   static ExprHandle complete(
-      const BufHandle& accumulator,
-      const ReduceInteraction& interaction,
+      BufHandle accumulator,
+      ReduceInteraction interaction,
       ExprHandle body,
       const std::vector<ExprHandle>& output_args,
       const std::vector<VarHandle>& reduce_args) {
@@ -140,41 +142,41 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ReduceOp(
-      const ExprPtr& body,
+      ExprPtr body,
       std::vector<VarPtr> reduce_args,
-      Reducer reducer)
+      const Reducer& reducer)
       : ExprNodeBase(body->dtype()),
         body_(body),
         reduce_args_(std::move(reduce_args)),
-        reducer_(std::move(reducer)) {
+        reducer_(reducer) {
     result_buf_ = nullptr;
     acc_buf_ = nullptr;
     ri_operand_ = nullptr;
   }
 
   ReduceOp(
-      const ExprPtr& body,
+      ExprPtr body,
       std::vector<VarPtr> reduce_args,
       BufPtr result_buf,
       BufPtr acc_buf,
       ExprPtr ri_operand,
-      Reducer reducer)
+      const Reducer& reducer)
       : ExprNodeBase(body->dtype()),
         body_(body),
         reduce_args_(std::move(reduce_args)),
         result_buf_(std::move(result_buf)),
         acc_buf_(std::move(acc_buf)),
         ri_operand_(std::move(ri_operand)),
-        reducer_(std::move(reducer)) {}
+        reducer_(reducer) {}
 
   static ExprHandle make(
       ExprHandle body,
-      const std::vector<VarHandle>& reduce_args,
+      std::vector<VarHandle> reduce_args,
       const Reducer& reducer);
 
   static ExprHandle make(
       ExprHandle body,
-      const std::vector<VarHandle>& reduce_args,
+      std::vector<VarHandle> reduce_args,
       BufHandle result_buf,
       BufHandle acc_buf,
       ExprHandle ri_operand,
@@ -231,7 +233,7 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
 class Sum : public Reducer {
  public:
   Sum()
-      : Reducer(ExprHandle(0), [](const ExprHandle& a, const ExprHandle& b) {
+      : Reducer(ExprHandle(0), [](ExprHandle a, ExprHandle b) {
           return a + b;
         }) {}
 };
@@ -268,15 +270,11 @@ class Maximum : public Reducer {
   Maximum(Dtype dtype)
       : Reducer(
             minimumVal(dtype.scalar_type()),
-            [](const ExprHandle& a, const ExprHandle& b) {
-              return Max::make(a, b, true);
-            }) {}
+            [](ExprHandle a, ExprHandle b) { return Max::make(a, b, true); }) {}
   Maximum(ExprHandle initializer)
-      : Reducer(
-            std::move(initializer),
-            [](const ExprHandle& a, const ExprHandle& b) {
-              return Max::make(a, b, true);
-            }) {}
+      : Reducer(initializer, [](ExprHandle a, ExprHandle b) {
+          return Max::make(a, b, true);
+        }) {}
 };
 
 class Minimum : public Reducer {
@@ -284,24 +282,24 @@ class Minimum : public Reducer {
   Minimum(Dtype dtype)
       : Reducer(
             maximumVal(dtype.scalar_type()),
-            [](const ExprHandle& a, const ExprHandle& b) {
-              return Min::make(a, b, true);
-            }) {}
-  Minimum(const ExprHandle& initializer)
-      : Reducer(initializer, [](const ExprHandle& a, const ExprHandle& b) {
+            [](ExprHandle a, ExprHandle b) { return Min::make(a, b, true); }) {}
+  Minimum(ExprHandle initializer)
+      : Reducer(initializer, [](ExprHandle a, ExprHandle b) {
           return Min::make(a, b, true);
         }) {}
 };
 
 class ReductionExpander : public IRMutator {
  public:
-  StmtPtr expand(const StmtPtr& s) {
+  StmtPtr expand(StmtPtr s) {
     return s->accept_mutator(this);
   }
 
-  ExprPtr mutate(const ReduceOpPtr& v) override {
+  ExprPtr mutate(ReduceOpPtr v) override {
     return v->body();
   }
 };
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

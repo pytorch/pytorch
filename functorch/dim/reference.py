@@ -383,7 +383,7 @@ _orig_getitem = torch.Tensor.__getitem__
 
 
 class dim_tracker:
-    def __init__(self) -> None:
+    def __init__(self):
         self.dims = llist()
         self.count = []
 

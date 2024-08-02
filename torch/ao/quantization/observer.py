@@ -1568,7 +1568,7 @@ class ReuseInputObserver(ObserverBase):
     Note: this is only enabled in FX Graph Mode Quantization
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__(torch.quint8, is_dynamic=False)
 
     def forward(self, x):

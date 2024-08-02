@@ -7,7 +7,7 @@ try:
     from torchvision.models import resnet18
 
     class TorchVisionTest(torch.nn.Module):
-        def __init__(self) -> None:
+        def __init__(self):
             super().__init__()
             self.tvmod = resnet18()
 

@@ -286,7 +286,7 @@ void initTensorExprBindings(PyObject* module) {
       "Compute",
       [](const std::string& func_name,
          const std::vector<ExprHandle>& dim_args,
-         const py::function& func) {
+         py::function func) {
         if (dim_args.size() == 1) {
           return Compute(func_name, dim_args, [&func](const VarHandle& a) {
             return py::cast<ExprHandle>(func(a));
@@ -327,7 +327,7 @@ void initTensorExprBindings(PyObject* module) {
       "Compute2",
       [](const std::string& func_name,
          const std::vector<ExprHandle>& dim_args,
-         const py::function& func) {
+         py::function func) {
         return Compute(
             func_name, dim_args, [&func](const std::vector<VarHandle>& dims) {
               return py::cast<ExprHandle>(func(dims));
@@ -701,7 +701,7 @@ void initTensorExprBindings(PyObject* module) {
   te.def(
       "lower",
       [](std::string op_str,
-         const py::list& inputs,
+         py::list inputs,
          std::vector<ExprHandle> outputShape,
          Dtype outputType) {
         auto op = c10::Symbol::fromQualString(op_str);

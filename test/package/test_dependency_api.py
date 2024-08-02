@@ -273,7 +273,7 @@ class TestDependencyAPI(PackageTestCase):
             return module
 
         class BrokenImporter(Importer):
-            def __init__(self) -> None:
+            def __init__(self):
                 self.modules = {
                     "foo": create_module("foo"),
                     "bar": create_module("bar"),

@@ -188,17 +188,17 @@ void IRVerifier::visit(const ExternalCallPtr& v) {
   IRVisitor::visit(v);
 }
 
-void verify(const StmtPtr& s) {
+void verify(StmtPtr s) {
   IRVerifier verifier;
   s->accept(&verifier);
 }
 
-void verify(const ExprPtr& e) {
+void verify(ExprPtr e) {
   IRVerifier verifier;
   e->accept(&verifier);
 }
 
-void verify(const ExprHandle& e) {
+void verify(ExprHandle e) {
   verify(e.node());
 }
 

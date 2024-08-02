@@ -278,7 +278,7 @@ class TestMisc(JitTestCase):
         class M(nn.Module):
             sub: OneTwoModule
 
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.sub = BarMod()
 

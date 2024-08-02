@@ -24,7 +24,7 @@ class _PyTreeExtensionContext:
 
     _extensions: dict[type, tuple[pytree.FlattenFunc, pytree.UnflattenFunc]]
 
-    def __init__(self) -> None:
+    def __init__(self):
         self._extensions = {}
         # Register PyTree extension for HuggingFace model output.
         self._register_huggingface_model_output_extension()
