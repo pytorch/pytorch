@@ -88,6 +88,7 @@ def insert_deferred_runtime_asserts(
     import sympy
 
     from torch.fx.experimental.symbolic_shapes import (
+        _has_unsupported_sympy_function,
         CallMethodKey,
         cast_symbool_to_symint_guardless,
         ConvertIntKey,
@@ -95,7 +96,6 @@ def insert_deferred_runtime_asserts(
         free_symbols,
         InnerTensorKey,
         resolve_unbacked_bindings,
-        _has_unsupported_sympy_function,
     )
     from torch.utils._sympy.numbers import int_oo
     from torch.utils._sympy.reference import PythonReferenceAnalysis
@@ -129,13 +129,8 @@ def insert_deferred_runtime_asserts(
         return (
             (val := _get_sym_val(node)) is not None
             and not isinstance(val, sympy.Number)
+            # this holds back from reifying anything in torch.utils._sympy.functions.py that's unsupported
             and not _has_unsupported_sympy_function(val)
-            # this holds back from reifying anything in torch.utils._sympy.functions.py from input shapes.
-            # TODO: figure out missing parts, too many failures on TruncToInt, CeilToInt, etc.
-            # see for example:
-            # test/dynamo/test_unspec.py test_unspec_float_precision
-            # test/dynamo/test_repros.py test_do_paste_mask
-            # test/nn/test_packed_sequence.py test_pack_padded_sequence (PYTORCH_TEST_WITH_DYNAMO=1)
             and any(
                 isinstance(arg, fx.Node)
                 and isinstance(_get_example_value(arg), (torch.Tensor, torch.Size))
@@ -193,7 +188,7 @@ def insert_deferred_runtime_asserts(
                 # if we've already added a constrain_range call for this symbol,
                 # then single-symbol bound asserts like u0 >= 0, u0 <= 5 are redundant.
                 or _has_unsupported_sympy_function(ra.expr)
-                # don't add anything we can't reify
+                # don't try to reify sympy functions we can't turn into FX nodes
             ):
                 continue
 
