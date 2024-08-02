@@ -207,7 +207,46 @@ def forward(self, x_1, w_1):
         gm = make_fx(func, tracing_mode="symbolic")(x, w)
         self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1, w_1):
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 1)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(w_1, 0)
+    eq = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
+    sym_size_int_2 = torch.ops.aten.sym_size.int(x_1, 0)
+    ge = sym_size_int_2 >= 0
+    sym_size_int_3 = torch.ops.aten.sym_size.int(w_1, 1)
+    ge_1 = sym_size_int_3 >= 0
+    mul = sym_size_int_2 * sym_size_int_3
+    add = 0 + mul;  mul = None
+    lt = sym_size_int_3 < 1
+    mul_1 = sym_size_int_2 * sym_size_int_3
+    lt_1 = mul_1 < 2;  mul_1 = None
+    eq_1 = sym_size_int_3 == 1
+    eq_2 = sym_size_int_2 == 1
+    ne = sym_size_int_3 != sym_size_int_3
+    mul_2 = sym_size_int_3 * sym_size_int_2
+    ge_2 = sym_size_int_2 >= 0
+    ge_3 = sym_size_int_3 >= 0
+    eq_3 = sym_size_int_2 == 0
+    sub = sym_size_int_2 - 1
+    mul_3 = sym_size_int_3 * sub;  sub = None
+    add_1 = 1 + mul_3;  mul_3 = None
+    eq_4 = sym_size_int_3 == 0
+    sub_1 = sym_size_int_3 - 1
+    add_2 = add_1 + sub_1;  add_1 = sub_1 = None
+    add_3 = 0 + add_2;  add_2 = None
+    mul_4 = 4 * add_3;  add_3 = None
+    ge_4 = sym_size_int_2 >= 0
+    ge_5 = sym_size_int_3 >= 0
+    eq_5 = sym_size_int_2 == 0
+    sub_2 = sym_size_int_2 - 1
+    mul_5 = sym_size_int_3 * sub_2;  sub_2 = None
+    add_4 = 1 + mul_5;  mul_5 = None
+    eq_6 = sym_size_int_3 == 0
+    sub_3 = sym_size_int_3 - 1
+    add_5 = add_4 + sub_3;  add_4 = sub_3 = None
+    add_6 = 0 + add_5;  add_5 = None
+    mul_6 = 4 * add_6;  add_6 = None
     out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, x_1, w_1);  x_1 = w_1 = None
+    mul_7 = sym_size_int_2 * sym_size_int_3;  sym_size_int_2 = sym_size_int_3 = None
     return out_dtype""")
 
     def test_out_dtype_wrong_output(self) -> None:

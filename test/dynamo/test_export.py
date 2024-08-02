@@ -3480,17 +3480,25 @@ def forward(self, x):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     arg0_1 = arg0
-    slice_1 = torch.ops.aten.slice.Tensor(arg0_1, 2, 0, 3)
     sym_size_int = torch.ops.aten.sym_size.int(arg0_1, 0)
+    eq = sym_size_int == sym_size_int
+    sym_size_int_1 = torch.ops.aten.sym_size.int(arg0_1, 1)
+    eq_1 = sym_size_int_1 == sym_size_int;  sym_size_int_1 = None
+    sym_size_int_2 = torch.ops.aten.sym_size.int(arg0_1, 2)
+    eq_2 = sym_size_int_2 == 3;  sym_size_int_2 = None
+    slice_1 = torch.ops.aten.slice.Tensor(arg0_1, 2, 0, 3)
     sub = sym_size_int - 1
+    eq_3 = sym_size_int == sub
     slice_2 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub);  sub = None
     slice_3 = torch.ops.aten.slice.Tensor(slice_2, 1, 1, sym_size_int);  slice_2 = None
     slice_4 = torch.ops.aten.slice.Tensor(slice_3, 2, 1, 3);  slice_3 = None
     sub_1 = sym_size_int - 2
+    eq_4 = sym_size_int == sub_1
     slice_5 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub_1);  sub_1 = None
     slice_6 = torch.ops.aten.slice.Tensor(slice_5, 1, 2, sym_size_int);  slice_5 = None
     slice_7 = torch.ops.aten.slice.Tensor(slice_6, 2, 2, 3);  slice_6 = None
     sub_2 = sym_size_int - 3
+    eq_5 = sym_size_int == sub_2
     slice_8 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub_2);  arg0_1 = sub_2 = None
     slice_9 = torch.ops.aten.slice.Tensor(slice_8, 1, 3, sym_size_int);  slice_8 = sym_size_int = None
     slice_10 = torch.ops.aten.slice.Tensor(slice_9, 2, 3, 3);  slice_9 = None
@@ -3616,7 +3624,7 @@ class GraphModule(torch.nn.Module):
             """\
 G['bulbous_bouffant'], accessed at:
   File "test_export.py", line N, in f
-    return bulbous_bouffant + y
+    [[], [], [], []],
 """,
         )
 
@@ -3642,9 +3650,8 @@ G['bulbous_bouffant'], accessed at:
             """\
 G['macademia'], accessed at:
   File "test_export.py", line N, in f
-    y = g(y)
   File "test_export.py", line N, in g
-    y = macademia + y
+    )
 """,
         )
 
@@ -4272,6 +4279,8 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
             gm.true_graph_0.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1):
+    sym_size_int = torch.ops.aten.sym_size.int(arg1_1, 1)
+    eq = sym_size_int == 5;  sym_size_int = None
     out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, arg1_1, arg0_1);  arg1_1 = arg0_1 = None
     sum_1 = torch.ops.aten.sum.default(out_dtype);  out_dtype = None
     return (sum_1,)""",
@@ -4281,6 +4290,24 @@ def forward(self, arg0_1, arg1_1):
             gm.false_graph_0.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1):
+    sym_size_int = torch.ops.aten.sym_size.int(arg1_1, 1)
+    eq = sym_size_int == 1
+    eq_1 = sym_size_int == 1
+    eq_2 = sym_size_int == sym_size_int
+    eq_3 = sym_size_int == 1
+    sym_size_int_1 = torch.ops.aten.sym_size.int(arg1_1, 0)
+    eq_4 = sym_size_int_1 == 1
+    eq_5 = sym_size_int_1 == 1
+    eq_6 = sym_size_int_1 == sym_size_int_1
+    eq_7 = sym_size_int_1 == 1
+    eq_8 = sym_size_int == 1
+    eq_9 = sym_size_int == 5
+    eq_10 = sym_size_int == 1
+    eq_11 = sym_size_int_1 == 1
+    eq_12 = sym_size_int_1 == 5
+    eq_13 = sym_size_int_1 == 1
+    eq_14 = sym_size_int_1 == sym_size_int_1;  sym_size_int_1 = None
+    eq_15 = sym_size_int == sym_size_int;  sym_size_int = None
     out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mul.Tensor, torch.int32, arg1_1, arg0_1);  arg1_1 = arg0_1 = None
     sum_1 = torch.ops.aten.sum.default(out_dtype);  out_dtype = None
     return (sum_1,)""",
