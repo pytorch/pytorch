@@ -203,7 +203,7 @@ class ExplainOutput:
     out_guards: Optional[List[_guards.Guard]] = None
     compile_times: Optional[str] = None
 
-    def __str__(self):
+    def __str__(self) -> str:
         output = f"Graph Count: {self.graph_count}\n"
         output += f"Graph Break Count: {self.graph_break_count}\n"
         output += f"Op Count: {self.op_count}\n"
@@ -289,7 +289,7 @@ class ExplainWithBackend:
         print(eb.output())
     """
 
-    def __init__(self, backend):
+    def __init__(self, backend) -> None:
         from .registry import lookup_backend
 
         self.backend = lookup_backend(backend)
