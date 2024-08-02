@@ -167,11 +167,6 @@ DispatchResult DispatchStubImpl::try_get_call_ptr(
       return xpu_dispatch_ptr != nullptr ? DispatchResult(xpu_dispatch_ptr) : ErrorType::MissingDeviceKernel;
 #endif
 
-#if defined(USE_XPU)
-    case DeviceType::XPU:
-      return xpu_dispatch_ptr != nullptr ? DispatchResult(xpu_dispatch_ptr) : ErrorType::MissingDeviceKernel;
-#endif
-
     case DeviceType::PrivateUse1:
       return privateuse1_dispatch_ptr != nullptr ? DispatchResult(privateuse1_dispatch_ptr) : ErrorType::MissingDeviceKernel;
 
