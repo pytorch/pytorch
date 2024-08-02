@@ -2301,10 +2301,6 @@ class CppVecKernel(CppKernel):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         assert reduction_type in VECTORIZABLE_RTYPES
         assert dtype == src_dtype
-        if reduction_type == "any":
-            assert dtype == torch.bool
-        else:
-            assert dtype in [torch.float, torch.int64]
         assert isinstance(value, CppCSEVariable), value
 
         if not value.is_vec:
@@ -2378,9 +2374,9 @@ class CppVecKernel(CppKernel):
                     + self.reduction_combine_vec(reduction_type, "x", "y")
                     + "; }"
                 )
-                is_any = reduction_type == "any"
+                is_bool = dtype == torch.bool
                 # we are using at::vec::VecMask<float, N> for bool
-                vec_dtype = "float" if is_any else DTYPE_TO_CPP[dtype]
+                vec_dtype = "float" if is_bool else DTYPE_TO_CPP[dtype]
                 vec = f"at::vec::Vectorized<{vec_dtype}>"
                 vec_reduce_all_func = f"at::vec::vec_reduce_all<{vec_dtype}>"
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
@@ -2459,7 +2455,11 @@ class CppVecKernel(CppKernel):
             return f"{self._get_mask_type()}::from(0)"
 
         scalar_init = reduction_init(reduction_type, dtype)
-        return f"{vec_type}({scalar_init})"
+        vec_init = f"{vec_type}({scalar_init})"
+        if dtype == torch.bool:
+            assert reduction_type in ("min", "max")
+            return f"{self._get_mask_type()}::from({vec_init})"
+        return vec_init
 
     def reduction_acc_type_vec(self, reduction_type, dtype):
         assert reduction_type not in {"argmin", "argmax"}
@@ -2467,7 +2467,12 @@ class CppVecKernel(CppKernel):
         vec_type = self._get_vec_type(scalar_type)
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>"
-        if reduction_type == "any":
+        if dtype == torch.bool:
+            assert reduction_type in (
+                "min",
+                "max",
+                "any",
+            )
             return f"{self._get_mask_type()}"
         return vec_type
 
@@ -2481,12 +2486,21 @@ class CppVecKernel(CppKernel):
         return f"static WeightRecp<{self._get_vec_type(dtype)}> weight_recps({vec_num_range_thread_expr});"
 
     def reduction_combine_vec(
-        self, reduction_type, var, next_value, use_weight_recps=False
+        self, reduction_type, var, next_value, use_weight_recps=False, dtype=None
     ):
+        is_bool = dtype == torch.bool
         if reduction_type == "max":
-            return f"at::vec::maximum({var}, {next_value})"
+            return (
+                f"{var} | {next_value}"
+                if is_bool
+                else f"at::vec::maximum({var}, {next_value})"
+            )
         elif reduction_type == "min":
-            return f"at::vec::minimum({var}, {next_value})"
+            return (
+                f"~({var} | {next_value})"
+                if is_bool
+                else f"at::vec::minimum({var}, {next_value})"
+            )
         elif reduction_type == "sum":
             return f"{var} + {next_value}"
         elif reduction_type == "prod":
@@ -2808,12 +2822,7 @@ class CppVecKernelChecker(CppVecKernel):
             return self.simd_vec
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        if not (
-            (src_dtype == torch.bool and reduction_type == "any")
-            or (dtype == torch.float and src_dtype == torch.float)
-            or (dtype == torch.int64 and src_dtype == torch.int64)
-            and reduction_type in VECTORIZABLE_RTYPES
-        ):
+        if reduction_type not in VECTORIZABLE_RTYPES:
             self.disable_vec(
                 f"reduction: dtype {dtype}, src_dtype {src_dtype}, reduction_type {reduction_type}"
             )

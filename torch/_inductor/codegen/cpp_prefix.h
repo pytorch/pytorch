@@ -241,6 +241,17 @@ inline scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
   return a < b ? a : b;
 }
 
+inline bool max_propagate_nan(bool a, float b) {
+  // float b is should be a "mask" value (all one or all zero bit)
+  TORCH_CHECK(at::_isnan(b) || b == 0.0);
+  return a || at::_isnan(b) ? true : false;
+}
+
+inline bool min_propagate_nan(bool a, float b) {
+  TORCH_CHECK(at::_isnan(b) || b == 0.0);
+  return a && at::_isnan(b) ? true : false;
+}
+
 constexpr float uint32_to_uniform_float(uint32_t value) {
   // maximum value such that `MAX_INT * scale < 1.0` (with float rounding)
   constexpr float scale = 4.6566127342e-10;
