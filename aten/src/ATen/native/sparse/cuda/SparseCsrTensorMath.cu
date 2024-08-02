@@ -708,7 +708,7 @@ struct ReductionMulOp {
 void _apply_sparse_csr_linear_solve(
   const Tensor& A,
   const Tensor& b,
-  const bool left, 
+  const bool left,
   const Tensor& x) {
 #if defined(USE_ROCM) || !defined(USE_CUDSS)
   TORCH_CHECK(
@@ -745,20 +745,20 @@ void _apply_sparse_csr_linear_solve(
   cudssConfigCreate(&config);
   // cudssAlgType_t reorder_alg = CUDSS_ALG_3;
   // cudssConfigSet(config, CUDSS_CONFIG_REORDERING_ALG, &reorder_alg, sizeof(cudssAlgType_t));
-  
+
   cudssDataCreate(handle, &cudss_data);
 
   AT_DISPATCH_FLOATING_TYPES(values.type(), "create_matrix", ([&] {
     scalar_t* values_ptr = values.data<scalar_t>();
     scalar_t* b_ptr = b.data<scalar_t>();
-    scalar_t* x_ptr = x.data<scalar_t>(); 
+    scalar_t* x_ptr = x.data<scalar_t>();
     auto CUDA_R_TYP = std::is_same<scalar_t, double>::value ? CUDA_R_64F : CUDA_R_32F;  // TODO: better conversion
     cudssMatrixCreateDn(&b_mt, b.size(0), 1, b.size(0), b_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR);
     cudssMatrixCreateDn(&x_mt, x.size(0), 1, x.size(0), x_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR);
     cudssMatrixCreateCsr(&A_mt, A.size(0), A.size(1),  A._nnz(), rowOffsets, rowOffsets + crow.size(0), colIndices, values_ptr, CUDA_R_32I, CUDA_R_TYP, CUDSS_MTYPE_GENERAL, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO);
   }));
   //---------------------------------------------------------------------------------
-  
+
   // Reordering & symbolic factorization
   cudssExecute(handle, CUDSS_PHASE_ANALYSIS, config, cudss_data, A_mt, x_mt, b_mt);
   // https://docs.nvidia.com/cuda/cudss/types.html?highlight=cudss_data_perm_row

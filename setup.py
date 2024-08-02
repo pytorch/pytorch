@@ -40,7 +40,7 @@
 #
 #   USE_CUDSS=0
 #     disables the cuDSS build
-# 
+#
 #   USE_CUFILE=0
 #     disables the cuFile build
 #
