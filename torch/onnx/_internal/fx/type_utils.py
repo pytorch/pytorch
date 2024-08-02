@@ -15,10 +15,12 @@ from typing import (
 )
 
 import numpy
+
 import onnx
 
 import torch
 from torch._subclasses import fake_tensor
+
 
 if TYPE_CHECKING:
     import onnx.defs.OpSchema.AttrType  # type: ignore[import]  # noqa: TCH004

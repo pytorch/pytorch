@@ -25,7 +25,7 @@ from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_modul
 
 
 class SimpleMLP(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = torch.nn.Linear(5, 128)
         self.relu = torch.nn.ReLU()
