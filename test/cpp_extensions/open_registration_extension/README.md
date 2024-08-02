@@ -11,5 +11,3 @@ A real implementation will most likely want to call these different APIs from c+
 The current version send everything back to python and is missing most implementations in python. The only one available is the one used by the autograd engine to check how many workers to spawn.
 
 Next step is to create the device daemon so we can actually provide and allocator and create memory, then start using features and re-route all missing methods to daemon as appropriate.
-
-

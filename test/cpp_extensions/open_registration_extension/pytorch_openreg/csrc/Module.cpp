@@ -10,7 +10,7 @@ PyMODINIT_FUNC PyInit__C(void) {
     PyObject* mod = PyModule_Create(&openreg_C_module);
 
     py::object openreg_mod = py::module_::import("pytorch_openreg");
-    // Intentionally leaked
+    // Only borrowed from the python side!
     openreg::set_impl_registry(openreg_mod.attr("_IMPL_REGISTRY").ptr());
 
     return mod;

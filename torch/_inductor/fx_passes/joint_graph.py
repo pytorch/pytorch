@@ -196,7 +196,7 @@ class UniformValueConstantFolder(ConstantFolder):
     with a tensor constructor call: aten.full([shape], value, ...)
     """
 
-    def __init__(self, gm, skip_constructors=False):
+    def __init__(self, gm, skip_constructors=False) -> None:
         super().__init__(gm, skip_constructors)
         self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}
         self.constant_data_ptrs: Dict[torch.fx.Node, StorageWeakRef] = {}
@@ -505,7 +505,7 @@ def pointless_view(match: Match, arg, size):
     node = match.output_node()
     arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
     if size == arg_size:
-        node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]  # type: ignore[arg-type]
+        node.replace_all_uses_with(node.args[0])
         match.erase_nodes(graph)
 
 

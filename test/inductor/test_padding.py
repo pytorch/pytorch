@@ -319,7 +319,7 @@ class PerfTestWithAndWithoutPadding(TestCaseBase):
         x = torch.randn(4, layer_sizes[0])
 
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 mod_list = []
                 for i in range(len(layer_sizes) - 1):
@@ -491,7 +491,7 @@ class PaddingTest(TestCaseBase):
         inv_scale = (num_heads / hidden_size) ** 0.5
 
         class Attention(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.query = nn.Linear(hidden_size, hidden_size)
                 self.key = nn.Linear(hidden_size, hidden_size)

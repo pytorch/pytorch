@@ -22,9 +22,9 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
     OpenRegHooksInterface(OpenRegHooksArgs) {};
     ~OpenRegHooksInterface() override = default;
 
-  	bool hasPrimaryContext(c10::DeviceIndex device_index) const override {
-  		return get_method("hasPrimaryContext")(device_index).cast<bool>();
-  	}
+      bool hasPrimaryContext(c10::DeviceIndex device_index) const override {
+          return get_method("hasPrimaryContext")(device_index).cast<bool>();
+      }
 };
 
 TORCH_DECLARE_REGISTRY(PrivateUse1HooksRegistry, OpenRegHooksInterface, OpenRegHooksArgs);
