@@ -60,7 +60,7 @@ static std::vector<optional<Tensor>> batchIndices(
   ArrayRef<optional<int64_t>> indices_bdims,
   int64_t batch_size,
   std::optional<int64_t> self_bdim,
-  std::optional<int64_t> values_bdim = nullopt) {
+  std::optional<int64_t> values_bdim = std::nullopt) {
   // There are 3 main cases:
   // 1. self is batched, indices/values are not batched
   // In this case, we just need to augment indices with a None at the front to
@@ -106,7 +106,7 @@ static std::vector<optional<Tensor>> batchIndices(
   }
 
   if (!indices_batched && self_bdim.has_value()) {
-    indices_.insert(indices_.begin(), nullopt);
+    indices_.insert(indices_.begin(), std::nullopt);
   } else if (indices_batched && !self_bdim.has_value()) {
     // do nothing
   } else if (indices_batched && (self_bdim.has_value() || values_bdim.has_value())) {

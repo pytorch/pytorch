@@ -2218,8 +2218,14 @@ def cpp_prefix() -> str:
 
 # Given a path to an input cpp file and an output path,
 # Attempts to compile the file, storing the output in "output_path"
-@dynamo_timed
 def compile_file(
+    input_path: Union[str, List[str]], output_path: str, cmd: List[str]
+) -> None:
+    with dynamo_timed("compile_file"):
+        return _compile_file(input_path, output_path, cmd)
+
+
+def _compile_file(
     input_path: Union[str, List[str]], output_path: str, cmd: List[str]
 ) -> None:
     input_paths = [input_path] if isinstance(input_path, str) else input_path
@@ -3417,7 +3423,7 @@ class DLLWrapper:
     def __init__(
         self,
         lib_path: str,
-    ):
+    ) -> None:
         self.lib_path = lib_path
         self.is_open = False
         self.DLL = cdll.LoadLibrary(lib_path)
@@ -3664,11 +3670,10 @@ class TritonFuture(CodeCacheFuture):
         self,
         kernel: Any,
         future: Optional[Future[Any]],
-    ):
+    ) -> None:
         self.kernel = kernel
         self.future = future
 
-    # @dynamo_utils.dynamo_timed
     def result(self) -> ModuleType:  # type: ignore[override]
         if self.future is not None:
             # If the worker failed this will throw an exception.
