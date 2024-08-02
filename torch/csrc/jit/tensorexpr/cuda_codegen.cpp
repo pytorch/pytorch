@@ -249,7 +249,7 @@ void CudaPrinter::visit(const IntrinsicsPtr& v) {
 
   // get type of resulting expression.
   ScalarType returnType = v->param(0)->dtype().scalar_type();
-  for (int i = 1; i < v->nparams(); ++i) {
+  for (size_t i = 1; i < v->nparams(); ++i) {
     returnType = promoteTypes(returnType, v->param(i)->dtype().scalar_type());
   }
 
@@ -1303,7 +1303,8 @@ void CudaCodeGen::CompileToNVRTC(
       "--std=c++17", compute.c_str(), "-default-device"};
 #endif
 
-  auto result = nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
+  auto result = nvrtc().nvrtcCompileProgram(
+      program, static_cast<int>(args.size()), args.data());
   if (result != NVRTC_SUCCESS) {
     size_t logsize = 0;
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));
