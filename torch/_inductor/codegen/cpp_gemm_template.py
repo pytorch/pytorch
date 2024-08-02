@@ -479,7 +479,6 @@ class CppPackedGemmTemplate(CppTemplate):
             new_inputs = list(inputs)
             X = inputs[0]
             W = inputs[1]
-            # B might actually be scale in case of WoQ GEMM
             B = inputs[2] if len(inputs) > 2 else None
             if isinstance(W, ir.IRNode):
                 if trans_w:
@@ -490,7 +489,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 if trans_w:
                     assert isinstance(W, torch.Tensor)
                     W = W.transpose(0, 1)
-            if B is not None:
+            if B is not None and has_bias:
                 if isinstance(B, ir.IRNode):
                     if not isinstance(B, ir.TensorBox):
                         B = ir.TensorBox(B)
@@ -658,7 +657,6 @@ class CppPackedGemmTemplate(CppTemplate):
         assert len(self.input_nodes) >= 2
 
         int8_gemm = self.input_nodes[0].get_dtype() == torch.uint8
-        is_woq_gemm = False
         x_scale = None
         x_zp = None
         w_scale = None
@@ -675,12 +673,7 @@ class CppPackedGemmTemplate(CppTemplate):
         else:
             X, W = self.input_nodes[0], self.input_nodes[1]
             Y = self.output_node
-            is_woq_gemm = (
-                X.get_dtype() == torch.bfloat16
-                and W.get_dtype() == torch.int8
-                and Y.get_dtype() == torch.bfloat16
-            )
-            inp = self.input_nodes[2] if self.has_bias or is_woq_gemm else None
+            inp = self.input_nodes[2] if self.has_bias else None
 
         if template_buffer_node is not None:
             # Use the updated prepacked weight buffer
@@ -697,7 +690,7 @@ class CppPackedGemmTemplate(CppTemplate):
         Y_aliases: Set[str] = set()
         # TODO(jgong5): for int8 gemm, bias-add is handled outside of gemm template,
         # but we'd better move it here to align with fp.
-        if inp is not None and self.beta != 0 and not int8_gemm and not is_woq_gemm:
+        if inp is not None and self.beta != 0 and not int8_gemm and self.has_bias:
             # add an epilogue for bias add
             def _bias_add_epilogue(buf):
                 return create_epilogue_with_attr(
@@ -795,7 +788,7 @@ class CppPackedGemmTemplate(CppTemplate):
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
 
-        def _get_acc_buf_dtype(input_dtype, input2_dtype):
+        def _get_acc_buf_dtype(input_dtype):
             if int8_gemm:
                 return torch.int32
             else:
@@ -827,7 +820,7 @@ class CppPackedGemmTemplate(CppTemplate):
             x_zp=x_zp,
             w_scale=w_scale,
             w_zp=w_zp,
-            acc_buf_dtype=_get_acc_buf_dtype(X.get_dtype(), W.get_dtype()),
+            acc_buf_dtype=_get_acc_buf_dtype(X.get_dtype()),
             DTYPE_TO_CPP=DTYPE_TO_CPP,
         )
         with contextlib.ExitStack() as stack:

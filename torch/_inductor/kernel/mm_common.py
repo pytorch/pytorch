@@ -275,14 +275,14 @@ def mm_args(
     layout=None,
     out_dtype=None,
     use_4x2_dim=False,
-    trans_w=False,
+    mat2_transposed=False,
 ):
     """
     Common arg processing for mm,bmm,addmm,etc
     """
     mat1, mat2 = realize_inputs(mat1, mat2)
     *b1, m, k1 = mat1.get_size()
-    if trans_w:
+    if mat2_transposed:
         *b2, n, k2 = mat2.get_size()
     else:
         *b2, k2, n = mat2.get_size()
@@ -305,9 +305,7 @@ def mm_args(
         assert out_dtype is None, "out_dtype is ignored if layout is specified."
     from ..lowering import expand
 
-    # For WoQ GEMM, we can't expand scale because the corresponding ATen op doesn't support 2d scale.
-    if not (mat1.get_dtype() == torch.bfloat16 and mat2.get_dtype() == torch.int8):
-        others = [realize_inputs(expand(x, layout.size)) for x in others]  # type: ignore[assignment]
+    others = [realize_inputs(expand(x, layout.size)) for x in others]  # type: ignore[assignment]
 
     return [m, n, k, layout, mat1, mat2, *others]
 

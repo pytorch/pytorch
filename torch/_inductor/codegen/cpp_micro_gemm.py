@@ -280,7 +280,6 @@ class CppMicroGemmRef(CppMicroGemm):
         [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
         input_dtype=torch.bfloat16,
         input2_dtype=torch.int8,
-        # the output of the microkernel is in FP32, but can it is converted to BF16 in the template
         output_dtype=torch.float,
         compute_dtype=torch.float,
     ),
@@ -306,7 +305,6 @@ class CppMicroGemmRef(CppMicroGemm):
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.bfloat16,
         input2_dtype=torch.int8,
-        # the output of the microkernel is in FP32, but it is converted to BF16 in the template
         output_dtype=torch.float,
         compute_dtype=torch.float,
     ),
@@ -315,6 +313,8 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
     """
     This class generates the code for micro gemm using fp32 vec instructions for compute.
     It supports input types of torch.float, torch.bfloat16, and torch.half with fp32 output.
+    The output of the microkernel is in FP32, but it would be converted to BF16/FP16 in the template,
+    if the desired output is BF16/FP16.
     """
 
     TEMPLATE_ENTRY = r"""
@@ -372,7 +372,6 @@ inline void {{kernel_name}}_kernel(
 ) {
     using Vectorized = at::vec::Vectorized<{{compute_t}}>;
     using VectorizedIn = at::vec::Vectorized<{{input_t}}>;
-    using VectorizedW = at::vec::Vectorized<{{input2_t}}>;
     constexpr auto VLEN = Vectorized::size();
     constexpr auto ROWS = BLOCK_M;
     constexpr auto COLS = BLOCK_N / VLEN;
@@ -410,11 +409,16 @@ inline void {{kernel_name}}_kernel(
             vb[col] = at::vec::convert<{{compute_t}}>(b);
             {%- elif input2_dtype == torch.int8 %}
             // Load a cache-line with 64 int8 elements & convert it into 4 FP32 vector registers
-            if C10_UNLIKELY (col % 4 == 0) {
-                int remaining = (COLS - 1) > (col + 3) ? 3 : (COLS - 1 - col);
+            if constexpr (col % 4 == 0) {
+                // First load 64 int8 elements
+                __m512i b_cacheline = _mm512_load_si512((__m512i*)(B + k * ldb + col * VLEN));
+                // First 16 elements
+                __m128i* b8 = reinterpret_cast<__m128i*>((void*)&b_cacheline);
+                constexpr auto remaining = std::min<int>(4, COLS - col);
                 {{kernel.unroll_pragma(4)}}
-                for(int idx = 0; idx <= remaining; idx++) {
-                    auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN + idx * 16);
+                for (int idx = 0; idx < remaining; idx++, b8++) {
+                    // Convert 16 int8 elements to FP32
+                    auto b32 = at::vec::convert_to_int32<int8_t>(reinterpret_cast<int8_t*>((void*)b8));
                     vb[col + idx] = at::vec::convert<float>(b32);
                 }
             }
@@ -436,7 +440,7 @@ inline void {{kernel_name}}_kernel(
     auto storec = [&](auto i) {
         constexpr int row = i / COLS;
         constexpr int col = i % COLS;
-        vc[i].store(C + row * ldc + col * VLEN, VLEN);
+        vc[i].store(C + row * ldc + col * VLEN);
     };
     c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
@@ -472,10 +476,7 @@ def check_amx_extra(config, m, n, k, alpha, num_threads):
         [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
         input_dtype=torch.bfloat16,
         input2_dtype=torch.int8,
-        # the output of the microkernel is in FP32, but can it be converted to BF16 in the template
         output_dtype=torch.float,
-        # the compute dtype won't be used anyway in the AMX micro-kernel, anyway,
-        # but is used to match for WoQ GEMM, which uses float for AVX2/AVX512
         compute_dtype=torch.float,
         extra_check=check_amx_extra,
     ),
@@ -603,11 +604,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     // TODO: loop-unrolling of the "compute" lambda may result in incorrect output
     // as this buffer would be used, so maybe 4 of these should be used?
     // Since UT output is correct, looks like loop unrolling isn't actually happening.
-    struct alignas(64) weight_buffer
-    {
-        {{input_t}} data[512];
-    } bf16_weights_buf;
-    {{input_t}}* bf16_weights_buf_ptr = static_cast<{{input_t}}*>((void*)(&bf16_weights_buf));
+    alignas(64) {{input_t}} bf16_weights_buf[512];
 
     int num_b_rows = (last_k_offset > 0) ? 16 : (tail_k_size * sizeof({{input_t}})) / 4;
     int b_tile_ptr_stride = ldb * {{vnni_size}};
@@ -628,7 +625,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         for (int i = 0; i < num_b_rows; i++) {
             load_B_row(
                 B_ptr + i * b_tile_ptr_stride,
-                bf16_weights_buf_ptr + i * 32
+                bf16_weights_buf + i * 32
             );
         }
     };
@@ -648,7 +645,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         {%- if tile_row == 0 %}
         {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
         load_B_in_buf(const_cast<{{input2_t}}*>(B) + k * ldb + {{tile_col * 16 * vnni_size}});
-        _tile_loadd({{tile_idx_b}}, bf16_weights_buf_ptr, 64);
+        _tile_loadd({{tile_idx_b}}, bf16_weights_buf, 64);
         {%- else %}
         _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
         {%- endif %}

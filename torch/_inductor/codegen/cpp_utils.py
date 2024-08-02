@@ -540,7 +540,7 @@ def get_gemm_template_output_and_compute_dtype(input_dtype):
     if input_dtype == torch.uint8:
         return (torch.int32, torch.int32)
     else:
-        return (torch.float, torch.float)
+        return (torch.float32, torch.float32)
 
 
 # Factored out epilogue creators here

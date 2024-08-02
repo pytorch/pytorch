@@ -6,11 +6,11 @@ from torch._inductor.kernel.mm_common import mm_args
 from . import config as inductor_config, lowering
 from .codegen.cpp_gemm_template import CppPackedGemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
-from .lowering import register_lowering
+from .lowering import expand, register_lowering
 from .select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
-    NoValidChoicesError,
+    realize_inputs,
 )
 from .utils import use_aten_gemm_kernels, use_cpp_packed_gemm_template
 
@@ -43,8 +43,8 @@ def register_quantized_ops():
 def register_woq_mm_ops():
     @register_lowering(aten._weight_int8pack_mm, type_promotion_kind=None)
     def int8pack_mm(input, weight, scale, *, layout=None):
-        _, _, _, layout, mat1, mat2, scale = mm_args(
-            input, weight, scale, layout=layout, trans_w=True
+        _, _, _, layout, mat1, mat2 = mm_args(
+            input, weight, layout=layout, mat2_transposed=True
         )
         assert (
             mat1.get_dtype() in [torch.bfloat16, torch.float16, torch.float]
@@ -59,11 +59,14 @@ def register_woq_mm_ops():
             else []
         )
 
-        # scale is applied as an epilogue
+        # scale is applied as an epilogue, and the scale tensor is expanded (with a view op)
+        # for broadcasting.
         def _mul_epilogue(buf):
-            return create_epilogue_with_attr(buf, "mul", other=scale)
+            return create_epilogue_with_attr(
+                buf, "mul", other=realize_inputs(expand(scale, layout.size))
+            )
 
-        if use_cpp_packed_gemm_template(aten_layout, mat1, mat2, trans_w=True):
+        if use_cpp_packed_gemm_template(aten_layout, mat1, mat2, mat2_transposed=True):
             CppPackedGemmTemplate.add_choices(
                 choices,
                 aten_layout,
@@ -82,18 +85,6 @@ def register_woq_mm_ops():
                 (mat1, mat2, scale), aten_layout
             ).output_node()
 
-        try:
-            return autotune_select_algorithm(
-                "_weight_int8pack_mm", choices, [mat1, mat2, scale], aten_layout
-            )
-        except NoValidChoicesError:
-            if not inductor_config.autotune_fallback_to_aten:
-                # use_aten_gemm_kernels() was also False
-                # and autotune_select_algorithm could not find a suitable choice
-                raise
-            log.warning(
-                "All choices for GEMM were invalid, using ATen backend as fallback"
-            )
-            return aten__weight_int8pack_mm.bind(
-                (mat1, mat2, scale), aten_layout
-            ).output_node()
+        return autotune_select_algorithm(
+            "_weight_int8pack_mm", choices, [mat1, mat2, scale], aten_layout
+        )

@@ -1149,7 +1149,7 @@ def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 
 
-def use_cpp_packed_gemm_template(layout, mat1, mat2, trans_w=False):
+def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
     from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
@@ -1167,7 +1167,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2, trans_w=False):
         mat1,
         mat2,
         out_dtype=layout.dtype if int8_gemm else None,
-        trans_w=trans_w,
+        mat2_transposed=mat2_transposed,
     )
 
     # TODO(jgong5): support dynamic shapes for n or k
