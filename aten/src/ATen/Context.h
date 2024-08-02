@@ -100,7 +100,7 @@ class TORCH_API Context {
       const void* data,
       std::optional<c10::DeviceType> device_type = std::nullopt) {
     auto opt_device_type =
-        device_type.has_value() ? device_type.value() : at::getAccelerator();
+        device_type.has_value() ? device_type : at::getAccelerator();
     if (!opt_device_type.has_value() || // there is no accelerator
         !at::isAccelerator(
             opt_device_type.value())) { // passed device not an accelerator
