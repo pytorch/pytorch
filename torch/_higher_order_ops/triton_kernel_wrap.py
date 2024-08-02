@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional, Union
 
 import torch
 import torch.fx as fx
-
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
@@ -520,7 +519,7 @@ def identify_mutated_tensors(kernel, kwargs):
 
 # Used for wrapping a Triton Kernel
 class TritonKernelWrapperMutation(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_mutation")
 
 
@@ -529,7 +528,7 @@ triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 
 # Used for wrapping a Triton Kernel in a functional manner
 class TritonKernelWrapperFunctional(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_functional")
 
 

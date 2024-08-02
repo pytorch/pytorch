@@ -2739,10 +2739,7 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            define_line = (
-                f"{DTYPE_TO_CPP[dtype]} {tile_var}[{self.outer_num_elems}*{self.inner_num_elems}] "
-                f"__attribute__ ((aligned ({factor})));"
-            )
+            define_line = f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}[{self.outer_num_elems}*{self.inner_num_elems}];"
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))

@@ -110,6 +110,7 @@ from .variables.user_defined import (
     UserDefinedObjectVariable,
 )
 
+
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
@@ -683,7 +684,7 @@ def break_graph_if_unsupported(*, push):
 class BytecodeDistpatchTableMeta(type):
     """Installs a `cls.dispatch_table` on every subclass to speed up calls to self.OPCODE()"""
 
-    def __init__(cls, name, bases, dct):
+    def __init__(cls, name, bases, dct) -> None:
         super().__init__(name, bases, dct)
 
         def _missing(opname, *args):
@@ -831,6 +832,9 @@ class InstructionTranslatorBase(
         TracingContext.set_current_loc(
             self.f_code.co_filename, lineno, self.f_code.co_name
         )
+        from torch._logging.structured import dump_file
+
+        dump_file(self.f_code.co_filename)
         if trace_source_log.isEnabledFor(logging.DEBUG):
             trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
 
@@ -1317,7 +1321,7 @@ class InstructionTranslatorBase(
             self.push(val)
         except (StopIteration, exc.ObservedUserStopIteration) as e:
             if isinstance(e, exc.ObservedUserStopIteration):
-                exc.handle_observed_user_stop_iteration(self)
+                exc.handle_observed_exception(self)
 
             # leave iterator upon exhaustion in 3.12
             if sys.version_info >= (3, 12):
@@ -1605,6 +1609,19 @@ class InstructionTranslatorBase(
                 # aten.random.from, again causing syntax errors. Since this
                 # usecase is uncommon, graph break.
                 unimplemented("random_ op is called with from keyword")
+            elif (
+                fn.name == "uniform_"
+                and isinstance(argsvars, TupleVariable)
+                and len(argsvars.items) == 0
+                and isinstance(kwargsvars, ConstDictVariable)
+                and ConstantVariable.create("from") in kwargsvars
+            ):
+                # `from`` is python keyword. Adding uniform_ with `from` in the
+                # Fx graph causes syntax error. Even if we convert the kwargs to
+                # args, aot_autograd/inductor while lowering generates
+                # aten.uniform.from, again causing syntax errors. Since this
+                # usecase is uncommon, graph break.
+                unimplemented("uniform_ op is called with from keyword")
 
         if not isinstance(
             argsvars, BaseListVariable
@@ -2498,7 +2515,7 @@ class InstructionTranslatorBase(
         inline_depth: int,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
-    ):
+    ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
         self.distributed_state = distributed_state
@@ -2604,7 +2621,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         frame_state,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
-    ):
+    ) -> None:
         _step_logger()(
             logging.INFO,
             f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
@@ -3078,7 +3095,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_globals: Dict[str, VariableTracker],
         closure_cells: Dict[str, VariableTracker],
         funcvar: BaseUserFunctionVariable,
-    ):
+    ) -> None:
         f_globals = funcvar.get_globals()  # type: ignore[attr-defined]
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
@@ -3250,7 +3267,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: List[VariableTracker]
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.generated_items = []
 
@@ -3281,7 +3298,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             val = tos.next_variable(self)
         except (StopIteration, exc.ObservedUserStopIteration) as ex:
             if isinstance(ex, exc.ObservedUserStopIteration):
-                exc.handle_observed_user_stop_iteration(self)
+                exc.handle_observed_exception(self)
 
             # The iterator is exhausted. Stop the loop and return.
             self.pop()
