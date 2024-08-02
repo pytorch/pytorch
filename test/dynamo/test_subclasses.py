@@ -2,11 +2,9 @@
 import functools
 import itertools
 import unittest
-
 from functools import partial
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
@@ -14,7 +12,6 @@ import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
-
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     ShapeEnv,
@@ -391,7 +388,7 @@ def func(a):
 
 
 class EagerRecordGraphAndInputs:
-    def __init__(self):
+    def __init__(self) -> None:
         self.graphs = []
         self.example_inputs = []
 
@@ -735,7 +732,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
     def test_user_overidden_property_unsupported(self):
         class LocalSubclass(torch.Tensor):
-            def __init__(self):
+            def __init__(self) -> None:
                 self._ndim = 10
 
             @classmethod
