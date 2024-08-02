@@ -50,7 +50,6 @@ class TORCH_API HashProvider : public IRVisitor {
  public:
   template <class T>
   SimplifierHashType hash(T e) {
-    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     e->accept(this);
     return hashOf(e);
   }
@@ -116,7 +115,7 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 
  private:
-  SimplifierHashType hashOf(ExprPtr e) {
+  SimplifierHashType hashOf(const ExprPtr& e) {
     auto it = exprToHash_.find(e);
     if (it != exprToHash_.end()) {
       return it->second;
@@ -127,12 +126,12 @@ class TORCH_API HashProvider : public IRVisitor {
     IRPrinter printer(ss);
     e->accept(&printer);
     SimplifierHashType hash = SimplifierHashType(te_hash(ss.str()));
-    putHash(std::move(e), hash);
+    putHash(e, hash);
 
     return hash;
   }
 
-  SimplifierHashType hashOf(StmtPtr s) {
+  SimplifierHashType hashOf(const StmtPtr& s) {
     auto it = stmtToHash_.find(s);
     if (it != stmtToHash_.end()) {
       return it->second;
@@ -143,7 +142,7 @@ class TORCH_API HashProvider : public IRVisitor {
     IRPrinter printer(ss);
     s->accept(&printer);
     SimplifierHashType hash = SimplifierHashType(te_hash(ss.str()));
-    putHash(std::move(s), hash);
+    putHash(s, hash);
 
     return hash;
   }
@@ -246,7 +245,6 @@ class TORCH_API HashProvider : public IRVisitor {
       for (unsigned int i = 0; i < 8; ++i) {
         if (s < 0)
           break;
-        // NOLINTNEXTLINE(bugprone-signed-char-misuse)
         int64_t c = val[s];
         intval |= (c << (i * 8));
 
@@ -260,35 +258,23 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 
   size_t te_hash(double d) {
-    // memcpy as type punning. Should be optimized out.
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t n;
-    std::memcpy(&n, &d, sizeof d);
-    return te_hash(n);
+    int64_t* n = reinterpret_cast<int64_t*>(&d);
+    return te_hash(*n);
   }
 
   size_t te_hash(float d) {
-    // memcpy as type punning. Should be optimized out.
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int32_t n;
-    std::memcpy(&n, &d, sizeof d);
-    return te_hash(n);
+    int32_t* n = reinterpret_cast<int32_t*>(&d);
+    return te_hash(*n);
   }
 
   size_t te_hash(at::Half d) {
-    // memcpy as type punning. Should be optimized out.
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int16_t n;
-    std::memcpy(&n, &d, sizeof d);
-    return te_hash(n);
+    int16_t* n = reinterpret_cast<int16_t*>(&d);
+    return te_hash(*n);
   }
 
   size_t te_hash(at::BFloat16 d) {
-    // memcpy as type punning. Should be optimized out.
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int16_t n;
-    std::memcpy(&n, &d, sizeof d);
-    return te_hash(n);
+    int16_t* n = reinterpret_cast<int16_t*>(&d);
+    return te_hash(*n);
   }
 };
 

@@ -62,7 +62,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class MyModel(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.a = nn.Linear(2, 2)
         self.b = nn.Linear(2, 2)
@@ -151,7 +151,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         # Test FSDP validation with SHARD_GRAD_OP and forward_prefetch
 
         class Mnist(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1)
                 self.conv2 = nn.Conv2d(32, 64, 3, 1)
@@ -258,7 +258,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         # computation.
 
         class MyModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = nn.Linear(10, 10)
                 self.b = nn.Linear(10, 10)
@@ -309,7 +309,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         self, sharding_strategy: ShardingStrategy
     ):
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin1 = nn.Linear(4, 4)
                 self.lin2 = nn.Linear(4, 4)
@@ -637,7 +637,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(2)
     def test_fsdp_namedtuple(self):
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = nn.Linear(100, 100)
 
@@ -710,7 +710,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
 
     def _test_fsdp_device_id_cpu_offload(self, use_orig_params: bool):
         class MyModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.seq = nn.Sequential(
                     nn.Linear(10, 10),
@@ -767,7 +767,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         torch.cuda.set_device(self.rank)
 
         class CPUGPUModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = nn.Linear(1, 1).cuda()
                 self.b = nn.Linear(1, 1)
@@ -786,7 +786,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         torch.cuda.set_device(self.rank)
 
         class CPUGPUModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = nn.Linear(1, 1)
                 self.b = nn.Linear(1, 1)
@@ -814,7 +814,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(2)
     def test_fsdp_device_id_no_move_ignored_params_and_bufs(self):
         class CPUGPUModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = nn.Linear(1, 1)
                 self.b = nn.Linear(1, 1)

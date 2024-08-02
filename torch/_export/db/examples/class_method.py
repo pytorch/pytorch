@@ -10,7 +10,7 @@ class ClassMethod(torch.nn.Module):
     def method(cls, x):
         return x + 1
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear = torch.nn.Linear(4, 2)
 

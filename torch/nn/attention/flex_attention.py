@@ -511,9 +511,6 @@ def _convert_mask_to_block_mask(
     assert mask.dtype == torch.bool
     mask = _broadcast_to_dim(mask, 4)
     B, H, Q, KV = mask.shape
-    is_decoding = Q < 128
-    if is_decoding:
-        Q_BLOCK_SIZE = Q
     assert Q % Q_BLOCK_SIZE == 0
     assert KV % KV_BLOCK_SIZE == 0
     mask = mask.view(
@@ -525,7 +522,7 @@ def _convert_mask_to_block_mask(
     mask_block_sum = mask.sum(
         dim=[-2, -1]
     )  # [B, H, Q//Q_BLOCK_SIZE, KV//KV_BLOCK_SIZE]
-    if separate_full_blocks and not is_decoding:
+    if separate_full_blocks:
         full_block_sum = Q_BLOCK_SIZE * KV_BLOCK_SIZE
         full_blocks = mask_block_sum == full_block_sum
         partial_blocks = (mask_block_sum > 0) & (mask_block_sum < full_block_sum)
@@ -732,7 +729,10 @@ def create_block_mask(
         mod_type == _ModificationType.MASK_MOD
     ), f"create-block_mask requires a mask_mod function! Got {mask_mod}"
     inner_func = _create_block_mask_inner
-    Q_LEN = Q_LEN if Q_LEN < 128 else _round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
+    if Q_LEN < 128:
+        Q_BLOCK_SIZE = Q_LEN
+    else:
+        Q_LEN = _round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
     KV_LEN = _round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)

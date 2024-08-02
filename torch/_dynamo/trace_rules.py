@@ -17,7 +17,6 @@ import linecache
 import logging
 import multiprocessing
 import operator
-import os
 import posixpath
 import random
 import re
@@ -35,20 +34,14 @@ import weakref
 from collections import defaultdict
 from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
 
-np: Optional[types.ModuleType] = None
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    pass
-
 import torch
 import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
-from ..utils import _config_module
+from torch.utils import _config_module
+
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
-
 from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
@@ -59,6 +52,13 @@ from .variables import (
     UserFunctionVariable,
     UserMethodVariable,
 )
+
+
+np: Optional[types.ModuleType] = None
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    pass
 
 
 if typing.TYPE_CHECKING:
@@ -2929,7 +2929,9 @@ class FunctionIdSet:
     function_ids: Optional[Set[int]] = None
     function_names: Optional[Dict[int, str]] = None
 
-    def __init__(self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]):
+    def __init__(
+        self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]
+    ) -> None:
         self.lazy_initializer = lazy_initializer
 
     def __call__(self):
@@ -2957,7 +2959,7 @@ class FunctionIdSet:
         if idx in function_ids:
             function_ids.remove(idx)
 
-    def __contains__(self, idx: int):
+    def __contains__(self, idx: int) -> bool:
         return idx in self()
 
 
@@ -3107,7 +3109,6 @@ BUILTIN_SKIPLIST = (
     logging,
     multiprocessing,
     operator,
-    os,
     posixpath,
     random,
     re,

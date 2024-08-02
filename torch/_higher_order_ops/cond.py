@@ -379,7 +379,7 @@ def cond_autograd(pred, true_fn, false_fn, operands):
     # we skip tracing the forward and backward graph.
     if pytree.tree_all_only(
         torch.Tensor,
-        lambda t: not t.requires_grad,
+        lambda t: not t.requires_grad,  # type: ignore[union-attr]
         (pred, operands),
     ):
         with torch._C._AutoDispatchBelowAutograd():
