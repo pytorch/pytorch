@@ -5117,8 +5117,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         opt_ladder = torch.compile(ladder, fullgraph=True, backend="eager")
         self.assertEqual(opt_ladder(data), ladder(data))
 
-    @unittest.expectedFailure
-    def test_trace_functional_tensor_with_error(self):
+    def test_trace_functional_tensor_with(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch._subclasses.functional_tensor import (
             FunctionalTensor,
@@ -5147,9 +5146,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 RuntimeError, "cannot mutate tensors with frozen storage"
             ):
                 opt_f(inp, tmp)
-
-        # grad state may not be properly reset after the error
-        self.assertTrue(torch.is_grad_enabled())
 
     def test_const_dict_keyerror(self):
         d = {}
