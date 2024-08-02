@@ -264,6 +264,9 @@ class CKGemmTemplate(CKTemplate):
 
         op = copy.deepcopy(op)
 
+        # This parameter is converted into tuple because of change
+        # from DeviceGemm_Xdl_CShuffleV3 to DeviceGemmMultiD_Xdl_CShuffle_V3.
+        # The first tuple element corresponds to matmul result...
         op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
             op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,
         )
@@ -272,16 +275,19 @@ class CKGemmTemplate(CKTemplate):
             op.ds_layouts = (torch_layout_to_ck_layout(Bias.get_layout()),)
             op.ds_element_dtypes = ((self._TORCH_DTYPE_TO_CK[Bias.get_layout().dtype]),)
             op.c_elementwise_op = "Bilinear"
-            # this dtype is also used for adding bias to matmul result
+            # c_shuffle_dtype is also used for adding bias to matmul result
             # before converting down to the result dtype
-            op.c_shuffle_dtype = "F32"
+            op.c_shuffle_dtype = op.acc_dtype
             # this parameter needs to be set accordingly to bias stride for correct accumulation
             if op.ds_layouts[0] == "Row":
+                # bias has (N, ) shape
                 bias_shuffle_block_transfer_scalar_per_vector_n_per_block = (
                     op.c_shuffle_block_transfer_scalar_per_vector_n_per_block
                 )
             else:
+                # bias has (M, 1) shape
                 bias_shuffle_block_transfer_scalar_per_vector_n_per_block = (1,)
+            # ...and the second tuple element corresponds to the bias
             op.c_shuffle_block_transfer_scalar_per_vector_n_per_block += (
                 bias_shuffle_block_transfer_scalar_per_vector_n_per_block
             )
