@@ -1,9 +1,6 @@
 # mypy: allow-untyped-defs
-import functools
 import logging
 from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
-
-import sympy
 
 from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
 from ...utils import sympy_product
