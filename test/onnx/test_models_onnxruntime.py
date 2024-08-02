@@ -347,7 +347,7 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipScriptTest()
     def test_roi_heads(self):
         class RoIHeadsModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.transform = _init_test_generalized_rcnn_transform()
                 self.rpn = _init_test_rpn()
