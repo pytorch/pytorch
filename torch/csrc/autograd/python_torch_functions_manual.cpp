@@ -21,6 +21,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/native/Resize.h>
 
 #include <Python.h>
 #include <fmt/format.h>
@@ -707,6 +708,19 @@ void initTorchFunctions(PyObject* module) {
     auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
     wrapper->was_storage_changed();
   });
+  py_module.def(
+      "_functionalize_unsafe_set", [](at::Tensor& dst, const at::Tensor& src) {
+        // Forcefully/unsafely dumps src.storage into dst.
+        // This API is only intended for use by functionalization.
+        // When we generate a new FunctionalTensor from a view op,
+        // we need to ensure it shares a storage with the view input.
+        at::native::checkSetStorage(
+            dst,
+            src.storage(),
+            dst.sym_storage_offset(),
+            dst.sym_sizes(),
+            dst.sym_strides());
+      });
   py_module.def(
       "_functionalize_mark_mutation_hidden_from_autograd",
       [](const at::Tensor& t) {

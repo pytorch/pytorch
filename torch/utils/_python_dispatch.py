@@ -463,44 +463,23 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
                     r
                 ), f"""Called {str(func)} with input of type {type(arg)}
 and output of type {type(ret)}. But expected types to match."""
-        # Need to run under no_dispatch, because we explicitly do **not**
+        # Need to call a non-dispatcher helper, because we explicitly do **not**
         # want our subclass to intercept the set_() call.
         # instead, our subclass should directly have its storage swapped out.
-        with torch.utils._mode_utils.no_dispatch():
-            # See Note: [Fake Tensor Dispatch Keys]
-            # we're borrowing the way it modifies dispatch key TLS.
-            meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-            torch._C._set_meta_in_tls_dispatch_include(True)
-            try:
-                # directly calling this overload, and passing ret.shape, because we **explicitly**
-                # don't want to reset the sizes on ret, if the storage implies a size change.
-                # Why?
-                # The purpose of this API is *not* to change the size/strides of our output- we assume it's already correct.
-                # We just want to "fix up" the storage aliasing, without modifying or output's metadata.
-                # Example: out = inp.expand(inp.shape[0], inp.shape[0])
-                #     This requires swapping the storage of out to be the same as inp,
-                #     but we do *not* want it to change the sizes/strides that were compute for out.
+        # we **explicitly** don't want to reset the sizes on ret, if the storage implies a size change.
+        # Why?
+        # The purpose of this API is *not* to change the size/strides of our output- we assume it's already correct.
+        # We just want to "fix up" the storage aliasing, without modifying or output's metadata.
+        # Example: out = inp.expand(inp.shape[0], inp.shape[0])
+        #     This requires swapping the storage of out to be the same as inp,
+        #     but we do *not* want it to change the sizes/strides that were compute for out.
 
-                if isinstance(ret, list):
-                    for r in ret:
-                        torch.ops.aten.set_.source_Storage_storage_offset(
-                            r,
-                            arg.untyped_storage(),
-                            r.storage_offset(),
-                            r.shape,
-                            r.stride(),
-                        )
-                else:
-                    assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
-                    torch.ops.aten.set_.source_Storage_storage_offset(
-                        ret,
-                        arg.untyped_storage(),
-                        ret.storage_offset(),
-                        ret.shape,
-                        ret.stride(),
-                    )
-            finally:
-                torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
+        if isinstance(ret, list):
+            for r in ret:
+                torch._functionalize_unsafe_set(r, arg)
+        else:
+            assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
+            torch._functionalize_unsafe_set(ret, arg)
 
     def is_read_only_alias_match(arg, ret):
         shared_aliases = arg.alias_set & ret.alias_set
