@@ -33,7 +33,7 @@ class AHOperation:
 
     def __init__(
         self, name: str, func: Callable[[Any], Value], is_categorical: bool = False
-    ):
+    ) -> None:
         self.name = name
         self.func = func
         self.is_categorical = is_categorical
