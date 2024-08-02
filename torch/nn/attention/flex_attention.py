@@ -772,7 +772,7 @@ def flex_attention(
         value (Tensor): Value tensor; shape :math:`(B, H, S, Ev)`.
         score_mod (Optional[Callable]): Function to modify attention scores. By default no score_mod is applied.
         block_mask (Optional[BlockMask]): BlockMask object that controls the blocksparsity pattern of the attention.
-        scale (float): Scaling factor applied prior to softmax. If
+        scale (Optional[float]): Scaling factor applied prior to softmax. If
         none, the default value is set to :math`\frac{1}{\sqrt{E}}`
         kernel_options (Optional[Dict[str, Any]]): Options to pass into the Triton kernels.
 
