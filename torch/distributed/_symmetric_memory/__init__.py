@@ -1,7 +1,6 @@
 # mypy: allow-untyped-decorators
 import socket
 import uuid
-
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import partial
@@ -11,6 +10,7 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
+
 
 _group_name_to_store: Dict[str, c10d.Store] = {}
 
@@ -504,7 +504,13 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     scatter_dim: int,
     group_name: str,
 ) -> torch.Tensor:
-    C = torch._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale, out_dtype=out_dtype)
+    C = torch._scaled_mm(
+        A.flatten(0, -2).contiguous(),
+        B,
+        A_scale,
+        B_scale,
+        out_dtype=out_dtype,
+    )
     C = C.view(*A.shape[:-1], B.shape[1])
     res = funcol.reduce_scatter_tensor(
         C,

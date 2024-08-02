@@ -388,7 +388,7 @@ def func(a):
 
 
 class EagerRecordGraphAndInputs:
-    def __init__(self):
+    def __init__(self) -> None:
         self.graphs = []
         self.example_inputs = []
 
@@ -732,7 +732,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
     def test_user_overidden_property_unsupported(self):
         class LocalSubclass(torch.Tensor):
-            def __init__(self):
+            def __init__(self) -> None:
                 self._ndim = 10
 
             @classmethod

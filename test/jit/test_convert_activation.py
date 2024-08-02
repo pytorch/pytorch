@@ -3,13 +3,13 @@
 import os
 import sys
 import unittest
-
 from itertools import product
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import FileCheck
+
 
 try:
     import torchvision
@@ -23,6 +23,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
+
 
 if __name__ == "__main__":
     raise RuntimeError(
