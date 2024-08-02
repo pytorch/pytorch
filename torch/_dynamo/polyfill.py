@@ -131,3 +131,10 @@ def enumerate(iterable, start=0):
     for elem in iterable:
         yield n, elem
         n += 1
+
+
+def mapping_get(obj, key, value=None):
+    try:
+        return obj.__getitem__(key)
+    except KeyError:
+        return value

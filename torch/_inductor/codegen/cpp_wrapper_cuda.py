@@ -29,7 +29,7 @@ class CppWrapperCuda(CppWrapperCpu):
     Generates cpp wrapper for running on GPU and calls CUDA kernels
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.device = "cuda"
         super().__init__()
         self.grid_id = count()
@@ -43,8 +43,6 @@ class CppWrapperCuda(CppWrapperCpu):
         super().write_header()
 
         self.header.splice("#include <filesystem>")
-        self.header.splice("typedef at::Half half;")
-        self.header.splice("typedef at::BFloat16 bfloat16;")
         if config.abi_compatible:
             self.header.splice(
                 "#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>"
