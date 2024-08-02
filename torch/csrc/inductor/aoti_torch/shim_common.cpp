@@ -201,6 +201,20 @@ AOTITorchError aoti_torch_get_numel(
   });
 }
 
+AOTITorchError aoti_torch_get_storage_numel(
+  AtenTensorHandle tensor, 
+  int64_t* ret_numel) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    TORCH_INTERNAL_ASSERT(t->has_storage());
+    auto dtype_size = t->dtype().itemsize();
+    size_t nbytes = t->storage().nbytes();
+    TORCH_INTERNAL_ASSERT(nbytes % dtype_size == 0);
+    auto numel = nbytes / dtype_size;
+    *ret_numel = numel;
+  });
+}
+
 AOTITorchError aoti_torch_get_sizes(
     AtenTensorHandle tensor,
     int64_t** ret_sizes) {

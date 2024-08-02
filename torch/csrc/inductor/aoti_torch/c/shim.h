@@ -204,6 +204,9 @@ aoti_torch_get_dim(AtenTensorHandle tensor, int64_t* ret_dim);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_numel(AtenTensorHandle tensor, int64_t* ret_numel);
 
+AOTI_TORCH_EXPORT AOTITorchError 
+aoti_torch_get_storage_numel(AtenTensorHandle tensor, int64_t* ret_numel);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_sizes(
     AtenTensorHandle tensor,
     int64_t** ret_sizes // returns borrowed reference
