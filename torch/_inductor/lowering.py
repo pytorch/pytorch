@@ -217,34 +217,44 @@ def in_namespace(op, namespace):
     return False
 
 
-def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
+def transform_args(
+    args, broadcast, type_promotion_kind, convert_input_to_bool, symbolify_supported
+):
     # 0-dim CPU tensor will be converted to a symbol when it is used in CUDA kernels
-    target_device_cuda = False
-    for arg in args:
-        if isinstance(arg, TensorBox) and arg.get_device().type == "cuda":
-            target_device_cuda = True
-            break
-    if target_device_cuda:
-        for i, arg in enumerate(args):
-            if (
-                isinstance(arg, TensorBox)
-                and arg.get_device().type == "cpu"
-                and arg.get_size() == []
-            ):
-                if is_float_dtype(arg.dtype):
-                    tmp_sym = V.fake_mode.shape_env.create_unbacked_symfloat().node.expr
-                elif is_integer_dtype(arg.dtype):
-                    tmp_sym = V.fake_mode.shape_env.create_unbacked_symint().node.expr
-                elif is_boolean_dtype(arg.dtype):
-                    tmp_sym = V.fake_mode.shape_env.create_unbacked_symbool().node.expr
-                else:
-                    raise NotImplementedError(
-                        f"the CPU scalar tensor can't be converted because of unknown dtype {arg.dtype}"
-                    )
-                buffer = ir.DynamicScalar(tmp_sym, (), arg)
-                buffer.name = V.graph.register_buffer(buffer)
-                V.graph.register_operation(buffer)
-                args[i] = tmp_sym
+    if symbolify_supported:
+        target_device_cuda = False
+        for arg in args:
+            if isinstance(arg, TensorBox) and arg.get_device().type == "cuda":
+                target_device_cuda = True
+                break
+        if target_device_cuda:
+            for i, arg in enumerate(args):
+                if (
+                    isinstance(arg, TensorBox)
+                    and arg.get_device().type == "cpu"
+                    and arg.get_size() == []
+                ):
+                    if is_float_dtype(arg.dtype):
+                        tmp_sym = (
+                            V.fake_mode.shape_env.create_unbacked_symfloat().node.expr
+                        )
+                    elif is_integer_dtype(arg.dtype):
+                        tmp_sym = (
+                            V.fake_mode.shape_env.create_unbacked_symint().node.expr
+                        )
+                    elif is_boolean_dtype(arg.dtype):
+                        # create_unbacked_symbool has an extra Eq
+                        tmp_sym = V.fake_mode.shape_env.create_unbacked_symbool().node.expr.args[
+                            0
+                        ]
+                    else:
+                        raise NotImplementedError(
+                            f"the CPU scalar tensor can't be converted because of unknown dtype {arg.dtype}"
+                        )
+                    buffer = ir.DynamicScalar(tmp_sym, (), arg)
+                    buffer.name = V.graph.register_buffer(buffer)
+                    V.graph.register_operation(buffer)
+                    args[i] = tmp_sym
 
     indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
 
@@ -340,9 +350,24 @@ def _register_lowering(
             assert not any(
                 x == "out" for x in kwargs.keys()
             ), "out= ops aren't yet supported"
-
+        unsupported_symbolify_lowerings = [
+            "index_put",
+            "_unsafe_index_put_",
+            "where",
+            "flex_attention",
+        ]
+        symbolify_supported = True
+        for reg in unsupported_symbolify_lowerings:
+            if V.graph.current_node.name.startswith(reg):
+                symbolify_supported = False
+                break
+        # unsupported_symbolify_lowerings = []
         args = transform_args(
-            args, broadcast, type_promotion_kind, convert_input_to_bool
+            args,
+            broadcast,
+            type_promotion_kind,
+            convert_input_to_bool,
+            symbolify_supported,
         )
 
         if unpacked:
