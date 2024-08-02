@@ -975,7 +975,7 @@ static Tensor sparse_compressed_tensor_ctor_worker(
         (required_layout
              ? r.layoutWithDefault(ARG_LAYOUT, required_layout.value())
              : r.layoutOptional(ARG_LAYOUT));
-    if (required_layout && layout) {
+    if (required_layout) {
       TORCH_CHECK(
           layout.value() == required_layout.value(),
           name,
@@ -1031,7 +1031,7 @@ static Tensor sparse_compressed_tensor_ctor_worker(
         (required_layout
              ? r.layoutWithDefault(ARG_LAYOUT1, required_layout.value())
              : r.layoutOptional(ARG_LAYOUT1));
-    if (required_layout && layout) {
+    if (required_layout) {
       TORCH_CHECK(
           layout.value() == required_layout.value(),
           name,
