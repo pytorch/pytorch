@@ -221,7 +221,7 @@ def query_key_value_clones(
     return query_ref, key_ref, value_ref
 
 
-class TestFlexAttention(InductorTestCase):
+class TestFlexDecoding(InductorTestCase):
     def _check_equal(
         self,
         golden_out: torch.Tensor,
@@ -1053,7 +1053,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         FileCheck().check_count(".run(", 3, False).run(code[0])
 
 
-common_utils.instantiate_parametrized_tests(TestFlexAttention)
+common_utils.instantiate_parametrized_tests(TestFlexDecoding)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
