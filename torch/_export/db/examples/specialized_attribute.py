@@ -11,7 +11,7 @@ class SpecializedAttribute(torch.nn.Module):
     Model attributes are specialized.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.a = "moo"
         self.b = 4
