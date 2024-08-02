@@ -1077,7 +1077,7 @@ inline py::object createPyObjectForStack(Stack&& stack) {
     return_values[ret] = toPyObject(std::move(stack[ret]));
   }
 
-  return std::move(return_values);
+  return return_values;
 }
 
 // TODO: Remove once we clean up the GraphExecutor usage.

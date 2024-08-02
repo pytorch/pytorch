@@ -1474,7 +1474,7 @@ static mpy::object create_dim(mpy::object name, mpy::handle size) {
     if (!mpy::is_none(size)) {
         d->set_size(mpy::to_int(size));
     }
-    return std::move(d);
+    return d;
 }
 
 static mpy::object create_dimlist(mpy::object name, mpy::handle size) {
@@ -1490,7 +1490,7 @@ static mpy::object create_dimlist(mpy::object name, mpy::handle size) {
             }
         }
     }
-    return std::move(d);
+    return d;
 }
 
 
