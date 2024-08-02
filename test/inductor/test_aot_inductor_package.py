@@ -86,7 +86,7 @@ class AOTInductorTestsTemplate:
 
     def test_linear(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
 

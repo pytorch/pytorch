@@ -20,9 +20,9 @@ from torch.onnx import (
     _OrtBackendOptions as OrtBackendOptions,
     ExportOptions,
 )
-
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNNModuleInlined
+
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import onnx_test_common
@@ -353,7 +353,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         class MLP(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 4, bias=True)
                 self.fc2 = nn.Linear(4, 2, bias=True)
@@ -690,7 +690,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         class MLP(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 4, bias=True)
                 self.fc2 = nn.Linear(4, 2, bias=True)

@@ -1316,8 +1316,6 @@ aten::unique_dim_consecutive.out
 aten::unsafe_split.Tensor_out
 aten::unsafe_split_with_sizes.out
 aten::unsqueeze_
-aten::unsqueeze_copy
-aten::unsqueeze_copy.out
 aten::upsample_bicubic2d_backward
 aten::upsample_bicubic2d_backward.grad_input
 aten::upsample_bilinear2d_backward
