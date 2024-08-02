@@ -58,7 +58,7 @@ jobs:
     - name: Build Torch
       shell: cmd
       run: |
-        call %conda_path%\Scripts\activate.bat activate
+        call %conda_path%\Scripts\activate.bat
         call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
 
         if exist "%home_dir%\pytorch" (
