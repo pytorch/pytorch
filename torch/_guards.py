@@ -92,6 +92,8 @@ class GuardSource(enum.Enum):
     SYNTHETIC_LOCAL = 11
     LOCAL_UNSPECIALIZED_NN_MODULE = 12
     GLOBAL_UNSPECIALIZED_NN_MODULE = 13
+    LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE = 14
+    GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE = 15
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
@@ -111,6 +113,14 @@ class GuardSource(enum.Enum):
         return self in (
             GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
             GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+        )
+
+    def is_unspecialized_builtin_nn_module(self) -> bool:
+        return self in (
+            GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
         )
 
     def is_local(self):
@@ -417,7 +427,7 @@ class ModuleContextCheckpointState:
 
 
 class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
-    def __init__(self):
+    def __init__(self) -> None:
         self.nn_modules: Dict[str, Any] = {}
 
     def copy_graphstate(self):
@@ -466,7 +476,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
         "autocast_cache_enabled",
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.global_state: Dict[str, Tuple[Callable, ...]] = {}
 
     def copy_graphstate(self):
@@ -534,7 +544,7 @@ class GuardsSet:
 
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
-    def __init__(self):
+    def __init__(self) -> None:
         self.dynamo_guards: GuardsSet = GuardsSet()
         self.aotautograd_guards: List[GuardEnvExpr] = []
 

@@ -197,7 +197,7 @@ class TimeoutTest(TestCase):
 
 
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
         self.fc2 = nn.Linear(10, 50, bias=False)
@@ -290,7 +290,7 @@ class ConvNet(nn.Module):
 
 
 class Task(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.p = nn.Parameter(torch.ones(2, 2))
 
@@ -299,7 +299,7 @@ class Task(nn.Module):
 
 
 class ModuleForDdpCommHook(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.t0 = Task()
 
@@ -308,7 +308,7 @@ class ModuleForDdpCommHook(nn.Module):
 
 
 class SparseGradientModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.embedding = nn.EmbeddingBag(10, 10, sparse=True)
 
@@ -1709,7 +1709,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     class Options:
-        def __init__(self):
+        def __init__(self) -> None:
             pass
 
         def create(self):
