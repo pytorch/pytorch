@@ -15,6 +15,7 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 
+
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
 
@@ -277,6 +278,7 @@ class FunctionalTensor(torch.Tensor):
 
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self, pre_dispatch=False, export=False, _allow_token_discovery=False):
+        super().__init__()
         self.export = export
         self.is_on_stack = False
         self.enter_stack = []
@@ -513,6 +515,10 @@ class FunctionalTensorMode(TorchDispatchMode):
         # Use this util to figure out the right thing to return.
         # If none of our inputs were wrapped, then we have no FunctionalTensor outputs that we need to fix up storages for.
         return return_and_correct_aliasing(func, args, kwargs, outs_wrapped)
+
+    @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
 
 
 @contextlib.contextmanager

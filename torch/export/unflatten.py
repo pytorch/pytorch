@@ -21,6 +21,7 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.fx._symbolic_trace import is_fx_tracing
+from torch.fx.graph_module import _print_readable
 from torch.utils._pytree import GetAttrKey, SequenceKey
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
@@ -132,6 +133,22 @@ class InterpreterModule(torch.nn.Module):
         for node in self.graph.nodes:
             if node.op == "placeholder":
                 self.arg_names.append(node.target)
+
+    def print_readable(
+        self,
+        print_output=True,
+        include_stride=False,
+        include_device=False,
+        colored=False,
+    ):
+        return _print_readable(
+            self,
+            "InterpreterModule",
+            print_output,
+            include_stride,
+            include_device,
+            colored,
+        )
 
 
 class FlatArgsAdapter(abc.ABC):
@@ -464,6 +481,22 @@ class UnflattenedModule(torch.nn.Module):
             *flat_args, enable_io_processing=False
         )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
+
+    def print_readable(
+        self,
+        print_output=True,
+        include_stride=False,
+        include_device=False,
+        colored=False,
+    ):
+        return _print_readable(
+            self,
+            "UnflattenedModule",
+            print_output,
+            include_stride,
+            include_device,
+            colored,
+        )
 
 
 def unflatten(
