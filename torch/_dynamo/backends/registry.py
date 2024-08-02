@@ -2,7 +2,7 @@
 
 import functools
 import sys
-from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple
 
 import torch
 from torch import fx
@@ -13,7 +13,7 @@ class CompiledFn(Protocol):
         ...
 
 
-CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor], Optional[Union[str, dict]]], CompiledFn]
+CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
 
 _BACKENDS: Dict[str, CompilerFn] = {}
 
