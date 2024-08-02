@@ -224,6 +224,22 @@ static PyObject* MPSModule_elapsedTimeOfEvents(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* MPSModule_getCommandBuffer_raw(
+    PyObject* /* unused */,
+    PyObject* /* noargs, unused */) {
+  HANDLE_TH_ERRORS
+  return PyLong_FromVoidPtr(at::detail::getMPSHooks().getCommandBuffer());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_getDispatchQueue_raw(
+    PyObject* /* unused */,
+    PyObject* /* noargs, unused */) {
+  HANDLE_TH_ERRORS
+  return PyLong_FromVoidPtr(at::detail::getMPSHooks().getDispatchQueue());
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(*-c-arrays, *-global-variables)
 static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_deviceSynchronize",
@@ -271,6 +287,14 @@ static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_elapsedTimeOfEvents",
      MPSModule_elapsedTimeOfEvents,
      METH_VARARGS,
+     nullptr},
+    {"_mps_getCommandBufferRaw",
+     MPSModule_getCommandBuffer_raw,
+     METH_NOARGS,
+     nullptr},
+    {"_mps_getDispatchQueueRaw",
+     MPSModule_getDispatchQueue_raw,
+     METH_NOARGS,
      nullptr},
     {nullptr}};
 
