@@ -191,6 +191,9 @@ class ConstantVariable(VariableTracker):
                     return SymNodeVariable.create(tx, proxy, add_target)
                 else:
                     return ConstantVariable.create(op(self.value, add_target))
+        elif isinstance(self.value, bytes) and name == "decode":
+            method = getattr(self.value, name)
+            return ConstantVariable.create(method(*const_args, **const_kwargs))
 
         if name == "__len__" and not (args or kwargs):
             return ConstantVariable.create(len(self.value))

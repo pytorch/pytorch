@@ -53,7 +53,6 @@ class NodeFinder : public IRVisitor {
   std::vector<NodePtr<Op>> nodes;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class VarFinder : public IRVisitor {
  public:
   void visit(const VarPtr& v) override {
@@ -111,7 +110,6 @@ class BufFinder : public IRVisitor {
 // Finds all kinds of write operations to the provided Buf.
 class WritesToBuf : public IRVisitor {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   WritesToBuf(BufPtr target) : target_(std::move(target)) {}
 
   std::vector<StmtPtr> writes() {
@@ -143,7 +141,6 @@ class WritesToBuf : public IRVisitor {
 
 class StmtsReadingBuf : public IRVisitor {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   StmtsReadingBuf(BufPtr target) : target_(std::move(target)) {}
 
   std::vector<StmtPtr> reads() {
@@ -282,8 +279,8 @@ class BufLiveRange : public IRVisitor {
  public:
   BufLiveRange(BufPtr b) : buf_(std::move(b)) {}
 
-  static std::tuple<int32_t, int32_t> liveRange(StmtPtr s, BufPtr b) {
-    BlockPtr block = to<Block>(std::move(s));
+  static std::tuple<int32_t, int32_t> liveRange(const StmtPtr& s, BufPtr b) {
+    BlockPtr block = to<Block>(s);
     // We Only analyze buffer live ranges for block stmts.
     if (!block) {
       return std::make_tuple(0, 0);
