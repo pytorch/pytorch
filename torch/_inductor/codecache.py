@@ -1534,6 +1534,7 @@ def get_include_and_linking_paths(
         or vec_isa != invalid_vec_isa
         or cuda
         or config.cpp.enable_kernel_profile
+        or config.profiler_mark_wrapper_call
     ):
         # Note - We include pytorch only on linux right now. There is more work
         # to do to enable OMP build on darwin where PyTorch is built with IOMP

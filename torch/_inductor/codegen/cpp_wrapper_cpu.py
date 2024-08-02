@@ -187,6 +187,12 @@ class CppWrapperCpu(WrapperCodeGen):
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
                 """
             )
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
+        if config.profiler_mark_wrapper_call or enable_kernel_profile:
+            self.header.splice("#include <ATen/record_function.h>")
 
         self.header.splice("#include <c10/util/generic_math.h>")
 
