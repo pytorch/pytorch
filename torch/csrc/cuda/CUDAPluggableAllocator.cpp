@@ -191,7 +191,7 @@ void CUDAPluggableAllocator::recordStream(
   }
 }
 
-c10::cuda::CUDACachingAllocator::DeviceStats CUDAPluggableAllocator::
+c10::DeviceStats CUDAPluggableAllocator::
     getDeviceStats(c10::DeviceIndex device) {
   TORCH_CHECK(
       false,
