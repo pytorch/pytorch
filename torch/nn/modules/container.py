@@ -291,7 +291,7 @@ class ModuleList(Module):
     Example::
 
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linears = nn.ModuleList([nn.Linear(10, 10) for i in range(10)])
 
@@ -465,7 +465,7 @@ class ModuleDict(Module):
     Example::
 
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.choices = nn.ModuleDict({
                         'conv': nn.Conv2d(10, 10, 3),
@@ -597,7 +597,7 @@ class ParameterList(Module):
     Example::
 
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.params = nn.ParameterList([nn.Parameter(torch.randn(10, 10)) for i in range(10)])
 
@@ -749,7 +749,7 @@ class ParameterDict(Module):
     Example::
 
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.params = nn.ParameterDict({
                         'left': nn.Parameter(torch.randn(5, 10)),
