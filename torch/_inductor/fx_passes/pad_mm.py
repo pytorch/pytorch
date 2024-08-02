@@ -559,11 +559,11 @@ def should_pad_bench(
 
         if ori_time is None:
             ori_time, pad_time = benchmarker.benchmark_many_gpu(
-                [orig_bench_fn, pad_bench_fn]
+                [orig_bench_fn, pad_bench_fn], warmup=5
             )
             set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
         else:
-            pad_time = benchmarker.benchmark_gpu(pad_bench_fn)
+            pad_time = benchmarker.benchmark_gpu(pad_bench_fn, warmup=5)
 
         return should_pad(key, ori_time, pad_time)
 
@@ -623,9 +623,9 @@ def run_autoheuristic(
 ) -> Optional[bool]:
     def feedback_fn(choice: str):
         if choice == orig_choice:
-            return benchmarker.benchmark_gpu(orig_bench_fn)
+            return benchmarker.benchmark_gpu(orig_bench_fn, warmup=5)
         elif choice == pad_choice:
-            return benchmarker.benchmark_gpu(pad_bench_fn)
+            return benchmarker.benchmark_gpu(pad_bench_fn, warmup=5)
         return None
 
     def fallback() -> str:

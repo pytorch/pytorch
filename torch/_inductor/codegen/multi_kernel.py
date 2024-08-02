@@ -323,6 +323,8 @@ class MultiKernelCall:
 
         return benchmarker.benchmark_many_gpu(
             [wrap_fn(kernel) for kernel in self.kernels],
+            rep=40,
+            fast_flush=True,
             ranking_key=f"benchmark_sub_kernels_{self.multi_kernel_name}",
         )
 
