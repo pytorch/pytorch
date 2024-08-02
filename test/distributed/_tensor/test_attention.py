@@ -149,7 +149,7 @@ class RingAttentionTest(DTensorTestBase):
             atol = (
                 1e-08
                 if backend == SDPBackend.EFFICIENT_ATTENTION
-                else 2e-3 * self.world_size
+                else 1e-3 * self.world_size
             )
             self.assertTrue(torch.allclose(local_out, cp_out, atol=atol))
 

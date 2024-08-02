@@ -89,12 +89,13 @@ class _SDPAMerger:
             self._lse = block_lse
             self._out = block_out
         else:
-            new_lse = self._lse + torch.log(1 + torch.exp(block_lse - self._lse))
-            self._out = (
-                torch.exp(self._lse - new_lse) * self._out
-                + torch.exp(block_lse - new_lse) * block_out
+            # The algorithm from
+            # github.com/zhuzilin/ring-flash-attention/pull/34#issuecomment-2076126795
+            # gives a relatively stable result.
+            self._out = self._out - F.sigmoid(block_lse - self._lse) * (
+                self._out - block_out
             )
-            self._lse = new_lse
+            self._lse = self._lse - F.logsigmoid(self._lse - block_lse)
 
     def step(self, out: torch.Tensor, lse: torch.Tensor) -> None:
         self._out_dtype = out.dtype
