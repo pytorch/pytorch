@@ -34,16 +34,17 @@ jobs:
         fetch-depth: 0
         path: ${{ env.home_dir }}//actionrepo
 
-    # - name: Set conda environment
-    #   shell: cmd
-    #   run: |
-    #     call %conda_path%\Scripts\activate.bat
-    #     call conda remove -n %conda_env% --all -y
-    #     call conda create -n %conda_env% python=3.10 -y
-    #     call conda activate %conda_env%
-    #     call conda remove ucrt -y
-    #     call conda install cmake==3.26.4 --force -y
-    #     call conda list
+    - name: Set conda environment
+      shell: cmd
+      run: |
+        call %conda_path%\Scripts\activate.bat
+        call conda remove -n %conda_env% --all -y
+        call conda create -n %conda_env% python=3.10 -y
+        call conda activate %conda_env%
+        call conda remove ucrt -y
+        call pip install cmake==3.26.4 --force -y
+        call pip install pyyaml --force -y
+        call conda list
 
     - name: Activate Intel Basekit
       shell: cmd
@@ -58,7 +59,7 @@ jobs:
     - name: Build Torch
       shell: cmd
       run: |
-        call %conda_path%\Scripts\activate.bat
+        call %conda_path%\Scripts\activate.bat activate %conda_env%
         call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
 
         if exist "%home_dir%\pytorch" (
