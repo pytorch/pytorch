@@ -15,6 +15,7 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 
+
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
 
@@ -146,7 +147,7 @@ class FunctionalTensor(torch.Tensor):
             elem.device,  # device
             False,  # pin_memory
             elem.requires_grad,  # requires_grad
-            "sizes",  # dispatch_sizes_strides_policy
+            None,  # dispatch_sizes_strides_policy
             False,  # dispatch_device
             False,  # dispatch_layout
             extra_dispatch_keys,  # _extra_dispatch_keys
@@ -277,6 +278,7 @@ class FunctionalTensor(torch.Tensor):
 
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self, pre_dispatch=False, export=False, _allow_token_discovery=False):
+        super().__init__()
         self.export = export
         self.is_on_stack = False
         self.enter_stack = []
@@ -508,11 +510,22 @@ class FunctionalTensorMode(TorchDispatchMode):
             or func == torch.ops.aten.lift_fresh.default
         ):
             return outs_wrapped
+        # for metadata mutations, need to manually mutate the metadata of the FunctionalTensor wrapper
+        if (
+            torch.Tag.inplace_view in func.tags
+            and func is not torch.ops.aten.set_.source_Tensor
+        ):
+            with torch.utils._mode_utils.no_dispatch():
+                func(*args, **kwargs)
         # Wrapper tensor subclasses do not have correct aliasing info! Use this util to manually correct the output aliasing.
         # inplace ops like `aten.add_()` are expected to return inputs **directly**, instead of creating fresh tensor objects.
         # Use this util to figure out the right thing to return.
         # If none of our inputs were wrapped, then we have no FunctionalTensor outputs that we need to fix up storages for.
         return return_and_correct_aliasing(func, args, kwargs, outs_wrapped)
+
+    @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
 
 
 @contextlib.contextmanager

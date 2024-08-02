@@ -288,7 +288,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
     @with_comms
     def test_weight_tying(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 # Initialize different weights for embedding and fc.
                 torch.manual_seed(1)

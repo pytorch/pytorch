@@ -59,7 +59,7 @@ std::unique_ptr<CodeGen> CreateCodeGen(
   return method(std::move(stmt), params, device, kernel_func_name);
 }
 
-ExprPtr GenericIntrinsicsExpander::mutate(IntrinsicsPtr v) {
+ExprPtr GenericIntrinsicsExpander::mutate(const IntrinsicsPtr& v) {
   if (v->op_type() == kSigmoid) {
     auto x = v->param(0)->accept_mutator(this);
     auto one = expr_to_vec(
@@ -259,7 +259,7 @@ ExtCallMemoryReuse::ExtCallMemoryReuse(
   }
 }
 
-StmtPtr ExtCallMemoryReuse::mutate(ExternalCallPtr v) {
+StmtPtr ExtCallMemoryReuse::mutate(const ExternalCallPtr& v) {
   if (extCallFuncNameMap_.count(v->func_name()) &&
       bufferArgs_.count(v->buf()) == 0) {
     std::vector<BufPtr> buf_out_args = {v->buf()};
