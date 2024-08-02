@@ -18,10 +18,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKIN
 import sympy
 
 import torch._guards
-
 import torch._logging
 import torch.distributed as dist
-
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
@@ -104,11 +102,12 @@ from .variables.tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-
 from .variables.torch_function import TensorWithTFOverrideVariable
+
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
 
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
@@ -1139,6 +1138,10 @@ class OutputGraph:
                     stored_graph_output_var = True
                 else:
                     output.append(create_instruction("POP_TOP"))
+            else:
+                # NB: Important to run compiler collective even when there is
+                # a graph break
+                self.run_compiler_collective(tx)
             append_prefix_insts()
             self.add_output_instructions(output + pass2.get_instructions())
 
@@ -1255,14 +1258,7 @@ class OutputGraph:
                 GlobalContextCheckpointState(current_global_state)
             )
 
-    @torch._guards.TracingContext.clear_frame()
-    def compile_and_call_fx_graph(self, tx, rv, root):
-        """
-        Generate code from self.graph and return the Instruction()s to
-        call that generated code.
-        """
-        from .decorators import disable
-
+    def run_compiler_collective(self, tx):
         if (ds := tx.distributed_state) is not None and ds.all_states is None:
             compile_pg = ds.compile_pg
             log.info("compiler_collective %s", ds.local_state)
@@ -1285,7 +1281,17 @@ class OutputGraph:
             tx.speculation_log.clear()
             raise exc.CompileCollectiveRestartAnalysis
 
+    @torch._guards.TracingContext.clear_frame()
+    def compile_and_call_fx_graph(self, tx, rv, root):
+        """
+        Generate code from self.graph and return the Instruction()s to
+        call that generated code.
+        """
+        from .decorators import disable
+
         assert self.should_exit
+
+        self.run_compiler_collective(tx)
 
         name = unique_id("__compiled_fn")
 
@@ -1394,8 +1400,13 @@ class OutputGraph:
     def graphargs(self) -> List[GraphArg]:
         return [node.meta["grapharg"] for node in self.placeholders]
 
-    @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+        with dynamo_timed(
+            "OutputGraph.call_user_compiler", phase_name="backend_compile"
+        ):
+            return self._call_user_compiler(gm)
+
+    def _call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         assert self.compiler_fn is not None
         tot = 0
         placeholders = []
@@ -1442,9 +1453,7 @@ class OutputGraph:
             # aborting execution.
             raise e
         except Exception as e:
-            raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
-                e.__traceback__
-            ) from None
+            raise BackendCompilerFailed(self.compiler_fn, e) from e
 
         signpost_event(
             "dynamo",

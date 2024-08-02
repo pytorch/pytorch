@@ -19,6 +19,7 @@ from .bytecode_transformation import (
 )
 from .utils import ExactWeakKeyDictionary
 
+
 # taken from code.h in cpython
 CO_OPTIMIZED = 0x0001
 CO_NEWLOCALS = 0x0002

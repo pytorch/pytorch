@@ -242,7 +242,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
         class BertPooler(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.dense = torch.nn.Linear(768, 768).to(device)
                 self.activation = torch.nn.Tanh()
@@ -256,7 +256,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
                 return pooled_output
 
         class BertEncoder(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(
@@ -272,7 +272,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
                 )
 
         class BertModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.encoder = BertEncoder()
                 self.pooler = BertPooler()

@@ -187,6 +187,8 @@ if RUN_CUDA:
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
         BaseTest("test_unspec_inputs"),
+        BaseTest("test_pointwise_hermite_polynomial_he"),
+        BaseTest("test_pointwise_hermite_polynomial_h"),
         BaseTest(
             "test_foreach_cpp_wrapper",
             tests=test_foreach.ForeachTests(),
