@@ -6,9 +6,6 @@ import warnings
 from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch._C
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._guards import Guard
 
 from .. import variables
@@ -30,6 +27,10 @@ from .functions import (
     WrappedUserMethodVariable,
 )
 from .user_defined import UserDefinedObjectVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 @dataclasses.dataclass
@@ -62,7 +63,9 @@ class ContextWrappingVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, target_values, initial_values=None, *, state=None, **kwargs):
+    def __init__(
+        self, target_values, initial_values=None, *, state=None, **kwargs
+    ) -> None:
         super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
@@ -126,7 +129,7 @@ class ContextWrappingVariable(VariableTracker):
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
     # Some methods in ContextWrappingVariable assumes the arguments are
     # python contants. Which might not always be the case here.
-    def __init__(self, cm_obj, **kwargs):
+    def __init__(self, cm_obj, **kwargs) -> None:
         assert cm_obj is not None
         super().__init__(
             value=cm_obj,
@@ -388,7 +391,7 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
             initial_values=None,
         )
 
-    def __init__(self, catch_warnings_args, **kwargs):
+    def __init__(self, catch_warnings_args, **kwargs) -> None:
         assert isinstance(catch_warnings_args, dict), catch_warnings_args
         super().__init__(**kwargs)
         self.catch_warnings_args = catch_warnings_args
@@ -464,7 +467,9 @@ class GradModeVariable(ContextWrappingVariable):
             var._call_func(tx, var.target_values)
         return var
 
-    def __init__(self, target_values, initial_values=None, initialized=True, **kwargs):
+    def __init__(
+        self, target_values, initial_values=None, initialized=True, **kwargs
+    ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -517,7 +522,7 @@ class InferenceModeVariable(ContextWrappingVariable):
         target_values,
         initial_values=None,
         **kwargs,
-    ):
+    ) -> None:
         if initial_values is None:
             # This must be called here since function defaults are evaluated at import time
             initial_values = torch.is_inference_mode_enabled()
@@ -571,7 +576,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         var.set_cleanup_hook(tx)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs):
+    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -603,7 +608,7 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
         var.set_cleanup_hook(tx)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs):
+    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -643,7 +648,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         var.set_cleanup_hook(tx)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs):
+    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -712,7 +717,7 @@ class AutocastModeVariable(ContextWrappingVariable):
         var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs):
+    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -745,7 +750,7 @@ class NullContextVariable(ContextWrappingVariable):
     support yet, e.g, torch.autograd.profiler.record_function.
     """
 
-    def __init__(self, target_values=None, **kwargs):
+    def __init__(self, target_values=None, **kwargs) -> None:
         super().__init__(target_values=target_values, **kwargs)
 
     def enter(self, tx):
@@ -786,7 +791,7 @@ class StreamContextVariable(ContextWrappingVariable):
             **kwargs,
         )
 
-    def __init__(self, target_values, device, initial_values=None, **kwargs):
+    def __init__(self, target_values, device, initial_values=None, **kwargs) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -839,7 +844,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
             )
         )
 
-    def __init__(self, tensor, prev_version, **kwargs):
+    def __init__(self, tensor, prev_version, **kwargs) -> None:
         kwargs.setdefault("target_values", None)
         super().__init__(**kwargs)
         self.tensor = tensor
@@ -874,7 +879,9 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
         )
         return var
 
-    def __init__(self, param_group_var, target_values, initial_values=None, **kwargs):
+    def __init__(
+        self, param_group_var, target_values, initial_values=None, **kwargs
+    ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -921,7 +928,7 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
 
 
 class StreamVariable(VariableTracker):
-    def __init__(self, proxy, value, device, **kwargs):
+    def __init__(self, proxy, value, device, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         assert (
@@ -994,7 +1001,7 @@ class StreamVariable(VariableTracker):
 
 
 class EventVariable(VariableTracker):
-    def __init__(self, proxy, value, **kwargs):
+    def __init__(self, proxy, value, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         super().__init__(**kwargs)
@@ -1042,7 +1049,7 @@ class WithExitFunctionVariable(VariableTracker):
         ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
         target,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         assert isinstance(
             ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
