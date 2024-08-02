@@ -49,7 +49,7 @@ from torch.testing._internal.distributed.common_state_dict import VerifyStateDic
 
 # Simple and boring model
 class TestDummyModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         torch.manual_seed(0)
         self.net1 = nn.Linear(8, 16)
@@ -69,7 +69,7 @@ class TestDummyModel(torch.nn.Module):
 
 
 class TestStatefulObj:
-    def __init__(self):
+    def __init__(self) -> None:
         self.data = torch.rand(10, 10, device="cuda")
 
     def state_dict(self):
