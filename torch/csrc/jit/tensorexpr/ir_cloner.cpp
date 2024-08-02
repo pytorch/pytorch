@@ -112,7 +112,6 @@ ExprPtr IRCloner::mutate(const CompareSelectPtr& v) {
       v->bias());
 }
 
-// NOLINTNEXTLINE
 #define IMM_MUTATE_DEFINE(_1, Name)                 \
   ExprPtr IRCloner::mutate(const Name##ImmPtr& v) { \
     return v;                                       \

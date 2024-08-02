@@ -444,6 +444,24 @@ class TensorVariable(VariableTracker):
             raise NotImplementedError
         return result
 
+    def call_id(self, tx):
+        if not self.source:
+            unimplemented("call_id not supported for sourceless TensorVariable")
+
+        # For local source, we associate the real value. We use this real value
+        scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
+        try:
+            _input_associated_real_value = eval(self.source.name(), scope)
+        except Exception as exc:
+            unimplemented(f"error getting associated real value: {exc}")
+
+        if _input_associated_real_value is None:
+            unimplemented("call_id without associated real value")
+
+        install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
+        id_value = id(_input_associated_real_value)
+        return ConstantVariable.create(id_value)
+
     def has_unpack_var_sequence(self, tx):
         return self.ndim > 0
 
