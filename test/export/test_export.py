@@ -40,7 +40,10 @@ from torch.export.graph_signature import InputKind
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    SM90OrLater,
+)
 from torch.testing._internal.common_device_type import onlyCPU, onlyCUDA
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -6659,13 +6662,20 @@ class TestOneOffModelExportResult(TestCase):
         ep = torch.export.export(
             ScaledDotProductAttention(), (q, k, v)
         ).run_decompositions()
-        self.assertExpectedInline(
-            ep.graph_module.code.strip(),
-            """\
+        code_str = """\
 def forward(self, q, k, v):
     _scaled_dot_product_flash_attention = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v, 0.0, True, scale = 0.125);  q = k = v = None
     getitem = _scaled_dot_product_flash_attention[0];  _scaled_dot_product_flash_attention = None
-    return (getitem,)""",
+    return (getitem,)"""
+        if SM90OrLater:
+            code_str = """\
+def forward(self, q, k, v):
+    _scaled_dot_product_cudnn_attention = torch.ops.aten._scaled_dot_product_cudnn_attention.default(q, k, v, None, False, 0.0, True);  q = k = v = None
+    getitem = _scaled_dot_product_cudnn_attention[0];  _scaled_dot_product_cudnn_attention = None
+    return (getitem,)"""
+        self.assertExpectedInline(
+            ep.graph_module.code.strip(),
+            code_str,
         )
 
     def test_int_list_output(self):
