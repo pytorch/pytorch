@@ -277,12 +277,12 @@ class TestPatternMatcher(TestCase):
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @unittest.skipIf(not IS_A100, "heuristic only run on Linux A100")
-    @inductor_config.patch(mixed_mm_choice="heuristic")
+    @inductor_config.patch(mixed_mm_choice="heuristic", autoheuristic_use="")
     def test_mixed_mm_heuristic_no(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
-        # examples that should not be selected by heuristic
+        # examples that should not be selected by handwritten heuristic
         mat1_dtype = torch.float16
         dyn_tensor = torch.randn(4, 4096, dtype=mat1_dtype, device="cuda")
         torch._dynamo.mark_dynamic(dyn_tensor, 0)
@@ -336,7 +336,7 @@ class TestPatternMatcher(TestCase):
             return torch.mm(a, b.to(a.dtype))
 
         mat1_dtype = torch.float16
-        # examples that should be selected by heuristic
+        # examples that should be selected by handwritten heuristic
         args_list = [
             (
                 torch.randn(1, 4096, dtype=mat1_dtype, device="cuda"),
