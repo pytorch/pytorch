@@ -340,7 +340,7 @@ def forward_inner(
     RCP_LN2: tl.constexpr = 1.44269504
 
     if PRESCALE_QK:
-        q = (q * scale * RCP_LN2).to(MATMUL_PRECISION)
+        q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
     # loop over k, v and update accumulator
     for start_n in range(block_n_start, block_n_end):
@@ -349,7 +349,7 @@ def forward_inner(
         # -- compute qk ---
         qk = tl.dot(q, k) # TODO: use cuda matmul when q_len <= 2.
         if not PRESCALE_QK:
-            qk *= scale
+            qk *= SM_SCALE
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = offs_n[None, :]
@@ -635,7 +635,7 @@ def flex_attention(
         device=query.get_device(),
     )
     kernel_options = dict(kernel_options)
-    kernel_options["scale"] = scale
+    kernel_options["SM_SCALE"] = scale
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
     # full_kv_num_blocks is None if partial blocks are not computed
     kernel_options["HAS_FULL_BLOCKS"] = full_kv_num_blocks is not None
@@ -867,7 +867,7 @@ flex_attention_backward_template = TritonTemplate(
         do = tl.load(DO + offs_m2[:, None] * stride_dom + offs_k[None, :] * stride_dod)
 
         if PRESCALE_QK:
-            q = (q * scale * RCP_LN2).to(MATMUL_PRECISION)
+            q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
         Di = tl.load(DELTA + offs_m2)
         lse = tl.load(LSE + offs_m2)
@@ -912,7 +912,7 @@ flex_attention_backward_template = TritonTemplate(
 
         # Write back dQ.
         dq_ptrs = DQ + offs_m2[:, None] * stride_dqm + offs_k[None, :] * stride_dqd
-        dq *= scale
+        dq *= SM_SCALE
         tl.store(dq_ptrs, dq)
     else:
         # THIS BLOCK DOES DK & DV
@@ -938,7 +938,7 @@ flex_attention_backward_template = TritonTemplate(
         # load K and V: they stay in SRAM throughout the inner loop.
         k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd)
         if PRESCALE_QK:
-            k = (k * scale * RCP_LN2).to(MATMUL_PRECISION)
+            k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
         v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd)
 
         # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -989,7 +989,7 @@ flex_attention_backward_template = TritonTemplate(
 
         tl.store(dv_ptrs, dv)
 
-        dk *= scale
+        dk *= SM_SCALE
         mask = index_n < KV_LEN
         {{store_output(("off_z", "off_h", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
 
@@ -1020,7 +1020,7 @@ def bwd_dq_inner(
         kT = tl.load(kT_ptrs)
         qk = tl.dot(q, kT)
         if not PRESCALE_QK:
-            qk *= scale
+            qk *= SM_SCALE
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         pre_mod_scores = qk
         m = offs_m2[:, None]
@@ -1118,7 +1118,7 @@ def bwd_dkdv_inner(
         lse = tl.load(LSE + offs_m1)
         qkT = tl.dot(k, qT)
         if not PRESCALE_QK:
-            qkT *= scale
+            qkT *= SM_SCALE
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m1[None, :]
         n = offs_n1[:, None]
@@ -1302,7 +1302,7 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     kernel_options = dict(kernel_options)
-    kernel_options["scale"] = scale
+    kernel_options["SM_SCALE"] = scale
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
     # full_kv_num_blocks is torch.zeros([1, 1, 1]) if partial blocks are not computed.
     kernel_options["HAS_FULL_BLOCKS"] = full_kv_num_blocks is not None
