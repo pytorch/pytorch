@@ -660,6 +660,21 @@ void propagate_xla_data(const ITensorListRef functional_tensor, ITensorListRef o
   }
 }
 
+void propagate_xla_data_direct(const Tensor& tensor, const Tensor& other) {
+  if (tensor.key_set().has(c10::DispatchKey::XLA)) {
+    at::_propagate_xla_data(tensor, other);
+  }
+ }
+
+void propagate_xla_data_direct(const ITensorListRef tensor,
+                               ITensorListRef other) {
+  auto tensor_it = tensor.begin();
+  auto other_it = other.begin();
+  for (C10_UNUSED const auto i : c10::irange(tensor.size())) {
+    propagate_xla_data_direct(*tensor_it++, *other_it++);
+  }
+}
+
 void commit_update(const Tensor& functional_tensor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
   unsafeGetFunctionalWrapper(functional_tensor)->commit_update();

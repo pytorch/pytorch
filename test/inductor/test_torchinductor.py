@@ -52,6 +52,7 @@ from torch._inductor.utils import (
     run_and_get_code,
     run_and_get_cpp_code,
     run_and_get_triton_code,
+    run_fw_bw_and_get_code,
 )
 from torch._inductor.virtualized import V
 from torch._prims_common import is_integer_dtype
@@ -214,15 +215,6 @@ def define_custom_op_3_for_test(id_, fn_cpu, fn_cuda, fn_xpu, fn_meta, tags=()):
 
 
 f32 = torch.float32
-
-
-def run_fw_bw_and_get_code(fn):
-    def run_with_backward():
-        result = fn()
-        result.sum().backward()
-        return result
-
-    return run_and_get_code(run_with_backward)
 
 
 def register_ops_with_aoti_compile(ns, op_set, dispatch_key, torch_compile_op_lib_impl):
@@ -3293,7 +3285,7 @@ class CommonTemplate:
     @skipIfXpu
     def test_linear_mixed_dtype(self):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super(Net, self).__init__()  # noqa: UP008
                 self.fc1 = nn.Linear(3, 3)
 
@@ -4275,7 +4267,7 @@ class CommonTemplate:
     @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8311
     def test_adaptive_avg_pool2d_low_prec(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
 
@@ -4293,9 +4285,9 @@ class CommonTemplate:
 
     def test_buffer_copied_in_graph(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buf", torch.zeros(1))
+                self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.w1 = torch.nn.Parameter(torch.zeros(1))
                 self.w2 = torch.nn.Parameter(torch.zeros(1))
 
@@ -4340,9 +4332,9 @@ class CommonTemplate:
     @skip_if_gpu_halide
     def test_buffer_copied_in_graph_with_different_shapes(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buf", torch.ones(4, 4))
+                self.buf = torch.nn.Buffer(torch.ones(4, 4))
                 self.w = torch.nn.Parameter(
                     torch.Tensor([[4, 5], [1, 2], [6, 7], [8, 9]])
                 )
@@ -4388,7 +4380,7 @@ class CommonTemplate:
     @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/128198")
     def test_buffer_batch_norm(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.m = torch.nn.BatchNorm1d(100)
 
@@ -4908,7 +4900,7 @@ class CommonTemplate:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.self_0 = torch.nn.Conv2d(
                     64,
@@ -5007,7 +4999,7 @@ class CommonTemplate:
 
     def test_view_as_complex(self):
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, view_2):
@@ -7181,6 +7173,11 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(64, 64)])
 
+    def test_new_cpp_build_logical(self):
+        from torch._inductor.codecache import validate_new_cpp_commands
+
+        validate_new_cpp_commands()
+
     def test_as_strided(self):
         def fn(x):
             return (
@@ -9050,7 +9047,7 @@ class CommonTemplate:
 
     def test_zero_element_mutation(self):
         class CustomModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer1 = nn.LeakyReLU(negative_slope=5.2955089, inplace=True)
 
@@ -9298,7 +9295,7 @@ class CommonTemplate:
             raise unittest.SkipTest("sqrt dynamic shapes only supports cpu")
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -9471,11 +9468,9 @@ class CommonTemplate:
 
         # https://github.com/pytorch/pytorch/issues/94725
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer(
-                    "_tensor_constant0", torch.randn([], dtype=torch.float32)
-                )
+                self._tensor_constant0 = nn.Buffer(torch.randn([], dtype=torch.float32))
 
             def forward(self, arg0_1, arg1_1):
                 convert_element_type = torch.ops.prims.convert_element_type.default(
@@ -9669,7 +9664,7 @@ class CommonTemplate:
     @config.patch(freezing=True)
     def test_sdpa_unaligned_mask_freezing(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.arg3_1 = torch.rand(1, 1, 16, 15, device=GPU_TYPE)
 
@@ -9734,7 +9729,7 @@ class CommonTemplate:
     @skipIfRocm
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.kv = torch.nn.Conv2d(
                     256, 384, kernel_size=(1, 1), stride=(1, 1), bias=False
@@ -9846,7 +9841,7 @@ class CommonTemplate:
     def test_data_type_propogation(self):
         from torch._dynamo.utils import detect_fake_mode
         from torch._inductor.codegen.common import boolean_ops
-        from torch._inductor.compile_fx import _shape_env_from_inputs
+        from torch._inductor.compile_fx import shape_env_from_inputs
         from torch._inductor.debug import DebugContext
         from torch._inductor.decomposition import decompositions
         from torch._inductor.graph import GraphLowering
@@ -9878,7 +9873,7 @@ class CommonTemplate:
             *example_inputs
         )
 
-        shape_env = _shape_env_from_inputs(example_inputs)
+        shape_env = shape_env_from_inputs(example_inputs)
 
         fake_mode = detect_fake_mode(example_inputs)
         if not fake_mode:
@@ -9996,10 +9991,9 @@ class CommonTemplate:
         if is_cpp_backend(self.device):
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             _, code = run_and_get_cpp_code(opt_fn, *args)
-            print(code)
             FileCheck().check_count(
-                "static_cast<int32_t>(256)",
-                1,
+                "static_cast<int64_t>(256)",
+                2,
                 exactly=True,
             ).run(code)
 
@@ -11178,6 +11172,18 @@ class CommonTemplate:
 
         self.common(forward, ())
 
+    def test_flip_cat(self):
+        def forward(unsqueeze, unsqueeze_1):
+            cat_1 = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], 1)
+            view = torch.ops.aten.view.default(cat_1, [4])
+            slice_5 = torch.ops.aten.slice.Tensor(view, 0, 0, 3)
+            rev_1 = torch.ops.aten.flip.default(slice_5, [0])
+            return (rev_1,)
+
+        a = torch.randn(2, 1, requires_grad=True)
+        b = torch.randn(2, 1, requires_grad=True)
+        self.common(forward, (a, b))
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -11252,7 +11258,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
         device = GPU_TYPE
 
         class NoOpCompilerBackend:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.example_args = None
                 self.model = None
 
@@ -11487,7 +11493,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
         )
         def test_sdpa_inference_mode_aot_compile(self):
             class TestSDPA(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
 
                 def forward(
@@ -11969,7 +11975,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
         @patch("torch._functorch.config.max_dist_from_bw", 0)
         def test_inductor_sequence_nr(self):
             class Model(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.conv1 = torch.nn.Conv2d(
                         in_channels=16,
@@ -12096,7 +12102,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
         device_type = GPU_TYPE
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.gru = torch.nn.GRU(16, 16, batch_first=True)
 

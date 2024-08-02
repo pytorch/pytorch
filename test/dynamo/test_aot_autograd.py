@@ -6,7 +6,6 @@ from textwrap import dedent
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.test_case
 import torch.fx.traceback as fx_traceback
@@ -44,7 +43,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     def test_LSTM(self):
         # https://github.com/pytorch/torchdynamo/issues/1147
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.self_mod_model_lstm_lstm = torch.nn.LSTM(
                     64, 64, num_layers=2, bidirectional=True
@@ -149,7 +148,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
     def test_call_fn_with_non_const_inputs_aot_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=20, kernel_size=(5, 5)
@@ -435,7 +434,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg(self):
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -488,7 +487,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         z = None
 
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -525,7 +524,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg_list(self):
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -575,7 +574,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param(self):
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -731,7 +730,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             from torch._functorch.aot_autograd import aot_module_simplified
 
             class WrapperModule(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.original = input_mod
                     self.submod = aot_module_simplified(input_mod, args, nop)
@@ -776,7 +775,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
     def test_aot_sequence_nr(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = torch.nn.Conv2d(
                     in_channels=16,
@@ -954,7 +953,7 @@ SeqNr|OrigAten|SrcFn
 
     def test_eager_sequence_nr(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = torch.nn.Conv2d(
                     in_channels=16,
@@ -1265,7 +1264,7 @@ SeqNr|OrigAten|SrcFn
         logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([2, 2]))
 
@@ -1326,7 +1325,7 @@ SeqNr|OrigAten|SrcFn
     def test_donated_buffer_with_retain_or_create_graph1(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([3, 3]))
 
@@ -1343,7 +1342,7 @@ SeqNr|OrigAten|SrcFn
     def test_donated_buffer_with_retain_or_create_graph2(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([3, 3]))
 
@@ -1362,7 +1361,7 @@ SeqNr|OrigAten|SrcFn
     def test_donated_buffer_with_retain_or_create_graph3(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([3, 3]))
 
@@ -1382,7 +1381,7 @@ SeqNr|OrigAten|SrcFn
     def test_donated_buffer_with_retain_or_create_graph4(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([3, 3]))
 
