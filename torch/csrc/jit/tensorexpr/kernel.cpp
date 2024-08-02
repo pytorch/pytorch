@@ -1766,7 +1766,8 @@ void TensorExprKernel::compile() {
 
   // Move output operands from `bufs_` to `bufOutputs_`
   for (auto i : c10::irange(graph_->outputs().size())) {
-    auto& output = graph_->outputs().at(i);
+    auto outputs = graph_->outputs();
+    auto& output = outputs.at(i);
     if (!bufs_.count(output)) {
       throw malformed_input("cannot find output Tensor");
     }

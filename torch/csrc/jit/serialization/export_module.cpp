@@ -204,8 +204,9 @@ std::pair<IValue, IValue> getFunctionTuple(
       // For DictType, there are two items in t->containedTypes(), the first one
       // is key and the second one is value. Both of them could be NamedTuple
       // type.
-      const TypePtr& key_type = t->containedTypes()[0];
-      const TypePtr& value_type = t->containedTypes()[1];
+      const auto& contained_types = t->containedTypes();
+      const TypePtr& key_type = contained_types[0];
+      const TypePtr& value_type = contained_types[1];
       std::string key_type_str = get_named_tuple_str_or_default(
           compilation_unit, key_type, key_type->annotation_str());
       std::string value_type_str = get_named_tuple_str_or_default(

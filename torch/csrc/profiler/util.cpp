@@ -163,7 +163,8 @@ std::string stacksToStr(
 static std::vector<std::vector<int64_t>> flattenList(
     const c10::List<c10::IValue>& list) {
   std::vector<std::vector<int64_t>> tensor_dims;
-  for (const c10::IValue& input : list) {
+  for (const auto& input_ref : list) {
+    const c10::IValue& input = input_ref;
     if (input.isTensor()) {
       const at::Tensor& tensor = input.toTensor();
       if (tensor.defined()) {

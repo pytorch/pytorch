@@ -330,7 +330,8 @@ struct DifferentiableGraphBackward : public autograd::Node {
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
       input_tensor_lists_.insert({index_, value.toTensorList().size()});
-      for (const at::Tensor& tensor : value.toTensorList()) {
+      for (const auto& tensor_ref : value.toTensorList()) {
+        const at::Tensor& tensor = tensor_ref;
         addOutputForTensor(tensor);
         index_++;
       }
@@ -361,7 +362,8 @@ struct DifferentiableGraphBackward : public autograd::Node {
     if (v.isTensorList()) {
       auto tensors = v.toTensorList();
       input_instructions_.pushTensorList(tensors.size());
-      for (const at::Tensor& tensor : tensors) {
+      for (const auto& tensor_ref : tensors) {
+        const at::Tensor& tensor = tensor_ref;
         addInputVariable(tensor);
       }
     } else if (v.isTensor()) {
