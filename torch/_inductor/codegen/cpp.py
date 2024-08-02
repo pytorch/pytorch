@@ -164,7 +164,7 @@ def reduction_acc_type(reduction_type, dtype):
     return scalar_type
 
 
-def reduction_combine(reduction_type, var, next_value):
+def reduction_combine(reduction_type, var, next_value, dtype=None):
     if reduction_type == "sum":
         return f"{var} + {next_value}"
     if reduction_type == "prod":
@@ -1549,7 +1549,7 @@ class CppKernel(Kernel):
             [
                 f"for (int tid = 0; tid < {num_threads}; tid++)",
                 "{",
-                f"    {acc} = {reduction_combine_fn(reduction_type, acc, acc_local_in_array)};",
+                f"    {acc} = {reduction_combine_fn(reduction_type, acc, acc_local_in_array, dtype=dtype)};",
                 "}",
             ],
         )
@@ -2343,7 +2343,7 @@ class CppVecKernel(CppKernel):
             )
         else:
             self.stores.writeline(
-                f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value)};"
+                f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value, dtype=dtype)};"
             )
         self._gen_parallel_reduction_buffers(
             acc,
