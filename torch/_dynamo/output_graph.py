@@ -1453,9 +1453,7 @@ class OutputGraph:
             # aborting execution.
             raise e
         except Exception as e:
-            raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
-                e.__traceback__
-            ) from None
+            raise BackendCompilerFailed(self.compiler_fn, e) from e
 
         signpost_event(
             "dynamo",
