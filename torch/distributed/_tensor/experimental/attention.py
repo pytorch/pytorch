@@ -479,13 +479,14 @@ def _templated_ring_attention_backward(
             grad_key += grad_key_
             grad_value += grad_value_
         else:
-            buffer = next_grad_kv
             pointer = 0
-            grad_key = buffer[pointer : pointer + grad_key.numel()].reshape(
+            assert next_grad_kv is not None
+            next_grad_kv = _maybe_wait(next_grad_kv)
+            grad_key = next_grad_kv[pointer : pointer + grad_key.numel()].reshape(
                 grad_key.shape
             )
             pointer += grad_key.numel()
-            grad_value = buffer[pointer : pointer + grad_value.numel()].reshape(
+            grad_value = next_grad_kv[pointer : pointer + grad_value.numel()].reshape(
                 grad_value.shape
             )
 
@@ -505,9 +506,6 @@ def _templated_ring_attention_backward(
         else:
             grad_query = _partial_update(grad_query, grad_query_, 2, 2, 1, add=True)
 
-    assert grad_query is not None
-    assert grad_key is not None
-    assert grad_value is not None
     assert next_grad_kv is not None
     assert grad_key_ is not None
     assert grad_value_ is not None
