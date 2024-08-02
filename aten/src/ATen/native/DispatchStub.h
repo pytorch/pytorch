@@ -43,6 +43,7 @@
 //   - CUDA: NVIDIA GPUs
 //   - HIP: AMD GPUs
 //   - MPS: Apple Silicon GPUs (Metal Performance Shaders)
+//   - MTIA: Meta Training and Inference Devices
 //   - XPU: Intel GPUs
 //   - PrivateUse1: Reserved for private/custom device types
 //
@@ -178,6 +179,7 @@ struct TORCH_API DispatchStubImpl {
     void* cuda_dispatch_ptr;
     void* hip_dispatch_ptr;
     void* mps_dispatch_ptr;
+    void* mtia_dispatch_ptr;
   #if defined(USE_XPU)
     void* xpu_dispatch_ptr;
   #endif
@@ -187,6 +189,7 @@ struct TORCH_API DispatchStubImpl {
     void* cuda_dispatch_ptr = nullptr;
     void* hip_dispatch_ptr = nullptr;
     void* mps_dispatch_ptr = nullptr;
+    void* mtia_dispatch_ptr = nullptr;
   #if defined(USE_XPU)
     void* xpu_dispatch_ptr = nullptr;
   #endif
@@ -246,6 +249,10 @@ public:
 
   void set_mps_dispatch_ptr(FnPtr fn_ptr) {
     impl.mps_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
+  }
+
+    void set_mtia_dispatch_ptr(FnPtr fn_ptr) {
+    impl.mtia_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
   }
 
   void set_privateuse1_dispatch_ptr(FnPtr fn_ptr) {
@@ -324,6 +331,13 @@ struct RegisterHIPDispatch {
 };
 
 template <typename DispatchStub>
+struct RegisterMTIADispatch {
+  RegisterMTIADispatch(DispatchStub &stub, typename DispatchStub::FnPtr value) {
+    stub.set_mtia_dispatch_ptr(value);
+  }
+};
+
+template <typename DispatchStub>
 struct RegisterPRIVATEUSE1Dispatch {
   RegisterPRIVATEUSE1Dispatch(DispatchStub &stub, typename DispatchStub::FnPtr value) {
     stub.set_privateuse1_dispatch_ptr(value);
@@ -396,6 +410,9 @@ struct RegisterPRIVATEUSE1Dispatch {
 
 #define REGISTER_MPS_DISPATCH(name, fn) \
   static RegisterMPSDispatch<struct name##_DECLARE_DISPATCH_type> name ## __register(name, fn);
+
+#define REGISTER_MTIA_DISPATCH(name, fn) \
+  static RegisterMTIADispatch<struct name##_DECLARE_DISPATCH_type> name ## __register(name, fn);
 
 #define REGISTER_PRIVATEUSE1_DISPATCH(name, fn) \
   static RegisterPRIVATEUSE1Dispatch<struct name##_DECLARE_DISPATCH_type> name ## __register(name, fn);

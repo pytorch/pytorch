@@ -236,6 +236,12 @@ class ParamBufferSource(AttrSource):
         return _GUARD_SOURCE_SPECIALIZED_NN_MODULE[self.base.guard_source()]
 
 
+# Special AttrSource to differentiate module._buffers or module._parameters
+@dataclasses.dataclass(frozen=True)
+class UnspecializedParamBufferSource(AttrSource):
+    pass
+
+
 # This source is intended to be used in places where a source is needed but it is expected
 # that the symbol will be simplified out later on. Symbols with ephemeral sources are
 # prioritized to be simplified out when e.g. compared against a symbol without an ephemeral
@@ -677,6 +683,14 @@ def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
     if not allow_cell_or_freevar and source.cell_or_freevar:
         return False
     return True
+
+
+def is_from_unspecialized_param_buffer_source(source: Source):
+    if isinstance(source, UnspecializedParamBufferSource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_unspecialized_param_buffer_source(source.base)
+    return False
 
 
 def is_from_flatten_script_object_source(source: Source):
