@@ -1,5 +1,7 @@
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
+#ifdef USE_CUDA
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
+#endif
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
@@ -22,6 +24,7 @@ void initAOTIRunnerBindings(PyObject* module) {
           "get_constant_names_to_dtypes",
           &AOTIModelContainerRunnerCpu::getConstantNamesToDtypes);
 
+#ifdef USE_CUDA
   py::class_<AOTIModelContainerRunnerCuda>(m, "AOTIModelContainerRunnerCuda")
       .def(py::init<const std::string&, int>())
       .def(py::init<const std::string&, int, const std::string&>())
@@ -38,6 +41,7 @@ void initAOTIRunnerBindings(PyObject* module) {
       .def(
           "get_constant_names_to_dtypes",
           &AOTIModelContainerRunnerCuda::getConstantNamesToDtypes);
+#endif
 
   m.def(
       "unsafe_alloc_void_ptrs_from_tensors",

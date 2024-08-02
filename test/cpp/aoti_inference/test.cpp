@@ -4,7 +4,9 @@
 #include <vector>
 
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
+#if defined(USE_CUDA) || defined(USE_ROCM)
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
+#endif
 #include <torch/script.h>
 #include <torch/torch.h>
 
