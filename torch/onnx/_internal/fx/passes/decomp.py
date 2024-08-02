@@ -2,17 +2,19 @@
 from __future__ import annotations
 
 import contextlib
-
-from typing import Callable, Mapping
+from typing import Callable, Mapping, TYPE_CHECKING
 
 import torch
 import torch._ops
-import torch.fx
 from torch._dispatch import python as python_dispatch
-from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.onnx._internal.fx.passes import _utils
+
+
+if TYPE_CHECKING:
+    import torch.fx
+    from torch._subclasses import fake_tensor
 
 
 class Decompose(_pass.Transform):
