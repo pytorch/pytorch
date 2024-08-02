@@ -26,27 +26,27 @@ class HalfChecker : public IRVisitor {
     return hasBFloat16_;
   }
 
-  void visit(const LoadPtr& v) override {
+  void visit(LoadPtr v) override {
     hasHalf_ |= v->dtype().scalar_type() == ScalarType::Half;
     hasBFloat16_ |= v->dtype().scalar_type() == ScalarType::BFloat16;
     IRVisitor::visit(v);
   }
 
-  void visit(const StorePtr& v) override {
+  void visit(StorePtr v) override {
     hasHalf_ |= v->buf()->dtype().scalar_type() == ScalarType::Half;
     hasBFloat16_ |= v->buf()->dtype().scalar_type() == ScalarType::BFloat16;
     IRVisitor::visit(v);
   }
 
-  void visit(const HalfImmPtr& v) override {
+  void visit(HalfImmPtr v) override {
     hasHalf_ = true;
   }
 
-  void visit(const BFloat16ImmPtr& v) override {
+  void visit(BFloat16ImmPtr v) override {
     hasBFloat16_ = true;
   }
 
-  void visit(const CastPtr& v) override {
+  void visit(CastPtr v) override {
     hasHalf_ |= v->dtype().scalar_type() == ScalarType::Half;
     hasBFloat16_ |= v->dtype().scalar_type() == ScalarType::BFloat16;
     IRVisitor::visit(v);

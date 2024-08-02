@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from typing import cast, List, Optional, Sequence, Tuple
@@ -408,7 +407,7 @@ def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # this only works when the input is sharded on the gather dimension, and
     # index has size 1 on the gather dimension
     if index_shape[dim] == 1:
-        index_partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=dim)
+        index_partial_placement = _MaskPartial(logical_dim_size=input_shape[dim])
         input_sharding: PlacementList = [
             index_partial_placement,
             Shard(dim),
@@ -595,7 +594,7 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
             args_schema=(
                 schema_suggestion.args_schema[0],
                 dim,
-                schema_suggestion.args_schema[1][dim],
+                schema_suggestion.args_schema[1][dim],  # type: ignore[index]
             ),
             kwargs_schema=op_schema.kwargs_schema,
         )

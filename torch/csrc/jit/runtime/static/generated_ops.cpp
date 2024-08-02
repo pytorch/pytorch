@@ -36,7 +36,8 @@
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 REGISTER_OPERATOR_FUNCTOR(
     aten::absolute,
@@ -5221,4 +5222,5 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

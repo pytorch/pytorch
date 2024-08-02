@@ -7,7 +7,8 @@
 
 #include <unordered_map>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace prim {
 using namespace ::c10::prim;
@@ -457,4 +458,5 @@ void EliminateDeadCode(
   eliminator.run(block, /*recurse=*/true);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

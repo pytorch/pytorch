@@ -4,8 +4,10 @@ import inspect
 from typing import Dict, List, TYPE_CHECKING
 
 import torch
-from torch.fx.experimental._backward_state import BackwardState
 
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+from ...fx.experimental._backward_state import BackwardState
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented
@@ -15,10 +17,6 @@ from ..source import AttrSource
 from ..utils import istype
 from .base import VariableTracker
 from .constant import ConstantVariable
-
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class DistributedVariable(VariableTracker):

@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 
 #include <sstream>
-#include <utility>
 
 namespace torch::jit::tensorexpr {
 
@@ -56,7 +55,7 @@ std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& kernel_func_name) {
   RegisterCodeGenList::StmtFactoryMethod method =
       RegisterCodeGenList::GetInstance().FindStmtFactoryMethod(name);
-  return method(std::move(stmt), params, device, kernel_func_name);
+  return method(stmt, params, device, kernel_func_name);
 }
 
 ExprPtr GenericIntrinsicsExpander::mutate(IntrinsicsPtr v) {
@@ -96,7 +95,7 @@ void CodeGen::call_with_numel(void** args, int64_t numel) {
       false, "This codegen backend does not implement call_with_numel");
 }
 
-static std::optional<size_t> bufSize(const BufPtr& buf) {
+static std::optional<size_t> bufSize(BufPtr buf) {
   size_t size = elementSize(buf->dtype().scalar_type()) * buf->dtype().lanes();
   for (auto& d : buf->dims()) {
     if (!d->isConstant()) {
@@ -122,8 +121,8 @@ static std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
     const std::unordered_set<BufPtr>& bufs_external_allocs) {
   // Sort buffers by the time they appear.
   std::vector<BufPtr> bufs_sorted(bufs.begin(), bufs.end());
-  auto sorting_function_by_start_time =
-      [&buf_ranges](const BufPtr& b1, const BufPtr& b2) -> bool {
+  auto sorting_function_by_start_time = [&buf_ranges](
+                                            BufPtr b1, BufPtr b2) -> bool {
     return std::get<0>(buf_ranges.at(b1)) < std::get<0>(buf_ranges.at(b2));
   };
   std::sort(
@@ -134,8 +133,8 @@ static std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
   std::unordered_map<BufPtr, BufPtr> buf_mem_map;
   std::vector<std::pair<BufPtr, BufPtr>> buf_allocs;
 
-  auto sorting_function_by_end_time =
-      [&buf_ranges](const BufPtr& b1, const BufPtr& b2) -> bool {
+  auto sorting_function_by_end_time = [&buf_ranges](
+                                          BufPtr b1, BufPtr b2) -> bool {
     return std::get<1>(buf_ranges.at(b1)) < std::get<1>(buf_ranges.at(b2));
   };
   for (const auto& buf : bufs_sorted) {
@@ -202,7 +201,7 @@ static std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
 static StmtPtr insertAllocFree(
     std::vector<std::pair<BufPtr, BufPtr>>& buf_allocs,
     const std::unordered_set<BufPtr>& bufs_external_allocs,
-    const StmtPtr& stmt) {
+    StmtPtr stmt) {
   BlockPtr b = to<Block>(stmt);
   if (!b) {
     b = alloc<Block>(std::vector<StmtPtr>({stmt}));

@@ -7,7 +7,8 @@
 
 #include <unordered_map>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 namespace {
 
 struct CommonSubexpressionEliminator {
@@ -125,4 +126,5 @@ bool EliminateCommonSubexpression(const std::shared_ptr<Graph>& graph) {
   CommonSubexpressionEliminator cse(graph);
   return cse.run([](Node*) { return nullptr; });
 }
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

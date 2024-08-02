@@ -4,7 +4,8 @@
 
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 TORCH_API TypePtr getTensorType(const at::Tensor& t, bool complete);
 
@@ -20,4 +21,5 @@ TORCH_API void setInputTensorTypes(
     bool complete,
     const std::vector<int>& param_count_list = {});
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

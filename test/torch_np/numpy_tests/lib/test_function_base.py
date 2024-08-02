@@ -6,11 +6,14 @@ import operator
 import sys
 import warnings
 from fractions import Fraction
+
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 import hypothesis
 import hypothesis.strategies as st
+
 import numpy
+
 import pytest
 from hypothesis.extra.numpy import arrays
 from pytest import raises as assert_raises
@@ -25,7 +28,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
-
 
 skip = functools.partial(skipif, True)
 
@@ -66,16 +68,17 @@ if TEST_WITH_TORCHDYNAMO:
     )
     from numpy.core.numeric import normalize_axis_tuple
     from numpy.random import rand
+
     from numpy.testing import (
         assert_,
-        assert_allclose,
+        assert_allclose,  # IS_PYPY,
         assert_almost_equal,
         assert_array_almost_equal,
         assert_array_equal,
         assert_equal,
         assert_raises_regex,
         assert_warns,
-        suppress_warnings,
+        suppress_warnings,  # HAS_REFCOUNT, IS_WASM
     )
 else:
     import torch._numpy as np
@@ -98,16 +101,17 @@ else:
     )
     from torch._numpy._util import normalize_axis_tuple
     from torch._numpy.random import rand
+
     from torch._numpy.testing import (
         assert_,
-        assert_allclose,
+        assert_allclose,  # IS_PYPY,
         assert_almost_equal,
         assert_array_almost_equal,
         assert_array_equal,
         assert_equal,
         assert_raises_regex,
         assert_warns,
-        suppress_warnings,
+        suppress_warnings,  # HAS_REFCOUNT, IS_WASM
     )
 
 

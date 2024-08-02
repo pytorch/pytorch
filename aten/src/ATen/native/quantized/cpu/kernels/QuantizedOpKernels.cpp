@@ -2214,6 +2214,7 @@ template <typename T>
 int64_t do_quantized_bilinear_on_AVX_n(
     const typename T::underlying*& pos1,
     typename T::underlying*& pos2,
+    int64_t input_height,
     int64_t input_width,
     int64_t output_height,
     int64_t output_width,
@@ -2337,6 +2338,7 @@ void qupsample_bilinear2d_nhwc_kernel(
         c = do_quantized_bilinear_on_AVX_n<scalar_t>(
             pos1,
             pos2,
+            input_height,
             input_width,
             output_height,
             output_width,

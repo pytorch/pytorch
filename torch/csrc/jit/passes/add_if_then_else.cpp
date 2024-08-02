@@ -1,7 +1,8 @@
 #include <torch/csrc/jit/passes/add_if_then_else.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -50,4 +51,5 @@ bool AddIfThenElseOp(std::shared_ptr<Graph>& graph) {
   return !to_replace.empty();
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

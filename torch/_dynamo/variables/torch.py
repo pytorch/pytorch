@@ -3,6 +3,7 @@
 import functools
 import inspect
 import logging
+
 import math
 import re
 from typing import Dict, List, TYPE_CHECKING
@@ -12,10 +13,13 @@ import torch._refs
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._guards import TracingContext
-from torch._logging import warning_once
-from torch._streambase import _StreamBase
 
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+from torch._logging import warning_once
+
+from torch._streambase import _StreamBase
+from ..._guards import TracingContext
 from .. import config, polyfill, variables
 from ..codegen import PyCodegen
 from ..create_parameter_op import (
@@ -46,7 +50,6 @@ from .distributed import DistributedVariable, ProcessGroupVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
-
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -56,11 +59,6 @@ try:
     from torch.distributed._composable.fsdp import _fsdp_param_group
 except ModuleNotFoundError:
     _fsdp_param_group = None  # type: ignore[assignment]
-
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
 
 log = logging.getLogger(__name__)
 
@@ -355,7 +353,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return _register
 
         from torch.backends.cuda import SDPAParams
-
         from . import (
             ConstantVariable,
             DeterministicAlgorithmsVariable,

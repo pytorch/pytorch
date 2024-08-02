@@ -79,6 +79,7 @@ FIXME_inductor_dont_reset_dynamo = {
     "test_modules",
     "test_ops",
     "test_ops_gradients",
+    "test_torch",
 }
 
 # We generate unittest.expectedFailure for all of the following tests

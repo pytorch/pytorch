@@ -188,7 +188,7 @@ void RegisterizerAnalysis::closeAccessIntoScope(
   scope->closeAccess(info);
 }
 
-void RegisterizerAnalysis::visit(const ForPtr& v) {
+void RegisterizerAnalysis::visit(ForPtr v) {
   if (v->loop_options().is_gpu_block_index() ||
       v->loop_options().is_gpu_thread_index()) {
     throw malformed_input(
@@ -272,7 +272,7 @@ void RegisterizerAnalysis::visit(const ForPtr& v) {
   mergeCurrentScopeIntoParent();
 };
 
-void RegisterizerAnalysis::visit(const CondPtr& v) {
+void RegisterizerAnalysis::visit(CondPtr v) {
   ExprPtr condition = v->condition();
   BlockPtr true_stmt = v->true_stmt();
   BlockPtr false_stmt = v->false_stmt();
@@ -312,7 +312,7 @@ void RegisterizerAnalysis::visit(const CondPtr& v) {
 // IfThenElses are just like Conds except they are not Stmts, which means no
 // registerization can occur internally. However, the first reference to an
 // access can occur within one if its visible outside the condition.
-void RegisterizerAnalysis::visit(const IfThenElsePtr& v) {
+void RegisterizerAnalysis::visit(IfThenElsePtr v) {
   ExprPtr condition = v->condition();
   ExprPtr true_value = v->true_value();
   ExprPtr false_value = v->false_value();
@@ -347,7 +347,7 @@ void RegisterizerAnalysis::visit(const IfThenElsePtr& v) {
   }
 }
 
-void RegisterizerAnalysis::visit(const LetPtr& v) {
+void RegisterizerAnalysis::visit(LetPtr v) {
   currentScope_->addLocalVar(v->var());
 
   stmtStack_.push_front(v);
@@ -355,7 +355,7 @@ void RegisterizerAnalysis::visit(const LetPtr& v) {
   stmtStack_.pop_front();
 }
 
-void RegisterizerAnalysis::visit(const BlockPtr& v) {
+void RegisterizerAnalysis::visit(BlockPtr v) {
   auto prev_scope = currentScope_;
   if (currentScope_->block() != v) {
     currentScope_ = std::make_shared<Scope>(v, prev_scope);
@@ -383,7 +383,7 @@ void RegisterizerAnalysis::visit(const BlockPtr& v) {
   }
 }
 
-void RegisterizerAnalysis::visit(const StorePtr& v) {
+void RegisterizerAnalysis::visit(StorePtr v) {
   stmtStack_.push_front(v);
   v->value()->accept(this);
   stmtStack_.pop_front();
@@ -437,7 +437,7 @@ void RegisterizerAnalysis::visit(const StorePtr& v) {
   }
 }
 
-void RegisterizerAnalysis::visit(const LoadPtr& v) {
+void RegisterizerAnalysis::visit(LoadPtr v) {
   if (v->indices().empty()) {
     // already a scalar.
     return;

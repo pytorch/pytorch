@@ -7,7 +7,8 @@
 #include <string>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 enum class IterableModuleKind { NONE, LIST, DICT, PARAMLIST, PARAMDICT };
 class ConcreteModuleType;
@@ -236,4 +237,5 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   TypePtr jitType_;
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -487,6 +487,7 @@ struct DifferentiableGraphOp {
       for (auto& tensor : lst) {
         tensor = detach(tensor);
       }
+      // NOLINTNEXTLINE(performance-move-const-arg)
       v = std::move(lst);
     }
   }

@@ -7,7 +7,8 @@
 
 #include <utility>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 void update_source_range_and_cs_ptr(
@@ -219,4 +220,5 @@ Module PatternBasedRewrite(const Module& module) {
   return subgraph_rewriter.runOnModule(module);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

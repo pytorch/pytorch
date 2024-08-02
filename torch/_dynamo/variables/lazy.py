@@ -1,10 +1,9 @@
-# mypy: allow-untyped-defs
+# mypy: ignore-errors
 import collections
 import functools
 from typing import Optional
 
 from .base import VariableTracker
-from .tensor import SymNodeVariable
 
 
 class LazyCache:
@@ -61,7 +60,6 @@ class LazyVariableTracker(VariableTracker):
         """Force construction of the real VariableTracker"""
         if self._cache.vt is None:
             self._cache.realize()
-            assert self._cache.vt is not None
         return self._cache.vt
 
     def unwrap(self):
@@ -88,7 +86,7 @@ class LazyVariableTracker(VariableTracker):
         return getattr(self.realize(), item)
 
     # most methods are auto-generated below, these are the ones we want to exclude
-    visit = VariableTracker.visit  # type: ignore[assignment]
+    visit = VariableTracker.visit
     __repr__ = VariableTracker.__repr__
 
     @classmethod
@@ -134,7 +132,7 @@ class LazyVariableTracker(VariableTracker):
 
 class LazySymNodeFormatString:
     def __init__(
-        self, sym_node_variable: SymNodeVariable, fmt_spec_var: VariableTracker
+        self, sym_node_variable: VariableTracker, fmt_spec_var: VariableTracker
     ):
         from .constant import ConstantVariable
 

@@ -8,8 +8,6 @@
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
-#include <utility>
-
 namespace torch::jit {
 
 using namespace torch::jit::tensorexpr;
@@ -72,8 +70,8 @@ void TEWrapper::call(const std::vector<void*>& args) {
 
 static std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
-    const Tensor& out,
-    const std::vector<CodeGen::BufferArg>& args,
+    Tensor out,
+    std::vector<CodeGen::BufferArg> args,
     int width = kVectorWidth) {
   return wrap;
 }
@@ -81,7 +79,7 @@ static std::shared_ptr<TEWrapper> wrapTECompute(
 static std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     LoopNest* ln,
-    const std::vector<CodeGen::BufferArg>& args) {
+    std::vector<CodeGen::BufferArg> args) {
   return wrap;
 }
 
@@ -110,7 +108,7 @@ std::shared_ptr<TEWrapper> lookupNNCCache(NodeKind kind) {
 
 void updateNNCCache(NodeKind kind, std::shared_ptr<TEWrapper> code) {
   std::lock_guard<std::mutex> lock(getNNCCacheMutex());
-  getNNCCache()[kind] = std::move(code);
+  getNNCCache()[kind] = code;
 }
 
 } // namespace

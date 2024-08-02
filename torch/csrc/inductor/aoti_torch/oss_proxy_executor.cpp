@@ -14,9 +14,9 @@ namespace torch::aot_inductor {
 
 void OSSProxyExecutor::prefill_stack_with_static_arguments(
     int index,
-    const at::TypePtr& schema_arg_type,
+    at::TypePtr schema_arg_type,
     const nlohmann::json& serialized_arg,
-    OSSOpKernel& op_kernel) {
+    OpKernel& op_kernel) {
   auto& stack = op_kernel.stack_;
   auto& dynamic_args = op_kernel.dynamic_args_;
 
@@ -29,7 +29,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       TORCH_CHECK(serialized_arg_type == "as_tensor");
       stack.emplace_back();
       dynamic_args.emplace_back(
-          index, DynamicArgType::TensorType, 1, serialized_arg_val);
+          index, DynamicArgType::TensorType, 1, std::move(serialized_arg_val));
       break;
     }
     // TODO: handle the other input types
@@ -42,7 +42,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
 void OSSProxyExecutor::get_input_info_from_serialized(
     const std::vector<c10::Argument>& schema_args,
     const nlohmann::json& serialized_node,
-    OSSOpKernel& op_kernel) {
+    OpKernel& op_kernel) {
   int index = 0;
   for (const auto& named_argument : serialized_node["inputs"]) {
     const auto& arg = named_argument["arg"];
@@ -59,8 +59,8 @@ void OSSProxyExecutor::get_input_info_from_serialized(
 void OSSProxyExecutor::get_output_info_from_serialized(
     const std::vector<c10::Argument>& schema_returns,
     const nlohmann::json& serialized_node,
-    OSSOpKernel& op_kernel) {
-  std::vector<OSSDynamicArg>& outputs = op_kernel.outputs_;
+    OpKernel& op_kernel) {
+  std::vector<DynamicArg>& outputs = op_kernel.outputs_;
 
   TORCH_CHECK(
       schema_returns.size() == serialized_node["outputs"].size(),
@@ -73,7 +73,7 @@ void OSSProxyExecutor::get_output_info_from_serialized(
     auto& serialized_output_val = serialized_output.begin().value();
 
     auto& schema_return = schema_returns[output_index];
-    const at::TypePtr& schema_return_type = schema_return.real_type();
+    at::TypePtr schema_return_type = schema_return.real_type();
 
     switch (schema_return_type->kind()) {
       case c10::TypeKind::TensorType: {
@@ -127,6 +127,8 @@ OSSProxyExecutor::OSSProxyExecutor(const std::string& json_path, bool is_cpu) {
     device_ = std::make_unique<c10::Device>(c10::DeviceType::CUDA, device_idx);
   }
 
+  std::string extern_kernel_nodes_serialized;
+
   std::ifstream json_file(json_path);
   TORCH_CHECK(json_file.is_open());
 
@@ -163,7 +165,7 @@ OSSProxyExecutor::OSSProxyExecutor(const std::string& json_path, bool is_cpu) {
     const auto& schema_args = schema.arguments();
     const auto& schema_returns = schema.returns();
 
-    OSSOpKernel op_kernel(target, op_handle);
+    OpKernel op_kernel(target, op_handle);
     get_input_info_from_serialized(schema_args, serialized_node, op_kernel);
     get_output_info_from_serialized(schema_returns, serialized_node, op_kernel);
 
@@ -180,7 +182,7 @@ void OSSProxyExecutor::call_function(
   TORCH_CHECK(
       extern_node_index < static_cast<int>(op_kernels_.size()),
       "Invalid extern node index");
-  OSSOpKernel& op_kernel = op_kernels_[extern_node_index];
+  OpKernel& op_kernel = op_kernels_[extern_node_index];
 
   std::vector<c10::IValue> stack = op_kernel.stack_;
   auto& dynamic_args = op_kernel.dynamic_args_;

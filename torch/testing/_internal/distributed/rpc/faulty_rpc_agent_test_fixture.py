@@ -1,4 +1,4 @@
-# mypy: allow-untyped-defs
+# mypy: ignore-errors
 
 import torch.distributed.rpc as rpc
 import torch.distributed.rpc._testing  # noqa: F401

@@ -13,7 +13,8 @@
 #include <unordered_set>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -78,10 +79,10 @@ std::optional<AutocastScope> parseAutocast(
       if (use.user->kind() == prim::SetAttr &&
           use.user->s(attr::name) == "_enabled") {
         // Search for `prim::SetAttr[name="_enabled"]`
-        enabled = constant_as<bool>(use.user->input(1));
+        auto ret = constant_as<bool>(use.user->input(1));
         TORCH_CHECK(
-            enabled.has_value(),
-            "Autocast _enabled argument must be a constant");
+            ret.has_value(), "Autocast _enabled argument must be a constant");
+        enabled = ret.value();
       } else if (
           use.user->kind() == prim::SetAttr &&
           use.user->s(attr::name) == "device") {
@@ -531,4 +532,5 @@ void Autocast(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("\nAfter Autocast: ", graph);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -1,4 +1,4 @@
-# mypy: allow-untyped-defs
+# mypy: ignore-errors
 
 import sys
 from functools import wraps, partial

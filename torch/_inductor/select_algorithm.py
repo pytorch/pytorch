@@ -400,7 +400,7 @@ class TritonTemplateKernel(TritonKernel):
             self.body.writeline(f"{output_name} = {out.value}")
 
             body_val = self.body.getvalue()
-            self.cse.invalidate(set())  # type: ignore[arg-type]
+            self.cse.invalidate(set())
             return body_val
 
     def store_output(
@@ -600,7 +600,7 @@ class TritonTemplate(KernelTemplate):
         self.all_templates[name] = self
         self.debug = debug
 
-    def generate(  # type: ignore[override]
+    def generate(
         self,
         input_nodes,
         layout,
@@ -1201,13 +1201,8 @@ class AlgorithmSelectorCache(PersistentCache):
             append_to_log(mm_file_name, {"invoke": str((M, K, N))})
 
         if len(choices) == 0:
-            backend_config = (
-                "max_autotune_gemm_backends"
-                if name != "convolution"
-                else "max_autotune_conv_backends"
-            )
             raise NoValidChoicesError(
-                f"No choices to select, please consider adding ATEN into {backend_config} "
+                "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
         log.debug("Max autotune selects from %s choices.", str(len(choices)))

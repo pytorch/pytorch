@@ -15,7 +15,8 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 class JitLoggingConfig {
  public:
@@ -32,10 +33,10 @@ class JitLoggingConfig {
   std::ostream* out;
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  JitLoggingConfig() : out(&std::cerr) {
+  JitLoggingConfig() {
     const char* jit_log_level = std::getenv("PYTORCH_JIT_LOG_LEVEL");
     logging_levels.assign(jit_log_level == nullptr ? "" : jit_log_level);
-
+    out = &std::cerr;
     parse();
   }
   void parse();
@@ -145,7 +146,7 @@ std::string jit_log_prefix(
   std::stringstream out_ss;
   std::string line;
   while (std::getline(in_ss, line)) {
-    out_ss << prefix << line << '\n';
+    out_ss << prefix << line << std::endl;
   }
 
   return out_ss.str();
@@ -184,4 +185,5 @@ std::ostream& operator<<(std::ostream& out, JitLoggingLevels level) {
   return out;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

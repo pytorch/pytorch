@@ -4,12 +4,13 @@
 #include <c10/macros/Export.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-namespace torch::aot_inductor {
+namespace torch {
+namespace aot_inductor {
 
 class ProxyExecutor {
  public:
-  ProxyExecutor() = default;
-  virtual ~ProxyExecutor() = default;
+  ProxyExecutor() {}
+  virtual ~ProxyExecutor() {}
 
   virtual void call_function(
       int extern_node_index,
@@ -19,4 +20,5 @@ class ProxyExecutor {
       AtenTensorHandle* flatten_tensor_args) = 0;
 };
 
-} // namespace torch::aot_inductor
+} // namespace aot_inductor
+} // namespace torch

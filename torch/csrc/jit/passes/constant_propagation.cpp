@@ -16,7 +16,8 @@
 
 #include <utility>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 std::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     const Node* n,
@@ -433,4 +434,5 @@ bool ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
   return made_change;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

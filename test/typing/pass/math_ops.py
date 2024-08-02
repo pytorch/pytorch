@@ -3,7 +3,6 @@ import math
 
 import torch
 
-
 a = torch.randn(4)
 b = torch.randn(4)
 t = torch.tensor([-1, -2, 3], dtype=torch.int8)

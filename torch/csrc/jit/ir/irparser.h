@@ -6,7 +6,8 @@
 
 #include <torch/csrc/Export.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct Graph;
 struct Value;
@@ -34,4 +35,5 @@ TORCH_API void parseIR(
     std::unordered_map<std::string, Value*>& vmap,
     bool parse_tensor_constants = false);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -366,26 +366,14 @@ def _get_cpp_std_cflag(std_num: str = "c++17") -> List[str]:
         return [f"std={std_num}"]
 
 
-def _get_os_related_cpp_cflags(cpp_compiler: str) -> List[str]:
-    if _IS_WINDOWS:
-        cflags = [
-            "wd4819",
-            "wd4251",
-            "wd4244",
-            "wd4267",
-            "wd4275",
-            "wd4018",
-            "wd4190",
-            "wd4624",
-            "wd4067",
-            "wd4068",
-            "EHsc",
-        ]
-    else:
+def _get_linux_cpp_cflags(cpp_compiler: str) -> List[str]:
+    if not _IS_WINDOWS:
         cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
         if _is_clang(cpp_compiler):
             cflags.append("Werror=ignored-optimization-argument")
-    return cflags
+        return cflags
+    else:
+        return []
 
 
 def _get_optimization_cflags() -> List[str]:
@@ -451,7 +439,7 @@ def get_cpp_options(
         + _get_optimization_cflags()
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
-        + _get_os_related_cpp_cflags(cpp_compiler)
+        + _get_linux_cpp_cflags(cpp_compiler)
     )
 
     passthough_args.append(" ".join(extra_flags))

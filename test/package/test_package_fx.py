@@ -12,7 +12,6 @@ from torch.package import (
 )
 from torch.testing._internal.common_utils import run_tests
 
-
 try:
     from .common import PackageTestCase
 except ImportError:

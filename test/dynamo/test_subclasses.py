@@ -2,9 +2,11 @@
 import functools
 import itertools
 import unittest
+
 from functools import partial
 
 import torch
+
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
@@ -12,6 +14,7 @@ import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
+
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     ShapeEnv,
@@ -1090,7 +1093,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[3, 4]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class wrap_body_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3, 4]"):
             add_: "f32[3, 4]" = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
@@ -1114,7 +1117,7 @@ class GraphModule(torch.nn.Module):
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
-    class wrap_body_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
@@ -1144,7 +1147,7 @@ class GraphModule(torch.nn.Module):
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
-    class wrap_body_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
             return (add_,)

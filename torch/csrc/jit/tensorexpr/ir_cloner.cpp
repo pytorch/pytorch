@@ -10,9 +10,9 @@ namespace torch::jit::tensorexpr {
 
 template <
     typename Op,
-    std::enable_if_t<std::is_same_v<
+    typename std::enable_if<std::is_same<
         decltype(detail::bin_op_deducer(std::declval<Op>())),
-        void>>* = nullptr>
+        void>::value>::type* = nullptr>
 static ExprPtr mutate_binary_op(
     NodePtr<Op> v,
     IRCloner* cloner,

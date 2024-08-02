@@ -16,7 +16,8 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -698,4 +699,5 @@ bool CombineConcats(const std::shared_ptr<Graph>& graph) {
   return changed;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

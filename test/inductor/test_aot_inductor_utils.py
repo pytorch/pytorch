@@ -1,9 +1,5 @@
 # Owner(s): ["module: inductor"]
 
-import os
-import shutil
-import tempfile
-
 import torch
 import torch._export
 import torch._inductor
@@ -23,8 +19,9 @@ class WrapperModule(torch.nn.Module):
 
 
 class AOTIRunnerUtil:
-    @staticmethod
+    @classmethod
     def compile(
+        cls,
         model,
         example_inputs,
         options=None,
@@ -64,21 +61,14 @@ class AOTIRunnerUtil:
 
         return so_path
 
-    @staticmethod
-    def load_runner(device, so_path):
+    @classmethod
+    def load_runner(cls, device, so_path):
         if IS_FBCODE:
             from .fb import test_aot_inductor_model_runner_pybind
 
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # copy *.so file to a unique path just before loading
-                # to avoid stale dlopen handles when an updated *.so
-                # from the same path is loaded repetitively in a test
-                temp_so_path = os.path.join(temp_dir, "model.so")
-                shutil.copy(so_path, temp_so_path)
-
-                return test_aot_inductor_model_runner_pybind.Runner(
-                    temp_so_path, device == "cpu"
-                )
+            return test_aot_inductor_model_runner_pybind.Runner(
+                so_path, device == "cpu"
+            )
         else:
             return (
                 torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
@@ -86,8 +76,8 @@ class AOTIRunnerUtil:
                 else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
             )
 
-    @staticmethod
-    def load(device, so_path):
+    @classmethod
+    def load(cls, device, so_path):
         # TODO: unify fbcode and oss behavior to only use torch._export.aot_load
         if IS_FBCODE:
             runner = AOTIRunnerUtil.load_runner(device, so_path)
@@ -105,8 +95,9 @@ class AOTIRunnerUtil:
         else:
             return torch._export.aot_load(so_path, device)
 
-    @staticmethod
+    @classmethod
     def run(
+        cls,
         device,
         model,
         example_inputs,
@@ -124,8 +115,9 @@ class AOTIRunnerUtil:
         optimized = AOTIRunnerUtil.load(device, so_path)
         return optimized(*example_inputs)
 
-    @staticmethod
+    @classmethod
     def run_multiple(
+        cls,
         device,
         model,
         list_example_inputs,

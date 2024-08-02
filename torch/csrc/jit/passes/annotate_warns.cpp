@@ -2,7 +2,8 @@
 
 #include <atomic>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 static void AnnotateWarns(Block* b) {
   static std::atomic<int64_t> idx(0);
@@ -24,4 +25,5 @@ void AnnotateWarns(const std::shared_ptr<Graph>& graph) {
   AnnotateWarns(graph->block());
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -3,11 +3,13 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 TORCH_API void Autocast(const std::shared_ptr<Graph>& graph);
 
 TORCH_API bool setAutocastMode(bool value);
 TORCH_API bool autocastEnabled();
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

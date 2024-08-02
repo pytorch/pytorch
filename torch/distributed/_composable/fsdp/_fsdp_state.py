@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
+
 from typing import (
     Any,
     Callable,

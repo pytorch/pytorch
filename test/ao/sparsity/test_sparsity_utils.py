@@ -9,6 +9,7 @@ from torch.ao.pruning.sparsifier.utils import (
     get_arg_info_from_tensor_fqn,
     module_to_fqn,
 )
+
 from torch.testing._internal.common_quantization import (
     ConvBnReLUModel,
     ConvModel,
@@ -19,7 +20,6 @@ from torch.testing._internal.common_quantization import (
     TwoLayerLinearModel,
 )
 from torch.testing._internal.common_utils import TestCase
-
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO

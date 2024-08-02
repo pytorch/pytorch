@@ -11,7 +11,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
     from numpy import fft, pi

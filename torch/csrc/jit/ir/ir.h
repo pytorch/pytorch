@@ -33,7 +33,8 @@ class THPPointer;
 using THPObjectPtr = THPPointer<PyObject>;
 using pyobj_list = std::vector<THPObjectPtr>;
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 namespace utils {
 TORCH_API std::string getNodesModuleHierarchy(const Node& n);
 } // namespace utils
@@ -164,7 +165,7 @@ struct OperatorMap;
 // access the same graph
 template <typename T>
 struct Wrap {
-  explicit Wrap(T* p) : elem(p) {}
+  explicit Wrap(T* p) : elem(p), clear_cb(nullptr) {}
   void clear() {
     if (clear_cb) {
       clear_cb(elem);
@@ -172,7 +173,7 @@ struct Wrap {
     elem = nullptr;
   }
   T* elem;
-  void (*clear_cb)(void*){nullptr};
+  void (*clear_cb)(void*);
 };
 
 struct Value {
@@ -1191,7 +1192,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
   std::unordered_set<const Node*> all_nodes;
   std::unordered_set<const Value*> all_values;
   std::unordered_set<const Block*> all_blocks;
-  size_t next_unique_{0};
+  size_t next_unique_;
 
   std::unordered_map<std::string, Value*> unique_names_;
   // name_base_suffix tracks largest suffix currently used by all names sharing
@@ -1211,7 +1212,8 @@ struct Graph : std::enable_shared_from_this<Graph> {
 
  public:
   Graph(ScopePtr scope_root = c10::make_intrusive<Scope>())
-      : current_scope_(std::move(scope_root)),
+      : next_unique_(0),
+        current_scope_(std::move(scope_root)),
         block_(new Block(this, nullptr)),
         insert_before_(return_node()) {}
 
@@ -1835,4 +1837,5 @@ struct FunctionSchemaMap {
   MapType map;
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

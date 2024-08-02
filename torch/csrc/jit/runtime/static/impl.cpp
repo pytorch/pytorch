@@ -317,7 +317,7 @@ std::pair<std::shared_ptr<Graph>, std::optional<Module>> PrepareForStaticModule(
 }
 
 std::pair<std::shared_ptr<Graph>, std::optional<Module>> PrepareForStaticModule(
-    const std::shared_ptr<torch::jit::Graph>& graph,
+    std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts,
     std::vector<IValue> sample_inputs) {
   PrepareGraphForStaticModule(graph, opts, std::move(sample_inputs));
@@ -527,7 +527,7 @@ std::vector<const Value*> ManagedTensorRanges::
 }
 
 StaticModule::StaticModule(
-    const std::shared_ptr<torch::jit::Graph>& g,
+    std::shared_ptr<torch::jit::Graph> g,
     const StaticModuleOptions& opts,
     std::vector<IValue> sample_inputs)
     : StaticModule(
@@ -1461,11 +1461,11 @@ void BlockRunner::benchmark(
     bool print_per_node_time,
     bool generate_ai_pep_output) {
   TORCH_CHECK(kwargs_list.empty() || args_list.size() == kwargs_list.size());
-  std::cout << "Input size: " << args_list.size() << '\n';
+  std::cout << "Input size: " << args_list.size() << std::endl;
   float time_per_iter =
       benchmark_model(args_list, kwargs_list, warmup_runs, main_runs);
   std::cout << "Static runtime ms per iter: " << time_per_iter
-            << ". Iters per second: " << 1000.0 / time_per_iter << '\n';
+            << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
 
   IndividualMetrics results =
       benchmark_individual_ops(args_list, kwargs_list, warmup_runs, main_runs);
@@ -1496,7 +1496,7 @@ void BlockRunner::benchmark(
         time_per_node_type_vec.end(),
         [](auto& left, auto& right) { return left.second > right.second; });
   }
-  std::cout << "Time per node type:" << '\n';
+  std::cout << "Time per node type:" << std::endl;
   for (const auto& p : time_per_node_type_vec) {
     const std::string& kind = p.first;
     const double ms = p.second;
@@ -1504,11 +1504,11 @@ void BlockRunner::benchmark(
               << results.percent_per_node_type[kind] << "%. " << kind << " ("
               << results.instances_per_node_type[kind] << " nodes";
     if (results.out_nodes.count(kind)) {
-      std::cout << ", out variant)" << '\n';
+      std::cout << ", out variant)" << std::endl;
     } else if (results.native_nodes.count(kind)) {
-      std::cout << ", native)" << '\n';
+      std::cout << ", native)" << std::endl;
     } else {
-      std::cout << ")" << '\n';
+      std::cout << ")" << std::endl;
     }
 
     if (generate_ai_pep_output) {
@@ -1519,34 +1519,36 @@ void BlockRunner::benchmark(
     LOG(INFO) << generate_latency_json(
         "static_runtime_first_iter", results.first_iter_time);
   }
-  std::cout << std::setw(15) << results.total_time << " ms. in Total" << '\n';
+  std::cout << std::setw(15) << results.total_time << " ms. in Total"
+            << std::endl;
   std::cout << "BlockRunner setup time: " << results.setup_time << " ms"
-            << '\n';
+            << std::endl;
   std::cout << "Memory allocation time: " << results.memory_alloc_time
             << " ms\n";
   std::cout << "Memory deallocation time: " << results.memory_dealloc_time
-            << " ms" << '\n';
+            << " ms" << std::endl;
   std::cout << "Outputs deallocation time: " << results.output_dealloc_time
-            << " ms" << '\n';
-  std::cout << "First iter time: " << results.first_iter_time << " ms" << '\n';
-  std::cout << "Number of operators: " << nodes_.size() << '\n';
+            << " ms" << std::endl;
+  std::cout << "First iter time: " << results.first_iter_time << " ms"
+            << std::endl;
+  std::cout << "Number of operators: " << nodes_.size() << std::endl;
 
   if (planner_) {
     std::cout << "Total number of managed tensors: "
-              << planner_->total_num_managed_tensors() << '\n';
+              << planner_->total_num_managed_tensors() << std::endl;
     std::cout << "Total number of managed output tensors: "
-              << planner_->total_num_managed_output_tensors() << '\n';
+              << planner_->total_num_managed_output_tensors() << std::endl;
     std::cout << "Total number of unmanaged values: "
-              << planner_->total_num_unmanaged() << '\n';
+              << planner_->total_num_unmanaged() << std::endl;
     std::cout << "Number of unmanaged values requiring cleanup: "
-              << planner_->num_unmanaged_non_scalars() << '\n';
+              << planner_->num_unmanaged_non_scalars() << std::endl;
     std::cout << "Number of unmanaged values not requiring cleanup: "
-              << planner_->num_unmanaged_scalars() << '\n';
+              << planner_->num_unmanaged_scalars() << std::endl;
     std::cout << "Total memory managed: " << planner_->total_managed()
-              << " bytes" << '\n';
+              << " bytes" << std::endl;
     if (static_module_.opts().optimize_memory) {
       std::cout << "Total number of reused tensors: "
-                << planner_->total_reused_tensors() << '\n';
+                << planner_->total_reused_tensors() << std::endl;
     }
   }
 
@@ -1557,13 +1559,13 @@ void BlockRunner::benchmark(
             << " ("
             << 100.0 * static_cast<float>(results.out_nodes_count) /
           static_cast<float>(results.total_nodes_count)
-            << "%)" << '\n';
+            << "%)" << std::endl;
   std::cout << "Total number of nodes not covered by SR/total number of nodes: "
             << unsupported_nodes_count << "/" << results.total_nodes_count
             << " ("
             << 100.0 * static_cast<float>(unsupported_nodes_count) /
           static_cast<float>(results.total_nodes_count)
-            << "%)" << '\n';
+            << "%)" << std::endl;
 
   check_for_memory_leak();
 
@@ -2255,10 +2257,10 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
 }
 
 StaticRuntime::StaticRuntime(const StaticModule& sm)
-    : async_task_launcher_(at::launch), values_(sm.value_buffer_size()) {
+    : values_(sm.value_buffer_size()) {
   std::copy(sm.constants().begin(), sm.constants().end(), values_.data());
   // default task launcher set to inter-op thread pool
-
+  async_task_launcher_ = at::launch;
   block_ = std::make_unique<BlockRunner>(
       sm,
       values_.data(),

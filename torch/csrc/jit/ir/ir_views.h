@@ -3,7 +3,8 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct IfView {
   explicit IfView(Node* node) : node_(node) {
@@ -159,4 +160,5 @@ struct LoopView {
     return adjusted;
   }
 };
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

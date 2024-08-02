@@ -10,7 +10,8 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 
-namespace torch::inductor {
+namespace torch {
+namespace inductor {
 using namespace at;
 
 Tensor _mm_plus_mm_out(
@@ -47,8 +48,7 @@ Tensor _alloc_from_pool(
       self.key_set(),
       caffe2::TypeMeta::fromScalarType(dtype));
   auto* self_tmp_ = self_.unsafeGetTensorImpl();
-  self_tmp_->set_storage_offset(
-      offset_bytes / static_cast<int64_t>(c10::elementSize(dtype)));
+  self_tmp_->set_storage_offset(offset_bytes / c10::elementSize(dtype));
   self_tmp_->set_sizes_and_strides(size, stride);
   return self_;
 }
@@ -110,4 +110,5 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
       {at::Tag::pt2_compliant_tag});
 }
 
-} // namespace torch::inductor
+} // namespace inductor
+} // namespace torch

@@ -1,6 +1,5 @@
 from collections import namedtuple
 
-
 ParityStatus = namedtuple("ParityStatus", ["has_impl_parity", "has_doc_parity"])
 
 """

@@ -1,4 +1,4 @@
-# mypy: allow-untyped-defs
+# mypy: ignore-errors
 
 from contextlib import contextmanager
 from datetime import timedelta

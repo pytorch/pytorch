@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Runs constant propagation on all objects unless ignore_custom_classes is
 // specified as true, in which case user defined classes are skipped.  This is
@@ -27,4 +28,5 @@ TORCH_API std::optional<Stack> runNodeIfInputsAreConstant(
     bool ignore_custom_classes = false,
     AliasDb* db = nullptr);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

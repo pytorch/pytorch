@@ -26,11 +26,9 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.passes import graph_drawer
 from torch.utils.checkpoint import CheckpointPolicy
-
 from . import config
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from .compile_utils import fx_graph_cse, get_aten_target
-
 
 if TYPE_CHECKING:
     import sympy
@@ -188,7 +186,7 @@ def _extract_graph_with_inputs_outputs(
             # joint_graph.nodes).
             continue
         elif node.op == "placeholder":
-            env[node] = InvalidNode
+            env[node] = InvalidNode  # type: ignore[assignment]
         elif node.op == "call_function":
             all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             all_args = [
@@ -197,7 +195,7 @@ def _extract_graph_with_inputs_outputs(
                 if isinstance(x, fx.Node)
             ]
             if any(all_args):
-                env[node] = InvalidNode
+                env[node] = InvalidNode  # type: ignore[assignment]
                 continue
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == "get_attr":

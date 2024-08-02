@@ -2364,7 +2364,8 @@ struct to_ir {
     {
       Block* condition_block = n->addBlock();
       pushFrame(condition_block);
-      Value* out = nullptr;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+      Value* out;
       if (cond) {
         WithInsertPoint insert(condition_block);
         out = emitToBool(cond.value().range(), emitExpr(cond.value()));
@@ -2845,7 +2846,10 @@ struct to_ir {
     if (sliceable->type()->isSubtypeOf(*TensorType::get())) {
       // If it's a tensor, just fully evaluate the subscript operation and emit
       // an in-place assignment
-      auto [sliced, tensorIndices] = emitIntAndSliceIndexing(
+      std::vector<Value*> tensorIndices;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+      Value* sliced;
+      std::tie(sliced, tensorIndices) = emitIntAndSliceIndexing(
           lhs.range(), sliceable, lhs.subscript_exprs());
 
       const auto slicedArg = NamedValue(stmt.lhs().range(), "self", sliced);
@@ -4197,10 +4201,12 @@ struct to_ir {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs) {
     auto g = method.graph();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    Node* fork_node;
     TypePtr out_type;
 
-    auto fork_node = g->insertNode(method.graph()->create(prim::forkClosure, 1))
-                         ->setSourceRange(loc);
+    fork_node = g->insertNode(method.graph()->create(prim::forkClosure, 1))
+                    ->setSourceRange(loc);
 
     // We create a fork by emitting a closure and setting the closure output
     // into the fork input. If a closure doesn't already exist, we create one.
@@ -4234,7 +4240,8 @@ struct to_ir {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs) {
     auto g = method.graph();
-    TypePtr out_type{};
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    TypePtr out_type;
 
     auto await_node =
         g->insertNode(method.graph()->create(prim::awaitableClosure, 1))
@@ -4270,7 +4277,7 @@ struct to_ir {
     // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
     size_t rpcMinInputs = 2;
-    size_t rpcMaxInputs = 5;
+    size_t rpcMaxInputs = 5; // NOLINT
     std::string op_name = rpc_op.toUnqualString();
     if (apply.inputs().size() < rpcMinInputs ||
         apply.inputs().size() > rpcMaxInputs) {

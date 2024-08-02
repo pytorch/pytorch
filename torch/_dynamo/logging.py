@@ -4,7 +4,6 @@ import logging
 
 from torch.hub import _Faketqdm, tqdm
 
-
 # Disable progress bar by default, not in dynamo config because otherwise get a circular import
 disable_progress = True
 
