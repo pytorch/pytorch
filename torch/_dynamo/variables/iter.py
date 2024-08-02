@@ -6,9 +6,9 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 
 from .. import polyfill, variables
 from ..exc import (
-    handle_observed_user_stop_iteration,
+    handle_observed_exception,
     ObservedUserStopIteration,
-    raise_observed_user_stop_iteration,
+    raise_observed_exception,
     unimplemented,
 )
 from .base import MutableLocal, VariableTracker
@@ -271,7 +271,7 @@ class CycleIteratorVariable(IteratorVariable):
                     return self.next_variable(tx)
                 return self.item
             except ObservedUserStopIteration:
-                handle_observed_user_stop_iteration(tx)
+                handle_observed_exception(tx)
                 self.iterator = None
                 return self.next_variable(tx)
         elif len(self.saved) > 0:
@@ -279,4 +279,4 @@ class CycleIteratorVariable(IteratorVariable):
             self.saved_index = (self.saved_index + 1) % len(self.saved)
             return self.item
         else:
-            raise_observed_user_stop_iteration(self, tx)
+            raise_observed_exception(StopIteration, tx, self)
