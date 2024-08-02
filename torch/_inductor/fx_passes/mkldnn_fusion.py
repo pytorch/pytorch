@@ -1,7 +1,8 @@
+# mypy: allow-untyped-defs
 import functools
 import operator
 from functools import reduce
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Tuple
 
 import torch
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
@@ -14,7 +15,6 @@ from ..pattern_matcher import (
     filter_nodes,
     get_arg_value,
     KeywordArg,
-    Match,
     MULTIPLE,
 )
 from ..virtualized import ops, V
@@ -36,24 +36,24 @@ if torch._C._has_mkldnn:
     _linear_args = [Arg() for _ in range(6)]
     _conv_transpose_args = [Arg() for _ in range(11)]
 
-    def _conv_call(users: int = 1) -> CallFunction:
+    def _conv_call(users=1):
         return CallFunction(
             mkldnn._convolution_pointwise.default, *_conv_args, _users=users
         )
 
-    def _linear_call(users: int = 1) -> CallFunction:
+    def _linear_call(users=1):
         return CallFunction(
             mkldnn._linear_pointwise.default, *_linear_args, _users=users
         )
 
-    def _conv_transpose_call(users: int = 1) -> CallFunction:
+    def _conv_transpose_call(users=1):
         return CallFunction(
             mkldnn._convolution_transpose_pointwise.default,
             *_conv_transpose_args,
             _users=users,
         )
 
-    def _to_float(input_call: CallFunction, users: int = 1) -> CallFunction:
+    def _to_float(input_call, users=1):
         return CallFunction(
             prims.convert_element_type.default,
             input_call,
@@ -61,7 +61,7 @@ if torch._C._has_mkldnn:
             _users=users,
         )
 
-    def _to_bf16(input_call: CallFunction) -> CallFunction:
+    def _to_bf16(input_call):
         return CallFunction(
             prims.convert_element_type.default,
             input_call,
@@ -69,7 +69,7 @@ if torch._C._has_mkldnn:
             _users=1,
         )
 
-    def _to_fp16(input_call: CallFunction) -> CallFunction:
+    def _to_fp16(input_call):
         return CallFunction(
             prims.convert_element_type.default,
             input_call,
@@ -77,12 +77,7 @@ if torch._C._has_mkldnn:
             _users=1,
         )
 
-    def _unary_fusion_pattern(
-        unary_fusion: Callable[..., CallFunction],
-        call_fn: Callable[..., CallFunction],
-        users: int,
-        lowp_dtype: Optional[torch.dtype],
-    ) -> CallFunction:
+    def _unary_fusion_pattern(unary_fusion, call_fn, users, lowp_dtype):
         # only insert to_dtype if lowp_dtype is True
         computation_call = (
             _to_float(call_fn(), users=users) if lowp_dtype else call_fn(users=users)
@@ -95,7 +90,7 @@ if torch._C._has_mkldnn:
         else:
             return out
 
-    def _gelu_fusion_1(computation_call: CallFunction) -> CallFunction:
+    def _gelu_fusion_1(computation_call):
         return CallFunction(
             aten.mul,
             CallFunction(aten.mul, computation_call, 0.5),
@@ -109,7 +104,7 @@ if torch._C._has_mkldnn:
             ),
         )
 
-    def _gelu_fusion_2(computation_call: CallFunction) -> CallFunction:
+    def _gelu_fusion_2(computation_call):
         return CallFunction(
             aten.mul,
             CallFunction(aten.mul, computation_call, 0.5),
@@ -141,7 +136,7 @@ if torch._C._has_mkldnn:
             ),
         )
 
-    def _hardswish_fusion(computation_call: CallFunction) -> CallFunction:
+    def _hardswish_fusion(computation_call):
         return CallFunction(
             aten.div,
             CallFunction(
@@ -158,12 +153,12 @@ if torch._C._has_mkldnn:
             6,
         )
 
-    def _silu_fusion(computation_call: CallFunction) -> CallFunction:
+    def _silu_fusion(computation_call):
         return CallFunction(
             aten.mul, computation_call, CallFunction(aten.sigmoid, computation_call)
         )
 
-    def _hardsigmoid_fusion(computation_call: CallFunction) -> CallFunction:
+    def _hardsigmoid_fusion(computation_call):
         return CallFunction(
             aten.div,
             CallFunction(
@@ -176,7 +171,7 @@ if torch._C._has_mkldnn:
             6,
         )
 
-    def _leaky_relu_fusion(computation_call: CallFunction) -> CallFunction:
+    def _leaky_relu_fusion(computation_call):
         return CallFunction(
             aten.where,
             CallFunction(aten.gt, computation_call, 0),
@@ -184,43 +179,31 @@ if torch._C._has_mkldnn:
             CallFunction(aten.mul, computation_call, KeywordArg("negative_slope")),
         )
 
-    def _hardtanh_fusion(computation_call: CallFunction) -> CallFunction:
+    def _hardtanh_fusion(computation_call):
         return CallFunction(
             aten.clamp_max,
             CallFunction(aten.clamp_min, computation_call, KeywordArg("min_value")),
             KeywordArg("max_value"),
         )
 
-    def _combined_fusion(
-        computation_call: CallFunction,
-        elementwise_op: Callable[..., Any],
-    ) -> CallFunction:
+    def _combined_fusion(computation_call, elementwise_op):
         return CallFunction(elementwise_op, computation_call)
 
     # binary_op(other, computation_op)
-    def _binary_fusion_v1(
-        computation_call: CallFunction,
-        binary_fn: Callable[..., Any],
-    ) -> CallFunction:
+    def _binary_fusion_v1(computation_call, binary_fn):
         return CallFunction(binary_fn, KeywordArg("other"), computation_call)
 
     # binary_op(computation_op, other)
-    def _binary_fusion_v2(
-        computation_call: CallFunction,
-        binary_fn: Callable[..., Any],
-    ) -> CallFunction:
+    def _binary_fusion_v2(computation_call, binary_fn):
         return CallFunction(binary_fn, computation_call, KeywordArg("other"))
 
-    def _is_single_computation_op(
-        computation_op: torch._ops.OpOverload,
-        lowp_dtype: Optional[torch.dtype] = None,
-    ) -> Callable[[Match], bool]:
-        def fn(match: Match) -> bool:
+    def _is_single_computation_op(computation_op, lowp_dtype=None):
+        def fn(match):
             computation_nodes = filter_nodes(match.nodes, computation_op)
 
-            if lowp_dtype is not None:
+            if lowp_dtype:
                 output_node_meta = match.output_node().meta.get("val")
-                if output_node_meta.dtype != lowp_dtype:  # type: ignore[union-attr]
+                if output_node_meta.dtype != lowp_dtype:
                     return False
 
             if len(computation_nodes) < 1:
@@ -231,11 +214,8 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _is_valid_computation_unary_fusion(
-        computation_op: torch._ops.OpOverload,
-        lowp_dtype: Optional[torch.dtype] = None,
-    ) -> Callable[[Match], bool]:
-        def fn(match: Match) -> bool:
+    def _is_valid_computation_unary_fusion(computation_op, lowp_dtype=None):
+        def fn(match):
             matched = _is_single_computation_op(computation_op, lowp_dtype)(match)
             computation_node = filter_nodes(match.nodes, computation_op)[0]
             if lowp_dtype:
@@ -251,22 +231,19 @@ if torch._C._has_mkldnn:
                 else:
                     to_float = conversion_dtype_nodes[1].args[1]
                     to_lp = conversion_dtype_nodes[0].args[1]
-                matched = matched and to_float == torch.float and to_lp == lowp_dtype  # type: ignore[assignment]
+                matched = matched and to_float == torch.float and to_lp == lowp_dtype
             return matched
 
         return fn
 
     def _register_unary_fusion_lowering(
-        pattern: CallFunction,
-        unary_attr: "UnaryAttr",
-        computation_op: torch._ops.OpOverload,
-        lowp_dtype: Optional[torch.dtype] = None,
-    ) -> Callable[..., Any]:
+        pattern, unary_attr, computation_op, lowp_dtype=None
+    ):
         @register_lowering_pattern(
             pattern,
             extra_check=_is_valid_computation_unary_fusion(computation_op, lowp_dtype),
         )
-        def fn(match: Match, *args: Any, **kwargs: Any) -> torch.Tensor:
+        def fn(match, *args, **kwargs):
             computation_args = list(args)[:-3] + [
                 unary_attr.op_name,
                 unary_attr.scalars_attr,
@@ -276,15 +253,11 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _register_leaky_relu_fusion_lowering(
-        pattern: CallFunction,
-        computation_op: torch._ops.OpOverload,
-        lowp_dtype: Optional[torch.dtype] = None,
-    ) -> Callable[..., Any]:
+    def _register_leaky_relu_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
             pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
         )
-        def fn(match: Match, *args: Any, **kwargs: Any) -> torch.Tensor:
+        def fn(match, *args, **kwargs):
             negative_slope = kwargs.get("negative_slope")
             if isinstance(negative_slope, ir.TensorBox):
                 matched = False
@@ -322,15 +295,11 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _register_hardtanh_fusion_lowering(
-        pattern: CallFunction,
-        computation_op: torch._ops.OpOverload,
-        lowp_dtype: Optional[torch.dtype] = None,
-    ) -> Callable[..., Any]:
+    def _register_hardtanh_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
             pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
         )
-        def fn(match: Match, *args: Any, **kwargs: Any) -> torch.Tensor:
+        def fn(match, *args, **kwargs):
             min_value = kwargs.get("min_value")
             max_value = kwargs.get("max_value")
             if isinstance(min_value, ir.TensorBox) or isinstance(
@@ -374,12 +343,12 @@ if torch._C._has_mkldnn:
         ops.sub: "sub",
     }
 
-    def _is_valid_binary(match: Match, fn: Callable[..., Any]) -> bool:
+    def _is_valid_binary(match, fn):
         binary_nodes = filter_nodes(match.nodes, fn)
         if len(binary_nodes) < 1:
             return False
 
-        def get_meta_value(argument: torch.fx.node.Argument) -> Optional[torch.Tensor]:
+        def get_meta_value(argument: torch.fx.node.Argument):
             # Only torch.fx.Node is expected to have meta.
             if isinstance(argument, torch.fx.Node):
                 return argument.meta.get("val", None)
@@ -399,9 +368,9 @@ if torch._C._has_mkldnn:
         ):
             return False
         if any(
-            get_meta_value(n.args[0]).size() != get_meta_value(n.args[1]).size()  # type: ignore[union-attr]
-            or get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device  # type: ignore[union-attr]
-            or get_meta_value(n.args[0]).dtype != get_meta_value(n.args[1]).dtype  # type: ignore[union-attr]
+            get_meta_value(n.args[0]).size() != get_meta_value(n.args[1]).size()
+            or get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device
+            or get_meta_value(n.args[0]).dtype != get_meta_value(n.args[1]).dtype
             for n in binary_nodes
         ):
             return False
@@ -410,12 +379,8 @@ if torch._C._has_mkldnn:
             return False
         return True
 
-    def _is_valid_computation_binary(
-        computation_op: torch._ops.OpOverload,
-        binary_op: Callable[..., Any],
-        other_index: Optional[int] = None,
-    ) -> Callable[[Match], bool]:
-        def fn(match: Match) -> bool:
+    def _is_valid_computation_binary(computation_op, binary_op, other_index=None):
+        def fn(match):
             if not _is_single_computation_op(computation_op)(match):
                 return False
             if not _is_valid_binary(match, binary_op):
@@ -424,10 +389,7 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _get_remaining_users(
-        extra_input_node: torch.fx.Node,
-        compute_node: torch.fx.Node,
-    ) -> List[torch.fx.Node]:
+    def _get_remaining_users(extra_input_node, compute_node):
         # Think about this pattern:
         #      ReLU
         #     /   \
@@ -445,10 +407,7 @@ if torch._C._has_mkldnn:
         # * compute_node: Conv2
         # _get_remaining_users will return the users of extra_input_node which are not
         # ancestor node of compute_node.
-        def _is_ancestor_node(
-            _current_node: torch.fx.Node,
-            _ancestor_node: torch.fx.Node,
-        ) -> bool:
+        def _is_ancestor_node(_current_node, _ancestor_node):
             # Check whether _ancestor_node is the ancestor node of _current_node
             _node_list = [_current_node]
             _visited_nodes = set()
@@ -471,45 +430,35 @@ if torch._C._has_mkldnn:
             if not _is_ancestor_node(compute_node, user)
         ]
 
-    def _is_valid_computation_binary_inplace(
-        computation_op: torch._ops.OpOverload,
-        binary_op: Callable[..., Any],
-        other_index: Optional[int] = None,
-    ) -> Callable[[Match], bool]:
-        def fn(match: Match) -> bool:
+    def _is_valid_computation_binary_inplace(computation_op, binary_op, other_index):
+        def fn(match):
             if not _is_valid_computation_binary(computation_op, binary_op)(match):
                 return False
             binary_nodes = filter_nodes(match.nodes, binary_op)
 
-            def _get_compute_node(
-                _binary_node: torch.fx.Node,
-                _other_index: int,
-            ) -> Any:
+            def _get_compute_node(_binary_node, _other_index):
                 assert (
                     len(_binary_node.all_input_nodes) == 2
                 ), "Binary node should have 2 input nodes."
                 _compute_index = 1 if (_other_index == 0) else 0
                 return _binary_node.args[_compute_index]
 
-            def _other_input_not_inplaceable(
-                _binary_node: torch.fx.Node,
-                _other_index: int,
-            ) -> bool:
+            def _other_input_not_inplaceable(_binary_node, _other_index):
                 _compute_node = _get_compute_node(_binary_node, _other_index)
                 return (
                     len(
                         _get_remaining_users(
-                            _binary_node.args[_other_index], _compute_node  # type: ignore[arg-type]
+                            _binary_node.args[_other_index], _compute_node
                         )
                     )
                     > 1
                     or _binary_node.args[_other_index] == _compute_node.args[0]
                 )
 
-            if any(_other_input_not_inplaceable(n, other_index) for n in binary_nodes):  # type: ignore[arg-type]
+            if any(_other_input_not_inplaceable(n, other_index) for n in binary_nodes):
                 return False
             if any(
-                n.args[other_index].op in ["placeholder", "output"]  # type: ignore[union-attr,arg-type,index]
+                n.args[other_index].op in ["placeholder", "output"]
                 for n in binary_nodes
             ):
                 return False
@@ -518,16 +467,16 @@ if torch._C._has_mkldnn:
         return fn
 
     def _register_binary_unary_fusion_lowering(
-        pattern: CallFunction,
-        computation_op: torch._ops.OpOverload,
-        binary_op: Callable[..., Any],
-        fusion_op: torch._ops.OpOverload,
-        unary_attr: Optional["UnaryAttr"] = None,
-    ) -> Callable[..., Any]:
+        pattern,
+        computation_op,
+        binary_op,
+        fusion_op,
+        unary_attr=None,
+    ):
         @register_lowering_pattern(
             pattern, extra_check=_is_valid_computation_binary(computation_op, binary_op)
         )
-        def fn(match: Match, *args: Any, **kwargs: Any) -> torch.Tensor:
+        def fn(match, *args, **kwargs):
             other = kwargs.get("other")
             assert isinstance(other, ir.TensorBox)
             binary_attr = _binary_attr[binary_op]
@@ -547,7 +496,7 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _can_be_inplace(_other: Any) -> bool:
+    def _can_be_inplace(_other):
         if isinstance(_other.data, ir.View):
             return _can_be_inplace(_other.data)
         else:
@@ -557,21 +506,21 @@ if torch._C._has_mkldnn:
             )
 
     def _register_binary_unary_maybe_inplace_fusion_lowering(
-        pattern: CallFunction,
-        computation_op: torch._ops.OpOverload,
-        binary_op: Callable[..., Any],
-        inplace_fusion_op: torch._ops.OpOverload,
-        outplace_fusion_op: torch._ops.OpOverload,
-        unary_attr: Optional["UnaryAttr"] = None,
-        other_index: Optional[int] = None,
-    ) -> Callable[..., Any]:
+        pattern,
+        computation_op,
+        binary_op,
+        inplace_fusion_op,
+        outplace_fusion_op,
+        unary_attr=None,
+        other_index=None,
+    ):
         @register_lowering_pattern(
             pattern,
             extra_check=_is_valid_computation_binary_inplace(
                 computation_op, binary_op, other_index
             ),
         )
-        def fn(match: Match, *args: Any, **kwargs: Any) -> torch.Tensor:
+        def fn(match, *args, **kwargs):
             other = kwargs.get("other")
             assert isinstance(other, ir.TensorBox)
             binary_attr = _binary_attr[binary_op]
@@ -603,21 +552,16 @@ if torch._C._has_mkldnn:
 
     class UnaryAttr:
         def __init__(
-            self,
-            op_name: str,
-            scalars_attr: Any = None,
-            algorithm_attr: Any = None,
-        ):
+            self, op_name: str, scalars_attr=None, algorithm_attr=None
+        ) -> None:
             self.op_name = op_name
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
 
-    def _register_unary_fusion() -> None:
+    def _register_unary_fusion():
         computation_call_fns = [_conv_call, _linear_call, _conv_transpose_call]
 
-        def _unary_fusion_patterns(
-            lowp_dtype: Optional[torch.dtype],
-        ) -> Dict[UnaryAttr, List[CallFunction]]:
+        def _unary_fusion_patterns(lowp_dtype):
             replacement_unary_fusion_patterns = {
                 UnaryAttr("gelu", algorithm_attr="tanh"): [
                     _unary_fusion_pattern(_gelu_fusion_2, call_fn, 4, lowp_dtype)
@@ -685,7 +629,7 @@ if torch._C._has_mkldnn:
             for pattern, computation_op in zip(hardtanh_patterns, computation_ops):
                 _register_hardtanh_fusion_lowering(pattern, computation_op, lowp_dtype)
 
-    def _register_inplace_fusion() -> None:
+    def _register_inplace_fusion():
         binary_ops = [aten.add, ops.add]
         inplace_fusion_op = mkldnn._convolution_pointwise_.binary
         outplace_fusion_op = mkldnn._convolution_pointwise.binary
@@ -731,7 +675,7 @@ if torch._C._has_mkldnn:
                 other_index=1,
             )
 
-    def _register_binary_fusion() -> None:
+    def _register_binary_fusion():
         binary_ops = [aten.add, ops.add, aten.sub, ops.sub]
         fusion_ops = [
             mkldnn._convolution_pointwise.binary,
@@ -753,7 +697,7 @@ if torch._C._has_mkldnn:
                     pattern, computation_op, binary_op, fusion_op
                 )
 
-    def _register_binary_unary_fusion() -> None:
+    def _register_binary_unary_fusion():
         binary_ops = [aten.add, ops.add, aten.sub, ops.sub]
         fusion_ops = [mkldnn._convolution_pointwise.binary]
         _computation_user_1 = [_conv_call(users=1)]
@@ -783,7 +727,7 @@ if torch._C._has_mkldnn:
                     unary_attr=UnaryAttr("relu"),
                 )
 
-    def _recover_linear() -> None:
+    def _recover_linear():
         # convert reshape+linear+reshape to a single linear for applying fusion path.
         @register_freezing_graph_pattern(
             CallFunction(
@@ -806,12 +750,8 @@ if torch._C._has_mkldnn:
             ),
             pass_number=1,
         )
-        def reshape_linear_reshape_pattern(
-            match: Any,
-            *args: Any,
-            **kwargs: Any,
-        ) -> None:
-            def get_val(val: Any) -> Any:
+        def reshape_linear_reshape_pattern(match, *args, **kwargs):
+            def get_val(val):
                 return val if isinstance(val, int) else val.meta.get("val")
 
             reshape_1 = kwargs.get("reshape_1")
@@ -847,7 +787,7 @@ if torch._C._has_mkldnn:
                 if len(reshape_1_node.users) == 0:
                     graph.erase_node(reshape_1_node)
 
-        def is_linear_add_bias(match: Any) -> bool:
+        def is_linear_add_bias(match):
             add_node = match.output_node()
             linear_node = add_node.args[0]
             packed_weight_node = linear_node.args[1]
@@ -884,7 +824,7 @@ if torch._C._has_mkldnn:
             pass_number=1,
             extra_check=is_linear_add_bias,
         )
-        def linear_bias_pattern(match: Any, *args: Any) -> None:
+        def linear_bias_pattern(match, *args):
             graph = match.graph
             add_node = match.output_node()
             linear_node = add_node.args[0]
@@ -897,7 +837,7 @@ if torch._C._has_mkldnn:
             add_node.replace_all_uses_with(repl)
             match.erase_nodes(graph)
 
-    def _is_packable_mkldnn_rnn_layer(match: Any) -> bool:
+    def _is_packable_mkldnn_rnn_layer(match):
         lstm_node = match.output_node()
         POS_WEIGHTS = [1, 2]
         POS_INPUTS = [0, 5, 6]
@@ -935,7 +875,7 @@ if torch._C._has_mkldnn:
 
         return True
 
-    def _is_packable_convolution(match: Any) -> bool:
+    def _is_packable_convolution(match):
         """
         Check if the node is supported for MKLDNN convolution.
         """
@@ -986,7 +926,7 @@ if torch._C._has_mkldnn:
                 return False
         return True
 
-    def _is_packable_linear(match: Any) -> bool:
+    def _is_packable_linear(match):
         """
         Check if the node is supported for MKLDNN linear.
         """
@@ -1085,12 +1025,12 @@ if torch._C._has_mkldnn:
         Arg(),  # train
     )
 
-    def _register_weight_pack_pass() -> None:
+    def _register_weight_pack_pass():
         @register_freezing_graph_pattern(
             CallFunction(aten.convolution.default, *_aten_conv_args),
             extra_check=_is_packable_convolution,
         )
-        def convolution(match: Any, *args: Any, **kwargs: Any) -> None:
+        def convolution(match, *args, **kwargs):
             is_transposed = kwargs.get("is_transposed")
             assert isinstance(is_transposed, bool)
             graph = match.graph
@@ -1131,12 +1071,8 @@ if torch._C._has_mkldnn:
             CallFunction(aten.mkldnn_rnn_layer.default, *_aten_mkldnn_rnn_layer_args),
             extra_check=_is_packable_mkldnn_rnn_layer,
         )
-        def mkldnn_rnn_layer(match: Any, *args: Any, **kwargs: Any) -> None:
-            def get_item(
-                graph: torch.fx.GraphModule,
-                node: torch.fx.Node,
-                index: int,
-            ) -> torch.fx.Node:
+        def mkldnn_rnn_layer(match, *args, **kwargs):
+            def get_item(graph, node, index):
                 return graph.call_function(operator.getitem, (node, index))
 
             graph = match.graph
@@ -1197,7 +1133,7 @@ if torch._C._has_mkldnn:
             CallFunction(aten.mm.default, Arg(), Arg()),
             extra_check=_is_packable_linear,
         )
-        def linear(match: Match, *args: Any, **kwargs: Any) -> None:
+        def linear(match, *args, **kwargs):
             graph = match.graph
             linear_node = match.output_node()
             input = args[0] if linear_node.target == aten.mm.default else args[1]
@@ -1268,12 +1204,12 @@ if torch._C._has_mkldnn:
                 packed_linear_node.meta.update(linear_node.meta)
                 graph.erase_node(linear_node)
 
-    def _eliminate_duplicate_packed_nodes(gm: torch.fx.GraphModule) -> Any:
+    def _eliminate_duplicate_packed_nodes(gm):
         """
         Combine packed weight nodes with the same inputs to reduce memory usage.
         for example:
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(32, 32, bias=True)
 
@@ -1307,7 +1243,7 @@ if torch._C._has_mkldnn:
                         gm.graph.erase_node(user_node)
 
     @functools.lru_cache(None)
-    def _mkldnn_fusion_init() -> None:
+    def _mkldnn_fusion_init():
         # TODO: aarch64: enable op fusion for acl once it supports fused operators. Disabling it for now.
         # Otherwise even the matmul or innerproduct can not be accelerated with acl
         if (
@@ -1323,7 +1259,7 @@ if torch._C._has_mkldnn:
             _register_woq_lowerings()
 
     @functools.lru_cache(None)
-    def _mkldnn_weight_pack_init() -> None:
+    def _mkldnn_weight_pack_init():
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
             _register_weight_pack_pass()
             _recover_linear()

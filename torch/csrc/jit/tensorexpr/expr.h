@@ -14,9 +14,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 enum IRNodeType {
   kPrimitive,
@@ -68,7 +66,7 @@ class TORCH_API Expr : public std::enable_shared_from_this<Expr> {
    * All sub-expressions inside the given expressions are also cloned. Note
    * that the variables are not deep-copied since they are immutable.
    */
-  static ExprPtr clone(ExprPtr s);
+  static ExprPtr clone(const ExprPtr& s);
 
  protected:
   std::shared_ptr<Expr> getptr() {
@@ -208,7 +206,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
       const std::vector<ExprHandle>& dims,
       Dtype dtype,
       std::optional<ExprHandle> initializer = std::nullopt,
-      std::optional<std::vector<ExprHandle>> strides = std::nullopt,
+      const std::optional<std::vector<ExprHandle>>& strides = std::nullopt,
       std::optional<ExprHandle> qscale = std::nullopt,
       std::optional<ExprHandle> qzero = std::nullopt);
 
@@ -227,7 +225,6 @@ class TORCH_API Buf : public ExprNode<Buf> {
     base_handle_->set_name_hint(name_hint);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Buf(const std::string& name_hint,
       const std::vector<ExprPtr>& dims,
       Dtype dtype,
@@ -243,8 +240,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
             std::move(qscale),
             std::move(qzero)) {}
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Buf(VarPtr var,
+  Buf(const VarPtr& var,
       std::vector<ExprPtr> dims,
       Dtype dtype,
       ExprPtr initializer = nullptr,
@@ -494,6 +490,4 @@ ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f);
 
 TORCH_API ExprHandle expr_to_vec(ExprHandle v, int lanes);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
