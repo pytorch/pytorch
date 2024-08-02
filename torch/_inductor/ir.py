@@ -4302,7 +4302,7 @@ class ExternKernel(InputsKernel):
         self.output_view = output_view
         self.op_overload = op_overload
         self.set_cpp_kernel_name(cpp_kernel_name)
-        self.python_kernel_name = python_kernel_name
+        self.set_python_kernel_name(python_kernel_name)
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.collect_arg_kwarg_properties()
         self.unbacked_bindings = {}
@@ -4430,6 +4430,21 @@ class ExternKernel(InputsKernel):
             self.cpp_op_schema = get_cpp_op_schema(kernel)
         except Exception:
             self.cpp_op_schema = ""
+
+    def set_python_kernel_name(self, python_kernel_name: Optional[str]):
+        self.python_kernel_name = python_kernel_name
+        if python_kernel_name is not None:
+            return
+
+        kernel = self.op_overload
+        if kernel is None:
+            pass
+        elif isinstance(kernel, torch._ops.HigherOrderOperator):
+            self.python_kernel_name = f"torch.ops.higher_order.{kernel.__name__}"
+        else:
+            self.python_kernel_name = (
+                f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
+            )
 
     def get_kernel_name(self):
         return (
@@ -5174,7 +5189,6 @@ class InplaceBernoulliFallback(ExternKernel):
         V.graph.mark_buffer_mutated(x.get_name())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
-        self.python_kernel_name = "aten.bernoulli_"
         if not config.abi_compatible:
             # TODO: this should be simplified once we switch to ABI-compatible only
             self.cpp_kernel_name = "at::native::bernoulli_"
@@ -5896,20 +5910,14 @@ class FallbackKernel(ExternKernelAlloc):
                         kernel,
                     )
                     self.use_runtime_dispatch = True
-            self.python_kernel_name = f"torch.ops.{kernel}"
         elif kernel.namespace == "_quantized":  # type: ignore[union-attr]
             # Internal Quantized Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
                 if not config.abi_compatible:
                     self.use_runtime_dispatch = True
-            else:
-                self.python_kernel_name = str(kernel)
-        elif isinstance(kernel, torch._ops.HigherOrderOperator):
-            self.python_kernel_name = f"torch.ops.higher_order.{kernel.__name__}"
         else:
             # For non-aten OpOverload, i.e. custom ops
-            self.python_kernel_name = f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"  # type: ignore[union-attr]
             if V.graph.cpp_wrapper:
                 self.use_runtime_dispatch = True
 
@@ -6968,8 +6976,6 @@ class _CollectiveKernel(FallbackKernel):
     def create_inplace(
         cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
     ) -> None:
-        cpp_kernel_name = kernel._name
-        python_kernel_name = cpp_kernel_name.replace("::", ".")
         with V.graph.fake_mode:
             (
                 example_output,
@@ -6990,8 +6996,6 @@ class _CollectiveKernel(FallbackKernel):
             non_tensor_args,
             unflatten_args,
         )
-        packed.cpp_kernel_name = cpp_kernel_name
-        packed.python_kernel_name = python_kernel_name
 
         inps = pytree.tree_leaves(inputs)
         packed.mutation_outputs.extend(
@@ -7033,8 +7037,6 @@ class _CollectiveKernel(FallbackKernel):
     def create_out_of_place(
         cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
     ):
-        cpp_kernel_name = kernel._name
-        python_kernel_name = cpp_kernel_name.replace("::", ".")
         with V.graph.fake_mode:
             (
                 example_output,
@@ -7056,8 +7058,6 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
             )
-            packed.cpp_kernel_name = cpp_kernel_name
-            packed.python_kernel_name = python_kernel_name
             packed.outputs = [
                 MultiOutput(
                     cls.tensor_to_layout(tensor),
@@ -7075,8 +7075,6 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
             )
-            packed.cpp_kernel_name = cpp_kernel_name
-            packed.python_kernel_name = python_kernel_name
             packed.outputs = [packed]
             return packed
 
