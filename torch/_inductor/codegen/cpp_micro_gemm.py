@@ -408,17 +408,13 @@ inline void {{kernel_name}}_kernel(
             auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
             vb[col] = at::vec::convert<{{compute_t}}>(b);
             {%- elif input2_dtype == torch.int8 %}
-            // Load a cache-line with 64 int8 elements & convert it into 4 FP32 vector registers
+            // Load 64 int8 elements & convert them into 16 FP32 elements each in 4 vector registers
             if constexpr (col % 4 == 0) {
-                // First load 64 int8 elements
-                __m512i b_cacheline = _mm512_load_si512((__m512i*)(B + k * ldb + col * VLEN));
-                // First 16 elements
-                __m128i* b8 = reinterpret_cast<__m128i*>((void*)&b_cacheline);
                 constexpr auto remaining = std::min<int>(4, COLS - col);
                 {{kernel.unroll_pragma(4)}}
-                for (int idx = 0; idx < remaining; idx++, b8++) {
-                    // Convert 16 int8 elements to FP32
-                    auto b32 = at::vec::convert_to_int32<int8_t>(reinterpret_cast<int8_t*>((void*)b8));
+                for (int idx = 0; idx <= remaining; idx++) {
+                    // Convert 16 int8 elements to int32, and then fp32
+                    auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN + idx * 16);
                     vb[col + idx] = at::vec::convert<float>(b32);
                 }
             }

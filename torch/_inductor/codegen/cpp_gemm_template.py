@@ -489,7 +489,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 if trans_w:
                     assert isinstance(W, torch.Tensor)
                     W = W.transpose(0, 1)
-            if B is not None and has_bias:
+            if has_bias and B is not None:
                 if isinstance(B, ir.IRNode):
                     if not isinstance(B, ir.TensorBox):
                         B = ir.TensorBox(B)
@@ -690,7 +690,7 @@ class CppPackedGemmTemplate(CppTemplate):
         Y_aliases: Set[str] = set()
         # TODO(jgong5): for int8 gemm, bias-add is handled outside of gemm template,
         # but we'd better move it here to align with fp.
-        if inp is not None and self.beta != 0 and not int8_gemm and self.has_bias:
+        if inp is not None and self.beta != 0 and not int8_gemm:
             # add an epilogue for bias add
             def _bias_add_epilogue(buf):
                 return create_epilogue_with_attr(
