@@ -151,7 +151,9 @@ public:
         // no safe toTensorRef method, alas)
         ks = ks | ivalue.unsafeToTensorImpl()->key_set();
       } else if (C10_UNLIKELY(ivalue.isTensorList())) {
-        for (const at::Tensor& tensor : ivalue.toTensorList()) {
+        const c10::List<at::Tensor> tensorlist = ivalue.toTensorList();
+        for (const auto& tensor_ref : tensorlist) {
+          const at::Tensor& tensor = tensor_ref;
           ks = ks | tensor.key_set();
         }
       }

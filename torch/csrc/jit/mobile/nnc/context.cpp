@@ -132,24 +132,24 @@ Function::Function(const c10::IValue& value) {
   nnc_kernel_id_ = dict.at("nnc_kernel_id").toStringRef();
   parameters_ = dict.at("parameters").toList();
 
+  auto input_tuple_ref = dict.at("input_specs").toTupleRef();
   // input_specs_
-  for (const auto& input_value :
-       dict.at("input_specs").toTupleRef().elements()) {
+  for (const auto& input_value : input_tuple_ref.elements()) {
     input_specs_.emplace_back(input_value);
   }
 
+  auto output_tuple_ref = dict.at("output_specs").toTupleRef();
   // output_specs_
-  for (const auto& output_value :
-       dict.at("output_specs").toTupleRef().elements()) {
+  for (const auto& output_value : output_tuple_ref.elements()) {
     output_specs_.emplace_back(output_value);
   }
 
   // memory_plan_
   memory_plan_ = MemoryPlan(dict.at("memory_plan"));
 
+  auto pos_tuple_ref = dict.at("sym_shape_pos").toTupleRef();
   // symbolic shape positions
-  for (const auto& sym_shape_pos :
-       dict.at("sym_shape_pos").toTupleRef().elements()) {
+  for (const auto& sym_shape_pos : pos_tuple_ref.elements()) {
     auto sym_shape_elements = sym_shape_pos.toTupleRef().elements();
     sym_shape_positions_.emplace_back(
         sym_shape_elements[0].toInt(), sym_shape_elements[1].toInt());
