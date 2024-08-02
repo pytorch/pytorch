@@ -29,7 +29,7 @@ namespace detail {
 template <typename T>
 struct is_optional : std::false_type {};
 template <typename T>
-struct is_optional<optional<T>> : std::true_type {};
+struct is_optional<std::optional<T>> : std::true_type {};
 } // namespace detail
 
 /// A dataset that can yield data only in batches.
@@ -49,7 +49,8 @@ class BatchDataset {
   /// Returns a batch of data given an index.
   virtual Batch get_batch(BatchRequest request) = 0;
 
-  /// Returns the size of the dataset, or an empty optional if it is unsized.
+  /// Returns the size of the dataset, or an empty std::optional if it is
+  /// unsized.
   virtual std::optional<size_t> size() const = 0;
 
   /// Creates a `MapDataset` that applies the given `transform` to this dataset.

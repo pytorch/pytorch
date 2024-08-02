@@ -27,7 +27,6 @@ import torch._C
 from torch.types import Device
 from .. import device as _device
 from .._utils import _dummy_type, _LazySeedTracker, classproperty
-from . import gds
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -135,6 +134,10 @@ def is_bf16_supported(including_emulation: bool = True):
     # since it is supported on AMD GPU archs.
     if torch.version.hip:
         return True
+
+    # If CUDA is not available, than it does not support bf16 either
+    if not is_available():
+        return False
 
     device = torch.cuda.current_device()
 
@@ -1622,6 +1625,8 @@ __all__ = [
     "memory_stats_as_nested_dict",
     "memory_summary",
     "memory_usage",
+    "MemPool",
+    "MemPoolContext",
     "temperature",
     "power_draw",
     "clock_rate",
