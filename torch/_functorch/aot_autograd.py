@@ -422,8 +422,14 @@ AOT_COUNTER = itertools.count()
 aot_autograd_decompositions = {}
 
 
-@dynamo_timed
 def create_aot_dispatcher_function(
+    flat_fn, flat_args: List[Any], aot_config: AOTConfig
+) -> Tuple[Callable, ViewAndMutationMeta]:
+    with dynamo_timed("create_aot_dispatcher_function"):
+        return _create_aot_dispatcher_function(flat_fn, flat_args, aot_config)
+
+
+def _create_aot_dispatcher_function(
     flat_fn, flat_args: List[Any], aot_config: AOTConfig
 ) -> Tuple[Callable, ViewAndMutationMeta]:
     """
@@ -878,7 +884,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     )
 
     class AOTModule(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.orig_module = mod
 

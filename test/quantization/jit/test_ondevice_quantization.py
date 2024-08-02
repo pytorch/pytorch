@@ -34,7 +34,7 @@ class myMod(torch.nn.Module):
 
 
 class MyConvLinearModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.conv = torch.nn.Conv2d(3, 5, 3)
         weight = torch.nn.Parameter(torch.ones(5, 5))

@@ -273,7 +273,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def test_mnist(self):
         class MNISTModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=True)
                 self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=True)
@@ -302,7 +302,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         # This produces op as `torch.ops.aten.log_sigmoid_forward`, instead of the more
         # conventional `torch.ops.aten.log_sigmoid`.
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.m = torch.nn.LogSigmoid()
 
@@ -419,7 +419,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def test_transpose_infer_shape(self):
         class TransposeModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 1, 3, stride=2)
 
@@ -845,7 +845,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     )
     def test_fx_symbolic_tracer_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc0 = nn.Linear(8, 8, bias=True)
                 self.fc1 = nn.Linear(8, 4, bias=True)
@@ -1178,7 +1178,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     )
     def test_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc0 = nn.Linear(8, 8, bias=True)
                 self.fc1 = nn.Linear(8, 4, bias=True)

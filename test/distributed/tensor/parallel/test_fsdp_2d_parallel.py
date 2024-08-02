@@ -42,7 +42,7 @@ LR = 3e-5
 
 
 class SimpleModel(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = nn.Linear(5, 8)
         self.relu = nn.ReLU()
@@ -60,7 +60,7 @@ class SimpleModel(nn.Module):
 
 
 class SimpleModelUneven(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         torch.manual_seed(0)
         self.net1 = nn.Linear(5, 10)

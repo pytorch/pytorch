@@ -104,7 +104,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     )
     def test_mnist_exported_with_no_warnings(self, diagnostic_rule):
         class MNISTModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=False)
                 self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=False)
@@ -227,7 +227,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         self,
     ):
         class TraceModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv2 = torch.nn.Conv2d(
                     16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1)
@@ -340,7 +340,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return output + bias
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.submodule = SubModule()
 
@@ -402,7 +402,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
     def test_dynamo_export_retains_readable_parameter_and_buffer_names(self):
         class SubModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=False)
                 self.fc1 = nn.Linear(9216, 128, bias=False)
@@ -419,7 +419,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return tensor_x
 
         class MNISTModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=False)
                 self.submodule = SubModule()
@@ -649,7 +649,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
     def test_exported_program_torch_distributions_normal_Normal(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.normal = torch.distributions.normal.Normal(0, 1)
                 super().__init__()
 
@@ -825,7 +825,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         self, include_initializer, use_fake_mode, use_exported_program
     ):
         class MNISTModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=False)
                 self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=False)

@@ -30,7 +30,7 @@ class CppTemplate(KernelTemplate):
         layout: ir.Layout,
         num_threads: int,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-    ):
+    ) -> None:
         super().__init__(name)
         self.input_nodes = input_nodes
         self.output_node: ir.Buffer = ir.Buffer("buf_out", layout)
