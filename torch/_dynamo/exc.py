@@ -74,7 +74,7 @@ class InvalidBackend(TorchDynamoException):
 
 
 class ResetRequired(TorchDynamoException):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__(
             textwrap.dedent(
                 """

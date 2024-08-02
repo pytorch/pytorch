@@ -118,7 +118,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
             K1, N1 = 2, 2
 
             class FooBar(torch.nn.Module):
-                def __init__(self) -> None:
+                def __init__(self):
                     super().__init__()
                     self.linear1 = torch.nn.Linear(K1, N1).float()
 

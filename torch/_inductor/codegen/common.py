@@ -1560,7 +1560,7 @@ class CSE:
 
 
 class CodeGen:
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.exit_stack = contextlib.ExitStack()
 

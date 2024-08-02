@@ -1012,7 +1012,7 @@ class _PatchedFnSetAttr(_PatchedFn):
 
 
 class _Patcher:
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.patches_made: List[_PatchedFn] = []
         self.visited: Set[int] = set()

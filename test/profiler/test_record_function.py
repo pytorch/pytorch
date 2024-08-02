@@ -96,7 +96,7 @@ class TestRecordFunction(TestCase):
 
     def test_datapipe_delegation_with_profiler(self):
         class IDPIterator(torch.utils.data.IterDataPipe):
-            def __init__(self) -> None:
+            def __init__(self):
                 self.data = list(range(10))
                 self._idx = 0
 

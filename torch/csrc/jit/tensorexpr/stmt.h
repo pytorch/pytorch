@@ -8,8 +8,9 @@
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
-
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 // The common base between all statement node.
 class TORCH_API Stmt : public std::enable_shared_from_this<Stmt> {
@@ -30,7 +31,7 @@ class TORCH_API Stmt : public std::enable_shared_from_this<Stmt> {
    * cloned. Note that the variables are not deep-copied since they are
    * immutable.
    */
-  static StmtPtr clone(const StmtPtr& s);
+  static StmtPtr clone(StmtPtr s);
 
  protected:
   static void set_parent(const StmtPtr& s, Stmt* new_parent) {
@@ -78,7 +79,7 @@ class TORCH_API Block : public StmtNode<Block> {
     return alloc<Block>(valid_stmts);
   }
 
-  size_t nstmts() const {
+  int nstmts() const {
     return stmts_.size();
   }
   bool empty() const {
@@ -104,7 +105,7 @@ class TORCH_API Block : public StmtNode<Block> {
     set_parent(s, this);
   }
 
-  void insert_stmt_before(StmtPtr s, const StmtPtr& before) {
+  void insert_stmt_before(StmtPtr s, StmtPtr before) {
     if (s->get_parent()) {
       throw malformed_input(
           "Block append Stmt with existing parent", std::move(s));
@@ -120,7 +121,7 @@ class TORCH_API Block : public StmtNode<Block> {
     set_parent(s, this);
   }
 
-  void insert_stmt_after(StmtPtr s, const StmtPtr& after) {
+  void insert_stmt_after(StmtPtr s, StmtPtr after) {
     if (s->get_parent()) {
       throw malformed_input(
           "Block append Stmt with existing parent", std::move(s));
@@ -135,10 +136,10 @@ class TORCH_API Block : public StmtNode<Block> {
     ++pos;
 
     stmts_.insert(pos, s);
-    set_parent(s, this);
+    set_parent(std::move(s), this);
   }
 
-  bool replace_stmt(const StmtPtr& old_stmt, StmtPtr new_stmt) {
+  bool replace_stmt(StmtPtr old_stmt, StmtPtr new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
           "Block replace Stmt with existing parent", std::move(new_stmt));
@@ -150,15 +151,15 @@ class TORCH_API Block : public StmtNode<Block> {
     }
     stmts_.insert(pos, new_stmt);
     stmts_.erase(pos);
-    set_parent(old_stmt, nullptr);
-    set_parent(new_stmt, this);
+    set_parent(std::move(old_stmt), nullptr);
+    set_parent(std::move(new_stmt), this);
     return true;
   }
 
   // Creates a new block by cloning `this` block and replacing the given
   // statement with a new statement. Note that `old_stmt` refers to a statement
   // in `this` block. If the `old_stmt` is not found, it will return `nullptr`.
-  BlockPtr clone_and_replace(const StmtPtr& old_stmt, StmtPtr new_stmt) {
+  BlockPtr clone_and_replace(StmtPtr old_stmt, StmtPtr new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
           "Block replace Stmt with existing parent", std::move(new_stmt));
@@ -250,7 +251,7 @@ class TORCH_API Block : public StmtNode<Block> {
     return stmts_.back();
   }
 
-  void splice(Block::iterator it, const BlockPtr& other) {
+  void splice(Block::iterator it, BlockPtr other) {
     for (const StmtPtr& s : *other) {
       set_parent(s, this);
     }
@@ -504,8 +505,8 @@ class TORCH_API Cond : public StmtNode<Cond> {
  public:
   static CondPtr make(
       const ExprHandle& condition,
-      const StmtPtr& true_stmt,
-      const StmtPtr& false_stmt) {
+      StmtPtr true_stmt,
+      StmtPtr false_stmt) {
     return alloc<Cond>(condition.node(), true_stmt, false_stmt);
   }
 
@@ -553,13 +554,11 @@ class TORCH_API Cond : public StmtNode<Cond> {
     set_false_stmt(std::move(false_stmt));
   }
 
-  CondPtr cloneWithNewBodies(
-      const StmtPtr& true_stmt,
-      const StmtPtr& false_stmt) {
+  CondPtr cloneWithNewBodies(StmtPtr true_stmt, StmtPtr false_stmt) {
     return alloc<Cond>(condition_, true_stmt, false_stmt);
   }
 
-  CondPtr cloneWithNewBody(const StmtPtr& true_stmt) {
+  CondPtr cloneWithNewBody(StmtPtr true_stmt) {
     return alloc<Cond>(condition_, true_stmt, nullptr);
   }
 
@@ -718,7 +717,7 @@ class TORCH_API For : public StmtNode<For> {
       const VarHandle& var,
       const ExprHandle& start,
       const ExprHandle& stop,
-      const StmtPtr& body) {
+      StmtPtr body) {
     if (!body) {
       return nullptr;
     }
@@ -728,7 +727,7 @@ class TORCH_API For : public StmtNode<For> {
       const VarHandle& var,
       const ExprHandle& start,
       const ExprHandle& stop,
-      const StmtPtr& body,
+      StmtPtr body,
       const LoopOptions& loop_options) {
     if (!body) {
       return nullptr;
@@ -755,15 +754,15 @@ class TORCH_API For : public StmtNode<For> {
       ExprPtr stop,
       StmtPtr body,
       LoopOptions loop_options)
-      : var_(std::move(var)),
-        start_(std::move(start)),
-        stop_(std::move(stop)),
+      : var_(var),
+        start_(start),
+        stop_(stop),
         loop_options_(std::move(loop_options)) {
-    if (!var_) {
+    if (!var) {
       throw malformed_input("invalid Var in For loop");
-    } else if (!start_) {
+    } else if (!start) {
       throw malformed_input("invalid Start in For loop");
-    } else if (!stop_) {
+    } else if (!stop) {
       throw malformed_input("invalid Stop in For loop");
     } else if (!body || body->get_parent()) {
       throw malformed_input("invalid Body in For loop");
@@ -797,7 +796,7 @@ class TORCH_API For : public StmtNode<For> {
     loop_options_.set_buffer_mapping(map);
   }
 
-  ForPtr cloneWithNewBody(const StmtPtr& body) const {
+  ForPtr cloneWithNewBody(StmtPtr body) const {
     return alloc<For>(var_, start_, stop_, body, loop_options_);
   }
 
@@ -1020,4 +1019,6 @@ class TORCH_API ExternalCallWithAlloc : public StmtNode<ExternalCallWithAlloc> {
   std::vector<ExprPtr> args_;
 };
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

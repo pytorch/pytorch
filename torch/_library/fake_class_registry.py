@@ -42,7 +42,7 @@ class HasStaticMethodFromReal(Protocol):
 
 
 class FakeClassRegistry:
-    def __init__(self) -> None:
+    def __init__(self):
         self._registered_class: Dict[str, Any] = {}
 
     def has_impl(self, full_qualname: str) -> bool:

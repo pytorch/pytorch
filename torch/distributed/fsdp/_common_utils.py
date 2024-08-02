@@ -106,7 +106,7 @@ class _FSDPDeviceHandle:
 
 
 class _UninitializedDeviceHandle(_FSDPDeviceHandle):
-    def __init__(self) -> None:
+    def __init__(self):
         pass
 
     def __getattribute__(self, __name: str) -> Any:

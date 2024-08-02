@@ -92,7 +92,7 @@ def print_missing(stack):
 class Profiler:
     unique_graphs = 0
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.prof = torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CPU],
             with_stack=should_print_missing(),

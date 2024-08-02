@@ -17,7 +17,7 @@ torch._lazy.ts_backend.init()
 
 
 class Net(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.conv1 = nn.Conv2d(1, 32, 3, 1)
         self.conv2 = nn.Conv2d(32, 64, 3, 1)

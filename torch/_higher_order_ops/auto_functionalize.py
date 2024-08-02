@@ -54,7 +54,7 @@ class AutoFunctionalized(HigherOrderOperator):
     underscore is to prevent collisions with kwarg names in **kwargs.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__("auto_functionalized")
 
     def __call__(

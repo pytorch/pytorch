@@ -8,7 +8,7 @@ class ModelAttrMutation(torch.nn.Module):
     Attribute mutation is not supported.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.attr_list = [torch.randn(3, 2), torch.randn(3, 2)]
 

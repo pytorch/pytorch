@@ -69,7 +69,7 @@ class OverrideDict(Collection[_K], Generic[_K, _V]):
     ones.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         self._base: Dict[_K, _V] = {}
         self._overrides: Dict[_K, _V] = {}
         self._merged: Dict[_K, _V] = {}

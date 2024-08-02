@@ -6,7 +6,9 @@
 
 #include <utility>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 template <typename T>
 class PaddedBuffer;
@@ -114,7 +116,7 @@ class TORCH_API ExtCallMemoryReuse : public IRMutator {
   explicit ExtCallMemoryReuse(
       const std::vector<CodeGen::BufferArg>& bufferArgs);
   ~ExtCallMemoryReuse() override = default;
-  StmtPtr mutate(const ExternalCallPtr& v) override;
+  StmtPtr mutate(ExternalCallPtr v) override;
 
  private:
   std::unordered_set<BufPtr> bufferArgs_;
@@ -272,7 +274,9 @@ TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(
 
 class TORCH_API GenericIntrinsicsExpander : public IRMutator {
  protected:
-  ExprPtr mutate(const IntrinsicsPtr& v) override;
+  ExprPtr mutate(IntrinsicsPtr v) override;
 };
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

@@ -34,7 +34,7 @@ class NewModule(torch.nn.Module):
 class UsesInterface(torch.nn.Module):
     proxy_mod: ModuleInterface
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.proxy_mod = OrigModule()
 

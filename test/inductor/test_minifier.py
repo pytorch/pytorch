@@ -122,7 +122,7 @@ inner(torch.randn(20))
             res.repro_module(),
             """\
 class Repro(torch.nn.Module):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
 
     def forward(self, arg0_1):
@@ -138,7 +138,7 @@ class Repro(torch.nn.Module):
             res.repro_module(),
             """\
 class Repro(torch.nn.Module):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
 
     def forward(self, arg0_1):

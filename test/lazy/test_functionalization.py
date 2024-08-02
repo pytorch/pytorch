@@ -22,7 +22,7 @@ class LazyFuncionalizationTest(TestCase):
                 metrics.reset()
 
             class Model(torch.nn.Module):
-                def __init__(self) -> None:
+                def __init__(self):
                     super().__init__()
                     self.fc1 = torch.nn.Linear(4, 2, bias=False)
 

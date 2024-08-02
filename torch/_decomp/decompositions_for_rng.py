@@ -71,7 +71,7 @@ class PhiloxState:
     trace time.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.reset()
 
     def reset(self):

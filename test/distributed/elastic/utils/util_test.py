@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class MockStore:
-    def __init__(self) -> None:
+    def __init__(self):
         self.ops = []
 
     def set_timeout(self, timeout: float) -> None:
