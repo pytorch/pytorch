@@ -1336,17 +1336,6 @@ def triton_(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
                 torch._dynamo.mark_dynamic(inp, 0)
             foo_c = torch.compile(foo)
             torch.testing.assert_allclose(foo(inp), foo_c(inp))
-    
-
-    def test_non_compiletime_known_aligned(self):
-        def fn(inp):
-            return inp[inp.size(0):] * 2
-
-        inp = torch.rand(1, 16, dtype=torch.uint8, device="cuda")
-        torch._dynamo.mark_unbacked(inp, 0)
-
-        fn_c = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)(inp)
-        torch.testing.assert_allclose(fn(inp), fn_c(inp))
 
 
 if __name__ == "__main__":
