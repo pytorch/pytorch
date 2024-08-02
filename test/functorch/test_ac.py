@@ -1,15 +1,15 @@
 # Owner(s): ["oncall: pt2"]
 import random
 import unittest
-
 from math import prod
 
 import torch
 import torch._functorch.config as config
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
-from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
 from torch.utils._triton import has_triton
+from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
+
 
 if has_triton():
     # note: if we only import triton in the test, the test fails:
@@ -214,7 +214,6 @@ class MemoryBudgetTest(TestCase):
             torch._library.capture_triton(relu_kernel_)[grid](x, y, sz, BLOCK_SIZE)
             return y
 
-
         @torch._library.triton_op("testac::triton_relu_backward", mutates_args=())
         def triton_relu_backward(grad_out: torch.Tensor) -> torch.Tensor:
             grad_x = torch.empty_like(grad_out)
@@ -222,24 +221,25 @@ class MemoryBudgetTest(TestCase):
             BLOCK_SIZE = 256
             grid = (triton.cdiv(sz, BLOCK_SIZE),)
             # I know this is wrong, but whatever..
-            torch._library.capture_triton(relu_kernel_)[grid](grad_out, grad_x, sz, BLOCK_SIZE)
+            torch._library.capture_triton(relu_kernel_)[grid](
+                grad_out, grad_x, sz, BLOCK_SIZE
+            )
             return grad_x
 
-
-        def _triton_relu_backward(
-            ctx, grad_out: torch.Tensor
-        ) -> torch.Tensor:
+        def _triton_relu_backward(ctx, grad_out: torch.Tensor) -> torch.Tensor:
             return triton_relu_backward(grad_out)
-
 
         def _triton_relu_setup_context(ctx, inputs, output):
             pass
 
         triton_relu.register_autograd(
-            _triton_relu_backward, setup_context=_triton_relu_setup_context,
+            _triton_relu_backward,
+            setup_context=_triton_relu_setup_context,
         )
 
-        @register_flop_formula([torch.ops.testac.triton_relu, torch.ops.testac.triton_relu_backward])
+        @register_flop_formula(
+            [torch.ops.testac.triton_relu, torch.ops.testac.triton_relu_backward]
+        )
         def triton_relu_flops(inp_shape, *args, **kwargs):
             return prod(inp_shape)
 
@@ -250,7 +250,9 @@ class MemoryBudgetTest(TestCase):
             return x.sum()
 
         x = torch.randn(512, 512, requires_grad=True, device="cuda")
-        ws = [torch.randn(512, 512, requires_grad=True, device="cuda") for _ in range(5)]
+        ws = [
+            torch.randn(512, 512, requires_grad=True, device="cuda") for _ in range(5)
+        ]
 
         def call():
             return f(x, ws)
@@ -261,7 +263,9 @@ class MemoryBudgetTest(TestCase):
             torch._dynamo.reset()
             with config.patch(activation_memory_budget=memory_budget):
                 if memory_budget is not None:
-                    f_compile = torch.compile(call, backend="aot_eager_decomp_partition")
+                    f_compile = torch.compile(
+                        call, backend="aot_eager_decomp_partition"
+                    )
 
                 self.assertEqual(expected, f_compile())
 
