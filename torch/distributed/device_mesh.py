@@ -75,23 +75,45 @@ else:
         def create_child_mesh(
             self, parent_mesh: "DeviceMesh", submesh_dim_names: Tuple[str, ...]
         ) -> "DeviceMesh":
+            import copy
+
+            mesh_dim_names = list(parent_mesh.mesh_dim_names)
+            mesh_tensor = copy.copy(parent_mesh.mesh)
+            for name in submesh_dim_names:
+                if name not in parent_mesh.view_dim_submesh_names:
+                    continue
+
+                # This does not the case where there are non-contiguous dim in
+                # submes_dim_names
+                start = None
+                end = None
+                for merged_mesh in parent_mesh.view_dim_submesh_names[name]:
+                    i = mesh_dim_names.index(merged_mesh)
+                    if start is None:
+                        start = i
+                    end = i
+                mesh_dim_names[start] = name
+                for i in range(start + 1, end + 1):
+                    mesh_dim_names.pop(start + 1)
+                mesh_tensor = mesh_tensor.flatten(start_dim=start, end_dim=end)
+
             # submesh_dims are the mesh dimension of the submesh in the parent mesh.
             submesh_dims = [
-                not_none(parent_mesh.mesh_dim_names).index(mesh_dim_name)
+                not_none(mesh_dim_names).index(mesh_dim_name)
                 for mesh_dim_name in submesh_dim_names
             ]
             submesh_dim_sizes = [
-                parent_mesh.mesh.size(mesh_dim) for mesh_dim in submesh_dims
+                mesh_tensor.size(mesh_dim) for mesh_dim in submesh_dims
             ]
 
-            mesh_dims_remained = list(range(parent_mesh.mesh.ndim))
+            mesh_dims_remained = list(range(mesh_tensor.ndim))
             for submesh_dim in submesh_dims:
                 mesh_dims_remained.remove(submesh_dim)
 
             # pg_ranks_by_dim is the size of [number of local ranks of the outermost submesh dimension, *sub_mesh_dims]
             # This means on each local rank of the outermost slice mesh dim, we have a tensor of submesh size with
             # the pg ranks of the submesh. From this, we can extract the submesh mesh tensor contains the current rank.
-            pg_ranks_by_dim = parent_mesh.mesh.permute(
+            pg_ranks_by_dim = mesh_tensor.permute(
                 *mesh_dims_remained, *submesh_dims
             ).reshape(-1, *submesh_dim_sizes)
 
@@ -106,9 +128,24 @@ else:
                 if cur_rank in mesh_nd:
                     res_submesh = submesh
 
-            res_submesh._dim_group_infos = [  # type: ignore[possibly-undefined]
-                parent_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims
-            ]
+            if name in parent_mesh.view_dim_submesh_names:
+                backend, pg_options = None, None
+                dim_group = new_group(
+                    ranks=mesh_nd,
+                    backend=backend,
+                    pg_options=pg_options,
+                )
+                res_submesh._dim_group_infos = [
+                    (
+                        _get_group_tag(not_none(dim_group)),
+                        mesh_nd,
+                        dim_group.group_name,
+                    )
+                ]
+            else:
+                res_submesh._dim_group_infos = [  # type: ignore[possibly-undefined]
+                    parent_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims
+                ]
             self.child_to_parent_mapping[res_submesh] = parent_mesh
 
             return res_submesh
@@ -220,6 +257,7 @@ else:
         device_type: str
         mesh: torch.Tensor
         mesh_dim_names: Optional[Tuple[str, ...]]
+        view_dim_submesh_names: Dict[str, Tuple[str]]
 
         def __init__(
             self,
@@ -238,6 +276,7 @@ else:
                 else torch.tensor(mesh, device="cpu", dtype=torch.int)
             )
             self.mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
+            self.view_dim_submesh_names = {}
 
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
@@ -452,20 +491,26 @@ else:
             if mesh_dim_names == self.mesh_dim_names:
                 return self
             elif len(mesh_dim_names) > len(self.mesh_dim_names) or not all(
-                mesh_dim_name in self.mesh_dim_names for mesh_dim_name in mesh_dim_names
+                (
+                    mesh_dim_name in self.mesh_dim_names
+                    or mesh_dim_name in self.view_dim_submesh_names
+                )
+                for mesh_dim_name in mesh_dim_names
             ):
                 raise KeyError(error_msg)
             # Check if the user-provided slicing is a valid contiguous subsequence of the mesh_dim_names
             # of the current DeviceMesh.
             else:
-                outermost_dim_name = mesh_dim_names[0]
-                outermost_dim_idx = self.mesh_dim_names.index(outermost_dim_name)
-                for i, j in zip(
-                    mesh_dim_names,
-                    self.mesh_dim_names[outermost_dim_idx : len(mesh_dim_names)],
-                ):
-                    if i != j:
-                        raise KeyError(error_msg)
+                if False:
+                    # Need to add the support of view dims
+                    outermost_dim_name = mesh_dim_names[0]
+                    outermost_dim_idx = self.mesh_dim_names.index(outermost_dim_name)
+                    for i, j in zip(
+                        mesh_dim_names,
+                        self.mesh_dim_names[outermost_dim_idx : len(mesh_dim_names)],
+                    ):
+                        if i != j:
+                            raise KeyError(error_msg)
 
             submesh = _mesh_resources.create_child_mesh(self, mesh_dim_names)
             return submesh
@@ -643,6 +688,13 @@ else:
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
             return self._coordinate_on_dim if self._coordinate_on_dim else None
+
+        def create_view_dim(self, dims, name):
+            if _mesh_resources.get_parent_mesh(self) is not None:
+                raise ValueError("create_view_dim cannot be used with a submesh")
+
+            self.view_dim_submesh_names[name] = tuple(dims)
+            return self[name]
 
     def init_device_mesh(
         device_type: str,
