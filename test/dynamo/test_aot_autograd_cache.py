@@ -18,6 +18,7 @@ from torch._functorch._aot_autograd.autograd_cache import (
 )
 from torch._functorch._aot_autograd.schemas import AOTConfig
 from torch._inductor import config as inductor_config
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -28,7 +29,7 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 @instantiate_parametrized_tests
-class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
+class AOTAutogradCacheTests(InductorTestCase):
     def setUp(self):
         """
         Reset all counters and caches before each unit test

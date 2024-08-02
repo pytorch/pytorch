@@ -141,8 +141,12 @@ def run_single_experiment(
         requires_grad=config.calculate_bwd_time,
     )
 
+    kwargs = {}
+    if get_func_name(config.mask_mod) == "causal":
+        kwargs["is_causal"] = True
+
     def eager_sdpa(query, key, value, _):
-        return F.scaled_dot_product_attention(query, key, value)
+        return F.scaled_dot_product_attention(query, key, value, **kwargs)
 
     if max_autotune:
         compiled_sdpa = torch.compile(
@@ -243,7 +247,17 @@ def calculate_tflops(config: ExperimentConfig, results: ExperimentResults) -> fl
 
 
 def get_func_name(func):
-    return func.__name__.split("<locals>.")[-1].split(" at ")[0]
+    if func is None:
+        return "None"
+    if "gqa" in func.__name__:
+        return func.__name__
+    func_str = str(func)
+    if "<locals>" in func_str:
+        # For locally defined functions
+        return func_str.split("<locals>.")[-1].split(" at ")[0]
+    else:
+        # For regular functions
+        return func.__name__
 
 
 def set_func_name(func, name):
@@ -263,12 +277,10 @@ def get_average_speedups(results: List[Experiment], type: str):
     min_config_dict = results[min_speedup_index].config.asdict()
 
     # Extract function names from score_mod strings
-    max_config_dict["score_mod"] = (
-        max_config_dict["score_mod"].__name__.split("<locals>.")[-1].split(" at ")[0]
-    )
-    min_config_dict["score_mod"] = (
-        min_config_dict["score_mod"].__name__.split("<locals>.")[-1].split(" at ")[0]
-    )
+    max_config_dict["score_mod"] = get_func_name(max_config_dict["score_mod"])
+    max_config_dict["mask_mod"] = get_func_name(max_config_dict["mask_mod"])
+    min_config_dict["score_mod"] = get_func_name(min_config_dict["score_mod"])
+    min_config_dict["mask_mod"] = get_func_name(min_config_dict["mask_mod"])
 
     # Create table data
     table_data = [
@@ -316,6 +328,7 @@ def print_results(results: List[Experiment]):
         table_data["bwd_speedup"] = bwd_speedups
 
     table_data["score_mod"] = [get_func_name(func) for func in table_data["score_mod"]]
+    table_data["mask_mod"] = [get_func_name(func) for func in table_data["mask_mod"]]
     print(tabulate(table_data, headers="keys", tablefmt="github", floatfmt=".3f"))
 
     print("\n")

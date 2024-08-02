@@ -9,7 +9,7 @@ import math
 import operator
 import types
 from collections import defaultdict, OrderedDict
-from collections.abc import KeysView, MutableMapping
+from collections.abc import KeysView
 from typing import Dict, List, TYPE_CHECKING
 
 import torch
@@ -635,11 +635,11 @@ class BuiltinVariable(VariableTracker):
     def can_insert_in_graph(self):
         return self.fn in self._fx_graph_functions()
 
-    def __init__(self, fn, **kwargs):
+    def __init__(self, fn, **kwargs) -> None:
         super().__init__(**kwargs)
         self.fn = fn
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.fn is None:
             name = "None"
         else:
@@ -1366,9 +1366,7 @@ class BuiltinVariable(VariableTracker):
                     for x in arg.force_unpack_var_sequence(tx)
                 )
                 return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
-            elif isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
-                arg.value, MutableMapping
-            ):
+            elif isinstance(arg, variables.MutableMappingVariable):
                 # This is applicable for user defined objects which seem like dict, but are not really dicts. For
                 # example, TensorDict derives from MutableMapping. For such cases, we can directly inline the .items
                 # method and create a new dict.
@@ -1975,6 +1973,9 @@ class BuiltinVariable(VariableTracker):
             install_guard(args[0].source.make_guard(GuardBuilder.ID_MATCH))
             constant_result = id(args[0].value)
             return variables.ConstantVariable.create(constant_result)
+        elif len(args) == 1 and isinstance(args[0], TensorVariable):
+            tensor_variable = args[0]
+            return tensor_variable.call_id(tx)
         else:
             unimplemented(f"call_id with args {args}")
 

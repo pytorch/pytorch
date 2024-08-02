@@ -31,7 +31,7 @@ class MutableLocalBase:
     Base class for Variable.mutable_local
     """
 
-    def __init__(self, typ: MutableLocalSource):
+    def __init__(self, typ: MutableLocalSource) -> None:
         # In HigherOrderOperator tracing, we need to distinguish
         # between MutableLocals inside the HigherOrderOperator and
         # ones outside it. For example, it is not safe to mutate
@@ -110,7 +110,7 @@ class VariableTrackerMeta(type):
             instance = instance.realize()
         return type.__instancecheck__(cls, instance)
 
-    def __init__(cls, name, bases, attrs):
+    def __init__(cls, name, bases, attrs) -> None:
         super().__init__(name, bases, attrs)
         VariableTrackerMeta.all_subclasses.append(cls)
 
@@ -173,7 +173,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             for subvalue in value.values():
                 cls.visit(fn, subvalue, cache)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
 
     def debug_repr(self):
@@ -365,7 +365,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         *,
         source: Source = None,
         mutable_local: MutableLocal = None,
-    ):
+    ) -> None:
         super().__init__()
         self.source = source
         self.mutable_local = mutable_local
