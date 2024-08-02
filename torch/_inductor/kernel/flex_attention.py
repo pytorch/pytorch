@@ -113,6 +113,7 @@ def build_subgraph_buffer(
     raise ValueError("FlexAttention was passed a subgraph with no output node!")
 
 
+# Inner Triton functions shared by flex_attention & split-k decoding kernels.
 compute_next_offset_func = r"""
 @triton.jit
 def get_offset_for_next_block(loop_iter, col_indices, total_blocks, SPARSE_BLOCK, SPARSE_BLOCK_MULTIPLE, BLOCK):
@@ -126,10 +127,7 @@ def get_offset_for_next_block(loop_iter, col_indices, total_blocks, SPARSE_BLOCK
     return offset
 """
 
-flex_attention_template = TritonTemplate(
-    name="flex_attention",
-    grid=flex_attention_grid,
-    source=r"""
+compute_flex_attention = r"""
 {{def_kernel("Q", "K", "V", "LSE", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
     # Sub notation for this kernel:
     #
@@ -143,7 +141,7 @@ flex_attention_template = TritonTemplate(
     # FULL_KV_NUM_BLKS: The number of fully unmasked KV blocks (so we don't need masking) for each query.
     # FULL_KV_IDX: The indices of fully unmasked KV blocks (so we don't need masking) for each query.
     #
-    # output_logsumexp: We only need to store the logsumexp if we require grad
+    # OUTPUT_LOGSUMEXP: We only need to store the logsumexp if we require grad
     #
     # (Modifiable) Performance tuning options
     # BLOCK_M: The thread block size across the seqlen dim of Q.
@@ -151,9 +149,9 @@ flex_attention_template = TritonTemplate(
 
     # The below are kernel options that can be applied for certain score_mods,
     # or involve a numerics vs. perf tradeoff
-    # prescale_qk: Whether to pre-scale QK by 1/sqrt(d) and change of base. Has
+    # PRESCALE_QK: Whether to pre-scale QK by 1/sqrt(d) and change of base. Has
     # about 20% more numerical error, but slightly faster.
-    # rows_guaranteed_safe: Is it guaranteed that at least one value in each row
+    # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row
     # is not masked out? If so, we can skip an extra safety check
 
     tl.static_assert(SPARSE_Q_BLOCK_SIZE >= BLOCK_M and SPARSE_Q_BLOCK_SIZE % BLOCK_M == 0)
@@ -248,6 +246,7 @@ flex_attention_template = TritonTemplate(
         acc, l_i, m_i,
         off_z, off_h, offs_m, offs_n,
         kv_indices, kv_num_blocks,
+        0, kv_num_blocks * SPARSE_KV_MULTIPLE,
         MATMUL_PRECISION,
         {{gen_argdefs()}},
         IS_FULL_BLOCKS=False
@@ -285,6 +284,7 @@ flex_attention_template = TritonTemplate(
             acc, l_i, m_i,
             off_z, off_h, offs_m, offs_n,
             kv_indices, kv_num_blocks,
+            0, kv_num_blocks * SPARSE_KV_MULTIPLE,
             MATMUL_PRECISION,
             {{gen_argdefs()}},
             IS_FULL_BLOCKS=True
@@ -306,13 +306,15 @@ flex_attention_template = TritonTemplate(
     {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "acc", "mask")}}
 
     # TODO dont want to write this if we dont require grad
-    if output_logsumexp:
+    if OUTPUT_LOGSUMEXP:
         off_hz = tl.program_id(1)
         l_ptrs = LSE + off_hz * Q_LEN + offs_m
         lse = m_i + tl.math.log2(l_i)
         tl.store(l_ptrs, lse)
+ """
 
 
+compute_forward_block = r"""
 @triton.jit
 def forward_inner(
     q, K_block_ptr, V_block_ptr,
@@ -322,6 +324,8 @@ def forward_inner(
     off_z, off_h, offs_m, offs_n,
     # blocksparse data
     kv_indices, kv_num_blocks,
+    # start kv and end kv block
+    block_n_start, block_n_end,
     MATMUL_PRECISION,
     {{gen_argdefs()}},
     IS_FULL_BLOCKS,
@@ -335,23 +339,21 @@ def forward_inner(
 
     RCP_LN2: tl.constexpr = 1.44269504
 
-    if prescale_qk:
+    if PRESCALE_QK:
         q = (q * scale * RCP_LN2).to(MATMUL_PRECISION)
 
     # loop over k, v and update accumulator
-    lo = 0
-    hi = kv_num_blocks * SPARSE_KV_MULTIPLE
-
-    for start_n in range(0, hi):
+    for start_n in range(block_n_start, block_n_end):
         # -- load k --
         k = tl.load(K_block_ptr)
         # -- compute qk ---
-        qk = tl.dot(q, k)
-        if not prescale_qk:
+        qk = tl.dot(q, k) # TODO: use cuda matmul when q_len <= 2.
+        if not PRESCALE_QK:
             qk *= scale
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = offs_n[None, :]
+        # TODO: Add load mask in modification when M/N Boundary is not safe
         {{ modification(
             subgraph_number=0,
             output_name="post_mod_scores",
@@ -377,13 +379,13 @@ def forward_inner(
             post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
 
         # TODO: In the case that score_mod is linear, this can be LICMed
-        if not prescale_qk:
+        if not PRESCALE_QK:
             post_mod_scores *= RCP_LN2
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # -- compute scaling constant ---
         m_ij = tl.maximum(m_i, tl.max(post_mod_scores, 1))
-        if not rows_guaranteed_safe:
+        if not ROWS_GUARANTEED_SAFE:
             masked_out_rows = (m_ij == float("-inf"))
             m_ij_masked = tl.where(masked_out_rows, 0, m_ij)
         else:
@@ -413,8 +415,14 @@ def forward_inner(
         offs_n = offs_n + offset
 
     return acc, l_i, m_i
- """
-    + compute_next_offset_func,
+
+"""
+
+
+flex_attention_template = TritonTemplate(
+    name="flex_attention",
+    grid=flex_attention_grid,
+    source=compute_flex_attention + compute_forward_block + compute_next_offset_func,
 )
 
 
@@ -571,18 +579,6 @@ def flex_attention(
     subgraph_buffer = build_subgraph_buffer(
         placeholder_inps + list(score_mod_other_buffers), subgraph
     )
-    if _use_flex_decoding(query):
-        return create_flex_decoding_kernel(
-            subgraph_buffer,
-            query,
-            key,
-            value,
-            subgraph,
-            block_mask,
-            scale,
-            kernel_options,
-            *score_mod_other_buffers,
-        )
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -595,6 +591,19 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
+    if _use_flex_decoding(query):
+        return create_flex_decoding_kernel(
+            query,
+            key,
+            value,
+            block_mask,
+            scale,
+            kernel_options,
+            subgraph_buffer,
+            mask_graph_buffer,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
     for buf in [
         query,
         key,
@@ -775,7 +784,7 @@ flex_attention_backward_template = TritonTemplate(
 
     # The below are kernel options that can be applied for certain score_mods,
     # or involve a numerics vs. perf tradeoff
-    # prescale_qk: Whether to pre-scale QK by 1/sqrt(d) and change of base. Has
+    # PRESCALE_QK: Whether to pre-scale QK by 1/sqrt(d) and change of base. Has
     # about 20% more numerical error, but slightly faster.
 
     # Define strides of inputs
@@ -857,7 +866,7 @@ flex_attention_backward_template = TritonTemplate(
         q = tl.load(Q + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
         do = tl.load(DO + offs_m2[:, None] * stride_dom + offs_k[None, :] * stride_dod)
 
-        if prescale_qk:
+        if PRESCALE_QK:
             q = (q * scale * RCP_LN2).to(MATMUL_PRECISION)
 
         Di = tl.load(DELTA + offs_m2)
@@ -928,7 +937,7 @@ flex_attention_backward_template = TritonTemplate(
 
         # load K and V: they stay in SRAM throughout the inner loop.
         k = tl.load(K + offs_n1[:, None] * stride_kn + offs_k[None, :] * stride_kd)
-        if prescale_qk:
+        if PRESCALE_QK:
             k = (k * scale * RCP_LN2).to(MATMUL_PRECISION)
         v = tl.load(V + offs_n1[:, None] * stride_vn + offs_k[None, :] * stride_vd)
 
@@ -1010,7 +1019,7 @@ def bwd_dq_inner(
     for start_n in range(0, hi):
         kT = tl.load(kT_ptrs)
         qk = tl.dot(q, kT)
-        if not prescale_qk:
+        if not PRESCALE_QK:
             qk *= scale
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         pre_mod_scores = qk
@@ -1041,7 +1050,7 @@ def bwd_dq_inner(
             # apply mask for partial masked block
             post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        if not prescale_qk:
+        if not PRESCALE_QK:
             post_mod_scores *= RCP_LN2
         p = tl.math.exp2(post_mod_scores - lse)
         # Compute dP and dS.
@@ -1108,7 +1117,7 @@ def bwd_dkdv_inner(
         qT = tl.load(qT_ptrs)
         lse = tl.load(LSE + offs_m1)
         qkT = tl.dot(k, qT)
-        if not prescale_qk:
+        if not PRESCALE_QK:
             qkT *= scale
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m1[None, :]
@@ -1137,7 +1146,7 @@ def bwd_dkdv_inner(
             # (grads) apply mask for fully masked block
             post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        if not prescale_qk:
+        if not PRESCALE_QK:
             post_mod_scores *= RCP_LN2
         pT = tl.math.exp2(post_mod_scores - lse[None, :])
         do = tl.load(do_ptrs)

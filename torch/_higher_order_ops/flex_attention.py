@@ -38,7 +38,7 @@ class TransformGetItemToIndex(TorchFunctionMode):
 
 
 class FlexAttentionHOP(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("flex_attention")
 
     def __call__(
@@ -76,7 +76,7 @@ flex_attention.__module__ = "torch.ops.higher_order"
 
 
 class FlexAttentionBackwardHOP(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("flex_attention_backward")
 
     def __call__(

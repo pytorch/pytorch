@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 """
 Python polyfills for common builtins.
@@ -24,7 +24,7 @@ def any(iterator):
 
 
 def index(iterator, item, start=0, end=None):
-    for i, elem in enumerate(list(iterator)[start:end], start):
+    for i, elem in list(enumerate(list(iterator)))[start:end]:
         if item == elem:
             return i
     # This will not run in dynamo
@@ -131,3 +131,10 @@ def enumerate(iterable, start=0):
     for elem in iterable:
         yield n, elem
         n += 1
+
+
+def mapping_get(obj, key, value=None):
+    try:
+        return obj.__getitem__(key)
+    except KeyError:
+        return value

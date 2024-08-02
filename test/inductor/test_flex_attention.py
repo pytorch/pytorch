@@ -1202,9 +1202,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         block_mask = _create_empty_block_mask(q, k)
         kernel_options = {
-            "rows_guaranteed_safe": False,
-            "prescale_qk": False,
-            "output_logsumexp": True,
+            "ROWS_GUARANTEED_SAFE": False,
+            "PRESCALE_QK": False,
+            "OUTPUT_LOGSUMEXP": True,
         }
 
         @torch.compile
@@ -1276,9 +1276,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         block_mask = _create_empty_block_mask(q, k)
         kernel_options = {
-            "rows_guaranteed_safe": False,
-            "prescale_qk": False,
-            "output_logsumexp": True,
+            "ROWS_GUARANTEED_SAFE": False,
+            "PRESCALE_QK": False,
+            "OUTPUT_LOGSUMEXP": True,
         }
 
         @torch.compile
@@ -1311,9 +1311,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         block_mask = _create_empty_block_mask(q, k)
         kernel_options = {
-            "rows_guaranteed_safe": False,
-            "prescale_qk": False,
-            "output_logsumexp": True,
+            "ROWS_GUARANTEED_SAFE": False,
+            "PRESCALE_QK": False,
+            "OUTPUT_LOGSUMEXP": True,
         }
 
         @torch.compile
@@ -1526,6 +1526,31 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
 
     @supported_platform
+    def test_block_mask_device_change(self):
+        offset = torch.zeros(8, device="cuda")
+
+        def causal_mask(b, h, q, kv):
+            return (q + (offset[b] * 128)) >= kv
+
+        block_mask = create_block_mask(causal_mask, 1, 1, 512, 512)
+        assert block_mask.kv_indices.is_cuda
+        assert block_mask.kv_num_blocks.is_cuda
+        assert block_mask.q_indices.is_cuda
+        assert block_mask.q_num_blocks.is_cuda
+
+        block_mask = block_mask.to("cpu")
+        assert block_mask.kv_indices.is_cpu
+        assert block_mask.kv_num_blocks.is_cpu
+        assert block_mask.q_indices.is_cpu
+        assert block_mask.q_num_blocks.is_cpu
+
+        block_mask = block_mask.to("cuda")
+        assert block_mask.kv_indices.is_cuda
+        assert block_mask.kv_num_blocks.is_cuda
+        assert block_mask.q_indices.is_cuda
+        assert block_mask.q_num_blocks.is_cuda
+
+    @supported_platform
     def test_block_mask_viz(self):
         def causal_mask(b, h, q, kv):
             return q >= kv
@@ -1617,18 +1642,18 @@ class GraphModule(torch.nn.Module):
         l_kwargs_block_mask_full_q_num_blocks = L_kwargs_block_mask_full_q_num_blocks
         l_kwargs_block_mask_full_q_indices = L_kwargs_block_mask_full_q_indices
 
-        child_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child: "f64[]" = l_args_0_.new_empty([], requires_grad = True)
+        child_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_1 = None
+        child_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_2 = None
+        child_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_3 = None
+        child_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_4 = None
+        child: "f64[]" = l_args_0_.new_empty([], requires_grad = True);  child = None
         score_mod_0 = self.score_mod_0
-        child_5: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_6: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        child_5: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_5 = None
+        child_6: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_6 = None
+        child_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_7 = None
+        child_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_8 = None
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (l_kwargs_block_mask_kv_num_blocks, l_kwargs_block_mask_kv_indices, l_kwargs_block_mask_full_kv_num_blocks, l_kwargs_block_mask_full_kv_indices, l_kwargs_block_mask_q_num_blocks, l_kwargs_block_mask_q_indices, l_kwargs_block_mask_full_q_num_blocks, l_kwargs_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'rows_guaranteed_safe': False, 'prescale_qk': False, 'output_logsumexp': True}, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = l_kwargs_block_mask_kv_num_blocks = l_kwargs_block_mask_kv_indices = l_kwargs_block_mask_full_kv_num_blocks = l_kwargs_block_mask_full_kv_indices = l_kwargs_block_mask_q_num_blocks = l_kwargs_block_mask_q_indices = l_kwargs_block_mask_full_q_num_blocks = l_kwargs_block_mask_full_q_indices = mask_fn_0 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (l_kwargs_block_mask_kv_num_blocks, l_kwargs_block_mask_kv_indices, l_kwargs_block_mask_full_kv_num_blocks, l_kwargs_block_mask_full_kv_indices, l_kwargs_block_mask_q_num_blocks, l_kwargs_block_mask_q_indices, l_kwargs_block_mask_full_q_num_blocks, l_kwargs_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = l_kwargs_block_mask_kv_num_blocks = l_kwargs_block_mask_kv_indices = l_kwargs_block_mask_full_kv_num_blocks = l_kwargs_block_mask_full_kv_indices = l_kwargs_block_mask_q_num_blocks = l_kwargs_block_mask_q_indices = l_kwargs_block_mask_full_q_num_blocks = l_kwargs_block_mask_full_q_indices = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -1668,7 +1693,7 @@ class GraphModule(torch.nn.Module):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
         mask_graph = self.mask_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, fw_graph, joint_graph, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 128, 128, mask_graph), 0.5, {'rows_guaranteed_safe': False, 'prescale_qk': False, 'output_logsumexp': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = fw_graph = joint_graph = full = full_default = convert_element_type = convert_element_type_1 = mask_graph = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, fw_graph, joint_graph, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 128, 128, mask_graph), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = fw_graph = joint_graph = full = full_default = convert_element_type = convert_element_type_1 = mask_graph = None
         getitem_4: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
@@ -1681,7 +1706,7 @@ class GraphModule(torch.nn.Module):
 
     class <lambda>(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]", arg5_1: "f64[]"):
-            mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1)
+            mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  mul = None
             mul_1: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1)
             mul_2: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1);  arg5_1 = arg0_1 = None
             add: "f64[]" = torch.ops.aten.add.Tensor(mul_2, mul_1);  mul_2 = mul_1 = None

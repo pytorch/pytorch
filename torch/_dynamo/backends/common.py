@@ -11,11 +11,12 @@ from torch._dynamo.utils import counters, defake, flatten_graph_inputs
 from torch._functorch.aot_autograd import aot_module_simplified
 from torch.utils._python_dispatch import _disable_current_modes
 
+
 log = logging.getLogger(__name__)
 
 
 class AotAutograd:
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         self.__name__ = "compiler_fn"
         self.kwargs = kwargs
 
@@ -53,7 +54,6 @@ class AotAutograd:
         )
 
         from functorch.compile import nop
-
         from torch._inductor.debug import enable_aot_logging
 
         # debug asserts slow down compile time noticeably,

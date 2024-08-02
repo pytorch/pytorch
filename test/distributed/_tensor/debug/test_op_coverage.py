@@ -7,7 +7,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class SimpleMLP(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = nn.Linear(50, 32)
         self.relu = nn.ReLU()

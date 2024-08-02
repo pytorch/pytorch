@@ -10,7 +10,7 @@ template <typename Node>
 using NodePtr = std::shared_ptr<Node>;
 
 template <typename To, typename From>
-NodePtr<To> to(NodePtr<From> x) {
+NodePtr<To> to(const NodePtr<From>& x) {
   return std::dynamic_pointer_cast<To>(x);
 }
 
