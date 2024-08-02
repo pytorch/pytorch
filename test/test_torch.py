@@ -10672,6 +10672,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         t7.d = "dog"
         self._checked_swap(t6, t7)
 
+    @unittest.skipIf(torch.cuda.is_available(), "Test specific for CPU")
+    def test_bf16_supported_on_cpu(self):
+        self.assertFalse(torch.cuda.is_bf16_supported())
+
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
