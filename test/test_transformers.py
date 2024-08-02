@@ -2143,6 +2143,71 @@ class TestSDPA(NNTestCase):
             actual = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask)
         self.assertEqual(math_ref, actual)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
+    @parametrize("backend", [SDPBackend.EFFICIENT_ATTENTION, SDPBackend.FLASH_ATTENTION])
+    @parametrize("seq_len", [32, 64, 128])
+    @parametrize("head_dim", [16, 32])
+    @parametrize("dtype", [torch.float32, torch.float16])
+    def test_fully_masked_out_rows(self, backend, device, seq_len, head_dim, dtype):
+        def attention_inputs(seq_len, head_dim, device, dtype, mask_probability=0.25):
+            query = torch.rand(1, 1, seq_len, head_dim, requires_grad=True, device=device, dtype=dtype)
+            key = torch.rand(1, 1, seq_len, head_dim, requires_grad=True, device=device, dtype=dtype)
+            value = torch.rand(1, 1, seq_len, head_dim, requires_grad=True, device=device, dtype=dtype)
+
+            # Create a mask with random row masking
+            mask = torch.ones(1, 1, seq_len, seq_len, dtype=torch.bool, device=device)
+
+            # Randomly select rows to mask
+            random_mask = torch.rand(seq_len, device=device) < mask_probability
+            mask[0, 0, random_mask, :] = False
+
+            # Randomly mask out some elements on along rows with 20% probz
+            mask = mask & (torch.rand(1, 1, seq_len, seq_len, device=device) < 0.2)
+
+            return query, key, value, mask
+
+
+        def compute_output_and_grads(query, key, value, mask, backend):
+            with sdpa_kernel(backend):
+                masked_out = scaled_dot_product_attention(query, key, value, attn_mask=mask)
+                loss = masked_out.sum()
+            grads = torch.autograd.grad(loss, [query, key, value])
+            return masked_out, grads
+
+        if backend == SDPBackend.FLASH_ATTENTION and "cuda" in str(device):
+            unittest.skip("FlashAttention does not support masks on cuda")
+            return
+        if backend == SDPBackend.EFFICIENT_ATTENTION and "cpu" in str(device):
+            unittest.skip("EfficientAttention does not support masks on cpu")
+            return
+        query, key, value, mask = attention_inputs(seq_len, head_dim, device, dtype)
+
+        # Compute results for the tested backend
+        backend_out, backend_grads = compute_output_and_grads(query, key, value, mask, backend)
+
+        # Compute results for the Math backend
+        math_out, math_grads = compute_output_and_grads(query, key, value, mask, SDPBackend.MATH)
+
+        # Compare outputs
+        torch.testing.assert_close(backend_out, math_out, atol=5e-3, rtol=0)
+        self.assertTrue(not backend_out.isnan().any())
+        self.assertTrue(not math_out.isnan().any())
+        # Compare gradients
+        for bg, mg in zip(backend_grads, math_grads):
+            torch.testing.assert_close(bg, mg, atol=3e-3, rtol=0)
+            self.assertTrue(not bg.isnan().any())
+            self.assertTrue(not mg.isnan().any())
+
+        # Check if masked rows are zero in output
+        mask_sum = mask.sum(dim=-1, keepdim=True)
+        masked_rows = (mask_sum == 0).expand_as(backend_out)
+        assert torch.all(backend_out[masked_rows] == 0), \
+            f"Non-zero values in fully masked rows for {backend}"
+
+        # Check if gradients for masked rows are zero
+        grad_query = backend_grads[0]
+        assert torch.all(grad_query[masked_rows] == 0), f"Non-zero gradients in fully masked rows for {backend}"
+
     @parametrize("kernel", [SDPBackend.MATH])
     def test_scaled_dot_product_attention_math_with_negative_scale(self, device, kernel: SDPBackend):
         # https://github.com/pytorch/pytorch/issues/105190.
