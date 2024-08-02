@@ -583,8 +583,6 @@ def trace_triton_kernel_wrapper(proxy_mode, func_overload, node_args):
         name=func_overload.__name__ + "_proxy",
     )
     ret = track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
-    if "val" not in out_proxy.node.meta:
-        out_proxy.node.meta["val"] = out
     return ret
 
 
