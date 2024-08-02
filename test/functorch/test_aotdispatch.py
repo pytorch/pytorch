@@ -526,7 +526,7 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(1, 10, 10, dtype=torch.complex64)]
 
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(10, 10, dtype=torch.complex64)
 
@@ -540,7 +540,7 @@ class TestAOTAutograd(AOTTestCase):
         # test that this works even though the sparse tensor has no storage.
 
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.EmbeddingBag(100, 8, sparse=True)
 
@@ -1004,7 +1004,7 @@ def forward(self, primals_1):
     @skipIfTorchDynamo("This test suite already uses dynamo")
     def test_composite_impl_compile(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
@@ -3584,7 +3584,7 @@ def forward(self, tangents_1):
 
     def test_buffer_copied_in_graph(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.w1 = torch.nn.Parameter(torch.zeros(1))
@@ -3639,7 +3639,7 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
 
     def test_buffer_copied_in_graph_with_different_shapes(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(4, 4))
                 self.w = torch.nn.Parameter(
@@ -3694,7 +3694,7 @@ def forward(self, primals_1, primals_2, primals_3):
 
     def test_buffer_batch_norm(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.m = torch.nn.BatchNorm1d(100)
 
@@ -3816,7 +3816,7 @@ def forward(self, tangents_1):
         from functorch.experimental import functionalize
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -3865,7 +3865,7 @@ def forward(self, tangents_1):
 
     def test_real_weights_in_symbolic_mode_with_inplace_ops(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer = torch.nn.Buffer(torch.ones(4, 5))
 
@@ -4142,7 +4142,7 @@ def forward(self, arg0_1, arg1_1):
 
     def test_aot_export_predispatch_composite_implicit_linear(self):
         class MM(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
 
@@ -4219,7 +4219,7 @@ def forward(self, arg0_1, arg1_1):
 
     def test_aot_export_predispatch_buffer_mutation_metadata(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Buffer(torch.zeros(2, 2))
 
@@ -4287,7 +4287,7 @@ def forward(self, arg0_1, arg1_1):
     )
     def test_aot_export_predispatch_with_cond_nested(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -4365,7 +4365,7 @@ def forward(self, arg0_1):
     )
     def test_aot_export_predispatch_map_1(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):
@@ -4449,7 +4449,7 @@ def forward(self, arg0_1, arg1_1):
 
     def test_aot_export_predispatch_map_2(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):
@@ -4492,7 +4492,7 @@ def forward(self, arg0_1, arg1_1):
     )
     def test_aot_export_predispatch_with_cond(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -4540,7 +4540,7 @@ def forward(self, arg0_1):
 
     def test_aot_export_predispatch_conv_and_bn(self):
         class ConvBatchnorm(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(1, 3, 1, 1)
                 self.bn = torch.nn.BatchNorm2d(3)
@@ -4607,7 +4607,7 @@ def forward(self, arg0_1):
 
     def test_aot_export_module_joint(self):
         class ConvBatchnormRelu(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(1, 3, 1, 1)
                 self.bn = torch.nn.BatchNorm2d(3)
@@ -4793,7 +4793,7 @@ class <lambda>(torch.nn.Module):
 
     def test_aot_export_forward_mutation_no_buffer_mut(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer1 = torch.nn.Buffer(torch.ones(6, 4))
 
@@ -4819,7 +4819,7 @@ def forward(self, arg0_1, arg1_1):
 
     def test_aot_export_forward_mutation_multiple_mut(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer1 = torch.nn.Buffer(torch.ones(6, 4))
 
@@ -4928,7 +4928,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     )
     def test_aot_export_with_torch_cond(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -5065,7 +5065,7 @@ class TestPartitioning(AOTTestCase):
         # Following module results in inplace ops while tracing. The test checks
         # that the meta tensor information is stored for inplace ops.
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(
                     torch.randn(3072, 768, requires_grad=True)
@@ -5800,7 +5800,7 @@ def forward(self, tangents_1, tangents_2):
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(20, 30)
 
@@ -5829,7 +5829,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
     def test_aot_module_simplified_dynamic(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(20, 30)
 
@@ -5892,7 +5892,7 @@ class TestAOTModuleSimplified(AOTTestCase):
     def test_inference_python_dispatcher(self):
         # Extracted from unet
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.upsample = torch.nn.Upsample(
                     scale_factor=2, mode="bilinear", align_corners=True
@@ -5911,7 +5911,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
     def test_aot_module_simplified_preserves_stack_trace(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(20, 30)
 
@@ -5952,7 +5952,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
     def test_aot_module_simplified_preserves_stack_trace_from_mutation(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -6390,7 +6390,7 @@ class MockFXGraphCache:
     In memory version of FXGraphCache so we can isolate testing for FXGraphCache
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.cache = {}
 
     def save(self, key, gm):

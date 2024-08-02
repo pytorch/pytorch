@@ -941,7 +941,7 @@ class TestNNParametrization(NNTestCase):
                 return x + 1.0
 
         class ModelWithoutDeepcopy(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = nn.Parameter(
                     torch.tensor([1.0, 1.0, 1.0, 1.0]), requires_grad=True

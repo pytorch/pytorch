@@ -941,6 +941,25 @@ command = [
 ]
 
 [[linter]]
+code = 'CONTEXT_DECORATOR'
+include_patterns = [
+    'torch/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=@.*(dynamo_timed)',
+    '--linter-name=CONTEXT_DECORATOR',
+    '--error-name=avoid context decorator',
+    """--error-description=\
+        Do not use context manager as decorator as it breaks cProfile traces.  Use it as \
+        a context manager instead\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'ONCE_FLAG'
 include_patterns = [
     'c10/**',

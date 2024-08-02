@@ -223,7 +223,7 @@ class TestLoadStateDict(NNTestCase):
     @swap([True, False])
     def test_load_state_dict_custom(self):
         class CustomState(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.ones(1))
                 self.sub = torch.nn.Linear(5, 5)
@@ -264,7 +264,7 @@ class TestLoadStateDict(NNTestCase):
     @parametrize("keep_vars", [True, False])
     def test_load_state_dict_assign_meta(self, keep_vars):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(3, 5)
                 self.bn = nn.BatchNorm1d(5)
@@ -340,7 +340,7 @@ class TestLoadStateDict(NNTestCase):
     @swap([True, False])
     def test_load_state_dict_assign_with_optimizer(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(3, 5)
                 self.bn = nn.BatchNorm1d(5)
@@ -390,7 +390,7 @@ class TestLoadStateDict(NNTestCase):
         # Assigned tensor is allowed to have different properties than initial
         # tensor except for shape
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(3, 5)
                 self.bn = nn.BatchNorm1d(5)
@@ -426,7 +426,7 @@ class TestLoadStateDict(NNTestCase):
     @swap([True, False])
     def test_load_state_dict_with_unexpected_key(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = torch.nn.Linear(5, 10)
 
