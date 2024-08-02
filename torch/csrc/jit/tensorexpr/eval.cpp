@@ -64,10 +64,8 @@ inline c10::BFloat16 div_value(c10::BFloat16 lhs, c10::BFloat16 rhs) {
   return lhs / rhs;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class SimpleIREvaluatorImpl : public IRVisitor {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   SimpleIREvaluatorImpl() = default;
 
   ~SimpleIREvaluatorImpl() override = default;
@@ -626,8 +624,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   TORCH_API void visit(const IfThenElsePtr& v) override {
     v->condition()->accept(this);
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    bool cond_v;
+    bool cond_v = false;
     switch (value_.dtype().scalar_type()) {
 #define TYPE_CASE(Type, Name)   \
   case ScalarType::Name: {      \
@@ -762,9 +759,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     value_ = InterpValue(val);                       \
   } break;
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
-      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       TYPE_CASE(c10::quint8, QUInt8);
-      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
       default:
@@ -811,9 +806,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }                                                           \
   } break;
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
-      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       TYPE_CASE(c10::quint8, QUInt8);
-      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
       default:
@@ -862,8 +855,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
     for (const ExprPtr& a : v->args()) {
       a->accept(this);
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t val;
+      int64_t val = 0;
       if (value().dtype() == kLong) {
         val = value().as<int64_t>();
       } else if (value().dtype() == kInt) {
@@ -934,8 +926,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
     for (const auto& a : v->args()) {
       a->accept(this);
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t val;
+      int64_t val = 0;
       if (value().dtype() == kLong) {
         val = value().as<int64_t>();
       } else if (value().dtype() == kInt) {
