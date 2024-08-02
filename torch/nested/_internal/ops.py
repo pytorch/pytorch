@@ -504,10 +504,10 @@ def _nested_jagged_to_strided(func, *args, **kwargs):
         # NB: NST is not supported in PT2. Calling this op with garbage will hit the
         # fake tensor unsupported impl and graph break.
         return torch._nested_view_from_buffer(
-            inp._values.view(-1),
-            nested_size=inp._values,
-            nested_strides=inp._values,
-            offsets=inp._values,
+            inp._values.view(-1),  # type: ignore[arg-type, attr-defined]
+            nested_size=inp._values,  # type: ignore[arg-type, attr-defined]
+            nested_strides=inp._values,  # type: ignore[arg-type, attr-defined]
+            offsets=inp._values,  # type: ignore[arg-type, attr-defined]
         )
 
     # Create a new C++ NT from the Python NestedTensor
