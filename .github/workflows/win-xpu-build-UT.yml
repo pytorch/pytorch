@@ -110,7 +110,7 @@ jobs:
   #       pip install pytest expecttest
   #       python -m pytest -v | tee "%home_dir%\mtl-bundle-uts.log"
 
-  Upload-whls:
+  Upload-artifacts:
     runs-on: ["${{ inputs.win_runner }}"]
     needs: [Preparation, Build-whls]
     steps:
