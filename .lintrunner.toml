@@ -233,7 +233,7 @@ exclude_patterns = [
     'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*',
     'torch/csrc/dynamo/eval_frame.h',
-    'torch/csrc/inductor/**/*',
+    'torch/csrc/inductor/aoti_torch/c/shim.h',
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/lazy/**/*',
@@ -417,6 +417,7 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
+    '.ci/docker/common/install_rocm_drm.sh',
     '.lintrunner.toml',
 ]
 command = [
@@ -1191,20 +1192,6 @@ exclude_patterns = [
     'torch/_export/trace.py',
     'torch/_export/verifier.py',
     'torch/_vendor/**',
-    'torch/ao/__init__.py',
-    'torch/ao/ns/__init__.py',
-    'torch/ao/ns/_numeric_suite.py',
-    'torch/ao/ns/_numeric_suite_fx.py',
-    'torch/ao/ns/fx/__init__.py',
-    'torch/ao/ns/fx/graph_matcher.py',
-    'torch/ao/ns/fx/graph_passes.py',
-    'torch/ao/ns/fx/mappings.py',
-    'torch/ao/ns/fx/n_shadows_utils.py',
-    'torch/ao/ns/fx/ns_types.py',
-    'torch/ao/ns/fx/pattern_utils.py',
-    'torch/ao/ns/fx/qconfig_multi_mapping.py',
-    'torch/ao/ns/fx/utils.py',
-    'torch/ao/ns/fx/weight_utils.py',
     'torch/compiler/__init__.py',
     'torch/contrib/__init__.py',
     'torch/contrib/_tensorboard_vis.py',
@@ -1551,7 +1538,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.5.2',
+    'ruff==0.5.5',
 ]
 is_formatter = true
 
