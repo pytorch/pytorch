@@ -7,8 +7,8 @@ import types
 from typing import Counter, Dict, List, Optional
 
 import torch.nn
-from . import utils
 
+from . import utils
 from .bytecode_transformation import (
     add_push_null,
     create_call_function,
@@ -50,7 +50,7 @@ class PyCodegen:
         root: Optional[torch.nn.Module] = None,
         graph_output_var: Optional[str] = None,
         tempvars=None,
-    ):
+    ) -> None:
         self.root = root
         self.top_of_stack: Optional[VariableTracker] = None
         self.uses: Counter[VariableTracker] = collections.Counter()

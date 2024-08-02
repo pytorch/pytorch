@@ -14,9 +14,9 @@ namespace tensorexpr {
 
 class TORCH_API Tensor {
  public:
-  Tensor(BufPtr buf, const std::vector<VarPtr>& args, ExprPtr body)
+  Tensor(BufPtr buf, const std::vector<VarPtr>& args, const ExprPtr& body)
       : buf_(std::move(buf)) {
-    stmt_ = constructStmt(args, std::move(body), {}, {});
+    stmt_ = constructStmt(args, body, {}, {});
   }
   Tensor(BufHandle buf, const std::vector<VarHandle>& args, ExprHandle body)
       : Tensor(buf.node(), VarHandleVectorToVarVector(args), body.node()) {}
@@ -26,9 +26,9 @@ class TORCH_API Tensor {
       const std::vector<VarPtr>& args,
       const std::vector<ExprPtr>& reduce_dims,
       const std::vector<VarPtr>& reduce_args,
-      ExprPtr body)
+      const ExprPtr& body)
       : buf_(std::move(buf)) {
-    stmt_ = constructStmt(args, std::move(body), reduce_dims, reduce_args);
+    stmt_ = constructStmt(args, body, reduce_dims, reduce_args);
   }
   Tensor(
       BufHandle buf,
@@ -62,7 +62,7 @@ class TORCH_API Tensor {
  private:
   StmtPtr constructStmt(
       const std::vector<VarPtr>& args,
-      ExprPtr body,
+      const ExprPtr& body,
       const std::vector<ExprPtr>& reduce_dims,
       const std::vector<VarPtr>& reduce_args) const;
 
@@ -73,7 +73,7 @@ class TORCH_API Tensor {
 TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const std::function<ExprHandle(const VarHandle&)>& body_func);
 TORCH_API Tensor Compute(
     const std::string& func_name,
@@ -82,7 +82,7 @@ TORCH_API Tensor Compute(
 TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const std::function<ExprHandle(const VarHandle&, const VarHandle&)>&
         body_func);
 TORCH_API Tensor Compute(
@@ -93,7 +93,7 @@ TORCH_API Tensor Compute(
 TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const std::function<
         ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>&
         body_func);
@@ -106,7 +106,7 @@ TORCH_API Tensor Compute(
 TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const std::function<ExprHandle(
         const VarHandle&,
         const VarHandle&,
@@ -123,7 +123,7 @@ TORCH_API Tensor Compute(
 TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const std::function<ExprHandle(const std::vector<VarHandle>&)>& body_func);
 TORCH_API Tensor Compute(
     const std::string& func_name,
@@ -146,7 +146,7 @@ template <typename InitFunc, typename BodyFunc>
 Tensor Reduce(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const Reducer& reducer,
     const InitFunc& init_func,
     const BodyFunc& body_func,
@@ -158,8 +158,8 @@ Tensor Reduce(
   // copy
   if (reduce_vars.empty()) {
     ExprHandle body = Reducer::getReduceBody(body_func, vars);
-    BufHandle func_result = Buf::make(
-        func_name, dims, body.dtype(), std::nullopt, std::move(strides));
+    BufHandle func_result =
+        Buf::make(func_name, dims, body.dtype(), std::nullopt, strides);
     return Tensor(std::move(func_result), vars, std::move(body));
   }
 
@@ -180,7 +180,7 @@ Tensor Reduce(
     reduce_op = reducer(
         func_result,
         std::move(func_result_acc),
-        std::move(body),
+        body,
         output_args,
         reduce_vars);
   }
@@ -215,7 +215,7 @@ template <typename BodyFunc>
 Tensor Reduce(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const Reducer& reducer,
     const BodyFunc& body_func,
     const std::vector<ExprHandle>& reduce_dims) {
@@ -246,7 +246,7 @@ template <typename BodyFunc>
 Tensor Reduce(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const Reducer& reducer,
     const BodyFunc&& body_func,
     const std::vector<ExprHandle>& reduce_dims) {
@@ -265,7 +265,7 @@ Tensor Reduce(
 TORCH_API Tensor Reduce(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const Reducer& reducer,
     const BufHandle& buffer,
     const std::vector<ExprHandle>& reduce_dims);
@@ -281,41 +281,37 @@ TORCH_API Tensor Reduce(
 TORCH_API Tensor Reduce(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const Reducer& reducer,
-    Tensor tensor,
+    const Tensor& tensor,
     const std::vector<ExprHandle>& reduce_dims);
 TORCH_API Tensor Reduce(
     const std::string& func_name,
     const std::vector<ExprHandle>& dims,
     const Reducer& reducer,
-    Tensor tensor,
+    const Tensor& tensor,
     const std::vector<ExprHandle>& reduce_dims);
 
 template <typename... Ts>
 inline ExprHandle Tensor::load(const Ts&... ts) const {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<ExprHandle> params({ExprHandle(ts)...});
   return Load::make(BufHandle(this->buf()), params);
 }
 
 template <typename T>
 inline ExprHandle Tensor::load(const std::vector<T>& args) const {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<ExprHandle> params(args.begin(), args.end());
   return Load::make(BufHandle(this->buf()), params);
 }
 
 template <typename... Ts>
 inline ExprHandle BufHandle::load(const Ts&... ts) const {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<ExprHandle> params({ExprHandle(ts)...});
   return ExprHandle(alloc<Load>(node(), ExprHandleVectorToExprVector(params)));
 }
 
 template <typename T>
 inline ExprHandle BufHandle::load(const std::vector<T>& args) const {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<ExprHandle> params(args.begin(), args.end());
   return ExprHandle(alloc<Load>(node(), ExprHandleVectorToExprVector(params)));
 }

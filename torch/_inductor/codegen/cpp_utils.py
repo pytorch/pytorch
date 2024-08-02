@@ -166,13 +166,13 @@ def deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs):
 
 
 class CppCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges[Any]):
+    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
         super().__init__(name, bounds)
         self.is_vec = False
         self.dtype: Optional[torch.dtype] = None
         self.dependent_itervars: Set[sympy.Symbol] = set()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"CppCSEVariable(name: {self.name}, bounds: {self.bounds}, is_vec: {self.is_vec}, dtype: {self.dtype}, "
             f"dependent_itervars: {self.dependent_itervars})"
@@ -492,7 +492,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         inner,
         global_to_local: Dict[str, ir.Buffer],
         rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr],
-    ):
+    ) -> None:
         super().__init__(inner)
         self.global_to_local = global_to_local
         self.rewrite_index = rewrite_index
@@ -534,7 +534,7 @@ class LocalBufferContext:
     these buffers without exposure to the outside world.
     """
 
-    def __init__(self, kernel_args: KernelArgs):
+    def __init__(self, kernel_args: KernelArgs) -> None:
         self.kernel_args = kernel_args
         self.exit_stack = contextlib.ExitStack()
         # map local buffer name to local buffer
