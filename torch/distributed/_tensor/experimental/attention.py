@@ -110,9 +110,14 @@ class _SDPAMerger:
             self._lse = block_lse
             self._out = block_out
         else:
+            assert self._lse is not None
+            assert self._out is not None
             lse = self._lse.chunk(2, dim=self._seq_dim)[1] if partial else self._lse
             out = self._out.chunk(2, dim=self._seq_dim)[1] if partial else self._out
 
+            # The algorithm from
+            # github.com/zhuzilin/ring-flash-attention/pull/34#issuecomment-2076126795
+            # gives a relatively stable result.
             new_lse = lse + torch.log(1 + torch.exp(block_lse - lse))
             out = (
                 torch.exp(lse - new_lse) * out
@@ -888,23 +893,31 @@ def enable_context_parallel(
 class _LoadBalancer(ABC):
     @classmethod
     @abstractmethod
-    def shard(cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int):
+    def shard(
+        cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
+    ) -> torch.Tensor:
         ...
 
     @classmethod
     @abstractmethod
-    def unshard(cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int):
+    def unshard(
+        cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
+    ) -> torch.Tensor:
         ...
 
 
 class EvenSharder(_LoadBalancer):
     @classmethod
-    def shard(cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int):
+    def shard(
+        cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
+    ) -> torch.Tensor:
         assert buffer.size()[seq_dim] % mesh.size() == 0
         return buffer.chunk(mesh.size(), dim=seq_dim)[mesh.get_local_rank()]
 
     @classmethod
-    def unshard(cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int):
+    def unshard(
+        cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
+    ) -> torch.Tensor:
         buffer = buffer.contiguous()
         all_buffers = [torch.empty_like(buffer) for _ in range(mesh.size())]
         ft_c.all_gather_inplace(all_buffers, buffer, mesh)
@@ -913,7 +926,9 @@ class EvenSharder(_LoadBalancer):
 
 class ZigzagLoadBalancer(_LoadBalancer):
     @classmethod
-    def shard(cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int):
+    def shard(
+        cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
+    ) -> torch.Tensor:
         cp_world_size = mesh.size()
         cp_rank = mesh.get_rank()
         assert buffer.size()[seq_dim] % (cp_world_size * 2) == 0
@@ -924,7 +939,9 @@ class ZigzagLoadBalancer(_LoadBalancer):
         )
 
     @classmethod
-    def unshard(cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int):
+    def unshard(
+        cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
+    ) -> torch.Tensor:
         buffer = buffer.contiguous()
         cp_world_size = mesh.size()
         cp_rank = mesh.get_rank()
