@@ -534,7 +534,7 @@ def decide_compile_threads() -> int:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
     elif sys.platform == "win32":
         return 1
-    elif is_fbcode() and worker_start_method != "subprocess":
+    elif is_fbcode():
         return 1
     else:
         cpu_count = (
