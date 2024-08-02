@@ -432,7 +432,7 @@ inline void {{kernel_name}}_kernel(
             "block_m": self.register_blocking.block_m,
             "block_n": self.register_blocking.block_n,
             "block_k": self.register_blocking.block_k,
-            "restrict_keyword":get_restrict_keyword(),
+            "restrict_keyword": get_restrict_keyword(),
             **self.get_common_options(),
         }
         result = KernelTemplate._template_from_string(self.TEMPLATE_KERNEL).render(
@@ -638,7 +638,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
             "block_n": block_n,
             "block_k": block_k,
             "num_columns": num_columns,
-            "restrict_keyword":get_restrict_keyword(),
+            "restrict_keyword": get_restrict_keyword(),
             **self.get_common_options(),
         }
         result = ""
