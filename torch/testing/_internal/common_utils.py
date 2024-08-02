@@ -1092,7 +1092,7 @@ def sanitize_pytest_xml(xml_file: str):
 
 def get_pytest_test_cases(argv: List[str]) -> List[str]:
     class TestCollectorPlugin:
-        def __init__(self):
+        def __init__(self) -> None:
             self.tests = []
 
         def pytest_collection_finish(self, session):

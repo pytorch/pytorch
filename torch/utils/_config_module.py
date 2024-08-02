@@ -1,5 +1,4 @@
 import contextlib
-
 import copy
 import hashlib
 import inspect
@@ -12,6 +11,7 @@ from types import FunctionType, ModuleType
 from typing import Any, Callable, Dict, NoReturn, Optional, Set, Union
 from typing_extensions import deprecated
 from unittest import mock
+
 
 # Types saved/loaded in configs
 CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)

@@ -212,7 +212,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_nn_module_getattr(self):
         class A:
-            def __init__(self):
+            def __init__(self) -> None:
                 self._b = 20
 
             def __getattr__(self, name):
@@ -222,7 +222,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise AttributeError(f"{name} absent")
 
         class B(A):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.a = 10
 
             def __getattr__(self, name):
