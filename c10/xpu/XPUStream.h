@@ -183,7 +183,7 @@ namespace std {
 template <>
 struct hash<c10::xpu::XPUStream> {
   size_t operator()(c10::xpu::XPUStream s) const noexcept {
-    return std::hash<c10::Stream>{}(s.unwrap());
+    return ::std::hash<c10::Stream>{}(s.unwrap());
   }
 };
 } // namespace std
