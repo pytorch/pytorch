@@ -80,12 +80,16 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             torch.arange(0, NUM_DEVICES),
         )
         parallelize_plan = {
-            "net1": ColwiseParallel(input_layouts=Shard(0))
-            if is_seq_parallel
-            else ColwiseParallel(),
-            "net2": RowwiseParallel(output_layouts=Shard(0))
-            if is_seq_parallel
-            else RowwiseParallel(),
+            "net1": (
+                ColwiseParallel(input_layouts=Shard(0))
+                if is_seq_parallel
+                else ColwiseParallel()
+            ),
+            "net2": (
+                RowwiseParallel(output_layouts=Shard(0))
+                if is_seq_parallel
+                else RowwiseParallel()
+            ),
         }
         model_tp = parallelize_module(model_tp, device_mesh, parallelize_plan)
         if recompute_activation:
@@ -187,14 +191,15 @@ class DistTensorParallelExampleTest(DTensorTestBase):
     @with_comms
     @skip_unless_torch_gpu
     @parametrize("is_seq_parallel", [True, False])
-    def test_transformer_training(self, is_seq_parallel=False):
+    @parametrize("dtype", [torch.float64, torch.float32])
+    def test_transformer_training(self, is_seq_parallel, dtype: torch.dtype):
         # Step 1: Initialize single-gpu models and optimizers.
 
         # Disable dropout in the test since we cannot reproduce the same random
         # behaviors when comparing single-gpu models with multi-gpu models.
         model_args = ModelArgs(dropout_p=0.0)
 
-        model = Transformer(model_args).to(device=self.device_type)
+        model = Transformer(model_args).to(device=self.device_type, dtype=dtype)
         model_tp = deepcopy(model)
         self._check_module(model, model_tp)
 
@@ -202,7 +207,13 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         # onto the device mesh.
 
         device_mesh = DeviceMesh(self.device_type, torch.arange(0, NUM_DEVICES))
-        model_tp = Transformer.parallelize(model_tp, device_mesh, is_seq_parallel)
+        local_output_for_attn = dtype is torch.float64
+        model_tp = Transformer.parallelize(
+            model_tp,
+            device_mesh,
+            is_seq_parallel,
+            local_output_for_attn=local_output_for_attn,
+        )
 
         # Step 3: Run test by comparing outputs from single-gpu and multi-gpu models.
 
@@ -215,75 +226,72 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         if is_seq_parallel:
             assert inp_size[1] % self.world_size == 0
         torch.manual_seed(0)
-        inp = torch.randint(model_args.vocab_size, inp_size, device=self.device_type)
-
-        # Compare outputs on the same input.
-        output = model(inp)
-        with CommDebugMode() as comm_mode:
-            output_tp = model_tp(inp)
-        self.assertEqual(output, output_tp)
-        if is_seq_parallel:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.reduce_scatter_tensor: 6,
-                    c10d_functional.all_gather_into_tensor: 6,
-                },
-            )
-        else:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_reduce: 6,
-                    c10d_functional.all_gather_into_tensor: 1,
-                },
+        steps = 10 if dtype is torch.float64 else 1
+        for iter in range(steps):
+            inp = torch.randint(
+                model_args.vocab_size, inp_size, device=self.device_type
             )
 
-        # Ensure gradients are equal.
-        output.sum().backward()
-        with CommDebugMode() as comm_mode:
-            output_tp.sum().backward()
-        self._check_module(model, model_tp, check_grad=True)
-        if is_seq_parallel:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.reduce_scatter_tensor: 5,
-                    c10d_functional.all_gather_into_tensor: 6,
-                },
-            )
-        else:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_reduce: 9,
-                },
-            )
-
-        # Ensure model weights are still the same after update.
-        optim.step()
-        from torch.distributed._tensor.experimental import implicit_replication
-
-        with implicit_replication():
+            # Compare outputs on the same input.
+            output = model(inp)
             with CommDebugMode() as comm_mode:
-                optim_tp.step()
-        self._check_module(model, model_tp)
-        if is_seq_parallel:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_reduce: 30,
-                },
-            )
-        else:
-            self.assertDictEqual(comm_mode.get_comm_counts(), {})
+                output_tp = model_tp(inp)
+            self.assertEqual(output, output_tp)
+            if is_seq_parallel:
+                self.assertDictEqual(
+                    comm_mode.get_comm_counts(),
+                    {
+                        c10d_functional.reduce_scatter_tensor: 6,
+                        c10d_functional.all_gather_into_tensor: 6,
+                    },
+                )
+            else:
+                self.assertDictEqual(
+                    comm_mode.get_comm_counts(),
+                    {
+                        c10d_functional.all_reduce: 6,
+                        c10d_functional.all_gather_into_tensor: 1,
+                    },
+                )
 
-        # Compare outputs on another input.
-        torch.manual_seed(11)
-        inp = torch.randint(model_args.vocab_size, inp_size, device=self.device_type)
-        output = model(inp)
-        output_tp = model_tp(inp)
-        self.assertEqual(output, output_tp)
+            # Ensure gradients are equal.
+            output.sum().backward()
+            with CommDebugMode() as comm_mode:
+                output_tp.sum().backward()
+            self._check_module(model, model_tp, check_grad=True)
+            if is_seq_parallel:
+                self.assertDictEqual(
+                    comm_mode.get_comm_counts(),
+                    {
+                        c10d_functional.reduce_scatter_tensor: 5,
+                        c10d_functional.all_gather_into_tensor: 6,
+                    },
+                )
+            else:
+                self.assertDictEqual(
+                    comm_mode.get_comm_counts(),
+                    {
+                        c10d_functional.all_reduce: 9,
+                    },
+                )
+
+            # Ensure model weights are still the same after update.
+            optim.step()
+            from torch.distributed._tensor.experimental import implicit_replication
+
+            with implicit_replication():
+                with CommDebugMode() as comm_mode:
+                    optim_tp.step()
+            self._check_module(model, model_tp)
+            if is_seq_parallel:
+                self.assertDictEqual(
+                    comm_mode.get_comm_counts(),
+                    {
+                        c10d_functional.all_reduce: 30,
+                    },
+                )
+            else:
+                self.assertDictEqual(comm_mode.get_comm_counts(), {})
 
     @with_comms
     def test_weight_tying(self):
