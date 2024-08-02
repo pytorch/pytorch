@@ -343,6 +343,13 @@ TORCH_API void propagate_xla_data(
     const ITensorListRef functional_tensor,
     ITensorListRef other);
 
+TORCH_API void propagate_xla_data_direct(
+    const Tensor& tensor,
+    const Tensor& other);
+TORCH_API void propagate_xla_data_direct(
+    const ITensorListRef tensor,
+    ITensorListRef other);
+
 Tensor create_functional_tensor_with_view_meta(
     const Tensor& view_to_wrap,
     const Tensor& base,
