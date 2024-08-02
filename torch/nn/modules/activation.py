@@ -42,6 +42,7 @@ __all__ = [
     "Softmax",
     "Softmax2d",
     "LogSoftmax",
+    "SwiGLU"
 ]
 
 
@@ -1744,3 +1745,55 @@ class LogSoftmax(Module):
 
     def extra_repr(self):
         return f"dim={self.dim}"
+
+class SwiGLU(nn.Module):
+    r"""Applies the SwiGLU function element-wise.
+
+    SwiGLU is defined as:
+
+    .. math::
+        \text{SwiGLU}(x) = \text{Swish}(x_1) \cdot x_2
+
+    where :math:`x` is split into two halves :math:`x_1` and :math:`x_2` along the last dimension,
+    and :math:`\text{Swish}(x) = x \cdot \sigma(\beta x)` with :math:`\sigma` being the sigmoid function
+    and :math:`\beta` a learnable parameter (default=1).
+
+    Args:
+        beta (float): the :math:`\beta` value for the Swish function. Default: 1.0
+        inplace (bool): can optionally do the operation in-place. Default: ``False``
+
+    Shape:
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
+
+    Examples::
+
+        >>> m = SwiGLU()
+        >>> input = torch.randn(2, 6)
+        >>> output = m(input)
+
+    Reference:
+        - GLU Variants Improve Transformer: https://arxiv.org/abs/2002.05202
+    """
+
+    def __init__(self, beta: float = 1.0, inplace: bool = False) -> None:
+        super().__init__()
+        self.beta = nn.Parameter(torch.tensor(beta))
+        self.inplace = inplace
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        # Check that the last dimension is even
+        if input.size(-1) % 2 != 0:
+            raise ValueError("The last dimension of the input must be even.")
+        
+        # Split input into two halves
+        x1, x2 = input.chunk(2, dim=-1)
+        
+        # Apply Swish activation
+        if self.inplace:
+            x1.mul_(self.beta).sigmoid_().mul_(x1)
+        else:
+            x1 = F.silu(x1 * self.beta)
+        
+        # Multiply the results
+        return x1 * x2

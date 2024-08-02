@@ -12164,5 +12164,44 @@ instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_f
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
 
+class TestSwiGLU:
+    def _test_swiglu(self, np_features, beta, device):
+        cpu_x = torch.from_numpy(np_features).requires_grad_()
+        mps_x = torch.from_numpy(np_features).to(device).requires_grad_()
+        swiglu_op = SwiGLU(beta=beta)
+
+        cpu_swiglu = swiglu_op(cpu_x)
+        mps_swiglu = swiglu_op(mps_x)
+        torch.testing.assert_close(cpu_swiglu, mps_swiglu.to('cpu'))
+
+        # Test backward pass
+        cpu_grad = torch.ones_like(cpu_swiglu)
+        mps_grad = cpu_grad.to(device)
+        cpu_swiglu.backward(gradient=cpu_grad)
+        mps_swiglu.backward(gradient=mps_grad)
+        torch.testing.assert_close(cpu_x.grad, mps_x.grad.to('cpu'))
+
+    def test_swiglu_forward_cpu(self):
+        np_features = torch.randn(2, 6).numpy()
+        self._test_swiglu(np_features, beta=1.0, device='cpu')
+
+    def test_swiglu_forward_mps(self):
+        np_features = torch.randn(2, 6).numpy()
+        self._test_swiglu(np_features, beta=1.0, device='mps')
+
+    def test_swiglu_invalid_input(self):
+        # Initialize the SwiGLU layer
+        swiglu = SwiGLU()
+
+        # Create a tensor with odd dimensions to test error handling
+        input_tensor = torch.randn(2, 5)
+
+        # Verify that an exception is raised for invalid input dimensions
+        try:
+            swiglu(input_tensor)
+            assert False, "Expected ValueError for invalid input dimension"
+        except ValueError:
+            pass
+
 if __name__ == "__main__":
     run_tests()
