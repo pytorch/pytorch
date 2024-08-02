@@ -17,7 +17,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._dynamo.exc import UserError
@@ -80,6 +79,76 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph()
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_no_tensor_computation_fail(self):
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Failed to produce a graph",
+        ):
+            inp = [torch.randn(3)]
+            inp2 = 2
+            inps = [inp, inp2]
+
+            def func(x, y):
+                return x
+
+            exported = torch._dynamo.export(func, same_signature=False)(*inps)
+
+    def test_no_tensor_computation(self):
+        inp = [torch.randn(3)]
+        inp2 = 2
+        inps = [inp, inp2]
+
+        def func(x, y):
+            return x
+
+        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func)(*inps)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertExpectedInline(
+            out_graph.code.strip(),
+            """\
+def forward(self, x, y):
+    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    x = arg0
+    return pytree.tree_unflatten([x], self._out_spec)""",
+        )
+
+    def test_no_tensor_computation_2(self):
+        inp = torch.randn(3)
+        inp2 = 2
+        inps = [inp, inp2]
+
+        def func(x, y):
+            return y
+
+        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func)(*inps)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertExpectedInline(
+            out_graph.code.strip(),
+            """\
+def forward(self, x, y):
+    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    x = arg0
+    return pytree.tree_unflatten([2], self._out_spec)""",
+        )
 
     def test_export_mismatched_out(self):
         def func(x):
@@ -608,6 +677,62 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph()
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    def test_export_no_tensor_computation_with_aten_graph(self):
+        inp = [torch.randn(3)]
+        inp2 = 2
+        inps = [inp, inp2]
+
+        def func(x, y):
+            return x
+
+        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func, aten_graph=True)(*inps)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertExpectedInline(
+            out_graph.code.strip(),
+            """\
+def forward(self, x, y):
+    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    arg0_1 = arg0
+    return pytree.tree_unflatten([arg0_1], self._out_spec)""",
+        )
+
+    def test_no_tensor_computation_2_with_aten_graph(self):
+        inp = torch.randn(3)
+        inp2 = 2
+        inps = [inp, inp2]
+
+        def func(x, y):
+            return y
+
+        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func, aten_graph=True)(*inps)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertExpectedInline(
+            out_graph.code.strip(),
+            """\
+def forward(self, x, y):
+    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    arg0_1 = arg0
+    return pytree.tree_unflatten([2], self._out_spec)""",
+        )
+
     def test_export_mismatched_out_with_aten_graph(self):
         def func(x):
             y = x + 1
@@ -955,7 +1080,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 return torch.cos(x).relu() + 1
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.block = MyBlock()
 
@@ -988,17 +1113,17 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(4, 4)
 
         class MyBlock(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.ones(1, 1))
-                self.register_buffer("buffer", torch.ones(1, 1))
+                self.buffer = torch.nn.Buffer(torch.ones(1, 1))
 
             def forward(self, x):
                 x = torch.nn.functional.linear(x, torch.randn(4, 4))
                 return torch.cos(x).relu() + self.weight + self.buffer
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.block = MyBlock()
 
@@ -1068,7 +1193,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     def test_export_with_constant_method_on_module(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1094,7 +1219,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     def test_export_with_constant_method_on_module_invoke_twice(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1124,7 +1249,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return torch.nonzero(x)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1154,7 +1279,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return torch.nonzero(x)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1180,7 +1305,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return torch.nonzero(x)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1578,7 +1703,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         from functorch.experimental.control_flow import cond
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
@@ -1617,7 +1742,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         class Module(torch.nn.Module):
             # ok
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
@@ -1649,7 +1774,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         from functorch.experimental.control_flow import cond
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, pred, x):
@@ -1662,7 +1787,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 return cond(pred, true_fn, false_fn, [x])
 
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, pred, x):
@@ -1675,7 +1800,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 return cond(pred, true_fn, false_fn, [x + 1])
 
         class FooBar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
@@ -1786,13 +1911,10 @@ def forward(self, l_x_):
             ):
                 # True branch and false branch return tensors of different shape
                 torch._dynamo.export(mod)(torch.randn(3, 2))
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile",
-            ):
-                # True branch and false branch return tensors of different shape
-                test_x = torch.randn(3, 2)
-                mod(test_x)
+
+            # We specialize into one of the branches since predicate is a python boolean.
+            test_x = torch.randn(3, 2)
+            mod(test_x)
 
     def test_export_with_map_cond(self):
         from functorch.experimental.control_flow import cond, map
@@ -1916,7 +2038,7 @@ def forward(self, l_x_):
             if node.op == "call_function" and node.target == operator.getitem:
                 count += 1
 
-        self.assertEqual(count, 3)
+        self.assertEqual(count, 1)
         self.assertEqual(gm_torch_mode(inp).shape, f(inp).shape)
 
     def test_dynamic_slicing_invalid(self):
@@ -2180,7 +2302,7 @@ def forward(self, x):
             return wrapper
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -2311,7 +2433,7 @@ def forward(self, x):
         self.assertTrue(torch._dynamo.utils.same(inp, out_graph(inp)))
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.ones(3, 3)
 
@@ -2325,7 +2447,7 @@ def forward(self, x):
     @unittest.skipIf(not TEST_CUDA, "No CUDA available.")
     def test_export_with_parameters(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.features = torch.nn.Sequential(
                     torch.nn.Conv2d(
@@ -2375,7 +2497,7 @@ def forward(self, x):
 
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.p = torch.nn.Parameter(torch.ones(2, 3))
 
@@ -2805,7 +2927,7 @@ def forward(self, x):
         dynamic_shapes = {"x": (dim0,)}
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "must be specialized.*guards generated.*too complex",
+            r"Constraints violated \(dim0\)",
         ):
             torch.export.export(foo, (x,), dynamic_shapes=dynamic_shapes)
 
@@ -2813,7 +2935,7 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Not all values.*satisfy the generated guard",
+            r"Constraints violated \(dim0\)",
         ):
             torch.export.export(qux, (x,), dynamic_shapes=dynamic_shapes)
 
@@ -2915,7 +3037,7 @@ def forward(self, x):
 
     def test_export_pass_arg_by_name(self):
         class BasicModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.my_lin = torch.nn.Linear(3, 4, bias=True)
 
@@ -2930,7 +3052,7 @@ def forward(self, x):
 
     def test_export_pass_arg_by_name_star_args(self):
         class BasicModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.my_lin = torch.nn.Linear(3, 4, bias=True)
 
@@ -3036,9 +3158,9 @@ def forward(self, x):
 
     def test_not_functionalize(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 2))
+                self.buffer1 = torch.nn.Buffer(torch.ones(6, 2))
 
             def forward(self, x):
                 x.add_(2)
@@ -3101,7 +3223,7 @@ def forward(self, x):
     def test_sum_param(self):
         # Setting a new attribute inside forward()
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.randn(3, 2)
 
@@ -3113,7 +3235,7 @@ def forward(self, x):
 
     def test_mixed_real_and_fake_inputs(self):
         class _TestPattern(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
                 self.bn = torch.nn.BatchNorm2d(1)
@@ -3302,8 +3424,7 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
+            RuntimeError, "Unmatched number of outputs from cond"
         ):
             torch._dynamo.export(
                 f_mismatch_return_length,
@@ -3363,16 +3484,15 @@ def forward(self, x):
     sym_size_int = torch.ops.aten.sym_size.int(arg0_1, 0)
     sub = sym_size_int - 1
     slice_2 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub);  sub = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(arg0_1, 2)
-    slice_3 = torch.ops.aten.slice.Tensor(slice_2, 1, 1, sym_size_int_1);  slice_2 = None
+    slice_3 = torch.ops.aten.slice.Tensor(slice_2, 1, 1, sym_size_int);  slice_2 = None
     slice_4 = torch.ops.aten.slice.Tensor(slice_3, 2, 1, 3);  slice_3 = None
     sub_1 = sym_size_int - 2
     slice_5 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub_1);  sub_1 = None
-    slice_6 = torch.ops.aten.slice.Tensor(slice_5, 1, 2, sym_size_int_1);  slice_5 = None
+    slice_6 = torch.ops.aten.slice.Tensor(slice_5, 1, 2, sym_size_int);  slice_5 = None
     slice_7 = torch.ops.aten.slice.Tensor(slice_6, 2, 2, 3);  slice_6 = None
-    sub_2 = sym_size_int - 3;  sym_size_int = None
+    sub_2 = sym_size_int - 3
     slice_8 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub_2);  arg0_1 = sub_2 = None
-    slice_9 = torch.ops.aten.slice.Tensor(slice_8, 1, 3, sym_size_int_1);  slice_8 = sym_size_int_1 = None
+    slice_9 = torch.ops.aten.slice.Tensor(slice_8, 1, 3, sym_size_int);  slice_8 = sym_size_int = None
     slice_10 = torch.ops.aten.slice.Tensor(slice_9, 2, 3, 3);  slice_9 = None
     return pytree.tree_unflatten([slice_1, slice_4, slice_7, slice_10], self._out_spec)""",
         )
@@ -3555,7 +3675,7 @@ G['macademia'], accessed at:
         fake_mode = fake_tensor.FakeTensorMode()
 
         class DynamicShapeSimpleModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b, c) -> torch.Tensor:
@@ -3650,23 +3770,23 @@ G['macademia'], accessed at:
 
     def test_cond_op_param_buffer_lifted(self):
         class A(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.zeros(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.zeros(6, 4))
 
             def forward(self):
                 return self.buffer1.sum()
 
         class B(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer2", torch.ones(6, 4))
+                self.buffer2 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self):
                 return self.buffer2.sum()
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = A()
                 self.b = B()
@@ -3686,23 +3806,23 @@ G['macademia'], accessed at:
 
     def test_nested_cond_op_param_buffer_lifted(self):
         class A(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.zeros(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.zeros(6, 4))
 
             def forward(self):
                 return self.buffer1.sum()
 
         class B(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer2", torch.ones(6, 4))
+                self.buffer2 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self):
                 return self.buffer2.sum()
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = A()
                 self.b = B()
@@ -3731,23 +3851,23 @@ G['macademia'], accessed at:
         from functorch.experimental.control_flow import cond, map
 
         class A(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.zeros(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.zeros(6, 4))
 
             def forward(self):
                 return self.buffer1.sum()
 
         class B(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer2", torch.ones(6, 4))
+                self.buffer2 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self):
                 return self.buffer2.sum()
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = A()
                 self.b = B()
@@ -3782,7 +3902,7 @@ G['macademia'], accessed at:
         from functorch.experimental.control_flow import cond
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, pred, x):
@@ -3862,7 +3982,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     )
     def test_retracibility(self):
         class MyLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(20, 98)
                 self.bias = torch.randn(20)
@@ -3871,7 +3991,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
                 self.linear = MyLinear()
@@ -3899,7 +4019,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
     def test_retracibility_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(20, 98)
                 self.bias = torch.randn(20)
@@ -3908,7 +4028,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
                 self.linear = MyLinear()
@@ -3949,7 +4069,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
     def test_retracibility_nested_list_out(self):
         class MyLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(20, 98)
                 self.bias = torch.randn(20)
@@ -3958,7 +4078,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
                 self.linear = MyLinear()
@@ -4034,9 +4154,9 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
     def test_param_buffer_safe_from_mutation_simple(self):
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.zeros(5, 5))
+                self.buffer1 = torch.nn.Buffer(torch.zeros(5, 5))
 
             def forward(self, x):
                 self.buffer1.add_(1)
@@ -4053,17 +4173,17 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
     def test_param_buffer_safe_from_mutation_recurse(self):
         class Child(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer2", torch.zeros(5))
+                self.buffer2 = torch.nn.Buffer(torch.zeros(5))
 
             def forward(self, x):
                 return x.sum() + self.buffer2.sum()
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.zeros(5))
+                self.buffer1 = torch.nn.Buffer(torch.zeros(5))
                 self.child = Child()
 
             def forward(self, x):
@@ -4198,7 +4318,7 @@ def forward(self, arg0_1, arg1_1):
                 return torch.sin(x)
 
         class Module2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod1 = Module1()
 
@@ -4383,8 +4503,8 @@ def forward(self, x):
     l_args_0_ = arg0
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
     add = l_args_0_ + 1;  l_args_0_ = None
-    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
-    return pytree.tree_unflatten([add], self._out_spec)""",
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",  # NOQA: B950
         )
         self.assertEqual(out.requires_grad, False)
         with self.assertRaisesRegex(
@@ -4406,8 +4526,8 @@ def forward(self, x):
     l_args_0_ = arg0
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(False)
     add = l_args_0_ + 1;  l_args_0_ = None
-    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
-    return pytree.tree_unflatten([add], self._out_spec)""",
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",  # NOQA: B950
         )
 
         inp = torch.randn(2, 2)
@@ -4428,8 +4548,8 @@ def forward(self, x):
     l_x_ = arg0
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
     add = l_x_ + 1;  l_x_ = None
-    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
-    return pytree.tree_unflatten([add], self._out_spec)""",
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",  # NOQA: B950
         )
         inp = torch.randn(2, 2, requires_grad=True)
         out = gm(inp)
@@ -4462,10 +4582,10 @@ def forward(self, x, b, y):
     l_x_ = arg0
     l_b_ = arg1
     l_y_ = arg2
-    _set_grad_enabled = torch._C._set_grad_enabled(False)
+    _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
     x = l_x_.clone();  l_x_ = None
-    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = None
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
+    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = setitem = None
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
     return pytree.tree_unflatten([x], self._out_spec)""",
         )
 
@@ -4480,9 +4600,9 @@ def forward(self, x, b, y):
     l_y_ = arg2
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
     x = l_x_.clone();  l_x_ = None
-    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = None
-    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
-    return pytree.tree_unflatten([x], self._out_spec)""",
+    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = setitem = None
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
+    return pytree.tree_unflatten([x], self._out_spec)""",  # NOQA: B950
         )
 
         with self.assertRaisesRegex(

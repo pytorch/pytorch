@@ -9,16 +9,14 @@ import itertools
 import mmap
 import operator
 import os
-
-import pathlib
 import sys
 import tempfile
 import warnings
 import weakref
 from contextlib import contextmanager
 from decimal import Decimal
+from pathlib import Path
 from tempfile import mkstemp
-
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import numpy
@@ -37,13 +35,14 @@ from torch.testing._internal.common_utils import (
     xpassIfTorchDynamo,
 )
 
+
 # If we are going to trace through these, we should use NumPy
 # If testing on eager mode, we use torch._numpy
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
     from numpy.testing import (
         assert_,
-        assert_allclose,  # IS_PYPY, IS_PYSTON, HAS_REFCOUNT,
+        assert_allclose,
         assert_almost_equal,
         assert_array_almost_equal,
         assert_array_equal,
@@ -51,15 +50,14 @@ if TEST_WITH_TORCHDYNAMO:
         assert_equal,
         assert_raises_regex,
         assert_warns,
-        # runstring, temppath,
-        suppress_warnings,  # break_cycles,
+        suppress_warnings,
     )
 
 else:
     import torch._numpy as np
     from torch._numpy.testing import (
         assert_,
-        assert_allclose,  # IS_PYPY, IS_PYSTON, HAS_REFCOUNT,
+        assert_allclose,
         assert_almost_equal,
         assert_array_almost_equal,
         assert_array_equal,
@@ -67,8 +65,7 @@ else:
         assert_equal,
         assert_raises_regex,
         assert_warns,
-        # runstring, temppath,
-        suppress_warnings,  # break_cycles,
+        suppress_warnings,
     )
 
 
@@ -1155,7 +1152,7 @@ class TestCreation(TestCase):
     def test_no_len_object_type(self):
         # gh-5100, want object array from iterable object without len()
         class Point2:
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
             def __getitem__(self, ind):
@@ -3866,7 +3863,7 @@ class TestIO(TestCase):
         assert_array_equal(y, x.flat)
 
     def test_roundtrip_dump_pathlib(self, x, tmp_filename):
-        p = pathlib.Path(tmp_filename)
+        p = Path(tmp_filename)
         x.dump(p)
         y = np.load(p, allow_pickle=True)
         assert_array_equal(y, x)

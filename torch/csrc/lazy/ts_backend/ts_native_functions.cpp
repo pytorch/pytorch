@@ -39,10 +39,10 @@ at::Tensor CreateLtcTensor(
 std::optional<torch::lazy::BackendDevice> GetLtcDevice(
     const std::optional<c10::Device>& device) {
   if (!device) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   if (device->type() != at::kLazy) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return torch::lazy::atenDeviceToBackendDevice(*device);
 }
@@ -130,6 +130,7 @@ at::Tensor LazyNativeFunctions::_copy_from_and_resize(
     // at this point we know dst is a lazy tensor
     auto* dest_impl =
         dynamic_cast<torch::lazy::LTCTensorImpl*>(dst.unsafeGetTensorImpl());
+    TORCH_CHECK(dest_impl);
     dest_impl->tensor()->UpdateFromTensorOut(self_tensor);
     dest_impl->force_refresh_sizes();
   }
@@ -235,7 +236,7 @@ at::Tensor LazyNativeFunctions::_to_copy(
     // captured IR, or we will try to convert an eager tensor back to a lazy one
     // inside the torchscript executor lazy:0 -> lazy:1 is handled in case3, so
     // we can safely drop the device argument
-    device = c10::nullopt;
+    device = std::nullopt;
 
     torch::lazy::NodePtr node = torch::lazy::ReuseNode<ToCopy>(
         lazy_self->GetIrValue(),
@@ -307,7 +308,7 @@ at::Tensor LazyNativeFunctions::empty_strided_symint(
     std::optional<bool> pin_memory) {
   TORCH_LAZY_FN_COUNTER("lazy::");
   at::Tensor t =
-      empty_symint(sym_size, dtype, layout, device, pin_memory, c10::nullopt);
+      empty_symint(sym_size, dtype, layout, device, pin_memory, std::nullopt);
   auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
   auto stride = C10_AS_INTARRAYREF_SLOW(sym_stride);
   return t.as_strided(size, stride, /*storage_offset=*/0);

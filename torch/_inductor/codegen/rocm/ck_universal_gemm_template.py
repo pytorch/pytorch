@@ -13,6 +13,7 @@ from torch._inductor.ir import Buffer, Layout
 
 from ...utils import IndentedBuffer, try_import_ck_lib
 
+
 _, gen_ops_library, gen_ops_preselected, CKGemmOperation = try_import_ck_lib()
 
 
@@ -91,7 +92,7 @@ class CKGemmTemplate(CKTemplate):
         alpha: float,
         beta: float,
         input_reorder: Optional[List[int]] = None,
-    ):
+    ) -> None:
         super().__init__(
             "ck_gemm_template",
             input_nodes=input_nodes,

@@ -29,8 +29,10 @@ from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
 from torch.utils._traceback import CapturedTraceback
 
+
 if TYPE_CHECKING:
     from torch.fx.proxy import Proxy
+
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
@@ -328,8 +330,11 @@ class AutogradCompilerInstance:
             return [self.to_proxy(x) for x in t]
         if isinstance(t, tuple):
             return tuple(self.to_proxy(x) for x in t)
-        assert isinstance(t, (torch.Tensor, torch.SymInt))
-        return fetch_object_proxy(self.fx_tracer)(t).proxy
+        # can it be torch.SymInt as the code used to imply?
+        assert isinstance(t, torch.Tensor)
+        proxy_tensor = fetch_object_proxy(self.fx_tracer, t)
+        assert isinstance(proxy_tensor, torch.fx.experimental.proxy_tensor._ProxyTensor)
+        return proxy_tensor.proxy
 
     def bind_tensors_to_proxies(self, tensors, proxies):
         if isinstance(proxies, torch.fx.Proxy):

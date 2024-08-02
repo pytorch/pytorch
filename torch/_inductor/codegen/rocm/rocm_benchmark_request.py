@@ -7,9 +7,9 @@ from ctypes import byref, c_size_t, c_void_p
 from typing import Any, Callable, Iterable, List, Optional, Union
 
 import torch
-
 from torch._inductor.autotune_process import GPUDeviceBenchmarkRequest, TensorMeta
 from torch._inductor.codecache import DLLWrapper, ROCmCodeCache
+
 
 log = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkRequest):
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Iterable[Any],
         source_code: str,
-    ):
+    ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.source_code = source_code
         self.workspace_size: int = 0

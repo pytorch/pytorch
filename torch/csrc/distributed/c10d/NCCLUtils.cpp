@@ -12,6 +12,8 @@
 #include <cuda_runtime.h>
 #include <mutex>
 
+#include <nlohmann/json.hpp>
+
 namespace {
 constexpr int64_t kCommInitBusyWaitMillis = 10;
 } // namespace
@@ -21,7 +23,7 @@ namespace c10d {
 ncclComm_t NCCLComm::getNcclComm() {
   std::unique_lock<std::mutex> lock(mutex_);
   if (aborted_) {
-    auto commFailureMsg = commFailureReason_ != c10::nullopt
+    auto commFailureMsg = commFailureReason_ != std::nullopt
         ? c10::str(" Original reason for failure was: ", *commFailureReason_)
         : "";
     TORCH_CHECK_WITH(
@@ -79,7 +81,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   C10D_NCCL_CHECK(
       ncclCommSplit(
           source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
-      c10::nullopt);
+      std::nullopt);
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
   return comm;
@@ -189,11 +191,11 @@ std::string ncclGetErrorWithVersion(ncclResult_t error) {
 // thrown in the NCCL codebase.
 std::string getNcclErrorDetailStr(
     ncclResult_t error,
-    std::optional<std::string> processGroupFailureReason /* = c10::nullopt */
+    std::optional<std::string> processGroupFailureReason /* = std::nullopt */
 ) {
   // Prioritize failure reason provided by PG NCCL first, as it can abort
   // communicators when it encounters collective timeouts, etc.
-  if (processGroupFailureReason != c10::nullopt) {
+  if (processGroupFailureReason != std::nullopt) {
     return *processGroupFailureReason;
   }
   std::string interpret;
@@ -252,14 +254,14 @@ control_plane::RegisterHandler dumpHandler{
       const std::string includeStackTracesStr = "includestacktraces";
       const std::string onlyActiveStr = "onlyactive";
 
-      std::unordered_map<std::string, bool> expectedParams = {
+      std::unordered_map<std::string, bool> processedParams = {
           {includeCollectivesStr, true},
           {includeStackTracesStr, true},
           {onlyActiveStr, false}};
 
       for (const auto& [paramName, paramValue] : params) {
-        auto it = expectedParams.find(paramName);
-        if (it != expectedParams.end()) {
+        auto it = processedParams.find(paramName);
+        if (it != processedParams.end()) {
           validParamCount++;
           if (paramValue == "true") {
             it->second = true;
@@ -283,10 +285,55 @@ control_plane::RegisterHandler dumpHandler{
       }
       res.setContent(
           dump_nccl_trace(
-              expectedParams[includeCollectivesStr],
-              expectedParams[includeStackTracesStr],
-              expectedParams[onlyActiveStr]),
+              processedParams[includeCollectivesStr],
+              processedParams[includeStackTracesStr],
+              processedParams[onlyActiveStr]),
           "application/octet-stream");
+    }};
+
+control_plane::RegisterHandler jsonDumpHandler{
+    "dump_nccl_trace_json",
+    [](const control_plane::Request& req, control_plane::Response& res) {
+      const auto params = req.params();
+      size_t validParamCount = 0;
+
+      // valid params
+      const std::string includeCollectivesStr = "includecollectives";
+      const std::string onlyActiveStr = "onlyactive";
+
+      std::unordered_map<std::string, bool> processedParams = {
+          {includeCollectivesStr, true}, {onlyActiveStr, false}};
+
+      for (const auto& [paramName, paramValue] : params) {
+        auto it = processedParams.find(paramName);
+        if (it != processedParams.end()) {
+          validParamCount++;
+          if (paramValue == "true") {
+            it->second = true;
+          } else if (paramValue == "false") {
+            it->second = false;
+          } else {
+            res.setStatus(400);
+            res.setContent(
+                "Invalid value for " + paramName +
+                    " valid values are true or false",
+                "text/plain");
+            return;
+          }
+        }
+      }
+      if (validParamCount < params.size()) {
+        res.setStatus(400);
+        res.setContent(
+            "Invalid parameters - unexpected param passed in", "text/plain");
+        return;
+      }
+      res.setStatus(200);
+      res.setContent(
+          dump_nccl_trace_json(
+              processedParams[includeCollectivesStr],
+              processedParams[onlyActiveStr]),
+          "application/json");
     }};
 
 void DebugInfoWriter::write(const std::string& ncclTrace) {
@@ -325,6 +372,97 @@ void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
       "debugInfoWriter already registered");
   hasWriterRegistered_.store(true);
   writer_ = std::move(writer);
+}
+
+std::string NCCLTraceBuffer::dump_json(
+    const std::optional<std::unordered_map<
+        std::string,
+        std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+    bool includeCollectives,
+    bool onlyActive) {
+  using json = nlohmann::json;
+  json result;
+  result[version_key_str] = version_val_str;
+  result[pg_config_key_str] = getPgConfigJson();
+  result[pg_status_key_str] = getPgStatusJson();
+
+  // collective trace
+  if (includeCollectives) {
+    std::list<json> entries;
+    for (auto& e : dump_entries()) {
+      json j;
+      if (onlyActive && e.time_discovered_completed_.has_value()) {
+        continue;
+      }
+      j[record_id_key_str] = int64_t(e.id_);
+      j[pg_id_key_str] = int64_t(e.pg_id_);
+      j[pg_name_key_str] = e.pg_name_;
+      j[collective_seq_id_key_str] = int64_t(e.collective_seq_id_);
+      j[p2p_seq_id_key_str] = int64_t(e.p2p_seq_id_);
+      j[op_id_key_str] = int64_t(e.op_id_);
+      j[profiling_name_key_str] = e.profiling_name_;
+      j[time_created_key_str] = int64_t(e.time_created_);
+      if (e.duration_) {
+        j[duration_key_str] = *e.duration_;
+      }
+      auto it = e.sizes_.begin();
+      auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
+        auto sizes = std::list<std::list<int>>();
+        for (auto dim : dims) {
+          auto arg_sizes = std::list<int>();
+          for (auto i : c10::irange(dim)) {
+            (void)i;
+            arg_sizes.push_back(*it++);
+          }
+          sizes.push_back(arg_sizes);
+        }
+        return sizes;
+      };
+      j[input_sizes_key_str] = read_sizes(e.input_dims_);
+      std::vector<std::string> input_dtypes_strs;
+      input_dtypes_strs.reserve(e.input_dtypes_.size());
+      for (const auto& input_dtype : e.input_dtypes_) {
+        input_dtypes_strs.push_back(c10::toString(input_dtype));
+      }
+      j[input_dtypes_key_str] = input_dtypes_strs;
+      j[output_sizes_key_str] = read_sizes(e.output_dims_);
+      std::vector<std::string> output_dtypes_strs;
+      output_dtypes_strs.reserve(e.output_dtypes_.size());
+      for (const auto& output_dtype : e.output_dtypes_) {
+        output_dtypes_strs.push_back(c10::toString(output_dtype));
+      }
+      j[output_dtypes_key_str] = output_dtypes_strs;
+      if (e.time_discovered_completed_.has_value()) {
+        j[state_key_str] = completed_state_str;
+      } else if (e.time_discovered_started_.has_value()) {
+        j[state_key_str] = started_state_str;
+      } else {
+        j[state_key_str] = scheduled_state_str;
+      }
+      j[time_discovered_started_key_str] =
+          e.time_discovered_started_.has_value()
+          ? int64_t(*e.time_discovered_started_)
+          : 0;
+      j[time_discovered_completed_key_str] =
+          e.time_discovered_completed_.has_value()
+          ? int64_t(*e.time_discovered_completed_)
+          : 0;
+      j[retired_key_str] = e.retired_;
+      j[timeout_key_str] = e.timeout_ms_;
+      j[is_p2p_key_str] = e.isP2P_;
+      entries.emplace_back(j);
+    }
+
+    if (entries.size() > 0) {
+      result[entries_key_str] = entries;
+    }
+  }
+
+  if (ncclDumpMap.has_value()) {
+    result[nccl_comm_key_str] = ncclDumpMap.value();
+  }
+
+  return result.dump();
 }
 
 std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;

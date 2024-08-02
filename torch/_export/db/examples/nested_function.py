@@ -18,6 +18,6 @@ class NestedFunction(torch.nn.Module):
 
         return closure(x)
 
-example_inputs = (torch.randn(3, 2), torch.randn(2))
+example_args = (torch.randn(3, 2), torch.randn(2))
 tags = {"python.closure"}
 model = NestedFunction()

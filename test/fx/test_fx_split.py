@@ -5,7 +5,6 @@ from typing import Dict, List, Tuple
 
 import torch
 from torch.fx.passes.split_utils import split_by_tags
-
 from torch.testing._internal.common_utils import TestCase
 
 
@@ -155,7 +154,7 @@ class TestSplitByTags(TestCase):
 
 class TestSplitOutputType(TestCase):
     class TestModule(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.conv = torch.nn.Conv2d(3, 16, 3, stride=1, bias=True)
             self.relu = torch.nn.ReLU()

@@ -11,6 +11,7 @@ from torch._dynamo.utils import counters, optimus_scuba_log
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
+
 try:
     # importing this will register fbgemm lowerings for inductor
     import deeplearning.fbgemm.fbgemm_gpu.fb.inductor_lowerings  # noqa: F401
@@ -522,7 +523,7 @@ class TestGroupBatchFusion(TestCase):
 
 
 class TestBMMFusionModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.my_modules = torch.nn.ModuleList()
         for _ in range(10):

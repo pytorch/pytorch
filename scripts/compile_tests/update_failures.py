@@ -194,7 +194,7 @@ if __name__ == "__main__":
         "filename",
         nargs="?",
         default=str(
-            Path(__file__).absolute().parents[2]
+            Path(__file__).absolute().parent.parent.parent
             / "torch/testing/_internal/dynamo_test_failures.py"
         ),
         help="Optional path to dynamo_test_failures.py",
@@ -203,7 +203,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "test_dir",
         nargs="?",
-        default=str(Path(__file__).absolute().parents[2] / "test"),
+        default=str(Path(__file__).absolute().parent.parent.parent / "test"),
         help="Optional path to test folder",
     )
     parser.add_argument(

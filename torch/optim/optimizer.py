@@ -1,7 +1,7 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """Base optimizer."""
 import functools
-import math
 import warnings
 from collections import defaultdict, OrderedDict
 from copy import deepcopy
@@ -34,6 +34,7 @@ from torch.utils._foreach_utils import (
     Indices,
 )
 from torch.utils.hooks import RemovableHandle
+
 
 Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
@@ -110,15 +111,6 @@ def _stack_if_compiling(x):
         return torch.stack(x)
     else:
         return x
-
-
-def _dispatch_sqrt(
-    x: float,
-):  # float annotation is needed because of torchscript type inference
-    if not torch.jit.is_scripting() and isinstance(x, torch.Tensor):
-        return x.sqrt()
-    else:
-        return math.sqrt(x)
 
 
 def _disable_dynamo_if_unsupported(single_tensor_fn=None):
@@ -218,7 +210,7 @@ def _get_scalar_dtype(is_fused=None):
 
 def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
     r"""Return the device type list that supports capturable optimizer."""
-    capturable_supported_devices = ["cuda"]
+    capturable_supported_devices = ["cuda", "xpu", "hpu"]
     if not torch.jit.is_scripting():
         capturable_supported_devices.append(torch._C._get_privateuse1_backend_name())
     if supports_xla:

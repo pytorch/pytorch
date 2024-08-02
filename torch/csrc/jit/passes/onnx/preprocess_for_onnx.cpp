@@ -15,18 +15,18 @@ using namespace ::c10::onnx;
 
 namespace {
 
-at::optional<Node*> FindFusibleListUnpack(Node* n) {
+std::optional<Node*> FindFusibleListUnpack(Node* n) {
   // 1. number of outputs is restricted to 1.
   // 2. output is only used by prim::ListUnpack.
   if (n->outputs().size() != 1) {
-    return at::nullopt;
+    return std::nullopt;
   }
   if (n->output()->uses().size() != 1) {
-    return at::nullopt;
+    return std::nullopt;
   }
   auto listUnpackNode = n->output()->uses()[0].user;
   if (listUnpackNode->kind() != prim::ListUnpack) {
-    return at::nullopt;
+    return std::nullopt;
   }
   return listUnpackNode;
 }
