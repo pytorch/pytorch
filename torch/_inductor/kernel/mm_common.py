@@ -305,7 +305,7 @@ def mm_args(
         assert out_dtype is None, "out_dtype is ignored if layout is specified."
     from ..lowering import expand
 
-    others = [realize_inputs(expand(x, layout.size)) for x in others]  # type: ignore[assignment]
+    others = [realize_inputs(expand(x, layout.size)) for x in others]
 
     return [m, n, k, layout, mat1, mat2, *others]
 
