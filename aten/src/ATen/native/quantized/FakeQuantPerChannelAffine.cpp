@@ -79,7 +79,7 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
   auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
   auto mask = at::empty_like(self, at::kBool, MemoryFormat::Preserve);
 
-  std::vector<int64_t> expected_shape(self.dim(), 1);
+  c10::DimVector expected_shape(self.dim(), 1);
   expected_shape[axis] = self.size(axis);
 
   TensorIterator iter = TensorIteratorConfig()
@@ -218,7 +218,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
 
   // Create an axis mask for vectorizing and reshaping the scale and zero point tensors
   // into the same shapes as X along the channel axis.
-  std::vector<int64_t> axis_mask(numDimensions, 0);
+  c10::DimVector axis_mask(numDimensions);
   for (const auto i : c10::irange(numDimensions)) {
     axis_mask[i] = (i == axis) ? X.size(axis) : 1;
   }
@@ -243,7 +243,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
 
   // Create a collection of axes that include all but the channel axis for
   // reduction when summing over the dScale and dZeroPoint tensors.
-  std::vector<int64_t> axis_for_reduction(numElements, 0);
+  c10::DimVector axis_for_reduction(numElements);
   for (const auto i : c10::irange(axis)) {
     axis_for_reduction[i] = i;
   }
