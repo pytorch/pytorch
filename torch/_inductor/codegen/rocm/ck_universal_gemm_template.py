@@ -48,10 +48,10 @@ class CKGemmTemplate(CKTemplate):
         const ck::index_t M = {{M}};
         const ck::index_t N = {{N}};
         const ck::index_t K = {{K}};
-        const ck::index_t StrideA = {{a_stride}};
-        const ck::index_t StrideB = {{b_stride}};
-        const ck::index_t StrideC = {{c_stride}};
-        constexpr auto StrideD = ck::Number<{{d_stride}}>{};
+        const ck::index_t LDA = {{ld_a}};
+        const ck::index_t LDB = {{ld_b}};
+        const ck::index_t LDC = {{ld_c}};
+        constexpr auto LDD = ck::Number<{{ld_d}}>{};
 
         auto argument = gemm.MakeArgument(
             reinterpret_cast<const {{a_element_dtype}}*>(X),
@@ -61,10 +61,10 @@ class CKGemmTemplate(CKTemplate):
             M,
             N,
             K,
-            StrideA,
-            StrideB,
-            std::array<ck::index_t, {{1 if has_bias else 0}}>{ {{'StrideD' if has_bias else ''}} },
-            StrideC, // == StrideE
+            LDA,
+            LDB,
+            std::array<ck::index_t, {{1 if has_bias else 0}}>{ {{'LDD' if has_bias else ''}} },
+            LDC,
             PassThrough {}, // a_elementwise_op
             PassThrough {}, // b_elementwise_op
             {{epilogue}} // c_elementwise_op
@@ -324,10 +324,10 @@ class CKGemmTemplate(CKTemplate):
             b_element_dtype=op.b_element_dtype,
             c_element_dtype=op.c_element_dtype,
             bias_element_dtype=op.ds_element_dtypes[0] if Bias is not None else "",
-            a_stride=kernel.contiguous_stride(X),
-            b_stride=kernel.contiguous_stride(W),
-            c_stride=kernel.contiguous_stride(Y),
-            d_stride=kernel.contiguous_stride(Bias),
+            ld_a=kernel.leading_dimension(X),
+            ld_b=kernel.leading_dimension(W),
+            ld_c=kernel.leading_dimension(Y),
+            ld_d=kernel.leading_dimension(Bias),
             alpha=self.alpha,
             beta=self.beta,
             epilogue=f"Bilinear {{ {self.alpha}, {self.beta} }}"

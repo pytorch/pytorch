@@ -213,33 +213,28 @@ class ROCmTemplateKernel(ROCmKernel):
         val = sympy_product(sizes)
         return cexpr(self.rename_indexing(val))
 
-    def contiguous_stride(self, node: Optional[IRNode], default_value: int = 0) -> str:
+    def leading_dimension(self, node: Optional[IRNode], default_value: int = 0) -> str:
         """
-        Hook called from template call to get the contiguous stride of an arg.
+        Hook called from template call to get the leading dimension of an arg.
         """
 
         if node is None:
             return str(default_value)
 
-        # 1D bias case, i.e. the shape when initialized is (N,)
-        # -> torch stride is (0, 1) and bias is row-major from CK POV
-        if node.get_stride() == [0, 1]:
-            return "0L"
+        stride = node.get_stride()
 
-        # Broadcasted bias case, i.e. the shape when initialized is (M, 1)
-        # -> torch stride is (1, 0) and bias is col-major from CK POV
-        if node.get_stride() == [1, 0]:
-            return "0L"
+        if 2 != len(stride):
+            leading_dim = default_value
+        elif stride[-1] == 1:
+            # row-major case
+            leading_dim = stride[-2]
+        elif stride[-2] == 1:
+            # column-major case
+            leading_dim = stride[-1]
+        else:
+            leading_dim = default_value
 
-        # strides: in torch, stride measures how many positions to advance the data pointer when the dimension index is incremented
-        # in CK, the stride is the size of the contiguous dimension
-        # so depending whether input is regular or transposed,
-        # the CK stride is either in -2 or -1 position of the strides list
-        # the below should do the job for 2D inputs
-        contiguous_stride = functools.reduce(
-            sympy.Max, node.get_stride(), sympy.Integer(0)
-        )
-        return cexpr(self.rename_indexing(contiguous_stride))
+        return cexpr(self.rename_indexing(leading_dim))
 
 
 class ROCmTemplateCaller(ChoiceCaller):
