@@ -26,8 +26,7 @@ class TestConverter(TestCase):
     ) -> ExportedProgram:
         # By default, it tests both jit.trace and jit.script.
         if option is None:
-            # option = ["trace", "script"]
-            option = ["script"]
+            option = ["trace", "script"]
 
         if check_persistent:
             num_iterations = 10
@@ -58,7 +57,6 @@ class TestConverter(TestCase):
             else:
                 raise RuntimeError(f"Unrecognized mode for torch.jit: {opt}")
 
-            print(opt, ts_model.graph)
             ep = TS2EPConverter(ts_model, inp).convert()
             ep_list.append(ep)
 
@@ -579,7 +577,7 @@ class TestConverter(TestCase):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
 
             def forward(self, x: torch.Tensor):
                 return self.w + x
@@ -588,7 +586,7 @@ class TestConverter(TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.m = M()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
 
             def forward(self, x: torch.Tensor):
                 return self.w + self.m(x)
@@ -597,7 +595,7 @@ class TestConverter(TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.m = NestedM()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
 
             def forward(self, x: torch.Tensor):
                 return self.w + self.m(x)
@@ -612,7 +610,7 @@ class TestConverter(TestCase):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
                 self.count = 1
 
             def forward(self, x: torch.Tensor):
@@ -623,7 +621,7 @@ class TestConverter(TestCase):
                 super().__init__()
                 self.m1 = M()
                 self.m2 = M()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
 
             def forward(self, x: torch.Tensor):
                 if torch.sum(x) > 1:
@@ -638,7 +636,7 @@ class TestConverter(TestCase):
                 super().__init__()
                 self.m1 = NestedM()
                 self.m2 = NestedM()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
 
             def forward(self, x: torch.Tensor):
                 if torch.max(x) > 1:
@@ -964,9 +962,6 @@ class TestConverter(TestCase):
                 y = torch.tensor(s)
                 return y
 
-        ep = torch.export.export(
-            M(), (torch.ones(3),), dynamic_shapes=({0: torch.export.Dim("m")},)
-        )
         ep_list = self._check_equal_ts_ep_converter(M(), (torch.ones(3),))
         for ep in ep_list:
             self.assertEqual(len(ep.constants), 0)
@@ -984,11 +979,9 @@ class TestConverter(TestCase):
                 y = torch.tensor([s, s * 2, 1])
                 return y
 
-        ep = torch.export.export(
-            M(), (torch.ones(3),), dynamic_shapes=({0: torch.export.Dim("m")},)
-        )
         ep_list = self._check_equal_ts_ep_converter(M(), (torch.ones(3),))
-        for ep in ep_list:
+        # Trace directly inline a tensor constant.
+        for ep in ep_list[1:]:
             self.assertEqual(len(ep.constants), 0)
 
         # TODO: Additional check once dynamic shape is supported.
@@ -1017,7 +1010,7 @@ class TestConverter(TestCase):
         # Since self.data is only read but not written, it is lifted as
         # constant tensors.
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.data = torch.randn(3, 2)
 
@@ -1025,7 +1018,7 @@ class TestConverter(TestCase):
                 return x + self.data
 
         class Goo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.data = torch.randn(3, 2)
                 self.foo = Foo()
@@ -1039,9 +1032,9 @@ class TestConverter(TestCase):
 
     def test_prim_SetAttr(self):
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("data", torch.ones(3, 2))
+                self.data = torch.nn.Buffer(torch.ones(3, 2))
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 self.data = self.data + x
@@ -1053,9 +1046,9 @@ class TestConverter(TestCase):
         )
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("data", torch.ones(3, 2))
+                self.data = torch.nn.Buffer(torch.ones(3, 2))
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 self.data = self.data + x
@@ -1071,7 +1064,7 @@ class TestConverter(TestCase):
         # In converter, we change tensor constants that are assigned as a buffer automatically,
         # since it might be hard to manually register them as buffers.
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.data = torch.ones(3, 2)
 
@@ -1089,7 +1082,7 @@ class TestConverter(TestCase):
         )
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.count = 0
 
@@ -1122,7 +1115,7 @@ class TestConverter(TestCase):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("w2", torch.ones(1))
+                self.w2 = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x: torch.Tensor):
                 self.w2 += 1
@@ -1172,7 +1165,7 @@ class TestConverter(TestCase):
 
     def test_context_manager(self):
         class ContextManager:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.count = 0
                 return
 
@@ -1218,7 +1211,7 @@ class TestConverter(TestCase):
 
     def test_ts2ep_multi_outputs_on_call_ops(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.pool = torch.nn.AdaptiveMaxPool2d((2, 2), return_indices=True)
 

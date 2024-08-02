@@ -1,14 +1,18 @@
-from setuptools import find_packages, setup
 import distutils.command.clean
+import shutil
+from pathlib import Path
+
+from setuptools import find_packages, setup
+
 from torch.utils.cpp_extension import BuildExtension, CppExtension
 
-from pathlib import Path
 
 PACKAGE_NAME = "pytorch_openreg"
 version = 1.0
 
 ROOT_DIR = Path(__file__).absolute().parent
 CSRS_DIR = ROOT_DIR / "pytorch_openreg/csrc"
+
 
 class clean(distutils.command.clean.clean):
     def run(self):
@@ -28,10 +32,7 @@ class clean(distutils.command.clean.clean):
 
 
 if __name__ == "__main__":
-
-    sources = (
-        list(CSRS_DIR.glob("*.cpp"))
-    )
+    sources = list(CSRS_DIR.glob("*.cpp"))
 
     # Note that we always compile with debug info
     ext_modules = [
@@ -40,7 +41,8 @@ if __name__ == "__main__":
             sources=sorted(str(s) for s in sources),
             include_dirs=[CSRS_DIR],
             extra_compile_args={"cxx": ["-g", "-Wall", "-Werror"]},
-    )]
+        )
+    ]
 
     setup(
         name=PACKAGE_NAME,

@@ -38,7 +38,7 @@ class ROCmTemplateKernel(ROCmKernel):
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, hipStream_t stream"
 
-    def __init__(self, kernel_name):
+    def __init__(self, kernel_name) -> None:
         """
         Initializes a new instance of the ROCmTemplateKernel class.
 
@@ -233,7 +233,7 @@ class ROCmTemplateCaller(ChoiceCaller):
         bmreq: ROCmBenchmarkRequest,
         template: "ROCmTemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
-    ):
+    ) -> None:
         super().__init__(name, input_nodes, layout)
         self.category = category
         self.make_kernel_render = make_kernel_render
@@ -249,7 +249,7 @@ class ROCmTemplateCaller(ChoiceCaller):
         assert self.bmreq is not None
         return self.bmreq.benchmark(*args, output_tensor=out)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"ROCmTemplateCaller(source_file={self.bmreq.source_file}, {self.info_dict()})"
 
     def call_name(self) -> str:

@@ -16,7 +16,6 @@ def patch(f):
             "normalization_pass": {},
             "remove_split_with_size_one_pass": {},
             "merge_getitem_cat_pass": {},
-            "merge_stack_tahn_unbind_pass": {},
             "merge_splits_pass": {},
             "mutate_cat_pass": {},
             "split_cat_pass": {},
@@ -1127,14 +1126,125 @@ class TestSplitCatFxPasses(TestCase):
             )
             return torch.cat((output, cat), dim=0)
 
+        @torch._inductor.config.patch(
+            pre_grad_fusion_options={
+                "optimize_cat_inputs_pass": {},
+            },
+            post_grad_fusion_options={},
+        )
+        def optimize_cat_inputs(x):
+            x_c = x.clone()
+            x_c_2 = x.clone()
+            l1_out = torch.split(x, [50, 50, 50, 50, 50, 50, 50, 50, 50, 50], dim=0)
+            l2_out = torch.split(x_c, [50, 50, 50, 50, 50, 50, 50, 50, 50, 50], dim=0)
+            l3_out = torch.split(x_c_2, [100, 100, 100, 100, 100], dim=0)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            item6 = l1_out[6]
+            item7 = l1_out[7]
+            item8 = l1_out[8]
+            item9 = l1_out[9]
+            item0_c = l2_out[0]
+            item1_c = l2_out[1]
+            item2_c = l2_out[2]
+            item3_c = l2_out[3]
+            item4_c = l2_out[4]
+            item5_c = l2_out[5]
+            item6_c = l2_out[6]
+            item7_c = l2_out[7]
+            item8_c = l2_out[8]
+            item9_c = l2_out[9]
+            item0_c_2 = l3_out[0]
+            item1_c_2 = l3_out[1]
+            item2_c_2 = l3_out[2]
+            item3_c_2 = l3_out[3]
+            item4_c_2 = l3_out[4]
+            other = item0.clone()
+            return torch.cat(
+                [
+                    other,
+                    item0,
+                    item1,
+                    item2,
+                    item3,
+                    item4,
+                    item5,
+                    item6,
+                    item7,
+                    item8,
+                    item9,
+                    item4_c,
+                    item5_c,
+                    item6_c,
+                    item7_c,
+                    item8_c,
+                    item9_c,
+                    item0_c,
+                    item1_c,
+                    item2_c,
+                    item3_c,
+                    item0_c_2,
+                    item1_c_2,
+                    item2_c_2,
+                    item3_c_2,
+                    item4_c_2,
+                ],
+                dim=0,
+            )
+
+        @torch._inductor.config.patch(
+            pre_grad_fusion_options={
+                "unbind_cat_to_view_pass": {},
+            },
+            post_grad_fusion_options={},
+        )
+        def unbind_cat_to_view(x):
+            x_c = x.view(10, 50, 500)
+            l1_out = torch.unbind(x_c, dim=0)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            item6 = l1_out[6]
+            item7 = l1_out[7]
+            item8 = l1_out[8]
+            item9 = l1_out[9]
+            cat = torch.cat(
+                [
+                    item0,
+                    item1,
+                    item2,
+                    item3,
+                    item4,
+                    item5,
+                    item6,
+                ],
+                dim=1,
+            )
+            return torch.cat((cat, item7, item8, item9), dim=1)
+
         args = [
             torch.randn(500, 500),
         ]
-        for fn, expected_getitem_cat_merged, expected_cat_removed in [
-            (split_cat_split, 2, 0),
-            (split_cat_split_kwarg, 2, 0),
-            (remove_cat_node_with_all_getitmes, 0, 2),
-            (mutate_cat_node_with_some_getitmes, 0, 1),
+        for (
+            fn,
+            expected_getitem_cat_merged,
+            expected_cat_removed,
+            expected_cat_optimized,
+            exptected_unbind_to_cat_view,
+        ) in [
+            (split_cat_split, 2, 0, 0, 0),
+            (split_cat_split_kwarg, 2, 0, 0, 0),
+            (remove_cat_node_with_all_getitmes, 0, 2, 0, 0),
+            (mutate_cat_node_with_some_getitmes, 0, 1, 0, 0),
+            (optimize_cat_inputs, 0, 0, 1, 0),
+            (unbind_cat_to_view, 0, 0, 0, 1),
         ]:
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
@@ -1148,41 +1258,14 @@ class TestSplitCatFxPasses(TestCase):
                 counters["inductor"]["mutate_cat_pass"],
                 expected_cat_removed,
             )
-            counters.clear()
-
-    @patch
-    def test_stack_tahn_unbind_merge(self):
-        def stack_tahn_unbind(x):
-            l1_out = torch.split(x, [20, 20, 20, 10, 10, 20, 20], 1)
-            item0 = l1_out[0]
-            item1 = l1_out[1]
-            item2 = l1_out[2]
-            item3 = l1_out[3]
-            item4 = l1_out[4]
-            item5 = l1_out[5]
-            item6 = l1_out[6]
-            stack = torch.stack(tensors=(item0, item1, item2), dim=0)
-            cat_1 = torch.cat((item3, item4), 1)
-            cat_2 = torch.cat((item5, item6), 1)
-            tanh = torch.tanh(stack)
-            unbind = torch.unbind(tanh, 0)
-            return torch.cat((unbind[0], unbind[1], torch.cat((cat_1, cat_2), 1)), 1)
-
-        args = [
-            torch.randn(50, 120),
-        ]
-        for fn, expected_stack_tahn_unbind_merged in [
-            (stack_tahn_unbind, 1),
-        ]:
-            expected = fn(*args)
-            actual = torch.compile(fn)(*args)
-
-            torch.testing.assert_close(actual, expected)
             self.assertEqual(
-                counters["inductor"]["merge_stack_tahn_unbind_pass"],
-                expected_stack_tahn_unbind_merged,
+                counters["inductor"]["optimize_cat_inputs_pass"],
+                expected_cat_optimized,
             )
-            self.assertIn("merge_getitem_cat_pass_pre_grad", optimus_scuba_log)
+            self.assertEqual(
+                counters["inductor"]["unbind_cat_to_view_pass"],
+                exptected_unbind_to_cat_view,
+            )
             counters.clear()
 
     def test_numpy_compat_normalization(self):

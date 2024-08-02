@@ -160,7 +160,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             """\
 def forward(self, x_1, output_1):
     triton_kernel_wrapper_functional_proxy = torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
-    getitem = triton_kernel_wrapper_functional_proxy['in_ptr0']
+    getitem = triton_kernel_wrapper_functional_proxy['in_ptr0'];  getitem = None
     getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return getitem_1""",
         )
@@ -1375,6 +1375,47 @@ def forward(self, x_1, output_1):
         f(x, x)
 
     @requires_gpu
+    @common_utils.parametrize("dynamic", [False, True])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_multiple_outputs(self, dynamic, backend):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            out_ptr2,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+            tl.store(out_ptr2 + offsets, output + 1, mask=mask)
+
+        @torch.compile(fullgraph=True, backend=backend, dynamic=dynamic)
+        def f(x, y, z):
+            output = torch.empty_like(x)
+            output2 = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, y, output, output2, n_elements, BLOCK_SIZE=16)
+            # The z return is intentional: we're testing training
+            return output, output2, z**2
+
+        x = torch.randn(3, requires_grad=True, device=GPU_TYPE)
+        y = torch.randn(3, requires_grad=True, device=GPU_TYPE)
+        z = torch.randn(3, requires_grad=True, device=GPU_TYPE)
+        out, out2, out3 = f(x, y, z)
+        self.assertEqual(out, x + y)
+        self.assertEqual(out2, x + y + 1)
+        self.assertEqual(out3, z**2)
+
+    @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_num_ctas(self, backend):
         @triton.jit
@@ -2347,6 +2388,66 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         out = f(x, y)
         expected = torch.empty_like(x)
         self.assertEqual(out, expected)
+
+    @requires_gpu
+    @common_utils.parametrize("dynamic", [False, True])
+    @common_utils.parametrize("autotune", [False, True])
+    def test_capture_triton_special_kwargs(self, dynamic, autotune):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        if autotune:
+            add_kernel = triton.autotune(
+                configs=[
+                    triton.Config({"BLOCK_SIZE": 128}),
+                    triton.Config({"BLOCK_SIZE": 64}),
+                ],
+                key=["n_elements"],
+            )(add_kernel)
+
+        def f(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            if autotune:
+                kwargs = {}
+            else:
+                kwargs = {"BLOCK_SIZE": 128}
+            capture_triton(add_kernel)[grid](
+                x,
+                y,
+                output,
+                n_elements,
+                num_warps=8,
+                num_stages=3,
+                **kwargs,
+            )
+            return output
+
+        x = torch.randn(4, device=GPU_TYPE)
+        tracing_mode = "symbolic" if dynamic else "fake"
+
+        result = f(x, x)
+        self.assertEqual(result, x + x)
+
+        from functorch import make_fx
+
+        gm = make_fx(f, tracing_mode=tracing_mode)(x, x)
+        self.assertEqual(gm(x, x), x + x)
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)

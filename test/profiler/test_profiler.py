@@ -244,7 +244,7 @@ class TestProfiler(TestCase):
             return w.sum()
 
         class DummyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     3, 2, kernel_size=1, stride=2, padding=3, bias=False
@@ -351,7 +351,7 @@ class TestProfiler(TestCase):
         end_barrier = threading.Barrier(num_threads, timeout=timeout)
 
         class Task(threading.Thread):
-            def __init__(self):
+            def __init__(self) -> None:
                 self._end_gate = threading.Event()
                 super().__init__(daemon=True)
                 self.start()
@@ -519,9 +519,9 @@ class TestProfiler(TestCase):
         for e in p.function_events:
             if "aten::mm" in e.name:
                 found_mm = True
-            if "gemm" in e.name or "Cijk" in e.name:
+            if "gemm" in e.name.lower() or "Cijk" in e.name:
                 found_gemm = True
-            if "Memcpy" in e.name or "memcpy" in e.name:
+            if "memcpy" in e.name.lower():
                 found_memcpy = True
         if use_cuda:
             self.assertTrue(found_gemm)
@@ -763,7 +763,7 @@ class TestProfiler(TestCase):
                 return x + 2
 
         class C(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.A0 = A()
                 self.B0 = B()
@@ -1423,7 +1423,7 @@ from torch.profiler import supported_activities, profile
 from torch.autograd.profiler import KinetoStepTracker
 
 class SimpleNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = nn.Linear(10, 5)
         self.fc2 = nn.Linear(5, 2)
@@ -1914,7 +1914,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 
 
 class SimpleNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = nn.Linear(10, 5)
         self.fc2 = nn.Linear(5, 2)

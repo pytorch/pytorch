@@ -16,7 +16,7 @@ requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 class Seq(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
