@@ -713,13 +713,16 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     )
 
 
-def _create_and_apply_kernel_options(query, key, value, **kwargs: Any):
-    kernel_options: Dict[str, Any] = {}
-    kernel_options.update(kwargs)
-    if kernel_options["scale"] is None:
-        kernel_options["scale"] = 1.0 / math.sqrt(query.size(-1))
+def _apply_kernel_options(query, key, value, kernel_options):
+    kernel_options = {} if kernel_options is None else kernel_options
+
+    if "rows_guaranteed_safe" not in kernel_options:
+        kernel_options["rows_guaranteed_safe"] = False
+    if "prescale_qk" not in kernel_options:
+        kernel_options["prescale_qk"] = False
 
     # If foward kernel needs to return logsumexp is decided by this rule internally.
+    assert "output_logsumexp" not in kernel_options
     any_inputs_require_grad = (
         query.requires_grad or key.requires_grad or value.requires_grad
     )
@@ -735,10 +738,8 @@ def flex_attention(
     value: Tensor,
     score_mod: Optional[_score_mod_signature] = None,
     block_mask: Optional[BlockMask] = None,
-    *,
     scale: Optional[float] = None,
-    rows_guaranteed_safe: bool = False,
-    prescale_qk: bool = False,
+    kernel_options: Optional[Dict[str, Any]] = None,
 ) -> Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -771,10 +772,9 @@ def flex_attention(
         value (Tensor): Value tensor; shape :math:`(B, H, S, Ev)`.
         score_mod (Optional[Callable]): Function to modify attention scores. By default no score_mod is applied.
         block_mask (Optional[BlockMask]): BlockMask object that controls the blocksparsity pattern of the attention.
-
-    Kwargs:
         scale (float): Scaling factor applied prior to softmax. If
         none, the default value is set to :math`\frac{1}{\sqrt{E}}`
+        kernel_options (Optional[Dict[str, Any]]): Options to pass into the Triton kernels.
 
     Returns:
         output (Tensor): Attention output; shape :math:`(B, H, L, Ev)`.
@@ -806,14 +806,14 @@ def flex_attention(
         score_mod = _identity
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
+    if scale is None:
+        scale = 1.0 / math.sqrt(query.size(-1))
 
-    kernel_options = _create_and_apply_kernel_options(
+    kernel_options = _apply_kernel_options(
         query,
         key,
         value,
-        scale=scale,
-        rows_guaranteed_safe=rows_guaranteed_safe,
-        prescale_qk=prescale_qk,
+        kernel_options,
     )
 
     if torch.compiler.is_dynamo_compiling():
@@ -821,7 +821,7 @@ def flex_attention(
         for x in [query, key, value]:
             torch._dynamo.mark_static(x, -1)
         out, _ = flex_attention_hop(
-            query, key, value, score_mod, block_mask.as_tuple(), kernel_options
+            query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options
         )
         return out
 
@@ -833,5 +833,13 @@ def flex_attention(
             with _temp_remove_pre_dispatch_torch_function_mode():
                 out, _ = torch.compile(
                     flex_attention_hop, backend="eager", fullgraph=True
-                )(query, key, value, score_mod, block_mask.as_tuple(), kernel_options)
+                )(
+                    query,
+                    key,
+                    value,
+                    score_mod,
+                    block_mask.as_tuple(),
+                    scale,
+                    kernel_options,
+                )
                 return out

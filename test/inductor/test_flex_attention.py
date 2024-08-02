@@ -1202,7 +1202,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         block_mask = _create_empty_block_mask(q, k)
         kernel_options = {
-            "scale": 1.0,
             "rows_guaranteed_safe": False,
             "prescale_qk": False,
             "output_logsumexp": True,
@@ -1216,6 +1215,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
+                1.0,
                 kernel_options,
             )
 
@@ -1226,7 +1226,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             backend. We need to replicate this.
             """
             return flex_attention_hop(
-                q, k, v, score_mod, block_mask.as_tuple(), kernel_options
+                q, k, v, score_mod, block_mask.as_tuple(), 1.0, kernel_options
             )
 
         ref_out, ref_lse = eager_sdpa_hop(
@@ -1276,7 +1276,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         block_mask = _create_empty_block_mask(q, k)
         kernel_options = {
-            "scale": 1.0,
             "rows_guaranteed_safe": False,
             "prescale_qk": False,
             "output_logsumexp": True,
@@ -1290,6 +1289,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
+                1.0,
                 kernel_options,
             )
             lse_2 = lse * 2
@@ -1311,7 +1311,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         block_mask = _create_empty_block_mask(q, k)
         kernel_options = {
-            "scale": 1.0,
             "rows_guaranteed_safe": False,
             "prescale_qk": False,
             "output_logsumexp": True,
@@ -1325,6 +1324,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
+                1.0,
                 kernel_options,
             )
             lse_2 = lse * 2
@@ -1628,7 +1628,7 @@ class GraphModule(torch.nn.Module):
         child_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         child_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (l_kwargs_block_mask_kv_num_blocks, l_kwargs_block_mask_kv_indices, l_kwargs_block_mask_full_kv_num_blocks, l_kwargs_block_mask_full_kv_indices, l_kwargs_block_mask_q_num_blocks, l_kwargs_block_mask_q_indices, l_kwargs_block_mask_full_q_num_blocks, l_kwargs_block_mask_full_q_indices, 128, 128, mask_fn_0), {'scale': 0.5, 'rows_guaranteed_safe': False, 'prescale_qk': False, 'output_logsumexp': True}, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = l_kwargs_block_mask_kv_num_blocks = l_kwargs_block_mask_kv_indices = l_kwargs_block_mask_full_kv_num_blocks = l_kwargs_block_mask_full_kv_indices = l_kwargs_block_mask_q_num_blocks = l_kwargs_block_mask_q_indices = l_kwargs_block_mask_full_q_num_blocks = l_kwargs_block_mask_full_q_indices = mask_fn_0 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (l_kwargs_block_mask_kv_num_blocks, l_kwargs_block_mask_kv_indices, l_kwargs_block_mask_full_kv_num_blocks, l_kwargs_block_mask_full_kv_indices, l_kwargs_block_mask_q_num_blocks, l_kwargs_block_mask_q_indices, l_kwargs_block_mask_full_q_num_blocks, l_kwargs_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'rows_guaranteed_safe': False, 'prescale_qk': False, 'output_logsumexp': True}, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = l_kwargs_block_mask_kv_num_blocks = l_kwargs_block_mask_kv_indices = l_kwargs_block_mask_full_kv_num_blocks = l_kwargs_block_mask_full_kv_indices = l_kwargs_block_mask_q_num_blocks = l_kwargs_block_mask_q_indices = l_kwargs_block_mask_full_q_num_blocks = l_kwargs_block_mask_full_q_indices = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -1668,7 +1668,7 @@ class GraphModule(torch.nn.Module):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
         mask_graph = self.mask_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, fw_graph, joint_graph, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 128, 128, mask_graph), {'scale': 0.5, 'rows_guaranteed_safe': False, 'prescale_qk': False, 'output_logsumexp': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = fw_graph = joint_graph = full = full_default = convert_element_type = convert_element_type_1 = mask_graph = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, fw_graph, joint_graph, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 128, 128, mask_graph), 0.5, {'rows_guaranteed_safe': False, 'prescale_qk': False, 'output_logsumexp': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = fw_graph = joint_graph = full = full_default = convert_element_type = convert_element_type_1 = mask_graph = None
         getitem_4: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None

@@ -540,6 +540,7 @@ def flex_attention(
     value,
     subgraph,
     block_mask,
+    scale,
     kernel_options,
     score_mod_other_buffers,
     mask_mod_other_buffers,
@@ -578,6 +579,7 @@ def flex_attention(
             value,
             subgraph,
             block_mask,
+            scale,
             kernel_options,
             *score_mod_other_buffers,
         )
@@ -624,6 +626,7 @@ def flex_attention(
         device=query.get_device(),
     )
     kernel_options = dict(kernel_options)
+    kernel_options["scale"] = scale
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
     # full_kv_num_blocks is None if partial blocks are not computed
     kernel_options["HAS_FULL_BLOCKS"] = full_kv_num_blocks is not None
@@ -1193,6 +1196,7 @@ def flex_attention_backward(*args, **kwargs):
         fw_graph,
         joint_graph,
         block_mask,
+        scale,
         kernel_options,
         score_mod_other_buffers,
         mask_mod_other_buffers,
@@ -1289,6 +1293,7 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     kernel_options = dict(kernel_options)
+    kernel_options["scale"] = scale
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
     # full_kv_num_blocks is torch.zeros([1, 1, 1]) if partial blocks are not computed.
     kernel_options["HAS_FULL_BLOCKS"] = full_kv_num_blocks is not None

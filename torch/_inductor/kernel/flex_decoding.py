@@ -311,6 +311,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         value,
         subgraph,
         block_mask,
+        scale,
         kernel_options,
         *other_buffers,
     ) = args
@@ -349,6 +350,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # TODO: fix autotuning.
 
     kernel_options = dict(kernel_options)
+    kernel_options["scale"] = scale
     kernel_options["SPLIT_KV"] = get_split_k(
         key.get_size()[0], key.get_size()[1], key.get_size()[2]
     )
