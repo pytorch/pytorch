@@ -4,8 +4,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Set, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any, Dict, List, Optional, Set
 
 import torch
 import torch._inductor as inductor
@@ -52,9 +51,6 @@ from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
 
-
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
