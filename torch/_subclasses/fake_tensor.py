@@ -1170,6 +1170,9 @@ class FakeTensorMode(TorchDispatchMode):
     #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
     @property
     def avoid_device_init(self) -> bool:
+        if torch.xpu._is_compiled():
+            return not torch.xpu.is_available()
+
         return not torch.cuda.is_available()
 
     @property
