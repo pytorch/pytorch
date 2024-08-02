@@ -11,10 +11,10 @@ from torch.testing._internal.common_utils import TemporaryFileName
 
 class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
     def test_dynamo_timed_profiling_isolated(self):
-        # @dynamo_timed functions should appear in profile traces.
-        @dynamo_timed
+        # dynamo_timed functions should appear in profile traces.
         def inner_fn(x):
-            return x.sin()
+            with dynamo_timed("inner_fn"):
+                return x.sin()
 
         def outer_fn(x, y):
             return inner_fn(x) * y
@@ -29,7 +29,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_dynamo_timed_profiling_backend_compile(self):
-        # @dynamo_timed functions should appear in profile traces.
+        # dynamo_timed functions should appear in profile traces.
         # this checks whether these actually appear in actual dynamo execution.
         # "backend_compile" is just chosen as an example; if it gets renamed
         # this test can be replaced or deleted
