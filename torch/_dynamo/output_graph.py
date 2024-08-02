@@ -1138,10 +1138,6 @@ class OutputGraph:
                     stored_graph_output_var = True
                 else:
                     output.append(create_instruction("POP_TOP"))
-            else:
-                # NB: Important to run compiler collective even when there is
-                # a graph break
-                self.run_compiler_collective(tx)
             append_prefix_insts()
             self.add_output_instructions(output + pass2.get_instructions())
 
@@ -1258,7 +1254,14 @@ class OutputGraph:
                 GlobalContextCheckpointState(current_global_state)
             )
 
-    def run_compiler_collective(self, tx):
+    @torch._guards.TracingContext.clear_frame()
+    def compile_and_call_fx_graph(self, tx, rv, root):
+        """
+        Generate code from self.graph and return the Instruction()s to
+        call that generated code.
+        """
+        from .decorators import disable
+
         if (ds := tx.distributed_state) is not None and ds.all_states is None:
             compile_pg = ds.compile_pg
             log.info("compiler_collective %s", ds.local_state)
@@ -1281,17 +1284,7 @@ class OutputGraph:
             tx.speculation_log.clear()
             raise exc.CompileCollectiveRestartAnalysis
 
-    @torch._guards.TracingContext.clear_frame()
-    def compile_and_call_fx_graph(self, tx, rv, root):
-        """
-        Generate code from self.graph and return the Instruction()s to
-        call that generated code.
-        """
-        from .decorators import disable
-
         assert self.should_exit
-
-        self.run_compiler_collective(tx)
 
         name = unique_id("__compiled_fn")
 
