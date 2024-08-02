@@ -478,10 +478,12 @@ def _size_of(node: fx.Node) -> int:
         elif isinstance(val, torch.Tensor):
             return _tensor_nbytes(hint_int(val.numel(), fallback=4096), val.dtype)
 
-        raise RuntimeError(f"Unknown metadata type {type(val)}")
+        raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
     if node.op == "get_attr":
         return 0
-    raise RuntimeError("We should always have `val` metadata on the nodes")
+    raise RuntimeError(
+        f"Node {node} didn't have `val` metadata; we should always have `val` metadata on the nodes."
+    )
 
 
 # Used for some investigative purposes

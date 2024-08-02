@@ -14,9 +14,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 enum IRNodeType {
   kPrimitive,
@@ -492,6 +490,4 @@ ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f);
 
 TORCH_API ExprHandle expr_to_vec(ExprHandle v, int lanes);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

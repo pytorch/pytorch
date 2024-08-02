@@ -131,7 +131,7 @@ def has_higher_order_op(gm):
 
 # compile each of the partitioned submodules using the user-provided compiler
 class SubmodCompiler(torch.fx.interpreter.Interpreter):
-    def __init__(self, module, compiler, fake_mode):
+    def __init__(self, module, compiler, fake_mode) -> None:
         super().__init__(module)
         self.compiler = compiler
         self.fake_mode = fake_mode
@@ -145,7 +145,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
         assert len(kwargs) == 0, "We assume only args for these modules"
 
         class WrapperModule(torch.nn.Module):
-            def __init__(self, submod, unwrap_singleton_tuple):
+            def __init__(self, submod, unwrap_singleton_tuple) -> None:
                 super().__init__()
                 self.submod = submod
                 self.unwrap_singleton_tuple = unwrap_singleton_tuple
@@ -252,7 +252,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
                     assert self.tc
                     torch._guards.TracingContext.try_get().fakify_first_call = True
 
-                def __del__(self):
+                def __del__(self) -> None:
                     self.tc.fakify_first_call = False
 
             # For aot_eager and other backends, tracing context is not set
@@ -362,7 +362,7 @@ class DDPOptimizer:
         bucket_bytes_cap: int,
         backend_compile_fn,
         first_bucket_cap: Optional[int] = None,
-    ):
+    ) -> None:
         if first_bucket_cap is not None:
             self.first_bucket_cap = first_bucket_cap
         elif torch.distributed.is_available():
