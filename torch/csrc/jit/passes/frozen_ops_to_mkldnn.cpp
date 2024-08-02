@@ -1099,13 +1099,13 @@ class MKLDNNSubgraphSlicer {
 
   // Try to merge `consumer` into `producer`. If successful, this destroys
   // `consumer` and returns the `producer` group.
-  c10::optional<Node*> tryMerge(Node* producer, Node* consumer) {
+  std::optional<Node*> tryMerge(Node* producer, Node* consumer) {
     AT_ASSERT(producer->kind() == prim::MKLDNNGroup);
     bool canMerge = shouldConsiderForMerge(consumer) &&
         aliasDb_.moveAfterTopologicallyValid(consumer, producer);
 
     if (!canMerge) {
-      return c10::nullopt;
+      return std::nullopt;
     }
 
     SubgraphUtils::mergeNodeIntoSubgraphAndUpdateAliasing(

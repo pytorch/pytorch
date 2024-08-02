@@ -1,8 +1,6 @@
 #pragma once
 
-#include <chrono>
 #include <thread>
-#include <vector>
 
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/socket.h>
@@ -34,6 +32,7 @@ enum class QueryType : uint8_t {
   MULTI_GET,
   MULTI_SET,
   CANCEL_WAIT,
+  PING,
 };
 
 enum class CheckResponseType : uint8_t { READY, NOT_READY };

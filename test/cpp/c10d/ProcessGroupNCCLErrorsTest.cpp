@@ -69,7 +69,7 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       const std::vector<at::Tensor>& outputs = {},
       bool record = false) override {
     return c10::make_intrusive<WorkNCCLSimulateErrors>(
-        device, simulateError_, rank, opType, seq_);
+        device, simulateError_, rank, opType, seqCollective_);
   }
 
   size_t getNCCLCommCacheSize() {
@@ -131,7 +131,7 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       const std::vector<at::Tensor>& outputs = {},
       bool record = false) override {
     return c10::make_intrusive<WorkNCCLTimedoutErrors>(
-        device, setTimedoutError_, rank, opType, seq_);
+        device, setTimedoutError_, rank, opType, seqCollective_);
   }
 
   void setTimedoutError() {
@@ -389,6 +389,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
       setenv("TORCH_NCCL_DEBUG_INFO_TEMP_FILE", tempFilename.c_str(), 1) == 0);
   // Enable nccl flight recorder.
   ASSERT_TRUE(setenv("TORCH_NCCL_TRACE_BUFFER_SIZE", "10", 1) == 0);
+  ASSERT_TRUE(setenv(c10d::TORCH_NCCL_DUMP_ON_TIMEOUT[0].c_str(), "1", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   // Set a long watchdog timeout, so that we have enough time to lock the
   // watchdog and let the heartbeat monitor thread to kick in.

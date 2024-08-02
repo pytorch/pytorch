@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 import inspect
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
 
 import torch
 from torch._streambase import _EventBase, _StreamBase
+
 
 get_cuda_stream: Optional[Callable[[int], int]]
 if torch.cuda._is_compiled():
@@ -128,7 +130,9 @@ class DeviceGuard:
     The device is switched using the provided device interface.
     """
 
-    def __init__(self, device_interface: Type[DeviceInterface], index: Optional[int]):
+    def __init__(
+        self, device_interface: Type[DeviceInterface], index: Optional[int]
+    ) -> None:
         self.device_interface = device_interface
         self.idx = index
         self.prev_idx = -1
@@ -202,8 +206,11 @@ class CudaInterface(DeviceInterface):
 
     @staticmethod
     def get_compute_capability(device: _device_t = None):
-        major, min = torch.cuda.get_device_capability(device)
-        return major * 10 + min
+        if torch.version.hip is None:
+            major, min = torch.cuda.get_device_capability(device)
+            return major * 10 + min
+        else:
+            return torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
 
 
 get_xpu_stream: Optional[Callable[[int], int]]

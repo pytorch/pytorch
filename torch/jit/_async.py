@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Async API.
 
 This module contains the API for parallelism in TorchScript, notably:
@@ -72,7 +73,7 @@ def fork(func, *args, **kwargs):
             def forward(self, a: Tensor, b : int):
                 return a + b
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super(self).__init__()
                 self.mod = AddMod()
             def forward(self, input):

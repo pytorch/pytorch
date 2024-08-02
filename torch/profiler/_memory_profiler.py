@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import dataclasses
 import enum
@@ -15,7 +16,6 @@ from typing import (
     Tuple,
     Union,
 )
-
 from typing_extensions import Literal
 
 import torch
@@ -31,6 +31,7 @@ from torch._C._profiler import (
 )
 from torch._utils import _element_size
 from torch.profiler import _utils
+
 
 KeyAndID = Tuple["Key", int]
 TensorAndID = Tuple["TensorKey", int]
@@ -930,8 +931,9 @@ class MemoryProfile:
                 self._is_gradient(*i) or i in used_for_gradient
                 for i in node.outputs.items()
             ):
-                for key, (_, version) in node.inputs.items():
-                    used_for_gradient.add((key, version))
+                used_for_gradient.update(
+                    (key, version) for key, (_, version) in node.inputs.items()
+                )
         candidate_parameters.intersection_update(used_for_gradient)
 
         # and depends on a gradient.

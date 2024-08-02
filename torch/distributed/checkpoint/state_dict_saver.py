@@ -1,28 +1,36 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
+import inspect
 import os
 import warnings
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import cast, Optional, Union
+from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
-from torch.distributed.checkpoint import FileSystemWriter
+from torch.distributed.checkpoint._storage_utils import _storage_setup
+from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
-from torch.distributed.checkpoint.planner import SavePlan
+from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE
+from torch.distributed.checkpoint.planner import SavePlan, SavePlanner
+from torch.distributed.checkpoint.staging import AsyncStager
 from torch.distributed.checkpoint.stateful import Stateful
+from torch.distributed.checkpoint.storage import StorageWriter
 from torch.distributed.distributed_c10d import _get_default_group
 
-from ._storage_utils import _storage_setup
-from .default_planner import DefaultSavePlanner
-from .metadata import Metadata, STATE_DICT_TYPE
-from .planner import SavePlanner
-from .storage import StorageWriter
 from .utils import _api_bc_check, _DistWrapper, _profile
 
 
 __all__ = ["save_state_dict", "save", "async_save"]
 
 
+@deprecated(
+    "`save_state_dict` is deprecated and will be removed in future versions."
+    "Please use `save` instead.",
+    category=FutureWarning,
+)
 def save_state_dict(
     state_dict: STATE_DICT_TYPE,
     storage_writer: StorageWriter,
@@ -32,11 +40,6 @@ def save_state_dict(
     planner: Optional[SavePlanner] = None,
 ) -> Metadata:
     """This method is deprecated. Please switch to 'save'."""
-    warnings.warn(
-        "'save_state_dict' is deprecated and will be removed in future versions."
-        "Please use 'save' instead."
-    )
-
     storage_writer.reset()
 
     # TODO: test returning `save` here instead.
@@ -164,8 +167,8 @@ def async_save(
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
 ) -> Future:
-    """Asynchronous version of ``save``. This code first de-stages the state_dict on CPU, and then calls
-    `save` in a separate thread.
+    """Asynchronous version of ``save``. This code first de-stages the state_dict on to the
+    staging storage (defaults to CPU memory), and then calls the `save` in a separate thread.
 
     .. warning::
         This feature is experimental and subject to change.
@@ -178,8 +181,8 @@ def async_save(
             It can also be a key if the storage is a key-value store.
             (Default: ``None``)
         storage_writer (Optional[StorageWriter]):
-            Instance of StorageWriter used to perform writes. If this is not
-            specified, DCP will automatically infer the writer based on the
+            Instance of StorageWriter used to perform 'stage' and  'save'. If
+            this is not specified, DCP will automatically infer the writer based on the
             checkpoint_id. If checkpoint_id is also None, an exception will
             be raised. (Default: ``None``)
         planner (Optional[SavePlanner]):
@@ -220,25 +223,29 @@ def async_save(
     storage_writer = cast(
         StorageWriter, _storage_setup(storage_writer, checkpoint_id, reader=False)
     )
-    if isinstance(storage_writer, FileSystemWriter):
-        # in the async case, the state dict is already on CPU, so maintaining this
-        # buffer makes no sense
-        storage_writer.per_thread_copy_ahead = 0
 
-    cpu_state_dict = _offload_state_dict_to_cpu(
-        _stateful_to_state_dict(state_dict), type_check=False
-    )
+    state_dict = _stateful_to_state_dict(state_dict)
+    if isinstance(storage_writer, AsyncStager):
+        staged_state_dict = storage_writer.stage(state_dict)
+    else:  # provides bwc for storage_writers not implementing AsyncStager
+        staged_state_dict = _offload_state_dict_to_cpu(state_dict, type_check=False)
 
     executor = ThreadPoolExecutor(max_workers=1)
     f: Future = executor.submit(
         save,
-        cpu_state_dict,
+        staged_state_dict,
         checkpoint_id=checkpoint_id,
         storage_writer=storage_writer,
         planner=planner,
         process_group=process_group,
     )
     f.add_done_callback(lambda f: executor.shutdown(wait=False))
+
+    if (
+        isinstance(storage_writer, AsyncStager)
+        and storage_writer.should_synchronize_after_execute
+    ):
+        storage_writer.synchronize_staging()
 
     return f
 
@@ -268,7 +275,7 @@ def _save_state_dict(
         planner = DefaultSavePlanner()
     assert planner is not None
 
-    global_metatadata = None
+    global_metadata = None
 
     ckpt_kwargs = {}
     if (ckpt_id := getattr(storage_writer, "checkpoint_id", None)) is not None:
@@ -277,18 +284,32 @@ def _save_state_dict(
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
         assert planner is not None
-        planner.set_up_planner(state_dict, distW.is_coordinator)
+        storage_meta = storage_writer.storage_meta()
+        if "storage_meta" not in inspect.signature(planner.set_up_planner).parameters:
+            warnings.warn(
+                "The function definition for SavePlanner.set_up_planner has been updated"
+                " to include the storage_meta argument. Please update your implementation"
+                " to include this parameter."
+            )
+            planner.set_up_planner(state_dict, distW.is_coordinator)  # type: ignore[call-arg, arg-type]
+        else:
+            planner.set_up_planner(
+                state_dict=state_dict,
+                storage_meta=storage_meta,
+                is_coordinator=distW.is_coordinator,
+            )
         storage_writer.set_up_storage_writer(distW.is_coordinator)
+
         local_plan = planner.create_local_plan()
         local_plan = storage_writer.prepare_local_plan(local_plan)
         return local_plan
 
     @_dcp_method_logger(**ckpt_kwargs)
     def global_step(all_local_plans):
-        nonlocal global_metatadata
+        nonlocal global_metadata
 
         assert planner is not None
-        all_local_plans, global_metatadata = planner.create_global_plan(all_local_plans)
+        all_local_plans, global_metadata = planner.create_global_plan(all_local_plans)
         all_local_plans = storage_writer.prepare_global_plan(all_local_plans)
         return all_local_plans
 
@@ -305,8 +326,8 @@ def _save_state_dict(
 
     @_dcp_method_logger(**ckpt_kwargs)
     def finish_checkpoint(all_results):
-        assert global_metatadata is not None
-        storage_writer.finish(metadata=global_metatadata, results=all_results)
-        return global_metatadata
+        assert global_metadata is not None
+        storage_writer.finish(metadata=global_metadata, results=all_results)
+        return global_metadata
 
     return distW.all_reduce("write", write_data, finish_checkpoint)

@@ -15,7 +15,8 @@ understanding of how you can use ``torch.compile`` in your own programs.
 .. note::
    To run this script, you need to have at least one GPU on your machine.
    If you do not have a GPU, you can remove the ``.to(device="cuda:0")`` code
-   in the snippet below and it will run on CPU.
+   in the snippet below and it will run on CPU. You can also set device to
+   ``xpu:0`` to run on Intel® GPUs.
 
 .. code:: python
 
@@ -64,7 +65,7 @@ the following:
       xindex = xoffset + tl.arange(0, XBLOCK)[:]
       xmask = xindex < xnumel
       x0 = xindex
-      tmp0 = tl.load(in_ptr0 + (x0), xmask)
+      tmp0 = tl.load(in_ptr0 + (x0), xmask, other=0.0)
       tmp1 = tl.cos(tmp0)
       tmp2 = tl.sin(tmp1)
       tl.store(out_ptr0 + (x0 + tl.zeros([XBLOCK], tl.int32)), tmp2, xmask)

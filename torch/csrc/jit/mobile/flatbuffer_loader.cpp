@@ -19,7 +19,6 @@
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/ScopeExit.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/file_format.h>
@@ -35,6 +34,7 @@
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
+#include <optional>
 
 #ifndef DISABLE_UPGRADER
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
@@ -296,6 +296,11 @@ mobile::Module FlatbufferLoader::parseModule(
       "Parsing flatbuffer module: Corrupted ivalues/object_types field");
   TORCH_CHECK(
       reinterpret_cast<const char*>(ivalues) < end, "Corrupted ivalues field");
+  TORCH_CHECK(
+      module->storage_data_size() >= 0,
+      "Parsing flatbuffer module: illegal storage_data_size: ",
+      module->storage_data_size(),
+      ", expected to be non negative");
   all_ivalues_.resize(ivalues->size());
   all_types_.resize(module->object_types()->size());
   storages_.resize(module->storage_data_size());
@@ -359,7 +364,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
       (operator_version < caffe2::serialize::kProducedFileFormatVersion);
 
   for (const auto* op : *method->operators()) {
-    c10::optional<int> num_args = c10::nullopt;
+    std::optional<int> num_args = std::nullopt;
     if (op->num_args_serialized() > -1) {
       num_args = op->num_args_serialized();
     }
@@ -394,7 +399,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
           auto arg = c10::Argument(
               arg_tb->name()->str(),
               std::move(type_ptr),
-              c10::nullopt /*N*/,
+              std::nullopt /*N*/,
               std::move(default_value));
           args.emplace_back(std::move(arg));
         }
@@ -752,7 +757,7 @@ void FlatbufferLoader::extractJitSourceAndConstants(
 mobile::Module parse_and_initialize_mobile_module(
     void* data,
     size_t size,
-    c10::optional<at::Device>,
+    std::optional<at::Device>,
     ExtraFilesMap* extra_files,
     bool should_copy_tensor_memory) {
   // TODO(T128189662): If not copying, enforce that data is aligned to
@@ -781,7 +786,7 @@ mobile::Module parse_and_initialize_mobile_module(
 mobile::Module parse_and_initialize_mobile_module(
     std::shared_ptr<char> data,
     size_t size,
-    c10::optional<at::Device> device,
+    std::optional<at::Device> device,
     ExtraFilesMap* extra_files) {
   mobile::Module m = parse_and_initialize_mobile_module(
       data.get(),
@@ -798,7 +803,7 @@ mobile::Module parse_and_initialize_mobile_module_for_jit(
     size_t size,
     ExtraFilesMap& jit_sources,
     std::vector<IValue>& jit_constants,
-    c10::optional<at::Device>,
+    std::optional<at::Device>,
     ExtraFilesMap* extra_files) {
   TORCH_CHECK(
       mobile::serialization::ModuleBufferHasIdentifier(data), "Format error");
@@ -825,7 +830,7 @@ mobile::Module parse_and_initialize_mobile_module_for_jit(
 
 mobile::Module load_mobile_module_from_file(
     const std::string& filename,
-    c10::optional<c10::Device> device,
+    std::optional<c10::Device> device,
     ExtraFilesMap* extra_files) {
   auto [data, size] = get_file_content(filename.c_str());
   return parse_and_initialize_mobile_module(
@@ -885,7 +890,7 @@ mobile::ModuleInfo get_module_info_from_flatbuffer(char* flatbuffer_content) {
 
 mobile::Module load_mobile_module_from_stream_with_copy(
     std::istream& in,
-    c10::optional<at::Device> device,
+    std::optional<at::Device> device,
     ExtraFilesMap* extra_files) {
   auto [data, size] = get_stream_content(in);
   return parse_and_initialize_mobile_module(
@@ -895,7 +900,7 @@ mobile::Module load_mobile_module_from_stream_with_copy(
 mobile::Module parse_flatbuffer_no_object(
     std::shared_ptr<char> data,
     size_t size,
-    c10::optional<at::Device> device) {
+    std::optional<at::Device> device) {
   (void)device;
   (void)size;
 

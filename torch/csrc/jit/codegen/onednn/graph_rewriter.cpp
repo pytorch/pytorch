@@ -127,12 +127,12 @@ std::pair<graph_node_list::iterator, bool> GraphRewriter::scanNode(
 
 // Try to merge `producer` into `consumer`. If successful, this destroys
 // `producer` and returns the `consumer` group.
-c10::optional<Node*> GraphRewriter::tryMerge(Node* consumer, Node* producer) {
+std::optional<Node*> GraphRewriter::tryMerge(Node* consumer, Node* producer) {
   AT_ASSERT(llgaHelper_.isLlgaSubgraph(consumer));
   bool canMerge = llgaHelper_.shouldMerge(producer, consumer) &&
       aliasDb_.moveBeforeTopologicallyValid(producer, consumer);
   if (!canMerge) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   llgaHelper_.mergeNodeIntoSubgraph(producer, consumer, aliasDb_);
   return consumer;

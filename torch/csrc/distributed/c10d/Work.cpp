@@ -9,7 +9,7 @@ Work::Work(
     int rank,
     OpType opType,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputTensors)
+    const std::optional<std::vector<at::Tensor>>& inputTensors)
     : rank_(rank), opType_(opType) {
   if (profilingTitle != nullptr) {
     auto recordingFunction =

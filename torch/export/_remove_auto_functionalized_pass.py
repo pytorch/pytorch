@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -43,14 +44,12 @@ def _remove_auto_functionalization_from_graph_helper(ep, auto_functionalize_node
                 )
 
                 # If the result of getitem was used in an output node, update the output spec with the correct name
-                adusted_index = user.args[1] - len(func._schema.returns)
-                original_arg = original_kwargs[mutable_args_names[adusted_index]]
+                adjusted_index = user.args[1] - len(func._schema.returns)
+                original_arg = original_kwargs[mutable_args_names[adjusted_index]]
 
                 # This is a little fragile/implementation dependent, but the order of the mutable args is the same as the order
                 # of the getitem calls following the HOP.
-                user.replace_all_uses_with(
-                    original_kwargs[mutable_args_names[adusted_index]]
-                )
+                user.replace_all_uses_with(original_arg)
 
         if len(func._schema.returns) == 1:
             # If the function has 1 return then it will just directly return the

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This module is one of the analysis modules - it takes as input a function or graph
 and some preexisting properties, and returns some data that is useful for deciding
@@ -17,6 +18,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
+
 from .. import config
 from .collect_metadata_analysis import coerce_tangent
 from .schemas import (
@@ -28,6 +30,7 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .utils import strict_zip
+
 
 zip = strict_zip
 
@@ -152,6 +155,10 @@ def create_synthetic_base_metadata(
             for x in outer_indices
         )
 
+        mutation_inductor_storage_resize = all(
+            m.input_info[x].mutation_inductor_storage_resize for x in outer_indices
+        )
+
         inpt_info = InputAliasInfo(
             # If len(outer_indices) > 1, then this input is a synthetic base.
             # The invariant is that to the rest of aot autograd, synthetic bases only show up if
@@ -166,6 +173,7 @@ def create_synthetic_base_metadata(
             if len(outer_indices) > 1
             else m.input_info[outer_indices[0]].mutates_storage_metadata,
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
+            mutation_inductor_storage_resize=mutation_inductor_storage_resize,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
             keep_input_mutations=m.keep_input_mutations,
@@ -332,8 +340,6 @@ def _tensors_definitely_do_not_overlap(x, y):
             # without
             if offset_delta_mod + y.size(1) <= x.stride(0):
                 return True
-            else:
-                return False
     return False
 
 

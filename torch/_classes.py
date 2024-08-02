@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import types
 
 import torch._C
@@ -18,7 +19,7 @@ class _ClassNamespace(types.ModuleType):
 class _Classes(types.ModuleType):
     __file__ = "_classes.py"
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("torch.classes")
 
     def __getattr__(self, name):

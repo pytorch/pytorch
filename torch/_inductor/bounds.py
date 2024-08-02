@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+import logging
 import operator
 from functools import partial
 from typing import Any, Callable, Dict
@@ -6,9 +8,13 @@ from sympy import Expr
 
 import torch
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
+
 from .ir import InterpreterShim, LoopBody, LoopBodyBlock
 from .utils import cache_on_self, dominated_nodes
 from .virtualized import V
+
+
+log = logging.getLogger(__name__)
 
 
 class BoundVars:
@@ -22,11 +28,12 @@ class BoundVars:
     """
 
     def __init__(self, loop_body: LoopBody) -> None:
+        def upper_bound(v):
+            return bound_sympy(v).upper if isinstance(v, Expr) else v
+
         self.loop_body = loop_body
         self.replacement_vals = {
-            k: ValueRanges[Expr](0, v - 1)
-            if (isinstance(v, int) or v.is_number)
-            else bound_sympy(v)
+            k: ValueRanges[Expr](0, upper_bound(v) - 1)
             for k, v in loop_body.var_ranges.items()
         }
         # avoid computing these values, pessimistically assume that they are unbounded
@@ -38,6 +45,15 @@ class BoundVars:
         )
         # To access this variable call `get_bounds()`
         self._bounds: Dict[torch.fx.Node, ValueRanges[Expr]] = {}
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"loop_body={self.loop_body},\n "
+            f"replacement_vals={self.replacement_vals}, \n"
+            f"unbounded_vars={self.unbounded_vars}, \n"
+            f"_bounds={self._bounds})"
+        )
 
     @cache_on_self
     def get_bounds(self) -> Dict[torch.fx.Node, ValueRanges[Expr]]:
@@ -54,6 +70,7 @@ class BoundVars:
 
         with V.set_ops_handler(ValueRangeAnalysis()):
             interpreter = InterpreterShim(self.loop_body.root_block.graph, submodules)
+            log.debug("get_bounds:\n%s", self.loop_body.root_block.graph)
             interpreter.run(V.get_ops_handler(), initial_env=self._bounds)
         return self._bounds
 
@@ -79,7 +96,6 @@ class BoundVars:
                     )
 
                 result[key] = make_fn(subblock)
-
             elif "set_indirect" in key:
                 idx = int(key[len("set_indirect") :])
                 var = self.loop_body.indirect_vars[idx]

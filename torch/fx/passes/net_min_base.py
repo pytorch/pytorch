@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -112,9 +113,12 @@ class _MinimizerBase:
         settings: _MinimizerSettingBase,
         module_exporter: Optional[
             Callable[
-                [List[torch.Tensor], torch.fx.GraphModule, str],
+                [Tensors, torch.fx.GraphModule, str],
                 None
             ]
+        ] = None,
+        exclusion_fn: Optional[
+            Callable[[NodeList, int, int], None]
         ] = None,
     ):
         assert isinstance(module, torch.fx.GraphModule)
@@ -124,6 +128,7 @@ class _MinimizerBase:
         self.compare_fn = compare_fn
         self.module_exporter = module_exporter
         self.settings = settings
+        self.exclusion_fn = exclusion_fn
 
         # Stores outputs of run_a function
         self.a_outputs: Dict[str, Any] = {}
@@ -157,14 +162,14 @@ class _MinimizerBase:
             self.a_outputs[name] = sample_input[i]
             self.b_outputs[name] = sample_input[i]
 
-    def run_a(self, mod: torch.fx.GraphModule, inputs: Tensors) -> TensorOrTensors:
+    def run_a(self, mod: torch.fx.GraphModule, inputs: Tensors, report_idx: int = -1) -> TensorOrTensors:
         """
         Run `mod` with `inputs` and generate output. The output will be compared with
         output of run_b().
         """
         raise RuntimeError("run_a() is not implemented.")
 
-    def run_b(self, mod: torch.fx.GraphModule, inputs: Tensors) -> TensorOrTensors:
+    def run_b(self, mod: torch.fx.GraphModule, inputs: Tensors, report_idx: int = -1) -> TensorOrTensors:
         """
         Run `mod` with `inputs` and generate output. The output will be compared with
         output of run_a().
@@ -317,7 +322,11 @@ class _MinimizerBase:
         return split_module, submodule_name
 
     def _run_and_compare(
-        self, split_module: torch.fx.GraphModule, submod_name: str, output_names: Names
+        self,
+        split_module: torch.fx.GraphModule,
+        submod_name: str,
+        output_names: Names,
+        report_idx: int = -1
     ):
         """
         Run the submodule in `split_module` that has name `submod_name`
@@ -336,7 +345,7 @@ class _MinimizerBase:
             self.reports.append([])
             self.iteration = 1
 
-        report = self.reports[self.iteration - 1]
+        report = self.reports[report_idx if report_idx >= 0 else self.iteration - 1]
         report.append("Run and compare ...")
 
         if output_names:
@@ -360,12 +369,12 @@ class _MinimizerBase:
                 result_key = map_arg(node.args, lambda x: x.name)
 
         try:
-            a_result = self.run_a(submodule, a_input)
-            b_result = self.run_b(submodule, b_input)
+            a_result = self.run_a(submodule, a_input, report_idx)
+            b_result = self.run_b(submodule, b_input, report_idx)
             self._store_outputs(a_result, b_result, submodule)
         except Exception as e:
             report.append(f"Exception raised when running {submod_name}: {e}")
-            raise FxNetMinimizerRunFuncError(  # noqa: TRY200
+            raise FxNetMinimizerRunFuncError(  # noqa: B904
                 f"Exception raised when running {submod_name}: {e}"
             )
 
@@ -382,10 +391,10 @@ class _MinimizerBase:
             report.append(f"Result mismatch for {result_key}")
             if self.module_exporter:
                 self.module_exporter(
-                    List[torch.Tensor](a_input), submodule, str(result_key[0]) + "_cpu",
+                    a_input, submodule, str(result_key[0]) + "_cpu",
                 )
                 self.module_exporter(
-                    List[torch.Tensor](b_input), submodule, str(result_key[0]) + "_acc",
+                    b_input, submodule, str(result_key[0]) + "_acc",
                 )
             raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")
 
@@ -395,26 +404,32 @@ class _MinimizerBase:
         """
         Recursive binary search implementation.
         """
+        culprits: NodeSet = set()
         nodes: NodeList = all_nodes[start_idx:end_idx]
 
         report: List[str] = []
-        self.reports.append(report)
+        if self.exclusion_fn is not None:
+            self.exclusion_fn(nodes, start_idx, end_idx)
+            if len(nodes) == 0:
+                report = ["All nodes are excluded by user"]
+                self.reports.append(report)
+                return culprits
+
+        first_node_name = nodes[0].name
+        output_node_name = nodes[-1].name
         self.iteration += 1
-        report.append(f"Binary search iteration {self.iteration}.")
+        self.reports.append(report)
+        report.append(f"Binary search iteration {self.iteration}")
         report.append(
-            f"From node index {start_idx} to {end_idx-1}. "
+            f"From node index {start_idx}:{first_node_name} to {end_idx-1}:{output_node_name}. "
             f"Size of the interested node list is {len(nodes)}"
         )
-
         cur_nodes: NodeSet = set(nodes)
-
-        for node in nodes:
-            if node in self.fusions:
-                cur_nodes.update(self.fusions[node])
 
         try:
             split_module, submod_name = self._build_submodule(cur_nodes)
-            self._run_and_compare(split_module, submod_name, [])
+            self._run_and_compare(split_module, submod_name, [output_node_name])
+
         except (FxNetMinimizerRunFuncError, FxNetMinimizerResultMismatchError):
 
             if len(nodes) == 1:
@@ -472,6 +487,14 @@ class _MinimizerBase:
             report.append(f"Visit node: {node.name}")
 
             _LOGGER.info("Visit node: %s", node.name)
+            node_list: NodeList = [node]
+            if self.exclusion_fn is not None:
+                self.exclusion_fn(node_list, -1, -1)
+                if len(node_list) == 0:
+                    report.append(f"User exclusion : {node.name}")
+                    self.print_report(report)
+                    return culprits
+
             cur_nodes: NodeSet = {node}
 
             if node in self.fusions:
@@ -496,11 +519,167 @@ class _MinimizerBase:
 
         return culprits
 
+
+    def _block_traverse_impl(self, nodes: NodeList, start_idx: int, end_idx: int, find_last_node: bool) -> int:
+        """
+        Recursive block search implementation.
+        find_last_node: If True, search for the last node which result in numerics difference
+        if False: find first node in sorted node list
+        """
+        report: List[str] = []
+
+        mid = (start_idx + end_idx) // 2
+        cur_nodes_list: NodeList = nodes[:mid + 1] if find_last_node else nodes[mid:]
+
+        if self.exclusion_fn:
+            self.exclusion_fn(cur_nodes_list, -1, -1)
+
+        cur_nodes = set(cur_nodes_list)
+
+        first_node_name = cur_nodes_list[0].name
+        last_node_name = cur_nodes_list[-1].name
+        target_node_name = last_node_name if find_last_node else first_node_name
+
+        self.iteration += 1
+        self.reports.append(report)
+        report.extend(
+            [
+                "=" * 30,
+                f"Block search iteration {self.iteration}",
+            ]
+        )
+        report.extend(
+            [
+                f"Search for {'last' if find_last_node else 'first'} node in culprits",
+                f"From node index {start_idx}:{nodes[start_idx].name} to {end_idx}:{nodes[end_idx].name}. ",
+                f"Subgraph constructed by {first_node_name} to {last_node_name}",
+                f"Targeting node: {target_node_name}",
+                f"Size of the interested node list is {end_idx - start_idx + 1}",
+            ]
+        )
+        report_idx = len(self.reports) - 1
+
+        try:
+            split_module, submod_name = self._build_submodule(cur_nodes)
+            self._run_and_compare(split_module, submod_name, [last_node_name], report_idx)
+        except (FxNetMinimizerResultMismatchError, FxNetMinimizerRunFuncError):
+            report.append(f"Culprits found from node {first_node_name} to {last_node_name}.")
+
+            if start_idx == mid:
+                report.extend(
+                    [
+                        "This is the last node in the sub-module. ",
+                        "Search in the current branch is successful with node :",
+                        f"{start_idx}, node name: {nodes[start_idx].name}."
+                    ]
+                )
+                self.print_report(report)
+                return start_idx
+
+            report.append(
+                "Proceed to split and lower the halves of the current "
+                "sub-module individually."
+            )
+            self.print_report(report)
+
+            if find_last_node:
+                return self._block_traverse_impl(nodes, start_idx, mid, find_last_node)
+            else:
+                return self._block_traverse_impl(nodes, mid + 1, end_idx, find_last_node)
+        else:
+            report.append(f"Culprits not found from node start to {mid}:{nodes[mid].name}.")
+
+            if start_idx == mid:
+                report.extend(
+                    [
+                        "This is the last node in the sub-module. ",
+                        "Search in the current branch is successful with node",
+                        f"{start_idx}, node name: {nodes[start_idx].name}.",
+                    ]
+                )
+                self.print_report(report)
+                return start_idx + 1 if find_last_node else start_idx - 1
+
+            report.append(
+                "Proceed to split and lower the halves of the current "
+                "sub-module individually."
+            )
+            self.print_report(report)
+
+            if find_last_node:
+                return self._block_traverse_impl(nodes, mid + 1, end_idx, find_last_node)
+            else:
+                return self._block_traverse_impl(nodes, start_idx, mid, find_last_node)
+
+
+    def _block_traverse(self, nodes: NodeList, find_last_node: Optional[bool]) -> NodeSet:
+        """
+        Traverse topologically sorted node list
+        Find minimium block (start_idx, end_idx) which contains the culprit
+        1st pass: search for end_idx by finding the last node in culprit block
+        where Numerical accuracy (0, end_idx) > threshold
+        2nd pass: search for start_idx by finding the first node in culprit block
+        where Numerical accuracy (start_idx, end_idx) < threshold
+        Form minimum block by (start_idx - 1, end_idx)
+        """
+        culprits: NodeSet = set()
+        first_node_name = nodes[0].name
+        last_node_name = nodes[-1].name
+        last_node_report = [f"Block search from {first_node_name} to {last_node_name}"]
+        last_node_report.append("*" * 50)
+        self.reports.append(last_node_report)
+
+        start_idx = 0
+        end_idx = len(nodes) - 1
+        run_both = True if find_last_node is None else False
+
+        # step 1: find (0, end_idx) of culprit block
+        if run_both or find_last_node:
+            last_node_report.append("Start searching for last node in culprit")
+            self.print_report(last_node_report)
+            end_idx = self._block_traverse_impl(nodes, start_idx, end_idx, True)
+            last_node_report.extend(
+                [
+                    "Finish Pass 1",
+                    f"Find end_idx = {end_idx}:{nodes[end_idx].name}"
+                ]
+            )
+            self.print_report(last_node_report)
+
+        # step 2: reduce culprit block to (start_idx, end_idx)
+        if run_both or not find_last_node:
+            first_node_report = ["Start searching for first node in culprit"]
+            self.print_report(first_node_report)
+            start_idx = self._block_traverse_impl(nodes[0:end_idx + 1], start_idx, end_idx, False)
+            first_node_report.append("*" * 50)
+            self.reports.append(first_node_report)
+            first_node_report.extend(
+                [
+                    "Finish Pass 2",
+                    f"Find start_idx = {start_idx}:{nodes[start_idx].name}"
+                ]
+            )
+            self.print_report(first_node_report)
+
+        # step 3: form module with minimum culprits
+        culprits.update(nodes[start_idx:end_idx + 1])
+        result_report = [f"Finish searching, found minimum block ({nodes[start_idx]},{nodes[end_idx]})"]
+        self.reports.append(result_report)
+        self.print_report(result_report)
+        return culprits
+
+
     def _defined_traverse(self, nodes: NodeList) -> NodeSet:
         """
         run user defined `nodes` and determine if it is a culprit.
         """
         culprits: NodeSet = set()
+        if self.exclusion_fn is not None:
+            self.exclusion_fn(nodes, -1, -1)
+        if len(nodes) == 0:
+            report = ["All nodes are excluded by user"]
+            self.reports.append(report)
+            return culprits
 
         first_node_name = nodes[0].name
         output_node_name = nodes[-1].name
@@ -562,7 +741,14 @@ class _MinimizerBase:
         """
         culprits: NodeSet = set()
         nodes: NodeList = all_nodes[start_idx:end_idx]
-
+        cur_nodes: NodeSet = set(nodes)
+        if self.exclusion_fn is not None:
+            self.exclusion_fn(nodes, start_idx, end_idx)
+            cur_nodes = set(nodes)
+        else:
+            for node in nodes:
+                if node in self.fusions:
+                    cur_nodes.update(self.fusions[node])
         report: List[str] = []
         self.reports.append(report)
         self.iteration += 1
@@ -571,12 +757,6 @@ class _MinimizerBase:
             f"From node index {start_idx} to {end_idx-1}. "
             f"Size of the interested node list is {len(nodes)}"
         )
-
-        cur_nodes: NodeSet = set(nodes)
-
-        for node in nodes:
-            if node in self.fusions:
-                cur_nodes.update(self.fusions[node])
 
         try:
             split_module, submod_name = self._build_submodule(cur_nodes)
@@ -588,7 +768,7 @@ class _MinimizerBase:
             return culprits
         except (FxNetMinimizerRunFuncError):
             culprits.update(cur_nodes)
-            report.append(f"Found culprit from run error: {node}")
+            report.append(f"Found culprit from run error: {cur_nodes}")
             self.print_report(report)
             return culprits
         else:
@@ -688,7 +868,11 @@ class _MinimizerBase:
             self.print_report(report)
 
     def minimize(
-        self, start: Optional[str] = None, end: Optional[str] = None, skip_nodes: Optional[List] = None,
+        self,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        skip_nodes: Optional[List] = None,
+        find_last_node: Optional[bool] = None,
     ) -> NodeSet:
         """
         Minimizing the model from node with name `start` to node with name `end` base
@@ -700,6 +884,12 @@ class _MinimizerBase:
                 to None, then we'll start with the first node of the model.
             end: The name of the node where we want to terminate minimizing. If
                 set to None, we'll end with the last node of the model.
+            skip_nodes: The names of nodes where we want to skip during minimizing.
+                It'll create subgraphs without these skip nodes under the hood.
+                Only applicable in mode "skip".
+            find_last_node: True if only last_node of a culprits is needed in mode "block".
+                False if only the first_node of a culprits is needed.
+                Only applicable in mode "block".
 
         Returns:
             nodes: A list of nodes that causes FxNetMinimizerRunFuncError or
@@ -727,5 +917,8 @@ class _MinimizerBase:
 
         if self.settings.traverse_method == "defined":
             return self._defined_traverse(nodes)
+
+        if self.settings.traverse_method == "block":
+            return self._block_traverse(nodes, find_last_node)
 
         raise RuntimeError(f"Unknown traverse method {self.settings.traverse_method}!")

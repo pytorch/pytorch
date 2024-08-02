@@ -7,13 +7,14 @@ from functools import partial, wraps
 import torch
 import torch.distributed as dist
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase, TEST_SKIPS
-
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -99,6 +100,20 @@ class TestObjectCollectives(MultiProcessTestCase):
         if self.rank == 0:
             for i, v in enumerate(output):
                 self.assertEqual(i, v, f"rank: {self.rank}")
+
+    @with_comms()
+    def test_send_recv_object_list(self):
+        val = 99 if self.rank == 0 else None
+        object_list = [val] * dist.get_world_size()
+        if self.rank == 0:
+            dist.send_object_list(object_list, 1)
+        if self.rank == 1:
+            dist.recv_object_list(object_list, 0)
+
+        if self.rank < 2:
+            self.assertEqual(99, object_list[0])
+        else:
+            self.assertEqual(None, object_list[0])
 
     @with_comms()
     def test_broadcast_object_list(self):

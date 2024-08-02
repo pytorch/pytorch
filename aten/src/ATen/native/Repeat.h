@@ -17,7 +17,7 @@ template <
     void compute(const index_t*, const int64_t*, index_t*, int64_t, int64_t)>
 static inline Tensor repeat_interleave_common(
     const Tensor& repeats,
-    c10::optional<int64_t> output_size) {
+    std::optional<int64_t> output_size) {
   TORCH_CHECK(
       repeats.dim() == 1, "repeat_interleave only accept 1D vector as repeat");
   TORCH_CHECK(
@@ -28,7 +28,7 @@ static inline Tensor repeat_interleave_common(
   }
   Tensor repeats_ = repeats.contiguous();
   Tensor cumsum = repeats.cumsum(0);
-  int64_t total;
+  int64_t total = 0;
   if (output_size.has_value()) {
     total = output_size.value();
   } else {

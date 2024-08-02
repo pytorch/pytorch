@@ -9,16 +9,16 @@
 // FP32 -> BF16 kernel
 __global__ void _float_to_bfloat16_cuda_kernel(
     const float* __restrict__ input,
-    const int nrows,
-    const int ncols,
+    const size_t nrows,
+    const size_t ncols,
     uint16_t* __restrict__ output) {
-  const int row_incre = blockDim.y * gridDim.y;
-  const int col_incre = blockDim.x * gridDim.x;
-  for (int row = blockIdx.y * blockDim.y + threadIdx.y; row < nrows;
+  const auto row_incre = blockDim.y * gridDim.y;
+  const auto col_incre = blockDim.x * gridDim.x;
+  for (auto row = blockIdx.y * blockDim.y + threadIdx.y; row < nrows;
        row += row_incre) {
     const float* input_row = input + row * ncols;
     uint16_t* output_row = output + row * ncols;
-    for (int col = blockIdx.x * blockDim.x + threadIdx.x; col < ncols;
+    for (auto col = blockIdx.x * blockDim.x + threadIdx.x; col < ncols;
          col += col_incre) {
       // Add 2^15 and right shift 16 to do round-nearest
       output_row[col] =
@@ -31,14 +31,14 @@ __global__ void _float_to_bfloat16_cuda_kernel(
 // BF16 -> FP32 kernel
 __global__ void _bfloat16_to_float_cuda_kernel(
     const uint16_t* __restrict__ input,
-    const int nrows,
-    const int ncols,
+    const size_t nrows,
+    const size_t ncols,
     float* __restrict__ output) {
-  const int row_incre = blockDim.y * gridDim.y;
-  const int col_incre = blockDim.x * gridDim.x;
-  for (int row = blockIdx.y * blockDim.y + threadIdx.y; row < nrows;
+  const auto row_incre = blockDim.y * gridDim.y;
+  const auto col_incre = blockDim.x * gridDim.x;
+  for (auto row = blockIdx.y * blockDim.y + threadIdx.y; row < nrows;
        row += row_incre) {
-    for (int col = blockIdx.x * blockDim.x + threadIdx.x; col < ncols;
+    for (auto col = blockIdx.x * blockDim.x + threadIdx.x; col < ncols;
          col += col_incre) {
       const uint16_t* input_row = input + row * ncols;
       float* output_row = output + row * ncols;
@@ -50,10 +50,7 @@ __global__ void _bfloat16_to_float_cuda_kernel(
   }
 }
 
-namespace torch {
-namespace distributed {
-namespace c10d {
-namespace quantization {
+namespace torch::distributed::c10d::quantization {
 
 at::Tensor _float_to_bfloat16_cuda(const at::Tensor& input) {
   TENSOR_ON_CUDA_GPU(input);
@@ -63,26 +60,28 @@ at::Tensor _float_to_bfloat16_cuda(const at::Tensor& input) {
   at::cuda::OptionalCUDAGuard device_guard;
   device_guard.set_index(input.get_device());
 
-  const int nrows = input.size(0);
-  const int ncols = input.size(1);
-  const int output_columns = ncols;
+  const auto nrows = input.size(0);
+  const auto ncols = input.size(1);
+  const size_t output_columns = ncols;
 
   auto output = at::empty(
-      {nrows, output_columns},
-      input.options().dtype(at::kHalf)); // at::kHalf
+      {nrows, ncols},
+#if HAS_NCCL_BF16_DATATYPE
+      input.options().dtype(at::kBFloat16));
+#else
+      input.options().dtype(at::kHalf));
+#endif
 
-  if (nrows == 0 || output_columns == 0) {
+  if (nrows == 0 || ncols == 0) {
     return output;
   }
 
-  // TODO: replace Half by BFloat16, after BFloat16 is supported by Nvidia
-  // NCCL input.options().dtype(at::kBFloat16)); // at::kBFloat16
-
-  constexpr int threads_per_block = 256;
-  const int blockDim_x = std::min(output_columns, threads_per_block);
+  constexpr size_t threads_per_block = 256;
+  const auto blockDim_x = std::min(output_columns, threads_per_block);
   dim3 blockDim(blockDim_x, threads_per_block / blockDim_x);
-  const int gridDim_x = (output_columns + blockDim.x - 1) / blockDim.x;
-  const int gridDim_y = std::min((nrows + blockDim.y - 1) / blockDim.y, 65535u);
+  const auto gridDim_x = (output_columns + blockDim.x - 1) / blockDim.x;
+  const auto gridDim_y =
+      std::min<size_t>((nrows + blockDim.y - 1) / blockDim.y, 65535u);
   dim3 gridDim(gridDim_x, gridDim_y);
 
   _float_to_bfloat16_cuda_kernel<<<
@@ -93,10 +92,13 @@ at::Tensor _float_to_bfloat16_cuda(const at::Tensor& input) {
       input.const_data_ptr<float>(),
       nrows,
       ncols,
-      // TODO: replace Half by BFloat16, after BFloat16 is supported by Nvidia
-      // NCCL
-      reinterpret_cast<uint16_t*>(output.mutable_data_ptr<at::Half>()));
-  //C10_CUDA_KERNEL_LAUNCH_CHECK();
+#if HAS_NCCL_BF16_DATATYPE
+      reinterpret_cast<uint16_t*>(output.mutable_data_ptr<at::BFloat16>())
+#else
+      reinterpret_cast<uint16_t*>(output.mutable_data_ptr<at::Half>())
+#endif
+      );
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return output;
 }
@@ -109,24 +111,25 @@ at::Tensor _bfloat16_to_float_cuda(const at::Tensor& input) {
   at::cuda::OptionalCUDAGuard device_guard;
   device_guard.set_index(input.get_device());
 
-  const int nrows = input.size(0);
-  const int ncols = input.size(1);
-  const int output_columns = ncols;
+  const auto nrows = input.size(0);
+  const auto ncols = input.size(1);
+  const size_t output_columns = ncols;
 
   auto output = at::empty(
-      {nrows, output_columns}, // 4 = sizeof(float)
+      {nrows, ncols}, // 4 = sizeof(float)
       input.options().dtype(at::kFloat)); // at::kBytes for uint8_t
 
-  if (nrows == 0 || output_columns == 0) {
+  if (nrows == 0 || ncols == 0) {
     return output;
   }
 
-  constexpr int threads_per_block = 256;
+  constexpr size_t threads_per_block = 256;
 
-  const int blockDim_x = std::min(output_columns, threads_per_block);
+  const auto blockDim_x = std::min(output_columns, threads_per_block);
   dim3 blockDim(blockDim_x, threads_per_block / blockDim_x);
-  const int gridDim_x = (output_columns + blockDim.x - 1) / blockDim.x;
-  const int gridDim_y = std::min((nrows + blockDim.y - 1) / blockDim.y, 65535u);
+  const auto gridDim_x = (output_columns + blockDim.x - 1) / blockDim.x;
+  const auto gridDim_y =
+      std::min<size_t>((nrows + blockDim.y - 1) / blockDim.y, 65535u);
   dim3 gridDim(gridDim_x, gridDim_y);
 
   _bfloat16_to_float_cuda_kernel<<<
@@ -134,9 +137,11 @@ at::Tensor _bfloat16_to_float_cuda(const at::Tensor& input) {
       blockDim,
       0,
       at::cuda::getCurrentCUDAStream()>>>(
-      // TODO: replace Half by BFloat16, after BFloat16 is supported by Nvidia
-      // NCCL
+#if HAS_NCCL_BF16_DATATYPE
+      reinterpret_cast<const uint16_t*>(input.const_data_ptr<at::BFloat16>()),
+#else
       reinterpret_cast<const uint16_t*>(input.const_data_ptr<at::Half>()),
+#endif
       nrows,
       ncols,
       output.mutable_data_ptr<float>());
@@ -146,14 +151,11 @@ at::Tensor _bfloat16_to_float_cuda(const at::Tensor& input) {
 }
 
 #define DISPATCH_TO_CUDA(name, function) \
-    m.impl(name, torch::dispatch(c10::DispatchKey::CUDA, TORCH_FN(function)))
+  m.impl(name, torch::dispatch(c10::DispatchKey::CUDA, TORCH_FN(function)))
 
 TORCH_LIBRARY_IMPL(quantization, CUDA, m) {
-    DISPATCH_TO_CUDA("_Bfloat16QuantizedToFloat", _bfloat16_to_float_cuda);
-    DISPATCH_TO_CUDA("_FloatToBfloat16Quantized", _float_to_bfloat16_cuda);
+  DISPATCH_TO_CUDA("_Bfloat16QuantizedToFloat", _bfloat16_to_float_cuda);
+  DISPATCH_TO_CUDA("_FloatToBfloat16Quantized", _float_to_bfloat16_cuda);
 }
 
-} // namespace quantization
-} // namespace c10d
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::c10d::quantization

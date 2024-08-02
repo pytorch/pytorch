@@ -433,7 +433,7 @@ TORCH_API int register_conv_params<3>();
 TORCH_API int register_linear_params();
 
 TORCH_API int register_linear_params() {
-  using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;
+  using SerializationType = std::tuple<at::Tensor, std::optional<at::Tensor>>;
   static auto register_linear_params =
       torch::selective_class_<LinearPackedParamsBase>(
           "quantized", TORCH_SELECTIVE_CLASS("LinearPackedParamsBase"))
@@ -446,7 +446,7 @@ TORCH_API int register_linear_params() {
                   -> c10::intrusive_ptr<
                       LinearPackedParamsBase> { // __setstate__
                 at::Tensor weight;
-                c10::optional<at::Tensor> bias;
+                std::optional<at::Tensor> bias;
                 weight = std::move(std::get<0>(state));
                 bias = std::move(std::get<1>(state));
 

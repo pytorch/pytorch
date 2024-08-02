@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 
+
 try:
     from torchvision.models import resnet18
 
@@ -32,6 +33,7 @@ except ImportError:
     from common import PackageTestCase
 
 from pathlib import Path
+
 
 packaging_directory = Path(__file__).parent
 
@@ -111,16 +113,16 @@ class DirectoryReaderTest(PackageTestCase):
         with PackageExporter(filename) as pe:
             # Layout looks like:
             #    package
-            #    ├── one/
-            #    │   ├── a.txt
-            #    │   ├── b.txt
-            #    │   ├── c.txt
-            #    │   └── three/
-            #    │       ├── d.txt
-            #    │       └── e.txt
-            #    └── two/
-            #       ├── f.txt
-            #       └── g.txt
+            #    |-- one/
+            #    |   |-- a.txt
+            #    |   |-- b.txt
+            #    |   |-- c.txt
+            #    |   +-- three/
+            #    |       |-- d.txt
+            #    |       +-- e.txt
+            #    +-- two/
+            #       |-- f.txt
+            #       +-- g.txt
             pe.save_text("one", "a.txt", "hello, a!")
             pe.save_text("one", "b.txt", "hello, b!")
             pe.save_text("one", "c.txt", "hello, c!")

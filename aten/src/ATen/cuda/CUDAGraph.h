@@ -39,10 +39,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void debug_dump(const std::string& debug_path);
 
  protected:
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
-  cudaGraph_t graph_ = NULL;
-  cudaGraphExec_t graph_exec_ = NULL;
-#endif
+  cudaGraph_t graph_ = nullptr;
+  cudaGraphExec_t graph_exec_ = nullptr;
 
   static std::atomic<int> pending_event_queries;
 
@@ -53,10 +51,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   bool has_graph_ = false;
   // Set to true in capture_end if cudaGraphInstantiate succeeded
   bool has_graph_exec_ = false;
-
-  // uuid of this instance's current capture, used to
-  // specify the pool.
-  CaptureId_t id_;
 
   // the ID assigned by cuda during graph capture,
   // used to identify when a stream is participating in capture

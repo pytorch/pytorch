@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Any, NamedTuple, Tuple
 
 import torch
@@ -29,7 +30,7 @@ from torch.autograd.forward_ad import _set_fwd_grad_enabled
 # We do this by using creating a custom HigherOrderOperator that only functorch
 # dispatches specially.
 class CustomFunctionHigherOrderOperator(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("custom_function_call")
 
     def __call__(self, autograd_function, *args, **kwargs):
@@ -273,7 +274,17 @@ def validate_vmap_returns_tuple_of_two_elements(result):
 
 
 @custom_function_call.py_impl(TransformType.Vmap)
-def custom_function_call_vmap(interpreter, autograd_function, *operands):
+def custom_function_call_vmap(interpreter, autograd_function, *operands, **kwargs):
+    if any(
+        isinstance(val, torch.Tensor)
+        for val in torch.utils._pytree.tree_flatten(kwargs)[0]
+    ):
+        raise NotImplementedError(
+            f"Run vmap on autograd.Function with kwarg-only Tensor args. "
+            f"Please do not pass kwarg-only Tensors to autograd.Function. "
+            f"Got: {kwargs}"
+        )
+
     if autograd_function.generate_vmap_rule:
         if has_overriden_vmap_rule(autograd_function):
             # TODO: Update link to stable once that's out
@@ -301,22 +312,32 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
             f"https://pytorch.org/docs/main/notes/extending.func.html"
         )
 
+    return custom_function_call_vmap_helper(
+        interpreter, autograd_function.vmap, autograd_function, *operands, **kwargs
+    )
+
+
+def custom_function_call_vmap_helper(
+    interpreter, vmap_function, op, *operands, **kwargs
+):
     current_level = interpreter.level()
     info = VmapInfo(
         batch_size=interpreter.batch_size(),
         randomness=interpreter.randomness(),
     )
     unwrapped_operands, in_dims = unwrap_batched(operands, current_level)
-
     # If none of the tensors are batched at the current level, then we skip the
     # current level. This saves the user from needing to handle this case in
     # their vmap staticmethod (and is consistent with our C++ batching rule API)
     if pytree.tree_all(lambda dim: dim is None, in_dims):
         with interpreter.lower():
-            return custom_function_call(autograd_function, *operands)
+            if isinstance(op, torch.autograd.function.FunctionMeta):
+                return custom_function_call(op, *operands)
+            else:
+                return op(*operands, **kwargs)
 
     with interpreter.lower():
-        result = autograd_function.vmap(info, in_dims, *unwrapped_operands)
+        result = vmap_function(info, in_dims, *unwrapped_operands, **kwargs)
     validate_vmap_returns_tuple_of_two_elements(result)
     unwrapped_output, out_dims = result
 
@@ -498,7 +519,7 @@ def get_tangents_in_dims(input_dims, tangents):
 # in_dims = 0
 # vmap(Sum.apply, in_dims)(x)
 #
-# Let’s assume for a moment that we didn’t vmap setup_context in VmappedSum:
+# Let's assume for a moment that we didn't vmap setup_context in VmappedSum:
 #
 # class VmappedSum(torch.autograd.Function):
 #    @staticmethod
@@ -519,7 +540,7 @@ def get_tangents_in_dims(input_dims, tangents):
 #        return gx
 #
 # We end up saving [B, 4] as x_shape. In the backward, gy has shape [B],
-# and we’re doing:
+# and we're doing:
 #
 # def backward_no_context(gy):
 #     return gy.expand([B, 4])
@@ -682,25 +703,40 @@ def reductify_leaf(
     return grad_input
 
 
+def autograd_function_forward_rewritten(original_forward, original_setup_context):
+    def new_forward(ctx, *args, **kwargs):
+        output = original_forward(*args, **kwargs)
+        original_setup_context(ctx, args, output)
+        return output
+
+    return new_forward
+
+
 class AutogradFunctionApply(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("autograd_function_apply")
 
-    def __call__(self, fwd, bwd, *fwd_args):
+    def __call__(self, fwd, bwd, *fwd_args, **fwd_kwargs):
         saved_values = None
+        args_tensor_mask = fwd_kwargs["args_tensor_mask"]
+        length_of_tensor_args = sum(args_tensor_mask)
+        # Filter out the original tensor args from fwd_args,
+        # lifted freevars should not be args of ApplyTemplate.apply
+        # since we don't need to calculate the gradients of them.
+        new_fwd_args = fwd_args[:length_of_tensor_args]
 
         class ApplyTemplate(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *args):
                 nonlocal saved_values
-                output, saved_values = fwd(None, *args)
+                output, saved_values = fwd(None, *fwd_args)
                 return output
 
             @staticmethod
             def backward(ctx, *grad):
                 return bwd(None, *grad, *saved_values)
 
-        return ApplyTemplate.apply(*fwd_args)
+        return ApplyTemplate.apply(*new_fwd_args)
 
 
 autograd_function_apply = AutogradFunctionApply()

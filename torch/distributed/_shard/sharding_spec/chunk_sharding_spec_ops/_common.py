@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 
 import torch
 import torch.distributed as dist
@@ -117,7 +118,7 @@ def _handle_col_wise_sharding_base(
         padding_idx: If specified, the entries at padding_idx do
             not contribute to the gradient; therefore, the embedding
             vector at padding_idx is not updated during training,
-            i.e. it remains as a fixed “pad”.
+            i.e. it remains as a fixed "pad".
             Note that the embedding vector at padding_idx is
             excluded from the reduction.
 
@@ -312,7 +313,7 @@ def _handle_row_wise_mask(gather_inp, padding_idx, weight, world_size, rank):
         padding_idx: If specified, the entries at padding_idx do
             not contribute to the gradient; therefore, the embedding
             vector at padding_idx is not updated during training,
-            i.e. it remains as a fixed “pad”.
+            i.e. it remains as a fixed "pad".
             Note that the embedding vector at padding_idx is
             excluded from the reduction.
         weight: weight tensor of Embedding look-up table.

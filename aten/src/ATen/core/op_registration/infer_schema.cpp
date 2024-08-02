@@ -43,7 +43,7 @@ FunctionSchema make_function_schema(
 } // namespace infer_schema
 } // namespace detail
 
-c10::optional<std::string> findSchemaDifferences(
+std::optional<std::string> findSchemaDifferences(
     const FunctionSchema& lhs,
     const FunctionSchema& rhs) {
   if (lhs.arguments().size() != rhs.arguments().size()) {
@@ -88,7 +88,7 @@ c10::optional<std::string> findSchemaDifferences(
   }
 
   // no differences found
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 } // namespace c10

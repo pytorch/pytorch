@@ -6,14 +6,11 @@ import operator
 import sys
 import warnings
 from fractions import Fraction
-
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 import hypothesis
 import hypothesis.strategies as st
-
 import numpy
-
 import pytest
 from hypothesis.extra.numpy import arrays
 from pytest import raises as assert_raises
@@ -28,6 +25,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
+
 
 skip = functools.partial(skipif, True)
 
@@ -68,17 +66,16 @@ if TEST_WITH_TORCHDYNAMO:
     )
     from numpy.core.numeric import normalize_axis_tuple
     from numpy.random import rand
-
     from numpy.testing import (
         assert_,
-        assert_allclose,  # IS_PYPY,
+        assert_allclose,
         assert_almost_equal,
         assert_array_almost_equal,
         assert_array_equal,
         assert_equal,
         assert_raises_regex,
         assert_warns,
-        suppress_warnings,  # HAS_REFCOUNT, IS_WASM
+        suppress_warnings,
     )
 else:
     import torch._numpy as np
@@ -101,17 +98,16 @@ else:
     )
     from torch._numpy._util import normalize_axis_tuple
     from torch._numpy.random import rand
-
     from torch._numpy.testing import (
         assert_,
-        assert_allclose,  # IS_PYPY,
+        assert_allclose,
         assert_almost_equal,
         assert_array_almost_equal,
         assert_array_equal,
         assert_equal,
         assert_raises_regex,
         assert_warns,
-        suppress_warnings,  # HAS_REFCOUNT, IS_WASM
+        suppress_warnings,
     )
 
 
@@ -855,7 +851,7 @@ class TestDelete(TestCase):
     def _check_inverse_of_slicing(self, indices):
         a_del = delete(self.a, indices)
         nd_a_del = delete(self.nd_a, indices, axis=1)
-        msg = "Delete failed for obj: %r" % indices
+        msg = f"Delete failed for obj: {indices!r}"
         assert_array_equal(setxor1d(a_del, self.a[indices,]), self.a, err_msg=msg)
         xor = setxor1d(nd_a_del[0, :, 0], self.nd_a[0, indices, 0])
         assert_array_equal(xor, self.nd_a[0, :, 0], err_msg=msg)
@@ -1435,7 +1431,7 @@ class TestVectorize(TestCase):
         try:
             vectorize(random.randrange)  # Should succeed
         except Exception:
-            raise AssertionError  # noqa: TRY200
+            raise AssertionError  # noqa: B904
 
     def test_keywords2_ticket_2100(self):
         # Test kwarg support: enhancement ticket 2100
@@ -3259,7 +3255,7 @@ class TestPercentile(TestCase):
             subtest(
                 [1, 7],
                 decorators=[
-                    xpassIfTorchDynamo,
+                    skip(reason="Keepdims wrapper incorrect for multiple q"),
                 ],
             ),
         ],
@@ -3273,13 +3269,13 @@ class TestPercentile(TestCase):
             subtest(
                 (0, 1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    skip(reason="Tuple axes"),
                 ],
             ),
             subtest(
                 (-3, -1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    skip(reason="Tuple axes"),
                 ],
             ),
         ],
@@ -3839,13 +3835,13 @@ class TestMedian(TestCase):
             subtest(
                 (0, 1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    skip(reason="Tuple axes"),
                 ],
             ),
             subtest(
                 (-3, -1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    skip(reason="Tuple axes"),
                 ],
             ),
         ],

@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUStream.h>
 #include <c10/xpu/test/impl/XPUTest.h>
+#include <optional>
 
 #include <thread>
 #include <unordered_set>
@@ -82,7 +82,7 @@ TEST(XPUStreamTest, StreamBehavior) {
   EXPECT_NE(stream.device_index(), c10::xpu::current_device());
 }
 
-void thread_fun(c10::optional<c10::xpu::XPUStream>& cur_thread_stream) {
+void thread_fun(std::optional<c10::xpu::XPUStream>& cur_thread_stream) {
   auto new_stream = c10::xpu::getStreamFromPool();
   c10::xpu::setCurrentXPUStream(new_stream);
   cur_thread_stream = {c10::xpu::getCurrentXPUStream()};
@@ -94,7 +94,7 @@ TEST(XPUStreamTest, MultithreadStreamBehavior) {
   if (!has_xpu()) {
     return;
   }
-  c10::optional<c10::xpu::XPUStream> s0, s1;
+  std::optional<c10::xpu::XPUStream> s0, s1;
 
   std::thread t0{thread_fun, std::ref(s0)};
   std::thread t1{thread_fun, std::ref(s1)};

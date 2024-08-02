@@ -1,9 +1,11 @@
 # Owner(s): ["module: inductor"]
 
 import sys
+import unittest
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -13,14 +15,12 @@ if IS_WINDOWS and IS_CI:
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")  # noqa: F821
 
-import unittest
-
 import torch
-from test_torchinductor import run_and_get_cpp_code
 from torch._C import FileCheck
 from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import run_and_get_cpp_code
 from torch.export import Dim
 from torch.utils._triton import has_triton
 
@@ -56,17 +56,16 @@ class TestMemoryPlanning(TestCase):
         ).check_next(
             "buf0 = alloc_from_pool(pool1, 0, torch.float32, (s0, s0), (s0, 1))"
         ).check(
-            "buf1 = alloc_from_pool(pool1, align((4*s0) + (4*s0*((-1) + s0))),"
+            "buf1 = alloc_from_pool(pool1, align(4*(s0*s0)),"
         ).run(
             code
         )
         self.assertTrue(same(f(*args), result))
 
-    @skipIfRocm
     def test_cpp_wrapper(self):
         f, args = self._generate(device="cuda")
         compiled = torch.compile(f, dynamic=True)
-        with config.patch("cpp_wrapper", True):
+        with config.patch({"cpp_wrapper": True, "abi_compatible": False}):
             result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
@@ -74,7 +73,7 @@ class TestMemoryPlanning(TestCase):
         ).check_next(
             "auto buf0 = alloc_from_pool(pool1, 0, at::kFloat, {s0, s0}, {s0, 1L});"
         ).check(
-            "auto buf1 = alloc_from_pool(pool1, align((4L*s0) + (4L*s0*((-1L) + s0))),"
+            "auto buf1 = alloc_from_pool(pool1, align(4L*(static_cast<long>(s0*s0))),"
         ).run(
             code
         )
@@ -82,7 +81,10 @@ class TestMemoryPlanning(TestCase):
 
     @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
     def test_abi_compatible(self):
-        from test_aot_inductor import AOTIRunnerUtil
+        try:
+            from .test_aot_inductor import AOTIRunnerUtil
+        except ImportError:
+            from test_aot_inductor import AOTIRunnerUtil
 
         f, args = self._generate(device="cuda")
         dim0_x = Dim("dim0_x", min=1, max=2048)

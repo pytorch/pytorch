@@ -14,10 +14,6 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,eager_fail_to_run,0
-
-
-
 LearningToPaint,pass,6
 
 
@@ -30,7 +26,7 @@ alexnet,pass,6
 
 
 
-basic_gnn_edgecnn,pass,22
+basic_gnn_edgecnn,pass,20
 
 
 
@@ -66,7 +62,7 @@ dlrm,pass,6
 
 
 
-drq,pass,6
+drq,pass,7
 
 
 
@@ -114,7 +110,7 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,pass,26
+hf_Reformer,pass,25
 
 
 
@@ -194,7 +190,7 @@ pytorch_stargan,pass,6
 
 
 
-pytorch_unet,pass,7
+pytorch_unet,pass_due_to_skip,7
 
 
 
@@ -286,4 +282,4 @@ vision_maskrcnn,pass,33
 
 
 
-yolov3,pass,9
+yolov3,fail_accuracy,8

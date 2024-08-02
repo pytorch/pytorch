@@ -286,7 +286,7 @@ void initTensorExprBindings(PyObject* module) {
       "Compute",
       [](const std::string& func_name,
          const std::vector<ExprHandle>& dim_args,
-         py::function func) {
+         const py::function& func) {
         if (dim_args.size() == 1) {
           return Compute(func_name, dim_args, [&func](const VarHandle& a) {
             return py::cast<ExprHandle>(func(a));
@@ -327,7 +327,7 @@ void initTensorExprBindings(PyObject* module) {
       "Compute2",
       [](const std::string& func_name,
          const std::vector<ExprHandle>& dim_args,
-         py::function func) {
+         const py::function& func) {
         return Compute(
             func_name, dim_args, [&func](const std::vector<VarHandle>& dims) {
               return py::cast<ExprHandle>(func(dims));
@@ -701,7 +701,7 @@ void initTensorExprBindings(PyObject* module) {
   te.def(
       "lower",
       [](std::string op_str,
-         py::list inputs,
+         const py::list& inputs,
          std::vector<ExprHandle> outputShape,
          Dtype outputType) {
         auto op = c10::Symbol::fromQualString(op_str);
@@ -936,13 +936,13 @@ void initTensorExprBindings(PyObject* module) {
       &tensorexpr::replaceListOutputWithTuple);
   te.def("trim_graph", &tensorexpr::trimGraph);
 #ifdef TORCH_ENABLE_LLVM
-  te.def("set_llvm_target_triple", [](const c10::optional<std::string>& val) {
+  te.def("set_llvm_target_triple", [](const std::optional<std::string>& val) {
     tensorexpr::LLVMTargetTriple() = val;
   });
-  te.def("set_llvm_target_cpu", [](const c10::optional<std::string>& val) {
+  te.def("set_llvm_target_cpu", [](const std::optional<std::string>& val) {
     tensorexpr::LLVMTargetCPU() = val;
   });
-  te.def("set_llvm_target_attrs", [](const c10::optional<std::string>& val) {
+  te.def("set_llvm_target_attrs", [](const std::optional<std::string>& val) {
     tensorexpr::LLVMTargetAttrs() = val;
   });
   te.def("set_llvm_aot_workflow", [](bool val) {

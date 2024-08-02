@@ -53,21 +53,19 @@ inline PyObject* wrap(void* value) {
 }
 
 inline PyObject* wrap(THPDtype* dtype) {
-  Py_INCREF(dtype);
-  return (PyObject*)dtype;
+  return Py_NewRef(dtype);
 }
 
 inline PyObject* wrap(at::ScalarType scalarType) {
-  return wrap(getTHPDtype(scalarType));
+  return Py_NewRef(getTHPDtype(scalarType));
 }
 
 inline PyObject* wrap(THPLayout* layout) {
-  Py_INCREF(layout);
-  return (PyObject*)layout;
+  return Py_NewRef(layout);
 }
 
 inline PyObject* wrap(at::Layout layout) {
-  return wrap(getTHPLayout(layout));
+  return Py_NewRef(getTHPLayout(layout));
 }
 
 inline PyObject* wrap(at::Tensor tensor) {

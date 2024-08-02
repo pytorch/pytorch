@@ -232,7 +232,7 @@ class CompiledNodeArgs {
     collect(t.list);
   }
   template <typename T>
-  void collect(const c10::optional<T>& t) {
+  void collect(const std::optional<T>& t) {
     if (cond(t.has_value())) {
       collect(*t);
     }
@@ -259,6 +259,7 @@ class CompiledNodeArgs {
     }
   }
   void collect(const at::IValue& iv) {
+    // used by AutogradContext::saved_data from CppNode
     if (iv.isList()) {
       c10::List<at::IValue> list = iv.toList();
       collect_size(list.size());
@@ -273,6 +274,8 @@ class CompiledNodeArgs {
         collect(it->key());
         collect(it->value());
       }
+    } else if (iv.isTensor()) {
+      collect(iv.toTensor());
     } else {
       try {
         collect(static_cast<uint64_t>(at::IValue::hash(iv)));
@@ -519,21 +522,19 @@ class CompiledNodeArgs {
 };
 
 struct TraceState {
-  TraceState(
-      const std::vector<c10::optional<c10::SymInt>>& ss,
-      size_t num_outputs)
+  TraceState(std::vector<std::optional<c10::SymInt>>&& ss, size_t num_outputs)
       : sym_sizes(ss), outputs(num_outputs) {}
 
   void debug_asserts() {
     TORCH_INTERNAL_ASSERT(sym_sizes_index == sym_sizes.size());
   }
-  c10::optional<c10::SymInt> next_sym_size() {
+  std::optional<c10::SymInt> next_sym_size() {
     TORCH_INTERNAL_ASSERT(sym_sizes_index < sym_sizes.size());
     return sym_sizes[sym_sizes_index++];
   }
 
   size_t sym_sizes_index{0};
-  std::vector<c10::optional<c10::SymInt>> sym_sizes;
+  std::vector<std::optional<c10::SymInt>> sym_sizes;
   variable_list outputs;
 };
 
@@ -578,11 +579,19 @@ class SwapSavedVariables {
   }
 
   void before(at::IValue& t) {
-    stashed_ivalues.save(&t, at::IValue(t));
+    if (t.isTensor()) {
+      before(t.toTensor());
+    } else {
+      stashed_ivalues.save(&t, at::IValue(t));
+    }
   }
 
   void after(at::IValue& t) {
-    stashed_ivalues.restore(&t);
+    if (t.isTensor()) {
+      after(t.toTensor());
+    } else {
+      stashed_ivalues.restore(&t);
+    }
   }
 
   void before(Edge& t) {
@@ -664,13 +673,13 @@ class SwapSavedVariables {
   }
 
   template <typename T>
-  void before(c10::optional<T>& t) {
+  void before(std::optional<T>& t) {
     if (t.has_value()) {
       before(*t);
     }
   }
   template <typename T>
-  void after(c10::optional<T>& t) {
+  void after(std::optional<T>& t) {
     if (t.has_value()) {
       after(*t);
     }

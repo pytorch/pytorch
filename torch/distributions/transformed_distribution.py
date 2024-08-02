@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Dict
 
 import torch
@@ -6,6 +7,7 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.independent import Independent
 from torch.distributions.transforms import ComposeTransform, Transform
 from torch.distributions.utils import _sum_rightmost
+
 
 __all__ = ["TransformedDistribution"]
 
@@ -67,9 +69,7 @@ class TransformedDistribution(Distribution):
         transform = ComposeTransform(self.transforms)
         if len(base_shape) < transform.domain.event_dim:
             raise ValueError(
-                "base_distribution needs to have shape with size at least {}, but got {}.".format(
-                    transform.domain.event_dim, base_shape
-                )
+                f"base_distribution needs to have shape with size at least {transform.domain.event_dim}, but got {base_shape}."
             )
         forward_shape = transform.forward_shape(base_shape)
         expanded_base_shape = transform.inverse_shape(forward_shape)

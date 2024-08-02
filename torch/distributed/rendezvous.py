@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 try:
     from urllib.parse import urlparse, urlunparse
 except ImportError as e:
@@ -9,7 +10,7 @@ import numbers
 import os
 import sys
 from datetime import timedelta
-from typing import Dict, Optional, Callable, Iterator, Tuple
+from typing import Callable, Dict, Iterator, Optional, Tuple
 
 from torch.distributed import FileStore, PrefixStore, Store, TCPStore
 
@@ -17,6 +18,8 @@ from .constants import default_pg_timeout
 
 
 _rendezvous_handlers: Dict[str, Callable[..., Iterator[Tuple[Store, int, int]]]] = {}
+
+__all__ = ["register_rendezvous_handler", "rendezvous"]
 
 
 def register_rendezvous_handler(scheme, handler):
@@ -45,16 +48,23 @@ def register_rendezvous_handler(scheme, handler):
     """
     global _rendezvous_handlers
     if scheme in _rendezvous_handlers:
-        raise RuntimeError(
-            f"Rendezvous handler for {scheme}:// already registered"
-        )
+        raise RuntimeError(f"Rendezvous handler for {scheme}:// already registered")
     _rendezvous_handlers[scheme] = handler
 
 
 # Query will have format "rank=0&world_size=1" and is
 # converted into {"rank": 0, "world_size": 1}
 def _query_to_dict(query: str) -> Dict[str, str]:
-    return {pair[0]: pair[1] for pair in (pair.split("=") for pair in filter(None, query.split("&")))}
+    return {
+        pair[0]: pair[1]
+        for pair in (pair.split("=") for pair in filter(None, query.split("&")))
+    }
+
+
+def _get_use_libuv_from_query_dict(query_dict: Dict[str, str]) -> bool:
+    # libuv is the default backend for TCPStore. To enable the non-libuv backend,
+    # user can explicitly specify ``use_libuv=0`` in the URL parameter.
+    return query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "1")) == "1"
 
 
 def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwargs):
@@ -144,12 +154,17 @@ def _torchelastic_use_agent_store() -> bool:
     return os.environ.get("TORCHELASTIC_USE_AGENT_STORE", None) == str(True)
 
 
-def _create_c10d_store(hostname, port, rank, world_size, timeout, use_libuv=False) -> Store:
+def _create_c10d_store(
+    hostname, port, rank, world_size, timeout, use_libuv=True
+) -> Store:
     """
     Smartly creates a c10d Store object on ``rank`` based on whether we need to re-use agent store.
 
     The TCPStore server is assumed to be hosted
     on ``hostname:port``.
+
+    By default, the TCPStore server uses the asynchronous implementation
+    ``LibUVStoreDaemon`` which utilizes libuv.
 
     If ``torchelastic_use_agent_store()`` is ``True``, then it is assumed that
     the agent leader (node rank 0) hosts the TCPStore server (for which the
@@ -172,7 +187,13 @@ def _create_c10d_store(hostname, port, rank, world_size, timeout, use_libuv=Fals
     else:
         start_daemon = rank == 0
         return TCPStore(
-            hostname, port, world_size, start_daemon, timeout, multi_tenant=True, use_libuv=use_libuv
+            hostname,
+            port,
+            world_size,
+            start_daemon,
+            timeout,
+            multi_tenant=True,
+            use_libuv=use_libuv,
         )
 
 
@@ -193,10 +214,13 @@ def _tcp_rendezvous_handler(
 
     rank = int(query_dict["rank"])
     world_size = int(query_dict["world_size"])
-    use_libuv = query_dict.get("use_libuv", "0") == "1"
+    use_libuv = _get_use_libuv_from_query_dict(query_dict)
+
     assert result.hostname is not None
 
-    store = _create_c10d_store(result.hostname, result.port, rank, world_size, timeout, use_libuv)
+    store = _create_c10d_store(
+        result.hostname, result.port, rank, world_size, timeout, use_libuv
+    )
 
     yield (store, rank, world_size)
 
@@ -238,12 +262,13 @@ def _env_rendezvous_handler(
     else:
         world_size = int(_get_env_or_raise("WORLD_SIZE"))
 
-
     master_addr = _get_env_or_raise("MASTER_ADDR")
     master_port = int(_get_env_or_raise("MASTER_PORT"))
-    use_libuv = query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "0")) == "1"
+    use_libuv = _get_use_libuv_from_query_dict(query_dict)
 
-    store = _create_c10d_store(master_addr, master_port, rank, world_size, timeout, use_libuv)
+    store = _create_c10d_store(
+        master_addr, master_port, rank, world_size, timeout, use_libuv
+    )
 
     yield (store, rank, world_size)
 

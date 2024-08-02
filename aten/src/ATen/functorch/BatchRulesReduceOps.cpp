@@ -18,27 +18,27 @@ static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
 }
 
 static Tensor sum_decomp(
-    const Tensor& self, optional<ScalarType> dtype) {
+    const Tensor& self, std::optional<ScalarType> dtype) {
   return at::sum(self, range(0, self.dim()), false, dtype);
 }
 
-static std::tuple<Tensor, optional<int64_t>> _is_all_true_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim) {
-  return std::make_tuple(at::_is_all_true(self), nullopt);
+static std::tuple<Tensor, std::optional<int64_t>> _is_all_true_batch_rule(
+    const Tensor& self, std::optional<int64_t> self_bdim) {
+  return std::make_tuple(at::_is_all_true(self), std::nullopt);
 }
 
-static std::tuple<Tensor, optional<int64_t>> _is_any_true_batch_rule(
-     const Tensor& self, optional<int64_t> self_bdim) {
-   return std::make_tuple(at::_is_any_true(self), nullopt);
+static std::tuple<Tensor, std::optional<int64_t>> _is_any_true_batch_rule(
+     const Tensor& self, std::optional<int64_t> self_bdim) {
+   return std::make_tuple(at::_is_any_true(self), std::nullopt);
  }
 
 static Tensor mean_decomp(
-    const Tensor& self, optional<ScalarType> dtype) {
+    const Tensor& self, std::optional<ScalarType> dtype) {
   return at::mean(self, range(0, self.dim()), false, dtype);
 }
 
 static Tensor prod_decomp(
-    const Tensor& self, optional<ScalarType> dtype) {
+    const Tensor& self, std::optional<ScalarType> dtype) {
   return at::prod(self.flatten(), 0, false, dtype);
 }
 
@@ -169,7 +169,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
     new_dims.push_back(getPhysicalDim(self, self_bdim.has_value(), dim));
   }
   bool is_scalar_case = logical_dim == 0 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0]);
-  c10::optional<bool> maybe_keepdim;
+  std::optional<bool> maybe_keepdim;
   if (is_scalar_case) {
     // NOTE: [boxed_reduction_batch_rule scalar tensor handling]
     // Reduction operations in PyTorch have an edge case where they allow
@@ -256,9 +256,9 @@ static std::tuple<Tensor, Tensor> expand_bdims(
       b_has_bdim ? b : b.expand_as(flagpole));
 }
 
-static std::tuple<Tensor,optional<int64_t>> _softmax_backward_batch_rule(
-    const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-    const Tensor& output, optional<int64_t> output_bdim,
+static std::tuple<Tensor, std::optional<int64_t>> _softmax_backward_batch_rule(
+    const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
+    const Tensor& output, std::optional<int64_t> output_bdim,
     int64_t dim,
     ScalarType input_dtype) {
   // softmax_backward's decomposition is y * gy - y * (y * gy).sum(dim, keepdim=True)
@@ -286,9 +286,9 @@ static std::tuple<Tensor,optional<int64_t>> _softmax_backward_batch_rule(
   return std::make_tuple(at::_softmax_backward_data(grad_output_, output_.contiguous(), dim, input_dtype), 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
-    const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-    const Tensor& output, optional<int64_t> output_bdim,
+static std::tuple<Tensor, std::optional<int64_t>> _log_softmax_backward_batch_rule(
+    const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
+    const Tensor& output, std::optional<int64_t> output_bdim,
     int64_t dim,
     c10::ScalarType input_dtype) {
   // NB: It turns out that expanding + calling log_softmax_backward is generally
@@ -314,16 +314,16 @@ static std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
   return std::make_tuple(at::_log_softmax_backward_data(grad_output_, output_, dim, input_dtype), 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> searchsorted_batch_rule(
     const Tensor& sorted_sequence,
-    optional<int64_t> sorted_sequence_bdim,
+    std::optional<int64_t> sorted_sequence_bdim,
     const Tensor& self,
-    optional<int64_t> self_bdim,
+    std::optional<int64_t> self_bdim,
     bool out_int32,
     bool right,
-    c10::optional<c10::string_view> side,
-    const c10::optional<Tensor>& sorter,
-    c10::optional<int64_t> sorter_bdim) {
+    std::optional<c10::string_view> side,
+    const std::optional<Tensor>& sorter,
+    std::optional<int64_t> sorter_bdim) {
   auto buckets_logical_rank = rankWithoutBatchDim(sorted_sequence, sorted_sequence_bdim);
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
 
@@ -331,12 +331,12 @@ static std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
   // If they both exist, and only one has a bdim, then we need to make sure both do.
   // After this step, we can forget about sorter for a bit.
   auto buckets = moveBatchDimToFront(sorted_sequence, sorted_sequence_bdim);
-  optional<int64_t> buckets_bdim;
+  std::optional<int64_t> buckets_bdim;
   if (sorted_sequence_bdim.has_value()) {
     buckets_bdim = 0;
   }
 
-  optional<Tensor> sorter_;
+  std::optional<Tensor> sorter_;
   if (sorter.has_value() && sorter->defined()) {
     auto sorter__ = moveBatchDimToFront(*sorter, sorter_bdim);
     if (sorted_sequence_bdim.has_value() != sorter_bdim.has_value()) {
@@ -410,7 +410,7 @@ static Tensor bucketize_decomp_Tensor(
     bool right) {
   // checking logical rank
   TORCH_CHECK(boundaries.dim() == 1, "bucketize: boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
-  return at::searchsorted(boundaries, self, out_int32, right, nullopt, nullopt);
+  return at::searchsorted(boundaries, self, out_int32, right, std::nullopt, std::nullopt);
 }
 
 static Tensor bucketize_decomp_Scalar(
@@ -420,7 +420,7 @@ static Tensor bucketize_decomp_Scalar(
     bool right) {
   // checking logical rank
   TORCH_CHECK(boundaries.dim() == 1, "bucketize: boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
-  return at::searchsorted(boundaries, self, out_int32, right, nullopt, nullopt);
+  return at::searchsorted(boundaries, self, out_int32, right, std::nullopt, std::nullopt);
 }
 
 // Use when the other macros don't work out.

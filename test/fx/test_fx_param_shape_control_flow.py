@@ -4,7 +4,6 @@ import unittest
 
 import torch
 import torch.fx
-
 from torch.testing._internal.common_utils import TestCase
 
 
@@ -20,7 +19,7 @@ class MyModuleBase(torch.nn.Module):
         return self.param
 
     def no_relu(self):
-        raise Exception("not implemented")
+        raise Exception("not implemented")  # noqa: TRY002
 
 
 class MyModuleParamShape(MyModuleBase):

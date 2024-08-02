@@ -9,6 +9,7 @@ import torch.testing._internal.common_nn as common_nn
 import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA
 
+
 # Note that this namedtuple is for C++ parity test mechanism's internal use.
 # For guidance on how to add a new C++ parity test, please see
 # NOTE [How to check NN module / functional API parity between Python and C++ frontends]
@@ -376,9 +377,9 @@ NOTE [How to check NN module / functional API parity between Python and C++ fron
 
 def generate_error_msg(name, cpp_value, python_value):
     return (
-        "Parity test failed: {} in C++ has value: {}, "
-        "which does not match the corresponding value in Python: {}.\n{}"
-    ).format(name, cpp_value, python_value, MESSAGE_HOW_TO_FIX_CPP_PARITY_TEST_FAILURE)
+        f"Parity test failed: {name} in C++ has value: {cpp_value}, "
+        f"which does not match the corresponding value in Python: {python_value}.\n{MESSAGE_HOW_TO_FIX_CPP_PARITY_TEST_FAILURE}"
+    )
 
 
 def try_remove_folder(folder_path):

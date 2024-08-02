@@ -13,6 +13,7 @@ from torch import _inductor as inductor, nn
 from torch._C import FileCheck
 from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import counters
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.distributed._composable.replicate import replicate
 from torch.distributed.algorithms.ddp_comm_hooks import (
@@ -69,7 +70,16 @@ def compiler_fn(no_inductor=False):
     return _compiler_fn
 
 
-class ReplicateTest(MultiProcessTestCase):
+class MultiProcessInductorTestCase(MultiProcessTestCase, InductorTestCase):
+    """
+    A version of MultiProcessTestCase that derives from the Inductor TestCase
+    to handle isolation of the inductor cache dir.
+    """
+
+    pass
+
+
+class ReplicateTest(MultiProcessInductorTestCase):
     @property
     def world_size(self) -> int:
         return min(2, torch.cuda.device_count())
@@ -93,6 +103,7 @@ class ReplicateTest(MultiProcessTestCase):
         setup_func: Optional[Callable] = None,
         no_inductor: bool = False,
         no_compile_forward: bool = False,
+        checkpoint: bool = False,
     ):
         backend = "nccl" if use_gpu else "gloo"
         dist.init_process_group(
@@ -113,16 +124,20 @@ class ReplicateTest(MultiProcessTestCase):
             else "python_reducer"
         )
         torch.manual_seed(123)
-        model = Net().to(device)
+        model = Net(checkpoint=checkpoint).to(device)
         input = torch.randn([1, DIM], device=device)
 
-        compiled_replicate_model = torch.compile(
-            replicate(deepcopy(model)), fullgraph=True
-        )
+        compiled_replicate_model = replicate(deepcopy(model))
+        if not no_compile_forward:
+            compiled_replicate_model = torch.compile(
+                compiled_replicate_model, fullgraph=False
+            )
         compiled_replicate_optim = torch.optim.Adam(
             compiled_replicate_model.parameters()
         )
-        compiled_ddp_model = torch.compile(DDP(deepcopy(model)), fullgraph=True)
+        compiled_ddp_model = DDP(deepcopy(model))
+        if not no_compile_forward:
+            compiled_ddp_model = torch.compile(compiled_ddp_model, fullgraph=True)
         compiled_ddp_optim = torch.optim.Adam(compiled_ddp_model.parameters())
         model = replicate(model)
         optim = torch.optim.Adam(model.parameters())
@@ -133,8 +148,8 @@ class ReplicateTest(MultiProcessTestCase):
         models = [model, compiled_replicate_model, compiled_ddp_model]
         optims = [optim, compiled_replicate_optim, compiled_ddp_optim]
         sync_contexts = [
-            replicate.state(model)._ddp.no_sync(),
-            replicate.state(compiled_replicate_model._orig_mod)._ddp.no_sync(),
+            contextlib.nullcontext(),
+            contextlib.nullcontext(),
             compiled_ddp_model.no_sync(),
         ]
 
@@ -149,8 +164,13 @@ class ReplicateTest(MultiProcessTestCase):
             for model_idx in range(3):
                 if no_sync and i % 2 == 0:
                     context = sync_contexts[model_idx]
+                    if model_idx <= 1:
+                        models[model_idx].set_requires_gradient_sync(False)
                 else:
                     context = contextlib.nullcontext()
+                    if model_idx <= 1:
+                        models[model_idx].set_requires_gradient_sync(True)
+                context = contextlib.nullcontext()
 
                 with context:
                     bwd_context = (
@@ -200,21 +220,25 @@ class ReplicateTest(MultiProcessTestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm
     @skip_if_lt_x_gpu(2)
+    @torch._inductor.config.patch(reorder_for_locality=False)
     def test_compile_gpu(self):
-        self._test_compile(use_gpu=True, no_sync=False)
+        self._test_compile(use_gpu=True, no_sync=False, checkpoint=False)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_rocm
+    @skip_if_lt_x_gpu(2)
+    @torch._inductor.config.patch(reorder_for_locality=False)
+    def test_compile_gpu_ac(self):
+        self._test_compile(use_gpu=True, no_sync=False, checkpoint=True)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm
     @skip_if_lt_x_gpu(2)
     def test_compile_bf16(self):
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
-            replicate.state(model)._ddp.register_comm_hook(
-                None, ddp_default_hooks.bf16_compress_hook
-            )
+            model.register_comm_hook(None, ddp_default_hooks.bf16_compress_hook)
             compiled_m = compiled_replicate_model._orig_mod
-            replicate.state(compiled_m)._ddp.register_comm_hook(
-                None, ddp_default_hooks.bf16_compress_hook
-            )
+            compiled_m.register_comm_hook(None, ddp_default_hooks.bf16_compress_hook)
             compiled_ddp_model.register_comm_hook(
                 None, ddp_default_hooks.bf16_compress_hook
             )
@@ -226,13 +250,9 @@ class ReplicateTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_compile_fp16(self):
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
-            replicate.state(model)._ddp.register_comm_hook(
-                None, ddp_default_hooks.fp16_compress_hook
-            )
+            model.register_comm_hook(None, ddp_default_hooks.fp16_compress_hook)
             compiled_m = compiled_replicate_model._orig_mod
-            replicate.state(compiled_m)._ddp.register_comm_hook(
-                None, ddp_default_hooks.fp16_compress_hook
-            )
+            compiled_m.register_comm_hook(None, ddp_default_hooks.fp16_compress_hook)
             compiled_ddp_model.register_comm_hook(
                 None, ddp_default_hooks.fp16_compress_hook
             )
@@ -260,7 +280,7 @@ class ReplicateTest(MultiProcessTestCase):
         input = torch.randn([1, DIM])
         torch._dynamo.config.optimize_ddp = "python_reducer"
         compiled_replicate_model = torch.compile(
-            replicate(deepcopy(model)), fullgraph=True
+            replicate(deepcopy(model)), fullgraph=False
         )
 
         def bwd(loss):
@@ -278,12 +298,16 @@ class ReplicateTest(MultiProcessTestCase):
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         return code
 
-    def test_bucketing_coalesced_op(self):
-        torch._inductor.config._fuse_ddp_communication_passes = [
+    @torch._inductor.config.patch(
+        _fuse_ddp_communication_passes=[
             "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
-
+    )
+    # todo: This pass mucks things up since Inductor thinks its inference
+    # and can apply this. Should turn off these passes in compiled autograd
+    @torch._inductor.config.patch(reorder_for_locality=False)
+    def test_bucketing_coalesced_op(self):
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
@@ -310,12 +334,16 @@ class ReplicateTest(MultiProcessTestCase):
 
         fc.run(code)
 
-    def test_bucketing_concat_op(self):
-        torch._inductor.config._fuse_ddp_communication_passes = [
+    @torch._inductor.config.patch(
+        _fuse_ddp_communication_passes=[
             "fuse_ddp_with_concat_op",
             "schedule_comm_wait",
         ]
-
+    )
+    # todo: This pass mucks things up since Inductor thinks its inference
+    # and can apply this. Should turn off these passes in compiled autograd
+    @torch._inductor.config.patch(reorder_for_locality=False)
+    def test_bucketing_concat_op(self):
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
@@ -341,7 +369,7 @@ class ReplicateTest(MultiProcessTestCase):
         fc.run(code)
 
 
-class DDP_TP_Test(MultiProcessTestCase):
+class DDP_TP_Test(MultiProcessInductorTestCase):
     @property
     def world_size(self) -> int:
         return min(4, torch.cuda.device_count())

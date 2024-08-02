@@ -66,6 +66,8 @@ torch.backends.cuda
 
         Clears a cuFFT plan cache.
 
+.. autofunction:: torch.backends.cuda.preferred_blas_library
+
 .. autofunction:: torch.backends.cuda.preferred_linalg_library
 
 .. autoclass:: torch.backends.cuda.SDPAParams
@@ -86,9 +88,13 @@ torch.backends.cuda
 
 .. autofunction:: torch.backends.cuda.enable_cudnn_sdp
 
+.. autofunction:: torch.backends.cuda.is_flash_attention_available
+
 .. autofunction:: torch.backends.cuda.can_use_flash_attention
 
 .. autofunction:: torch.backends.cuda.can_use_efficient_attention
+
+.. autofunction:: torch.backends.cuda.can_use_cudnn_attention
 
 .. autofunction:: torch.backends.cuda.sdp_kernel
 

@@ -18,15 +18,10 @@
 #include <torch/custom_class.h>
 
 #include <caffe2/serialize/in_memory_adapter.h>
-#include <exception>
-#include <fstream>
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
-using caffe2::serialize::FileAdapter;
-using caffe2::serialize::IStreamAdapter;
+namespace torch::jit {
 using caffe2::serialize::MemoryReadAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
@@ -40,13 +35,13 @@ namespace {
 class IValueUnpickler final {
  public:
   explicit IValueUnpickler(std::unique_ptr<PyTorchStreamReader> reader);
-  c10::IValue deserialize(c10::optional<at::Device> device);
+  c10::IValue deserialize(std::optional<at::Device> device);
 
  private:
   c10::IValue readArchive(
       const std::string& archive_name,
       std::shared_ptr<mobile::CompilationUnit> mcu,
-      c10::optional<at::Device> device);
+      std::optional<at::Device> device);
 
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unique_ptr<PyTorchStreamReader> reader_;
@@ -56,17 +51,16 @@ IValueUnpickler::IValueUnpickler(std::unique_ptr<PyTorchStreamReader> reader)
     : compilation_unit_(std::make_shared<CompilationUnit>()),
       reader_(std::move(reader)) {}
 
-c10::IValue IValueUnpickler::deserialize(c10::optional<at::Device> device) {
+c10::IValue IValueUnpickler::deserialize(std::optional<at::Device> device) {
   auto mcu = std::make_shared<mobile::CompilationUnit>();
 
-  // NOLINTNEXTLINE(performance-move-const-arg)
-  return readArchive("data", mcu, std::move(device));
+  return readArchive("data", mcu, device);
 }
 
 c10::IValue IValueUnpickler::readArchive(
     const std::string& archive_name,
     std::shared_ptr<mobile::CompilationUnit> mcu,
-    c10::optional<at::Device> device) {
+    std::optional<at::Device> device) {
   std::stringstream picklename;
   picklename << archive_name << ".pkl";
   at::DataPtr pickle_ptr;
@@ -157,8 +151,7 @@ c10::IValue IValueUnpickler::readArchive(
       std::move(type_resolver),
       std::move(obj_loader),
       std::move(read_record),
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(device),
+      device,
       false,
       nullptr);
   return unpickler.parse_ivalue();
@@ -169,7 +162,7 @@ c10::IValue IValueUnpickler::readArchive(
  */
 std::map<std::string, at::Tensor> load_parameters_from_zip(
     std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device) {
+    std::optional<c10::Device> device) {
   auto reader = std::make_unique<PyTorchStreamReader>(std::move(rai));
   IValueUnpickler unpickler(std::move(reader));
   auto result = unpickler.deserialize(device).toGenericDict();
@@ -239,9 +232,9 @@ std::map<std::string, at::Tensor> mobile_module_to_parameter_map(
 }
 
 static std::map<std::string, at::Tensor> _load_parameters_bytes(
-    std::shared_ptr<char> data,
+    const std::shared_ptr<char>& data,
     size_t size,
-    c10::optional<at::Device> device) {
+    std::optional<at::Device> device) {
   TORCH_CHECK(size >= kFileFormatHeaderSize, "Unrecognized data format");
   FileFormat format = getFileFormat(data.get());
   // Call the appropriate parser.
@@ -268,17 +261,16 @@ static std::map<std::string, at::Tensor> _load_parameters_bytes(
 
 std::map<std::string, at::Tensor> _load_parameters(
     std::istream& in,
-    c10::optional<at::Device> device) {
+    std::optional<at::Device> device) {
   auto [data, size] = get_stream_content(in);
-  return _load_parameters_bytes(std::move(data), size, device);
+  return _load_parameters_bytes(data, size, device);
 }
 
 std::map<std::string, at::Tensor> _load_parameters(
     const std::string& filename,
-    c10::optional<at::Device> device) {
+    std::optional<at::Device> device) {
   auto [data, size] = get_file_content(filename.c_str());
-  return _load_parameters_bytes(std::move(data), size, device);
+  return _load_parameters_bytes(data, size, device);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

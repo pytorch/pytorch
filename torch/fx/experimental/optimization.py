@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch.fx as fx
 from torch.fx.node import Argument, Target
 from torch.nn.utils.fusion import fuse_conv_bn_eval
@@ -402,7 +403,7 @@ def optimize_for_inference(
         if node.target == 'to_mkldnn' or node.target == 'to_dense':
             mkldnn_conversions += 1
 
-    logging.getLogger(__name__).info(f"mkldnn conversions: {mkldnn_conversions}")
+    logging.getLogger(__name__).info("mkldnn conversions: %s", mkldnn_conversions)
     fx_graph.lint()
     result = fx.GraphModule(model, fx_graph)
     return result

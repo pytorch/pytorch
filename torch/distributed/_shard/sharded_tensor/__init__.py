@@ -1,35 +1,39 @@
+# mypy: allow-untyped-defs
 import functools
 from typing import List, TYPE_CHECKING
 
 import torch
+from torch.distributed._shard.op_registry_utils import _decorator_func
+
+from .api import (
+    _CUSTOM_SHARDED_OPS,
+    _SHARDED_OPS,
+    Shard,
+    ShardedTensor,
+    ShardedTensorBase,
+    ShardedTensorMetadata,
+    TensorProperties,
+)
+from .metadata import ShardMetadata  # noqa: F401
+
 
 if TYPE_CHECKING:
     from torch.distributed._shard.sharding_spec import ShardingSpec
 else:
     ShardingSpec = "ShardingSpec"
 
-from .api import (
-    _CUSTOM_SHARDED_OPS,
-    _SHARDED_OPS,
-    Shard,
-    ShardedTensorBase,
-    ShardedTensor,
-    ShardedTensorMetadata,
-    TensorProperties,
-)
-from .metadata import ShardMetadata  # noqa: F401
-from torch.distributed._shard.op_registry_utils import _decorator_func
 
-
-def empty(sharding_spec: ShardingSpec,
-          *size,
-          dtype=None,
-          layout=torch.strided,
-          requires_grad=False,
-          pin_memory=False,
-          memory_format=torch.contiguous_format,
-          process_group=None,
-          init_rrefs=False) -> ShardedTensor:
+def empty(
+    sharding_spec: ShardingSpec,
+    *size,
+    dtype=None,
+    layout=torch.strided,
+    requires_grad=False,
+    pin_memory=False,
+    memory_format=torch.contiguous_format,
+    process_group=None,
+    init_rrefs=False,
+) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` filled with uninitialized data.
         Needs to be called on all ranks in an SPMD fashion.
@@ -73,15 +77,18 @@ def empty(sharding_spec: ShardingSpec,
         init_rrefs=init_rrefs,
     )
 
-def ones(sharding_spec: ShardingSpec,
-         *size,
-         dtype=None,
-         layout=torch.strided,
-         requires_grad=False,
-         pin_memory=False,
-         memory_format=torch.contiguous_format,
-         process_group=None,
-         init_rrefs=False) -> ShardedTensor:
+
+def ones(
+    sharding_spec: ShardingSpec,
+    *size,
+    dtype=None,
+    layout=torch.strided,
+    requires_grad=False,
+    pin_memory=False,
+    memory_format=torch.contiguous_format,
+    process_group=None,
+    init_rrefs=False,
+) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` with the scalar value 1.
         Needs to be called on all ranks in an SPMD fashion.
@@ -121,18 +128,21 @@ def ones(sharding_spec: ShardingSpec,
         pin_memory=pin_memory,
         memory_format=memory_format,
         process_group=process_group,
-        init_rrefs=init_rrefs
+        init_rrefs=init_rrefs,
     )
 
-def zeros(sharding_spec: ShardingSpec,
-          *size,
-          dtype=None,
-          layout=torch.strided,
-          requires_grad=False,
-          pin_memory=False,
-          memory_format=torch.contiguous_format,
-          process_group=None,
-          init_rrefs=False) -> ShardedTensor:
+
+def zeros(
+    sharding_spec: ShardingSpec,
+    *size,
+    dtype=None,
+    layout=torch.strided,
+    requires_grad=False,
+    pin_memory=False,
+    memory_format=torch.contiguous_format,
+    process_group=None,
+    init_rrefs=False,
+) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` filled with the scalar value 0.
         Needs to be called on all ranks in an SPMD fashion.
@@ -172,22 +182,25 @@ def zeros(sharding_spec: ShardingSpec,
         pin_memory=pin_memory,
         memory_format=memory_format,
         process_group=process_group,
-        init_rrefs=init_rrefs
+        init_rrefs=init_rrefs,
     )
 
-def full(sharding_spec: ShardingSpec,
-         size,
-         fill_value,
-         *,
-         dtype=None,
-         layout=torch.strided,
-         requires_grad=False,
-         pin_memory=False,
-         memory_format=torch.contiguous_format,
-         process_group=None,
-         init_rrefs=False) -> ShardedTensor:
+
+def full(
+    sharding_spec: ShardingSpec,
+    size,
+    fill_value,
+    *,
+    dtype=None,
+    layout=torch.strided,
+    requires_grad=False,
+    pin_memory=False,
+    memory_format=torch.contiguous_format,
+    process_group=None,
+    init_rrefs=False,
+) -> ShardedTensor:
     """
-    Creates a :class:`ShardedTensor` filled with fill_value. The tensor’s dtype
+    Creates a :class:`ShardedTensor` filled with fill_value. The tensor's dtype
         is inferred from fill_value. If dtype is specified, it will override the
         inferred type from fill_value. Needs to be called on all ranks in an SPMD fashion.
     Args:
@@ -195,7 +208,7 @@ def full(sharding_spec: ShardingSpec,
             describing how to shard the Tensor.
         size (int...):  a list, tuple, or `torch.Size` of integers defining the shape of the
             output tensor.
-        fill_value (Scalar) – the value to fill the output tensor with.
+        fill_value (Scalar) - the value to fill the output tensor with.
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
             Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
@@ -228,15 +241,18 @@ def full(sharding_spec: ShardingSpec,
     torch.nn.init.constant_(sharded_tensor, fill_value)  # type: ignore[arg-type]
     return sharded_tensor
 
-def rand(sharding_spec: ShardingSpec,
-         *size,
-         dtype=None,
-         layout=torch.strided,
-         requires_grad=False,
-         pin_memory=False,
-         memory_format=torch.contiguous_format,
-         process_group=None,
-         init_rrefs=False) -> ShardedTensor:
+
+def rand(
+    sharding_spec: ShardingSpec,
+    *size,
+    dtype=None,
+    layout=torch.strided,
+    requires_grad=False,
+    pin_memory=False,
+    memory_format=torch.contiguous_format,
+    process_group=None,
+    init_rrefs=False,
+) -> ShardedTensor:
     """
     Creates a :class:`ShardedTensor` filled with random numbers from a uniform distribution
         on the interval :math:`[0, 1)`. The shape of the tensor is defined by the
@@ -281,15 +297,18 @@ def rand(sharding_spec: ShardingSpec,
     torch.nn.init.uniform_(sharded_tensor, 0, 1)  # type: ignore[arg-type]
     return sharded_tensor
 
-def randn(sharding_spec: ShardingSpec,
-          *size,
-          dtype=None,
-          layout=torch.strided,
-          requires_grad=False,
-          pin_memory=False,
-          memory_format=torch.contiguous_format,
-          process_group=None,
-          init_rrefs=False) -> ShardedTensor:
+
+def randn(
+    sharding_spec: ShardingSpec,
+    *size,
+    dtype=None,
+    layout=torch.strided,
+    requires_grad=False,
+    pin_memory=False,
+    memory_format=torch.contiguous_format,
+    process_group=None,
+    init_rrefs=False,
+) -> ShardedTensor:
     """
     Creates a :class:`ShardedTensor` filled with random numbers from a uniform distribution
         with mean `0` and variance `1` (also called standard normal distribution). The shape
@@ -335,11 +354,10 @@ def randn(sharding_spec: ShardingSpec,
     torch.nn.init.normal_(sharded_tensor, 0, 1)  # type: ignore[arg-type]
     return sharded_tensor
 
+
 def init_from_local_shards(
-        local_shards: List[Shard],
-        *global_size,
-        process_group=None,
-        init_rrefs=False) -> ShardedTensor:
+    local_shards: List[Shard], *global_size, process_group=None, init_rrefs=False
+) -> ShardedTensor:
     """
     Creates an :class:`ShardedTensor` from local shards and the global metadata.
     Needs to be called on all ranks in an SPMD fashion.
@@ -387,11 +405,9 @@ def init_from_local_shards(
         >>> sharded_tensor = init_from_local_shards(local_shards, [10, 5])
     """
     return ShardedTensor._init_from_local_shards(
-        local_shards,
-        *global_size,
-        process_group=process_group,
-        init_rrefs=init_rrefs
+        local_shards, *global_size, process_group=process_group, init_rrefs=init_rrefs
     )
+
 
 def state_dict_hook(module, destination, prefix, local_metadata):
     """
@@ -403,20 +419,31 @@ def state_dict_hook(module, destination, prefix, local_metadata):
         for attr_name, attr in submodule.__dict__.items():
             if isinstance(attr, ShardedTensor):
                 mod_prefix = prefix + submodule_name
-                key = mod_prefix + ('.' if mod_prefix else '') + attr_name
+                key = mod_prefix + ("." if mod_prefix else "") + attr_name
                 destination[key] = attr
 
-def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+
+def pre_load_state_dict_hook(
+    module,
+    state_dict,
+    prefix,
+    local_metadata,
+    strict,
+    missing_keys,
+    unexpected_keys,
+    error_msgs,
+):
     """
     Pre-load state dict hook to add ShardedTensor to the module.
     """
     for submodule_name, submodule in module.named_modules():
         for attr_name in submodule.__dict__.keys():
             mod_prefix = prefix + submodule_name
-            key = mod_prefix + ('.' if mod_prefix else '') + attr_name
+            key = mod_prefix + ("." if mod_prefix else "") + attr_name
             if key in state_dict:
                 if isinstance(state_dict[key], ShardedTensor):
                     setattr(submodule, attr_name, state_dict[key])
+
 
 def custom_sharded_op_impl(func):
     """
@@ -449,21 +476,15 @@ def custom_sharded_op_impl(func):
         func(Callable): Torch function for which we want to provide a sharded
             implementation (ex: torch.nn.functional.linear)
     """
-    return functools.partial(
-        _decorator_func,
-        op=func,
-        op_table=_CUSTOM_SHARDED_OPS
-    )
+    return functools.partial(_decorator_func, op=func, op_table=_CUSTOM_SHARDED_OPS)
+
 
 def _sharded_op_impl(func):
     """
     Decorator to register a default sharded op.
     """
-    return functools.partial(
-        _decorator_func,
-        op=func,
-        op_table=_SHARDED_OPS
-    )
+    return functools.partial(_decorator_func, op=func, op_table=_SHARDED_OPS)
+
 
 # Import all builtin sharded ops
 from ._ops import *  # noqa: F403

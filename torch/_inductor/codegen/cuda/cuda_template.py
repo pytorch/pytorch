@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -7,13 +8,14 @@ from unittest.mock import patch
 import sympy
 
 import torch
+
 from ...autotune_process import CUDABenchmarkRequest, TensorMeta
 from ...ir import Buffer, CUDATemplateBuffer, IRNode, Layout
-
 from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate
 from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
+
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +29,7 @@ class CUDATemplate(KernelTemplate):
         input_nodes: List[Buffer],
         layout: Layout,
         input_reorder: Optional[List[int]] = None,
-    ):
+    ) -> None:
         """
 
         Baseclass for CUDA C++ Templates, derived from KernelTemplate. Not to be instantiated directly.
@@ -66,7 +68,7 @@ class CUDATemplate(KernelTemplate):
             kernel_name=kernel_name,
         ) as kernel:
             code = self.render(kernel=kernel, **kwargs)
-            _, call_args, _ = kernel.args.python_argdefs()
+            _, call_args, _, _ = kernel.args.python_argdefs()
             log.debug("Generated Code:\n%s", code)
             log.debug(
                 "Args: cpp_argdefs: %s, python_argdefs: %s",

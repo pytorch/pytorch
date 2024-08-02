@@ -5,17 +5,16 @@ import sys
 
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
-    skipIfRocm,
     slowTest,
     TEST_WITH_ASAN,
 )
-
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -68,7 +67,6 @@ class BenchmarkFusionTestTemplate:
         self.common(f, (torch.rand(2, 8192),))
 
     @slowTest
-    @skipIfRocm  # fail accuracy check on ROCm
     def test_resnet18(self):
         import torchvision
 
@@ -203,7 +201,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     {
                         "benchmark_kernel": True,
                         "benchmark_fusion": True,
-                        "benchmark_multi_templates": True,
+                        "benchmark_epilogue_fusion": True,
                     }
                 )
             )
@@ -212,6 +210,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def tearDownClass(cls):
             cls._stack.close()
             super().tearDownClass()
+
+        def setUp(self):
+            super().setUp()
+            if not is_big_gpu(0):
+                return self.skipTest("Need a big GPU to run max_autotune=True")
 
         def _equivalent_output_code_impl(self, size, first_dim=None, activation=True):
             def foo(m, inp):
@@ -231,7 +234,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             torch._dynamo.reset()
             with unittest.mock.patch.object(
-                torch._inductor.config, "benchmark_multi_templates", False
+                torch._inductor.config, "benchmark_epilogue_fusion", False
             ):
                 foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
                 with torch.no_grad():
