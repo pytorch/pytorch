@@ -1303,7 +1303,8 @@ void CudaCodeGen::CompileToNVRTC(
       "--std=c++17", compute.c_str(), "-default-device"};
 #endif
 
-  auto result = nvrtc().nvrtcCompileProgram(program, static_cast<int>(args.size()), args.data());
+  auto result = nvrtc().nvrtcCompileProgram(
+      program, static_cast<int>(args.size()), args.data());
   if (result != NVRTC_SUCCESS) {
     size_t logsize = 0;
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));
