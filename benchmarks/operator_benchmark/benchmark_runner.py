@@ -148,6 +148,11 @@ def parse_args():
         help="Choose the output directory to save the logs",
         default="DEFAULT_OUTPUT_DIR",
     )
+    parser.add_argument(
+        "--disable-output",
+        help="Disable log output to csv file",
+        default="False",
+    )
 
     args, _ = parser.parse_known_args()
 
