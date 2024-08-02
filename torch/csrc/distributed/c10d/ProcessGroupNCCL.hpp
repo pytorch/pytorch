@@ -342,7 +342,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::chrono::milliseconds opTimeout_;
 
     // timeout to be reduced after this work finishes.
-    std::chrono::milliseconds opTimeoutReduce_ = std::chrono::milliseconds(0);
+    std::chrono::milliseconds timeoutReductionOnComplete_ =
+        std::chrono::milliseconds(0);
 
     // Time point representing when the work started.
     std::chrono::time_point<std::chrono::steady_clock> workStartTime_;
@@ -645,7 +646,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void performNocolorSplit(at::Device device);
 
-  void extendTimeoutUntilFirstDone(const std::chrono::milliseconds& timeout);
+  // This method sets a temporary extension for the timeout period,
+  // applying to all collectives between the calling of this API and
+  // the completion of the first collective on the GPU. While this feature
+  // provides flexibility in specific scenarios, it introduces statefulness
+  // to timeout setting. Therefore, it is advisable to use this API sparingly
+  // and consider alternative approaches, such as directly setting the timeout
+  // or utilizing a barrier collective (one can set any timeout to the barrier),
+  // whenever feasible.
+  void setEphemeralTimeout(const std::chrono::milliseconds& timeout);
 
   bool checkWorkTimeout(
       const c10::intrusive_ptr<Work> work,
@@ -812,8 +821,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Util function to assign timeout to each work.
   void assignTimeoutToWork(
-      c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work,
-      c10::intrusive_ptr<Options> option);
+      const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work,
+      const c10::intrusive_ptr<Options>& option);
 
  protected:
   // Function that runs as part of a separate thread aside from watchdog
@@ -854,15 +863,18 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   bool storeError_{false};
 
   // The lock which protects the write/read of
-  // extendedTimeout_/inflightTimeoutExt_.
+  // extendedTimeout_/ephemeralTimeoutInflight_.
+  // TODO(fduwjj): We need to have an audit on all mutexes we are adding here.
+  // And consolidate them if possible.
   std::mutex mtxTimeoutExtension_;
 
-  // The extended timeout on top of existing timeout for works issued before
+  // The extended timeout set on top of existing timeout for works issued before
   // first work finishes.
-  std::chrono::milliseconds extendedTimeout_ = std::chrono::milliseconds(0);
+  std::chrono::milliseconds ephemeralTimeoutSet_ = std::chrono::milliseconds(0);
 
   // The timeout extension which has been already applied to work.
-  std::chrono::milliseconds inflightTimeoutExt_ = std::chrono::milliseconds(0);
+  std::chrono::milliseconds ephemeralTimeoutInflight_ =
+      std::chrono::milliseconds(0);
 
   const c10::intrusive_ptr<Options> options_;
 

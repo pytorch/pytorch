@@ -2708,10 +2708,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>())
           .def(
-              "_extend_timeout_until_first_done",
+              "_set_ephemeral_timeout",
               [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
                  const std::chrono::milliseconds& timeout) {
-                self->extendTimeoutUntilFirstDone(timeout);
+                self->setEphemeralTimeout(timeout);
               },
               py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>())

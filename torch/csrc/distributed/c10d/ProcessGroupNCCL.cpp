@@ -496,7 +496,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       ncclComm_(w.ncclComm_),
       blockingWait_(w.blockingWait_),
       opTimeout_(w.opTimeout_),
-      opTimeoutReduce_(w.opTimeoutReduce_),
+      timeoutReductionOnComplete_(w.timeoutReductionOnComplete_),
       workStartTime_(w.workStartTime_),
       seq_(w.seq_),
       startTraceUpdated_(w.startTraceUpdated_),
@@ -1603,10 +1603,10 @@ const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
   return options_->global_ranks_in_group;
 }
 
-void ProcessGroupNCCL::extendTimeoutUntilFirstDone(
+void ProcessGroupNCCL::setEphemeralTimeout(
     const std::chrono::milliseconds& timeout) {
   std::lock_guard<std::mutex> lock(mtxTimeoutExtension_);
-  extendedTimeout_ += timeout;
+  ephemeralTimeoutSet_ += timeout;
 }
 
 bool ProcessGroupNCCL::checkWorkTimeout(
@@ -1799,9 +1799,9 @@ void ProcessGroupNCCL::watchdogHandler() {
         {
           // Reset the timeout and first work if the work is completed.
           std::lock_guard<std::mutex> lock(mtxTimeoutExtension_);
-          if (work.opTimeoutReduce_.count() > 0) {
-            extendedTimeout_ -= work.opTimeoutReduce_;
-            inflightTimeoutExt_ -= work.opTimeoutReduce_;
+          if (work.timeoutReductionOnComplete_.count() > 0) {
+            ephemeralTimeoutSet_ -= work.timeoutReductionOnComplete_;
+            ephemeralTimeoutInflight_ -= work.timeoutReductionOnComplete_;
           }
         }
         pgStatus_->lastCompletedSeq = work.seq_;
@@ -2437,16 +2437,17 @@ uint64_t ProcessGroupNCCL::WorkNCCL::getSequencenumber() const {
 }
 
 void ProcessGroupNCCL::assignTimeoutToWork(
-    c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work,
-    c10::intrusive_ptr<ProcessGroupNCCL::Options> option) {
+    const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work,
+    const c10::intrusive_ptr<ProcessGroupNCCL::Options>& option) {
   std::chrono::milliseconds timeout = option->timeout;
   std::lock_guard<std::mutex> lock(mtxTimeoutExtension_);
-  if (extendedTimeout_.count() > 0) {
-    timeout += extendedTimeout_;
+  if (ephemeralTimeoutSet_.count() > 0) {
+    timeout += ephemeralTimeoutSet_;
   }
   work->opTimeout_ = timeout;
-  work->opTimeoutReduce_ = extendedTimeout_ - inflightTimeoutExt_;
-  inflightTimeoutExt_ = extendedTimeout_;
+  work->timeoutReductionOnComplete_ =
+      ephemeralTimeoutSet_ - ephemeralTimeoutInflight_;
+  ephemeralTimeoutInflight_ = ephemeralTimeoutSet_;
 }
 
 void ProcessGroupNCCL::workEnqueue(

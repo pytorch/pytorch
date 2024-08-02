@@ -609,7 +609,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self.assertTrue(bankend._check_work_timeout(w, timedelta(seconds=3)))
             w.wait()
         else:
-            dist.distributed_c10d._extend_timeout_until_first_done_all_pgs(
+            dist.distributed_c10d._set_ephemeral_timeout_for_all_pgs(
                 timedelta(seconds=10)
             )
             w1 = pg.allreduce(torch.rand(10).cuda(self.rank))
@@ -617,7 +617,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self.assertTrue(bankend._check_work_timeout(w1, timedelta(seconds=13)))
             self.assertTrue(bankend._check_work_timeout(w2, timedelta(seconds=13)))
             w1.wait()
-            dist.distributed_c10d._extend_timeout_until_first_done_all_pgs(
+            dist.distributed_c10d._set_ephemeral_timeout_for_all_pgs(
                 timedelta(seconds=5)
             )
             # Since we are not block wait so use a sync here to leave enough time
