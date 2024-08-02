@@ -328,7 +328,11 @@ class MetaTensorDescriber:
             is_parameter=isinstance(t, torch.nn.Parameter),
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
-            nested_int=_tensor_symint_registry.get(t, None),
+            nested_int=(
+                _tensor_symint_registry[t].node.nested_int()
+                if t in _tensor_symint_registry
+                else None
+            ),
             is_functional=is_functional,
             layout=layout,
             device=t.device,
@@ -1575,7 +1579,7 @@ class MetaConverter:
             # See Note: [Creating symbolic nested int]
             if t.nested_int is not None:
                 r.nested_int_memo = r.fake_mode.create_symbolic_nested_int(
-                    hint=t.nested_int
+                    nt_tensor_id=t.nested_int
                 )
 
             self.set_tensor_memo(t, r)
