@@ -161,7 +161,7 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_bn_mixed_dtype(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     3,
@@ -219,7 +219,7 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_unsupported_conv_transpose(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv_transpose = torch.nn.ConvTranspose2d(
                     3, 6, 3, stride=1, padding=1, output_padding=1
@@ -351,7 +351,7 @@ class CPUReproTests(TestCase):
     @config.patch(freezing=True)
     def test_module_buffer_mutation(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Buffer(torch.rand((3, 10)))
 
@@ -843,7 +843,7 @@ class CPUReproTests(TestCase):
     def test_fp32_load_with_to_lowp_fp(self):
         # From llama model.
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.cache_k = torch.zeros(8, 4, 2, 2)
 
@@ -1272,7 +1272,7 @@ class CPUReproTests(TestCase):
     @requires_vectorization
     def test_per_channel_fake_quant_module_uint8(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.scales = torch.ones((3,)).to(torch.float64)
                 self.zero_points = torch.zeros((3,)).to(torch.int64)
@@ -2898,7 +2898,7 @@ class CPUReproTests(TestCase):
         """a sub-module from TIMM gmlp_s16_224"""
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(
                     in_features=256, out_features=1536, bias=True
@@ -3242,7 +3242,7 @@ class CPUReproTests(TestCase):
 
     def test_linear_buffer_reuse(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(16, 16)
                 self.tanh = torch.nn.Tanh()
@@ -3288,7 +3288,7 @@ class CPUReproTests(TestCase):
     def test_nn_param_assign(self):
         # https://github.com/pytorch/pytorch/issues/99569
         class Model2(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(in_channels=3, out_channels=5, kernel_size=3)
                 self.batchnorm = nn.BatchNorm2d(num_features=5)
@@ -3316,7 +3316,7 @@ class CPUReproTests(TestCase):
 
     def test_nn_param_assign_wrapped(self):
         class Model2(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(in_channels=3, out_channels=5, kernel_size=3)
                 self.batchnorm = nn.BatchNorm2d(num_features=5)
@@ -3488,7 +3488,7 @@ class CPUReproTests(TestCase):
     @config.patch(freezing=True)
     def test_linear_with_reshape(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(16, 16, bias=False)
 
@@ -3525,7 +3525,7 @@ class CPUReproTests(TestCase):
 
     def test_group_norm_vec(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.group_norm = torch.nn.GroupNorm(32, 32)
 
@@ -3573,7 +3573,7 @@ class CPUReproTests(TestCase):
     def test_non_contiguous_reduction_store(self):
         # https://github.com/pytorch/pytorch/issues/113018
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(39, 1, kernel_size=(1, 17), stride=(2, 2))
 
@@ -3586,7 +3586,7 @@ class CPUReproTests(TestCase):
 
     def test_embedding_vec(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(64, 128)
 
@@ -3603,7 +3603,7 @@ class CPUReproTests(TestCase):
 
     def test_embedding_vec_bf16(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(64, 128)
 
@@ -3854,7 +3854,7 @@ class CPUReproTests(TestCase):
         p0 = torch.tensor([1.0879], dtype=torch.float16)
 
         class Model1(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, *args):
@@ -3894,7 +3894,7 @@ class CPUReproTests(TestCase):
         input3 = torch.randn(128, 128, dtype=torch.float32)
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, x2, x3):
@@ -3935,7 +3935,7 @@ class CPUReproTests(TestCase):
     @config.patch(freezing=True)
     def test_linear_float64(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight1 = torch.nn.Parameter(
                     torch.randn(10, 10, dtype=torch.float64)
@@ -3961,7 +3961,7 @@ class CPUReproTests(TestCase):
     def test_fused_attention_conv(self):
         # https://github.com/pytorch/pytorch/issues/121174.
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.q_conv = torch.nn.Conv2d(4, 4, 1)
                 self.k_conv = torch.nn.Conv2d(4, 4, 1)

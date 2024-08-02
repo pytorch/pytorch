@@ -601,121 +601,136 @@ void initTorchFunctions(PyObject* module) {
   auto py_module = py::module::import("torch");
 
   py_module.def(
-      "_functionalize_are_all_mutations_under_no_grad_or_inference_mode", [](const at::Tensor& t) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
-        return at::functionalization::impl::are_all_mutations_under_no_grad_or_inference_mode(t);
-  });
+      "_functionalize_are_all_mutations_under_no_grad_or_inference_mode",
+      [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        return at::functionalization::impl::
+            are_all_mutations_under_no_grad_or_inference_mode(t);
+      });
   py_module.def(
       "_functionalize_was_inductor_storage_resized", [](const at::Tensor& t) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
         auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
         return impl->was_inductor_storage_resized();
-  });
+      });
   py_module.def(
-      "_functionalize_are_all_mutations_hidden_from_autograd", [](const at::Tensor& t) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
-        return at::functionalization::impl::are_all_mutations_hidden_from_autograd(t);
-  });
+      "_functionalize_are_all_mutations_hidden_from_autograd",
+      [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        return at::functionalization::impl::
+            are_all_mutations_hidden_from_autograd(t);
+      });
   py_module.def(
-      "_functionalize_mark_mutation_hidden_from_autograd", [](const at::Tensor& t) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+      "_functionalize_mark_mutation_hidden_from_autograd",
+      [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
         at::functionalization::impl::mark_mutation_hidden_from_autograd(t);
-  });
+      });
   py_module.def(
-      "_functionalize_apply_view_metas", [](const at::Tensor& tensor, const at::Tensor& base) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(tensor));
-        auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+      "_functionalize_apply_view_metas",
+      [](const at::Tensor& tensor, const at::Tensor& base) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(tensor));
+        auto impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
         return impl->apply_view_metas(base);
+      });
+  py_module.def("_functionalize_is_symbolic", [](const at::Tensor& t) {
+    TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+    auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+    return impl->is_symbolic();
   });
-  py_module.def(
-      "_functionalize_is_symbolic", [](const at::Tensor& t) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
-        auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
-        return impl->is_symbolic();
+  py_module.def("_functionalize_sync", [](const at::Tensor& t) {
+    TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+    at::functionalization::impl::sync(t);
   });
-  py_module.def(
-      "_functionalize_sync", [](const at::Tensor& t) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
-        at::functionalization::impl::sync(t);
-  });
-  py_module.def(
-      "_functionalize_commit_update", [](const at::Tensor& t) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
-        at::functionalization::impl::commit_update(t);
+  py_module.def("_functionalize_commit_update", [](const at::Tensor& t) {
+    TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+    at::functionalization::impl::commit_update(t);
   });
   py_module.def(
       "_functionalize_replace", [](const at::Tensor& t, const at::Tensor& o) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
-        TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(o));
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        TORCH_INTERNAL_ASSERT(
+            !at::functionalization::impl::isFunctionalTensor(o));
         at::functionalization::impl::replace_(t, o);
+      });
+  py_module.def("_functionalize_is_multi_output_view", [](const at::Tensor& t) {
+    TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+    auto t_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+    return t_impl->is_multi_output_view();
   });
   py_module.def(
-      "_functionalize_is_multi_output_view", [](const at::Tensor& t) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
-        auto t_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
-        return t_impl->is_multi_output_view();
-  });
-  py_module.def(
-      "_functionalize_enable_reapply_views", [](bool reapply_views = false) {
-        auto old = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
-        at::functionalization::impl::setFunctionalizationReapplyViewsTLS(reapply_views);
+      "_functionalize_enable_reapply_views",
+      [](bool reapply_views = false) {
+        auto old =
+            at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
+        at::functionalization::impl::setFunctionalizationReapplyViewsTLS(
+            reapply_views);
         return old;
-  });
+      },
+      py::arg("reapply_views") = false);
   py_module.def(
       "_functionalize_has_metadata_mutation", [](const at::Tensor& t) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
-        auto t_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto t_impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
         return t_impl->has_metadata_mutation();
-  });
-  py_module.def(
-      "_functionalize_has_data_mutation", [](const at::Tensor& t) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
-        auto t_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
-        return t_impl->has_data_mutation();
+      });
+  py_module.def("_functionalize_has_data_mutation", [](const at::Tensor& t) {
+    TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+    auto t_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+    return t_impl->has_data_mutation();
   });
   py_module.def(
       "_functionalize_get_storage_size", [](const at::Tensor& t, bool before) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
-        auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto wrapper =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
         auto size = wrapper->get_storage_size(/*before=*/before);
         return size;
+      });
+  py_module.def("_functionalize_set_storage_changed", [](const at::Tensor& t) {
+    TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+    auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+    wrapper->set_storage_changed();
+  });
+  py_module.def("_functionalize_was_storage_changed", [](const at::Tensor& t) {
+    TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+    auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+    wrapper->was_storage_changed();
   });
   py_module.def(
-      "_functionalize_set_storage_changed", [](const at::Tensor& t) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
-        auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
-        wrapper->set_storage_changed();
-  });
-  py_module.def(
-      "_functionalize_was_storage_changed", [](const at::Tensor& t) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
-        auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
-        wrapper->was_storage_changed();
-  });
-  py_module.def(
-      "_functionalize_mark_mutation_hidden_from_autograd", [](const at::Tensor& t) {
-        TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+      "_functionalize_mark_mutation_hidden_from_autograd",
+      [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
         at::functionalization::impl::mark_mutation_hidden_from_autograd(t);
+      });
+  py_module.def("_is_functional_tensor", [](const at::Tensor& t) {
+    return at::functionalization::impl::isFunctionalTensor(t);
+  });
+  py_module.def("_to_functional_tensor", [](const at::Tensor& t) {
+    return at::functionalization::impl::to_functional_tensor(t);
+  });
+  py_module.def("_from_functional_tensor", [](const at::Tensor& t) {
+    return at::functionalization::impl::from_functional_tensor(t);
+  });
+  py_module.def("_freeze_functional_tensor", [](const at::Tensor& t) {
+    at::functionalization::impl::freeze_functional_tensor(t);
   });
   py_module.def(
-      "_is_functional_tensor", [](const at::Tensor& t) {
-        return at::functionalization::impl::isFunctionalTensor(t);
-  });
-  py_module.def(
-      "_to_functional_tensor", [](const at::Tensor& t) {
-        return at::functionalization::impl::to_functional_tensor(t);
-  });
-  py_module.def(
-      "_from_functional_tensor", [](const at::Tensor& t) {
-        return at::functionalization::impl::from_functional_tensor(t);
-  });
-  py_module.def(
-      "_freeze_functional_tensor", [](const at::Tensor& t) {
-        at::functionalization::impl::freeze_functional_tensor(t);
-  });
-  py_module.def(
-      "_enable_functionalization", [](const at::Tensor& t, bool reapply_views = false) {
-        if (c10::impl::tls_is_dispatch_key_included(at::DispatchKey::Functionalize)) {
+      "_enable_functionalization",
+      [](bool reapply_views = false) {
+        if (c10::impl::tls_is_dispatch_key_included(
+                at::DispatchKey::Functionalize)) {
           TORCH_INTERNAL_ASSERT(
               false,
               "multiple layers of mode-style functionalization nesting is not"
@@ -724,20 +739,22 @@ void initTorchFunctions(PyObject* module) {
         c10::impl::tls_set_dispatch_key_included(
             at::DispatchKey::Functionalize, true);
         if (reapply_views) {
-          at::functionalization::impl::setFunctionalizationReapplyViewsTLS(true);
+          at::functionalization::impl::setFunctionalizationReapplyViewsTLS(
+              true);
         }
+      },
+      py::arg("reapply_views") = false);
+  py_module.def("_disable_functionalization", []() {
+    c10::impl::tls_set_dispatch_key_included(
+        at::DispatchKey::Functionalize, false);
+    at::functionalization::impl::setFunctionalizationReapplyViewsTLS(false);
   });
   py_module.def(
-      "_disable_functionalization", []() {
-        c10::impl::tls_set_dispatch_key_included(
-            at::DispatchKey::Functionalize, false);
-        at::functionalization::impl::setFunctionalizationReapplyViewsTLS(false);
-  });
-  py_module.def(
-      "_mirror_autograd_meta_to", [](const at::Tensor& src_, const at::Tensor& dst_) {
-        // Here, we unsafely set the grad function on the wrapper to be the same as
-        // the inner. We expect this grad_fn to NEVER be used. It's needed so that
-        // .is_leaf metadata is accurate on the wrapper
+      "_mirror_autograd_meta_to",
+      [](const at::Tensor& src_, const at::Tensor& dst_) {
+        // Here, we unsafely set the grad function on the wrapper to be the same
+        // as the inner. We expect this grad_fn to NEVER be used. It's needed so
+        // that .is_leaf metadata is accurate on the wrapper
         auto inner_autograd_meta = impl::get_autograd_meta(src_);
         if (inner_autograd_meta) {
           dst_.set_requires_grad(src_.requires_grad());
@@ -749,7 +766,7 @@ void initTorchFunctions(PyObject* module) {
             torch::autograd::set_history(dst_, new_grad_fn);
           }
         }
-  });
+      });
 }
 
 } // namespace autograd

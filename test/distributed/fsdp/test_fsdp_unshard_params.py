@@ -676,7 +676,7 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
     @skip_if_lt_x_gpu(2)
     def test_unshard_params_from_forward_raises(self):
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = nn.Parameter(torch.zeros(5))
 

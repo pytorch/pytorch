@@ -18,7 +18,7 @@ mpl.use("Agg")
 
 
 class ThreeLayerNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = nn.Linear(1, 40)
         self.relu1 = nn.ReLU()
