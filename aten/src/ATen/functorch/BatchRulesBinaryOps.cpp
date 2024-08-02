@@ -258,7 +258,7 @@ static std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
 
   auto out = at::_cdist_backward(grad_, x1_, x2_, p, cdist);
 
-  std::optional<int64_t> out_bdim = nullopt;
+  std::optional<int64_t> out_bdim = std::nullopt;
   if (x1_bdim || x2_bdim) {
     out_bdim = 0;
   }
@@ -277,7 +277,7 @@ static void fill__Tensor_batch_rule(
     self.fill_(other);
     return;
   }
-  if (!self_bdim && other_bdim) {
+  if (!self_bdim) {
     vmapIncompatibleInplaceError("fill_");
   }
   auto self_and_other = _binary_pointwise_helper(
