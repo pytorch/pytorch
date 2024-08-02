@@ -27,7 +27,7 @@ inline Tensor pad(
     TORCH_CHECK(false, "Unrecognised padding mode");
   }();
 
-  c10::optional<double> fill_value;
+  std::optional<double> fill_value;
   if (value != 0.0) {
     fill_value = value;
   }

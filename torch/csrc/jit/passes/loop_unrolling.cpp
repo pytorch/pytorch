@@ -19,7 +19,7 @@ static constexpr int64_t kMaxBodySize = 32;
 static constexpr int64_t kMaxBodyRepeats = 64;
 
 bool isTrueConstant(Value* val) {
-  c10::optional<bool> maybe_value = constant_as<bool>(val);
+  std::optional<bool> maybe_value = constant_as<bool>(val);
   return maybe_value && *maybe_value;
 }
 
@@ -178,7 +178,7 @@ void unroll(Node* loop) {
   // Some optimization for constant-length loops. If we know they won't run too
   // many times, then we can unroll them entirely.
   Value* trip_count = loop->inputs().at(0);
-  c10::optional<int64_t> const_len = constant_as<int64_t>(trip_count);
+  std::optional<int64_t> const_len = constant_as<int64_t>(trip_count);
   if (const_len && *const_len < kMaxBodyRepeats) {
     Block* dest = loop->addBlock();
     repeatBody(body, *const_len, dest);

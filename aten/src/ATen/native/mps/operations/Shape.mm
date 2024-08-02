@@ -108,8 +108,8 @@ TORCH_IMPL_FUNC(topk_out_mps)
     // Input as placeholders
     MPSShape* input_shape = getMPSShape(self);
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
-    string key = string("topk:") + [ns_shape_key UTF8String] + ":" + getMPSTypeString(self) + ":k" + to_string(k) +
-        ":dim" + to_string(dim_) + ":largest" + to_string(largest);
+    string key = string("topk:") + [ns_shape_key UTF8String] + ":" + getMPSTypeString(self) + ":k" + std::to_string(k) +
+        ":dim" + std::to_string(dim_) + ":largest" + std::to_string(largest);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), input_shape);
 
@@ -320,8 +320,16 @@ TORCH_IMPL_FUNC(cat_out_mps)
   };
 
   @autoreleasepool {
-    string key = "cat_out_mps:" + to_string(dimension) + getTensorsStringKey(input_tensors, /*short_dtype*/ true) +
-        ":" + (memory_format == MemoryFormat::ChannelsLast ? "NHWC" : "NCHW");
+    string key = "cat_out_mps:" + std::to_string(dimension) + ":" +
+        (memory_format == MemoryFormat::ChannelsLast ? "NHWC" : "NCHW");
+    if (!all_same_dtype) {
+      key += getTensorsStringKey(input_tensors, true, all_same_sizes_and_stride);
+    } else {
+      key += ":" + getMPSTypeString(input_tensors[0].scalar_type(), true) + ":" + std::to_string(inputs.size());
+    }
+    for (auto idx : skipped_tensor_indices) {
+      key += "," + std::to_string(idx);
+    }
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto len_tensor_array = inputs.size() - skipped_tensor_indices.size();
@@ -334,8 +342,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
         if (tensor.scalar_type() == kBool) {
           scalar_type = MPSDataTypeInt8;
         }
-        newCachedGraph->inputTensors_[idx] =
-            mpsGraphRankedPlaceHolder(mpsGraph, scalar_type, getMPSShape(tensor, MemoryFormat::Contiguous));
+        newCachedGraph->inputTensors_[idx] = mpsGraphUnrankedPlaceHolder(mpsGraph, scalar_type);
         if (tensor.scalar_type() != out_dtype) {
           castInputTensors[idx] = [mpsGraph castTensor:newCachedGraph->inputTensors_[idx]
                                                 toType:getMPSDataType(out_dtype)
@@ -364,11 +371,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
         if (tensor.scalar_type() == kBool) {
           scalar_type = MPSDataTypeInt8;
         }
-        inputPlaceholders.emplace_back(cachedGraph->inputTensors_[t_idx],
-                                       tensor,
-                                       getMPSShape(tensor, MemoryFormat::Contiguous),
-                                       /*gatherTensorData*/ true,
-                                       scalar_type);
+        inputPlaceholders.emplace_back(cachedGraph->inputTensors_[t_idx], tensor, nullptr, true, scalar_type);
         t_idx++;
       }
       i++;

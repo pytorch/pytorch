@@ -114,25 +114,25 @@ class DataLoaderBase {
     Job(QuitWorker q, size_t sqn) : Sequenced(sqn), quit(q) {}
     Job(BatchRequest&& i, size_t sqn)
         : Sequenced(sqn), batch_request(std::move(i)) {}
-    optional<QuitWorker> quit;
-    optional<BatchRequest> batch_request;
+    std::optional<QuitWorker> quit;
+    std::optional<BatchRequest> batch_request;
   };
 
   /// The finished result of a job.
   struct Result : Sequenced {
     Result() = default;
-    Result(optional<Batch>&& b, size_t sqn)
+    Result(std::optional<Batch>&& b, size_t sqn)
         : Sequenced(sqn), batch(std::move(b)) {}
     Result(std::exception_ptr exception, size_t sqn)
         : Sequenced(sqn), exception(std::move(exception)) {}
-    optional<Batch> batch;
+    std::optional<Batch> batch;
     std::exception_ptr exception;
   };
 
   /// Subclass hook for getting the next batch request. The stateless case will
   /// ask the sampler for a new batch request (e.g. a vector of indices), while
   /// the stateful one will simply return the batch size.
-  virtual optional<BatchRequestType> get_batch_request() = 0;
+  virtual std::optional<BatchRequestType> get_batch_request() = 0;
 
   /// Resets the internal state of the DataLoader, optionally pre-fetching
   /// new jobs.
@@ -164,9 +164,9 @@ class DataLoaderBase {
   /// Returns the next batch of data, or an empty `optional` if the DataLoader
   /// is exhausted. This operation will block until a batch is available if one
   /// is still expected.
-  optional<BatchType> next() {
+  std::optional<BatchType> next() {
     if (options_.workers > 0) {
-      while (optional<Result> result = this->pop_result()) {
+      while (std::optional<Result> result = this->pop_result()) {
         if (result->exception) {
           throw WorkerException(result->exception);
         } else if (result->batch) {
@@ -204,7 +204,7 @@ class DataLoaderBase {
   }
 
   /// Convenience method that gets the next result from the sequencer.
-  optional<Result> pop_result() {
+  std::optional<Result> pop_result() {
     return sequencer_->next(
         [this] { return this->shuttle_.pop_result(this->options_.timeout); });
   }

@@ -15,11 +15,9 @@
 /// and inspired by Half implementation from pytorch/c10/util/Half.h
 
 #include <c10/macros/Macros.h>
-#include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/floating_point_utils.h>
-#include <type_traits>
 
-#if defined(__cplusplus) && (__cplusplus >= 201103L)
+#if defined(__cplusplus)
 #include <cmath>
 #include <cstdint>
 #elif !defined(__OPENCL_VERSION__)
@@ -32,16 +30,7 @@
 #endif
 
 #include <climits>
-#include <cstdint>
-#include <cstring>
-#include <iosfwd>
-#include <limits>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <utility>
-
-#include <typeinfo> // operator typeid
+#include <iostream>
 
 namespace c10 {
 
@@ -233,13 +222,18 @@ struct alignas(1) Float8_e4m3fn {
   Float8_e4m3fn() = default;
 
   constexpr C10_HOST_DEVICE Float8_e4m3fn(uint8_t bits, from_bits_t)
-      : x(bits){};
+      : x(bits) {}
   inline C10_HOST_DEVICE Float8_e4m3fn(float value);
   inline C10_HOST_DEVICE operator float() const;
   inline C10_HOST_DEVICE bool isnan() const;
 };
 
-C10_API std::ostream& operator<<(std::ostream& out, const Float8_e4m3fn& value);
+C10_API inline std::ostream& operator<<(
+    std::ostream& out,
+    const Float8_e4m3fn& value) {
+  out << (float)value;
+  return out;
+}
 
 } // namespace c10
 

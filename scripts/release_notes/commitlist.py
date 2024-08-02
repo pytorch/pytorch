@@ -13,7 +13,6 @@ from common import (
     features_to_dict,
     frontend_categories,
     get_commit_data_cache,
-    get_features,
     run,
     topics,
 )

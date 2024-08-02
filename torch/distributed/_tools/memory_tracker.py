@@ -1,22 +1,17 @@
-from collections import defaultdict
-
-from itertools import chain
-
+# mypy: allow-untyped-defs
+import operator
 import pickle
-
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    no_type_check,
-    Sequence,
-)
+from collections import defaultdict
+from itertools import chain
+from typing import Any, Callable, Dict, List, no_type_check, Sequence, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
-from torch.utils.hooks import RemovableHandle
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 
 BYTES_PER_MB = 1024 * 1024.0
@@ -148,7 +143,7 @@ class MemoryTracker:
         print("------------------------------------------------")
         print(f"The number of cuda retries are: {self._num_cuda_retries}")
         print(f"Top {top} ops that generates memory are:")
-        for k, v in sorted(op_diff.items(), key=lambda item: item[1], reverse=True)[
+        for k, v in sorted(op_diff.items(), key=operator.itemgetter(1), reverse=True)[
             :top
         ]:
             print(f"{k}: {v}MB")
@@ -229,6 +224,7 @@ class MemoryTracker:
 
     def _create_pre_forward_hook(self, name: str) -> Callable:
         """Prefix operator name with current module and 'forward', and insert 'fw_start' marker at forward pass start."""
+
         def _pre_forward_hook(module: nn.Module, inputs: Any) -> None:
             self._cur_module_name = f"{name}.forward"
             if (

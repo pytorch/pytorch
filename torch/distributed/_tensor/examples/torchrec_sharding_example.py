@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 The following example demonstrates how to represent torchrec's embedding
 sharding with the DTensor API.
@@ -5,10 +6,9 @@ sharding with the DTensor API.
 import argparse
 import os
 from functools import cached_property
-from typing import List
+from typing import List, TYPE_CHECKING
 
 import torch
-
 from torch.distributed._tensor import (
     DeviceMesh,
     DTensor,
@@ -17,12 +17,15 @@ from torch.distributed._tensor import (
     Shard,
 )
 from torch.distributed._tensor.debug.visualize_sharding import visualize_sharding
-from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.checkpoint.metadata import (
     ChunkStorageMetadata,
     TensorProperties,
     TensorStorageMetadata,
 )
+
+
+if TYPE_CHECKING:
+    from torch.distributed._tensor.placement_types import Placement
 
 
 def get_device_type():

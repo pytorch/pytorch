@@ -1,14 +1,17 @@
+# mypy: allow-untyped-defs
 import inspect
 from collections import defaultdict
 from functools import wraps
 from itertools import chain
-from typing import Callable, Dict, List, Sequence, Union
+from typing import Callable, Dict, List, Sequence, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch.library
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._prims_common import CustomOutParamAnnotation
 from torch.utils import _pytree as pytree
+
 
 __all__ = [
     "decomposition_table",
@@ -19,6 +22,8 @@ __all__ = [
     "core_aten_decompositions",
 ]
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 # TODO: relax key type here; torch registrations should be possible to; but
 # right now this type is accurate
@@ -144,7 +149,7 @@ def _convert_out_params(f):
 
 def register_decomposition(
     aten_op, registry=None, *, type="post_autograd", unsafe=False
-):
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     A decorator to register a function as a decomposition to the Python
     decomposition table.  Use it like this::
@@ -170,7 +175,7 @@ def register_decomposition(
 
     assert type in {"post_autograd", "pre_autograd", "meta"}
 
-    def decomposition_decorator(fn: Callable) -> Callable:
+    def decomposition_decorator(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         orig_fn = fn
         if not unsafe:
             fn = _convert_out_params(fn)
@@ -260,6 +265,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.addcmul_,
             aten.addr,
             aten.affine_grid_generator,
+            aten.alias_copy,
             aten.all,
             aten.aminmax,
             aten.arange.default,
@@ -272,6 +278,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.block_diag,
             aten.celu,
             aten.celu_,
+            aten.channel_shuffle,
             aten.clamp_max,
             aten.clamp_min,
             aten.col2im,
@@ -279,6 +286,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.linalg_cross,
             aten.cudnn_batch_norm,
             aten.cudnn_batch_norm_backward,
+            aten.miopen_batch_norm_backward,
             aten.deg2rad,
             aten.deg2rad_,
             aten.detach,
@@ -294,6 +302,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.empty_like,
             aten._euclidean_dist.default,
             aten.expand_as,
+            aten.expand_copy,
             aten.eye,
             aten.fill,
             aten.fill_,
@@ -382,8 +391,11 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.rad2deg,
             aten.rad2deg_,
             aten.reflection_pad1d,
+            aten.reflection_pad1d_backward,
             aten.reflection_pad2d,
+            aten.reflection_pad2d_backward,
             aten.reflection_pad3d,
+            aten.reflection_pad3d_backward,
             aten.replication_pad1d,
             aten.replication_pad2d,
             aten.replication_pad3d,
@@ -429,6 +441,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.sum.default,
             aten.sum.out,
             aten.t,
+            aten.t_copy,
             aten.take,
             aten.tanh_backward,
             aten.threshold,
@@ -444,8 +457,11 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.unfold_backward,
             aten.unfold_copy,
             aten._unsafe_index,
+            aten._unsafe_masked_index,
+            aten._unsafe_masked_index_put_accumulate,
             aten.unsafe_split.Tensor,
             aten.unsafe_split_with_sizes,
+            aten.unsqueeze_copy,
             aten._unsafe_view,
             aten.upsample_linear1d,
             aten.upsample_bilinear2d,

@@ -53,11 +53,6 @@ if(NOT BUILD_LITE_INTERPRETER)
   file(GLOB_RECURSE ATen_CORE_TEST_SRCS "core/*_test.cpp")
 endif()
 EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
-# Exclude TensorImpl_test.cpp if compiling without Caffe2
-if(NOT BUILD_CAFFE2 AND NOT BUILD_LITE_INTERPRETER)
-  file(GLOB_RECURSE ATen_CORE_EXCLUDED_TEST_SRCS "core/TensorImpl_test.cpp")
-  EXCLUDE(ATen_CORE_TEST_SRCS "${ATen_CORE_TEST_SRCS}" ${ATen_CORE_EXCLUDED_TEST_SRCS})
-endif()
 
 file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec256/*.h" "cpu/vec/vec256/vsx/*.h" "cpu/vec/vec256/zarch/*.h" "cpu/vec/*.h" "quantized/*.h" "functorch/*.h")
 file(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp" "functorch/*.cpp")
@@ -349,16 +344,6 @@ endif()
 
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-if(USE_TBB)
-  if(USE_SYSTEM_TBB)
-    message("ATen is compiled with system-provided Intel TBB.")
-  else()
-    message("ATen is compiled with Intel TBB (${TBB_ROOT_DIR}).")
-  endif()
-  list(APPEND ATen_CPU_INCLUDE ${TBB_INCLUDE_DIR})
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS TBB::tbb)
-endif()
-
 if(BLAS_FOUND)
   if($ENV{TH_BINARY_BUILD})
     message(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")
@@ -396,6 +381,7 @@ if(UNIX AND NOT APPLE)
 endif(UNIX AND NOT APPLE)
 
 if(UNIX)
+  include(CheckFunctionExists)
   set(CMAKE_EXTRA_INCLUDE_FILES "sys/mman.h")
   CHECK_FUNCTION_EXISTS(mmap HAVE_MMAP)
   if(HAVE_MMAP)
@@ -482,6 +468,7 @@ endif()
 
 if(USE_CUDA AND NOT USE_ROCM)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/include)
+  list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/tools/util/include)
   if($ENV{ATEN_STATIC_CUDA})
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}

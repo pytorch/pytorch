@@ -3,6 +3,7 @@ import json
 import math
 import sys
 
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--test-name", dest="test_name", action="store", required=True, help="test name"
@@ -59,16 +60,16 @@ print("sample mean: ", sample_mean)
 print("sample sigma: ", sample_sigma)
 
 if math.isnan(sample_mean):
-    raise Exception("""Error: sample mean is NaN""")
+    raise Exception("""Error: sample mean is NaN""")  # noqa: TRY002
 elif math.isnan(sample_sigma):
-    raise Exception("""Error: sample sigma is NaN""")
+    raise Exception("""Error: sample sigma is NaN""")  # noqa: TRY002
 
 z_value = (sample_mean - mean) / sigma
 
 print("z-value: ", z_value)
 
 if z_value >= 3:
-    raise Exception(
+    raise Exception(  # noqa: TRY002
         f"""\n
 z-value >= 3, there is high chance of perf regression.\n
 To reproduce this regression, run

@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import weakref
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
 import torch
 from torch.utils._pytree import tree_map_only
@@ -15,13 +15,17 @@ from ..source import (
     GradSource,
 )
 from ..utils import GLOBAL_KEY_PREFIX
-
-from .base import VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import ListVariable
 from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
+    from .base import VariableTracker
 
 
 class ArgMappingException(Exception):
@@ -47,15 +51,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
         static_tensor_names=None,
         tensor_to_source=None,
         **kwargs,
-    ):
-        from ..decorators import mark_static_address
-
+    ) -> None:
         super().__init__(value, **kwargs)
-
-        for group in self.value.param_groups:
-            for p in group["params"]:
-                mark_static_address(p)
-
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
         self.static_tensor_names = static_tensor_names or set()
@@ -93,7 +90,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         # Note: this allows us to intercept the call in call_method
         # in the typical case, we return a UserMethodVariable
         # which will directly inline
@@ -101,6 +98,12 @@ class OptimizerVariable(UserDefinedObjectVariable):
             return GetAttrVariable(self, name, source=AttrSource(self.source, name))
 
         if name == "param_groups":
+            from ..decorators import mark_static_address
+
+            for group in self.value.param_groups:
+                for p in group["params"]:
+                    mark_static_address(p)
+
             self._set_capturable(tx)
 
         return super().var_getattr(tx, name)
@@ -113,9 +116,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
         for g in self.value.param_groups:
             for p in g["params"]:
                 side_effects = tx.output.side_effects
-                if side_effects.has_pending_mutation(
-                    side_effects.id_to_variable.get(id(p), None)
-                ):
+                variable = side_effects.id_to_variable.get(id(p), None)
+                if variable and side_effects.has_pending_mutation(variable):
                     from ..exc import Unsupported
 
                     raise Unsupported("Pending mutation on parameter")
@@ -124,9 +126,23 @@ class OptimizerVariable(UserDefinedObjectVariable):
         from . import LazyVariableTracker
         from .builder import VariableBuilder
 
-        # Set capturable to True
-        for group in self.value.param_groups:
-            if "capturable" in group:
+        # We only set capturable if params are on cuda
+        # and the state is not initialized
+        def safe_to_set_capturable(group):
+            all_uninitialized = True
+            all_cuda = True
+
+            for p in group.get("params", []):
+                all_cuda &= p.is_cuda
+                all_uninitialized &= p not in self.value.state
+
+            return "capturable" in group and all_uninitialized and all_cuda
+
+        # track indices to not set so we don't need to
+        # in the variable tracker realize the whole state
+        # we handle guarding the state specially
+        for ind, group in enumerate(self.value.param_groups):
+            if safe_to_set_capturable(group):
                 group["capturable"] = True
 
         param_groups_vt = LazyVariableTracker.realize_all(
@@ -134,12 +150,11 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 self.value.param_groups
             )
         )
-        for param_group_vt in param_groups_vt.items:
+        for ind, param_group_vt in enumerate(param_groups_vt.items):
             key = ConstDictVariable._HashableTracker(
                 ConstantVariable.create("capturable")
             )
-            if key in param_group_vt.items:
-                param_group_vt.items[key] = ConstantVariable.create(True)
+            param_group_vt.items[key] = ConstantVariable.create(True)
 
     def get_python_args(self, *args, **kwargs):
         """Get python values equivalent to the variable tracker args"""
@@ -271,7 +286,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 ):
                     self.tensor_to_source[v] = GetItemSource(p_state_source, k)
 
-    def wrap_tensor(self, tx, tensor_value):
+    def wrap_tensor(self, tx: "InstructionTranslator", tensor_value):
         """Wrap state tensor in a TensorVariable"""
         from ..decorators import mark_static_address
         from .builder import VariableBuilder
@@ -299,7 +314,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         result = builder(tensor_value)
         return result
 
-    def update_list_args(self, tx, args, kwargs, py_args, py_kwargs):
+    def update_list_args(
+        self, tx: "InstructionTranslator", args, kwargs, py_args, py_kwargs
+    ):
         """Update the args and kwargs to the traced optimizer call"""
         for arg, py_arg in zip(args, py_args):
             if isinstance(arg, ListVariable):

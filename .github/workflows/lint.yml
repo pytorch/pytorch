@@ -19,8 +19,8 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
       timeout: 120
-      runner: linux.2xlarge
-      docker-image: pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter
+      runner: amz2023.linux.2xlarge
+      docker-image: pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
       fetch-depth: 0
@@ -35,8 +35,8 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
       timeout: 120
-      runner: linux.2xlarge
-      docker-image: pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter
+      runner: amz2023.linux.2xlarge
+      docker-image: pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
       fetch-depth: 0
@@ -49,7 +49,7 @@ jobs:
   quick-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
-      runner: linux.2xlarge
+      runner: amz2023.linux.2xlarge
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -83,7 +83,7 @@ jobs:
 
   pr-sanity-checks:
     name: pr-sanity-checks
-    runs-on: [self-hosted, linux.large]
+    runs-on: [self-hosted, amz2023.linux.large]
     # Only run this on pull requests. This check is simple enough to be done without a Docker image
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks')
     steps:
@@ -103,7 +103,7 @@ jobs:
   workflow-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
-      runner: linux.2xlarge
+      runner: amz2023.linux.2xlarge
       docker-image: pytorch-linux-focal-linter
       fetch-depth: -1
       submodules: true
@@ -139,7 +139,7 @@ jobs:
   toc:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
-      runner: linux.2xlarge
+      runner: amz2023.linux.2xlarge
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -177,7 +177,7 @@ jobs:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
-      runner: linux.2xlarge
+      runner: amz2023.linux.2xlarge
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -230,11 +230,11 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
-      - name: Setup Python 3.5
+      - name: Setup Python 3.6
         if: matrix.test_type == 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: '3.5'
+          python-version: '3.6'
           architecture: x64
           check-latest: false
           cache: pip

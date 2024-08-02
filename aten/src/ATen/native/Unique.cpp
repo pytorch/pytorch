@@ -182,8 +182,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
   // is to return a output size of ([1]), `flatten` here will do the job
   auto input_flattened = input.flatten();
 
-  Tensor input_sorted, indices;
-  std::tie(input_sorted, indices) = input_flattened.sort();
+  auto [input_sorted, indices] = input_flattened.sort();
 
   scalar_t* input_sorted_data = input_sorted.data_ptr<scalar_t>();
   int64_t* indices_data = indices.data_ptr<int64_t>();
@@ -484,7 +483,7 @@ unique_dim_consecutive_cpu(const Tensor& self, const int64_t dim, const bool ret
 }
 
 std::tuple<Tensor, Tensor, Tensor>
-unique_consecutive_cpu(const Tensor& self, const bool return_inverse, const bool return_counts, c10::optional<int64_t> dim) {
+unique_consecutive_cpu(const Tensor& self, const bool return_inverse, const bool return_counts, std::optional<int64_t> dim) {
   if (!dim.has_value() || (dim.value() == 0 && self.dim() == 1)) {
     return AT_DISPATCH_V2(self.scalar_type(), "unique", AT_WRAP([&] {
       return unique_consecutive_cpu_template<scalar_t>(self, return_inverse, return_counts);

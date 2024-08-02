@@ -42,7 +42,7 @@ static std::string getStridedKey(const ScalarType& self_dtype,
   }
 
   return (is_scatter ? "scatter:" : "gather:") + dtype_key + "[" + getArrayRefString(base_shape) + "]:[" +
-      getArrayRefString(new_shape) + "]:[" + getArrayRefString(stride) + "]:[" + to_string(storage_offset) + "]";
+      getArrayRefString(new_shape) + "]:[" + getArrayRefString(stride) + "]:[" + std::to_string(storage_offset) + "]";
 }
 
 // initializes the MTLBuffers for tensor data and runs the MPSGraph for the view op
@@ -770,63 +770,22 @@ static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const st
   return "(x)";
 }
 
-static id<MTLLibrary> compileGatherScatterOpsLibrary(id<MTLDevice> device,
-                                                     const std::string& dtypeSrc,
-                                                     const std::string& dtypeDst,
-                                                     bool needsScatter,
-                                                     bool needsConj) {
-  auto key = std::to_string(needsScatter) + std::to_string(needsConj) + dtypeSrc + dtypeDst;
-  static std::unordered_map<std::string, id<MTLLibrary>> _libCache;
-  auto it = _libCache.find(key);
-  if (it != _libCache.end()) {
-    return it->second;
-  }
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
-                                                                                      : MTLLanguageVersion2_3];
-  const auto shaderStr = fmt::format(needsScatter ? SCATTER_OPS_TEMPLATE : GATHER_OPS_TEMPLATE,
-                                     dtypeSrc,
-                                     dtypeDst,
-                                     genScatterGatherCvtFunc(dtypeSrc, dtypeDst, needsConj));
-  auto gatherScatterLib = [device newLibraryWithSource:[NSString stringWithUTF8String:shaderStr.c_str()]
-                                               options:options
-                                                 error:&error];
-  TORCH_CHECK(gatherScatterLib != nil && error == nil,
-              "Failed to compile gather-scatter library, error: ",
-              [[error description] UTF8String]);
-  _libCache[key] = gatherScatterLib;
-  return gatherScatterLib;
-}
+static MetalShaderLibrary scatterLib(SCATTER_OPS_TEMPLATE, 3);
+static MetalShaderLibrary gatherLib(GATHER_OPS_TEMPLATE, 3);
 
-static id<MTLComputePipelineState> getPipelineState(id<MTLDevice> device,
-                                                    const std::string& kernel,
+static id<MTLComputePipelineState> getPipelineState(const std::string& kernel,
                                                     const std::string& dtypeSrc,
                                                     const std::string& dtypeDst,
                                                     bool needsScatter,
                                                     bool needsConj) {
-  auto key = kernel + dtypeSrc + dtypeDst + std::to_string(needsConj);
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> _mtlPipelineCache;
-  auto it = _mtlPipelineCache.find(key);
-  if (it != _mtlPipelineCache.end()) {
-    return it->second;
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> library = compileGatherScatterOpsLibrary(device, dtypeSrc, dtypeDst, needsScatter, needsConj);
-  id<MTLFunction> func = [library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(func, "Failed to load the Metal Shader function: ", kernel);
-  id<MTLComputePipelineState> pso = [device newComputePipelineStateWithFunction:func error:&error];
-  TORCH_CHECK(
-      pso != nil && error == nil, "Failed to construct pipeline state: ", [[error localizedDescription] UTF8String]);
-  _mtlPipelineCache[key] = pso;
-  return pso;
+  auto cvtFunc = genScatterGatherCvtFunc(dtypeSrc, dtypeDst, needsConj);
+  return (needsScatter ? scatterLib : gatherLib).getPipelineStateForFunc(kernel, {dtypeSrc, dtypeDst, cvtFunc});
 }
 
 Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
   Tensor output = dst;
   if (!dst.has_storage()) {
-    output = at::empty(src.sizes(), src.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+    output = at::empty(src.sizes(), src.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   }
 
   if (src.numel() == 0 || output.numel() == 0) {
@@ -845,8 +804,7 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
     std::string functionName = getGatherScatterFunctionName(output.scalar_type(), output.dim(), /*needsScatter=*/false);
-    id<MTLComputePipelineState> gatherPSO = getPipelineState(MPSDevice::getInstance()->device(),
-                                                             functionName,
+    id<MTLComputePipelineState> gatherPSO = getPipelineState(functionName,
                                                              getGatherScatterScalarType(src),
                                                              getGatherScatterScalarType(output),
                                                              /*needsScatter=*/false,
@@ -871,8 +829,8 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
     [computeEncoder setComputePipelineState:gatherPSO];
     mtl_setBuffer(computeEncoder, src, 0);
     mtl_setBuffer(computeEncoder, dst.has_storage() ? dst : output, 1);
-    [computeEncoder setBytes:&src_sizes[0] length:sizeof(uint32_t) * kernel_size atIndex:2];
-    [computeEncoder setBytes:&src_strides[0] length:sizeof(uint32_t) * kernel_size atIndex:3];
+    mtl_setBytes(computeEncoder, src_sizes, 2);
+    mtl_setBytes(computeEncoder, src_strides, 3);
     [computeEncoder setBytes:&numThreads length:sizeof(uint32_t) atIndex:4];
     mtl_dispatch1DJob(computeEncoder, gatherPSO, numThreads);
 
@@ -903,8 +861,7 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       std::string functionName =
           getGatherScatterFunctionName(output.scalar_type(), output.dim(), /*needsScatter=*/true);
-      id<MTLComputePipelineState> scatterPSO = getPipelineState(MPSDevice::getInstance()->device(),
-                                                                functionName,
+      id<MTLComputePipelineState> scatterPSO = getPipelineState(functionName,
                                                                 getGatherScatterScalarType(src),
                                                                 getGatherScatterScalarType(output),
                                                                 /*needsScatter=*/true,
@@ -928,8 +885,8 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
       [computeEncoder setComputePipelineState:scatterPSO];
       mtl_setBuffer(computeEncoder, src, 0);
       mtl_setBuffer(computeEncoder, output, 1);
-      [computeEncoder setBytes:&output_sizes[0] length:sizeof(uint32_t) * kernel_size atIndex:2];
-      [computeEncoder setBytes:&output_strides[0] length:sizeof(uint32_t) * kernel_size atIndex:3];
+      mtl_setBytes(computeEncoder, output_sizes, 2);
+      mtl_setBytes(computeEncoder, output_strides, 3);
       [computeEncoder setBytes:&numThreads length:sizeof(uint32_t) atIndex:4];
       mtl_dispatch1DJob(computeEncoder, scatterPSO, numThreads);
 
@@ -946,7 +903,7 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
 Tensor as_strided_tensorimpl_mps(const Tensor& self,
                                  IntArrayRef size,
                                  IntArrayRef stride,
-                                 c10::optional<int64_t> storage_offset_) {
+                                 std::optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto result =
       detail::make_tensor<TensorImpl>(c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());

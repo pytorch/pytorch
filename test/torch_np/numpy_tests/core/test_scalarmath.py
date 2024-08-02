@@ -6,19 +6,11 @@ import itertools
 import operator
 import sys
 import warnings
-
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import numpy
-
-# from numpy._utils import _pep440
 import pytest
 from pytest import raises as assert_raises
-
-# from hypothesis import given, settings
-# from hypothesis.strategies import sampled_from
-# from hypothesis.extra import numpy as hynp
-
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -31,6 +23,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
+
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
@@ -47,8 +40,6 @@ else:
         assert_,
         assert_almost_equal,
         assert_equal,
-        #    assert_array_equal, suppress_warnings, _gen_alignment_data,
-        #    assert_warns,
     )
 
 
@@ -363,9 +354,9 @@ class TestModulus(TestCase):
         b = np.array(1.0, dtype=dt)
         a = np.nextafter(np.array(0.0, dtype=dt), -b)
         rem = operator.mod(a, b)
-        assert_(rem <= b, "dt: %s" % dt)
+        assert_(rem <= b, f"dt: {dt}")
         rem = operator.mod(-a, -b)
-        assert_(rem >= -b, "dt: %s" % dt)
+        assert_(rem >= -b, f"dt: {dt}")
 
         # Check nans, inf
         #     with suppress_warnings() as sup:
@@ -380,14 +371,14 @@ class TestModulus(TestCase):
             finf = np.array(np.inf, dtype=dt)
             fnan = np.array(np.nan, dtype=dt)
             rem = operator.mod(fone, fzer)
-            assert_(np.isnan(rem), "dt: %s" % dt)
+            assert_(np.isnan(rem), f"dt: {dt}")
             # MSVC 2008 returns NaN here, so disable the check.
             # rem = operator.mod(fone, finf)
             # assert_(rem == fone, 'dt: %s' % dt)
             rem = operator.mod(fone, fnan)
-            assert_(np.isnan(rem), "dt: %s" % dt)
+            assert_(np.isnan(rem), f"dt: {dt}")
             rem = operator.mod(finf, fone)
-            assert_(np.isnan(rem), "dt: %s" % dt)
+            assert_(np.isnan(rem), f"dt: {dt}")
             for op in [floordiv_and_mod, divmod]:
                 div, mod = op(fone, fzer)
                 assert_(np.isinf(div)) and assert_(np.isnan(mod))
@@ -439,7 +430,7 @@ class TestComplexDivision(TestCase):
         for t in [np.complex64, np.complex128]:
             # tupled (numerator, denominator, expected)
             # for testing as expected == numerator/denominator
-            data = list()
+            data = []
 
             # trigger branch: real(fabs(denom)) > imag(fabs(denom))
             # followed by else condition as neither are == 0
@@ -739,6 +730,9 @@ class TestBitShifts(TestCase):
         # gh-2449
         dt = np.dtype(type_code)
         nbits = dt.itemsize * 8
+        if dt in (np.dtype(np.uint64), np.dtype(np.uint32), np.dtype(np.uint16)):
+            raise SkipTest("NYI: bitshift uint64")
+
         for val in [5, -5]:
             for shift in [nbits, nbits + 4]:
                 val_scl = np.array(val).astype(dt)[()]

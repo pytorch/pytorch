@@ -16,9 +16,9 @@ namespace sparse {
 
 struct TORCH_API PackedLinearWeightQnnp
     : public LinearPackedParamsBase {
-  PackedLinearWeightQnnp(const at::Tensor& weight, const c10::optional<at::Tensor>& bias, const int64_t out_features_block_size /* block sparsity size across output_features */, const int64_t in_features_block_size /* block sparsity size across input_features */);
+  PackedLinearWeightQnnp(const at::Tensor& weight, const std::optional<at::Tensor>& bias, const int64_t out_features_block_size /* block sparsity size across output_features */, const int64_t in_features_block_size /* block sparsity size across input_features */);
   explicit PackedLinearWeightQnnp(const BCSRSerializationType& serialized);
-  c10::optional<at::Tensor> orig_bias_;
+  std::optional<at::Tensor> orig_bias_;
   // Separate copy of bias exist so that we can fill in zeros when
   // optional bias does not exist. This is to compy with qnnpack operator that
   // expects bias to be present.
@@ -67,13 +67,13 @@ struct TORCH_API PackedLinearWeightQnnp
   static c10::intrusive_ptr<LinearPackedParamsBase> deserialize(
       const BCSRSerializationType& serialized);
 
-  c10::optional<at::Tensor> bias() override {
+  std::optional<at::Tensor> bias() override {
     return orig_bias_;
   }
 
   static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
       const at::Tensor& weight,
-      const c10::optional<at::Tensor>& bias,
+      const std::optional<at::Tensor>& bias,
       const int64_t out_features_block_size,
       const int64_t in_features_block_size);
 

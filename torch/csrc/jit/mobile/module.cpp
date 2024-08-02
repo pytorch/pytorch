@@ -46,7 +46,7 @@ Method Module::get_method(const std::string& name) const {
 bool Module::compareMethodSchemas(
     const std::string& name_1,
     const std::string& name_2) {
-  c10::optional<c10::FunctionSchema> schema_1, schema_2;
+  std::optional<c10::FunctionSchema> schema_1, schema_2;
   for (const auto& fn : cu_->methods()) {
     if (fn->name() == name_1) {
       schema_1 = fn->getSchema();
@@ -87,13 +87,13 @@ void Module::unsafeCopyMethod(
   cu_->register_function(std::move(new_fn));
 }
 
-c10::optional<Method> Module::find_method(const std::string& basename) const {
+std::optional<Method> Module::find_method(const std::string& basename) const {
   for (const auto& fn : cu_->methods()) {
     if (fn->name() == basename) {
-      return c10::make_optional<Method>(Method(this, fn.get()));
+      return std::make_optional<Method>(Method(this, fn.get()));
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 namespace {
@@ -316,7 +316,7 @@ c10::IValue Method::operator()(std::vector<c10::IValue> stack) const {
   return stack.front();
 }
 
-static c10::optional<std::string> print_type(const c10::Type& t) {
+static std::optional<std::string> print_type(const c10::Type& t) {
   auto namedType = t.cast<c10::NamedType>();
   if (namedType && namedType->name()) {
     return namedType->name().value().qualifiedName();
@@ -324,7 +324,7 @@ static c10::optional<std::string> print_type(const c10::Type& t) {
   if (auto dyn = t.castRaw<c10::DynamicType>()) {
     return dyn->fallback()->annotation_str();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 TORCH_API ModuleInfo get_module_info(const mobile::Module& module) {

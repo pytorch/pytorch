@@ -33,8 +33,8 @@ struct TorchScriptIrBuilder : IrBuilder {
   NodePtr MakeCast(
       const Value& input0,
       const at::ScalarType& dtype,
-      const c10::optional<at::ScalarType>& stype =
-          c10::nullopt) const override {
+      const std::optional<at::ScalarType>& stype =
+          std::nullopt) const override {
     return ReuseOrMakeNode<Cast>(input0, dtype, stype);
   }
   NodePtr MakeTensorList(const OpList& inputs) const override {

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""
 This package introduces support for the XPU backend, specifically tailored for
 Intel GPU optimization.
@@ -12,10 +13,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch._C
-from .. import device as _device
-from .._utils import _dummy_type, _LazySeedTracker
+from torch import device as _device
+from torch._utils import _dummy_type, _LazySeedTracker
+
 from ._utils import _get_device_index
 from .streams import Event, Stream
+
 
 _initialized = False
 _tls = threading.local()
@@ -132,7 +135,7 @@ def _lazy_init():
                         f"XPU call failed lazily at initialization with error: {str(e)}\n\n"
                         f"XPU call was originally invoked at:\n\n{''.join(orig_traceback)}"
                     )
-                    raise Exception(msg) from e
+                    raise Exception(msg) from e  # noqa: TRY002
         finally:
             delattr(_tls, "is_initializing")
         _initialized = True

@@ -44,18 +44,20 @@ class TestPassInfra(TestCase):
     @unittest.skipIf(IS_WINDOWS, "Windows not supported")
     def test_cond(self) -> None:
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, pred, x, y):
                 def true_fn(x, y):
                     b = x.item()
-                    torch._constrain_as_value(b, min=2, max=5)
+                    torch._check(b >= 2)
+                    torch._check(b <= 5)
                     return x - y
 
                 def false_fn(x, y):
                     c = y.item()
-                    torch._constrain_as_value(c, min=2, max=5)
+                    torch._check(c >= 2)
+                    torch._check(c <= 5)
                     return x + y
 
                 ret = control_flow.cond(pred, true_fn, false_fn, [x, y])
@@ -72,15 +74,15 @@ class TestPassInfra(TestCase):
         # Tests that graph nodes stay the same for nodes that are not touched
         # during transformation
         class CustomModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 # Define a parameter
                 self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
 
                 # Define two buffers
-                self.register_buffer("my_buffer1", torch.tensor(3.0))
-                self.register_buffer("my_buffer2", torch.tensor(4.0))
+                self.my_buffer1 = torch.nn.Buffer(torch.tensor(3.0))
+                self.my_buffer2 = torch.nn.Buffer(torch.tensor(4.0))
 
             def forward(self, x1, x2):
                 # Use the parameter, buffers, and both inputs in the forward method
@@ -108,13 +110,13 @@ class TestPassInfra(TestCase):
         # Checks that pass infra correctly updates graph signature
         # after transformations.
         class CustomModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
 
-                self.register_buffer("my_buffer1", torch.tensor(3.0))
-                self.register_buffer("my_buffer2", torch.tensor(4.0))
+                self.my_buffer1 = torch.nn.Buffer(torch.tensor(3.0))
+                self.my_buffer2 = torch.nn.Buffer(torch.tensor(4.0))
 
             def forward(self, x1, x2):
                 # Use the parameter, buffers, and both inputs in the forward method
@@ -150,13 +152,13 @@ class TestPassInfra(TestCase):
 
     def test_replace_hook_basic(self) -> None:
         class CustomModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
 
-                self.register_buffer("my_buffer1", torch.tensor(3.0))
-                self.register_buffer("my_buffer2", torch.tensor(4.0))
+                self.my_buffer1 = torch.nn.Buffer(torch.tensor(3.0))
+                self.my_buffer2 = torch.nn.Buffer(torch.tensor(4.0))
 
             def forward(self, x1, x2):
                 # Use the parameter, buffers, and both inputs in the forward method

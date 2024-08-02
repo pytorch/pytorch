@@ -42,7 +42,7 @@ TensorBase TensorBase::to(
     at::TensorOptions options,
     bool non_blocking,
     bool copy,
-    c10::optional<at::MemoryFormat> memory_format) const {
+    std::optional<at::MemoryFormat> memory_format) const {
   Tensor self(*this);
   return at::_ops::to_dtype_layout::call(
       self, optTypeMetaToScalarType(options.dtype_opt()),
@@ -134,8 +134,8 @@ bool TensorBase::retains_grad() const {
 }
 
 void Tensor::_backward(TensorList inputs,
-        const c10::optional<Tensor>& gradient,
-        c10::optional<bool> keep_graph,
+        const std::optional<Tensor>& gradient,
+        std::optional<bool> keep_graph,
         bool create_graph) const {
   return impl::GetVariableHooks()->_backward(*this, inputs, gradient, keep_graph, create_graph);
 }

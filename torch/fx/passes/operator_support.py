@@ -1,3 +1,5 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 import abc
 import typing as t
 
@@ -203,10 +205,7 @@ class OpSupports:
             submodules: t.Mapping[str, torch.nn.Module],
             node: torch.fx.Node,
         ) -> bool:
-            if node.name in disallow_set:
-                return False
-            else:
-                return True
+            return node.name not in disallow_set
         return create_op_support(_decline_if_node_in_names)
 
 

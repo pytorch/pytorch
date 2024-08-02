@@ -218,7 +218,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   CuFFTParams Params(input.strides(), out.strides(), signal_size, fft_type, value_type);
   CuFFTParamsLRUCache& plan_cache = cufft_get_plan_cache(input.device().index());
   std::unique_lock<std::mutex> guard(plan_cache.mutex, std::defer_lock);
-  c10::optional<CuFFTConfig> uncached_plan;
+  std::optional<CuFFTConfig> uncached_plan;
   const CuFFTConfig * config = nullptr;
 
   // Workaround for gh-63152, gh-58724
@@ -227,7 +227,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   // sizes with only small prime factors can still be cached
   bool use_caching = true;
 #ifdef CUFFT_VERSION
-  if (10300 <= CUFFT_VERSION && CUFFT_VERSION < 10400) {
+  if constexpr (10300 <= CUFFT_VERSION && CUFFT_VERSION < 10400) {
     // Only cache plans for transforms with small prime factors
     use_caching = std::none_of(
         signal_size.begin() + 1, signal_size.end(), [](int64_t dim_size) {

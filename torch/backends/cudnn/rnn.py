@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch.cuda
 
 try:
@@ -18,7 +19,7 @@ def get_cudnn_mode(mode):
     elif mode == "GRU":
         return int(_cudnn.RNNMode.gru)
     else:
-        raise Exception(f"Unknown mode: {mode}")
+        raise Exception(f"Unknown mode: {mode}")  # noqa: TRY002
 
 
 # NB: We don't actually need this class anymore (in fact, we could serialize the

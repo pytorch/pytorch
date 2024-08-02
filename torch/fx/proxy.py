@@ -38,7 +38,7 @@ class Scope:
                 return x.transpose(1, 2)
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.sub = Sub()
 
             def forward(self, x):
@@ -92,8 +92,11 @@ _COPY_META_FIELDS = [
     "source_fn_stack",
     "original_aten",
     "recompute",
+    "ac_graph_id",
     "from_node",
     "quantization_tag",
+    "_numeric_debug_handle",
+    "partitioner_tag"
 ]
 
 
@@ -282,7 +285,7 @@ class TracerBase:
         elif isinstance(a, range):
             return range(self.create_arg(a.start), self.create_arg(a.stop), self.create_arg(a.step))
 
-        elif isinstance(a, torch._ops.OpOverload):
+        elif isinstance(a, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
             return a
 
         if isinstance(a, Proxy):

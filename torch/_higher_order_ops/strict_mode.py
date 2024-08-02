@@ -1,11 +1,9 @@
+# mypy: allow-untyped-defs
 import torch
 import torch._subclasses.functional_tensor
-
 import torch.utils._pytree as pytree
-
 from torch._C import DispatchKey
 from torch._functorch.utils import exposed_in
-
 from torch._higher_order_ops.utils import _set_compilation_env, autograd_not_implemented
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -59,16 +57,7 @@ def trace_strict_mode(mode, strict_mode_op, callable, operands):
     with disable_proxy_modes_tracing():
         graph = make_fx(callable, pre_dispatch=pre_dispatch)(*operands)
 
-    next_name = None
-    i = 0
-    while not next_name:
-        candidate = f"strict_graph_{i}"
-        if hasattr(mode.tracer.root, candidate):
-            i += 1
-        else:
-            next_name = candidate
-
-    graph_name = next_name
+    graph_name = mode.tracer.get_fresh_qualname("strict_graph_")
     mode.tracer.root.register_module(graph_name, graph)
 
     args = (graph, operands)

@@ -294,7 +294,7 @@ int main(int argc, char** argv) {
   }
 
   c10::CPUCachingAllocator caching_allocator;
-  c10::optional<c10::WithCPUCachingAllocatorGuard> caching_allocator_guard;
+  std::optional<c10::WithCPUCachingAllocatorGuard> caching_allocator_guard;
   if (FLAGS_use_caching_allocator) {
     caching_allocator_guard.emplace(&caching_allocator);
   }

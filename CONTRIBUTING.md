@@ -11,6 +11,7 @@ aspects of contributing to PyTorch.
 <!-- toc -->
 
 - [Developing PyTorch](#developing-pytorch)
+  - [Setup the development environment](#setup-the-development-environment)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
@@ -64,7 +65,23 @@ aspects of contributing to PyTorch.
 <!-- tocstop -->
 
 ## Developing PyTorch
+
 Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you get stuck when developing PyTorch on your machine, check out the [tips and debugging](#tips-and-debugging) section below for common solutions.
+
+### Setup the development environment
+
+First, you need to [fork the PyTorch project on GitHub](https://github.com/pytorch/pytorch/fork) and follow the instructions at [Connecting to GitHub with SSH](https://docs.github.com/en/authentication/connecting-to-github-with-ssh) to setup your SSH authentication credentials.
+
+Then clone the PyTorch project and setup the development environment:
+
+```bash
+git clone git@github.com:<USERNAME>/pytorch.git
+cd pytorch
+git remote add upstream git@github.com:pytorch/pytorch.git
+
+make setup-env  # or make setup-env-cuda for pre-built CUDA binaries
+conda activate pytorch-deps
+```
 
 ### Tips and Debugging
 
@@ -173,6 +190,13 @@ the regular environment parameters (`--name` or `--prefix`):
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch -n my-env
 conda activate my-env
+```
+
+To install the nightly binaries built with CUDA, you can pass in the flag `--cuda`:
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch --cuda
+conda activate pytorch-deps
 ```
 
 You can also use this tool to pull the nightly commits into the current branch:
@@ -325,7 +349,7 @@ command runs tests such as `TestNN.test_BCELoss` and
 Install all prerequisites by running
 
 ```bash
-make setup_lint
+make setup-lint
 ```
 
 You can now run the same linting steps that are used in CI locally via `make`:
@@ -667,7 +691,6 @@ only interested in a specific component.
 - Working on a test binary? Run `(cd build && ninja bin/test_binary_name)` to
   rebuild only that test binary (without rerunning cmake). (Replace `ninja` with
   `make` if you don't have ninja installed).
-- Don't need Caffe2?  Pass `BUILD_CAFFE2=0` to disable Caffe2 build.
 
 On the initial build, you can also speed things up with the environment
 variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `USE_FLASH_ATTENTION`, `USE_MEM_EFF_ATTENTION`, `BUILD_TEST`, `USE_FBGEMM`, `USE_NNPACK` and `USE_QNNPACK`.
@@ -790,7 +813,7 @@ USE_PRECOMPILED_HEADERS=1 python setup.py develop
 ```
 
 This adds a build step where the compiler takes `<ATen/ATen.h>` and essentially
-dumps it's internal AST to a file so the compiler can avoid repeating itself for
+dumps its internal AST to a file so the compiler can avoid repeating itself for
 every `.cpp` file.
 
 One caveat is that when enabled, this header gets included in every file by default.
@@ -1196,7 +1219,7 @@ build_with_asan()
   LDFLAGS="-stdlib=libstdc++" \
   CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
-  USE_CUDA=0 USE_OPENMP=0 BUILD_CAFFE2_OPS=0 USE_DISTRIBUTED=0 DEBUG=1 \
+  USE_CUDA=0 USE_OPENMP=0 USE_DISTRIBUTED=0 DEBUG=1 \
   python setup.py develop
 }
 
@@ -1321,7 +1344,7 @@ There are two possible choices for which commit to use:
 1. Checkout commit `B`, the head of the PR (manually committed by the PR
    author).
 2. Checkout commit `C`, the hypothetical result of what would happen if the PR
-   were merged into it's destination (usually `main`).
+   were merged into its destination (usually `main`).
 
 For all practical purposes, most people can think of the commit being used as
 commit `B` (choice **1**).

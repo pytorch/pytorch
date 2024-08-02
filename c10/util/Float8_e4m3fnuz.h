@@ -17,12 +17,12 @@
 /// Implementation based on the paper https://arxiv.org/pdf/2206.02915.pdf and
 /// the existing Float8_e4m3fn implementation.
 
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/floating_point_utils.h>
 #include <type_traits>
 
-#if defined(__cplusplus) && (__cplusplus >= 201103L)
+#if defined(__cplusplus)
 #include <cstdint>
 #elif !defined(__OPENCL_VERSION__)
 #include <math.h>
@@ -121,15 +121,18 @@ struct alignas(1) Float8_e4m3fnuz {
   Float8_e4m3fnuz() = default;
 
   constexpr C10_HOST_DEVICE Float8_e4m3fnuz(uint8_t bits, from_bits_t)
-      : x(bits){};
+      : x(bits) {}
   inline C10_HOST_DEVICE Float8_e4m3fnuz(float value);
   inline C10_HOST_DEVICE operator float() const;
   inline C10_HOST_DEVICE bool isnan() const;
 };
 
-C10_API std::ostream& operator<<(
+C10_API inline std::ostream& operator<<(
     std::ostream& out,
-    const Float8_e4m3fnuz& value);
+    const Float8_e4m3fnuz& value) {
+  out << (float)value;
+  return out;
+}
 
 } // namespace c10
 

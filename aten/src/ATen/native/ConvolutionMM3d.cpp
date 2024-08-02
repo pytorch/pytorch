@@ -553,7 +553,7 @@ static void slow_conv3d_backward_parameters_out_cpu_template(
 
 Tensor& slow_conv3d_forward_out_cpu(const Tensor& self,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     Tensor& output) {
@@ -668,7 +668,7 @@ Tensor& slow_conv3d_forward_out_cpu(const Tensor& self,
 Tensor slow_conv3d_forward_cpu(
     const Tensor& self,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -771,7 +771,7 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv3d_backward_cpu(
 
 Tensor& slow_conv3d_out(const Tensor& self,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     Tensor& output) {
@@ -792,7 +792,7 @@ Tensor& slow_conv3d_out(const Tensor& self,
 Tensor slow_conv3d(
     const Tensor& self,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding) {
   // See [Note: hacky wrapper removal for optional tensor]

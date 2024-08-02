@@ -6,12 +6,10 @@ import torch.distributed.checkpoint as dist_cp
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._tensor import init_device_mesh, Replicate
-
 from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
     DefaultSavePlanner,
 )
-
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     ShardingStrategy,
@@ -23,7 +21,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
 )
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -32,7 +29,7 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 class SimpleModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = nn.Linear(5, 8)
         self.relu = nn.ReLU()
@@ -50,7 +47,7 @@ class SimpleModel(torch.nn.Module):
 
 
 class SimpleModelUneven(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = nn.Linear(5, 10)
         self.relu = nn.ReLU()

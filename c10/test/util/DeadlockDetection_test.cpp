@@ -1,7 +1,8 @@
 #include <c10/util/DeadlockDetection.h>
-#include <c10/util/env.h>
 
 #include <gtest/gtest.h>
+
+#include <cstdlib>
 
 using namespace ::testing;
 using namespace c10::impl;
@@ -22,7 +23,7 @@ TEST(DeadlockDetection, basic) {
 
 #ifndef _WIN32
 TEST(DeadlockDetection, disable) {
-  c10::utils::set_env("TORCH_DISABLE_DEADLOCK_DETECTION", "1");
+  setenv("TORCH_DISABLE_DEADLOCK_DETECTION", "1", 1);
   DummyPythonGILHooks hooks;
   SetPythonGILHooks(&hooks);
   SetPythonGILHooks(&hooks);

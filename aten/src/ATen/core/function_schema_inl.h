@@ -162,8 +162,8 @@ inline bool Argument::isForwardCompatibleWith(
 inline std::string FunctionSchema::formatTypeMismatchMsg(
     const Argument& expected,
     const std::string& actual_type,
-    c10::optional<size_t> position,
-    c10::optional<std::string> value) const {
+    std::optional<size_t> position,
+    std::optional<std::string> value) const {
   std::string position_str;
   if (position) {
     position_str = c10::str("Position: ", *position, "\n");
@@ -328,7 +328,7 @@ template<typename T>
 inline void FunctionSchema::checkArg(
     const IValue& value,
     const Argument& argument,
-    optional<size_t> pos) const {
+    std::optional<size_t> pos) const {
   if (value.isTensor() && argument.type() == TensorType::get()) {
     // Fast-path for the common case
     return;
@@ -401,7 +401,7 @@ inline void FunctionSchema::checkAndNormalizeInputs(
     }
     auto it = kwargs.find(argument.name());
     if (it != kwargs.end()) {
-      checkArg<T>(it->second, argument, nullopt);
+      checkArg<T>(it->second, argument, std::nullopt);
       inputs.push_back(it->second);
       consumed_kwargs++;
       continue;

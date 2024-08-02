@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
 import re
 import sys
 from io import StringIO
@@ -7,6 +8,7 @@ from io import StringIO
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.comptime import comptime
+
 
 # Because we don't support free variables in comptime at the moment,
 # we have to communicate via globals.  This also means these tests cannot
@@ -17,6 +19,57 @@ SELF = None
 
 
 class ComptimeTests(torch._dynamo.test_case.TestCase):
+    def test_print_single(self):
+        global FILE
+        FILE = StringIO()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def comptime_print(e):
+            @comptime
+            def _(ctx):
+                ctx.print(ctx.get_local("e"), file=FILE)
+
+        Employee = collections.namedtuple("Employee", ["name", "id"])
+
+        class mylist(list):
+            pass
+
+        @torch._dynamo.optimize(cnt, dynamic=True)
+        def f(x):
+            y = x * 2
+            comptime_print(y)
+            comptime_print(2)
+            comptime_print([y, 2])
+            comptime_print((y, 2))
+            comptime_print({"foo": y})
+            comptime_print(range(1, 3))
+            comptime_print(Employee("foo", 2))
+            comptime_print(mylist([1, 2]))
+            comptime_print(collections.defaultdict(lambda: None))
+            comptime_print(set())
+            comptime_print({"a", "b"})
+            comptime_print(x.size(0))
+            return y + 3
+
+        f(torch.randn(2))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertExpectedInline(
+            FILE.getvalue().strip(),
+            """\
+FakeTensor(..., size=(s0,))
+2
+[FakeTensor(..., size=(s0,)), 2]
+(FakeTensor(..., size=(s0,)), 2)
+{'foo': FakeTensor(..., size=(s0,))}
+range(1, 3, 1)
+Employee(name='foo', id=2)
+[1, 2]
+defaultdict(NestedUserFunctionVariable(), {})
+set()
+{'a','b'}
+s0""",
+        )
+
     def test_print_graph(self):
         global FILE
         FILE = StringIO()
@@ -43,7 +96,7 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
             """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    y = l_x_ * 2;  l_x_ = None""",
+    y = l_x_ * 2;  l_x_ = y = None""",
         )
 
     def test_print_disas(self):
@@ -136,6 +189,43 @@ x = TensorVariable()
 y = TensorVariable()
 """,
         )
+
+    # Just make sure it doesn't crash
+    def test_print_direct(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(cnt)
+        def f(x, z):
+            y = x * 2
+            lambda: z
+            comptime.print(z)
+            return y + 3
+
+        f(torch.randn(2), torch.randn(2))
+
+    # Just make sure it doesn't crash
+    def test_get_local_closure_variable(self):
+        global SELF
+        SELF = self
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(cnt)
+        def f(x):
+            z = 3
+
+            def g():
+                @comptime
+                def _(ctx):
+                    r = ctx.get_local("z")
+                    SELF.assertEqual(repr(r), "3")
+
+                comptime.print(z)
+                return 2
+
+            y = x * g()
+            return y + 3
+
+        f(torch.randn(2))
 
     def test_print_bt(self):
         global FILE
@@ -302,7 +392,7 @@ y = TensorVariable()
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     y = l_x_ * 2;  l_x_ = None
-    add = y + 4;  y = None""",
+    add = y + 4;  y = add = None""",
         )
 
 

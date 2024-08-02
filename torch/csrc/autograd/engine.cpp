@@ -28,7 +28,6 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
@@ -41,6 +40,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <sstream>
 #include <string>
@@ -735,10 +735,10 @@ void GraphTask::exec_post_processing() {
     for (const auto& leaf_stream : leaf_streams) {
       // stash_current_cuda/privateuse1_streams() stashed streams for all device
       // IDs that already had a CUDA/privateuse1 context before the GraphTask
-      // executed. For inactive devices, it stashed a c10::nullopt. I don't
+      // executed. For inactive devices, it stashed a std::nullopt. I don't
       // expect GraphTask's backward pass ran leaf nodes on any new devices, so
       // the stashed streams should be enough. If leaf_stream.device_index()
-      // happens to be for a new device, operator* on the c10::nullopt should
+      // happens to be for a new device, operator* on the std::nullopt should
       // throw an error.
       const auto caller_current_stream =
           // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -1550,20 +1550,11 @@ void GraphTask::stash_current_streams() {
   caller_current_streams_.resize(num_devices);
   if (num_devices > 0) {
     for (c10::DeviceIndex idx = 0; idx < num_devices; idx++) {
-#if defined(USE_ROCM) && (ROCM_VERSION < 50000)
-      // If the build targets ROCM, stash streams for all visible devices
-      // unconditionally, to work around
-      // https://github.com/pytorch/pytorch/issues/59750.
-      // TODO: Remove ROCM-specific behavior when
-      // https://github.com/pytorch/pytorch/issues/59750 is fixed.
-      if (true) {
-#else
       if (at::globalContext().getAcceleratorHooksInterface().hasPrimaryContext(
               idx)) {
-#endif
         caller_current_streams_[idx] = guard.getStream({accelerator, idx});
       } else {
-        caller_current_streams_[idx] = c10::nullopt;
+        caller_current_streams_[idx] = std::nullopt;
       }
     }
   }

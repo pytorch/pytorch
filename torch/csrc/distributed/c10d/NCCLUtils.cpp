@@ -1,13 +1,18 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
 #include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
+#include <algorithm>
 
 #ifdef USE_C10D_NCCL
 #include <vector>
 
 #include <cuda_runtime.h>
 #include <mutex>
+
+#include <nlohmann/json.hpp>
 
 namespace {
 constexpr int64_t kCommInitBusyWaitMillis = 10;
@@ -18,7 +23,7 @@ namespace c10d {
 ncclComm_t NCCLComm::getNcclComm() {
   std::unique_lock<std::mutex> lock(mutex_);
   if (aborted_) {
-    auto commFailureMsg = commFailureReason_ != c10::nullopt
+    auto commFailureMsg = commFailureReason_ != std::nullopt
         ? c10::str(" Original reason for failure was: ", *commFailureReason_)
         : "";
     TORCH_CHECK_WITH(
@@ -62,6 +67,33 @@ void NCCLComm::waitUntilInitialized(int timeoutSecs) {
         std::chrono::milliseconds(kCommInitBusyWaitMillis));
   }
 }
+
+#if defined(NCCL_HAS_COMM_SPLIT) && !defined(FBCODE_CAFFE2)
+// last argument to split() API is not used to support
+// multiple implementations
+std::shared_ptr<NCCLComm> NCCLComm::split(
+    NCCLComm* source,
+    int color_id,
+    int rank,
+    ncclConfig_t& config,
+    std::vector<uint64_t>& ranks_ull) {
+  auto comm = std::make_shared<NCCLComm>();
+  C10D_NCCL_CHECK(
+      ncclCommSplit(
+          source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
+      std::nullopt);
+  ++source->ncclCommSplitCounter_;
+  comm->rank_ = rank;
+  return comm;
+}
+#endif
+
+#ifndef FBCODE_CAFFE2
+bool shouldBroadcastNCCLUniqueID(bool isSendRecvSelf) {
+  // For point-to-point communication on the same process, don't need broadcast.
+  return !isSendRecvSelf;
+}
+#endif
 
 std::string getNcclVersion() {
   static c10::once_flag ncclGetVersionFlag;
@@ -159,11 +191,11 @@ std::string ncclGetErrorWithVersion(ncclResult_t error) {
 // thrown in the NCCL codebase.
 std::string getNcclErrorDetailStr(
     ncclResult_t error,
-    c10::optional<std::string> processGroupFailureReason /* = c10::nullopt */
+    std::optional<std::string> processGroupFailureReason /* = std::nullopt */
 ) {
   // Prioritize failure reason provided by PG NCCL first, as it can abort
   // communicators when it encounters collective timeouts, etc.
-  if (processGroupFailureReason != c10::nullopt) {
+  if (processGroupFailureReason != std::nullopt) {
     return *processGroupFailureReason;
   }
   std::string interpret;
@@ -209,6 +241,240 @@ std::string getNcclErrorDetailStr(
       interpret = "Unknown NCCL error!";
   }
   return interpret + err;
+}
+
+control_plane::RegisterHandler dumpHandler{
+    "dump_nccl_trace_pickle",
+    [](const control_plane::Request& req, control_plane::Response& res) {
+      const auto params = req.params();
+      size_t validParamCount = 0;
+
+      // valid params
+      const std::string includeCollectivesStr = "includecollectives";
+      const std::string includeStackTracesStr = "includestacktraces";
+      const std::string onlyActiveStr = "onlyactive";
+
+      std::unordered_map<std::string, bool> processedParams = {
+          {includeCollectivesStr, true},
+          {includeStackTracesStr, true},
+          {onlyActiveStr, false}};
+
+      for (const auto& [paramName, paramValue] : params) {
+        auto it = processedParams.find(paramName);
+        if (it != processedParams.end()) {
+          validParamCount++;
+          if (paramValue == "true") {
+            it->second = true;
+          } else if (paramValue == "false") {
+            it->second = false;
+          } else {
+            res.setStatus(400);
+            res.setContent(
+                "Invalid value for " + paramName +
+                    " valid values are true or false",
+                "text/plain");
+            return;
+          }
+        }
+      }
+      if (validParamCount < params.size()) {
+        res.setStatus(400);
+        res.setContent(
+            "Invalid parameters - unexpected param passed in", "text/plain");
+        return;
+      }
+      res.setContent(
+          dump_nccl_trace(
+              processedParams[includeCollectivesStr],
+              processedParams[includeStackTracesStr],
+              processedParams[onlyActiveStr]),
+          "application/octet-stream");
+    }};
+
+control_plane::RegisterHandler jsonDumpHandler{
+    "dump_nccl_trace_json",
+    [](const control_plane::Request& req, control_plane::Response& res) {
+      const auto params = req.params();
+      size_t validParamCount = 0;
+
+      // valid params
+      const std::string includeCollectivesStr = "includecollectives";
+      const std::string onlyActiveStr = "onlyactive";
+
+      std::unordered_map<std::string, bool> processedParams = {
+          {includeCollectivesStr, true}, {onlyActiveStr, false}};
+
+      for (const auto& [paramName, paramValue] : params) {
+        auto it = processedParams.find(paramName);
+        if (it != processedParams.end()) {
+          validParamCount++;
+          if (paramValue == "true") {
+            it->second = true;
+          } else if (paramValue == "false") {
+            it->second = false;
+          } else {
+            res.setStatus(400);
+            res.setContent(
+                "Invalid value for " + paramName +
+                    " valid values are true or false",
+                "text/plain");
+            return;
+          }
+        }
+      }
+      if (validParamCount < params.size()) {
+        res.setStatus(400);
+        res.setContent(
+            "Invalid parameters - unexpected param passed in", "text/plain");
+        return;
+      }
+      res.setStatus(200);
+      res.setContent(
+          dump_nccl_trace_json(
+              processedParams[includeCollectivesStr],
+              processedParams[onlyActiveStr]),
+          "application/json");
+    }};
+
+void DebugInfoWriter::write(const std::string& ncclTrace) {
+  // Open a file for writing. The ios::binary flag is used to write data as
+  // binary.
+  std::ofstream file(filename_, std::ios::binary);
+
+  // Check if the file was opened successfully.
+  if (!file.is_open()) {
+    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
+               << filename_;
+    return;
+  }
+
+  file.write(ncclTrace.data(), ncclTrace.size());
+  LOG(INFO) << "Finished writing NCCLPG debug info to " << filename_;
+}
+
+DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
+  if (writer_ == nullptr) {
+    std::string fileNamePrefix = getCvarString(
+        {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
+    // Using std::unique_ptr here to auto-delete the writer object
+    // when the pointer itself is destroyed.
+    std::unique_ptr<DebugInfoWriter> writerPtr(
+        new DebugInfoWriter(fileNamePrefix, rank));
+    DebugInfoWriter::registerWriter(std::move(writerPtr));
+  }
+  return *writer_;
+}
+
+void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      hasWriterRegistered_.load() == false,
+      "debugInfoWriter already registered");
+  hasWriterRegistered_.store(true);
+  writer_ = std::move(writer);
+}
+
+std::string NCCLTraceBuffer::dump_json(
+    const std::optional<std::unordered_map<
+        std::string,
+        std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+    bool includeCollectives,
+    bool onlyActive) {
+  using json = nlohmann::json;
+  json result;
+  result[version_key_str] = version_val_str;
+  result[pg_config_key_str] = getPgConfigJson();
+  result[pg_status_key_str] = getPgStatusJson();
+
+  // collective trace
+  if (includeCollectives) {
+    std::list<json> entries;
+    for (auto& e : dump_entries()) {
+      json j;
+      if (onlyActive && e.time_discovered_completed_.has_value()) {
+        continue;
+      }
+      j[record_id_key_str] = int64_t(e.id_);
+      j[pg_id_key_str] = int64_t(e.pg_id_);
+      j[pg_name_key_str] = e.pg_name_;
+      j[collective_seq_id_key_str] = int64_t(e.collective_seq_id_);
+      j[p2p_seq_id_key_str] = int64_t(e.p2p_seq_id_);
+      j[op_id_key_str] = int64_t(e.op_id_);
+      j[profiling_name_key_str] = e.profiling_name_;
+      j[time_created_key_str] = int64_t(e.time_created_);
+      if (e.duration_) {
+        j[duration_key_str] = *e.duration_;
+      }
+      auto it = e.sizes_.begin();
+      auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
+        auto sizes = std::list<std::list<int>>();
+        for (auto dim : dims) {
+          auto arg_sizes = std::list<int>();
+          for (auto i : c10::irange(dim)) {
+            (void)i;
+            arg_sizes.push_back(*it++);
+          }
+          sizes.push_back(arg_sizes);
+        }
+        return sizes;
+      };
+      j[input_sizes_key_str] = read_sizes(e.input_dims_);
+      std::vector<std::string> input_dtypes_strs;
+      input_dtypes_strs.reserve(e.input_dtypes_.size());
+      for (const auto& input_dtype : e.input_dtypes_) {
+        input_dtypes_strs.push_back(c10::toString(input_dtype));
+      }
+      j[input_dtypes_key_str] = input_dtypes_strs;
+      j[output_sizes_key_str] = read_sizes(e.output_dims_);
+      std::vector<std::string> output_dtypes_strs;
+      output_dtypes_strs.reserve(e.output_dtypes_.size());
+      for (const auto& output_dtype : e.output_dtypes_) {
+        output_dtypes_strs.push_back(c10::toString(output_dtype));
+      }
+      j[output_dtypes_key_str] = output_dtypes_strs;
+      if (e.time_discovered_completed_.has_value()) {
+        j[state_key_str] = completed_state_str;
+      } else if (e.time_discovered_started_.has_value()) {
+        j[state_key_str] = started_state_str;
+      } else {
+        j[state_key_str] = scheduled_state_str;
+      }
+      j[time_discovered_started_key_str] =
+          e.time_discovered_started_.has_value()
+          ? int64_t(*e.time_discovered_started_)
+          : 0;
+      j[time_discovered_completed_key_str] =
+          e.time_discovered_completed_.has_value()
+          ? int64_t(*e.time_discovered_completed_)
+          : 0;
+      j[retired_key_str] = e.retired_;
+      j[timeout_key_str] = e.timeout_ms_;
+      j[is_p2p_key_str] = e.isP2P_;
+      entries.emplace_back(j);
+    }
+
+    if (entries.size() > 0) {
+      result[entries_key_str] = entries;
+    }
+  }
+
+  if (ncclDumpMap.has_value()) {
+    result[nccl_comm_key_str] = ncclDumpMap.value();
+  }
+
+  return result.dump();
+}
+
+std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
+std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
+
+float getDurationFromEvent(
+    at::cuda::CUDAEvent& ncclStartEvent,
+    at::cuda::CUDAEvent& ncclEndEvent) {
+  TORCH_CHECK(
+      ncclEndEvent.query(),
+      "getDuration can only be called after work is succeeded.")
+  return ncclStartEvent.elapsed_time(ncclEndEvent);
 }
 
 } // namespace c10d

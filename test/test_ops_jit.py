@@ -4,7 +4,6 @@ from functools import partial
 from textwrap import dedent
 
 import torch
-
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -33,6 +32,7 @@ from torch.testing._internal.jit_utils import (
     disable_autodiff_subgraph_inlining,
     is_lambda,
 )
+
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
@@ -117,7 +117,7 @@ class TestJit(JitCommonTestCase):
                         with inputs {sample}:
                     """
                     )
-                    raise Exception(variant_error_info) from e
+                    raise Exception(variant_error_info) from e  # noqa: TRY002
 
         assert tested, "JIT Test does not execute any logic"
 

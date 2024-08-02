@@ -8,6 +8,7 @@ from torch import nn
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import _inline_everything, JitTestCase, RUN_CUDA
 
+
 if __name__ == "__main__":
     raise RuntimeError(
         "This test file is not meant to be run directly, use:\n\n"
@@ -202,7 +203,7 @@ class TestPeephole(JitTestCase):
         for mod in modules:
 
             class ConvDim(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.conv = mod(3, 32, kernel_size=3, stride=2, bias=False)
 
@@ -216,7 +217,7 @@ class TestPeephole(JitTestCase):
             FileCheck().check_not("conv").check_not("dim").run(conv_dim.graph)
 
             class ConvDimMutate(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.conv = mod(3, 32, kernel_size=3, stride=2, bias=False)
 
@@ -274,7 +275,7 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x: List[int], y: List[int]):
             if len(x) != 4 or len(y) != 5:
-                raise Exception("")
+                raise Exception("")  # noqa: TRY002
 
             return len(x) + len(y)
 
@@ -288,7 +289,7 @@ class TestPeephole(JitTestCase):
             if len(x) == 4 and len(y) == 5:
                 pass
             else:
-                raise Exception("hi")
+                raise Exception("hi")  # noqa: TRY002
 
             return len(x) + len(y)
 
@@ -300,15 +301,15 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x: List[int], y: List[int], z: List[int]):
             if len(x) != 4:
-                raise Exception("..")
+                raise Exception("..")  # noqa: TRY002
             else:
                 if len(y) != 8:
-                    raise Exception("...")
+                    raise Exception("...")  # noqa: TRY002
                 else:
                     if len(z) == 3:
                         pass
                     else:
-                        raise Exception("...")
+                        raise Exception("...")  # noqa: TRY002
 
             return len(x) + len(y) * len(z)
 
@@ -458,7 +459,7 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x: int, y: int):
             if x != 4 or y != 5:
-                raise Exception("")
+                raise Exception("")  # noqa: TRY002
 
             return x + y
 
@@ -477,7 +478,7 @@ class TestPeephole(JitTestCase):
             if x == 4 and y == 5:
                 pass
             else:
-                raise Exception("hi")
+                raise Exception("hi")  # noqa: TRY002
 
             return x + y
 
@@ -489,15 +490,15 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x: int, y: int, z: int):
             if x != 4:
-                raise Exception("..")
+                raise Exception("..")  # noqa: TRY002
             else:
                 if y != 8:
-                    raise Exception("...")
+                    raise Exception("...")  # noqa: TRY002
                 else:
                     if z == 3:
                         pass
                     else:
-                        raise Exception("...")
+                        raise Exception("...")  # noqa: TRY002
 
             return x + y * z
 

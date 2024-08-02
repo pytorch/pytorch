@@ -390,8 +390,8 @@ at::Tensor quantized_cat(
                       .typed<at::Tensor(
                           c10::List<at::Tensor> const&,
                           int64_t,
-                          c10::optional<double>,
-                          c10::optional<int64_t>)>();
+                          std::optional<double>,
+                          std::optional<int64_t>)>();
   return op.redispatch(
       DispatchKeySet({DispatchKey::QuantizedCPU}), xs, dim, scale, zero);
 }

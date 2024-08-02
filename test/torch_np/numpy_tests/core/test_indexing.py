@@ -5,14 +5,12 @@ import operator
 import re
 import sys
 import warnings
-
 from itertools import product
-
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import pytest
-
 from pytest import raises as assert_raises
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -22,6 +20,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
+
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
@@ -740,7 +739,7 @@ class TestMultiIndexingAutomated(TestCase):
                 try:
                     indx = np.array(indx, dtype=np.intp)
                 except ValueError:
-                    raise IndexError
+                    raise IndexError from None
                 in_indices[i] = indx
             elif indx.dtype.kind != "b" and indx.dtype.kind != "i":
                 raise IndexError(
@@ -902,7 +901,7 @@ class TestMultiIndexingAutomated(TestCase):
                     arr = arr.reshape(arr.shape[:ax] + mi.shape + arr.shape[ax + 1 :])
                 except ValueError:
                     # too many dimensions, probably
-                    raise IndexError
+                    raise IndexError from None
                 ax += mi.ndim
                 continue
 

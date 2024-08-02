@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 from numbers import Number, Real
 
@@ -5,6 +6,7 @@ import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _standard_normal, broadcast_all
+
 
 __all__ = ["Normal"]
 

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import dis
 import functools
@@ -11,12 +12,6 @@ import unittest
 from typing import List, Optional, Sequence, Union
 from unittest.mock import patch
 
-np: Optional[types.ModuleType] = None
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
-
 import torch
 from torch import fx
 from torch._dynamo.output_graph import OutputGraph
@@ -28,8 +23,16 @@ from .bytecode_transformation import (
     is_generator,
     transform_code_object,
 )
-from .guards import CheckFunctionManager, GuardedCode
+from .guards import CheckFunctionManager, CompileId, GuardedCode
 from .utils import same
+
+
+np: Optional[types.ModuleType] = None
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
 
 unsupported = eval_frame.unsupported
 three = 3
@@ -56,8 +59,8 @@ def collect_results(model, prediction, loss, example_inputs):
     #         f"High loss value alert - {loss:.2f}. Can result in unstable gradients."
     #     )
 
-    grads = dict()
-    params = dict()
+    grads = {}
+    params = {}
     for name, param in model.named_parameters():
         if isinstance(model, eval_frame.OptimizedModule):
             name = remove_optimized_module_prefix(name)
@@ -70,7 +73,7 @@ def collect_results(model, prediction, loss, example_inputs):
         params[name] = param_copy
     results.append(grads)
     results.append(params)
-    buffers = dict()
+    buffers = {}
     for name, buffer in model.named_buffers():
         if isinstance(model, eval_frame.OptimizedModule):
             name = remove_optimized_module_prefix(name)
@@ -162,7 +165,7 @@ def debug_insert_nops(
         f_code=frame.f_code,
     )
 
-    return GuardedCode(code, CheckFunctionManager(graph).check_fn)
+    return GuardedCode(code, CheckFunctionManager(graph).check_fn, CompileId(0, 0))
 
 
 class CompileCounter:
@@ -208,7 +211,7 @@ class EagerAndRecordGraphs:
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         self.graphs.append(gm)
-        return gm
+        return gm.forward
 
 
 def strip_comment(code) -> str:
@@ -311,7 +314,9 @@ def _make_fn_with_patches(fn, *patches):
     return _fn
 
 
-def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches, xfail_prop=None):
+def make_test_cls_with_patches(
+    cls, cls_prefix, fn_suffix, *patches, xfail_prop=None, decorator=lambda x: x
+):
     DummyTestClass = type(f"{cls_prefix}{cls.__name__}", cls.__bases__, {})
     DummyTestClass.__qualname__ = DummyTestClass.__name__
 
@@ -326,7 +331,7 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches, xfail_prop=
             new_fn.__name__ = new_name
             if xfail_prop is not None and hasattr(fn, xfail_prop):
                 new_fn = unittest.expectedFailure(new_fn)
-            setattr(DummyTestClass, new_name, new_fn)
+            setattr(DummyTestClass, new_name, decorator(new_fn))
         # NB: Doesn't handle slots correctly, but whatever
         elif not hasattr(DummyTestClass, name):
             setattr(DummyTestClass, name, getattr(cls, name))
@@ -339,6 +344,24 @@ def skipIfNotPy311(fn):
     if sys.version_info >= (3, 11):
         return fn
     return unittest.skip(fn)
+
+
+def skipIfNotPy312(fn):
+    if sys.version_info >= (3, 12):
+        return fn
+    return unittest.skip(fn)
+
+
+def xfailIfPy312(fn):
+    if sys.version_info >= (3, 12):
+        return unittest.expectedFailure(fn)
+    return fn
+
+
+def skipIfPy312(fn):
+    if sys.version_info >= (3, 12):
+        return unittest.skip(fn)
+    return fn
 
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py

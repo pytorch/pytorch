@@ -27,11 +27,11 @@ void setDynamicLayerFrontBackKeysIncluded(bool included) {
 DynamicLayer::DynamicLayer(
     TransformType transform_type,
     int64_t layerId,
-    optional<c10::SymInt> batchSize,
-    optional<RandomnessType> randomness,
-    optional<bool> prev_grad_mode,
-    optional<bool> prev_fwd_grad_mode,
-    optional<bool> functionalize_add_back_views)
+    std::optional<c10::SymInt> batchSize,
+    std::optional<RandomnessType> randomness,
+    std::optional<bool> prev_grad_mode,
+    std::optional<bool> prev_fwd_grad_mode,
+    std::optional<bool> functionalize_add_back_views)
 {
   if (transform_type == TransformType::Grad) {
     TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
@@ -175,7 +175,7 @@ const std::shared_ptr<bool>& getLifeHandleForLevel(int64_t level) {
   return dynamic_layer.interpreter().is_alive_ptr();
 }
 
-optional<DynamicLayer> maybeCurrentDynamicLayer() {
+std::optional<DynamicLayer> maybeCurrentDynamicLayer() {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   if (dynamicLayerStack.empty()) {
     return {};
@@ -250,11 +250,11 @@ int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
 
 int64_t initAndPushDynamicLayer(
     TransformType transform_type,
-    optional<c10::SymInt> batch_size,
-    optional<RandomnessType> randomness,
-    optional<bool> prev_grad_mode,
-    optional<bool> prev_fwd_grad_mode,
-    optional<bool> functionalize_add_back_views) {
+    std::optional<c10::SymInt> batch_size,
+    std::optional<RandomnessType> randomness,
+    std::optional<bool> prev_grad_mode,
+    std::optional<bool> prev_fwd_grad_mode,
+    std::optional<bool> functionalize_add_back_views) {
   const auto& dynamicLayerStack = dynamicLayerStackAccessor();
   const auto layerId = 1 + dynamicLayerStack.size();
   DynamicLayer new_layer(transform_type, layerId, std::move(batch_size), randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views);
@@ -387,13 +387,13 @@ bool isInplaceOp(const FunctionSchema& schema) {
   return return_alias_info && return_alias_info->isWrite();
 }
 
-c10::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int64_t immutable_input_idx) {
+std::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int64_t immutable_input_idx) {
   for (size_t res_idx = 0; res_idx != schema.returns().size(); ++res_idx) {
     if (schema.may_contain_alias(SchemaArgument(SchemaArgType::input, immutable_input_idx), SchemaArgument(SchemaArgType::output, res_idx))) {
       return res_idx; // for everything currently in native_functions, each input aliases at most one output (tensor list counts as one output)
     }
   }
-  return nullopt;
+  return std::nullopt;
 }
 
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE

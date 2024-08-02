@@ -151,7 +151,7 @@ void warn_or_error_on_sync() {
   }
 }
 
-c10::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
+std::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
   // check current device first
   auto current_device_index = current_device();
   if (current_device_index >= 0) {
@@ -166,7 +166,7 @@ c10::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
       return device_index;
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 namespace _internal {
