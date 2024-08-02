@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import cast, Dict, List, Optional, Set
 
 import torch
+
 from .. import config, inductor_prims
 from ..pattern_matcher import (
     CallFunction,
