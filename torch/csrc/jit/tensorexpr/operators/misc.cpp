@@ -3,8 +3,6 @@
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-#include <utility>
-
 namespace torch::jit::tensorexpr {
 
 int64_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
@@ -161,7 +159,9 @@ ExprHandle demoteOutput(
 
 std::optional<TensorInfo> getTensorInfo(const BufHandle& b) {
   std::vector<int64_t> dims;
-  for (auto dim : b.dims()) {
+  auto b_dims = b.dims();
+  dims.reserve(b_dims.size());
+  for (auto dim : b_dims) {
     auto val = intValue(dim.node());
     if (!val) {
       return std::nullopt;
