@@ -1455,6 +1455,21 @@ class TestSparse(TestSparseBase):
 
     @onlyCUDA
     @unittest.skipIf(
+        IS_WINDOWS and TEST_CUDA,
+        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
+    )
+    def test_bmm_oob(self, device):
+        # targets an out of bounds error when the sparse tensor has no non-zero
+        # values in the first batch dimension (#131977)
+        torch.cuda.empty_cache()
+        indices = torch.tensor([[1], [0], [0]], device=device)
+        values = torch.tensor([1.], device=device)
+        a = torch.sparse_coo_tensor(indices, values, size=(2, 1, 1))
+        b = torch.zeros((2, 1, 1), device=device)
+        _ = torch.bmm(a, b)
+
+    @onlyCUDA
+    @unittest.skipIf(
         not IS_WINDOWS or not TEST_WITH_ROCM,
         "this test ensures bmm sparse-dense CUDA gives an error when run on Windows with CUDA < 11.0"
     )
