@@ -2201,6 +2201,7 @@ class TestSDPA(NNTestCase):
         # Check if masked rows are zero in output
         mask_sum = mask.sum(dim=-1, keepdim=True)
         masked_rows = (mask_sum == 0).expand_as(backend_out)
+        self.assertTrue((mask_sum == 0).sum() > 0, "No fully masked out rows found")
         assert torch.all(backend_out[masked_rows] == 0), \
             f"Non-zero values in fully masked rows for {backend}"
 
