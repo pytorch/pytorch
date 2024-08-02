@@ -249,7 +249,7 @@ void CudaPrinter::visit(const IntrinsicsPtr& v) {
 
   // get type of resulting expression.
   ScalarType returnType = v->param(0)->dtype().scalar_type();
-  for (int i = 1; i < v->nparams(); ++i) {
+  for (size_t i = 1; i < v->nparams(); ++i) {
     returnType = promoteTypes(returnType, v->param(i)->dtype().scalar_type());
   }
 
@@ -348,7 +348,7 @@ class AtomicAddFuser : public IRMutator {
     }
   }
 
-  StmtPtr mutate(StorePtr v) override {
+  StmtPtr mutate(const StorePtr& v) override {
     BufPtr buf = v->buf();
 
     // Thread locals never need to be atomic.
@@ -488,7 +488,7 @@ void CudaPrinter::visit(const LetPtr& v) {
 
 class PrioritizeLoad : public IRMutator {
  public:
-  ExprPtr mutate(LoadPtr v) override {
+  ExprPtr mutate(const LoadPtr& v) override {
     // Look at the declaration of this variable for more details.
     if (nested_if_then_else_ > 0) {
       return IRMutator::mutate(v);
@@ -529,7 +529,7 @@ class PrioritizeLoad : public IRMutator {
     return load_new_var;
   }
 
-  ExprPtr mutate(CastPtr v) override {
+  ExprPtr mutate(const CastPtr& v) override {
     LoadPtr src_load = to<Load>(v->src_value());
     ExprPtr new_src = v->src_value()->accept_mutator(this);
     VarPtr new_var = to<Var>(new_src);
@@ -550,7 +550,7 @@ class PrioritizeLoad : public IRMutator {
     return new_var;
   }
 
-  StmtPtr mutate(StorePtr v) override {
+  StmtPtr mutate(const StorePtr& v) override {
     StorePtr last = nested_store_;
     nested_store_ = v;
     StmtPtr s = IRMutator::mutate(v);
@@ -558,14 +558,14 @@ class PrioritizeLoad : public IRMutator {
     return s;
   }
 
-  StmtPtr mutate(LetPtr v) override {
+  StmtPtr mutate(const LetPtr& v) override {
     nested_let_ = true;
     StmtPtr s = IRMutator::mutate(v);
     nested_let_ = false;
     return s;
   }
 
-  StmtPtr mutate(BlockPtr v) override {
+  StmtPtr mutate(const BlockPtr& v) override {
     std::list<StmtPtr> stmts = v->stmts();
     for (const StmtPtr& stmt : stmts) {
       PushList();
@@ -582,7 +582,7 @@ class PrioritizeLoad : public IRMutator {
     return v;
   }
 
-  ExprPtr mutate(IfThenElsePtr v) override {
+  ExprPtr mutate(const IfThenElsePtr& v) override {
     nested_if_then_else_++;
     ExprPtr new_v = IRMutator::mutate(v);
     nested_if_then_else_--;
@@ -665,7 +665,7 @@ bool GPUMetaVarRewriter::isFullExtent() {
   return true;
 }
 
-StmtPtr GPUMetaVarRewriter::mutate(ForPtr v) {
+StmtPtr GPUMetaVarRewriter::mutate(const ForPtr& v) {
   StmtPtr body = v->body();
   ExprPtr old_reach = nullptr;
   const LoopOptions& loop_options = v->loop_options();
@@ -720,7 +720,7 @@ StmtPtr GPUMetaVarRewriter::mutate(ForPtr v) {
   return v->cloneWithNewBody(body);
 }
 
-StmtPtr GPUMetaVarRewriter::mutate(BlockPtr v) {
+StmtPtr GPUMetaVarRewriter::mutate(const BlockPtr& v) {
   std::vector<Segment> innerSegments;
   Segment current;
 
@@ -1303,7 +1303,8 @@ void CudaCodeGen::CompileToNVRTC(
       "--std=c++17", compute.c_str(), "-default-device"};
 #endif
 
-  auto result = nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
+  auto result = nvrtc().nvrtcCompileProgram(
+      program, static_cast<int>(args.size()), args.data());
   if (result != NVRTC_SUCCESS) {
     size_t logsize = 0;
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));

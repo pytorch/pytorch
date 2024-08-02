@@ -9,9 +9,6 @@ from typing import Any, Dict, List, TYPE_CHECKING
 
 import torch.nn
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
 from .. import trace_rules, variables
 from ..exc import (
     ObservedException,
@@ -47,6 +44,10 @@ from .functions import invoke_and_store_as_constant
 from .lazy import LazyVariableTracker
 from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
@@ -131,7 +132,7 @@ class NNModuleVariable(VariableTracker):
 
     def __init__(
         self, module_type: type, module_key: str, module: torch.nn.Module, **kwargs
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         self.module_type = module_type
         self.module_key = module_key
@@ -774,7 +775,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     Giving one graph per module class.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         if type(value) is torch.jit._script.RecursiveScriptModule:
             raise Unsupported(
                 "ScriptModules aren't supported in UnspecializedNNModuleVariable"
@@ -1142,7 +1143,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     compilation.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         source = kwargs.get("source", None)
         assert (
             source is not None

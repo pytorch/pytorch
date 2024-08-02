@@ -214,13 +214,13 @@ num_guards_executed=0)
 
     def test_no_hasattr_guard(self):
         class Bar:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.bar = 2
 
         bar = Bar()
 
         class Foo:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.foo = 2
 
         foo = Foo()
