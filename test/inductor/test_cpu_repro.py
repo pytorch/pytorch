@@ -4062,6 +4062,24 @@ class CPUReproTests(TestCase):
                 exactly=True,
             ).run(code)
 
+    def test_any_bool_vec(self):
+        def fn(x, y):
+            return torch.any(x), torch.any(y)
+
+        c = [False] * 64
+        input1 = torch.Tensor(c)
+        c[0] = True
+        input2 = torch.Tensor(c)
+        metrics.reset()
+        self.common(
+            fn,
+            (
+                input1,
+                input2,
+            ),
+        )
+        check_metrics_vec_kernel_count(2)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
