@@ -1,9 +1,9 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
 
-namespace at {
 
-namespace native {
+
+namespace at::native {
 
 using fused_adagrad_fn = void (*)(
     const at::Tensor& param,
@@ -20,4 +20,4 @@ using fused_adagrad_fn = void (*)(
 DECLARE_DISPATCH(fused_adagrad_fn, fused_adagrad_stub);
 
 }
-}
+

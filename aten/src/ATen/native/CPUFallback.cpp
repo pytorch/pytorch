@@ -33,7 +33,7 @@ static std::vector<T> to_cpu(const std::vector<T>& tensors) {
       // Explicitly handling undefined tensors here instead of letting `at::_to_cpu` handle it.
       // Otherwise, we'd need to require all backends with their own implementation of _to_cpu
       // to properly handle undefined tensors.
-      if constexpr(std::is_same<T, std::optional<at::Tensor>>::value) {
+      if constexpr(std::is_same_v<T, std::optional<at::Tensor>>) {
         if (tensors[i].has_value() && tensors[i].value().defined()) {
           to_translate[i] = true;
           valid_tensors.push_back(tensors[i].value());
@@ -58,7 +58,7 @@ static std::vector<T> to_cpu(const std::vector<T>& tensors) {
   return cpu_tensors;
 }
 
-static std::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args, std::vector<c10::List<at::Tensor>> tlist_args) {
+static std::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args, const std::vector<c10::List<at::Tensor>>& tlist_args) {
   // Decide what device to move the output tensor(s) to.
   // The current convention is that we use the first tensor arg to pick the device
   // Barring that, we take the first tensor from a TensorList arg.

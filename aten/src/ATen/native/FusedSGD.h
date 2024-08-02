@@ -1,9 +1,9 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
 
-namespace at {
 
-namespace native {
+
+namespace at::native {
 
 using fused_sgd_fn = void (*)(
     const at::Tensor& param,
@@ -21,4 +21,4 @@ using fused_sgd_fn = void (*)(
 DECLARE_DISPATCH(fused_sgd_fn, fused_sgd_stub);
 
 }
-}
+

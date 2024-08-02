@@ -340,8 +340,8 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
   // when self has zero storage.
   // This kernel should never really be run, except with debugging using compile(backend="aot_eager")
   for (const auto i : c10::irange(src.size())) {
-    auto curr_src = src[i];
-    auto curr_self = self[i];
+    const auto& curr_src = src[i];
+    const auto& curr_self = self[i];
     outs.push_back(at::copy(curr_self, curr_src, non_blocking));
   }
   return outs;
