@@ -5,7 +5,8 @@
 
 #include <cstddef>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // insert GraphExecutor nodes that group together
 // subgraphs that are differentiable by the jit's autodiff passes
@@ -14,4 +15,5 @@ namespace torch::jit {
 TORCH_API std::vector<Node*> CreateAutodiffSubgraphs(
     const std::shared_ptr<Graph>& graph,
     size_t threshold = 2);
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

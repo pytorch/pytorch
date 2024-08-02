@@ -10,12 +10,13 @@
 #include <iosfwd>
 #include <ostream>
 
-#if defined(__CUDACC__) && !defined(USE_ROCM)
+#if defined(__CUDACC__)
+#if !defined(USE_ROCM)
 #include <cuda_bf16.h>
-#endif
-#if defined(__HIPCC__) && defined(USE_ROCM)
-#include <hip/hip_bf16.h>
-#endif
+#else // defined(USE_ROCM)
+#include <hip_bf16.h>
+#endif // defined(USE_ROCM)
+#endif // defined(__CUDACC__)
 
 #if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
 #if defined(CL_SYCL_LANGUAGE_VERSION)
@@ -75,8 +76,8 @@ inline C10_HOST_DEVICE uint16_t round_to_nearest_even(float src) {
   } else {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
-      uint32_t U32; // NOLINT(facebook-hte-BadMemberName)
-      float F32; // NOLINT(facebook-hte-BadMemberName)
+      uint32_t U32;
+      float F32;
     };
 
     F32 = src;
@@ -103,17 +104,18 @@ struct alignas(2) BFloat16 {
 
   constexpr C10_HOST_DEVICE BFloat16(unsigned short bits, from_bits_t)
       : x(bits) {}
-  /* implicit */ inline C10_HOST_DEVICE BFloat16(float value);
+  inline C10_HOST_DEVICE BFloat16(float value);
   inline C10_HOST_DEVICE operator float() const;
 
-#if defined(__CUDACC__) && !defined(USE_ROCM)
+#if defined(__CUDACC__)
+#if !defined(USE_ROCM)
   inline C10_HOST_DEVICE BFloat16(const __nv_bfloat16& value);
   explicit inline C10_HOST_DEVICE operator __nv_bfloat16() const;
-#endif
-#if defined(__HIPCC__) && defined(USE_ROCM)
+#else // defined(USE_ROCM)
   inline C10_HOST_DEVICE BFloat16(const __hip_bfloat16& value);
   explicit inline C10_HOST_DEVICE operator __hip_bfloat16() const;
-#endif
+#endif // defined(USE_ROCM)
+#endif // defined(__CUDACC__)
 
 #if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
   inline C10_HOST_DEVICE BFloat16(const sycl::ext::oneapi::bfloat16& value);

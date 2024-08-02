@@ -538,14 +538,8 @@ option(BUILD_EXECUTORCH "Master flag to build Executorch" ON)
 if(LINUX)
   set(CMAKE_SHARED_LINKER_FLAGS
       "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-as-needed")
-
-  set(ENV_LDFLAGS "$ENV{LDFLAGS}")
-  string(STRIP "${ENV_LDFLAGS}" ENV_LDFLAGS)
-  # Do not append linker flags passed via env var if they already there
-  if(NOT ${CMAKE_SHARED_LINKER_FLAGS} MATCHES "${ENV_LDFLAGS}")
-     set(CMAKE_SHARED_LINKER_FLAGS
-         "${CMAKE_SHARED_LINKER_FLAGS} ${ENV_LDFLAGS}")
-  endif()
+  set(CMAKE_SHARED_LINKER_FLAGS
+      "${CMAKE_SHARED_LINKER_FLAGS} $ENV{LDFLAGS}")
 endif()
 
 if(MSVC)
@@ -861,7 +855,7 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform"
   ON
-  "USE_CUDA OR USE_ROCM;NOT MSVC"
+  "USE_CUDA OR USE_ROCM; NOT MSVC OR CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0"
   OFF)
 
 # We are currenlty not using alibi attention for Flash So we disable this
@@ -1169,10 +1163,6 @@ if(APPLE)
   endif()
   append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
-endif()
-
-if(USE_XPU)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_XPU")
 endif()
 
 if(EMSCRIPTEN)

@@ -41,7 +41,6 @@ from torch.onnx.symbolic_helper import (
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
 
-
 unittest.TestCase.maxDiff = None
 
 _onnx_test = False  # flag to produce onnx test cases.

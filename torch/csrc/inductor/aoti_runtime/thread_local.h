@@ -2,7 +2,8 @@
 
 #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
 
-namespace torch::aot_inductor {
+namespace torch {
+namespace aot_inductor {
 
 template <typename T>
 struct ThreadLocalCachedOutputTensor;
@@ -64,7 +65,7 @@ struct ThreadLocalCachedOutputTensor<ArrayRefTensor<T>> {
   void realloc(const ArrayRefTensor<T>& t) {
     capacity_ = t.numel();
     storage_ = std::make_unique<T[]>(t.numel());
-    AtenTensorHandle handle = nullptr;
+    AtenTensorHandle handle;
     AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
         storage_.get(),
         t.sizes().size(),
@@ -153,4 +154,5 @@ struct ThreadLocalCachedOutputArray<ArrayRefTensor<T>> {
   ArrayRefTensor<T> tensor_;
 };
 
-} // namespace torch::aot_inductor
+} // namespace aot_inductor
+} // namespace torch

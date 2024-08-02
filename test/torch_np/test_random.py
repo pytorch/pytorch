@@ -9,8 +9,10 @@ import numpy as _np
 import pytest
 
 import torch._dynamo.config as config
+
 import torch._numpy as tnp
 from torch._numpy.testing import assert_equal
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,

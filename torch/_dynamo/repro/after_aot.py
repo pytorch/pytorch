@@ -44,7 +44,6 @@ from torch.hub import tqdm
 
 from .. import config
 
-
 log = logging.getLogger(__name__)
 
 

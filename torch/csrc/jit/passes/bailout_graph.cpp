@@ -12,7 +12,8 @@
 #include <unordered_set>
 #include <utility>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 static bool shouldBeCapturedInByBailOut(Node* n) {
   return n->kind() != prim::Constant;
@@ -222,7 +223,7 @@ struct BailOutGraphBuilderForNode {
 // version of an original graph from a particular point
 struct BailOutInserter {
   explicit BailOutInserter(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)) {}
+      : graph_(std::move(graph)), bailout_index_(0) {}
 
   void run() {
     liveness_sets_ = BuildLivenessSets(graph_);
@@ -321,7 +322,7 @@ struct BailOutInserter {
 
   std::shared_ptr<Graph> graph_;
   std::map<Node*, Node*> subgraphs;
-  std::size_t bailout_index_{0};
+  std::size_t bailout_index_;
   std::unordered_map<Node*, std::vector<Value*>> liveness_sets_;
   std::vector<Node*> bailouts_;
   std::map<Value*, Value*> replacements_;
@@ -393,4 +394,5 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
   return bailout_graph;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

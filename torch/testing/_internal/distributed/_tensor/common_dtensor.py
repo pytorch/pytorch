@@ -1,4 +1,4 @@
-# mypy: allow-untyped-defs
+# mypy: ignore-errors
 
 # Copyright (c) Meta Platforms, Inc. and affiliates
 

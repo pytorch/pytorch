@@ -31,27 +31,8 @@ from torch.masked.maskedtensor.creation import as_masked_tensor, masked_tensor
 
 
 __all__ = [
-    "amax",
-    "amin",
-    "argmax",
-    "argmin",
     "as_masked_tensor",
-    "cumprod",
-    "cumsum",
     "is_masked_tensor",
-    "log_softmax",
-    "logaddexp",
-    "logsumexp",
     "masked_tensor",
     "MaskedTensor",
-    "mean",
-    "median",
-    "norm",
-    "normalize",
-    "prod",
-    "softmax",
-    "softmin",
-    "std",
-    "sum",
-    "var",
 ]

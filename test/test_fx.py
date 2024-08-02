@@ -854,7 +854,7 @@ class TestFX(JitTestCase):
                 self.mm_param = torch.nn.Parameter(torch.randn(d_hid, d_hid))
                 self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
                 self.lin = torch.nn.Linear(d_hid, d_hid)
-                self.buffer = torch.nn.Buffer(torch.randn(bs + 100, d_hid))
+                self.register_buffer('buffer', torch.randn(bs + 100, d_hid))
 
             def forward(self, x):
                 x = torch.mm(x, self.mm_param)
@@ -2703,7 +2703,7 @@ class TestFX(JitTestCase):
         class GetItemBase(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.pe = torch.nn.Buffer(torch.randn(8, 8))
+                self.register_buffer('pe', torch.randn(8, 8))
 
         class GetItem1(GetItemBase):
             def forward(self, x):
@@ -3068,7 +3068,7 @@ class TestFX(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(100, 200)
-                self.buf = torch.nn.Buffer(torch.randn(2, 3))
+                self.register_buffer("buf", torch.randn(2, 3))
                 self.net_c = C()
 
             def forward(self, x):
@@ -3238,7 +3238,7 @@ class TestFX(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.l1 = torch.nn.Linear(1, 1)
-                self.buffer = torch.nn.Buffer(torch.ones(1))
+                self.register_buffer('buffer', torch.ones(1))
 
             def forward(self, x):
                 return self.l1(x) + self.buffer
@@ -3385,7 +3385,7 @@ class TestFX(JitTestCase):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.my_buff = torch.nn.Buffer(torch.rand(3, 4))
+                self.register_buffer("my_buff", torch.rand(3, 4))
                 self.register_parameter(
                     "my_param", torch.nn.Parameter(torch.rand(3, 4))
                 )
@@ -3834,7 +3834,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
     def test_insert_arg(self):
         m = symbolic_trace(SimpleTest())
-        m.buf = torch.nn.Buffer(torch.tensor(0))
+        m.register_buffer("buf", torch.tensor(0))
         output_node = next(iter(reversed(m.graph.nodes)))
         with m.graph.inserting_before(output_node):
             a = m.graph.get_attr("buf")
@@ -3851,31 +3851,6 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         self.assertIs(next(iter(a.users.keys())), output_node)
         m.graph.lint()
 
-    def test_delete_unused_values(self):
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        # disable mutable checking temporarily
-        orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
-        torch.fx.proxy.TracerBase.check_mutable_operations = False
-
-        def fn(a, b, c, d):
-            x = a + b
-            y = c + d
-            y.copy_(x)
-            x = torch.relu(x)
-            return x
-
-        a, b, c, d = (torch.randn(2, 4, requires_grad=False) for _ in range(4))
-        fx_fn = make_fx(fn)(a, b, c, d)
-        print(fx_fn)
-
-        fx_fn.graph.eliminate_dead_code()
-        py_code = fx_fn.recompile()
-        self.assertTrue("copy_ = torch.ops.aten.copy_.default" in py_code.src)
-        self.assertTrue("copy_ = None" in py_code.src)
-
-        # recorver mutable checking flag
-        torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
@@ -4193,7 +4168,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
     def test_preserve_unused_attr_after_unpickle(self):
         gm = torch.fx.symbolic_trace(Add())
         gm.add_submodule("foo", Add())
-        gm.dummy_buffer = torch.nn.Buffer(torch.empty(1))
+        gm.register_buffer("dummy_buffer", torch.empty(1))
         gm.register_parameter("dummy_parameter", torch.nn.Parameter(torch.empty(1)))
         b = io.BytesIO()
         torch.save(gm, b)

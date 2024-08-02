@@ -113,7 +113,6 @@ def build_subgraph_buffer(
     raise ValueError("FlexAttention was passed a subgraph with no output node!")
 
 
-# Inner Triton functions shared by flex_attention & split-k decoding kernels.
 compute_next_offset_func = r"""
 @triton.jit
 def get_offset_for_next_block(loop_iter, col_indices, total_blocks, SPARSE_BLOCK, SPARSE_BLOCK_MULTIPLE, BLOCK):
@@ -127,7 +126,10 @@ def get_offset_for_next_block(loop_iter, col_indices, total_blocks, SPARSE_BLOCK
     return offset
 """
 
-compute_flex_attention = r"""
+flex_attention_template = TritonTemplate(
+    name="flex_attention",
+    grid=flex_attention_grid,
+    source=r"""
 {{def_kernel("Q", "K", "V", "LSE", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
     # Sub notation for this kernel:
     #
@@ -246,7 +248,6 @@ compute_flex_attention = r"""
         acc, l_i, m_i,
         off_z, off_h, offs_m, offs_n,
         kv_indices, kv_num_blocks,
-        0, kv_num_blocks * SPARSE_KV_MULTIPLE,
         MATMUL_PRECISION,
         {{gen_argdefs()}},
         IS_FULL_BLOCKS=False
@@ -284,7 +285,6 @@ compute_flex_attention = r"""
             acc, l_i, m_i,
             off_z, off_h, offs_m, offs_n,
             kv_indices, kv_num_blocks,
-            0, kv_num_blocks * SPARSE_KV_MULTIPLE,
             MATMUL_PRECISION,
             {{gen_argdefs()}},
             IS_FULL_BLOCKS=True
@@ -311,10 +311,8 @@ compute_flex_attention = r"""
         l_ptrs = LSE + off_hz * Q_LEN + offs_m
         lse = m_i + tl.math.log2(l_i)
         tl.store(l_ptrs, lse)
- """
 
 
-compute_forward_block = r"""
 @triton.jit
 def forward_inner(
     q, K_block_ptr, V_block_ptr,
@@ -324,8 +322,6 @@ def forward_inner(
     off_z, off_h, offs_m, offs_n,
     # blocksparse data
     kv_indices, kv_num_blocks,
-    # start kv and end kv block
-    block_n_start, block_n_end,
     MATMUL_PRECISION,
     {{gen_argdefs()}},
     IS_FULL_BLOCKS,
@@ -343,17 +339,19 @@ def forward_inner(
         q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
     # loop over k, v and update accumulator
-    for start_n in range(block_n_start, block_n_end):
+    lo = 0
+    hi = kv_num_blocks * SPARSE_KV_MULTIPLE
+
+    for start_n in range(0, hi):
         # -- load k --
         k = tl.load(K_block_ptr)
         # -- compute qk ---
-        qk = tl.dot(q, k) # TODO: use cuda matmul when q_len <= 2.
+        qk = tl.dot(q, k)
         if not PRESCALE_QK:
             qk *= SM_SCALE
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = offs_n[None, :]
-        # TODO: Add load mask in modification when M/N Boundary is not safe
         {{ modification(
             subgraph_number=0,
             output_name="post_mod_scores",
@@ -415,14 +413,8 @@ def forward_inner(
         offs_n = offs_n + offset
 
     return acc, l_i, m_i
-
-"""
-
-
-flex_attention_template = TritonTemplate(
-    name="flex_attention",
-    grid=flex_attention_grid,
-    source=compute_flex_attention + compute_forward_block + compute_next_offset_func,
+ """
+    + compute_next_offset_func,
 )
 
 
@@ -578,6 +570,17 @@ def flex_attention(
     subgraph_buffer = build_subgraph_buffer(
         placeholder_inps + list(score_mod_other_buffers), subgraph
     )
+    if _use_flex_decoding(query):
+        return create_flex_decoding_kernel(
+            subgraph_buffer,
+            query,
+            key,
+            value,
+            subgraph,
+            block_mask,
+            scale,
+            *score_mod_other_buffers,
+        )
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -590,18 +593,6 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
-    if _use_flex_decoding(query):
-        return create_flex_decoding_kernel(
-            query,
-            key,
-            value,
-            block_mask,
-            scale,
-            subgraph_buffer,
-            mask_graph_buffer,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
-        )
     for buf in [
         query,
         key,

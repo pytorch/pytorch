@@ -3,7 +3,8 @@
 #include <ATen/Tensor.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-namespace torch::aot_inductor {
+namespace torch {
+namespace aot_inductor {
 
 // Functions declared here are not meant to be called from the AOTInductor
 // generated model.so
@@ -23,4 +24,5 @@ TORCH_API std::vector<at::Tensor> alloc_tensors_by_stealing_from_handles(
     AtenTensorHandle* handles,
     size_t length);
 
-} // namespace torch::aot_inductor
+} // namespace aot_inductor
+} // namespace torch

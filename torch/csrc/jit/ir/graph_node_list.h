@@ -2,7 +2,8 @@
 
 #include <c10/util/Exception.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Intrusive doubly linked lists with sane reverse iterators.
 // The header file is named generic_graph_node_list.h because it is ONLY
@@ -183,7 +184,8 @@ static inline bool operator!=(
   return *a != *b;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch
 
 namespace std {
 

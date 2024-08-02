@@ -4,10 +4,8 @@
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 
-#include <utility>
-
 // This number is a heuristic determined with pytorch/benchmark
-static constexpr int DEFAULT_FUSION_SIZE = 4;
+#define DEFAULT_FUSION_SIZE 4
 
 namespace torch::jit {
 
@@ -119,9 +117,7 @@ void initStaticModuleBindings(PyObject* module) {
           });
   m.def(
        "_jit_to_static_module",
-       [](const std::shared_ptr<torch::jit::Graph>& g) {
-         return StaticModule(g);
-       })
+       [](std::shared_ptr<torch::jit::Graph> g) { return StaticModule(g); })
       .def(
           "_jit_to_static_module",
           [](const torch::jit::Module& module) { return StaticModule(module); })
@@ -140,7 +136,7 @@ void initStaticModuleBindings(PyObject* module) {
       .def(
           "_fuse_to_static_module",
           [](std::shared_ptr<torch::jit::Graph> g, size_t min_size) {
-            fuseStaticSubgraphs(std::move(g), min_size);
+            fuseStaticSubgraphs(g, min_size);
           },
           py::arg("graph"),
           py::arg("min_size") = DEFAULT_FUSION_SIZE);

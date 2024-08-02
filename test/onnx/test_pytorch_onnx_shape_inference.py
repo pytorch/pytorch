@@ -3,7 +3,6 @@
 import io
 
 import numpy as np
-
 import onnx
 import pytorch_test_common
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion

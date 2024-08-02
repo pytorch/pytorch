@@ -10,7 +10,6 @@ from torch._custom_op.impl import (
 )
 from torch.library import get_ctx
 
-
 __all__ = [
     "custom_op",
     "impl",
@@ -105,7 +104,7 @@ def custom_op(qualname, func_or_schema=None):
                 f"is passed to `custom_op`"
             )
 
-        schema = infer_schema(func, mutates_args=())
+        schema = infer_schema(func)
         _custom_op_with_schema(qualname, schema)
         return func
 

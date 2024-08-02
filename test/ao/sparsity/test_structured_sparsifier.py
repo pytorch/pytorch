@@ -29,6 +29,7 @@ from torch.testing._internal.common_pruning import (
     SimpleConv2d,
     SimpleLinear,
 )
+
 from torch.testing._internal.common_utils import skipIfTorchDynamo, TestCase
 
 

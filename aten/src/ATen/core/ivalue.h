@@ -103,7 +103,7 @@ struct OptionalArray {
     if (ref) {
       list = std::vector<T>(ref->begin(), ref->end());
     } else {
-      list = std::nullopt;
+      list = nullopt;
     }
     return *this;
   }
@@ -113,7 +113,7 @@ struct OptionalArray {
     if (ref) {
       list = std::vector<T>(ref->begin(), ref->end());
     } else {
-      list = std::nullopt;
+      list = nullopt;
     }
     return *this;
   }

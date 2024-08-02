@@ -2,7 +2,8 @@
 
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 
-namespace torch::aot_inductor {
+namespace torch {
+namespace aot_inductor {
 
 template <typename T>
 inline RAIIAtenTensorHandle scalar_to_tensor_handle(T value) {
@@ -32,4 +33,5 @@ AOTI_RUNTIME_SCALAR_TO_TENSOR(int64, int64_t)
 AOTI_RUNTIME_SCALAR_TO_TENSOR(bool, bool)
 #undef AOTI_RUNTIME_SCALAR_TO_TENSOR
 
-} // namespace torch::aot_inductor
+} // namespace aot_inductor
+} // namespace torch

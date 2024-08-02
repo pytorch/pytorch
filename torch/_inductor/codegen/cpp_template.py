@@ -114,10 +114,9 @@ class CppTemplate(KernelTemplate):
                 #include "c10/util/Unroll.h"
             """
         )
-        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
-            "linux",
-            "win32",
-        ]
+        enable_kernel_profile = (
+            config.cpp.enable_kernel_profile and sys.platform == "linux"
+        )
         if enable_kernel_profile:
             res.writelines(["#include <ATen/record_function.h>"])
         return res

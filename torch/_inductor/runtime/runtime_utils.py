@@ -118,36 +118,18 @@ def do_bench_gpu(*args, **kwargs):
     return triton_do_bench(*args, **kwargs)[0]
 
 
-def do_bench_cpu(fn, warmup=20, rep=100):
-    """
-    Benchmark a function on the CPU.
-
-    Parameters:
-    - fn: The function to be benchmarked.
-    - warmup: The number of milliseconds to run the function before starting the benchmark.
-    - rep: The number of milliseconds to run the function for the benchmark.
-
-    Returns:
-    - The median time (in milliseconds) taken by the function.
-
-    """
-    start = time.perf_counter()
-    while True:
+def do_bench_cpu(fn, warmup=5, times=20):
+    assert times > 0
+    for _ in range(warmup):
         fn()
-        if (time.perf_counter() - start) * 1000 > warmup:
-            break
     durations = []
-    start = time.perf_counter()
-    while True:
+    for _ in range(times):
         t0 = time.perf_counter()
         fn()
         t1 = time.perf_counter()
         durations.append((t1 - t0) * 1000)
-        if (t1 - start) * 1000 > rep:
-            break
     # return the median time
     sorted_durations = sorted(durations)
-    times = len(durations)
     if times % 2 == 0:
         return (sorted_durations[times // 2 - 1] + sorted_durations[times // 2]) / 2
     else:

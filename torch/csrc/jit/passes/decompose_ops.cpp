@@ -10,7 +10,8 @@
 
 #include <ATen/core/symbol.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 c10::AliasAnalysisKind aliasAnalysisFromSchema() {
@@ -230,4 +231,5 @@ void DecomposeOps(std::shared_ptr<Graph>& graph) {
   }
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

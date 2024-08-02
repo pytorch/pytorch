@@ -17,6 +17,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
+
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._dynamo.exc import UserError
@@ -1116,7 +1117,7 @@ def forward(self, x, y):
             def __init__(self):
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.ones(1, 1))
-                self.buffer = torch.nn.Buffer(torch.ones(1, 1))
+                self.register_buffer("buffer", torch.ones(1, 1))
 
             def forward(self, x):
                 x = torch.nn.functional.linear(x, torch.randn(4, 4))
@@ -3160,7 +3161,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer1 = torch.nn.Buffer(torch.ones(6, 2))
+                self.register_buffer("buffer1", torch.ones(6, 2))
 
             def forward(self, x):
                 x.add_(2)
@@ -3772,7 +3773,7 @@ G['macademia'], accessed at:
         class A(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer1 = torch.nn.Buffer(torch.zeros(6, 4))
+                self.register_buffer("buffer1", torch.zeros(6, 4))
 
             def forward(self):
                 return self.buffer1.sum()
@@ -3780,7 +3781,7 @@ G['macademia'], accessed at:
         class B(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer2 = torch.nn.Buffer(torch.ones(6, 4))
+                self.register_buffer("buffer2", torch.ones(6, 4))
 
             def forward(self):
                 return self.buffer2.sum()
@@ -3808,7 +3809,7 @@ G['macademia'], accessed at:
         class A(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer1 = torch.nn.Buffer(torch.zeros(6, 4))
+                self.register_buffer("buffer1", torch.zeros(6, 4))
 
             def forward(self):
                 return self.buffer1.sum()
@@ -3816,7 +3817,7 @@ G['macademia'], accessed at:
         class B(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer2 = torch.nn.Buffer(torch.ones(6, 4))
+                self.register_buffer("buffer2", torch.ones(6, 4))
 
             def forward(self):
                 return self.buffer2.sum()
@@ -3853,7 +3854,7 @@ G['macademia'], accessed at:
         class A(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer1 = torch.nn.Buffer(torch.zeros(6, 4))
+                self.register_buffer("buffer1", torch.zeros(6, 4))
 
             def forward(self):
                 return self.buffer1.sum()
@@ -3861,7 +3862,7 @@ G['macademia'], accessed at:
         class B(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer2 = torch.nn.Buffer(torch.ones(6, 4))
+                self.register_buffer("buffer2", torch.ones(6, 4))
 
             def forward(self):
                 return self.buffer2.sum()
@@ -4156,7 +4157,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer1 = torch.nn.Buffer(torch.zeros(5, 5))
+                self.register_buffer("buffer1", torch.zeros(5, 5))
 
             def forward(self, x):
                 self.buffer1.add_(1)
@@ -4175,7 +4176,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         class Child(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer2 = torch.nn.Buffer(torch.zeros(5))
+                self.register_buffer("buffer2", torch.zeros(5))
 
             def forward(self, x):
                 return x.sum() + self.buffer2.sum()
@@ -4183,7 +4184,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.buffer1 = torch.nn.Buffer(torch.zeros(5))
+                self.register_buffer("buffer1", torch.zeros(5))
                 self.child = Child()
 
             def forward(self, x):
@@ -4503,8 +4504,8 @@ def forward(self, x):
     l_args_0_ = arg0
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
     add = l_args_0_ + 1;  l_args_0_ = None
-    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
-    return pytree.tree_unflatten([add], self._out_spec)""",  # NOQA: B950
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",
         )
         self.assertEqual(out.requires_grad, False)
         with self.assertRaisesRegex(
@@ -4526,8 +4527,8 @@ def forward(self, x):
     l_args_0_ = arg0
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(False)
     add = l_args_0_ + 1;  l_args_0_ = None
-    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
-    return pytree.tree_unflatten([add], self._out_spec)""",  # NOQA: B950
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",
         )
 
         inp = torch.randn(2, 2)
@@ -4548,8 +4549,8 @@ def forward(self, x):
     l_x_ = arg0
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
     add = l_x_ + 1;  l_x_ = None
-    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
-    return pytree.tree_unflatten([add], self._out_spec)""",  # NOQA: B950
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",
         )
         inp = torch.randn(2, 2, requires_grad=True)
         out = gm(inp)
@@ -4582,10 +4583,10 @@ def forward(self, x, b, y):
     l_x_ = arg0
     l_b_ = arg1
     l_y_ = arg2
-    _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+    _set_grad_enabled = torch._C._set_grad_enabled(False)
     x = l_x_.clone();  l_x_ = None
-    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = setitem = None
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = None
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
     return pytree.tree_unflatten([x], self._out_spec)""",
         )
 
@@ -4600,9 +4601,9 @@ def forward(self, x, b, y):
     l_y_ = arg2
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
     x = l_x_.clone();  l_x_ = None
-    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = setitem = None
-    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = _exit_inference_mode = None
-    return pytree.tree_unflatten([x], self._out_spec)""",  # NOQA: B950
+    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = None
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
+    return pytree.tree_unflatten([x], self._out_spec)""",
         )
 
         with self.assertRaisesRegex(

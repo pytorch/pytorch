@@ -18,10 +18,15 @@
 #include <torch/custom_class.h>
 
 #include <caffe2/serialize/in_memory_adapter.h>
+#include <exception>
+#include <fstream>
 #include <string>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
+using caffe2::serialize::FileAdapter;
+using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::MemoryReadAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
@@ -54,7 +59,8 @@ IValueUnpickler::IValueUnpickler(std::unique_ptr<PyTorchStreamReader> reader)
 c10::IValue IValueUnpickler::deserialize(std::optional<at::Device> device) {
   auto mcu = std::make_shared<mobile::CompilationUnit>();
 
-  return readArchive("data", mcu, device);
+  // NOLINTNEXTLINE(performance-move-const-arg)
+  return readArchive("data", mcu, std::move(device));
 }
 
 c10::IValue IValueUnpickler::readArchive(
@@ -151,7 +157,8 @@ c10::IValue IValueUnpickler::readArchive(
       std::move(type_resolver),
       std::move(obj_loader),
       std::move(read_record),
-      device,
+      // NOLINTNEXTLINE(performance-move-const-arg)
+      std::move(device),
       false,
       nullptr);
   return unpickler.parse_ivalue();
@@ -232,7 +239,7 @@ std::map<std::string, at::Tensor> mobile_module_to_parameter_map(
 }
 
 static std::map<std::string, at::Tensor> _load_parameters_bytes(
-    const std::shared_ptr<char>& data,
+    std::shared_ptr<char> data,
     size_t size,
     std::optional<at::Device> device) {
   TORCH_CHECK(size >= kFileFormatHeaderSize, "Unrecognized data format");
@@ -263,14 +270,15 @@ std::map<std::string, at::Tensor> _load_parameters(
     std::istream& in,
     std::optional<at::Device> device) {
   auto [data, size] = get_stream_content(in);
-  return _load_parameters_bytes(data, size, device);
+  return _load_parameters_bytes(std::move(data), size, device);
 }
 
 std::map<std::string, at::Tensor> _load_parameters(
     const std::string& filename,
     std::optional<at::Device> device) {
   auto [data, size] = get_file_content(filename.c_str());
-  return _load_parameters_bytes(data, size, device);
+  return _load_parameters_bytes(std::move(data), size, device);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

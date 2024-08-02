@@ -3,7 +3,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct TORCH_API CanonicalizedSymbolicShape {
   // TODO: Consider in the future if it is reasonable to
@@ -52,4 +53,5 @@ TORCH_API void cache_shape_function(
 TORCH_API void clear_shape_cache();
 TORCH_API size_t get_shape_cache_size();
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -9,7 +9,8 @@
 #include <ATen/core/symbol.h>
 #include <c10/util/irange.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 static const auto countsAttribute = Symbol::attr("none_counts");
 
@@ -476,4 +477,5 @@ void specializeAutogradZero(std::shared_ptr<Graph> g) {
   azs.run();
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

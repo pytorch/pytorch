@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 TORCH_API std::shared_ptr<Graph> Canonicalize(
     const std::shared_ptr<Graph>& graph,
@@ -17,4 +18,5 @@ TORCH_API bool isBeforeOrAfter(
     const Use& b,
     bool checking_before);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

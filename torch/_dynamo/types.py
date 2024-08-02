@@ -2,20 +2,24 @@ import dataclasses
 import sys
 import types
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Protocol, Union
-
-# CacheEntry has a `check_fn` field for the guard, and a `code` field for the code object.
-from torch._C._dynamo.eval_frame import (
-    _CacheEntry as CacheEntry,
-    _ExtraState as ExtraState,
-)
-from torch._guards import CompileId
+from typing_extensions import TypeAlias
 
 
 if sys.version_info >= (3, 11):
-    from torch._C._dynamo.eval_frame import _PyInterpreterFrame as DynamoFrameType
-else:
-    from types import FrameType as DynamoFrameType
+    from torch._C._dynamo import eval_frame
 
+    DynamoFrameType: TypeAlias = eval_frame._PyInterpreterFrame
+else:
+    DynamoFrameType: TypeAlias = types.FrameType
+
+import torch
+from torch._guards import CompileId
+
+# This class has a `check_fn` field for the guard,
+#  and a `code` field for the code object.
+CacheEntry = torch._C._dynamo.eval_frame._CacheEntry
+
+ExtraState = torch._C._dynamo.eval_frame._ExtraState
 
 # We use a dict to store additional data per frame.
 FrameState = Dict[Any, Any]

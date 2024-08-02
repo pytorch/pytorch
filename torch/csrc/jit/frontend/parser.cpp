@@ -263,7 +263,8 @@ struct ParserImpl {
   }
   Expr parseExp(int precedence) {
     TreeRef prefix;
-    int unary_prec = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    int unary_prec;
     if (shared.isUnary(L.cur().kind, &unary_prec)) {
       auto kind = L.cur().kind;
       auto pos = L.cur().range;
@@ -282,7 +283,8 @@ struct ParserImpl {
     } else {
       prefix = parseBaseExp();
     }
-    int binary_prec = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    int binary_prec;
     while (shared.isBinary(L.cur().kind, &binary_prec)) {
       if (binary_prec <= precedence) // not allowed to parse something which is
         // not greater than 'precedence'

@@ -9,7 +9,11 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
-from torch._guards import Source
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
+from ..._guards import Source
 
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -30,10 +34,6 @@ from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .iter import IteratorVariable
-
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class BaseListVariable(VariableTracker):

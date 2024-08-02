@@ -26,98 +26,98 @@ bool SimplifierHashType::operator!=(const size_t other) const {
   return _h != other;
 }
 
-void HashProvider::visit(const AddPtr& v) {
+void HashProvider::visit(AddPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "+", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const SubPtr& v) {
+void HashProvider::visit(SubPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "-", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const MulPtr& v) {
+void HashProvider::visit(MulPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "*", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const DivPtr& v) {
+void HashProvider::visit(DivPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "/", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const ModPtr& v) {
+void HashProvider::visit(ModPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "%", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const RoundOffPtr& v) {
+void HashProvider::visit(RoundOffPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "rof", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const MaxPtr& v) {
+void HashProvider::visit(MaxPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "Mx", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const MinPtr& v) {
+void HashProvider::visit(MinPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "Mn", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const AndPtr& v) {
+void HashProvider::visit(AndPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "&", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const OrPtr& v) {
+void HashProvider::visit(OrPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "|", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const XorPtr& v) {
+void HashProvider::visit(XorPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "^", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const LshiftPtr& v) {
+void HashProvider::visit(LshiftPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), "<<", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const RshiftPtr& v) {
+void HashProvider::visit(RshiftPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
   putHash(v, hash_combine(hashOf(v->lhs()), ">>", hashOf(v->rhs())));
 }
 
-void HashProvider::visit(const CompareSelectPtr& v) {
+void HashProvider::visit(CompareSelectPtr v) {
   CACHE_GUARD();
   v->lhs()->accept(this);
   v->rhs()->accept(this);
@@ -133,18 +133,18 @@ void HashProvider::visit(const CompareSelectPtr& v) {
           hashOf(v->ret_val2())));
 }
 
-void HashProvider::visit(const CastPtr& v) {
+void HashProvider::visit(CastPtr v) {
   CACHE_GUARD();
   v->src_value()->accept(this);
   putHash(v, hash_combine("cast", v->dtype(), hashOf(v->src_value())));
 }
 
-void HashProvider::visit(const VarPtr& v) {
+void HashProvider::visit(VarPtr v) {
   CACHE_GUARD();
   putHash(v, hash_combine("var", name_manager_.get_unique_name(v)));
 }
 
-void HashProvider::visit(const RampPtr& v) {
+void HashProvider::visit(RampPtr v) {
   CACHE_GUARD();
   v->base()->accept(this);
   v->stride()->accept(this);
@@ -153,7 +153,7 @@ void HashProvider::visit(const RampPtr& v) {
       hash_combine("ramp", hashOf(v->base()), hashOf(v->stride()), v->lanes()));
 }
 
-void HashProvider::visit(const LoadPtr& v) {
+void HashProvider::visit(LoadPtr v) {
   CACHE_GUARD();
   v->base_handle()->accept(this);
   SimplifierHashType indices_hash;
@@ -164,7 +164,7 @@ void HashProvider::visit(const LoadPtr& v) {
   putHash(v, hash_combine("load", hashOf(v->base_handle()), indices_hash));
 }
 
-void HashProvider::visit(const StorePtr& v) {
+void HashProvider::visit(StorePtr v) {
   CACHE_GUARD();
   v->base_handle()->accept(this);
   SimplifierHashType indices_hash;
@@ -179,7 +179,7 @@ void HashProvider::visit(const StorePtr& v) {
           "store", hashOf(v->base_handle()), indices_hash, hashOf(v->value())));
 }
 
-void HashProvider::visit(const BlockPtr& v) {
+void HashProvider::visit(BlockPtr v) {
   CACHE_GUARD();
   SimplifierHashType hash;
 
@@ -190,7 +190,7 @@ void HashProvider::visit(const BlockPtr& v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const ForPtr& v) {
+void HashProvider::visit(ForPtr v) {
   CACHE_GUARD();
   v->var()->accept(this);
   v->start()->accept(this);
@@ -207,13 +207,13 @@ void HashProvider::visit(const ForPtr& v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const BroadcastPtr& v) {
+void HashProvider::visit(BroadcastPtr v) {
   CACHE_GUARD();
   v->value()->accept(this);
   putHash(v, hash_combine("broadcast", hashOf(v->value()), v->lanes()));
 }
 
-void HashProvider::visit(const IfThenElsePtr& v) {
+void HashProvider::visit(IfThenElsePtr v) {
   CACHE_GUARD();
   v->condition()->accept(this);
   v->true_value()->accept(this);
@@ -228,7 +228,7 @@ void HashProvider::visit(const IfThenElsePtr& v) {
           hashOf(v->false_value())));
 }
 
-void HashProvider::visit(const IntrinsicsPtr& v) {
+void HashProvider::visit(IntrinsicsPtr v) {
   CACHE_GUARD();
   // calls to rand are not symbolic and have a different value each time, they
   // should not hash to anything and this is the best we can do.
@@ -247,7 +247,7 @@ void HashProvider::visit(const IntrinsicsPtr& v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const AllocatePtr& v) {
+void HashProvider::visit(AllocatePtr v) {
   CACHE_GUARD();
   VarPtr buffer_var = v->buffer_var();
   buffer_var->accept(this);
@@ -263,7 +263,7 @@ void HashProvider::visit(const AllocatePtr& v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const FreePtr& v) {
+void HashProvider::visit(FreePtr v) {
   CACHE_GUARD();
   VarPtr buffer_var = v->buffer_var();
   buffer_var->accept(this);
@@ -271,7 +271,7 @@ void HashProvider::visit(const FreePtr& v) {
   putHash(v, hash_combine("free", hashOf(buffer_var)));
 }
 
-void HashProvider::visit(const CondPtr& v) {
+void HashProvider::visit(CondPtr v) {
   CACHE_GUARD();
   ExprPtr condition = v->condition();
   StmtPtr true_stmt = v->true_stmt();
@@ -291,7 +291,7 @@ void HashProvider::visit(const CondPtr& v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const TermPtr& v) {
+void HashProvider::visit(TermPtr v) {
   CACHE_GUARD();
   v->scalar()->accept(this);
 
@@ -304,7 +304,7 @@ void HashProvider::visit(const TermPtr& v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const PolynomialPtr& v) {
+void HashProvider::visit(PolynomialPtr v) {
   CACHE_GUARD();
   v->scalar()->accept(this);
 
@@ -317,7 +317,7 @@ void HashProvider::visit(const PolynomialPtr& v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const MaxTermPtr& v) {
+void HashProvider::visit(MaxTermPtr v) {
   CACHE_GUARD();
   SimplifierHashType hash = hash_combine("maxterm");
   if (v->scalar()) {
@@ -333,7 +333,7 @@ void HashProvider::visit(const MaxTermPtr& v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const MinTermPtr& v) {
+void HashProvider::visit(MinTermPtr v) {
   CACHE_GUARD();
   SimplifierHashType hash = hash_combine("minterm");
   if (v->scalar()) {
