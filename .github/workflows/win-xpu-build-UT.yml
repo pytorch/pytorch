@@ -1,4 +1,4 @@
-name: Win-xpu-build-UT
+name: A-win-build-UT
 on:
     workflow_dispatch:
       inputs:
@@ -20,7 +20,8 @@ env:
     node_proxy: 'http://proxy-us.intel.com:911'
     USE_XPU: 1
     VS2022INSTALLDIR: 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools'
-    PATH: 'C:\Program Files\Git\cmd;C:\Users\nrvalgo_jenkinsadm\miniforge3;C:\Users\nrvalgo_jenkinsadm\miniforge3\Scripts;%PATH%'
+    basekit_path: 'C:\Program Files (x86)\Intel\oneAPI'
+    PATH: 'C:\Program Files\Git\cmd;C:\Users\nrvalgo_jenkinsadm\miniforge3;C:\Users\nrvalgo_jenkinsadm\miniforge3\Scripts.'
 
 jobs:
   Preparation:
@@ -42,16 +43,10 @@ jobs:
         call conda create -n %conda_env% python=3.10 -y
         call conda activate %conda_env%
         call conda remove ucrt -y
+        call conda install ninja 
         call conda install pyyaml --force -y
-        call conda install ninja --force -y
         call pip install cmake==3.26.4 --force
         call conda list
-
-    - name: Activate Intel Basekit
-      shell: cmd
-      run: |
-        set "basekit_path=C:\Program Files (x86)\Intel\oneAPI"
-        call "%basekit_path%\setvars.bat"
 
   Build-whls:
     runs-on: ["${{ inputs.win_runner }}"]
@@ -61,7 +56,7 @@ jobs:
       shell: cmd
       run: |
         call %conda_path%\Scripts\activate.bat activate %conda_env%
-        call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
+        call "%basekit_path%\setvars.bat"
 
         if exist "%home_dir%\pytorch" (
           rmdir /s /q "%home_dir%\pytorch"
