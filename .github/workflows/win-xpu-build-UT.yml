@@ -13,15 +13,14 @@ on:
             type: string
 
 env:
-    home_dir: '%CD%\torch'
+    home_dir: 'torch'
     conda_env: torch_venv
     conda_path: C:\Users\nrvalgo_jenkinsadm\miniforge3
     python_version: '3.10'
     node_proxy: 'http://proxy-us.intel.com:911'
     USE_XPU: 1
     VS2022INSTALLDIR: 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools'
-    ACTIONS_RUNNER_DEBUG: true
-    PATH: '%PATH%;C:\Program Files\Git\cmd;C:\Users\nrvalgo_jenkinsadm\miniforge3;C:\Users\nrvalgo_jenkinsadm\miniforge3\Scripts.'
+    PATH: 'C:\Program Files\Git\cmd;C:\Users\nrvalgo_jenkinsadm\miniforge3;C:\Users\nrvalgo_jenkinsadm\miniforge3\Scripts;%PATH%'
 
 jobs:
   Preparation:
@@ -35,16 +34,16 @@ jobs:
         fetch-depth: 0
         path: ${{ env.home_dir }}//actionrepo
 
-    - name: Set conda environment
-      shell: cmd
-      run: |
-        call %conda_path%\Scripts\activate.bat
-        call conda remove -n %conda_env% --all -y
-        call conda create -n %conda_env% python=3.10 -y
-        call conda activate %conda_env%
-        call conda remove ucrt -y
-        call conda install cmake==3.26.4 --force -y
-        call conda list
+    # - name: Set conda environment
+    #   shell: cmd
+    #   run: |
+    #     call %conda_path%\Scripts\activate.bat
+    #     call conda remove -n %conda_env% --all -y
+    #     call conda create -n %conda_env% python=3.10 -y
+    #     call conda activate %conda_env%
+    #     call conda remove ucrt -y
+    #     call conda install cmake==3.26.4 --force -y
+    #     call conda list
 
     - name: Activate Intel Basekit
       shell: cmd
@@ -59,13 +58,17 @@ jobs:
     - name: Build Torch
       shell: cmd
       run: |
-        call %conda_path%\Scripts\activate.bat activate %conda_env%
-        conda list
-        if exist "%home_dir%\pytorch" rmdir /s /q "%home_dir%\pytorch"
+        call %conda_path%\Scripts\activate.bat activate
+        call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
+
+        if exist "%home_dir%\pytorch" (
+          rmdir /s /q "%home_dir%\pytorch"
+        )
+
         git clone https://github.com/pytorch/pytorch.git %home_dir%\pytorch
         cd %home_dir%\pytorch
         echo ${{ inputs.working_commit }} > third_party/xpu.txt
-        python -u setup.py bdist_wheel
+        python -u setup.py bdist_wheel > build.log
 
   #   - name: Build TorchVision
   #     shell: cmd
@@ -106,3 +109,19 @@ jobs:
   #       cd %home_dir%\xpurepo\examples
   #       pip install pytest expecttest
   #       python -m pytest -v | tee "%home_dir%\mtl-bundle-uts.log"
+
+  Upload-whls:
+    runs-on: ["${{ inputs.win_runner }}"]
+    needs: [Preparation, Build-whls]
+    steps:
+    - name: Upload whls
+      uses: actions/upload-artifact@v2
+      with:
+        name: whls
+        path: ${{ env.home_dir }}\pytorch\dist
+
+    - name: Upload logs
+      uses: actions/upload-artifact@v2
+      with:
+        name: logs
+        path: ${{ env.home_dir }}\pytorch\build.log
