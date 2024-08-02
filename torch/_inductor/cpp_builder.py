@@ -117,6 +117,7 @@ def install_gcc_via_conda() -> str:
     return cxx_path
 
 
+@functools.lru_cache(None)
 def check_compiler_exist_windows(compiler: str) -> None:
     """
     Check if compiler is ready, in case end user not activate MSVC environment.
