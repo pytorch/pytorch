@@ -627,7 +627,7 @@ class TestStateDictHooks(TestCase):
 
         # Test with module instance method as hook
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Parameter(torch.rand(10))
 
@@ -699,7 +699,7 @@ class TestStateDictHooks(TestCase):
         hook_called = 0
 
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Parameter(torch.rand(10))
 
@@ -813,7 +813,7 @@ class TestStateDictHooks(TestCase):
 
     def test_register_state_dict_pre_hook(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = nn.Sequential(
                     nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3)
@@ -827,7 +827,7 @@ class TestStateDictHooks(TestCase):
 
     def test_register_state_dict_pre_hook_lazy_module(self):
         class MyLazyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer1 = nn.LazyLinear(8)
                 self.layer2 = nn.LazyLinear(5)
