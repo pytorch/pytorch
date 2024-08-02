@@ -3,9 +3,9 @@
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+#include <utility>
+
+namespace torch::jit::tensorexpr {
 
 int64_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
   if (idx < 0) {
@@ -30,7 +30,6 @@ ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
   }
 
   switch (dt) {
-// NOLINTNEXTLINE
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
     e = cast<Type>(e);        \
@@ -160,7 +159,7 @@ ExprHandle demoteOutput(
   return e;
 }
 
-std::optional<TensorInfo> getTensorInfo(BufHandle b) {
+std::optional<TensorInfo> getTensorInfo(const BufHandle& b) {
   std::vector<int64_t> dims;
   for (auto dim : b.dims()) {
     auto val = intValue(dim.node());
@@ -180,7 +179,7 @@ ExprHandle clamp(
   return CompareSelect::make(mm, cmax, cmax, mm, kGT);
 }
 
-static bool isOne(ExprHandle e) {
+static bool isOne(const ExprHandle& e) {
   auto const& n = intValue(e);
   if (!n) {
     return false;
@@ -239,7 +238,7 @@ static std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
 
 std::vector<ExprHandle> broadcastShapes(
     std::vector<std::vector<ExprHandle>> shapes) {
-  return broadcastShapesImpl(shapes).first;
+  return broadcastShapesImpl(std::move(shapes)).first;
 }
 
 std::vector<ExprHandle> broadcastShapes(
@@ -271,7 +270,7 @@ ExprHandle scalarOrConstant(const ArgValue& v) {
   return constant(v);
 }
 
-ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes) {
+ExprHandle broadcast(const BufHandle& b, const std::vector<ExprHandle>& axes) {
   return b.load(computeIndicesToBroadcast(axes, b.dims()));
 }
 
@@ -361,7 +360,7 @@ Tensor computeTranspose(
   // Trivial case of 0-dim and 1-dim tensors: transpose is just a copy
   if (A.ndim() <= 1) {
     return Compute(
-        "aten_transpose", outputShape, [&](std::vector<VarHandle> axes) {
+        "aten_transpose", outputShape, [&](const std::vector<VarHandle>& axes) {
           TORCH_INTERNAL_ASSERT(
               axes.size() <= 1,
               buildErrorMessage("Invalid axes size in transpose"));
@@ -569,7 +568,7 @@ static Tensor computeCatWoConditionals(
 
   auto gen_code_for_input = [&](const BufHandle& inp,
                                 size_t inp_pos,
-                                ExprPtr concat_dim_size,
+                                const ExprPtr& concat_dim_size,
                                 const std::vector<ExprHandle>& dims) {
     std::vector<VarPtr> for_vars(dims.size());
     std::vector<ExprPtr> load_indices(dims.size());
@@ -701,6 +700,4 @@ Tensor computeEmbedding(
   return Tensor(ResultBuf.node(), s);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
