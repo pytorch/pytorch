@@ -1260,11 +1260,10 @@ inline Expr pep604union_to_union(const Expr& expr) {
   // In order to support unions with more than 2 operands ((x|y)|z), we need to
   // recursively flatten the tree of | expressions.
   auto members = get_pep604_union_members(expr);
-  auto synthesised_union = Subscript::create(
+  return Subscript::create(
       expr.range(),
       Var::create(expr.range(), Ident::create(expr.range(), "Union")),
       List<Expr>::create(expr.range(), members));
-  return synthesised_union;
 }
 
 } // namespace torch::jit
