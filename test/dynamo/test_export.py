@@ -3650,8 +3650,9 @@ G['bulbous_bouffant'], accessed at:
             """\
 G['macademia'], accessed at:
   File "test_export.py", line N, in f
+    y = g(y)
   File "test_export.py", line N, in g
-    )
+    y = macademia + y
 """,
         )
 
@@ -4279,8 +4280,6 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
             gm.true_graph_0.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    sym_size_int = torch.ops.aten.sym_size.int(arg1_1, 1)
-    eq = sym_size_int == 5;  sym_size_int = None
     out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, arg1_1, arg0_1);  arg1_1 = arg0_1 = None
     sum_1 = torch.ops.aten.sum.default(out_dtype);  out_dtype = None
     return (sum_1,)""",
@@ -4290,24 +4289,6 @@ def forward(self, arg0_1, arg1_1):
             gm.false_graph_0.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    sym_size_int = torch.ops.aten.sym_size.int(arg1_1, 1)
-    eq = sym_size_int == 1
-    eq_1 = sym_size_int == 1
-    eq_2 = sym_size_int == sym_size_int
-    eq_3 = sym_size_int == 1
-    sym_size_int_1 = torch.ops.aten.sym_size.int(arg1_1, 0)
-    eq_4 = sym_size_int_1 == 1
-    eq_5 = sym_size_int_1 == 1
-    eq_6 = sym_size_int_1 == sym_size_int_1
-    eq_7 = sym_size_int_1 == 1
-    eq_8 = sym_size_int == 1
-    eq_9 = sym_size_int == 5
-    eq_10 = sym_size_int == 1
-    eq_11 = sym_size_int_1 == 1
-    eq_12 = sym_size_int_1 == 5
-    eq_13 = sym_size_int_1 == 1
-    eq_14 = sym_size_int_1 == sym_size_int_1;  sym_size_int_1 = None
-    eq_15 = sym_size_int == sym_size_int;  sym_size_int = None
     out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mul.Tensor, torch.int32, arg1_1, arg0_1);  arg1_1 = arg0_1 = None
     sum_1 = torch.ops.aten.sum.default(out_dtype);  out_dtype = None
     return (sum_1,)""",
