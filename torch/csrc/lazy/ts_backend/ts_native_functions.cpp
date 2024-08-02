@@ -130,6 +130,7 @@ at::Tensor LazyNativeFunctions::_copy_from_and_resize(
     // at this point we know dst is a lazy tensor
     auto* dest_impl =
         dynamic_cast<torch::lazy::LTCTensorImpl*>(dst.unsafeGetTensorImpl());
+    TORCH_CHECK(dest_impl);
     dest_impl->tensor()->UpdateFromTensorOut(self_tensor);
     dest_impl->force_refresh_sizes();
   }
