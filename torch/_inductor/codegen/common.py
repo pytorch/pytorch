@@ -1271,7 +1271,7 @@ class KernelArgs:
         for prefix in ["zuf", "zf"]:
             if str(name).startswith(prefix):
                 # Have to rename it to ks to avoid reindexing issue
-                return self._lookup("ks", self.sizevars, name)
+                return self._lookup(f"k{prefix}", self.sizevars, name)
         return self._lookup("ks", self.sizevars, name)
 
     def call_names(self):

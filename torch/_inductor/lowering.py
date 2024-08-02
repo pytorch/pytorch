@@ -584,7 +584,9 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
     return inner
 
 
-def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
+def to_dtype(x: Union[TensorBox, sympy.Symbol], dtype: torch.dtype, copy=False):
+    if isinstance(x, sympy.Symbol):
+        return x
     src_dtype = x.get_dtype()
     if src_dtype == dtype:
         return clone(x) if copy else x
