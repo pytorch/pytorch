@@ -67,7 +67,7 @@ static bool checkTypes(const ScalarType highType, const int typeConstraints) {
   return false;
 }
 
-static bool isScalar(ExprHandle e) {
+static bool isScalar(const ExprHandle& e) {
   auto n = e.node();
   return n->isConstant() || to<Var>(n);
 }
@@ -142,7 +142,6 @@ ExprHandle demoteOutput(
   }
 
   switch (*type) {
-// NOLINTNEXTLINE
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
     return cast<Type>(e);
@@ -454,7 +453,6 @@ Tensor computeReshape(
           // then it's 3 for dim_idx = 1, and then it's 3*2 for dim_idx = 0.
           stride = stride * A.dim(dim_idx);
         }
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         return A.load(orig_buf_indexes);
       });
 }
@@ -511,8 +509,7 @@ static Tensor computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides) {
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto input_list = std::get<BufList>(inputs[0]);
+  auto const& input_list = std::get<BufList>(inputs[0]);
   auto arg_dim = inputs[1];
   auto cat_info = processCatList(input_list);
   ScalarType high_type = cat_info.first;
@@ -626,8 +623,7 @@ Tensor computeCat(
   if (device == at::kCPU && getCatWoConditionals()) {
     return computeCatWoConditionals(inputs, outputShape, outputStrides);
   }
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto inputList = std::get<BufList>(inputs[0]);
+  auto const& inputList = std::get<BufList>(inputs[0]);
   auto argDim = inputs[1];
   auto catInfo = processCatList(inputList);
   ScalarType highType = catInfo.first;
