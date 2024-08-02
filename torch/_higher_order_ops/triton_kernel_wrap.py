@@ -519,7 +519,7 @@ def identify_mutated_tensors(kernel, kwargs):
 
 # Used for wrapping a Triton Kernel
 class TritonKernelWrapperMutation(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_mutation")
 
 
@@ -528,7 +528,7 @@ triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 
 # Used for wrapping a Triton Kernel in a functional manner
 class TritonKernelWrapperFunctional(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_functional")
 
 
@@ -582,7 +582,8 @@ def trace_triton_kernel_wrapper(proxy_mode, func_overload, node_args):
         proxy_args,
         name=func_overload.__name__ + "_proxy",
     )
-    return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
+    ret = track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
+    return ret
 
 
 @triton_kernel_wrapper_mutation.py_impl(ProxyTorchDispatchMode)

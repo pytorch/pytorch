@@ -66,7 +66,7 @@ class ConstantFolder(torch.fx.Interpreter):
         skip_constructors: bool = False,
         lifted_constants: Optional[Dict[str, torch.Tensor]] = None,
         skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
-    ):
+    ) -> None:
         super().__init__(gm)
         self.node_replacements: Dict[torch.fx.Node, Any] = {}
         self.replaced_uses: Dict[torch.fx.Node, int] = collections.Counter()

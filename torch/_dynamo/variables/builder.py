@@ -15,7 +15,7 @@ import re
 import sys
 import types
 import weakref
-from typing import Any, List, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, List, MutableMapping, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import SymInt
@@ -181,6 +181,7 @@ from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
+    MutableMappingVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
@@ -270,7 +271,7 @@ class GraphArg:
 
 
 class BackwardStateGraphArg(GraphArg):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(
             source=None,
             _example=BackwardState(),
@@ -303,7 +304,7 @@ class VariableBuilder:
         self,
         tx,
         source: Source,
-    ):
+    ) -> None:
         assert (
             source is not None
         ), "Consider SourcelessBuilder for ephemeral objects, usually objects created locally."
@@ -1076,6 +1077,9 @@ class VariableBuilder:
                 fake_script_obj,
                 source=self.source,
             )
+        elif issubclass(type(value), MutableMapping):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return MutableMappingVariable(value, source=self.source)
         else:
             return self.wrap_user_defined(value)
 
@@ -1300,7 +1304,7 @@ class VariableBuilder:
                 # Assume that integers that came from NN modules want to be
                 # specialized (as we don't expect users to be changing the
                 # NN modules on the fly)
-                or self.source.guard_source().is_nn_module()
+                or self.source.guard_source().is_specialized_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
                 # TODO: Delete this condition when rollout is done.  NB: this
@@ -1350,7 +1354,7 @@ class VariableBuilder:
         )
 
         if (
-            source.guard_source().is_nn_module() or make_graph_attribute
+            source.guard_source().is_specialized_nn_module() or make_graph_attribute
         ) and not source.guard_source().is_fsdp_module():
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
@@ -2612,7 +2616,7 @@ def wrap_to_fake_tensor_and_record(
 
         if (
             is_tensor
-            and not (static_shapes and source.is_nn_module())
+            and not (static_shapes and source.is_specialized_nn_module())
             and not is_constant_source(source)
         ):
             tx.output.tracked_fakes.append(
@@ -2638,7 +2642,7 @@ class SourcelessBuilder:
     if/else type->VariableTracker trees that were cropping up all over dynamo.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         raise AssertionError("Use SourcelessBuilder.create()")
 
     @staticmethod

@@ -139,7 +139,8 @@ class InlineOptionalStreamGuard {
   /// Set the current device to the device associated with the passed stream,
   /// and set the current stream on that device to the passed stream,
   /// if the passed stream is not nullopt.
-  explicit InlineOptionalStreamGuard(optional<Stream> stream_opt) : guard_() {
+  explicit InlineOptionalStreamGuard(std::optional<Stream> stream_opt)
+      : guard_() {
     if (stream_opt.has_value()) {
       guard_.emplace(stream_opt.value());
     }

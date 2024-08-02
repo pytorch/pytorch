@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import importlib
 from abc import ABC, abstractmethod
-from pickle import (  # type: ignore[attr-defined]  # type: ignore[attr-defined]
+from pickle import (  # type: ignore[attr-defined]
     _getattribute,
     _Pickler,
     whichmodule as _pickle_whichmodule,
@@ -10,6 +10,7 @@ from types import ModuleType
 from typing import Any, Dict, List, Optional, Tuple
 
 from ._mangling import demangle, get_mangle_prefix, is_mangled
+
 
 __all__ = ["ObjNotFoundError", "ObjMismatchError", "Importer", "OrderedImporter"]
 
