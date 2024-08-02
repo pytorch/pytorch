@@ -79,7 +79,7 @@ def patch_reduce_scatter(new_reduce_scatter):
 
 
 class MyModel(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.lin1 = nn.Linear(10, 10)
         self.lin2 = nn.Linear(10, 10)
