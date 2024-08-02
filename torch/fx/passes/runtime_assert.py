@@ -179,16 +179,17 @@ def insert_deferred_runtime_asserts(
     def add_runtime_asserts(ras):
         for ra in ras:
             if (
-                ra.expr in added_asserts  # redundant
+                # redundant
+                ra.expr in added_asserts
+                # if we've already added a constrain_range call for this symbol,
+                # then single-symbol bound asserts like u0 >= 0, u0 <= 5 are redundant.
                 or (
                     len(ra.expr.free_symbols) == 1
                     and next(iter(ra.expr.free_symbols)) in constrained_unbacked_symbols
                     and _is_bound_expr_for_symbol(ra.expr)
                 )
-                # if we've already added a constrain_range call for this symbol,
-                # then single-symbol bound asserts like u0 >= 0, u0 <= 5 are redundant.
-                or _has_unsupported_sympy_function(ra.expr)
                 # don't try to reify sympy functions we can't turn into FX nodes
+                or _has_unsupported_sympy_function(ra.expr)
             ):
                 continue
 
