@@ -97,8 +97,15 @@ class OperatorBase:
                 return True
         return False
 
-    def py_impl(self, k):
+    def py_impl(self, k, *, raw=False):
         def inner(fn):
+            # import cycles
+            if "torch.fx.experimental.proxy_tensor" in sys.modules:
+                from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+
+                if not raw and k is ProxyTorchDispatchMode:
+                    return self.py_proxy_impl(fn)
+
             if inspect.isclass(k) and (
                 issubclass(k, TorchDispatchMode) or issubclass(k, torch.Tensor)
             ):
@@ -127,6 +134,23 @@ class OperatorBase:
             return fn
 
         return inner
+
+    # Special registrar for ProxyTensorMode that handles basic stuff that
+    # every proxy tensor mode implementation needs to handle
+    def py_proxy_impl(self, fn):
+        from torch.fx.experimental.proxy_tensor import (
+            ProxyTorchDispatchMode,
+            set_original_aten_op,
+        )
+
+        def wrapped_proxy_fn(mode, *args, **kwargs):
+            with mode.sym_mode.enable(False), set_original_aten_op(self):
+                if not mode.enable_tracing:
+                    return self(*args, **kwargs)
+
+                return fn(mode, *args, **kwargs)
+
+        return self.py_impl(ProxyTorchDispatchMode, raw=True)(wrapped_proxy_fn)
 
     # Registers an implementation to all **3** variants of functionalization that we have:
     # - DispatchKey.Functionalize
@@ -278,10 +302,10 @@ class HigherOrderOperator(OperatorBase):
         # it to next key. This is only safe to do when PreDispatch key stack has no
         # active modes.
 
-    def py_impl(self, k):
+    def py_impl(self, k, *, raw=False):
         if isinstance(k, torch._C.DispatchKey) and not self.non_fallthrough_keys.has(k):
             self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
-        return super().py_impl(k)
+        return super().py_impl(k, raw=raw)
 
     @property
     def namespace(self):

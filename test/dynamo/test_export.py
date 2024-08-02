@@ -3624,7 +3624,7 @@ class GraphModule(torch.nn.Module):
             """\
 G['bulbous_bouffant'], accessed at:
   File "test_export.py", line N, in f
-    [[], [], [], []],
+    return bulbous_bouffant + y
 """,
         )
 

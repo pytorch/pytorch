@@ -52,7 +52,7 @@ from weakref import WeakKeyDictionary
 if TYPE_CHECKING:
     import types
 
-    from torch._ops import OpOverload
+    from torch._ops import OpOverload, OperatorBase
     from torch.fx._symbolic_trace import PHBase
     from torch.types import IntLikeType
 
@@ -977,7 +977,7 @@ def wrap_key(f: Callable[_P, R], tensors: _P.args, tracer: _ProxyTracer, pre_dis
 
 ORIGINAL_ATEN: Optional[object] = None
 @contextmanager
-def set_original_aten_op(func: OpOverload) -> Generator[None, None, None]:
+def set_original_aten_op(func: OperatorBase) -> Generator[None, None, None]:
     global ORIGINAL_ATEN
     if ORIGINAL_ATEN is None and fx_traceback.has_preserved_node_meta():
         ORIGINAL_ATEN = func
@@ -1784,13 +1784,15 @@ class _MakefxTracer:
         # Create a new tracer based on parent's config
         sub_tracer = _MakefxTracer(
             self.decomposition_table,
-            self.tracing_mode,
+            "real",
             self._allow_non_fake_inputs,
             self.pre_dispatch,
             self.record_module_stack,
             self._allow_fake_constant,
             self._error_on_data_dependent_ops
         )
+        if isinstance(self.proxy_mode, ProxyTorchDispatchMode):
+            assert not self.proxy_mode.sym_mode.enable_tracing
         with sub_tracer._init_modes_from_parent(self):
             return sub_tracer._trace_inner(f, *args)
 
