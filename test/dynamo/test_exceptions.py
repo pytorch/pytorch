@@ -294,6 +294,21 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
 
+    def test_key_error(self):
+        def fn(x, d):
+            try:
+                a = d["b"]
+            except KeyError:
+                a = 2
+            return x * a
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        d = {"a": 1}
+        ref = fn(x, d)
+        res = opt_fn(x, d)
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
