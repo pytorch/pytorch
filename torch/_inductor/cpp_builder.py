@@ -972,8 +972,8 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
-    include_dirs = cpp_extension.include_paths(cuda)
-    libraries_dirs = cpp_extension.library_paths(cuda)
+    include_dirs = cpp_extension.include_paths(backend="cuda" if cuda else "cpu")
+    libraries_dirs = cpp_extension.library_paths(backend="cuda" if cuda else "cpu")
 
     if cuda:
         definations.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
