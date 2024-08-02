@@ -24,12 +24,12 @@ static Tensor sum_decomp(
 
 static std::tuple<Tensor, std::optional<int64_t>> _is_all_true_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim) {
-  return std::make_tuple(at::_is_all_true(self), nullopt);
+  return std::make_tuple(at::_is_all_true(self), std::nullopt);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> _is_any_true_batch_rule(
      const Tensor& self, std::optional<int64_t> self_bdim) {
-   return std::make_tuple(at::_is_any_true(self), nullopt);
+   return std::make_tuple(at::_is_any_true(self), std::nullopt);
  }
 
 static Tensor mean_decomp(
@@ -256,7 +256,7 @@ static std::tuple<Tensor, Tensor> expand_bdims(
       b_has_bdim ? b : b.expand_as(flagpole));
 }
 
-static std::tuple<Tensor,optional<int64_t>> _softmax_backward_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> _softmax_backward_batch_rule(
     const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
     const Tensor& output, std::optional<int64_t> output_bdim,
     int64_t dim,
@@ -286,7 +286,7 @@ static std::tuple<Tensor,optional<int64_t>> _softmax_backward_batch_rule(
   return std::make_tuple(at::_softmax_backward_data(grad_output_, output_.contiguous(), dim, input_dtype), 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> _log_softmax_backward_batch_rule(
     const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
     const Tensor& output, std::optional<int64_t> output_bdim,
     int64_t dim,
@@ -314,7 +314,7 @@ static std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
   return std::make_tuple(at::_log_softmax_backward_data(grad_output_, output_, dim, input_dtype), 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> searchsorted_batch_rule(
     const Tensor& sorted_sequence,
     std::optional<int64_t> sorted_sequence_bdim,
     const Tensor& self,
@@ -410,7 +410,7 @@ static Tensor bucketize_decomp_Tensor(
     bool right) {
   // checking logical rank
   TORCH_CHECK(boundaries.dim() == 1, "bucketize: boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
-  return at::searchsorted(boundaries, self, out_int32, right, nullopt, nullopt);
+  return at::searchsorted(boundaries, self, out_int32, right, std::nullopt, std::nullopt);
 }
 
 static Tensor bucketize_decomp_Scalar(
@@ -420,7 +420,7 @@ static Tensor bucketize_decomp_Scalar(
     bool right) {
   // checking logical rank
   TORCH_CHECK(boundaries.dim() == 1, "bucketize: boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
-  return at::searchsorted(boundaries, self, out_int32, right, nullopt, nullopt);
+  return at::searchsorted(boundaries, self, out_int32, right, std::nullopt, std::nullopt);
 }
 
 // Use when the other macros don't work out.
