@@ -42,8 +42,8 @@ jobs:
         call conda create -n %conda_env% python=3.10 -y
         call conda activate %conda_env%
         call conda remove ucrt -y
-        call pip install cmake==3.26.4 --force -y
-        call pip install pyyaml --force -y
+        call pip install cmake==3.26.4 --force
+        call pip install pyyaml --force
         call conda list
 
     - name: Activate Intel Basekit
