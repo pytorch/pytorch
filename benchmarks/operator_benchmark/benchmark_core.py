@@ -401,8 +401,7 @@ class BenchmarkRunner:
         return False
 
     def _output_csv(self, filename, headers, row):
-        global disable_output
-        if disable_output:
+        if self.args.disable_output:
             return
         if os.path.exists(filename):
             with open(filename) as fd:
