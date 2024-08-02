@@ -650,13 +650,13 @@ class CachingAutotuner(KernelInterface):
             device_interface.current_device()
         )
 
+        cloned_args, cloned_kwargs = self.clone_args(*args, **kwargs)
         def kernel_call():
             if launcher.config.pre_hook is not None:
                 launcher.config.pre_hook(
                     {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
                 )
 
-            cloned_args, cloned_kwargs = self.clone_args(*args, **kwargs)
             launcher(
                 *cloned_args,
                 **cloned_kwargs,
