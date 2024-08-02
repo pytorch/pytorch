@@ -2062,7 +2062,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         # Create a test module, ModuleInfo entry, and decorator to apply.
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = torch.nn.Parameter(torch.randn(3))
 
@@ -2216,7 +2216,7 @@ class TestImports(TestCase):
     @classmethod
     def _check_python_output(cls, program) -> str:
         return subprocess.check_output(
-            [sys.executable, "-W", "all", "-c", program],
+            [sys.executable, "-W", "always", "-c", program],
             stderr=subprocess.STDOUT,
             # On Windows, opening the subprocess with the default CWD makes `import torch`
             # fail, so just set CWD to this script's directory

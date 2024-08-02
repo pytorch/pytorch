@@ -1,6 +1,4 @@
-# mypy: allow-untyped-defs
 import contextlib
-
 import copy
 import hashlib
 import inspect
@@ -10,15 +8,16 @@ import tokenize
 import unittest
 import warnings
 from types import FunctionType, ModuleType
-from typing import Any, Dict, Optional, Set, Union
+from typing import Any, Callable, Dict, NoReturn, Optional, Set, Union
 from typing_extensions import deprecated
 from unittest import mock
+
 
 # Types saved/loaded in configs
 CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
 
 
-def install_config_module(module):
+def install_config_module(module: ModuleType) -> None:
     """
     Converts a module-level config into a `ConfigModule()`.
 
@@ -28,7 +27,11 @@ def install_config_module(module):
     class ConfigModuleInstance(ConfigModule):
         _bypass_keys = set({"_is_dirty", "_hash_digest"})
 
-    def visit(source, dest, prefix):
+    def visit(
+        source: Union[ModuleType, type],
+        dest: Union[ModuleType, SubConfigProxy],
+        prefix: str,
+    ) -> None:
         """Walk the module structure and move everything to module._config"""
         for key, value in list(source.__dict__.items()):
             if (
@@ -59,20 +62,20 @@ def install_config_module(module):
     compile_ignored_keys = get_assignments_with_compile_ignored_comments(module)
 
     visit(module, module, "")
-    module._config = config
-    module._default = default
-    module._allowed_keys = set(config.keys())
-    module._compile_ignored_keys = compile_ignored_keys
+    module._config = config  # type: ignore[attr-defined]
+    module._default = default  # type: ignore[attr-defined]
+    module._allowed_keys = set(config.keys())  # type: ignore[attr-defined]
+    module._compile_ignored_keys = compile_ignored_keys  # type: ignore[attr-defined]
     module.__class__ = ConfigModuleInstance
-    module._is_dirty = True
-    module._hash_digest = None
+    module._is_dirty = True  # type: ignore[attr-defined]
+    module._hash_digest = None  # type: ignore[attr-defined]
 
 
 COMPILE_IGNORED_MARKER = "@compile_ignored"
 
 
 # Gets all the keys (i.e. assignments) with a @compile_ignored comment
-def get_assignments_with_compile_ignored_comments(module):
+def get_assignments_with_compile_ignored_comments(module: ModuleType) -> Set[str]:
     source_code = inspect.getsource(module)
     assignments = set()
 
@@ -126,12 +129,12 @@ class ConfigModule(ModuleType):
     _is_dirty: bool
     _hash_digest: Optional[bytes]
 
-    def __init__(self):
+    def __init__(self) -> None:
         raise NotImplementedError(
             f"use {__name__}.install_config_module(sys.modules[__name__])"
         )
 
-    def __setattr__(self, name, value):
+    def __setattr__(self, name: str, value: object) -> None:
         if name in self._bypass_keys:
             super().__setattr__(name, value)
         elif name not in self._allowed_keys:
@@ -139,14 +142,14 @@ class ConfigModule(ModuleType):
         else:
             self._config[name] = value
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         try:
             return self._config[name]
         except KeyError as e:
             # make hasattr() work properly
             raise AttributeError(f"{self.__name__}.{name} does not exist") from e
 
-    def __delattr__(self, name):
+    def __delattr__(self, name: str) -> None:
         # must support delete because unittest.mock.patch deletes
         # then recreate things
         del self._config[name]
@@ -226,8 +229,8 @@ class ConfigModule(ModuleType):
         self,
         arg1: Optional[Union[str, Dict[str, Any]]] = None,
         arg2: Any = None,
-        **kwargs,
-    ):
+        **kwargs: Dict[str, Any],
+    ) -> "ContextDecorator":
         """
         Decorator and/or context manager to make temporary changes to a config.
 
@@ -265,7 +268,7 @@ class ConfigModule(ModuleType):
         dirty = False
 
         class ConfigPatch(ContextDecorator):
-            def __enter__(self):
+            def __enter__(self) -> None:
                 assert not prior
                 nonlocal dirty
                 for key in changes.keys():
@@ -275,7 +278,7 @@ class ConfigModule(ModuleType):
                 config._config.update(changes)
                 config._is_dirty = dirty
 
-            def __exit__(self, exc_type, exc_val, exc_tb):
+            def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
                 nonlocal dirty
                 config._config.update(prior)
                 config._is_dirty = dirty
@@ -283,7 +286,7 @@ class ConfigModule(ModuleType):
 
         return ConfigPatch()
 
-    def _make_closure_patcher(self, **changes):
+    def _make_closure_patcher(self, **changes: Dict[str, Any]) -> Any:
         """
         A lower-overhead version of patch() for things on the critical path.
 
@@ -303,11 +306,11 @@ class ConfigModule(ModuleType):
         """
         config = self._config
 
-        def change():
+        def change() -> Callable[[], None]:
             prior = {k: config[k] for k in changes}
             config.update(changes)
 
-            def revert():
+            def revert() -> None:
                 config.update(prior)
 
             return revert
@@ -321,18 +324,18 @@ class ContextDecorator(contextlib.ContextDecorator):
     `unittest.TestCase`
     """
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         raise NotImplementedError("NYI")
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> NoReturn:  # type: ignore[no-untyped-def]
         raise NotImplementedError("NYI")
 
-    def __call__(self, func):
+    def __call__(self, func: Callable[[Any], Any]) -> Any:
         if isinstance(func, type) and issubclass(func, unittest.TestCase):
 
             class _TestCase(func):  # type: ignore[valid-type, misc]
                 @classmethod
-                def setUpClass(cls):
+                def setUpClass(cls) -> None:
                     self.__enter__()
                     try:
                         super().setUpClass()
@@ -341,7 +344,7 @@ class ContextDecorator(contextlib.ContextDecorator):
                         raise
 
                 @classmethod
-                def tearDownClass(cls):
+                def tearDownClass(cls) -> None:
                     try:
                         super().tearDownClass()
                     finally:
@@ -362,22 +365,22 @@ class SubConfigProxy:
     `config.triton.cudagraphs` maps to _config["triton.cudagraphs"]
     """
 
-    def __init__(self, config, prefix):
+    def __init__(self, config: object, prefix: str):
         # `super().__setattr__` to bypass custom `__setattr__`
         super().__setattr__("_config", config)
         super().__setattr__("_prefix", prefix)
 
-    def __setattr__(self, name, value):
+    def __setattr__(self, name: str, value: object) -> None:
         return self._config.__setattr__(self._prefix + name, value)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return self._config.__getattr__(self._prefix + name)
 
-    def __delattr__(self, name):
+    def __delattr__(self, name: str) -> None:
         return self._config.__delattr__(self._prefix + name)
 
 
-def patch_object(obj, name, value):
+def patch_object(obj: object, name: str, value: object) -> object:
     """
     Workaround `mock.patch.object` issue with ConfigModule
     """

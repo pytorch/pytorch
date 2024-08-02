@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from enum import Enum
 from typing import Any, Dict, Optional, Tuple, Union
@@ -54,7 +55,7 @@ class WithEffects(HigherOrderOperator):
     per "effect type", which are enumerated in the _EffectType enum.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("with_effects")
 
     def __call__(

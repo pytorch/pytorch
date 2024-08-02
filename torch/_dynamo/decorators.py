@@ -5,10 +5,12 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 from . import trace_rules, variables
 from .comptime import comptime
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
+
 
 if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401

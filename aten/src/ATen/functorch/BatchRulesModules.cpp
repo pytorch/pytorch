@@ -130,7 +130,7 @@ grid_sample_batch_rule(const Tensor& input, std::optional<int64_t> input_bdim, c
     out = reshape_dim_outof(0, input.sizes()[*grid_bdim], out);
     result = std::make_tuple(std::move(out), 0);
   } else {
-    result = std::make_tuple(Func(input, grid, std::forward<ExtraArgs>(extra_args)...), nullopt);
+    result = std::make_tuple(Func(input, grid, std::forward<ExtraArgs>(extra_args)...), std::nullopt);
   }
   return result;
 }
@@ -363,6 +363,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
   EXISTING_BDIM(pixel_shuffle);
   EXISTING_BDIM(pixel_unshuffle);
+  EXISTING_BDIM(channel_shuffle);
 
   VARIADIC_BDIMS(constant_pad_nd);
   EXISTING_BDIM(reflection_pad1d);

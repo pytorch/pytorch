@@ -7,6 +7,7 @@ future.
 """
 
 from torch.optim import lr_scheduler, swa_utils
+from torch.optim._adafactor import Adafactor
 from torch.optim.adadelta import Adadelta
 from torch.optim.adagrad import Adagrad
 from torch.optim.adam import Adam
@@ -23,6 +24,9 @@ from torch.optim.sgd import SGD
 from torch.optim.sparse_adam import SparseAdam
 
 
+Adafactor.__module__ = "torch.optim"
+
+
 del adadelta  # type: ignore[name-defined] # noqa: F821
 del adagrad  # type: ignore[name-defined] # noqa: F821
 del adam  # type: ignore[name-defined] # noqa: F821
@@ -37,3 +41,23 @@ del rmsprop  # type: ignore[name-defined] # noqa: F821
 del optimizer  # type: ignore[name-defined] # noqa: F821
 del nadam  # type: ignore[name-defined] # noqa: F821
 del lbfgs  # type: ignore[name-defined] # noqa: F821
+
+__all__ = [
+    "Adafactor",
+    "Adadelta",
+    "Adagrad",
+    "Adam",
+    "Adamax",
+    "AdamW",
+    "ASGD",
+    "LBFGS",
+    "lr_scheduler",
+    "NAdam",
+    "Optimizer",
+    "RAdam",
+    "RMSprop",
+    "Rprop",
+    "SGD",
+    "SparseAdam",
+    "swa_utils",
+]
