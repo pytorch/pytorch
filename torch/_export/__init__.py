@@ -28,7 +28,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._utils_internal import log_export_usage
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.graph_signature import (
-    _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
     ExportGraphSignature,

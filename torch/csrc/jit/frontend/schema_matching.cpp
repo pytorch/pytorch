@@ -687,7 +687,6 @@ Value* emitBuiltinCall(
   // first let's set the graph's version
   auto graph_version = graph.get_op_version();
 
-  std::stringstream failure_messages;
   std::vector<const FunctionSchema*> schemas;
   // we append them later to schemas because
   // parseSchema returns rvalue which can not

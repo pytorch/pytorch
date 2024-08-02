@@ -486,7 +486,7 @@ class TORCH_API Load : public ExprNode<Load> {
       const std::vector<ExprHandle>& indices);
 
   Load(Dtype dtype, BufPtr base_handle, std::vector<ExprPtr> indices);
-  Load(BufPtr base_handle, const std::vector<ExprPtr>& indices);
+  Load(const BufPtr& base_handle, const std::vector<ExprPtr>& indices);
 
  private:
   BufPtr buf_;
