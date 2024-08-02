@@ -52,6 +52,8 @@ def patches(fn):
 
     for patcher in [
         dynamo_config.patch(verbose=True),
+        # Fails due to https://github.com/pytorch/pytorch/issues/131929
+        dynamo_config.patch(inline_inbuilt_nn_modules=False),
         inductor_config.patch(
             debug=True,
             max_autotune=True,
@@ -556,9 +558,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 0,
             )
 
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     @inductor_config.patch({"freezing": True})
     @patches
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch.no_grad
     @parametrize("batch_size", (3, 16, 32, 49))
     @parametrize("in_features", (4, 68, 128))  # k should be a multiple of 4

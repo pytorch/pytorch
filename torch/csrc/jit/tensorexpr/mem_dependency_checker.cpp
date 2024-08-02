@@ -502,7 +502,7 @@ std::shared_ptr<AccessInfo> MemDependencyChecker::output(BufPtr b) const {
 
 // Node visitors:
 
-void MemDependencyChecker::visit(StorePtr v) {
+void MemDependencyChecker::visit(const StorePtr& v) {
   StmtPtr last = lastStmt_;
   lastStmt_ = v;
   v->value()->accept(this);
@@ -534,7 +534,7 @@ void MemDependencyChecker::visit(StorePtr v) {
   currentScope_->accesses_.push_back(info);
 }
 
-void MemDependencyChecker::visit(LoadPtr v) {
+void MemDependencyChecker::visit(const LoadPtr& v) {
   // Create a temporary scope to hold any loads that occur within the indices of
   // this load.
   auto indicesScope =
@@ -675,7 +675,7 @@ static bool executionSafetyCheck(
   return false;
 }
 
-void MemDependencyChecker::visit(ForPtr v) {
+void MemDependencyChecker::visit(const ForPtr& v) {
   VarPtr var = v->var();
 
   StmtPtr last = lastStmt_;
@@ -910,7 +910,7 @@ void MemDependencyChecker::visit(ForPtr v) {
   currentScope_ = currentScope_->parent;
 }
 
-void MemDependencyChecker::visit(CondPtr v) {
+void MemDependencyChecker::visit(const CondPtr& v) {
   StmtPtr last = lastStmt_;
   lastStmt_ = v;
 
@@ -959,7 +959,7 @@ void MemDependencyChecker::visit(CondPtr v) {
   lastStmt_ = last;
 }
 
-void MemDependencyChecker::visit(IfThenElsePtr v) {
+void MemDependencyChecker::visit(const IfThenElsePtr& v) {
   // condition is in enclosing scope.
   v->condition()->accept(this);
 
@@ -995,7 +995,7 @@ void MemDependencyChecker::visit(IfThenElsePtr v) {
   currentScope_ = enclosingScope;
 }
 
-void MemDependencyChecker::visit(CompareSelectPtr v) {
+void MemDependencyChecker::visit(const CompareSelectPtr& v) {
   // condition is in enclosing scope.
   v->lhs()->accept(this);
   v->rhs()->accept(this);
@@ -1055,7 +1055,7 @@ void MemDependencyChecker::insertBuffers(
   }
 }
 
-void MemDependencyChecker::visit(BlockPtr v) {
+void MemDependencyChecker::visit(const BlockPtr& v) {
   auto prev_scope = currentScope_;
 
   // handle kernel inputs.
@@ -1091,7 +1091,7 @@ void MemDependencyChecker::visit(BlockPtr v) {
   }
 }
 
-void MemDependencyChecker::visit(LetPtr v) {
+void MemDependencyChecker::visit(const LetPtr& v) {
   StmtPtr last = lastStmt_;
   lastStmt_ = v;
 
@@ -1110,11 +1110,11 @@ void MemDependencyChecker::visit(LetPtr v) {
 
 // Don't support AtomicAdd yet, it's a bit more complex since it's both a read
 // and a write. It's only inserted during Cuda codegen so this should be okay.
-void MemDependencyChecker::visit(AtomicAddPtr v) {
+void MemDependencyChecker::visit(const AtomicAddPtr& v) {
   throw std::runtime_error("MemDependencyChecker AtomicAdd unimplemented");
 }
 
-void MemDependencyChecker::visit(AllocatePtr v) {
+void MemDependencyChecker::visit(const AllocatePtr& v) {
   StmtPtr last = lastStmt_;
   lastStmt_ = v;
 
@@ -1146,7 +1146,7 @@ void MemDependencyChecker::visit(AllocatePtr v) {
   lastStmt_ = last;
 }
 
-void MemDependencyChecker::visit(FreePtr v) {
+void MemDependencyChecker::visit(const FreePtr& v) {
   StmtPtr last = lastStmt_;
   lastStmt_ = v;
 
@@ -1290,7 +1290,7 @@ class VarBoundBinder : public IRVisitor {
   }
 
  private:
-  void visit(VarPtr v) override {
+  void visit(const VarPtr& v) override {
     auto it = vars_.find(v);
     if (it == vars_.end()) {
       return;
