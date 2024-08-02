@@ -1975,6 +1975,9 @@ class BuiltinVariable(VariableTracker):
             install_guard(args[0].source.make_guard(GuardBuilder.ID_MATCH))
             constant_result = id(args[0].value)
             return variables.ConstantVariable.create(constant_result)
+        elif len(args) == 1 and isinstance(args[0], TensorVariable):
+            tensor_variable = args[0]
+            return tensor_variable.call_id(tx)
         else:
             unimplemented(f"call_id with args {args}")
 
