@@ -264,11 +264,13 @@ static optional_variable_list _process_backward_mode_ad(
     const _view_as_self_fn_t& view_as_self_fn) {
   auto num_outputs = raw_outputs.size();
 
+#ifndef STRIP_ERROR_MESSAGES
   const char* error_msg_input_returned_as_is =
       "A input that has been returned as-is as output is being saved for backward. "
       "This is not supported if you override setup_context. You should return and "
       "save a view of the input instead, e.g. with x.view_as(x) or setup ctx inside "
       "the forward function itself.";
+#endif
 
   // Sets the grad_fn and output_nr of an output Variable.
   auto set_history = [&](Variable& var,

@@ -591,7 +591,7 @@ CacheNode* _compiled_autograd_impl(
         if (next.is_valid() && output.defined()) {
           input_buffers.lookup(next.function.get())
               .add(
-                  next.input_nr, std::move(output), c10::nullopt, c10::nullopt);
+                  next.input_nr, std::move(output), std::nullopt, std::nullopt);
         }
       }
     }

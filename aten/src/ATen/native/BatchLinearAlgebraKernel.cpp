@@ -337,7 +337,7 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
   auto batch_size = batchCount(input);
   auto m = input.size(-2);
   auto n = input.size(-1);
-  auto lda = std::max<int>(1, m);
+  auto lda = std::max<int64_t>(1, m);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int info;
@@ -352,7 +352,7 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
 
   // if lwork is less than 'n' then a warning is printed:
   // Intel MKL ERROR: Parameter 7 was incorrect on entry to SGEQRF.
-  lwork = std::max<int>(std::max<int>(1, n), real_impl<scalar_t, value_t>(wkopt));
+  lwork = std::max<int>({1, static_cast<int>(n), static_cast<int>(real_impl<scalar_t, value_t>(wkopt))});
   Tensor work = at::empty({lwork}, input.options());
 
   for (const auto i : c10::irange(batch_size)) {
@@ -500,8 +500,8 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
   auto infos_data = infos.data_ptr<int>();
 
   // only 'gels' driver does not compute the rank
-  int rank_32;
-  int64_t* rank_data;
+  int rank_32 = 0;
+  int64_t* rank_data = nullptr;
   int64_t* rank_working_ptr = nullptr;
   if (driver_t::Gels != driver_type) {
     rank_data = rank.data_ptr<int64_t>();
@@ -510,9 +510,9 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
 
   // 'gelsd' and 'gelss' are SVD-based algorithms
   // so we can get singular values
-  value_t* s_data;
+  value_t* s_data = nullptr;
   value_t* s_working_ptr = nullptr;
-  int64_t s_stride;
+  int64_t s_stride = 0;
   if (driver_t::Gelsd == driver_type || driver_t::Gelss == driver_type) {
     s_data = singular_values.data_ptr<value_t>();
     s_working_ptr = s_data;
@@ -531,7 +531,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
   int lwork = -1; // default value to decide the opt size for workspace arrays
   scalar_t work_opt;
   value_t rwork_opt;
-  int iwork_opt;
+  int iwork_opt = 0;
   lapack_func(trans, m, n, nrhs,
     A_data, lda,
     B_data, ldb,
@@ -550,9 +550,9 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
 
   // 'rwork' only used for complex inputs and 'gelsy', 'gelsd' and 'gelss' drivers
   Tensor rwork;
-  value_t* rwork_data;
+  value_t* rwork_data = nullptr;
   if (A.is_complex() && driver_t::Gels != driver_type) {
-    int64_t rwork_len;
+    int64_t rwork_len = 0;
     switch (driver_type) {
       case driver_t::Gelsy:
         rwork_len = std::max<int64_t>(1, 2 * n);
@@ -570,7 +570,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
 
   // 'iwork' workspace array is relevant only for 'gelsd'
   Tensor iwork;
-  int* iwork_data;
+  int* iwork_data = nullptr;
   if (driver_t::Gelsd == driver_type) {
     iwork = at::empty({std::max<int>(1, iwork_opt)}, A.options().dtype(at::kInt));
     iwork_data = iwork.mutable_data_ptr<int>();

@@ -278,10 +278,12 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
     return std::isupper(label) ? label - 'A' : label - 'a' + NUM_OF_LETTERS;
   };
 
+#ifndef STRIP_ERROR_MESSAGES
   // Convert subscript in [0, TOTAL_LABELS) to label in [A-Za-z]
   auto subscript_to_label = [=](uint8_t s) -> unsigned char {
     return s < NUM_OF_LETTERS ? s + 'A' : s + 'a' - NUM_OF_LETTERS;
   };
+#endif
 
   // Find arrow (->) to split equation into lhs and rhs
   const auto arrow_pos = equation.find("->");

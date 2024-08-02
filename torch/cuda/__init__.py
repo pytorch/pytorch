@@ -135,6 +135,10 @@ def is_bf16_supported(including_emulation: bool = True):
     if torch.version.hip:
         return True
 
+    # If CUDA is not available, than it does not support bf16 either
+    if not is_available():
+        return False
+
     device = torch.cuda.current_device()
 
     # Check for CUDA version and device compute capability.
@@ -637,9 +641,13 @@ def set_stream(stream: Stream):
 
 def _parse_visible_devices() -> Union[List[int], List[str]]:
     r"""Parse CUDA_VISIBLE_DEVICES environment variable."""
-    var = os.getenv(
-        "CUDA_VISIBLE_DEVICES" if not torch.version.hip else "HIP_VISIBLE_DEVICES"
-    )
+    var = os.getenv("CUDA_VISIBLE_DEVICES")
+
+    if torch.version.hip:
+        hip_devices = os.getenv("HIP_VISIBLE_DEVICES")
+        if hip_devices is not None:
+            var = hip_devices
+
     if var is None:
         return list(range(64))
 
@@ -1067,7 +1075,7 @@ def _get_amdsmi_handler(device: Optional[Union[Device, int]] = None):
 
 
 def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
-    r"""Return the amdsmi index of the device, taking HIP_VISIBLE_DEVICES into account."""
+    r"""Return the amdsmi index of the device, taking visible_devices into account."""
     idx = _get_device_index(device, optional=True)
     visible_devices = _parse_visible_devices()
     if type(visible_devices[0]) is str:
@@ -1104,7 +1112,11 @@ def _get_amdsmi_temperature(device: Optional[Union[Device, int]] = None) -> int:
 
 def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
+    socket_power = amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
+    if socket_power != "N/A":
+        return socket_power
+    else:
+        return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
 
 
 def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
@@ -1613,6 +1625,8 @@ __all__ = [
     "memory_stats_as_nested_dict",
     "memory_summary",
     "memory_usage",
+    "MemPool",
+    "MemPoolContext",
     "temperature",
     "power_draw",
     "clock_rate",

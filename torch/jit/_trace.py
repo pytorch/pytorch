@@ -23,6 +23,7 @@ from typing_extensions import ParamSpec
 
 import torch
 from torch._jit_internal import (
+    _get_model_id,
     _qualified_name,
     get_callable_argument_names,
     is_scripting,
@@ -965,7 +966,7 @@ def trace(
         import torch.nn as nn
 
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 
@@ -1001,7 +1002,6 @@ def trace(
         log_torchscript_usage,
     )
 
-    log_torchscript_usage("trace")
     traced_func = _trace_impl(
         func,
         example_inputs,
@@ -1016,6 +1016,7 @@ def trace(
         example_kwarg_inputs,
         _store_inputs,
     )
+    log_torchscript_usage("trace", model_id=_get_model_id(traced_func))
 
     if check_if_torch_exportable():
         from torch._export.converter import TS2EPConverter
@@ -1181,7 +1182,7 @@ def trace_module(
         import torch.nn as nn
 
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 

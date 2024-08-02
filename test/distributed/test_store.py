@@ -3,6 +3,7 @@
 import datetime
 import os
 import socket
+import struct
 import sys
 import tempfile
 import threading
@@ -17,6 +18,7 @@ import torch.distributed.rpc as rpc
 from torch.distributed import DistError, DistNetworkError, DistStoreError
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
+
 
 if not dist.is_available():
     print("torch.distributed not available, skipping tests", file=sys.stderr)
@@ -36,6 +38,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -275,11 +278,11 @@ class TCPStoreTest(TestCase, StoreTestBase):
         )
 
     def test_address_already_in_use(self):
-        err_msg_reg = "^The server socket has failed to listen on any local "
-        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
-            addr = DEFAULT_HOSTNAME
-            port = common.find_free_port()
+        addr = DEFAULT_HOSTNAME
+        port = common.find_free_port()
 
+        err_msg_reg = f"^The server socket has failed to listen on any local .*{port}"
+        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
             # object is not destroyed before the second object is created.
@@ -308,6 +311,30 @@ class TCPStoreTest(TestCase, StoreTestBase):
         )  # type: ignore[call-arg] # noqa: F841
         self.assertEqual(store1.libuvBackend, self._use_libuv)
         self.assertEqual(store2.libuvBackend, self._use_libuv)
+
+    def test_repr(self) -> None:
+        # server
+        store1 = self._create_store()
+        self.assertRegex(
+            repr(store1),
+            r"TCPStore\("
+            r"client=TCPClient\(SocketImpl\(fd=\d+, addr=\[?localhost\]?:\d+, remote=\[?localhost\]?:\d+\)\), "
+            r"server=TCPServer\(port=\d+\)\)",
+        )
+
+        # client
+        store2 = dist.TCPStore(
+            store1.host,
+            store1.port,
+            world_size=2,
+            is_master=False,
+        )
+        self.assertRegex(
+            repr(store2),
+            r"TCPStore\("
+            r"client=TCPClient\(SocketImpl\(fd=\d+, addr=\[?localhost\]?:\d+, remote=\[?localhost\]?:\d+\)\), "
+            r"server=<nullptr>\)",
+        )
 
     @skip_if_win32()
     @retry_on_connect_failures
@@ -551,7 +578,7 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 
 
 class MyPythonStore(dist.Store):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.store = {}
 
@@ -707,28 +734,34 @@ class RendezvousTCPTest(TestCase):
     @retry_on_connect_failures(connect_errors=(CONNECT_TIMEOUT, ADDRESS_IN_USE))
     def test_tcp_store_timeout_set(self):
         url = self.create_tcp_url()
-        test_store_timeout = timedelta(seconds=10)
-        gen0 = dist.rendezvous(url + "&rank=0", timeout=test_store_timeout)
+        test_store_timeout = timedelta(seconds=0.1)
+        gen0 = dist.rendezvous(url + "&rank=0", timeout=timedelta(seconds=10))
         store0, rank0, size0 = next(gen0)
-        # this should time out in 10s. If the timeout passed into rendezvous was
+        store0.set_timeout(test_store_timeout)
+        # this should time out in 0.1s. If the timeout passed into rendezvous was
         # not respected, it will take much longer to timeout.
         start = time.time()
-        with self.assertRaisesRegex(RuntimeError, "Timeout"):
+        with self.assertRaisesRegex(
+            DistStoreError, "wait timeout after 100ms, keys: /nonexistant key"
+        ):
             store0.get("nonexistant key")
 
         end = time.time()
         time_diff = end - start
-        self.assertGreater(test_store_timeout.seconds * 10, time_diff)
+        self.assertGreater(10, time_diff)
 
     def test_tcp_store_timeout_doest_break_client(self):
         url = self.create_tcp_url()
-        test_store_timeout = timedelta(seconds=10)
-        gen0 = dist.rendezvous(url + "&rank=0", timeout=test_store_timeout)
+        test_store_timeout = timedelta(seconds=0.1)
+        gen0 = dist.rendezvous(url + "&rank=0", timeout=timedelta(seconds=10))
         store0, rank0, size0 = next(gen0)
+        store0.set_timeout(test_store_timeout)
         # this should time out in 10s. If the timeout passed into rendezvous was
         # not respected, it will take much longer to timeout.
         start = time.time()
-        with self.assertRaisesRegex(RuntimeError, "Timeout"):
+        with self.assertRaisesRegex(
+            DistStoreError, "wait timeout after 100ms, keys: /the_key"
+        ):
             store0.get("the_key")
 
         store0.set("the_key", "x")
@@ -737,7 +770,7 @@ class RendezvousTCPTest(TestCase):
 
         end = time.time()
         time_diff = end - start
-        self.assertGreater(test_store_timeout.seconds * 10, time_diff)
+        self.assertGreater(10, time_diff)
 
     def test_tcp_store_url_with_libuv(self):
         url = self.create_tcp_url()
@@ -747,7 +780,7 @@ class RendezvousTCPTest(TestCase):
 
 
 class DummyStore(dist.Store):
-    def __init__(self):
+    def __init__(self) -> None:
         self.appends = []
         self.multi_sets = []
         self.multi_gets = []
@@ -1003,6 +1036,46 @@ class InitPgWithNonUvStore(TestCase):
         self.assertTrue(isinstance(store, dist.TCPStore))
         self.assertFalse(store.libuvBackend)
         dist.destroy_process_group()
+
+
+class TestClientProtocol(TestCase):
+    def test_client_connect(self) -> None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("localhost", 0))
+        port = sock.getsockname()[1]
+
+        def listen() -> None:
+            sock.listen()
+            conn, _ = sock.accept()
+
+            # VALIDATE
+            # 0x3C85F7CE
+            self.assertEqual(conn.recv(5), b"\x00\xce\xf7\x85\x3c")
+
+            # PING
+            data = conn.recv(5)
+            self.assertEqual(data[0], 13)
+            nonce = struct.unpack("i", data[1:])[0]
+            self.assertEqual(nonce, os.getpid())
+
+            # send PING nonce response
+            conn.sendall(data[1:])
+
+            conn.close()
+
+        thread = threading.Thread(target=listen)
+        thread.start()
+
+        store = dist.TCPStore(
+            host_name="localhost",
+            port=port,
+            world_size=2,
+            is_master=False,
+            timeout=timedelta(seconds=2),
+            wait_for_workers=False,
+        )
+
+        thread.join()
 
 
 if __name__ == "__main__":

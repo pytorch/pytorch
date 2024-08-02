@@ -38,7 +38,7 @@ class Scope:
                 return x.transpose(1, 2)
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.sub = Sub()
 
             def forward(self, x):
@@ -95,6 +95,8 @@ _COPY_META_FIELDS = [
     "ac_graph_id",
     "from_node",
     "quantization_tag",
+    "_numeric_debug_handle",
+    "partitioner_tag"
 ]
 
 

@@ -14,6 +14,7 @@ from quantize import WeightOnlyInt8QuantHandler as LLaMAWeightOnlyInt8QuantHandl
 import torch
 import torch._inductor.config
 
+
 torch._inductor.config.coordinate_descent_tuning = True
 torch._inductor.config.triton.unique_kernel_names = True
 torch._inductor.config.fx_graph_cache = True  # Experimental feature to reduce compilation times, will be on by default in future
@@ -348,7 +349,7 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
         "int8",
         MixtralMoEWeightOnlyInt8QuantHandler,
         175,
-        1280,
+        1130,
         162,
     )
     token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)

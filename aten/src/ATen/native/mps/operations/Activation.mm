@@ -1104,7 +1104,7 @@ Tensor& glu_backward_mps_out(const Tensor& grad_output, const Tensor& self, cons
 }
 
 Tensor glu_backward_mps(const Tensor& grad_output, const Tensor& self, const int64_t dim) {
-  Tensor grad_input = at::empty(self.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor grad_input = at::empty(self.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   grad_input = glu_backward_mps_out(grad_output, self, dim, grad_input);
   return grad_input;
 }
@@ -1833,7 +1833,7 @@ TORCH_IMPL_FUNC(hardsigmoid_backward_out_mps)
 
 Tensor hardtanh_backward_mps(const Tensor& grad_output, const Tensor& self, const Scalar& min, const Scalar& max) {
   Tensor grad_input =
-      at::empty(grad_output.sizes(), grad_output.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+      at::empty(grad_output.sizes(), grad_output.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   grad_input = hardtanh_backward_out_mps(grad_output, self, min, max, grad_input);
   return grad_input;
 }

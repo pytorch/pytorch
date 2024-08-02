@@ -5,9 +5,8 @@ import functools
 import os
 import sys
 import warnings
-from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable
+from typing import Any, Callable, Dict
 
 
 def _reload_triton_kernel_in_subproc(reload_module, kernel_name):
@@ -52,17 +51,18 @@ def _reload_python_module(key, path):
 def _set_triton_ptxas_path() -> None:
     if os.environ.get("TRITON_PTXAS_PATH") is not None:
         return
-    ptxas = Path(__file__).absolute().parents[1] / "bin" / "ptxas"
-    if not ptxas.exists():
+    ptxas_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "bin", "ptxas")
+    )
+    if not os.path.exists(ptxas_path):
         return
-    if ptxas.is_file() and os.access(ptxas, os.X_OK):
-        os.environ["TRITON_PTXAS_PATH"] = str(ptxas)
+    if os.path.isfile(ptxas_path) and os.access(ptxas_path, os.X_OK):
+        os.environ["TRITON_PTXAS_PATH"] = ptxas_path
     else:
-        warnings.warn(f"{ptxas} exists but is not an executable")
+        warnings.warn(f"{ptxas_path} exists but is not an executable")
 
 
-def _worker_compile_triton(
-    load_kernel: Callable[[], Any],
-):
+def _worker_compile_triton(load_kernel: Callable[[], Any], extra_env: Dict[str, str]):
     _set_triton_ptxas_path()
+    os.environ.update(extra_env)
     load_kernel().precompile(warm_cache_only=True)

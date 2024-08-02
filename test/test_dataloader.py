@@ -62,14 +62,15 @@ try:
     import psutil
 
     HAS_PSUTIL = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_PSUTIL = False
+    psutil = None
     err_msg = (
         "psutil not found. Some critical data loader tests relying on it "
         "(e.g., TestDataLoader.test_proper_exit) will not run."
     )
     if IS_CI:
-        raise ImportError(err_msg) from None
+        raise ModuleNotFoundError(err_msg) from None
     else:
         warnings.warn(err_msg)
 
@@ -78,8 +79,9 @@ try:
     import numpy as np
 
     HAS_NUMPY = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_NUMPY = False
+    np = None
 skipIfNoNumpy = unittest.skipIf(not HAS_NUMPY, "no NumPy")
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -479,7 +481,7 @@ class TestStackDataset(TestCase):
 
     def test_getitems(self):
         class GetItemsDataset(Dataset):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.data = torch.randn(4)
 
             def __getitem__(self, item):
@@ -508,7 +510,7 @@ class TestStackDataset(TestCase):
 
     def test_getitems_raises_index_error(self):
         class GetItemsDataset(Dataset):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.data = torch.randn(4)
 
             def __getitem__(self, item):
@@ -530,7 +532,7 @@ class TestStackDataset(TestCase):
 
     def test_getitems_value_error(self):
         class GetItemsDataset(Dataset):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.data = torch.randn(4)
 
             def __getitem__(self, item):
@@ -2993,7 +2995,7 @@ class IntegrationTestDataLoaderDataPipe(TestCase):
 
 
 class StringDataset(Dataset):
-    def __init__(self):
+    def __init__(self) -> None:
         self.s = "12345"
 
     def __len__(self):
@@ -3106,7 +3108,7 @@ class TestDictDataLoader(TestCase):
 
 
 class DummyDataset(torch.utils.data.Dataset):
-    def __init__(self):
+    def __init__(self) -> None:
         self.data = list(range(10))
 
     def __len__(self):
@@ -3486,7 +3488,7 @@ class TestSetAffinity(TestCase):
 
 
 class ConvDataset(Dataset):
-    def __init__(self):
+    def __init__(self) -> None:
         self.x = torch.ones(1, 1, 24000)
         # Call convolution on parent process
         self[0]
