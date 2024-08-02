@@ -3,6 +3,7 @@ import logging
 
 import torch
 from torch._inductor.kernel.mm_common import mm_args
+
 from . import config as inductor_config, lowering
 from .codegen.cpp_gemm_template import CppPackedGemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
@@ -13,6 +14,7 @@ from .select_algorithm import (
     realize_inputs,
 )
 from .utils import use_aten_gemm_kernels, use_cpp_packed_gemm_template
+
 
 log = logging.getLogger(__name__)
 
@@ -60,7 +62,7 @@ def register_woq_mm_ops():
         )
 
         # scale is applied as an epilogue, and the scale tensor is expanded (with a view op)
-        # for broadcasting.
+        # for broadcasting, as it's 1D.
         def _mul_epilogue(buf):
             return create_epilogue_with_attr(
                 buf, "mul", other=realize_inputs(expand(scale, layout.size))

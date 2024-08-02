@@ -789,12 +789,6 @@ class CppPackedGemmTemplate(CppTemplate):
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
 
-        def _get_acc_buf_dtype(input_dtype):
-            if int8_gemm:
-                return torch.int32
-            else:
-                return torch.float32
-
         options = dict(
             X=X,
             W=W,
@@ -821,7 +815,7 @@ class CppPackedGemmTemplate(CppTemplate):
             x_zp=x_zp,
             w_scale=w_scale,
             w_zp=w_zp,
-            acc_buf_dtype=_get_acc_buf_dtype(X.get_dtype()),
+            acc_buf_dtype=torch.int32 if int8_gemm else torch.float,
             DTYPE_TO_CPP=DTYPE_TO_CPP,
         )
         with contextlib.ExitStack() as stack:

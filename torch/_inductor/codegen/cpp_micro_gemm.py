@@ -397,7 +397,7 @@ inline void {{kernel_name}}_kernel(
         if constexpr (accum) {
             constexpr int row = i / COLS;
             constexpr int col = i % COLS;
-            vc[i] = Vectorized::loadu(C + row * ldc + col * VLEN, VLEN);
+            vc[i] = Vectorized::loadu(C + row * ldc + col * VLEN);
         } else {
             vc[i] = Vectorized(0.0f);
         }
