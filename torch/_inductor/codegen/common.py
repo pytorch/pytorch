@@ -1270,7 +1270,6 @@ class KernelArgs:
         # symbol name from torch/utils/_sympy/symbol.py
         for prefix in ["zuf", "zf"]:
             if str(name).startswith(prefix):
-                # Have to rename it to ks to avoid reindexing issue
                 return self._lookup(f"k{prefix}", self.sizevars, name)
         return self._lookup("ks", self.sizevars, name)
 
