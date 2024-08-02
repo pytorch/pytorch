@@ -711,9 +711,18 @@ void initTorchFunctions(PyObject* module) {
   py_module.def(
       "_functionalize_unsafe_set", [](at::Tensor& dst, const at::Tensor& src) {
         // Forcefully/unsafely dumps src.storage into dst.
-        // This API is only intended for use by functionalization.
-        // When we generate a new FunctionalTensor from a view op,
-        // we need to ensure it shares a storage with the view input.
+        // This API is technically and not specific to functionalization
+        // (it just runs set_() without the safety checks).
+        // But its main intended purpose today is during functionalization.
+        // In particular: when we generate a new FunctionalTensor from a view
+        // op, we need to ensure it shares a storage with the view input.
+        //
+        // Other subclasses shouldn't really need to care about this,
+        // because we define aliasing on wrapper subclasses such that:
+        // - differentiable aliasing: subclass_x and subclass_y share a ._base.
+        // - non-differentiable aliasing: aliasing of subclass_x and subclass_y
+        //   is defined recursively based on the aliasing of their inner
+        //   tensors.
         at::native::checkSetStorage(
             dst,
             src.storage(),
