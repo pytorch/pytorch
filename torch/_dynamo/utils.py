@@ -2169,7 +2169,10 @@ def tensor_always_has_static_shape(
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
-    if guard_source.is_nn_module() and config.force_nn_module_property_static_shapes:
+    if (
+        guard_source.is_specialized_nn_module()
+        or guard_source.is_unspecialized_builtin_nn_module()
+    ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
     if type(tensor) is torch.nn.Parameter and config.force_parameter_static_shapes:
         return True, TensorStaticReason.PARAMETER
@@ -2228,7 +2231,6 @@ def nn_module_get_all_hooks(
     check_backward_hooks=False,
     check_state_dict_hooks=False,
 ):
-    reset_code = torch._C._dynamo.eval_frame.reset_code
     """
     Sometimes its useful to differentiate between types of hooks such as forward/backward/pre
     hooks executed during module.__call__, and state_dict hooks which are executed separately.

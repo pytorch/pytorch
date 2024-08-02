@@ -85,7 +85,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
     def test_disable_nn_modules_forward_hook(self):
         class SimpleLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer0 = torch.nn.Linear(4, 4)
 
@@ -93,7 +93,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 return self.layer0(torch.sigmoid(inp))
 
         class SimpleModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer0 = SimpleLinear()
                 self.layer1 = torch.nn.Linear(4, 4)
@@ -138,7 +138,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         @torch._dynamo.disable
         class SimpleLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer0 = torch.nn.Linear(4, 4)
 
@@ -147,7 +147,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend=cnts)
         class SimpleModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer0 = SimpleLinear()
                 self.layer1 = torch.nn.Linear(4, 4)

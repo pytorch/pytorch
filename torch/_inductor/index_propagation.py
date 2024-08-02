@@ -86,7 +86,10 @@ class SymPyOps:
 
     @staticmethod
     def to_dtype(
-        value: TypedExpr, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
+        value: TypedExpr,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types: bool = False,
     ) -> TypedExpr:
         return TypedExpr(value.expr, dtype)
 
