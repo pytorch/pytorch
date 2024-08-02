@@ -1083,7 +1083,7 @@ test_forward_backward_compatibility() {
   # First, validate public API tests in the torch built from branch.
   # Step 1. Make sure the public API test "test_correct_module_names" fails when a new file
   # introduces an invalid public API function.
-  new_filename=$(mktemp XXXXXXXX.py -p torch/)
+  new_filename=$(mktemp XXXXXXXX.py -p "${TORCH_INSTALL_DIR}")
 
   BAD_PUBLIC_FUNC=$(
   cat << 'EOF'
@@ -1112,8 +1112,9 @@ EOF
 
   # Step 2. Make sure that the public API test "test_correct_module_names" fails when an existing
   # file is modified to introduce an invalid public API function.
-  EXISTING_FILEPATH="torch/nn/parameter.py"
-  echo "${BAD_PUBLIC_FUNC}" >> ${EXISTING_FILEPATH}
+  EXISTING_FILEPATH="${TORCH_INSTALL_DIR}/nn/parameter.py"
+  cp -v "${EXISTING_FILEPATH}" "${EXISTING_FILEPATH}.orig"
+  echo "${BAD_PUBLIC_FUNC}" >> "${EXISTING_FILEPATH}"
   invalid_api="torch.nn.parameter.new_public_func"
   echo "Appended an invalid public API function to existing file ${EXISTING_FILEPATH}..."
 
@@ -1122,7 +1123,7 @@ EOF
       "${invalid_api}" \
       "an invalid public API function" && ret=$? || ret=$?
 
-  git checkout ${EXISTING_FILEPATH}
+  mv -v "${EXISTING_FILEPATH}.orig" "${EXISTING_FILEPATH}"
 
   if [ "$ret" -ne 0 ]; then
       exit 1
@@ -1130,9 +1131,9 @@ EOF
 
   # Step 3. Make sure that the public API test "test_modules_can_be_imported" fails when a module
   # cannot be imported.
-  new_module_dir=$(mktemp XXXXXXXX -d -p torch/)
+  new_module_dir=$(mktemp XXXXXXXX -d -p "${TORCH_INSTALL_DIR}")
   echo "invalid syntax garbage" > "${new_module_dir}/__init__.py"
-  invalid_module_name="${new_module_dir/\//.}"
+  invalid_module_name="torch.$(basename "${new_module_dir}")"
 
   check_public_api_test_fails \
       "test_modules_can_be_imported" \
