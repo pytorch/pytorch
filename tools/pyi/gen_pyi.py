@@ -416,7 +416,9 @@ def gen_nn_functional(fm: FileManager) -> None:
                 )
             ],
             "log_sigmoid": [defs("log_sigmoid", ["input: Tensor"], "Tensor")],
-            "gelu": [defs("gelu", ["input: Tensor", "approximate: str = ..."], "Tensor")],
+            "gelu": [
+                defs("gelu", ["input: Tensor", "approximate: str = ..."], "Tensor")
+            ],
             "softplus": [
                 defs(
                     "softplus",
@@ -424,7 +426,9 @@ def gen_nn_functional(fm: FileManager) -> None:
                     "Tensor",
                 )
             ],
-            "softshrink": [defs("softshrink", ["input: Tensor", "lambd: float = ..."], "Tensor")],
+            "softshrink": [
+                defs("softshrink", ["input: Tensor", "lambd: float = ..."], "Tensor")
+            ],
             "hardsigmoid": [
                 defs(
                     "hardsigmoid",
@@ -451,7 +455,9 @@ def gen_nn_functional(fm: FileManager) -> None:
                     "Tensor",
                 )
             ],
-            "one_hot": [defs("one_hot", ["tensor: Tensor", "num_classes: int = ..."], "Tensor")],
+            "one_hot": [
+                defs("one_hot", ["tensor: Tensor", "num_classes: int = ..."], "Tensor")
+            ],
             "scaled_dot_product_attention": [
                 defs(
                     "scaled_dot_product_attention",
