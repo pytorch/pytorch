@@ -1,10 +1,11 @@
 import distutils.command.clean
-
+import shutil
 from pathlib import Path
 
 from setuptools import find_packages, setup
 
 from torch.utils.cpp_extension import BuildExtension, CppExtension
+
 
 PACKAGE_NAME = "pytorch_openreg"
 version = 1.0
@@ -43,6 +44,7 @@ if __name__ == "__main__":
         )
     ]
 
+    print(ext_modules)
     setup(
         name=PACKAGE_NAME,
         version=version,

@@ -3,10 +3,12 @@ import logging
 import torch
 from torch.utils._pytree import tree_any
 
+
 log = logging.getLogger(__name__)
 
 from ._device_daemon import daemon
 from ._meta_parser import prepare_for_sending, to_device_no_copy
+
 
 _IMPL_REGISTRY = {}
 
@@ -15,7 +17,7 @@ _IMPL_REGISTRY = {}
 def _register_same_name(name, with_log=False):
     def _(*args, **kwargs):
         if with_log:
-            log.info(f"Calling hook {name}")
+            log.info("Calling hook %s", name)
         return daemon.exec(name, *args, **kwargs)
 
     _IMPL_REGISTRY[name] = _
@@ -32,7 +34,7 @@ _openreg_lib = torch.library.Library("_", "IMPL")
 
 
 def _openreg_kernel_fallback(op, *args, **kwargs):
-    log.info(f"Calling kernel {op}")
+    log.info("Calling kernel %s", op)
 
     # Special ops needed to avoid infinite recursion
     if op is torch.ops.aten._copy_from.default:
@@ -81,10 +83,12 @@ def _openreg_kernel_fallback(op, *args, **kwargs):
                 )
             op = op.overloadpacket.default
 
-            def post_process():
+            def _post_process():
                 nonlocal real_res
                 orig_out.set_(real_res)
                 real_res = orig_out
+
+            post_process = _post_process
 
         else:
             # No metadata update to do, just run the op on the device

@@ -9,6 +9,7 @@ from ._meta_parser import (
     validate_send_queue_args,
 )
 
+
 log = logging.getLogger(__name__)
 mp_context = torch.multiprocessing.get_context("spawn")
 
@@ -44,7 +45,7 @@ class Allocator:
 
         # Might be a rewrap of another storage at a different offset
         # Slow path to try and find the corresponding storage
-        if found_base == None:
+        if found_base is None:
             for tag, t in self.allocated.items():
                 # t is always a 1D uint8 storage!
                 if meta.data_ptr > tag and meta.data_ptr < tag + t.nelement():
@@ -58,9 +59,9 @@ class Allocator:
                     )
 
         # This pointer is not allocated here, segfault !
-        if found_base == None:
-            log.info(f"Currently allocated blocks:\n{safe_str(self.allocated)}")
-            log.info(f"Trying to access {meta}")
+        if found_base is None:
+            log.info("Currently allocated blocks:\n %s", safe_str(self.allocated))
+            log.info("Trying to access %s", meta)
             raise RuntimeError("SEGFAULT!")
 
         # Raw 1d uint8 data
@@ -99,11 +100,11 @@ class _Daemon:
 
     def exec(self, cmd, *args):
         self._lazy_init()
-        log.info(f"Main process launched: {cmd}(*{safe_str(args)})")
+        log.info("Main process launched: %s(*%s)", cmd, safe_str(args))
         validate_send_queue_args(cmd, args)
         self.req_queue.put((cmd,) + args)
         res = self.ans_queue.get()
-        log.info(f"Main process result for {cmd} received: {safe_str(res)}")
+        log.info("Main process result for %s received: %s", cmd, safe_str(res))
         if res == "ERROR":
             raise RuntimeError(f"Error in daemon while executing {cmd}, see logs")
         else:
@@ -122,7 +123,7 @@ class _Daemon:
         # Serve all requests
         while True:
             cmd, *args = req_queue.get()
-            log.info(f"Worker executing: {cmd}")
+            log.info("Worker executing: %s", cmd)
             res = empty_res
             if cmd == "deviceCount":
                 assert len(args) == 0
@@ -163,7 +164,7 @@ class _Daemon:
 
             if res == empty_res:
                 raise RuntimeError("Bad impl didn't return anything")
-            log.info(f"Worker answering to: {cmd}")
+            log.info("Worker answering to: %s", cmd)
             ans_queue.put(res)
 
 

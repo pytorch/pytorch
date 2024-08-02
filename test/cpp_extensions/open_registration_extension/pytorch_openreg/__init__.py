@@ -1,12 +1,14 @@
-# Load the C++ Module
 import torch
 
 # Create our python implementation dict so that the C++ module
 # can access it during its initialization
 # Also register aten impls
-from ._aten_impl import _IMPL_REGISTRY as _IMPL_REGISTRY
+from ._aten_impl import _IMPL_REGISTRY as _IMPL_REGISTRY  # noqa: F401
 
-import pytorch_openreg._C
+
+# Load the C++ Module
+import pytorch_openreg._C  # noqa: F401  # usort: skip
+
 
 # Module used for our backend
 class _OpenRegMod:

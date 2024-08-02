@@ -18,7 +18,10 @@ class OpenRegTensorMeta:
         self.nelem_in_bytes = tensor.nelement() * tensor.element_size()
 
     def __repr__(self):
-        return f"OpenRegTensorMeta({self.data_ptr=}, {self.size=}, {self.stride=}, {self.storage_offset=}, {self.dtype=}, {self.nelem_in_bytes=})"
+        return (
+            f"OpenRegTensorMeta({self.data_ptr=}, {self.size=}, {self.stride=}, "
+            f"{self.storage_offset=}, {self.dtype=}, {self.nelem_in_bytes=})"
+        )
 
 
 class OpenRegTensorData(torch.Tensor):

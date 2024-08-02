@@ -426,7 +426,7 @@ class ConcreteTypeStore:
     type_store: Dict[Type[Module], List[torch._C.ConcreteModuleType]]
     methods_compiled: Set[torch._C.ConcreteModuleType]
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Python module type => List[ConcreteModuleType)]
         self.type_store = {}
         # ConcreteTypes that have had their methods already compiled
@@ -661,7 +661,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         isinstance(nn_module, torch.nn.ModuleDict)
         and "__contains__" not in cpp_module._method_names()
     ):
-        if len(nn_module.keys()):  # type: ignore[arg-type]
+        if len(nn_module.keys()):
             keys = repr(list(nn_module.keys()))
             script_module.define(
                 f"def __contains__(self, key: str):\n   return key in {keys}\n"

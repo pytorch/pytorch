@@ -17,8 +17,11 @@
 #include <unordered_map>
 
 #if !defined(USE_ROCM) && \
-    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 14)))
+    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 13)))
+#define NCCL_HAS_REMOTE_ERROR 1
+#if (NCCL_MAJOR > 2) || (NCCL_MINOR >= 14)
 #define NCCL_HAS_COMM_NONBLOCKING 1
+#endif
 #endif
 
 ncclComm_t* to_nccl_comm(torch::cuda::nccl::ncclComm_t* var) {
@@ -47,8 +50,10 @@ ncclResult_t to_nccl_result(torch::cuda::nccl::ncclResult var) {
       return ncclResult_t::ncclInvalidArgument;
     case torch::cuda::nccl::ncclResult::InvalidUsage:
       return ncclResult_t::ncclInvalidUsage;
+#ifdef NCCL_HAS_REMOTE_ERROR
     case torch::cuda::nccl::ncclResult::RemoteError:
       return ncclResult_t::ncclRemoteError;
+#endif
 #ifdef NCCL_HAS_COMM_NONBLOCKING
     case torch::cuda::nccl::ncclResult::InProgress:
       return ncclResult_t::ncclInProgress;
@@ -74,8 +79,10 @@ torch::cuda::nccl::ncclResult from_nccl_result(ncclResult_t var) {
       return torch::cuda::nccl::ncclResult::InvalidArgument;
     case ncclInvalidUsage:
       return torch::cuda::nccl::ncclResult::InvalidUsage;
+#ifdef NCCL_HAS_REMOTE_ERROR
     case ncclRemoteError:
       return torch::cuda::nccl::ncclResult::RemoteError;
+#endif
 #ifdef NCCL_HAS_COMM_NONBLOCKING
     case ncclInProgress:
       return torch::cuda::nccl::ncclResult::InProgress;
