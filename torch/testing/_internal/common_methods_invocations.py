@@ -3124,7 +3124,8 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad, **kwargs):
                           weight=weight_tensor, density=density)
 
         bins_tensor = make_arg((bin_ct + 1,))
-        yield SampleInput(input_tensor, bins_tensor,
+        sorted_bins, bins_indices = torch.sort(bins_tensor)
+        yield SampleInput(input_tensor, sorted_bins,
                           weight=weight_tensor, density=density)
 
 def sample_inputs_histogramdd(op_info, device, dtype, requires_grad, **kwargs):
@@ -3591,7 +3592,7 @@ def error_inputs_adaptive_max_pool3d(opinfo, device, **kwargs):
 
 class _TestParamsMaxPoolBase:
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.kwargs = {
             'kernel_size': [3],
             'stride': [2, None],
@@ -3628,7 +3629,7 @@ class _TestParamsMaxPoolBase:
 
 class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.kwargs['kernel_size'] += [(3,)]
         self.kwargs['stride'] += [(2,)]
@@ -3637,7 +3638,7 @@ class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
 
 class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.kwargs['kernel_size'] += [(3, 2)]
         self.kwargs['stride'] += [(2, 1)]
@@ -3648,7 +3649,7 @@ class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
 
 class _TestParamsMaxPool3d(_TestParamsMaxPoolBase):
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.kwargs['kernel_size'] += [(3, 2, 3)]
         self.kwargs['stride'] += [(2, 1, 2)]
