@@ -5500,6 +5500,32 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(z2, (x_clone + 1).sin())
         self.assertEqual(z3, (x_clone + 1).sin())
 
+    # https://github.com/pytorch/pytorch/issues/132197
+    def test_fsdp_set_input_mutation_applied_when_input_gets_no_gradients(self):
+        set_available = hasattr(torch.ops, "fsdp") and hasattr(torch.ops.fsdp, "set_")
+        if not set_available:
+            return
+
+        @torch.compile(backend="aot_eager_decomp_partition")
+        def f(x, l):
+            z = x.sin()
+            y = x + 1
+            # graph input has its storage mutated
+            torch.ops.fsdp.set_.default(x, y)
+            z2 = x.sin()
+            return z2, l**2
+
+        x = torch.randn(3)
+        x_test = x.clone()
+        l = torch.randn(3, requires_grad=True)
+        result, _ = f(x, l)
+        result_test, _ = torch.compile(f, backend="aot_eager_decomp_partition")(
+            x_test, l
+        )
+
+        self.assertEqual(result, result_test)
+        self.assertEqual(x, x_test)
+
     def test_changing_stride(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
