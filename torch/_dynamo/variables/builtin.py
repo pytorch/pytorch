@@ -1356,13 +1356,19 @@ class BuiltinVariable(VariableTracker):
                 # This is applicable for user defined objects which seem like dict, but are not really dicts. For
                 # example, TensorDict derives from MutableMapping. For such cases, we can directly inline the .items
                 # method and create a new dict.
-                func_var = arg.var_getattr(tx, "items")
-                if not isinstance(func_var, variables.UserFunctionVariable):
-                    unimplemented(f"{user_cls.__name__}.items(): {args} {kwargs}")
-                out = tx.inline_user_function_return(func_var, args, kwargs)
-                if isinstance(out, ConstDictVariable):
-                    return out
-                return BuiltinVariable(user_cls).call_custom_dict(tx, user_cls, out)
+                if type(arg.value).items in (dict.items, OrderedDict.items) and not tx.output.side_effects.has_pending_mutation(arg):
+                    # These are implemeted in C, so we will have to manually construct the items
+                    new_dict = dict(arg.value.items())
+                    from .builder import SourcelessBuilder
+                    return SourcelessBuilder.create(tx, new_dict)
+                else:
+                    func_var = arg.var_getattr(tx, "items")
+                    if not isinstance(func_var, variables.UserFunctionVariable):
+                        unimplemented(f"{user_cls.__name__}.items(): {args} {kwargs}")
+                    out = tx.inline_user_function_return(func_var, args, kwargs)
+                    if isinstance(out, ConstDictVariable):
+                        return out
+                    return BuiltinVariable(user_cls).call_custom_dict(tx, user_cls, out)
         elif not args and kwargs:
             items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
             return variables.ConstDictVariable(
