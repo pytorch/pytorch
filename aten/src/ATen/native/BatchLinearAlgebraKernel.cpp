@@ -337,7 +337,7 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
   auto batch_size = batchCount(input);
   auto m = input.size(-2);
   auto n = input.size(-1);
-  auto lda = std::max<int>(1, m);
+  auto lda = std::max<int64_t>(1, m);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int info;
@@ -352,7 +352,7 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
 
   // if lwork is less than 'n' then a warning is printed:
   // Intel MKL ERROR: Parameter 7 was incorrect on entry to SGEQRF.
-  lwork = std::max<int>(std::max<int>(1, n), real_impl<scalar_t, value_t>(wkopt));
+  lwork = std::max<int>({1, static_cast<int>(n), static_cast<int>(real_impl<scalar_t, value_t>(wkopt))});
   Tensor work = at::empty({lwork}, input.options());
 
   for (const auto i : c10::irange(batch_size)) {

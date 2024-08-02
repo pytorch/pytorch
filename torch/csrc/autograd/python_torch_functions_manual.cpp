@@ -222,12 +222,12 @@ static PyObject* THPVariable_sparse_coo_tensor(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-      "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False, bool check_invariants=None)",
-      "sparse_coo_tensor(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False, bool check_invariants=None, bool is_coalesced=None)",
+      "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None)",
+      "sparse_coo_tensor(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, bool check_invariants=None, bool is_coalesced=None)",
       "sparse_coo_tensor(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False, bool check_invariants=None)",
   });
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<9> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.has_torch_function()) {
     return handle_torch_function(
@@ -706,7 +706,7 @@ void initTorchFunctions(PyObject* module) {
   py_module.def("_functionalize_was_storage_changed", [](const at::Tensor& t) {
     TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
     auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
-    wrapper->was_storage_changed();
+    return wrapper->was_storage_changed();
   });
   py_module.def(
       "_functionalize_unsafe_set", [](at::Tensor& dst, const at::Tensor& src) {
