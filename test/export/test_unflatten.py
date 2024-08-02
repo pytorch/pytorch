@@ -629,6 +629,47 @@ class TestUnflatten(TestCase):
             export_module.module(), unflattened, (torch.randn((2, 3)),)
         )
 
+    # skip connection is not supported yet
+    @unittest.expectedFailure
+    def test_unflatten_skipped_call_module(self):
+        class C(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return a.d(x.cos())
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = C()
+
+            def forward(self, x):
+                return self.c(x) + x
+
+        class D(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.sin()
+
+        class A(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.b = B()
+                self.d = D()
+
+            def forward(self, x):
+                return self.b(x)
+
+        a = A()
+
+        # The call chain looks like this:
+        # A -> B -> C -> A.d
+        ep = torch.export.export(a, (torch.randn(3),), strict=False)
+        unflattened = unflatten(ep)
+
     def test_nested_leaf_non_strict(self):
         class Leaf(torch.nn.Module):
             def forward(self, x):
