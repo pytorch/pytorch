@@ -64,7 +64,7 @@ class ConstantVariable(VariableTracker):
 
         return ConstantVariable(value, **kwargs)
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         if not ConstantVariable.is_literal(value):
             for disallowed_type, reason in _type_to_assert_reason.items():
@@ -81,7 +81,7 @@ class ConstantVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
 
     def python_type(self):
@@ -147,14 +147,6 @@ class ConstantVariable(VariableTracker):
             return variables.BuiltinVariable(str.format).call_function(
                 tx, [self, *args], kwargs
             )
-        elif name == "join" and istype(self.value, str):
-            assert len(args) == 1 and len(kwargs) == 0
-            arg_unpacked = args[0].force_unpack_var_sequence(tx)
-            try:
-                arg_const = [x.as_python_constant() for x in arg_unpacked]
-                return ConstantVariable.create(self.value.join(arg_const))
-            except NotImplementedError:
-                return super().call_method(tx, name, args, kwargs)
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
@@ -191,6 +183,9 @@ class ConstantVariable(VariableTracker):
                     return SymNodeVariable.create(tx, proxy, add_target)
                 else:
                     return ConstantVariable.create(op(self.value, add_target))
+        elif isinstance(self.value, bytes) and name == "decode":
+            method = getattr(self.value, name)
+            return ConstantVariable.create(method(*const_args, **const_kwargs))
 
         if name == "__len__" and not (args or kwargs):
             return ConstantVariable.create(len(self.value))
@@ -208,7 +203,7 @@ class ConstantVariable(VariableTracker):
 
 
 class EnumVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -223,7 +218,7 @@ class EnumVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"EnumVariable({type(self.value)})"
 
     def python_type(self):

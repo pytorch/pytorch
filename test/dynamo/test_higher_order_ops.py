@@ -51,7 +51,7 @@ class Obj:
 
 
 class MyModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.existing = torch.nn.Parameter(torch.ones([]))
 
@@ -330,7 +330,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class wrap_body_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, l_d_x_: "f32[]", l_d_y_0_: "f32[]", l_d_y_1_2_: "f32[]"):
             sin: "f32[]" = l_d_x_.sin();  l_d_x_ = None
             cos: "f32[]" = l_d_y_0_.cos();  l_d_y_0_ = None
@@ -368,7 +368,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[3]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class wrap_body_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3, 1]"):
             view: "f32[3]" = l_x_.view(3);  l_x_ = None
             add: "f32[3]" = view + 0.5;  view = None
@@ -388,7 +388,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[s0]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class wrap_body_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[s0, 1]", size: "Sym(s0)"):
             view: "f32[s0]" = l_x_.view(size);  l_x_ = size = None
             add: "f32[s0]" = view + 0.5;  view = None
@@ -1449,7 +1449,7 @@ def forward(self, child, const_unused):
         cnt = CompileCounterWithBackend(backend)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer = torch.nn.Buffer(torch.ones(6, 4))
 
@@ -1485,7 +1485,7 @@ def forward(self, child, const_unused):
         z = torch.ones(4, 4)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer = torch.nn.Buffer(torch.ones(6, 4))
 
@@ -1659,7 +1659,7 @@ def forward(self):
         z = [torch.ones(4, 4)]
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, y, x):
@@ -1710,7 +1710,7 @@ def forward(self):
         cnt = CompileCounterWithBackend(backend)
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w = torch.nn.Buffer(torch.ones(6, 4))
 
@@ -1740,7 +1740,7 @@ def forward(self):
         z = [torch.ones(6, 4)]
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w = torch.nn.Buffer(torch.ones(6, 4))
 
@@ -1844,7 +1844,7 @@ class GraphModule(torch.nn.Module):
         getitem_1: "f32[3]" = wrap[1];  wrap = None
         return (getitem, getitem_1)
 
-    class wrap_body_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, l_arg1_0_: "f32[3]", l_arg2_0_: "f32[3]"):
             child: "f32[3]" = l_arg1_0_ + 1;  l_arg1_0_ = None
 
@@ -2043,7 +2043,7 @@ class GraphModule(torch.nn.Module):
         add: "f32[2, 3]" = a + b;  a = b = None
         return (add,)
 
-    class wrap_body_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[2, 3]"):
             child: "f32[2, 3]" = l_x_.sin()
             child_1: "f32[2, 3]" = l_x_.cos();  l_x_ = None
@@ -2078,7 +2078,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[3]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class wrap_body_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3]"):
             child: "f32[3]" = -l_x_;  l_x_ = None
             return (child,)
@@ -2187,7 +2187,7 @@ class GraphModule(torch.nn.Module):
 
     def test_nested_wrap(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
 
@@ -2214,7 +2214,7 @@ class GraphModule(torch.nn.Module):
 
     def test_hooks(self):
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.net = torch.nn.Linear(10, 10)
 
@@ -2259,7 +2259,7 @@ class GraphModule(torch.nn.Module):
 
     def test_wrap_source_fn_stack(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
@@ -3640,7 +3640,7 @@ class GraphModule(torch.nn.Module):
     def test_functional_call_sequential_params_and_buffers(self):
         # copied from test/test_stateless.py
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l1 = torch.nn.Linear(1, 1)
                 self.register_buffer("buffer", torch.ones(1))
@@ -6227,7 +6227,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_module(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
 
