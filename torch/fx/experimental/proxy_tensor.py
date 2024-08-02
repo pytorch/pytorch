@@ -288,8 +288,8 @@ def snapshot_fake(val: Tensor) -> Optional[Tensor]:
 
 _ExtractValType = Optional[Union[
     PySymType, _AnyScriptObjectType, BackwardState,
-    List["_ExtractValType"], Tuple["_ExtractValType", ...], Tensor,
-    int, float, bool]]
+    List["_ExtractValType"], Tuple["_ExtractValType", ...],
+    Dict[str, "_ExtractValType"], Tensor, int, float, bool]]
 
 def extract_val(val: _ExtractValType) -> _ExtractValType:
     if is_fake(val):
