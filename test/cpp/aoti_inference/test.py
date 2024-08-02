@@ -20,7 +20,7 @@ class Net(torch.nn.Module):
 
 
 class NetWithTensorConstants(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.w = torch.randn(30, 1, device="cuda")
 
