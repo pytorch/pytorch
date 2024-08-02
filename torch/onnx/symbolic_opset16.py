@@ -36,6 +36,7 @@ from torch.nn.functional import (
 from torch.onnx import _type_utils, errors, symbolic_helper, utils
 from torch.onnx._internal import jit_utils, registration
 
+
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=16)
 
 

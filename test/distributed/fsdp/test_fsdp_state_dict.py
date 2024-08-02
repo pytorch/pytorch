@@ -135,7 +135,7 @@ class Model(Module):
 
 
 class TestDummyModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         torch.manual_seed(0)
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
@@ -1130,7 +1130,7 @@ class TestFSDPStateDict(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_local_state_dict_with_empty_ranks(self):
         class Model(Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.my_tensor = torch.full((1,), 3.1415926)
                 self.my_parameter = nn.Parameter(self.my_tensor)
