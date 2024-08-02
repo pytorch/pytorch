@@ -873,7 +873,9 @@ class FakeTensor(Tensor):
         coeff: Union[int, torch.SymInt] = 1,
     ) -> torch.SymInt:
         if self.nested_int_memo is None:
-            self.nested_int_memo = self.fake_mode.create_symbolic_nested_int(hint=None)
+            self.nested_int_memo = self.fake_mode.create_symbolic_nested_int(
+                nt_tensor_id=None
+            )
         return self.nested_int_memo * coeff
 
     # We must handle tolist in a special way for FakeTensors here in the case
@@ -2139,16 +2141,17 @@ class FakeTensorMode(TorchDispatchMode):
         return tree_map(wrap, r)
 
     def create_symbolic_nested_int(
-        self, *, hint: Optional[Union[int, torch.SymInt]] = None
+        self, *, nt_tensor_id: Optional[int] = None
     ) -> torch.SymInt:
         # See Note: [Creating symbolic nested int]
         # Returned nested int always has coeff=1; multiply the result by coeff if needed
         import torch.nested._internal.nested_tensor
 
-        if hint is None:
-            hint = torch._C._get_nested_int(self.nt_tensor_id_counter, 1)
+        if nt_tensor_id is None:
+            nt_tensor_id = self.nt_tensor_id_counter
             assert self.enter_stack, "should only called while FakeTensorMode is active"
             self.nt_tensor_id_counter += 1
+        hint = torch._C._get_nested_int(nt_tensor_id, 1)
 
         src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
         assert self.shape_env is not None
