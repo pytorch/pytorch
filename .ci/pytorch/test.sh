@@ -9,7 +9,6 @@ set -ex
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-
 # Do not change workspace permissions for ROCm CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
 if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then

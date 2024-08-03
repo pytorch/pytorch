@@ -1,12 +1,12 @@
 import random
 import sys
 
-from benchmarks.dynamo.pr_time_benchmarks.benchmark_base import Benchmark
+from benchmarks.dynamo.pr_time_benchmarks.benchmark_base import BenchmarkBase
 
 import torch
 
 
-class P0(Benchmark):
+class Benchmark(BenchmarkBase):
     N = 20
 
     def name(self):
@@ -39,7 +39,7 @@ class P0(Benchmark):
 
 def main():
     result_path = sys.argv[1]
-    P0().enable_instruction_count().collect_all().append_results(result_path)
+    Benchmark().enable_instruction_count().collect_all().append_results(result_path)
 
 
 if __name__ == "__main__":
