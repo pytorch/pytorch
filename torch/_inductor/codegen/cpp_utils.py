@@ -683,7 +683,6 @@ def get_gemm_template_output_and_compute_dtype(input_dtype):
         return (torch.float32, torch.float32)
 
 
-# Factored out epilogue creators here
 def create_epilogue_with_attr(input_buffer, attr, **kwargs):
     input_loader = input_buffer.make_loader()
     dtype = input_buffer.get_dtype()

@@ -425,7 +425,7 @@ inline void {{kernel_name}}_kernel(
             if constexpr (col % 4 == 0) {
                 constexpr auto remaining = std::min<int>(4, COLS - col);
                 {{kernel.unroll_pragma(4)}}
-                for (int idx = 0; idx <= remaining; idx++) {
+                for (int idx = 0; idx < remaining; idx++) {
                     // Convert 16 int8 elements to int32, and then fp32
                     auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN + idx * 16);
                     vb[col + idx] = at::vec::convert<float>(b32);

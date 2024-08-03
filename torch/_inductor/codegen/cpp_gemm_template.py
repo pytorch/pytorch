@@ -490,7 +490,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 if trans_w:
                     assert isinstance(W, torch.Tensor)
                     W = W.transpose(0, 1)
-            if has_bias and B is not None:
+            if B is not None:
                 if isinstance(B, ir.IRNode):
                     if not isinstance(B, ir.TensorBox):
                         B = ir.TensorBox(B)
