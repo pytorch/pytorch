@@ -6559,7 +6559,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         torch.manual_seed(0)
 
         class mha(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 torch.manual_seed(0)
                 self.linear = torch.nn.Linear(d2, d3, device=device)
@@ -6950,10 +6950,6 @@ FORWARD_FAILURES = {
     "masked.sum",
     "masked.var",
     # === BEGIN BUG SECTION ===
-    # NJT arg is second for these signatures; need to support this
-    *(f"polygamma.polygamma_n_{n}" for n in range(5)),
-    "special.polygamma.special_polygamma_n_0",
-    "ldexp",
     # Returns a tuple of Tensors so it doesn't work with NJT's unary pointwise logic
     "frexp",
     # Need to adjust sample input func to pass the right thing
@@ -6986,7 +6982,6 @@ BACKWARD_FAILURES = {
     "clamp_max",
     "clamp_min",
     "copysign",
-    "digamma",
     "float_power",
     "max.binary",
     "maximum",
@@ -6997,13 +6992,6 @@ BACKWARD_FAILURES = {
     "sinc",
     "special.i1",
     "special.i1e",
-}
-
-COMPILE_BACKWARD_FAILURES = {
-    *BACKWARD_FAILURES,
-    # mvlgamma_backward calls arange() passing self.options() and layout=torch.jagged
-    # is not supported for the arange() decomp. Backward function should be fixed
-    *(f"mvlgamma.mvlgamma_p_{p}" for p in [1, 3, 5]),
 }
 
 
@@ -7085,7 +7073,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
             self.assertEqual(out_compile, out_ref)
 
-    @withXFails(COMPILE_BACKWARD_FAILURES)
+    @withXFails(BACKWARD_FAILURES)
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
         allowed_dtypes=(torch.float32,),

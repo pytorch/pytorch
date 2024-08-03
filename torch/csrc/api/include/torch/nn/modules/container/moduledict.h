@@ -146,7 +146,7 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
   /// Special cloning function for `ModuleDict` because it does not use
   /// `reset()`.
   std::shared_ptr<Module> clone(
-      const std::optional<Device>& device = nullopt) const override {
+      const std::optional<Device>& device = std::nullopt) const override {
     auto clone = std::make_shared<ModuleDictImpl>();
     for (const auto& module : modules_) {
       clone->insert(module.key(), module.value()->clone(device));
