@@ -334,7 +334,7 @@ class HigherOrderOperator(OperatorBase):
                         result = handler(mode, *args, **kwargs)
                 else:
                     raise NotImplementedError(
-                        f"There was no rule registered for HOP {self_.name} and mode {curr_mode}. "
+                        "There was no rule registered for HOP {self._name} and mode {curr_mode}. "
                         "We recommend filing an issue."
                     )
                 if result is not NotImplemented:
@@ -355,7 +355,7 @@ class HigherOrderOperator(OperatorBase):
                     result = handler(*args, **kwargs)
                 else:
                     raise NotImplementedError(
-                        f"There was no rule registered for HOP {self_.name} and subclass {subclass_type}. "
+                        "There was no rule registered for HOP {self._name} and subclass {subclass_type}. "
                         "We recommend filing an issue."
                     )
                 if result is not NotImplemented:
