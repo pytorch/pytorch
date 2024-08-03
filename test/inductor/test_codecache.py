@@ -58,7 +58,7 @@ torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
 
 class MyModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = torch.nn.Linear(10, 10)
 

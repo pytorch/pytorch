@@ -82,7 +82,7 @@ bool isBatchedAtLevel(const c10::List<std::optional<Tensor>>& maybe_tensors, int
   return false;
 }
 
-bool areAnyBatchedAtLevel(ArrayRef<optional<Tensor>> maybe_tensors, int64_t level) {
+bool areAnyBatchedAtLevel(ArrayRef<std::optional<Tensor>> maybe_tensors, int64_t level) {
   for (const auto& maybe_tensor : maybe_tensors) {
     if (isBatchedAtLevel(maybe_tensor, level)) {
       return true;

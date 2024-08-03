@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+
+# pyre-unsafe
 import argparse
 import io
 import os

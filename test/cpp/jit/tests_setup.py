@@ -26,7 +26,7 @@ class EvalModeForLoadedModule(FileSetup):
 
     def setup(self):
         class Model(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.dropout = torch.nn.Dropout(0.1)
 
