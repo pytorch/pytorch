@@ -1,14 +1,12 @@
 # mypy: allow-untyped-defs
 import contextlib
 import copy
-
 from typing import List
 
 import torch
 from torch._higher_order_ops.wrap import wrap_with_autocast
 
 from ..utils import node_inline_, nodes_filter, nodes_first, nodes_map, sequential_split
-
 from .replace_with_hop_pass_util import _replace_with_hop_helper
 
 
