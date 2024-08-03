@@ -17,12 +17,12 @@ from torch.utils._pytree import (
 
 from .exported_program import ExportedProgram
 
+
 if TYPE_CHECKING:
     from sympy import Symbol
 
     from torch._guards import Source
-
-    from ..fx.experimental.symbolic_shapes import ShapeEnv, StrictMinMaxConstraint
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv, StrictMinMaxConstraint
 
 __all__ = [
     "Constraint",
