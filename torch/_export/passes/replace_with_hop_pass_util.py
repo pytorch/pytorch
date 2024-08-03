@@ -1,11 +1,9 @@
 # mypy: allow-untyped-defs
 
 import copy
-
 from typing import Callable
 
 import torch
-
 from torch._ops import HigherOrderOperator
 
 from ..utils import node_replace_
