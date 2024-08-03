@@ -20,6 +20,8 @@ import usort
 
 IS_WINDOWS: bool = os.name == "nt"
 REPO_ROOT = Path(__file__).absolute().parents[3]
+
+# TODO: remove this when it gets empty and remove `black` in PYFMT
 USE_BLACK_FILELIST = re.compile(
     "|".join(
         (
@@ -113,17 +115,16 @@ def format_error_message(filename: str, err: Exception) -> LintMessage:
 def run_isort(content: str, path: Path) -> str:
     isort_config = isort.Config(settings_path=str(REPO_ROOT))
 
-    if not path.samefile(__file__):
-        return re.sub(
-            r"(#.*\b)isort: split\b",
-            r"\g<1>usort: skip",
-            isort.code(
-                re.sub(r"(#.*\b)usort:\s*skip\b", r"\g<1>isort: split", content),
-                config=isort_config,
-                file_path=path,
-            ),
-        )
-    return isort.code(content, config=isort_config, file_path=path)
+    is_this_file = path.samefile(__file__)
+    if not is_this_file:
+        content = re.sub(r"(#.*\b)usort:\s*skip\b", r"\g<1>isort: split", content)
+
+    content = isort.code(content, config=isort_config, file_path=path)
+
+    if not is_this_file:
+        content = re.sub(r"(#.*\b)isort: split\b", r"\g<1>usort: skip", content)
+
+    return content
 
 
 def run_usort(content: str, path: Path) -> str:
