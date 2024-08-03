@@ -115,6 +115,14 @@ def _create_jit_graph(
     return graph, params, torch_out, None
 
 
+def list_add(a, b):
+    return a + b
+
+
+def list_append(container, element):
+    return container + [element]
+
+
 def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
     def pattern(im, dim, scale):
         sym_size_int = torch.ops.aten.sym_size.int(im, dim)
@@ -330,6 +338,7 @@ def get_attribute_fqn_from_ts_node(
 
 def get_op_overload(node: torch._C.Node):
     schema_str = node.schema()
+    assert schema_str != "(no schema)", f"got empty schema for {node}"
     schema: torch._C.FunctionSchema = torch._C.parse_schema(schema_str)
     ns, op_name = str(schema.name).split("::")
     override = schema.overload_name
@@ -343,7 +352,7 @@ def get_op_overload(node: torch._C.Node):
             op_overload = op_overload_packet.default
     except Exception as e:
         raise RuntimeError(
-            f"Unable to find operator {node.kind()} with schema {node.schema}"
+            f"Unable to find operator {node.kind()} with schema {node.schema()}"
         ) from e
 
     return op_overload
@@ -531,6 +540,24 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         fx_node = self.fx_graph.call_function(target, args, kwargs)
         self.name_to_node[output_name] = fx_node
+
+    def convert_aten_append(self, node: torch._C.Node):
+        # special handle python list append: "aten::append.t(t[](a!) self, t(c -> *) el) -> t[](a!)"
+
+        # inplace append to the list!! This is kinda crazy, as we are inplace mutating the list
+        # This makes the converter "non-functional", and the result depends on the order of the nodes being converter
+        # In a sense, the converter now becomes an stateful interpreter
+        warnings.warn(
+            "Converting aten::append.t, which is a inplace mutation of the list. "
+            "This makes the converter non-functional: the result depends on the order of the append nodes being converter!"
+        )
+
+        args = tuple(self.get_fx_value(inp) for inp in node.inputs())
+        fx_node = self.fx_graph.call_function(list_append, args)
+        self.name_to_node[node.output().debugName()] = fx_node
+
+        # inplace mutate arg[0], which is the python list
+        self.name_to_node[node.inputsAt(0).debugName()] = fx_node
 
     def convert_prim_Constant(self, node: torch._C.Node):
         name = node.output().debugName()
@@ -767,6 +794,64 @@ class TS2FXGraphConverter:
         )
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
+
+    def convert_aten_to(self, node: torch._C.Node):
+        target = get_op_overload(node)
+        args, kwargs = self.get_args_kwargs(node, target._schema)
+
+        # special handle aten.to.dtype and aten.to.prim_dtype followed by inplace_mutation_op
+        # coz aten.to + inplace_mutation_op pattern would trigger
+        # "cannot mutate tensors with frozen storage" functionalization error.
+        # To work around the issue, we override the copy to be True, so that the output
+        # is for sure not an alias of input
+        if target == torch.ops.aten.to.dtype or target == torch.ops.aten.to.prim_dtype:
+            user_nodes = [use.user for use in node.output().uses()]
+            user_targets = [
+                get_op_overload(user_node)
+                for user_node in user_nodes
+                if user_node.schema() != "(no schema)"
+            ]
+            has_mutable_target = any(
+                target._schema.is_mutable for target in user_targets
+            )
+
+            if has_mutable_target:
+                assert len(args) >= 4
+                new_args = list(args)
+                new_args[3] = True  # copy, override to True
+                fx_node = self.fx_graph.call_function(
+                    torch.ops.aten.to.dtype, tuple(new_args)
+                )
+                # temp hack to work around the issue https://github.com/pytorch/pytorch/issues/131679
+                # When this issue is fixed, the clone node would be no longer needed
+                clone_node = self.fx_graph.call_function(
+                    torch.ops.aten.clone.default, (fx_node,)
+                )
+                output_name = node.output().debugName()
+                self.name_to_node[output_name] = clone_node
+                return
+
+        self.convert_call_function_op(node)
+
+    def convert_aten_add(self, node: torch._C.Node):
+        if node.schema() == "(no schema)":
+            if isinstance(node.inputsAt(0).type(), torch.ListType) and isinstance(
+                node.inputsAt(1).type(), torch.ListType
+            ):
+                target = torch.ops.aten.add.t
+            else:
+                raise RuntimeError(f"unable to determind the target for {node}")
+        else:
+            target = get_op_overload(node)
+
+        if target == torch.ops.aten.add.t:
+            # special handle python list/tuple add: "aten::add.t(t[] a, t[] b) -> t[]" for
+            # RuntimeError: aten::add() Expected a value of type 'List[t]' for argument 'a' but instead found type 'immutable_list'.
+            args, kwargs = self.get_args_kwargs(node, target._schema)
+            output_name = node.output().debugName()
+            self.name_to_node[output_name] = self.fx_graph.call_function(list_add, args)
+        else:
+            self.convert_call_function_op(node)
 
     def _check_set_attr_in_if_block(self, if_node: torch._C.Node):
         for block in if_node.blocks():
@@ -1051,7 +1136,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
     def convert_node(self, node):
         try:
             super().convert_node(node)
-        except Exception:
+        except Exception as e:
             self.unsupported_node_list.append(node)
 
 
