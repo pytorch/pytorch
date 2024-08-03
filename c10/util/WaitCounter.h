@@ -45,6 +45,13 @@ class C10_API WaitCounterHandle {
 
   class WaitGuard {
    public:
+    WaitGuard(WaitGuard&& other) noexcept
+        : handle_{std::exchange(other.handle_, {})},
+          ctxs_{std::move(other.ctxs_)} {}
+    WaitGuard(const WaitGuard&) = delete;
+    WaitGuard& operator=(const WaitGuard&) = delete;
+    WaitGuard& operator=(WaitGuard&&) = delete;
+
     ~WaitGuard() {
       stop();
     }
