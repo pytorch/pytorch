@@ -133,11 +133,7 @@ def run_isort(content: str, path: Path) -> str:
 def run_usort(content: str, path: Path) -> str:
     usort_config = usort.Config.find(path)
 
-    return usort.usort_string(
-        content,
-        path=path,
-        config=usort_config,
-    )
+    return usort.usort_string(content, path=path, config=usort_config)
 
 
 def run_black(content: str, path: Path) -> str:
@@ -154,10 +150,7 @@ def run_black(content: str, path: Path) -> str:
     black_mode.is_pyi = path.suffix.lower() == ".pyi"
     black_mode.is_ipynb = path.suffix.lower() == ".ipynb"
 
-    return black.format_str(
-        content,
-        mode=black_mode,
-    )
+    return black.format_str(content, mode=black_mode)
 
 
 def run_ruff_format(content: str, path: Path) -> str:
