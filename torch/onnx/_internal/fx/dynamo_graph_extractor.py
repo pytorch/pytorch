@@ -15,7 +15,7 @@ import torch._dynamo
 import torch.export as torch_export
 import torch.fx
 import torch.onnx
-from torch.onnx._internal import exporter, io_adapter
+from torch.onnx._internal import _exporter_legacy, io_adapter
 from torch.utils import _pytree as pytree
 
 
@@ -24,7 +24,7 @@ class _PyTreeExtensionContext:
 
     _extensions: dict[type, tuple[pytree.FlattenFunc, pytree.UnflattenFunc]]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._extensions = {}
         # Register PyTree extension for HuggingFace model output.
         self._register_huggingface_model_output_extension()
@@ -153,7 +153,7 @@ def _wrap_model_with_output_adapter(
     return wrapped
 
 
-class DynamoExport(exporter.FXGraphExtractor):
+class DynamoExport(_exporter_legacy.FXGraphExtractor):
     """Generates a FX GraphModule using torch.dynamo.export API
     Args:
         aten_graph: If True, exports a graph with ATen operators.
@@ -169,7 +169,7 @@ class DynamoExport(exporter.FXGraphExtractor):
 
     def generate_fx(
         self,
-        options: exporter.ResolvedExportOptions,
+        options: _exporter_legacy.ResolvedExportOptions,
         model: torch.nn.Module | Callable,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
@@ -216,11 +216,11 @@ class DynamoExport(exporter.FXGraphExtractor):
 
     def pre_export_passes(
         self,
-        options: exporter.ResolvedExportOptions,
+        options: _exporter_legacy.ResolvedExportOptions,
         original_model: torch.nn.Module | Callable,
         fx_module: torch.fx.GraphModule,
         fx_module_args: Sequence[Any],
     ):
-        return exporter.common_pre_export_passes(
+        return _exporter_legacy.common_pre_export_passes(
             options, original_model, fx_module, fx_module_args
         )

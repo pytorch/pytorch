@@ -206,7 +206,7 @@ class TestFindMismatch(pytorch_test_common.ExportTestCase):
         )
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = torch.nn.Sequential(
                     torch.nn.Linear(3, 4),

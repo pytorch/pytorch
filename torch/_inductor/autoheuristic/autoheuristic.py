@@ -1,7 +1,7 @@
 import json
 import os
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 import torch
 from torch._inductor.autoheuristic.autoheuristic_utils import (
@@ -12,6 +12,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     CHOICE_COL,
     Feedback,
     FEEDBACK_COL,
+    get_metadata_str_from_log,
 )
 from torch._inductor.autoheuristic.learned_heuristic_controller import (
     LearnedHeuristicController,
@@ -19,25 +20,6 @@ from torch._inductor.autoheuristic.learned_heuristic_controller import (
 from torch._inductor.ir import ChoiceCaller
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import get_gpu_shared_memory
-
-
-def deserialize_data(log_path: str) -> Tuple[Any, Dict[str, Any]]:
-    json_string = get_metadata_str_from_log(log_path)
-    metadata = deserialize_metadata(json_string)
-    import pandas as pd  # type: ignore[import-untyped]
-
-    df = pd.read_csv(log_path, skiprows=1)
-    return (df, metadata)
-
-
-def deserialize_metadata(json_string: str) -> Dict[str, Any]:
-    return json.loads(json_string)
-
-
-def get_metadata_str_from_log(log_path: str) -> str:
-    with open(log_path, newline="") as file:
-        json_string = file.readline().strip()
-        return json_string
 
 
 class LocalFeedback:
@@ -147,6 +129,9 @@ class AutoHeuristic:
                 self.context,
             )
             decision = controller.get_decision()
+            if decision not in self.choices:
+                # TODO(AlnisM): We might want to allow this in the future
+                return self.fallback()
             if decision is not None:
                 return decision
         return self.fallback()

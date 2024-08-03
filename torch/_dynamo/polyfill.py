@@ -24,7 +24,7 @@ def any(iterator):
 
 
 def index(iterator, item, start=0, end=None):
-    for i, elem in list(enumerate(list(iterator)))[start:end]:
+    for i, elem in list(enumerate(iterator))[start:end]:
         if item == elem:
             return i
     # This will not run in dynamo
@@ -126,8 +126,8 @@ def getattr_and_trace(*args, **kwargs):
     return fn(*args[2:], **kwargs)
 
 
-def enumerate(iterable, start=0):
-    n = start
-    for elem in iterable:
-        yield n, elem
-        n += 1
+def mapping_get(obj, key, value=None):
+    try:
+        return obj.__getitem__(key)
+    except KeyError:
+        return value

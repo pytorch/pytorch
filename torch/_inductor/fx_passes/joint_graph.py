@@ -196,7 +196,7 @@ class UniformValueConstantFolder(ConstantFolder):
     with a tensor constructor call: aten.full([shape], value, ...)
     """
 
-    def __init__(self, gm, skip_constructors=False):
+    def __init__(self, gm, skip_constructors=False) -> None:
         super().__init__(gm, skip_constructors)
         self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}
         self.constant_data_ptrs: Dict[torch.fx.Node, StorageWeakRef] = {}
