@@ -948,11 +948,28 @@ def dispatch_trace(
 ) -> GraphModule:
     graph = tracer.trace(root, concrete_args)
 
-    # TODO: I guess hypothetically you could have an impure node that returns
-    # a SymInt only, but between this and the catch all impure test this
-    # should be pretty obscure
+    # NB: be careful not to DCE .item() calls
     def impure_pred(n: fx.Node) -> bool:
-        return 'val' not in n.meta or not isinstance(n.meta['val'], py_sym_types) or n.is_impure()
+        if n.target in (
+            # TODO: dedupe with accessor node in output_graph.py
+            torch.ops.aten.sym_size,
+            torch.ops.aten.sym_size.default,
+            torch.ops.aten.sym_size.int,
+            torch.ops.aten.sym_stride,
+            torch.ops.aten.sym_stride.default,
+            torch.ops.aten.sym_stride.int,
+            torch.ops.aten.sym_storage_offset,
+            torch.ops.aten.sym_storage_offset.default,
+            # TODO: sync this back to output_graph
+            torch.ops.aten.sym_numel.default,
+        ):
+            return False
+        return (
+            not isinstance(n.meta.get('val'), py_sym_types) or
+            # NB: constant args ok
+            any(not isinstance(a.meta.get('val'), py_sym_types) for a in n.args if isinstance(a, fx.Node)) or
+            n.is_impure()
+        )
 
     graph.eliminate_dead_code(impure_pred)
     from torch._inductor.fx_passes.dedupe_symint_uses import dedupe_symints
