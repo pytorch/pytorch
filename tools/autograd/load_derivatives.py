@@ -991,7 +991,7 @@ def _create_op_prefix(name: str) -> str:
     OP names correspond to classes, hence the change to title case.
 
     Example::
-    >>> _create_op_prefix('add')
+    >>> _create_op_prefix("add")
     'AddBackward'
     """
     camel_case = "".join([p.title() for p in name.split("_")])
