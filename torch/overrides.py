@@ -1561,10 +1561,10 @@ def wrap_torch_function(dispatcher: Callable):
 
     Examples
     --------
-    >>> def dispatcher(a): # Must have the same signature as func
+    >>> def dispatcher(a):  # Must have the same signature as func
     ...     return (a,)
     >>> @torch.overrides.wrap_torch_function(dispatcher)
-    >>> def func(a): # This will make func dispatchable by __torch_function__
+    >>> def func(a):  # This will make func dispatchable by __torch_function__
     ...     return a + 0
     """
 

@@ -919,13 +919,7 @@ class LOBPCG:
             # Update E, X, P
             self.X[:, nc:] = mm(S_, Z[:, : n - nc])
             self.E[nc:] = E_[: n - nc]
-            P = mm(
-                S_,
-                mm(
-                    Z[:, n - nc :],
-                    _utils.basis(Z[: n - nc, n - nc :].mT),
-                ),
-            )
+            P = mm(S_, mm(Z[:, n - nc :], _utils.basis(Z[: n - nc, n - nc :].mT)))
             np = P.shape[-1]
 
             # check convergence

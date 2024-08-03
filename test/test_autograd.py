@@ -1064,16 +1064,7 @@ class TestAutograd(TestCase):
 
         # Preserves symints
         nt = torch.nested.nested_tensor(
-            [
-                torch.randn(
-                    3,
-                    2,
-                ),
-                torch.randn(
-                    2,
-                    2,
-                ),
-            ],
+            [torch.randn(3, 2), torch.randn(2, 2)],
             layout=torch.jagged,
             requires_grad=True,
         )
@@ -1125,8 +1116,7 @@ class TestAutograd(TestCase):
         # not a scalar
         out, tmp_edge = fn(x, reduce=False)
         with self.assertRaisesRegex(
-            RuntimeError,
-            "grad can be implicitly created only for scalar output",
+            RuntimeError, "grad can be implicitly created only for scalar output"
         ):
             torch.autograd.grad(tmp_edge, (x,))
 
@@ -3798,10 +3788,7 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, "has been modified by an inplace"):
             y.backward()
 
-    def _test_type_conversion_backward(
-        self,
-        t,
-    ):
+    def _test_type_conversion_backward(self, t):
         fvar = Variable(t(torch.randn(5, 5).float()), requires_grad=True)
         fvar.double().sum().backward()
         self.assertEqual(fvar.grad, torch.ones_like(fvar))
@@ -4468,13 +4455,7 @@ CosBackward0, CosBackward0, SinBackward0, MulBackward0, torch::autograd::Accumul
         register_logging_hooks(a, b, out)
         out.register_hook(hook)
         with torch.autograd.set_multithreading_enabled(False):
-            torch.autograd.grad(
-                (out,),
-                inputs=(
-                    a,
-                    b,
-                ),
-            )
+            torch.autograd.grad((out,), inputs=(a, b))
         self.assertEqual(
             names(predicted[0]),
             """\
@@ -6017,15 +5998,7 @@ Done""",
                 return x * y.coalesce().to_dense()
 
             a = torch.rand(2, 2, dtype=torch.double, requires_grad=True)
-            b = (
-                torch.rand(
-                    2,
-                    2,
-                    dtype=torch.double,
-                )
-                .to_sparse()
-                .requires_grad_(True)
-            )
+            b = torch.rand(2, 2, dtype=torch.double).to_sparse().requires_grad_(True)
             self.assertTrue(
                 gradcheck(
                     fn,
@@ -10462,28 +10435,8 @@ class TestAutogradForwardMode(TestCase):
             dual.as_strided((5,), (1,), 0)
 
     def test_metadata_check_checks_ignores_size_zero(self):
-        a = torch.ones(0).as_strided(
-            (
-                0,
-                1,
-            ),
-            (
-                1,
-                1,
-            ),
-            0,
-        )
-        b = torch.ones(0).as_strided(
-            (
-                0,
-                1,
-            ),
-            (
-                1,
-                0,
-            ),
-            0,
-        )
+        a = torch.ones(0).as_strided((0, 1), (1, 1), 0)
+        b = torch.ones(0).as_strided((0, 1), (1, 0), 0)
 
         with fwAD.dual_level():
             dual = fwAD.make_dual(a, b)
@@ -11228,22 +11181,10 @@ class TestAutogradDeviceType(TestCase):
                 return saved_grad_x, None
 
         size = torch.Size([6, 3, 2])
-        i1 = torch.tensor(
-            [
-                [0, 3, 4],
-                [0, 2, 2],
-            ],
-            dtype=torch.long,
-        )
+        i1 = torch.tensor([[0, 3, 4], [0, 2, 2]], dtype=torch.long)
         v1 = make_tensor([3, 2], dtype=dtype, device=device)
         sparse_grad1 = torch.sparse_coo_tensor(i1, v1, size, dtype=dtype, device=device)
-        i2 = torch.tensor(
-            [
-                [0, 1, 3, 4],
-                [0, 1, 2, 2],
-            ],
-            dtype=torch.long,
-        )
+        i2 = torch.tensor([[0, 1, 3, 4], [0, 1, 2, 2]], dtype=torch.long)
         v2 = make_tensor([4, 2], dtype=dtype, device=device)
         sparse_grad2 = torch.sparse_coo_tensor(i2, v2, size, dtype=dtype, device=device)
         dense_grad = torch.rand(size, device=device, dtype=dtype)
@@ -13480,9 +13421,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
         def fn_sac(x, y):
             context_fn = functools.partial(
                 create_selective_checkpoint_contexts,
-                [
-                    torch.ops.aten.mm.default,
-                ],
+                [torch.ops.aten.mm.default],
             )
             out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
             return out
@@ -13553,9 +13492,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
         context_fn = functools.partial(
             create_selective_checkpoint_contexts,
-            [
-                torch.ops.aten.view.default,
-            ],
+            [torch.ops.aten.view.default],
         )
         out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
         out[1].sum().backward()
