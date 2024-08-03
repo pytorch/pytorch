@@ -154,10 +154,10 @@ def run_usort(content: str, path: Path) -> str:
 
 
 def run_black(content: str, path: Path) -> str:
-    black_config = black.parse_pyproject_toml(black.find_pyproject_toml((str(path),)))
+    black_config = black.parse_pyproject_toml(black.find_pyproject_toml((str(path),)))  # type: ignore[attr-defined,arg-type]
     # manually patch options that do not have a 1-to-1 match in Mode arguments
     black_config["target_versions"] = {
-        black.TargetVersion[ver.upper()]
+        black.TargetVersion[ver.upper()]  # type: ignore[attr-defined]
         for ver in black_config.pop("target_version", [])
     }
     black_config["string_normalization"] = not black_config.pop(
