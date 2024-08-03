@@ -1,37 +1,28 @@
-#include <errno.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <torch/csrc/instruction_counter/Module.h>
 #include <torch/csrc/utils/pybind.h>
-#include <unistd.h>
+#include <cerrno>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #if defined(__linux__)
-#include <sys/syscall.h>
 #include <linux/perf_event.h>
 #include <sys/ioctl.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #endif
 
 namespace torch::instruction_counter {
 
-struct read_format {
-  uint64_t nr;
-  uint64_t time_enabled;
-  uint64_t time_running;
-  struct {
-    uint64_t value;
-  } values[1];
-};
-
-int start() {
+long start() {
 #if !defined(__linux__)
   printf("This systems seems not to be Linux");
   return -1;
 #else
 
   // Construct base perf_event_attr struct
-  struct perf_event_attr attr;
+  perf_event_attr attr{};
   memset(&attr, 0, sizeof(attr));
   attr.size = sizeof(attr);
   attr.exclude_kernel = 1;
@@ -42,7 +33,7 @@ int start() {
   attr.type = PERF_TYPE_HARDWARE;
   attr.config = PERF_COUNT_HW_INSTRUCTIONS;
 
-  int fd = syscall(SYS_perf_event_open, &attr, 0, -1, -1, 0);
+  long fd = syscall(SYS_perf_event_open, &attr, 0, -1, -1, 0);
   if (fd == -1) {
     fprintf(
         stderr,
@@ -50,8 +41,8 @@ int start() {
         strerror(errno));
     return -1;
   }
-  ioctl(fd, PERF_EVENT_IOC_RESET, 0); // Reset the counter
-  ioctl(fd, PERF_EVENT_IOC_ENABLE, 0); // Enable the counter
+  ioctl((int)fd, PERF_EVENT_IOC_RESET, 0); // Reset the counter
+  ioctl((int)fd, PERF_EVENT_IOC_ENABLE, 0); // Enable the counter
   return fd;
 #endif
 }
@@ -70,10 +61,10 @@ uint64_t end(int fd) {
     return -1;
   }
 
-  uint64_t total_instructions;
+  uint64_t total_instructions = 0;
 
   // Read results
-  int ret_val = read(fd, &total_instructions, sizeof(total_instructions));
+  long ret_val = read(fd, &total_instructions, sizeof(total_instructions));
   if (ret_val == -1) {
     fprintf(stderr, "Error reading perf event results: %s\n", strerror(errno));
     return -1;
