@@ -568,8 +568,12 @@ Tensor angle_backward(const Tensor& grad, const Tensor& self) {
 }
 
 Tensor mvlgamma_backward(const Tensor& grad, const Tensor& self, int64_t p) {
-  Tensor args =
-      at::arange(-static_cast<double>(p) / 2. + 0.5, 0.5, 0.5, self.options());
+  Tensor args = at::arange(
+      -static_cast<double>(p) / 2. + 0.5,
+      0.5,
+      0.5,
+      // use strided here regardless of self's layout; useful for e.g. NJT
+      self.options().layout(c10::kStrided));
   args = args.add(self.unsqueeze(-1));
   return grad * args.digamma_().sum(-1);
 }

@@ -13,7 +13,7 @@ from torch._guards import Source
 
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import raise_observed_user_stop_iteration, unimplemented
+from ..exc import raise_observed_exception, unimplemented
 from ..source import AttrSource, GetItemSource
 from ..utils import (
     get_fake_value,
@@ -29,7 +29,6 @@ from ..utils import (
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
-from .iter import IteratorVariable
 
 
 if TYPE_CHECKING:
@@ -61,7 +60,7 @@ class BaseListVariable(VariableTracker):
         self,
         items: List[VariableTracker],
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
@@ -157,7 +156,7 @@ class BaseListVariable(VariableTracker):
 
 
 class RangeVariable(BaseListVariable):
-    def __init__(self, items, **kwargs):
+    def __init__(self, items, **kwargs) -> None:
         items_to_map = items
         start = variables.ConstantVariable.create(0)
         stop = None
@@ -340,11 +339,11 @@ class CommonListMethodsVariable(BaseListVariable):
             name == "extend"
             and self.mutable_local
             and args
-            and args[0].has_force_unpack_var_sequence(tx)
+            and args[0].has_unpack_var_sequence(tx)
         ):
             assert not kwargs
             (arg,) = args
-            seq = arg.force_unpack_var_sequence(tx)
+            seq = arg.unpack_var_sequence(tx)
             tx.output.side_effects.mutation(self)
             self.items.extend(seq)
             return ConstantVariable.create(None)
@@ -401,7 +400,7 @@ class ListVariable(CommonListMethodsVariable):
     def python_type(self):
         return list
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)})"
 
     def debug_repr(self):
@@ -428,13 +427,11 @@ class ListVariable(CommonListMethodsVariable):
             key, value = args
             tx.output.side_effects.mutation(self)
             if isinstance(key, SliceVariable):
-                if not value.has_force_unpack_var_sequence(tx):
+                if not value.has_unpack_var_sequence(tx):
                     unimplemented(
                         f"Missing dynamo support for expanding {value} into a list for slice assignment."
                     )
-                self.items[key.as_python_constant()] = value.force_unpack_var_sequence(
-                    tx
-                )
+                self.items[key.as_python_constant()] = value.unpack_var_sequence(tx)
             else:
                 self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
@@ -462,12 +459,7 @@ class DequeVariable(CommonListMethodsVariable):
             )
         )
         codegen.foreach(self.items)
-        codegen.extend_output(
-            [
-                create_instruction("BUILD_LIST", arg=len(self.items)),
-                *create_call_function(1, False),
-            ]
-        )
+        codegen.extend_output(create_call_function(len(self.items), False))
 
     def call_method(
         self,
@@ -490,15 +482,11 @@ class DequeVariable(CommonListMethodsVariable):
             tx.output.side_effects.mutation(self)
             self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
-        elif (
-            name == "extendleft"
-            and self.mutable_local
-            and args[0].has_force_unpack_var_sequence(tx)
-        ):
+        elif name == "extendleft" and self.mutable_local:
             assert not kwargs
 
             (arg,) = args
-            prefix = arg.force_unpack_var_sequence(tx)
+            prefix = arg.unpack_var_sequence(tx)
             prefix.reverse()
             tx.output.side_effects.mutation(self)
             self.items = prefix + list(self.items)
@@ -558,7 +546,7 @@ class SizeVariable(TupleVariable):
         items: List[VariableTracker],
         proxy: Optional[torch.fx.Proxy] = None,
         **kwargs,
-    ):
+    ) -> None:
         self.proxy = proxy
         super().__init__(items, **kwargs)
 
@@ -694,7 +682,7 @@ class NamedTupleVariable(TupleVariable):
         *TupleVariable._nonvar_fields,
     }
 
-    def __init__(self, items, tuple_cls, **kwargs):
+    def __init__(self, items, tuple_cls, **kwargs) -> None:
         super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
 
@@ -753,7 +741,7 @@ class NamedTupleVariable(TupleVariable):
 
 
 class SliceVariable(BaseListVariable):
-    def __init__(self, items, **kwargs):
+    def __init__(self, items, **kwargs) -> None:
         items_to_map = items
         start, stop, step = [variables.ConstantVariable.create(None)] * 3
 
@@ -796,13 +784,13 @@ class SliceVariable(BaseListVariable):
         return self.items[fields.index(name)]
 
 
-class ListIteratorVariable(IteratorVariable):
+class ListIteratorVariable(VariableTracker):
     _nonvar_fields = {
         "index",
-        *IteratorVariable._nonvar_fields,
+        *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, items, index: int = 0, **kwargs):
+    def __init__(self, items, index: int = 0, **kwargs) -> None:
         super().__init__(**kwargs)
         assert isinstance(items, list)
         # Removing this check as it slows things down too much
@@ -812,14 +800,14 @@ class ListIteratorVariable(IteratorVariable):
         self.items = items
         self.index = index
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
 
     def next_variable(self, tx):
         assert self.mutable_local
         old_index = self.index
         if old_index >= len(self.items):
-            raise_observed_user_stop_iteration(self, tx)
+            raise_observed_exception(StopIteration, tx, self)
 
         tx.output.side_effects.mutation(self)
         self.index += 1
@@ -849,9 +837,6 @@ class ListIteratorVariable(IteratorVariable):
 
     def unpack_var_sequence(self, tx):
         return list(self.items[self.index :])
-
-    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
-        return self.unpack_var_sequence(tx)
 
     def reconstruct(self, codegen):
         remaining_items = self.items[self.index :]
@@ -916,7 +901,9 @@ class RestrictedListSubclassVariable(ListVariable):
     def is_matching_cls(cls, user_cls: type):
         return cls._is_non_conflicting_subclass(user_cls, list)
 
-    def __init__(self, items, *, user_cls: type, user_cls_source: Source, **kwargs):
+    def __init__(
+        self, items, *, user_cls: type, user_cls_source: Source, **kwargs
+    ) -> None:
         super().__init__(items=items, **kwargs)
         self.user_cls = user_cls
         self.user_cls_source = user_cls_source
