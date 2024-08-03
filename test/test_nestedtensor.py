@@ -5182,16 +5182,12 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             expected_batch_size = len(tensor_list)
             expected_contiguous = True
             expected_min_seqlen = min(
-                [
-                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
-                    for t in tensor_list
-                ]
+                (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                for t in tensor_list
             )
             expected_max_seqlen = max(
-                [
-                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
-                    for t in tensor_list
-                ]
+                (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                for t in tensor_list
             )
             self._validate_nt(
                 nt,
@@ -5231,16 +5227,12 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             expected_batch_size = len(tensor_list)
             expected_contiguous = True
             expected_min_seqlen = min(
-                [
-                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
-                    for t in tensor_list
-                ]
+                (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                for t in tensor_list
             )
             expected_max_seqlen = max(
-                [
-                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
-                    for t in tensor_list
-                ]
+                (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                for t in tensor_list
             )
             self._validate_nt(
                 nt,
@@ -5278,16 +5270,12 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             expected_dim = torch.as_tensor(tensor_list[0]).dim() + 1
             expected_batch_size = len(tensor_list)
             expected_min_seqlen = min(
-                [
-                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
-                    for t in tensor_list
-                ]
+                (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                for t in tensor_list
             )
             expected_max_seqlen = max(
-                [
-                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
-                    for t in tensor_list
-                ]
+                (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                for t in tensor_list
             )
             self._validate_nt(
                 nt,
