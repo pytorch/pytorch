@@ -16,5 +16,4 @@ void initModule(PyObject* module) {
   cpu.def("_L1d_cache_size", at::cpu::L1d_cache_size);
   cpu.def("_L2_cache_size", at::cpu::L2_cache_size);
 }
-
 } // namespace torch::cpu

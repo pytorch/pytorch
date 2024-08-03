@@ -1,7 +1,7 @@
 import csv
 from abc import ABC, abstractmethod
 
-from benchmarks.dynamo.pr_time_benchmarks.cirron.cirron import Collector
+import torch._C._instruction_counter as i_counter
 
 
 class Benchmark(ABC):
@@ -29,16 +29,18 @@ class Benchmark(ABC):
         pass
 
     def count_instructions(self):
+        print(f"collecting instruction count for {self.name()}")
         self.prepare_once()
 
         results = []
         for i in range(10):
             self.prepare()
-            with Collector() as collector:
-                self.work()
-
+            id = i_counter.start()
+            self.work()
+            count = i_counter.end(id)
+            print(f"instruction count for iteration {i} is {count}")
             if i != 0:
-                results.append(collector.counters.instruction_count)
+                results.append(count)
         return min(results)
 
     def append_results(self, path):
