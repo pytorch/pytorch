@@ -29,17 +29,11 @@ USE_BLACK_FILELIST = re.compile(
                 [
                     # **
                     # .ci/**
-                    ".ci/**",
                     # .github/**
-                    ".github/**",
                     # benchmarks/**
-                    "benchmarks/**",
                     # functorch/**
-                    "functorch/**",
                     # tools/**
-                    "tools/**",
                     # torchgen/**
-                    "torchgen/**",
                     # test/**
                     # test/[a-c]*/**
                     "test/[a-c]*/**",

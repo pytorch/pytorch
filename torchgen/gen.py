@@ -1361,7 +1361,7 @@ def get_grouped_by_view_native_functions(
     native_functions: Sequence[NativeFunction],
 ) -> Sequence[NativeFunction | NativeFunctionsViewGroup]:
     def maybe_create_view_group(
-        d: dict[ViewSchemaKind | SchemaKind, NativeFunction]
+        d: dict[ViewSchemaKind | SchemaKind, NativeFunction],
     ) -> list[NativeFunction | NativeFunctionsViewGroup]:
         funcs: list[NativeFunction | NativeFunctionsViewGroup] = []
         if ViewSchemaKind.aliasing in d:
@@ -1408,7 +1408,7 @@ def get_grouped_native_functions(
     native_functions: Sequence[NativeFunction],
 ) -> Sequence[NativeFunction | NativeFunctionsGroup]:
     def flatten_pre_group(
-        d: dict[SchemaKind, NativeFunction]
+        d: dict[SchemaKind, NativeFunction],
     ) -> Sequence[NativeFunction | NativeFunctionsGroup]:
         r = NativeFunctionsGroup.from_dict(d)
         if r is None:
@@ -1475,9 +1475,7 @@ def get_native_function_declarations_from_ns_grouped_kernels(
 {ns_helper.prologue}
 {newline.join(ordered_kernels)}
 {ns_helper.epilogue}
-        """.split(
-                newline
-            )
+        """.split(newline)
         )
     return declarations
 
@@ -1670,9 +1668,7 @@ def get_namespaced_declaration(
 {ns_helper.prologue}
 {newline.join(ordered_kernels)}
 {ns_helper.epilogue}
-        """.split(
-                newline
-            )
+        """.split(newline)
         )
     return declarations
 
@@ -2385,9 +2381,7 @@ def gen_source_files(
                         os.path.join(aoti_fm.install_dir, header_file_name)
                     ) as old_file:
                         old_header = old_file.read()
-                        assert (
-                            old_header == new_header
-                        ), """
+                        assert old_header == new_header, """
 
 WARNING: The generated AOTInductor C shim header files have unexpectedly changed. This
 indicates an AOTInductor fallback operator ABI backward compatibility breakage!!!

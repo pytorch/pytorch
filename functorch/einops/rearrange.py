@@ -95,7 +95,7 @@ def _create_rearrange_callable(
             raise ValueError(f"Unexpected dimension: {dimension}")
 
     def composition_to_dims(
-        composition: Sequence[Union[List[Union[str, AnonymousAxis]], str]]
+        composition: Sequence[Union[List[Union[str, AnonymousAxis]], str]],
     ) -> List[Union[str, Tuple[str, ...]]]:
         """Convert a `ParsedExpression.composition` into a `Tensor.__getitem__` index of strings representing first
         class dims."""

@@ -447,7 +447,7 @@ UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 
 
 def get_infos_with_derivatives_list(
-    differentiability_infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]]
+    differentiability_infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]],
 ) -> list[DifferentiabilityInfo]:
     diff_info_list = [
         info

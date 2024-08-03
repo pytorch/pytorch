@@ -145,9 +145,9 @@ def emit_metric(
         return
 
     # Prefix key with metric name and timestamp to derisk chance of a uuid1 name collision
-    reserved_metrics[
-        "dynamo_key"
-    ] = f"{metric_name}_{int(time.time())}_{uuid.uuid1().hex}"
+    reserved_metrics["dynamo_key"] = (
+        f"{metric_name}_{int(time.time())}_{uuid.uuid1().hex}"
+    )
 
     # Ensure the metrics dict doesn't contain any reserved keys
     for key in reserved_metrics.keys():

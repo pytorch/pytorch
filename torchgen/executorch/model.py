@@ -96,7 +96,7 @@ class ETKernelKey:
             )
             assert (
                 dim_order in dim_order_alias_map
-            ), "Undefined dim_order alias: " + str(dim_order)
+            ), f"Undefined dim_order alias: {dim_order}"
             dtype_alias_used.add(type_alias)
 
         # Generate all permutations of dtype alias values
@@ -172,11 +172,11 @@ class ETKernelIndex:
 
     @staticmethod
     def from_backend_indices(
-        backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]]
+        backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]],
     ) -> ETKernelIndex:
-        kernel_index: dict[
-            OperatorName, dict[ETKernelKey, BackendMetadata]
-        ] = defaultdict(dict)
+        kernel_index: dict[OperatorName, dict[ETKernelKey, BackendMetadata]] = (
+            defaultdict(dict)
+        )
         ETKernelIndex.grow_from_backend_indices(kernel_index, backend_indices)
         return ETKernelIndex(kernel_index)
 
