@@ -3,12 +3,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/syscall.h>
 #include <torch/csrc/instruction_counter/Module.h>
 #include <torch/csrc/utils/pybind.h>
 #include <unistd.h>
 
 #if defined(__linux__)
+#include <sys/syscall.h>
 #include <linux/perf_event.h>
 #include <sys/ioctl.h>
 #endif
