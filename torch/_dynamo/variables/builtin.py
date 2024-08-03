@@ -1332,6 +1332,8 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     def call_custom_dict(tx: "InstructionTranslator", user_cls, *args, **kwargs):
+        from .builder import SourcelessBuilder
+
         if not kwargs:
             if not args:
                 args = ({},)
@@ -1357,13 +1359,15 @@ class BuiltinVariable(VariableTracker):
                 # This is applicable for user defined objects which seem like dict, but are not really dicts. For
                 # example, TensorDict derives from MutableMapping. For such cases, we can directly inline the .items
                 # method and create a new dict.
-                if does_not_override_dict_iter_methods(
-                    type(arg.value)
-                ) and not tx.output.side_effects.has_pending_mutation(arg):
+                if does_not_override_dict_iter_methods(type(arg.value)):
                     # These are implemeted in C, so we will have to manually construct the items
-                    new_dict = dict(arg.value.items())
-                    from .builder import SourcelessBuilder
 
+                    if tx.output.side_effects.has_pending_mutation(arg):
+                        unimplemented(
+                            f"{user_cls.__name__}.items(): {args} {kwargs} - object is mutated"
+                        )
+
+                    new_dict = dict(arg.value.items())
                     return SourcelessBuilder.create(tx, new_dict)
                 else:
                     func_var = arg.var_getattr(tx, "items")
