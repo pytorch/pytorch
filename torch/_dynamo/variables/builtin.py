@@ -1356,10 +1356,14 @@ class BuiltinVariable(VariableTracker):
                 # This is applicable for user defined objects which seem like dict, but are not really dicts. For
                 # example, TensorDict derives from MutableMapping. For such cases, we can directly inline the .items
                 # method and create a new dict.
-                if type(arg.value).items in (dict.items, OrderedDict.items) and not tx.output.side_effects.has_pending_mutation(arg):
+                if type(arg.value).items in (
+                    dict.items,
+                    OrderedDict.items,
+                ) and not tx.output.side_effects.has_pending_mutation(arg):
                     # These are implemeted in C, so we will have to manually construct the items
                     new_dict = dict(arg.value.items())
                     from .builder import SourcelessBuilder
+
                     return SourcelessBuilder.create(tx, new_dict)
                 else:
                     func_var = arg.var_getattr(tx, "items")
