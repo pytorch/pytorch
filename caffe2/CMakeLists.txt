@@ -1508,7 +1508,7 @@ if(USE_CUDA)
     target_link_libraries(torch_cuda PRIVATE torch::nvtx3)
     target_compile_definitions(torch_cuda PUBLIC TORCH_CUDA_USE_NVTX3)
   else()
-    target_link_libraries(torch_cuda PRIVATE torch::nvtoolsext)
+    target_link_libraries(torch_cuda PUBLIC torch::nvtoolsext)
   endif()
 
   target_include_directories(
