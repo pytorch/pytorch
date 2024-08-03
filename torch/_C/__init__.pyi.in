@@ -2029,7 +2029,6 @@ class _SDPAParams:
     attn_mask: Tensor | None
     dropout: _float
     is_causal: _bool
-    enable_gqa: _bool
     def __init__(
         self,
         query: Tensor,
@@ -2038,7 +2037,6 @@ class _SDPAParams:
         attn_mask: Tensor | None,
         dropout: _float,
         is_causal: _bool,
-        enable_gqa: _bool,
     ) -> None: ...
 
 class _SDPBackend(Enum):

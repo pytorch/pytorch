@@ -442,7 +442,6 @@ def gen_nn_functional(fm: FileManager) -> None:
                         "dropout_p: float = 0.0",
                         "is_causal: bool = False",
                         "scale: float | None = None",
-                        "enable_gqa: bool = False",
                     ],
                     "Tensor",
                 )
