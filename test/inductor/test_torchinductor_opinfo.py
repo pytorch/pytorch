@@ -654,7 +654,7 @@ class TestInductorOpInfo(TestCase):
                 samples = [next(samples)]
 
         class HasRngOp(TorchDispatchMode):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.has_rng_op = False
 

@@ -9,7 +9,7 @@ from typing import Callable, Union
 import torch
 import torch._custom_op
 import torch._logging
-
+from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
     elementwise_dtypes,
@@ -18,7 +18,6 @@ from torch._prims_common import (
     is_float_dtype,
     is_integer_dtype,
 )
-
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
     DynamicOutputShapeException,
@@ -28,8 +27,8 @@ from torch._subclasses.fake_tensor import (
     UnsupportedOperatorException,
 )
 from torch.fx.operator_schemas import normalize_function
-
 from torch.utils._stats import count_label
+
 
 pytree = torch.utils._pytree
 
@@ -92,9 +91,9 @@ _device_not_kwarg_ops = ordered_set(
     aten._nested_tensor_from_tensor_list.default,
     aten._nested_tensor_from_tensor_list.out,
     aten.pin_memory.default,
-    aten.is_pinned.default,
     aten.to.device,
     aten.to.prim_Device,
+    aten.is_pinned.default,
     aten._pin_memory.default,
     aten._pin_memory.out,
     aten._resize_output.default,
@@ -176,6 +175,19 @@ def constructors(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
     return FakeTensor(fake_mode, r, out_device)
+
+
+@register_op_impl(aten.is_pinned.default)
+def non_kwarg_is_pinned(fake_mode, func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args, kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+    # we'll ignore device argument because it is deprecated and not
+    # actually used by is_pinned.
+    with in_kernel_invocation_manager(fake_mode):
+        r = func(inp)
+    return r
 
 
 @register_op_impl(aten.to.prim_Device)
@@ -619,6 +631,7 @@ def nested_tensors_unsupported(fake_mode, func, *args, **kwargs):
         if x
         not in (
             # these are already registered elsewhere
+            aten.is_pinned.default,
             aten.to.device,
             aten.to.prim_Device,
             aten._nested_tensor_from_tensor_list.default,
@@ -1216,6 +1229,14 @@ def make_fast_binary_impl(slow_ref):
     return fast_binary_impl
 
 
+# disable the python dispatcher to avoid decomposing detach() further
+# (proxy_mode should still decompose detach() though)
+def fast_detach(fake_mode, x):
+    with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
+        out = torch.ops.aten.detach.default(x)
+    return FakeTensor(fake_mode, out, x.device)
+
+
 @functools.lru_cache(None)
 def get_fast_op_impls():
     import torch._refs
@@ -1230,4 +1251,5 @@ def get_fast_op_impls():
     register_fast_op_impl(torch.ops.aten.div.Tensor)(
         make_fast_binary_impl(torch._refs.div)
     )
+    register_fast_op_impl(torch.ops.aten.detach.default)(fast_detach)
     return FAST_OP_IMPLEMENTATIONS

@@ -10,9 +10,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.distributed as dist
 from torch._dynamo.testing import skipIfNotPy311
-
 from torch.nn.parallel import DistributedDataParallel as DDP
-
 from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
@@ -24,6 +22,7 @@ from torch.testing._internal.logging_utils import (
     make_logging_test,
     make_settings_test,
 )
+
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
@@ -189,6 +188,15 @@ due to:
 Traceback (most recent call last):
   File "test_logging.py", line N, in throw
     raise AssertionError
+torch._inductor.exc.LoweringException: AssertionError:
+  target: aten.round.default
+  args[0]: TensorBox(StorageBox(
+    InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
+  ))
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
 torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
 LoweringException: AssertionError:
   target: aten.round.default
@@ -204,7 +212,7 @@ LoweringException: AssertionError:
     @make_logging_test(ddp_graphs=True)
     def test_ddp_graphs(self, records):
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = torch.nn.Sequential(
                     torch.nn.Linear(1024, 1024),
