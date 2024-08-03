@@ -3499,7 +3499,7 @@ class TestSparseCSR(TestCase):
             A = A.to_sparse_csr().cuda()
             x = torch.sparse.spsolve(A, b)
         except RuntimeError as e:
-            if "Calling torch.linalg.solve with sparse tensors requires" in str(e):
+            if "Calling linear solver with sparse tensors requires compiling " in str(e):
                 self.skipTest("PyTorch was not built with cuDSS support")
 
         samples = sample_inputs_linalg_solve(None, device, dtype)
