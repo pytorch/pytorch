@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 import torch._C._instruction_counter as i_counter
 
 
-class Benchmark(ABC):
+class BenchmarkBase(ABC):
     _instruction_count = False
 
     def enable_instruction_count(self):
