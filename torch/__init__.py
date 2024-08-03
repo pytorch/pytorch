@@ -1172,18 +1172,18 @@ def set_default_dtype(d: "torch.dtype", /) -> None:
 
         >>> torch.set_default_dtype(torch.float64)
         >>> # Python floats are now interpreted as float64
-        >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
+        >>> torch.tensor([1.2, 3]).dtype  # a new floating point tensor
         torch.float64
         >>> # Complex Python numbers are now interpreted as complex128
-        >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
+        >>> torch.tensor([1.2, 3j]).dtype  # a new complex tensor
         torch.complex128
 
         >>> torch.set_default_dtype(torch.float16)
         >>> # Python floats are now interpreted as float16
-        >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
+        >>> torch.tensor([1.2, 3]).dtype  # a new floating point tensor
         torch.float16
         >>> # Complex Python numbers are now interpreted as complex128
-        >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
+        >>> torch.tensor([1.2, 3j]).dtype  # a new complex tensor
         torch.complex32
 
     """

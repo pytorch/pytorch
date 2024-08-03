@@ -44,6 +44,10 @@ target-version = "py38"
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
 
+[tool.ruff.format]
+docstring-code-format = true
+quote-style = "double"
+
 [tool.ruff.lint]
 # NOTE: Synchoronize the ignores with .flake8
 ignore = [

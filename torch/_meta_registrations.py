@@ -745,11 +745,7 @@ def squareCheckInputs(self: Tensor, f_name: str):
 # Validates input shapes and devices
 # for linear solve methods (solve, cholesky_solve, lu_solve, triangular_solve)
 # From aten/src/ATen/native/LinearAlgebraUtils.h
-def linearSolveCheckInputs(
-    self: Tensor,
-    A: Tensor,
-    name: str,
-):
+def linearSolveCheckInputs(self: Tensor, A: Tensor, name: str):
     torch._check(
         self.device == A.device,
         lambda: (
@@ -810,12 +806,7 @@ def checkIsMatrix(A: Tensor, f_name: str, arg_name: str = "A"):
     )
 
 
-def checkInputsSolver(
-    A: Tensor,
-    B: Tensor,
-    left: bool,
-    f_name: str,
-):
+def checkInputsSolver(A: Tensor, B: Tensor, left: bool, f_name: str):
     squareCheckInputs(A, f_name)
     checkIsMatrix(B, f_name)
     torch._check(
@@ -853,11 +844,7 @@ def checkUplo(UPLO: str):
 
 @register_meta([aten._linalg_eigh.default, aten._linalg_eigh.eigenvalues])
 @out_wrapper("eigenvalues", "eigenvectors")
-def meta__linalg_eigh(
-    A: Tensor,
-    UPLO: str = "L",
-    compute_v: bool = True,
-):
+def meta__linalg_eigh(A: Tensor, UPLO: str = "L", compute_v: bool = True):
     squareCheckInputs(A, "linalg.eigh")
     checkUplo(UPLO)
 
@@ -1279,10 +1266,7 @@ def _parse_qr_mode(mode: str) -> Tuple[bool, bool]:
 
 @register_meta([aten.linalg_qr.default, aten.linalg_qr.out])
 @out_wrapper("Q", "R")
-def linalg_qr_meta(
-    A: Tensor,
-    mode: str = "reduced",
-) -> Tuple[Tensor, Tensor]:
+def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> Tuple[Tensor, Tensor]:
     checkIsMatrix(A, "linalg.qr")
     checkFloatingOrComplex(A, "linalg.qr")
 
@@ -2322,13 +2306,7 @@ if torch._C._has_mkldnn:
         )
 
         @register_meta(torch.ops.mkl._mkl_linear)
-        def meta_mkl_linear(
-            input_tensor,
-            packed_weight,
-            orig_weight,
-            bias,
-            batch_size,
-        ):
+        def meta_mkl_linear(input_tensor, packed_weight, orig_weight, bias, batch_size):
             return input_tensor.new_empty(
                 (*input_tensor.shape[:-1], orig_weight.shape[0])
             )
