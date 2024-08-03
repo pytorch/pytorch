@@ -358,7 +358,7 @@ def _register_lowering(
         ]
         symbolify_supported = True
         for reg in unsupported_symbolify_lowerings:
-            if V.graph.current_node.name.startswith(reg):
+            if V.graph.current_node and V.graph.current_node.name.startswith(reg):
                 symbolify_supported = False
                 break
         # unsupported_symbolify_lowerings = []
