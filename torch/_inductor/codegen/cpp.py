@@ -2638,7 +2638,7 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            define_line = f"{DTYPE_TO_CPP[dtype]} {tile_var}[{factor}*{factor}] __attribute__ ((aligned ({factor})));"
+            define_line = f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}[{factor}*{factor}];"
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
@@ -3729,11 +3729,27 @@ class CppScheduling(BaseScheduling):
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
 
     def split_loop(self, nodes):
-        if any(len(node.group[1][1]) != 0 for node in nodes):
-            return nodes
-
         can_split = False
+        split_var = None
+        split_number = None
+        divide_index_name = None
         for node in nodes:
+            if len(node.group[1][1]) != 0:
+                can_split = False
+                break
+
+            def has_modular_index(expr):
+                if isinstance(expr, ModularIndexing):
+                    return True
+                return any(has_modular_index(arg) for arg in expr.args)
+
+            if any(
+                has_modular_index(expr)
+                for name, expr in node._body.indexing_exprs.items()
+            ):
+                can_split = False
+                break
+
             (
                 (original_index_size, original_reduce_size),
                 _,
@@ -3745,15 +3761,12 @@ class CppScheduling(BaseScheduling):
                 and len(original_reduce_size) == 0
                 and len([*node._body.var_ranges.values()]) == 3
             ):
-                continue
+                can_split = False
+                break
 
             # Check index: The split dim has a divider at 1 index_expr
-            split_var = None
-            split_number = None
-            divide_index_name = None
-
             def has_div(expr, name):
-                if isinstance(expr, torch.utils._sympy.functions.FloorDiv):
+                if isinstance(expr, FloorDiv):
                     nonlocal split_var
                     nonlocal split_number
                     nonlocal divide_index_name
@@ -3781,10 +3794,10 @@ class CppScheduling(BaseScheduling):
                 for name, expr in node._body.indexing_exprs.items()
                 if name != divide_index_name
             ):
-                continue
+                can_split = False
+                break
 
             can_split = True
-            break
 
         if not can_split:
             return nodes
