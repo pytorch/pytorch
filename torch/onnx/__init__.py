@@ -48,7 +48,7 @@ from . import (  # usort: skip. Keep the order instead of sorting lexicographica
 )
 
 
-from ._internal.exporter import (  # usort: skip. needs to be last to avoid circular import
+from ._internal._exporter_legacy import (  # usort: skip. needs to be last to avoid circular import
     DiagnosticOptions,
     ExportOptions,
     ONNXProgram,

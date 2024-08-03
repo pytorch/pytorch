@@ -1524,8 +1524,11 @@ _post_grad_graph_counter = itertools.count()
 class Scheduler:
     __dep_size_hint_cache: Dict[Dep, int]
 
-    @dynamo_timed
     def __init__(self, nodes: List[ir.Operation]) -> None:
+        with dynamo_timed("Scheduler.__init__"):
+            self._init(nodes)
+
+    def _init(self, nodes: List[ir.Operation]) -> None:
         super().__init__()
         self.__dep_size_hint_cache = {}
         V.graph.scheduler = self
@@ -2939,8 +2942,11 @@ class Scheduler:
             _, last = max(origins, key=operator.itemgetter(0))
             V.graph.wrapper_code.enter_context(last)
 
-    @dynamo_timed
     def codegen(self) -> None:
+        with dynamo_timed("Scheduler.codegen"):
+            return self._codegen()
+
+    def _codegen(self) -> None:
         for node in self.nodes:
             try:
                 log.debug(

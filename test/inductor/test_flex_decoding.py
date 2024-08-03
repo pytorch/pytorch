@@ -905,6 +905,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         q, k, v = make_q(), make_kv(), make_kv()
         block_mask = _create_empty_block_mask(q, k)
+        kernel_options = {
+            "ROWS_GUARANTEED_SAFE": False,
+            "PRESCALE_QK": False,
+            "OUTPUT_LOGSUMEXP": True,
+        }
 
         @torch.compile
         def sdpa_hop(q, k, v, score_mod, block_mask):
@@ -915,6 +920,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 score_mod,
                 block_mask.as_tuple(),
                 1.0,
+                kernel_options,
             )
 
         @torch.compile(backend="aot_eager")
@@ -923,7 +929,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             Besides dropping LSE it also ensures that the hop is compiled with aot-eager
             backend. We need to replicate this.
             """
-            return flex_attention_hop(q, k, v, score_mod, block_mask.as_tuple(), 1.0)
+            return flex_attention_hop(
+                q, k, v, score_mod, block_mask.as_tuple(), 1.0, kernel_options
+            )
 
         ref_out, ref_lse = eager_sdpa_hop(
             q.to(torch.float64),
@@ -978,6 +986,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         q, k, v = make_q(), make_kv(), make_kv()
         block_mask = _create_empty_block_mask(q, k)
+        kernel_options = {
+            "ROWS_GUARANTEED_SAFE": False,
+            "PRESCALE_QK": False,
+            "OUTPUT_LOGSUMEXP": True,
+        }
 
         @torch.compile
         def func(q, k, v, score_mod, block_mask):
@@ -987,7 +1000,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
-                scale=1.0,
+                1.0,
+                kernel_options,
             )
             lse_2 = lse * 2
             return lse_2
@@ -1014,6 +1028,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         q, k, v = make_q(), make_kv(), make_kv()
         block_mask = _create_empty_block_mask(q, k)
+        kernel_options = {
+            "ROWS_GUARANTEED_SAFE": False,
+            "PRESCALE_QK": False,
+            "OUTPUT_LOGSUMEXP": True,
+        }
 
         @torch.compile
         def func(q, k, v, score_mod, block_mask):
@@ -1024,6 +1043,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 score_mod,
                 block_mask.as_tuple(),
                 1.0,
+                kernel_options,
             )
             lse_2 = lse * 2
             return out, lse_2
