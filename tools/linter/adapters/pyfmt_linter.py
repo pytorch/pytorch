@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import fnmatch
 import json
 import logging
 import os
 import re
+import subprocess
 import sys
 from enum import Enum
 from pathlib import Path
@@ -18,6 +20,70 @@ import usort
 
 IS_WINDOWS: bool = os.name == "nt"
 REPO_ROOT = Path(__file__).absolute().parents[3]
+USE_BLACK_FILELIST = re.compile(
+    "|".join(
+        (
+            r"\A\Z",  # empty string
+            *map(
+                fnmatch.translate,
+                [
+                    # **
+                    "**",
+                    # .ci/**
+                    ".ci/**",
+                    # .github/**
+                    ".github/**",
+                    # benchmarks/**
+                    "benchmarks/**",
+                    # functorch/**
+                    "functorch/**",
+                    # tools/**
+                    "tools/**",
+                    # torchgen/**
+                    "torchgen/**",
+                    # test/**
+                    "test/**",
+                    # test/[a-c]*/**
+                    "test/[a-c]*/**",
+                    # test/d*/**
+                    "test/d*/**",
+                    # test/dy*/**
+                    "test/dy*/**",
+                    # test/[e-h]*/**
+                    "test/[e-h]*/**",
+                    # test/i*/**
+                    "test/i*/**",
+                    # test/j*/**
+                    "test/j*/**",
+                    # test/[k-p]*/**
+                    "test/[k-p]*/**",
+                    # test/[q-z]*/**
+                    "test/[q-z]*/**",
+                    # torch/**
+                    "torch/**",
+                    # torch/_[a-c]*/**
+                    "torch/_[a-c]*/**",
+                    # torch/_d*/**
+                    "torch/_d*/**",
+                    # torch/_[e-h]*/**
+                    "torch/_[e-h]*/**",
+                    # torch/_i*/**
+                    "torch/_i*/**",
+                    # torch/_[j-z]*/**
+                    "torch/_[j-z]*/**",
+                    # torch/[a-c]*/**
+                    "torch/[a-c]*/**",
+                    # torch/d*/**
+                    "torch/d*/**",
+                    # torch/[e-n]*/**
+                    "torch/[e-n]*/**",
+                    # torch/[o-z]*/**
+                    "torch/[o-z]*/**",
+                ],
+            ),
+        )
+    )
+)
 
 
 def eprint(*args: Any, **kwargs: Any) -> None:
@@ -107,6 +173,29 @@ def run_black(content: str, path: Path) -> str:
     )
 
 
+def run_ruff_format(content: str, path: Path) -> str:
+    try:
+        return subprocess.check_output(
+            [
+                sys.executable,
+                "-m",
+                "ruff",
+                "format",
+                "--config",
+                str(REPO_ROOT / "pyproject.toml"),
+                "--stdin-filename",
+                str(path),
+                "-",
+            ],
+            input=content,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+        )
+    except subprocess.CalledProcessError as exc:
+        raise ValueError(exc.output) from exc
+
+
 def check_file(filename: str) -> list[LintMessage]:
     path = Path(filename).absolute()
     original = replacement = path.read_text(encoding="utf-8")
@@ -114,7 +203,10 @@ def check_file(filename: str) -> list[LintMessage]:
     try:
         replacement = run_isort(replacement, path=path)
         replacement = run_usort(replacement, path=path)
-        replacement = run_black(replacement, path=path)
+        if USE_BLACK_FILELIST.match(path.as_posix()):
+            replacement = run_black(replacement, path=path)
+        else:
+            replacement = run_ruff_format(replacement, path=path)
 
         if original == replacement:
             return []
@@ -138,7 +230,7 @@ def check_file(filename: str) -> list[LintMessage]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Format files with usort + black.",
+        description="Format files with usort + ruff-format.",
         fromfile_prefix_chars="@",
     )
     parser.add_argument(

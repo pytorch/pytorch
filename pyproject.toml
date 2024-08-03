@@ -41,7 +41,7 @@ standard_library = ["typing_extensions"]
 
 [tool.ruff]
 target-version = "py38"
-line-length = 120
+line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
 
 [tool.ruff.lint]
