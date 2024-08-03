@@ -2294,8 +2294,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
-) -> _Callable[_InputT, _RetT]:
-    ...
+) -> _Callable[_InputT, _RetT]: ...
 
 
 @_overload
@@ -2308,8 +2307,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
-) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]:
-    ...
+) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
 def compile(
@@ -2447,9 +2445,7 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
-    )(
-        model
-    )  # type: ignore[return-value]
+    )(model)  # type: ignore[return-value]
 
 
 def _register_device_module(device_type, module):

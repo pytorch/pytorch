@@ -361,8 +361,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:
-            ...
+        def foo(x: torch.Tensor) -> torch.Tensor: ...
 
         @foo.impl(["cpu", "cuda"])
         def foo_impl(x):

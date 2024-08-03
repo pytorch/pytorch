@@ -1131,7 +1131,11 @@ class Tensor(torch._C.TensorBase):
         """
         if has_torch_function_unary(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(Tensor.__cuda_array_interface__.__get__, (self,), self)  # type: ignore[attr-defined]
+            return handle_torch_function(
+                Tensor.__cuda_array_interface__.__get__,  # type: ignore[attr-defined]
+                (self,),
+                self,
+            )
 
         # raise AttributeError for unsupported tensors, so that
         # hasattr(cpu_tensor, "__cuda_array_interface__") is False.

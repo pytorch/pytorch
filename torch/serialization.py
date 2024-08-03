@@ -254,7 +254,6 @@ class safe_globals(_weights_only_unpickler._safe_globals):
         #          [-0.8234,  2.0500, -0.3657]])
         >>> assert torch.serialization.get_safe_globals() == []
     """
-    pass
 
 
 def _is_zipfile(f) -> bool:
