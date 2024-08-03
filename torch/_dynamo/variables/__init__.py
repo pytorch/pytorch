@@ -41,12 +41,9 @@ from .higher_order_ops import (
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
-    EnumerateVariable,
     IteratorVariable,
     ItertoolsVariable,
-    MapVariable,
     RepeatIteratorVariable,
-    ZipVariable,
 )
 from .lazy import LazyVariableTracker
 from .lists import (
@@ -98,6 +95,7 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
+    MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,

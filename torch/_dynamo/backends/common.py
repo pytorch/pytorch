@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 
 class AotAutograd:
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         self.__name__ = "compiler_fn"
         self.kwargs = kwargs
 

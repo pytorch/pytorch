@@ -482,7 +482,7 @@ class BenchmarkRequest:
         input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Iterable[Any],
-    ):
+    ) -> None:
         # the kernel name defined in the module
         self.kernel_name = kernel_name
 
@@ -616,7 +616,7 @@ class TritonBenchmarkRequest(GPUDeviceBenchmarkRequest):
         num_stages: int,
         num_warps: int,
         matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.
-    ):
+    ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.module_path = module_path
         self.module_cache_key = module_cache_key
@@ -688,7 +688,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkRequest):
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Iterable[Any],
         source_code: str,
-    ):
+    ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.source_code = source_code
         self.workspace_size: int = 0
@@ -815,7 +815,7 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Iterable[Any],
         source_code: str,
-    ):
+    ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.source_code = source_code
         self.hash_key = get_hash(source_code)
