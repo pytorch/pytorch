@@ -22,12 +22,6 @@ c10::impl::LocalDispatchKeySet safe_get_tls_on_entry() {
   return tls_on_entry.value();
 }
 
-// All the keys below the Python key
-constexpr c10::DispatchKeySet after_Python_keyset = c10::DispatchKeySet(c10::DispatchKeySet::FULL) ^
-  (c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Python) |
-   c10::DispatchKeySet(c10::DispatchKey::Python));
-
-
 // This guard assumes that tls_on_entry has a value.
 struct StashTLSOnEntryGuard {
 public:
@@ -49,7 +43,6 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
   // c10::impl::ForceDispatchKeyGuard dispatcher_guard(tls_on_entry.value());
   // StashTLSOnEntryGuard stash_guard;
-  c10::impl::ExcludeDispatchKeyGuard guard(after_Python_keyset);
 
 
   // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch

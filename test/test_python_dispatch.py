@@ -2700,5 +2700,23 @@ class TestWrapperSubclassAliasing(TestCase):
 
 instantiate_device_type_tests(TestWrapperSubclassAliasing, globals())
 
+
+class TestWrapperSubclassConjugate(TestCase):
+    # this test guards the correctness of the complex multiplication of tensor subclass
+    # in particular, conjugate needs to be handled correctly
+    def test_wrapper_subclass_conjugate(self):
+        a = torch.tensor(
+            [1 + 1j], dtype=torch.complex64, device="cuda", requires_grad=True
+        )
+        b = torch.randn((1,), dtype=torch.complex64, device="cuda")
+        expected_result = a * b.conj()
+
+        a = TwoTensor(a, a.clone())
+        b = TwoTensor(b, b.clone())
+        subclass_result = a * b.conj()
+
+        self.assertEqual(expected_result, subclass_result)
+
+
 if __name__ == "__main__":
     run_tests()
