@@ -292,17 +292,10 @@ def forward(self, pred_1, x_1):
     cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
-    eq = sym_size_int == sym_size_int
-    and_ = True & eq;  eq = None
-    eq_1 = sym_size_int == 1
-    eq_2 = sym_size_int == sym_size_int
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
     cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
     getitem_1 = cond_1[0];  cond_1 = None
-    eq_3 = sym_size_int == 1
-    eq_4 = sym_size_int == sym_size_int;  sym_size_int = None
     return (getitem_1,)""",  # noqa: B950
         )
 
@@ -449,18 +442,11 @@ def forward(self, pred_1, x_1, y_1, z_1):
     cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (z_1, y_1));  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
-    eq = sym_size_int == sym_size_int
-    and_ = True & eq;  eq = None
-    eq_1 = sym_size_int == 1
-    eq_2 = sym_size_int == sym_size_int
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
     cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, z_1, y_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = z_1 = y_1 = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1];  cond_1 = None
-    eq_3 = sym_size_int == 1
-    eq_4 = sym_size_int == sym_size_int;  sym_size_int = None
     return (getitem_1,)""",  # noqa: B950
         )
 
@@ -574,37 +560,14 @@ def forward(self, x_1):
     mul_2 = torch.ops.aten.mul.Tensor(add_1, add_1)
     add_2 = torch.ops.aten.add.Tensor(mul_2, 1);  mul_2 = None
     ones_like = torch.ops.aten.ones_like.default(add_2, pin_memory = False);  add_2 = None
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
-    eq = sym_size_int == sym_size_int
-    and_ = True & eq;  eq = None
-    eq_1 = sym_size_int == 1
-    eq_2 = sym_size_int == sym_size_int
-    eq_3 = sym_size_int == 1
-    eq_4 = sym_size_int == sym_size_int
     mul_3 = torch.ops.aten.mul.Tensor(ones_like, add_1)
     mul_4 = torch.ops.aten.mul.Tensor(ones_like, add_1);  ones_like = add_1 = None
-    eq_5 = sym_size_int == 1
-    eq_6 = sym_size_int == sym_size_int
-    eq_7 = sym_size_int == 1
-    eq_8 = sym_size_int == sym_size_int
     add_3 = torch.ops.aten.add.Tensor(mul_4, mul_3);  mul_4 = mul_3 = None
-    eq_9 = sym_size_int == 1
-    eq_10 = sym_size_int == sym_size_int
     mul_5 = torch.ops.aten.mul.Tensor(add_3, add)
     mul_6 = torch.ops.aten.mul.Tensor(add_3, add);  add_3 = add = None
-    eq_11 = sym_size_int == 1
-    eq_12 = sym_size_int == sym_size_int
-    eq_13 = sym_size_int == 1
-    eq_14 = sym_size_int == sym_size_int
     add_4 = torch.ops.aten.add.Tensor(mul_6, mul_5);  mul_6 = mul_5 = None
-    eq_15 = sym_size_int == 1
-    eq_16 = sym_size_int == sym_size_int
     mul_7 = torch.ops.aten.mul.Tensor(add_4, x_1)
     mul_8 = torch.ops.aten.mul.Tensor(add_4, x_1);  add_4 = x_1 = None
-    eq_17 = sym_size_int == 1
-    eq_18 = sym_size_int == sym_size_int
-    eq_19 = sym_size_int == 1
-    eq_20 = sym_size_int == sym_size_int;  sym_size_int = None
     add_5 = torch.ops.aten.add.Tensor(mul_8, mul_7);  mul_8 = mul_7 = None
     return (add_5,)""",  # noqa: B950
         )
@@ -653,25 +616,12 @@ def forward(self, pred_1, a_1, b_1, c_1):
     cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (a_1, b_1, c_1));  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
-    sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
-    eq = sym_size_int == sym_size_int
-    and_ = True & eq;  eq = None
-    eq_1 = sym_size_int == 1
-    eq_2 = sym_size_int == sym_size_int
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, a_1, b_1, c_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = a_1 = None
+    cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, a_1, b_1, c_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = a_1 = b_1 = c_1 = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1]
     getitem_3 = cond_1[2];  cond_1 = None
-    eq_3 = sym_size_int == 1
-    eq_4 = sym_size_int == sym_size_int
-    sym_size_int_1 = torch.ops.aten.sym_size.int(b_1, 0);  b_1 = None
-    eq_5 = sym_size_int_1 == 1
-    eq_6 = sym_size_int_1 == sym_size_int;  sym_size_int_1 = None
-    sym_size_int_2 = torch.ops.aten.sym_size.int(c_1, 0);  c_1 = None
-    eq_7 = sym_size_int_2 == 1
-    eq_8 = sym_size_int_2 == sym_size_int;  sym_size_int_2 = sym_size_int = None
     return (getitem_1, getitem_2)""",  # noqa: B950
         )
         # Forward
@@ -687,19 +637,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             gm.true_graph_1.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    add = torch.ops.aten.add.Tensor(arg1_1, arg2_1);  arg1_1 = None
-    sym_size_int = torch.ops.aten.sym_size.int(arg0_1, 0)
-    eq = sym_size_int == sym_size_int
-    and_ = True & eq;  eq = None
-    eq_1 = sym_size_int == sym_size_int
-    and__1 = True & eq_1;  eq_1 = None
-    eq_2 = sym_size_int == 1
-    eq_3 = sym_size_int == sym_size_int
-    eq_4 = sym_size_int == 1
-    eq_5 = sym_size_int == sym_size_int
-    sym_size_int_1 = torch.ops.aten.sym_size.int(arg2_1, 0);  arg2_1 = None
-    eq_6 = sym_size_int_1 == 1
-    eq_7 = sym_size_int_1 == sym_size_int;  sym_size_int_1 = sym_size_int = None
+    add = torch.ops.aten.add.Tensor(arg1_1, arg2_1);  arg1_1 = arg2_1 = None
     clone = torch.ops.aten.clone.default(arg0_1)
     clone_1 = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
     return [clone, clone_1, None]""",
