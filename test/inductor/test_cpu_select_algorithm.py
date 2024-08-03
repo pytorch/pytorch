@@ -560,6 +560,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @inductor_config.patch({"freezing": True})
     @patches
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch.no_grad
     @parametrize("batch_size", (3, 16, 32, 49))
     @parametrize("in_features", (4, 68, 128))  # k should be a multiple of 4
