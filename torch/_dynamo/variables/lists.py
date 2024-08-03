@@ -95,25 +95,11 @@ class BaseListVariable(VariableTracker):
             index = arg.as_python_constant()
 
         if isinstance(index, slice):
-            # not imported at the top to avoid circular imports
-            from ..side_effects import MutableSideEffects
-
             if self.source is not None:
-                # For lists, mark the mutable side effects. A more reconstruction-friendly way would have been to call
-                # track_obj but there is no way to get the id(list[slice]) at this point. Additionally, the id of
-                # list[slice] is not guaranteed to be a constant. To ensure that we record the mutation on the sliced
-                # list correctly, we manually mark the mutable_local as MutableSideEffects.
-                mutable_local = None
-                if self.mutable_local:
-                    if isinstance(self, ListVariable):
-                        mutable_local = MutableSideEffects(self.source)
-                    else:
-                        mutable_local = MutableLocal()
-
                 return self.clone(
                     items=self.items[index],
                     source=GetItemSource(self.source, index),
-                    mutable_local=mutable_local,
+                    mutable_local=MutableLocal() if self.mutable_local else None,
                 )
             else:
                 return self.clone(

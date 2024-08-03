@@ -610,14 +610,6 @@ class SideEffects:
                         suffixes.append(
                             [*create_call_method(3), create_instruction("POP_TOP")]
                         )
-                    elif isinstance(value, variables.ListVariable) and self.is_modified(
-                        value
-                    ):
-                        unimplemented(
-                            f"{var.source.name()}.{name} is initially overwritten with {value.source.name()} "
-                            "and then further modified (with operations like append). "
-                            "This mutation is hard to reconstruct in Dynamo."
-                        )
                     else:
                         cg.tx.output.update_co_names(name)
                         cg(value)
