@@ -144,7 +144,10 @@ class OperatorBase:
         )
 
         def wrapped_proxy_fn(mode, *args, **kwargs):
-            with mode.sym_mode.enable(False), set_original_aten_op(self):
+            # TODO: set_original_aten_op(self) could be useful but
+            # there is downstream code querying this meta assuming you have an
+            # OpOverload, not a HigherOrderOp
+            with mode.sym_mode.enable(False):
                 if not mode.enable_tracing:
                     return self(*args, **kwargs)
 

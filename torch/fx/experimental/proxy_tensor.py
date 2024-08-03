@@ -22,7 +22,7 @@ import warnings
 import weakref
 
 from ._backward_state import BackwardState
-from ._sym_dispatch_mode import SymDispatchMode
+from ._sym_dispatch_mode import SymDispatchMode, sym_function_mode
 from .sym_node import SymNode
 from collections import defaultdict
 from contextlib import contextmanager, nullcontext, AbstractContextManager, ExitStack
@@ -341,13 +341,21 @@ def extract_val(val: _ExtractValType) -> _ExtractValType:
     typing_extensions.assert_never(val)
 
 @contextmanager
+def maybe_enable_thunkify_temporary_workaround() -> Generator[None, None, None]:
+    if _CURRENT_MAKE_FX_TRACER is not None:
+        with enable_thunkify(_CURRENT_MAKE_FX_TRACER.fx_tracer):
+            yield
+    else:
+        yield
+
+@contextmanager
 def enable_thunkify(tracer: _ProxyTracer) -> Generator[None, None, None]:
     old = tracer.enable_thunkify
     tracer.enable_thunkify = True
     try:
         yield
     finally:
-        tracer.enable_thunkify = False
+        tracer.enable_thunkify = old
 
 # Note [invariants for node meta 'val']
 # What invariants do we have for the 'val' set on the FX node?  It has accurate
@@ -1792,7 +1800,9 @@ class _MakefxTracer:
             self._error_on_data_dependent_ops
         )
         if isinstance(self.proxy_mode, ProxyTorchDispatchMode):
-            assert not self.proxy_mode.sym_mode.enable_tracing
+            # TODO: Work out when we should disable sym_function_mode and when
+            # we toggle enable_tracing
+            assert sym_function_mode() is None or not self.proxy_mode.sym_mode.enable_tracing
         with sub_tracer._init_modes_from_parent(self):
             return sub_tracer._trace_inner(f, *args)
 
@@ -1842,7 +1852,7 @@ def get_torch_dispatch_modes() -> List[TorchDispatchMode]:
     return torch.utils._python_dispatch._get_current_dispatch_mode_stack()
 
 
-def get_innermost_proxy_mode() -> ProxyTorchDispatchMode:
+def get_innermost_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
 
 

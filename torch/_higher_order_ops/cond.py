@@ -27,6 +27,7 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
+from torch.fx.experimental._sym_dispatch_mode import disable_sym_dispatch
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
     disable_proxy_modes_tracing,
@@ -166,7 +167,7 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
     # See Note [HOP create fw_bw graph] in create_fw_bw_graph in utils.py
 
     with suspend_functionalization(), disable_functional_mode():
-        with disable_proxy_modes_tracing():
+        with disable_proxy_modes_tracing(), disable_sym_dispatch():
             fw_inputs = pytree.tree_map(_from_fun, operands)
 
             fw_outputs_true = pytree.tree_map(_from_fun, true_fn(*fw_inputs))

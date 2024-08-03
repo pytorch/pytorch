@@ -333,10 +333,17 @@ def forward(self, pred_1, x_1):
     cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  true_graph_0 = false_graph_0 = None
     getitem = cond[0];  cond = None
     ones_like = torch.ops.aten.ones_like.default(getitem, pin_memory = False);  getitem = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    eq = sym_size_int == sym_size_int
+    and_ = True & eq;  eq = None
+    eq_1 = sym_size_int == 1
+    eq_2 = sym_size_int == sym_size_int
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
     cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = None
     getitem_1 = cond_1[0];  cond_1 = None
+    eq_3 = sym_size_int == 1
+    eq_4 = sym_size_int == sym_size_int;  sym_size_int = None
     return (getitem_1,)""",  # noqa: B950
         )
 
