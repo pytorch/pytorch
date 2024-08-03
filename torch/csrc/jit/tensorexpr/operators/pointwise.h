@@ -9,7 +9,7 @@ namespace tensorexpr {
 TORCH_API Tensor computeSign(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    std::optional<std::vector<ExprHandle>> outputStrides = std::nullopt);
+    const std::optional<std::vector<ExprHandle>>& outputStrides = std::nullopt);
 
 Tensor computeOneOperand(
     const std::string& name,
