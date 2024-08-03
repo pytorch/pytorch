@@ -4,8 +4,7 @@
     },
     "files.associations": {
         "*.py.in": "python",
-        "*.pyi.in": "python",
-        "editor.defaultFormatter": "omnilib.ufmt"
+        "*.pyi.in": "python"
     },
     "files.eol": "\n",
     "files.insertFinalNewline": true,
