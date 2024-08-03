@@ -1241,6 +1241,15 @@ def _is_supported_equivalence(expr):
         )
     return isinstance(expr, sympy.Symbol)
 
+def _has_unsupported_sympy_function(expr) -> bool:
+    return expr.has(
+        torch.utils._sympy.functions.ToFloat,
+        torch.utils._sympy.functions.TruncToInt,
+        torch.utils._sympy.functions.CeilToInt,
+        # add more sympy functions that involve float<->int conversion here
+        # since our solver does not know what to do with them
+    )
+
 @dataclass(frozen=True)
 class SymbolicContext:
     """
@@ -1712,14 +1721,6 @@ class DimConstraints:
             expr = expr.replace(FloorDiv, floor_div_handler)
         return expr
 
-    def _has_unsupported_sympy_function(self, expr) -> bool:
-        return expr.has(
-            torch.utils._sympy.functions.ToFloat,
-            torch.utils._sympy.functions.TruncToInt,
-            # add more sympy functions that involve float<->int conversion here
-            # since our solver does not know what to do with them
-        )
-
     def add(self, expr) -> bool:
         """Add an expression to the set of constraints.
 
@@ -1736,7 +1737,7 @@ class DimConstraints:
         # a fix for this issue, we delay raising such failures. See solve().
         if orig_reduced == sympy.false:
             self._inconsistencies.append(f"{orig_expr} is inconsistent!")
-        if isinstance(expr, sympy.Ne) or self._has_unsupported_sympy_function(expr):
+        if isinstance(expr, sympy.Ne) or _has_unsupported_sympy_function(expr):
             # we're not going to do anything useful with these, so drop them
             return False
         free_symbols = expr.free_symbols
