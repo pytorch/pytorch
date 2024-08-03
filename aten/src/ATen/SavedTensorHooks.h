@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/core/SafePyObject.h>
 #include <c10/macros/Export.h>
 #include <c10/util/python_stub.h>
 #include <optional>
@@ -15,7 +14,7 @@ namespace impl {
 
 struct TORCH_API SavedTensorDefaultHooksTLS {
   // PyObject is defined in c10/util/python_stub.h
-  std::stack<std::pair<c10::SafePyObject, c10::SafePyObject>> stack;
+  std::stack<std::pair<PyObject*, PyObject*>> stack;
 
   // See NOTE: [Disabling SavedTensorDefaultHooks] for context
   // NOTE: [disabled_error_message invariant]
@@ -31,12 +30,9 @@ struct TORCH_API SavedTensorDefaultHooksTLS {
 } // namespace impl
 
 struct TORCH_API SavedTensorDefaultHooks {
-  static void push_hooks(
-      c10::SafePyObject pack_hook,
-      c10::SafePyObject unpack_hook);
-  static std::pair<c10::SafePyObject, c10::SafePyObject> pop_hooks();
-  static std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
-  get_hooks();
+  static void push_hooks(PyObject* pack_hook, PyObject* unpack_hook);
+  static std::pair<PyObject*, PyObject*> pop_hooks();
+  static std::pair<PyObject*, PyObject*> get_hooks();
   static void lazy_initialize();
 
   static const impl::SavedTensorDefaultHooksTLS& get_tls_state();

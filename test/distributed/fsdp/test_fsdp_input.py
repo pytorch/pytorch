@@ -41,7 +41,7 @@ class TestInput(FSDPTest):
         """Test FSDP with input being a list or a dict, only single GPU."""
 
         class Model(Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.layer = Linear(4, 4)
 

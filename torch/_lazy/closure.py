@@ -7,7 +7,7 @@ from torch._lazy.device_context import get_device_context
 
 
 class ClosureHandler:
-    def __init__(self) -> None:
+    def __init__(self):
         pass
 
     def run(self, closure):

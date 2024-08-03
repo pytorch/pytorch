@@ -5,10 +5,13 @@ import operator
 import re
 import sys
 import warnings
+
 from itertools import product
+
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import pytest
+
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
@@ -20,7 +23,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
-
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np

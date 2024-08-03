@@ -34,7 +34,6 @@ The following constraints are implemented:
 
 import torch
 
-
 __all__ = [
     "Constraint",
     "boolean",

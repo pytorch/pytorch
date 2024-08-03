@@ -3,7 +3,6 @@ import functools
 from typing import Dict, List, Set, Tuple
 
 import torch
-
 from ..._dynamo.utils import counters
 from ..ir import FixedLayout, Subgraph
 from ..kernel.flex_attention import build_subgraph_buffer, create_placeholder

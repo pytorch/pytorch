@@ -30,6 +30,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
 )
+
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     PT2EQuantizationTestCase,
@@ -299,7 +300,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
 
     def test_set_module_name(self):
         class Sub(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -307,7 +308,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
                 return self.linear(x)
 
         class M(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
                 self.sub = Sub()
@@ -344,7 +345,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
         """Test that if a module name has an underscore, we can still quantize it"""
 
         class M(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 # This module name has underscores, which can be part of a mangled
                 # name.
@@ -385,7 +386,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
 
     def test_set_module_type(self):
         class Sub(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -393,7 +394,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
                 return self.linear(x)
 
         class M(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
                 self.sub = Sub()
@@ -428,7 +429,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
 
     def test_set_module_type_case_2(self):
         class M(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3,
@@ -952,7 +953,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
 
     def test_add_mul_long(self):
         class M(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.t = torch.tensor([100])
 

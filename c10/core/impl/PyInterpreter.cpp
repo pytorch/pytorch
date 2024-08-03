@@ -9,8 +9,6 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     return "<unloaded interpreter>";
   }
 
-  void incref(PyObject* pyobj) const override {} // do nothing
-
   void decref(PyObject* pyobj, bool has_pyobj_slot) const override {
   } // do nothing
 

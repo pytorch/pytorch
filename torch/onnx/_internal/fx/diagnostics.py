@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import dataclasses
+
 import functools
+
 from typing import Any, TYPE_CHECKING
 
 import onnxscript  # type: ignore[import]
@@ -14,7 +16,6 @@ from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import decorator, formatter
 from torch.onnx._internal.fx import registration, type_utils as fx_type_utils
-
 
 if TYPE_CHECKING:
     import logging

@@ -1,9 +1,7 @@
 from typing import Optional
 
 import torch.distributed as dist
-
 from . import config
-
 
 _COMPILE_PG: Optional[dist.ProcessGroup] = None
 

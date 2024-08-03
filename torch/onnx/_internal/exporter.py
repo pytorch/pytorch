@@ -4,10 +4,12 @@ from __future__ import (  # for onnx.ModelProto (ONNXProgram) and onnxruntime (O
 )
 
 import abc
+
 import contextlib
 import dataclasses
 import logging
 import os
+
 import tempfile
 import warnings
 from collections import defaultdict
@@ -25,9 +27,11 @@ from typing import (
 from typing_extensions import Self
 
 import torch
+
 import torch._ops
 import torch.export as torch_export
 import torch.utils._pytree as pytree
+
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.fx import (
@@ -37,7 +41,6 @@ from torch.onnx._internal.fx import (
     serialization as fx_serialization,
 )
 
-
 # We can only import onnx from this module in a type-checking context to ensure that
 # 'import torch.onnx' continues to work without having 'onnx' installed. We fully
 # 'import onnx' inside of dynamo_export (by way of _assert_dependencies).
@@ -45,7 +48,6 @@ if TYPE_CHECKING:
     import io
 
     import onnx
-
     import onnxruntime  # type: ignore[import]
     import onnxscript  # type: ignore[import]
     from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
@@ -53,6 +55,7 @@ if TYPE_CHECKING:
     )
 
     from torch._subclasses import fake_tensor
+
     from torch.onnx._internal.fx import diagnostics
 
 _DEFAULT_OPSET_VERSION: Final[int] = 18
@@ -757,7 +760,7 @@ class ONNXProgram:
 
             >>> import pprint
             >>> class CustomModule(torch.nn.Module):
-            ...     def __init__(self) -> None:
+            ...     def __init__(self):
             ...         super().__init__()
             ...         self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
             ...         self.register_buffer("my_buffer1", torch.tensor(3.0))

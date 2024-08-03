@@ -7,7 +7,9 @@
 
 #include <utility>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 class HasRand : public IRVisitor {
  public:
   HasRand(StmtPtr stmt) : stmt_(std::move(stmt)) {
@@ -19,11 +21,11 @@ class HasRand : public IRVisitor {
   }
 
  private:
-  void visit(const IntrinsicsPtr& v) override {
+  void visit(IntrinsicsPtr v) override {
     if (v->op_type() == IntrinsicsOp::kRand) {
       has_rand_ = true;
     } else {
-      IRVisitor::visit(v);
+      IRVisitor::visit(std::move(v));
     }
   }
   StmtPtr stmt_;
@@ -31,9 +33,10 @@ class HasRand : public IRVisitor {
 };
 
 template <typename Op>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class NodeFinder : public IRVisitor {
  public:
-  void visit(const NodePtr<Op>& v) override {
+  void visit(NodePtr<Op> v) override {
     nodes.push_back((NodePtr<Op>)v);
     IRVisitor::visit(v);
   }
@@ -53,11 +56,12 @@ class NodeFinder : public IRVisitor {
   std::vector<NodePtr<Op>> nodes;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class VarFinder : public IRVisitor {
  public:
-  void visit(const VarPtr& v) override {
+  void visit(VarPtr v) override {
     vars_.insert(v);
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
   }
 
   static std::unordered_set<VarPtr> find(const StmtPtr& s) {
@@ -82,9 +86,9 @@ class VarFinder : public IRVisitor {
 
 class BufFinder : public IRVisitor {
  public:
-  void visit(const BufPtr& v) override {
+  void visit(BufPtr v) override {
     bufs_.insert(v);
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
   }
 
   static std::unordered_set<BufPtr> find(const StmtPtr& s) {
@@ -110,6 +114,7 @@ class BufFinder : public IRVisitor {
 // Finds all kinds of write operations to the provided Buf.
 class WritesToBuf : public IRVisitor {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   WritesToBuf(BufPtr target) : target_(std::move(target)) {}
 
   std::vector<StmtPtr> writes() {
@@ -123,13 +128,13 @@ class WritesToBuf : public IRVisitor {
   }
 
  private:
-  void visit(const StorePtr& v) override {
+  void visit(StorePtr v) override {
     if (v->buf() == target_) {
       writes_.push_back(v);
     }
   }
 
-  void visit(const AtomicAddPtr& v) override {
+  void visit(AtomicAddPtr v) override {
     if (v->buf() == target_) {
       writes_.push_back(v);
     }
@@ -141,6 +146,7 @@ class WritesToBuf : public IRVisitor {
 
 class StmtsReadingBuf : public IRVisitor {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   StmtsReadingBuf(BufPtr target) : target_(std::move(target)) {}
 
   std::vector<StmtPtr> reads() {
@@ -164,25 +170,25 @@ class StmtsReadingBuf : public IRVisitor {
     return false;
   }
 
-  void visit(const StorePtr& v) override {
+  void visit(StorePtr v) override {
     if (readsBuffer(v)) {
       reads_.push_back(v);
     }
   }
 
-  void visit(const LetPtr& v) override {
+  void visit(LetPtr v) override {
     if (readsBuffer(v)) {
       reads_.push_back(v);
     }
   }
 
-  void visit(const CondPtr& v) override {
+  void visit(CondPtr v) override {
     if (readsBuffer(v)) {
       reads_.push_back(v);
     }
   }
 
-  void visit(const AtomicAddPtr& v) override {
+  void visit(AtomicAddPtr v) override {
     if (readsBuffer(v)) {
       reads_.push_back(v);
     }
@@ -194,10 +200,10 @@ class StmtsReadingBuf : public IRVisitor {
 
 class ExternalAllocBufFinder : public IRVisitor {
  public:
-  void visit(const ExternalCallWithAllocPtr& v) override {
+  void visit(ExternalCallWithAllocPtr v) override {
     const auto& bufs_out = v->buf_out_args();
     bufs_.insert(bufs_out.begin(), bufs_out.end());
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
   }
 
   static std::unordered_set<BufPtr> find(const StmtPtr& s) {
@@ -236,36 +242,36 @@ class ModifiesVarChecker : public IRVisitor {
   }
 
  private:
-  void visit(const StorePtr& v) override {
+  void visit(StorePtr v) override {
     if (v->buf()->base_handle() == var_) {
       found_ = true;
       return;
     }
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
   }
 
-  void visit(const AtomicAddPtr& v) override {
+  void visit(AtomicAddPtr v) override {
     if (v->buf()->base_handle() == var_) {
       found_ = true;
       return;
     }
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
   }
 
-  void visit(const LetPtr& v) override {
+  void visit(LetPtr v) override {
     if (v->var() == var_) {
       found_ = true;
       return;
     }
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
   }
 
-  void visit(const ForPtr& v) override {
+  void visit(ForPtr v) override {
     if (v->var() == var_) {
       found_ = true;
       return;
     }
-    IRVisitor::visit(v);
+    IRVisitor::visit(std::move(v));
   }
 
   VarPtr var_;
@@ -279,8 +285,8 @@ class BufLiveRange : public IRVisitor {
  public:
   BufLiveRange(BufPtr b) : buf_(std::move(b)) {}
 
-  static std::tuple<int32_t, int32_t> liveRange(const StmtPtr& s, BufPtr b) {
-    BlockPtr block = to<Block>(s);
+  static std::tuple<int32_t, int32_t> liveRange(StmtPtr s, BufPtr b) {
+    BlockPtr block = to<Block>(std::move(s));
     // We Only analyze buffer live ranges for block stmts.
     if (!block) {
       return std::make_tuple(0, 0);
@@ -356,7 +362,7 @@ class BufLiveRange : public IRVisitor {
     }
   }
 
-  void visit(const BlockPtr& v) override {
+  void visit(BlockPtr v) override {
     for (const StmtPtr& s : *v) {
       curr_index_ += 1;
       findAccAndUpdateLiveRange(s);
@@ -378,7 +384,7 @@ class CreateBufferMap : public IRVisitor {
   }
 
  private:
-  void visit(const StorePtr& v) override {
+  void visit(StorePtr v) override {
     auto load_node = to<Load>(v->value());
     if (load_node) {
       auto t_buf = load_node->buf();
@@ -395,4 +401,6 @@ class CreateBufferMap : public IRVisitor {
   std::unordered_map<std::string, BufPtr> map_input_to_tensor_bufs_;
 };
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

@@ -13,12 +13,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch._C
-from torch import device as _device
-from torch._utils import _dummy_type, _LazySeedTracker
-
+from .. import device as _device
+from .._utils import _dummy_type, _LazySeedTracker
 from ._utils import _get_device_index
 from .streams import Event, Stream
-
 
 _initialized = False
 _tls = threading.local()

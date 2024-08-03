@@ -77,7 +77,6 @@ class CrossRefFakeMode(TorchDispatchMode):
         check_strides=True,
         check_aliasing=True,
     ):
-        super().__init__()
         self.ignore_op_fn = (
             ignore_op_fn if ignore_op_fn is not None else lambda fn: False
         )

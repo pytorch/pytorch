@@ -40,7 +40,6 @@ from torch.testing._internal import (
     common_utils,
 )
 
-
 OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
 
 # Modify this section ##########################################################

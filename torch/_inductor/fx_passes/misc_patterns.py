@@ -79,7 +79,7 @@ class NumpyCompatNormalization:
     inverse_mapping: Dict[str, str]
     cache: Dict["torch.fx.graph.Target", Set[str]]
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.cache = {}  # callable -> tuple of replaceable args e.g. ["axis"]
         self.inverse_mapping = {}
         for actual_kwarg, numpy_kwargs in self.numpy_compat.items():

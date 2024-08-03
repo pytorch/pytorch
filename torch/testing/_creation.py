@@ -9,7 +9,6 @@ from typing import cast, List, Optional, Tuple, Union
 
 import torch
 
-
 _INTEGRAL_TYPES = [
     torch.uint8,
     torch.int8,

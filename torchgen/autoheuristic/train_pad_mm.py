@@ -1,16 +1,11 @@
 # mypy: ignore-errors
-import os
-import sys
+
+from train import AHTrain
+
+from torch._inductor.fx_passes.pad_mm import pad_mm_operations
 
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from train_decision import AHTrainDecisionTree
-
-from torch._inductor.autoheuristic.autoheuristic_utils import pad_mm_operations
-
-
-class AHTrainDecisionTreePadMM(AHTrainDecisionTree):
+class AHTrainPadMM(AHTrain):
     def __init__(self):
         super().__init__()
 
@@ -23,5 +18,5 @@ class AHTrainDecisionTreePadMM(AHTrainDecisionTree):
 
 
 if __name__ == "__main__":
-    train = AHTrainDecisionTreePadMM()
+    train = AHTrainPadMM()
     train.generate_heuristic()

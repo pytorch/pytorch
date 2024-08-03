@@ -4,6 +4,7 @@ import pytorch_test_common
 import torch
 import torch._dynamo
 import torch.fx
+
 from torch.onnx._internal.fx.passes import _utils as pass_utils
 from torch.testing._internal import common_utils
 
@@ -126,7 +127,7 @@ class TestModularizePass(common_utils.TestCase):
         #
         # Minified repro from Background_Matting. https://github.com/pytorch/benchmark/issues/1768
         class TestModule(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.unused_relu = torch.nn.ReLU()
                 self.used_gelu = torch.nn.GELU()
@@ -172,7 +173,7 @@ class TestModularizePass(common_utils.TestCase):
         self, is_exported_program
     ):
         class TestModule(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.relu = torch.nn.ReLU()
 
@@ -218,7 +219,7 @@ class TestModularizePass(common_utils.TestCase):
     ):
         # Minified repro from basic_gnn_edgecnn.
         class InnerModule(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.relu = torch.nn.ReLU()
 
@@ -226,7 +227,7 @@ class TestModularizePass(common_utils.TestCase):
                 return self.relu(x)
 
         class TestModule(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.inner_module = InnerModule()
 

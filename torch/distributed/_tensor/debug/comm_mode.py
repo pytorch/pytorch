@@ -3,15 +3,18 @@ import copy
 import json
 import re
 import weakref
+
 from collections import defaultdict
 from typing import Any, Dict
 
 import torch
+
 import torch.nn
-from torch._guards import detect_fake_mode
+
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed._tensor.api import DTensor
 from torch.distributed._tools.mod_tracker import ModTracker
+
 from torch.nn.modules.module import (
     register_module_forward_hook,
     register_module_forward_pre_hook,
@@ -20,9 +23,10 @@ from torch.nn.modules.module import (
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 
-
 funcol_native = torch.ops._c10d_functional
 funcol_py = torch.ops.c10d_functional
+from torch._guards import detect_fake_mode
+
 funcol_autograd = torch.ops._c10d_functional_autograd
 c10d_ops = torch.ops.c10d
 
@@ -206,7 +210,6 @@ class CommModeModuleTracker(ModTracker):
         super().__exit__(*args)
         self._bw_handle.remove()
 
-        # removes all forward_hook handles added in the pre-hook
         for handle in self.register_forward_hook_handles.values():
             handle.remove()
 
@@ -259,12 +262,18 @@ class CommDebugMode(TorchDispatchMode):
         3. prints all operations
         """
 
-        (
-            include_DTensor_ops,
-            include_module_data,
-            include_ops,
-            include_trivial_ops,
-        ) = self.set_noise_parameters(noise_level)
+        include_DTensor_ops = False
+        include_ops = False
+        include_trivial_ops = False
+
+        if noise_level > 0:
+            include_DTensor_ops = True
+
+        if noise_level > 1:
+            include_ops = True
+
+        if noise_level > 2:
+            include_trivial_ops = True
 
         # recursively builds json data
         def add_json_information(json_dict, fqn):
@@ -280,7 +289,7 @@ class CommDebugMode(TorchDispatchMode):
             # adds module layer type and parameters, and their sharding
             if (
                 "module_type" in self.advanced_module_tracker.module_helper_dict[fqn]
-                and include_module_data
+                and include_ops
             ):
                 json_dict[
                     "module_type"
@@ -315,11 +324,27 @@ class CommDebugMode(TorchDispatchMode):
             # only get operations if the minimum operation noise level is set to true
             if include_DTensor_ops:
                 if fqn in self.comm_module_operation_counts:
-                    (
-                        forward_operations,
-                        backward_operations,
-                        checkpointing_operations,
-                    ) = self.get_operations_list(self.comm_module_operation_counts[fqn])
+                    forward_operations = [
+                        op
+                        for op in self.comm_module_operation_counts[fqn][
+                            "operations_list"
+                        ]
+                        if not op["is_bw"]
+                    ]
+                    backward_operations = [
+                        op
+                        for op in self.comm_module_operation_counts[fqn][
+                            "operations_list"
+                        ]
+                        if op["is_bw"] and not op["is_activation_checkpointing"]
+                    ]
+                    checkpointing_operations = [
+                        op
+                        for op in self.comm_module_operation_counts[fqn][
+                            "operations_list"
+                        ]
+                        if op["is_activation_checkpointing"]
+                    ]
 
             # remove all operations who don't have DTensor inputs
             if not include_ops:
@@ -407,12 +432,20 @@ class CommDebugMode(TorchDispatchMode):
         3. prints all operations
         """
 
-        (
-            include_DTensor_ops,
-            include_module_data,
-            include_ops,
-            include_trivial_ops,
-        ) = self.set_noise_parameters(noise_level)
+        include_DTensor_ops = False
+        include_ops = False
+        include_trivial_ops = False
+        include_module_data = False
+
+        if noise_level > 0:
+            include_DTensor_ops = True
+            include_module_data = True
+
+        if noise_level > 1:
+            include_ops = True
+
+        if noise_level > 2:
+            include_trivial_ops = True
 
         table = ""
         for fqn in self.advanced_module_tracker.module_helper_dict:
@@ -463,11 +496,27 @@ class CommDebugMode(TorchDispatchMode):
 
             if include_DTensor_ops:
                 if fqn in self.comm_module_operation_counts:
-                    (
-                        forward_operations,
-                        backward_operations,
-                        checkpointing_operations,
-                    ) = self.get_operations_list(self.comm_module_operation_counts[fqn])
+                    forward_operations = [
+                        op
+                        for op in self.comm_module_operation_counts[fqn][
+                            "operations_list"
+                        ]
+                        if not op["is_bw"]
+                    ]
+                    backward_operations = [
+                        op
+                        for op in self.comm_module_operation_counts[fqn][
+                            "operations_list"
+                        ]
+                        if op["is_bw"] and not op["is_activation_checkpointing"]
+                    ]
+                    checkpointing_operations = [
+                        op
+                        for op in self.comm_module_operation_counts[fqn][
+                            "operations_list"
+                        ]
+                        if op["is_activation_checkpointing"]
+                    ]
 
             def add_tracing_information(table, collectives_dict, operation_list):
                 """
@@ -542,23 +591,6 @@ class CommDebugMode(TorchDispatchMode):
 
         return table
 
-    def get_operations_list(self, module_operation_counts):
-        forward_operations = [
-            op for op in module_operation_counts["operations_list"] if not op["is_bw"]
-        ]
-        backward_operations = [
-            op
-            for op in module_operation_counts["operations_list"]
-            if op["is_bw"] and not op["is_activation_checkpointing"]
-        ]
-        checkpointing_operations = [
-            op
-            for op in module_operation_counts["operations_list"]
-            if op["is_activation_checkpointing"]
-        ]
-
-        return forward_operations, backward_operations, checkpointing_operations
-
     def get_total_counts(self) -> int:
         return sum(self.comm_counts.values())
 
@@ -616,32 +648,6 @@ class CommDebugMode(TorchDispatchMode):
 
     def print_sharding_info(self):
         self.advanced_module_tracker.print_sharding_info()
-
-    def set_noise_parameters(self, noise_level):
-        """
-        sets variables controlling what information displays based on noise level
-        """
-        include_DTensor_ops = False
-        include_module_data = False
-        include_ops = False
-        include_trivial_ops = False
-
-        if noise_level > 0:
-            include_DTensor_ops = True
-            include_module_data = True
-
-        if noise_level > 1:
-            include_ops = True
-
-        if noise_level > 2:
-            include_trivial_ops = True
-
-        return (
-            include_DTensor_ops,
-            include_module_data,
-            include_ops,
-            include_trivial_ops,
-        )
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         # When running this mode with DTensor, ordinarily all modes will

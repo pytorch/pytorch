@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace torch {
 namespace data {
@@ -104,7 +105,7 @@ Example<> MNIST::get(size_t index) {
   return {images_[index], targets_[index]};
 }
 
-std::optional<size_t> MNIST::size() const {
+optional<size_t> MNIST::size() const {
   return images_.size(0);
 }
 

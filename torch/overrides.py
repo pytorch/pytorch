@@ -2025,7 +2025,7 @@ class TorchFunctionMode:
     inner: "TorchFunctionMode"
 
     # Force metaclass to generate constructor at the base of the hierarchy
-    def __init__(self) -> None:
+    def __init__(self):
         pass
 
     def __torch_function__(self, func, types, args=(), kwargs=None):

@@ -3,6 +3,7 @@
 from unittest import skipIf, SkipTest
 
 import numpy
+
 import pytest
 from pytest import raises as assert_raises
 

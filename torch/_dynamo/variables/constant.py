@@ -6,16 +6,14 @@ from typing import Dict, List, TYPE_CHECKING
 import torch
 from torch._dynamo.source import GetItemSource
 
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
 from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
-
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
 
 _type_to_assert_reason = {
     # NB - We CAN have ConstantVariable.create(set) because of how sets interact with guards.
@@ -64,7 +62,7 @@ class ConstantVariable(VariableTracker):
 
         return ConstantVariable(value, **kwargs)
 
-    def __init__(self, value, **kwargs) -> None:
+    def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         if not ConstantVariable.is_literal(value):
             for disallowed_type, reason in _type_to_assert_reason.items():
@@ -81,7 +79,7 @@ class ConstantVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
-    def __str__(self) -> str:
+    def __str__(self):
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
 
     def python_type(self):
@@ -191,9 +189,6 @@ class ConstantVariable(VariableTracker):
                     return SymNodeVariable.create(tx, proxy, add_target)
                 else:
                     return ConstantVariable.create(op(self.value, add_target))
-        elif isinstance(self.value, bytes) and name == "decode":
-            method = getattr(self.value, name)
-            return ConstantVariable.create(method(*const_args, **const_kwargs))
 
         if name == "__len__" and not (args or kwargs):
             return ConstantVariable.create(len(self.value))
@@ -211,7 +206,7 @@ class ConstantVariable(VariableTracker):
 
 
 class EnumVariable(VariableTracker):
-    def __init__(self, value, **kwargs) -> None:
+    def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
 
@@ -226,7 +221,7 @@ class EnumVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
-    def __str__(self) -> str:
+    def __str__(self):
         return f"EnumVariable({type(self.value)})"
 
     def python_type(self):

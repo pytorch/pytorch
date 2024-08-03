@@ -137,7 +137,7 @@ class DetectorBase(ABC):
         - Should return a str-based report and dict info in Tuple[str,Dict] format
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.detector_config_info = None
 

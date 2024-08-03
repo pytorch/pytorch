@@ -30,7 +30,6 @@ from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import onnx_proto_utils
 from torch.types import Number
 
-
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
@@ -1723,7 +1722,7 @@ def find_mismatch(
         ...     opset_version=opset_version,
         ... )
         >>> class Model(torch.nn.Module):
-        ...     def __init__(self) -> None:
+        ...     def __init__(self):
         ...         super().__init__()
         ...         self.layers = torch.nn.Sequential(
         ...             torch.nn.Linear(3, 4),

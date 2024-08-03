@@ -268,7 +268,7 @@ class XNNPACKQuantizer(Quantizer):
         "linear",
     ]
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.global_config: Optional[QuantizationConfig] = None
         self.operator_type_config: Dict[

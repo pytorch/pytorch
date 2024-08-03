@@ -90,10 +90,6 @@ if(USE_XPU)
     message(WARNING "Not compiling with XPU. Could NOT find SYCL."
     "Suppress this warning with -DUSE_XPU=OFF.")
     caffe2_update_option(USE_XPU OFF)
-  else()
-    if(LINUX)
-      string(APPEND CMAKE_CXX_FLAGS " -D__INTEL_PREVIEW_BREAKING_CHANGES")
-    endif()
   endif()
 endif()
 

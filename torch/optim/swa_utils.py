@@ -11,9 +11,7 @@ from torch import Tensor
 from torch.nn import Module
 from torch.optim.lr_scheduler import _format_param, LRScheduler
 from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
-
 from .optimizer import Optimizer
-
 
 __all__ = [
     "AveragedModel",
@@ -26,7 +24,6 @@ __all__ = [
 ]
 
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
-
 
 PARAM_LIST = Union[Tuple[Tensor, ...], List[Tensor]]
 

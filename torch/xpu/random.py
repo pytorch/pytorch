@@ -2,8 +2,7 @@
 from typing import Iterable, List, Union
 
 import torch
-from torch import Tensor
-
+from .. import Tensor
 from . import _lazy_call, _lazy_init, current_device, device_count
 
 

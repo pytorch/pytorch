@@ -5,14 +5,13 @@ import unittest
 import torch
 import torch._C
 
-
 torch.ops.load_library("//caffe2:xnnpack_backend")
 
 
 class TestXNNPackBackend(unittest.TestCase):
     def test_xnnpack_constant_data(self):
         class Module(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self._constant = torch.ones(4, 4, 4)
 

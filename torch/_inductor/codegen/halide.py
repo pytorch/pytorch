@@ -15,6 +15,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     Tuple,
     TYPE_CHECKING,
     Union,
@@ -59,8 +60,6 @@ from .simd import constant_repr, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
-    from torch.utils._ordered_set import OrderedSet
-
     from ..ops_handler import ReductionType, StoreMode
 
 log = logging.getLogger(__name__)
@@ -80,7 +79,7 @@ def halide_constant(val):
 
 
 class Unsupported(RuntimeError):
-    def __init__(self, thing) -> None:
+    def __init__(self, thing):
         super().__init__(f"halide backend does not support: {thing}")
 
 
@@ -566,7 +565,7 @@ def _typecheck_HalideOverrides(h: HalideOverrides) -> OpsHandler[str]:
 class HalideCSEVariable(CSEVariable):
     undefined_re = re.compile(r"\b(tmp\d+)\[\?\]")
 
-    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
+    def __init__(self, name, bounds: ValueRanges[Any]):
         super().__init__(name, bounds)
         self.used_dims: Optional[List[sympy.Symbol]] = None
 
@@ -584,7 +583,7 @@ class HalideCSEVariable(CSEVariable):
         # Reversed since Halide is column major
         return f"{self.name}[{', '.join(map(str, dims))}]"
 
-    def __str__(self) -> str:
+    def __str__(self):
         if self.used_dims is None:
             # This will get recomputed and replaced in codegen_kernel()
             return f"{self.name}[?]"
@@ -603,7 +602,7 @@ class DimensionInfo:
     size: sympy.Expr
     stride: sympy.Expr
 
-    def __init__(self, expr, size, stride) -> None:
+    def __init__(self, expr, size, stride):
         super().__init__()
         if V.graph.sizevars.statically_known_lt(stride, 0):
             stride = -stride
@@ -666,11 +665,11 @@ class HalideKernel(SIMDKernel):
         self,
         *groups,
         index_dtype: str,
-        mutations: Optional[OrderedSet[str]] = None,
+        mutations: Optional[Set[str]] = None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
         override_persistent_reduction=None,
-    ) -> None:
+    ):
         super().__init__(
             *groups,
             index_dtype=index_dtype,
@@ -718,7 +717,7 @@ class HalideKernel(SIMDKernel):
         assert not (
             self.index_replacements or self.halide_vars or self.reduction_renames
         )
-        size_hint = functools.partial(V.graph.sizevars.size_hint, fallback=inf)  # type: ignore[arg-type]
+        size_hint = functools.partial(V.graph.sizevars.size_hint, fallback=inf)
         indices = dict.fromkeys(map(super().prepare_indexing, indices))
         all_used_symbols = set()
         sym_to_node = {
@@ -1648,7 +1647,7 @@ class HalideScheduling(SIMDScheduling):
     int32_type = "hl.Int(32)"
     # TODO(jansel): Halide doesn't actually support 64 bit indexing...
     int64_type = "hl.Int(64)"
-    kernel_type = HalideKernel  # type: ignore[arg-type]
+    kernel_type = HalideKernel
 
     @classmethod
     def get_backend_features(cls, device: torch.device):

@@ -26,7 +26,7 @@ class TestCustomAutogradFunction(pytorch_test_common.ExportTestCase):
                 return g.op("Clip", input, min_f=scalar)
 
         class MyModule(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.clip = MyClip.apply
 
@@ -52,7 +52,7 @@ class TestCustomAutogradFunction(pytorch_test_common.ExportTestCase):
                 return input.clamp(min=0)
 
         class MyModule(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.clip = MyClip.apply
                 self.relu = MyRelu.apply
@@ -62,12 +62,13 @@ class TestCustomAutogradFunction(pytorch_test_common.ExportTestCase):
                 h = self.relu(h)
                 return h
 
-        def symbolic_pythonop(g, *args, **kwargs):
+        def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
+            n = ctx.cur_node
             name = kwargs["name"]
             if name == "MyClip":
-                return g.op("Clip", args[0], min_f=args[1])
+                return g.op("Clip", args[0], min_f=args[1], outputs=n.outputsSize())
             elif name == "MyRelu":
-                return g.op("Relu", args[0])
+                return g.op("Relu", args[0], outputs=n.outputsSize())
             else:
                 return symbolic_helper._unimplemented(
                     "prim::PythonOp", "unknown node kind: " + name
@@ -89,7 +90,7 @@ class TestExportAsContribOps(pytorch_test_common.ExportTestCase):
 
     def test_contrib_op_with_loop(self):
         class M(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.gelu = torch.nn.GELU(approximate="none")
 

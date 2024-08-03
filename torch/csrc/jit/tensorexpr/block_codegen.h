@@ -14,7 +14,9 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/unique_name_manager.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 // A class that analyzes the given program relevant for Block backend.
 class BlockAnalysis : public IRVisitor {
@@ -50,9 +52,9 @@ class BlockAnalysis : public IRVisitor {
   }
 
  private:
-  void visit(const StorePtr& v) override;
-  void visit(const LoadPtr& v) override;
-  void visit(const ForPtr& v) override;
+  void visit(StorePtr v) override;
+  void visit(LoadPtr v) override;
+  void visit(ForPtr v) override;
 
   std::unordered_map<std::string, BufPtr> map_input_to_tensor_bufs_;
   std::unordered_set<BufPtr> store_targets_;
@@ -85,12 +87,12 @@ class BlockPrinter : public IRPrinter {
   void PrintDMAs(const std::unordered_set<BufPtr>& bufs);
   void PrintAdjustBuffers(const std::unordered_set<BufPtr>& bufs);
 
-  void visit(const ForPtr& v) override;
-  void visit(const LoadPtr& v) override;
-  void visit(const StorePtr& v) override;
-  void visit(const BlockPtr& v) override;
-  void visit(const AddPtr& v) override;
-  void visit(const MulPtr& v) override;
+  void visit(ForPtr v) override;
+  void visit(LoadPtr v) override;
+  void visit(StorePtr v) override;
+  void visit(BlockPtr v) override;
+  void visit(AddPtr v) override;
+  void visit(MulPtr v) override;
 };
 
 class TORCH_API BlockCodeGen : public CodeGen {
@@ -143,4 +145,6 @@ class TORCH_API BlockCodeGen : public CodeGen {
 
   std::string GetUniqueFuncName(const std::string& func_prefix);
 };
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

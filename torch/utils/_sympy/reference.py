@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import math
+
 import operator
 
 import sympy

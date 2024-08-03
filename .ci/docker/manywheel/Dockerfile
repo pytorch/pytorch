@@ -29,7 +29,9 @@ RUN yum install -y devtoolset-${DEVTOOLSET_VERSION}-gcc devtoolset-${DEVTOOLSET_
 ENV PATH=/opt/rh/devtoolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/devtoolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/devtoolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 
-RUN yum --enablerepo=extras install -y epel-release
+RUN wget http://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm && \
+    rpm -ivh epel-release-latest-7.noarch.rpm && \
+    rm -f epel-release-latest-7.noarch.rpm
 
 # cmake-3.18.4 from pip
 RUN yum install -y python3-pip && \
@@ -115,8 +117,7 @@ RUN yum install -y \
         yasm
 RUN yum install -y \
     https://repo.ius.io/ius-release-el7.rpm \
-    https://ossci-linux.s3.amazonaws.com/epel-release-7-14.noarch.rpm
-
+    https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
 RUN yum swap -y git git236-core
 # git236+ would refuse to run git commands in repos owned by other users
 # Which causes version check to fail, as pytorch repo is bind-mounted into the image

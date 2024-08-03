@@ -6,7 +6,6 @@ Try to keep this list in sync with that.
 """
 import operator
 
-
 top_torch = [
     ("t", 6837449),
     ("tensor", 585786),

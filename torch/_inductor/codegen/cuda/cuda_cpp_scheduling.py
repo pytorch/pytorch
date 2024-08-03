@@ -24,7 +24,7 @@ class CUDACPPScheduling(BaseScheduling):
     It handles fusion decisions and CUDA C++ specific template code generation.
     """
 
-    def __init__(self, scheduler: Scheduler) -> None:
+    def __init__(self, scheduler: Scheduler):
         super().__init__()
         self.scheduler = scheduler
 

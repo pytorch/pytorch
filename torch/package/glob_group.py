@@ -2,7 +2,6 @@
 import re
 from typing import Iterable, Union
 
-
 GlobPattern = Union[str, Iterable[str]]
 
 

@@ -4,6 +4,7 @@ import itertools
 import logging
 
 from torch._logging import warning_once
+
 from torch._ops import HigherOrderOperator
 from torch.utils.checkpoint import checkpoint, CheckpointPolicy
 
@@ -15,7 +16,7 @@ uid = itertools.count(1)
 
 # Used for testing the HigherOrderOperator mechanism
 class Wrap(HigherOrderOperator):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__("wrap")
 
     def __call__(self, func, *args, **kwargs):
@@ -36,7 +37,7 @@ wrap = Wrap()
 
 
 class WrapWithSetGradEnabled(HigherOrderOperator):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__("wrap_with_set_grad_enabled")
 
     def __call__(self, enable_grad, wrapped_func, *args, **kwargs):
@@ -74,7 +75,7 @@ class WrapActivationCheckpoint(HigherOrderOperator):
     partitioners. See TagActivationCheckpoint for more information.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__("wrap_activation_checkpoint")
 
     def __call__(self, function, *args, **kwargs):
@@ -113,7 +114,7 @@ class TagActivationCheckpoint(HigherOrderOperator):
     the forward and recomputed forward in backward.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__("tag_activation_checkpoint")
 
     @staticmethod

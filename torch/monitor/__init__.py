@@ -1,7 +1,6 @@
 from torch._C._monitor import *  # noqa: F403
-from typing import TYPE_CHECKING
 
-from torch._C._monitor import _WaitCounter  # type: ignore[attr-defined]
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from torch.utils.tensorboard import SummaryWriter

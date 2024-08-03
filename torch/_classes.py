@@ -19,7 +19,7 @@ class _ClassNamespace(types.ModuleType):
 class _Classes(types.ModuleType):
     __file__ = "_classes.py"
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__("torch.classes")
 
     def __getattr__(self, name):

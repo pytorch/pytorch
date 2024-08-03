@@ -6,12 +6,10 @@ from typing import List
 
 import torch
 
-
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
-
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -158,7 +156,7 @@ class TestSlice(JitTestCase):
                 return 0
 
         class Foo(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 module_list = [Bar("A"), Bar("B"), Bar("C"), Bar("D"), Bar("E")]
                 self.test = torch.nn.ModuleList(module_list)

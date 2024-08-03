@@ -127,7 +127,7 @@ void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, 
   }
 }
 
-std::optional<DimnameList> get_opt_names(const TensorImpl* impl) {
+optional<DimnameList> get_opt_names(const TensorImpl* impl) {
   const auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
     return std::nullopt;

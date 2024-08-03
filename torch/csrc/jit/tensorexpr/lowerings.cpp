@@ -15,7 +15,7 @@ FunctionSchemaMap<NNCLoweringFunction>& getNNCLoweringRegistry() {
 
 RegisterNNCLoweringsFunction::RegisterNNCLoweringsFunction(
     const std::vector<std::string>& schemas,
-    const NNCLoweringFunction& fn) {
+    NNCLoweringFunction fn) {
   for (const auto& schema_str : schemas) {
     getNNCLoweringRegistry().insert(parseSchema(schema_str), fn);
   }

@@ -21,7 +21,6 @@ from .optimizer import (
     ParamsT,
 )
 
-
 __all__ = ["Adamax", "adamax"]
 
 

@@ -7,7 +7,9 @@
 
 #include <utility>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 struct TORCH_API SimplifierHashType {
   SimplifierHashType() = default;
@@ -22,7 +24,9 @@ struct TORCH_API SimplifierHashType {
   size_t _h{0};
 };
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch
 
 namespace std {
 template <>
@@ -34,7 +38,9 @@ struct hash<torch::jit::tensorexpr::SimplifierHashType> {
 
 } // namespace std
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 #define CACHE_GUARD()  \
   if (cachedHash(v)) { \
@@ -50,14 +56,15 @@ class TORCH_API HashProvider : public IRVisitor {
  public:
   template <class T>
   SimplifierHashType hash(T e) {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     e->accept(this);
     return hashOf(e);
   }
 
-  bool cachedHash(const ExprPtr& e) {
+  bool cachedHash(ExprPtr e) {
     return exprToHash_.find(e) != exprToHash_.end();
   }
-  bool cachedHash(const StmtPtr& s) {
+  bool cachedHash(StmtPtr s) {
     return stmtToHash_.find(s) != stmtToHash_.end();
   }
 
@@ -66,46 +73,47 @@ class TORCH_API HashProvider : public IRVisitor {
     stmtToHash_.clear();
   }
 
-  void visit(const AddPtr& v) override;
-  void visit(const SubPtr& v) override;
-  void visit(const MulPtr& v) override;
-  void visit(const DivPtr& v) override;
-  void visit(const ModPtr& v) override;
-  void visit(const RoundOffPtr& v) override;
-  void visit(const MaxPtr& v) override;
-  void visit(const MinPtr& v) override;
-  void visit(const AndPtr& v) override;
-  void visit(const OrPtr& v) override;
-  void visit(const XorPtr& v) override;
-  void visit(const LshiftPtr& v) override;
-  void visit(const RshiftPtr& v) override;
-  void visit(const CompareSelectPtr& v) override;
+  void visit(AddPtr v) override;
+  void visit(SubPtr v) override;
+  void visit(MulPtr v) override;
+  void visit(DivPtr v) override;
+  void visit(ModPtr v) override;
+  void visit(RoundOffPtr v) override;
+  void visit(MaxPtr v) override;
+  void visit(MinPtr v) override;
+  void visit(AndPtr v) override;
+  void visit(OrPtr v) override;
+  void visit(XorPtr v) override;
+  void visit(LshiftPtr v) override;
+  void visit(RshiftPtr v) override;
+  void visit(CompareSelectPtr v) override;
 
+// NOLINTNEXTLINE
 #define IMM_VISIT(Type, Name)                    \
-  void visit(const Name##ImmPtr& v) override {   \
+  void visit(Name##ImmPtr v) override {          \
     CACHE_GUARD();                               \
     putHash(v, hash_combine(#Name, v->value())); \
   }
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT);
 #undef IMM_VISIT
 
-  void visit(const CastPtr& v) override;
-  void visit(const VarPtr& v) override;
-  void visit(const RampPtr& v) override;
-  void visit(const LoadPtr& v) override;
-  void visit(const StorePtr& v) override;
-  void visit(const BlockPtr& v) override;
-  void visit(const ForPtr& v) override;
-  void visit(const BroadcastPtr& v) override;
-  void visit(const IfThenElsePtr& v) override;
-  void visit(const IntrinsicsPtr& v) override;
-  void visit(const AllocatePtr& v) override;
-  void visit(const FreePtr& v) override;
-  void visit(const CondPtr& v) override;
-  void visit(const TermPtr& v) override;
-  void visit(const PolynomialPtr& v) override;
-  void visit(const MaxTermPtr& v) override;
-  void visit(const MinTermPtr& v) override;
+  void visit(CastPtr v) override;
+  void visit(VarPtr v) override;
+  void visit(RampPtr v) override;
+  void visit(LoadPtr v) override;
+  void visit(StorePtr v) override;
+  void visit(BlockPtr v) override;
+  void visit(ForPtr v) override;
+  void visit(BroadcastPtr v) override;
+  void visit(IfThenElsePtr v) override;
+  void visit(IntrinsicsPtr v) override;
+  void visit(AllocatePtr v) override;
+  void visit(FreePtr v) override;
+  void visit(CondPtr v) override;
+  void visit(TermPtr v) override;
+  void visit(PolynomialPtr v) override;
+  void visit(MaxTermPtr v) override;
+  void visit(MinTermPtr v) override;
 
   template <typename... Types>
   SimplifierHashType hash_combine(const Types&... args) {
@@ -115,7 +123,7 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 
  private:
-  SimplifierHashType hashOf(const ExprPtr& e) {
+  SimplifierHashType hashOf(ExprPtr e) {
     auto it = exprToHash_.find(e);
     if (it != exprToHash_.end()) {
       return it->second;
@@ -126,12 +134,12 @@ class TORCH_API HashProvider : public IRVisitor {
     IRPrinter printer(ss);
     e->accept(&printer);
     SimplifierHashType hash = SimplifierHashType(te_hash(ss.str()));
-    putHash(e, hash);
+    putHash(std::move(e), hash);
 
     return hash;
   }
 
-  SimplifierHashType hashOf(const StmtPtr& s) {
+  SimplifierHashType hashOf(StmtPtr s) {
     auto it = stmtToHash_.find(s);
     if (it != stmtToHash_.end()) {
       return it->second;
@@ -142,7 +150,7 @@ class TORCH_API HashProvider : public IRVisitor {
     IRPrinter printer(ss);
     s->accept(&printer);
     SimplifierHashType hash = SimplifierHashType(te_hash(ss.str()));
-    putHash(s, hash);
+    putHash(std::move(s), hash);
 
     return hash;
   }
@@ -181,14 +189,14 @@ class TORCH_API HashProvider : public IRVisitor {
     _hash_combine(seed, args...);
   }
 
-  void putHash(const ExprPtr& e, SimplifierHashType h) {
+  void putHash(ExprPtr e, SimplifierHashType h) {
     auto res = exprToHash_.emplace(e, h);
     if (res.second == false) {
       // This is always a logic bug since we should check the cache first.
       throw std::runtime_error("hash collision");
     }
   }
-  void putHash(const StmtPtr& s, SimplifierHashType h) {
+  void putHash(StmtPtr s, SimplifierHashType h) {
     auto res = stmtToHash_.emplace(s, h);
     if (res.second == false) {
       // This is always a logic bug since we should check the cache first.
@@ -245,7 +253,8 @@ class TORCH_API HashProvider : public IRVisitor {
       for (unsigned int i = 0; i < 8; ++i) {
         if (s < 0)
           break;
-        int64_t c = val[s];
+        // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+        int64_t c = val.data()[s];
         intval |= (c << (i * 8));
 
         s--;
@@ -258,24 +267,38 @@ class TORCH_API HashProvider : public IRVisitor {
   }
 
   size_t te_hash(double d) {
-    int64_t* n = reinterpret_cast<int64_t*>(&d);
-    return te_hash(*n);
+    // memcpy as type punning. Should be optimized out.
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    int64_t n;
+    std::memcpy(&n, &d, sizeof d);
+    return te_hash(n);
   }
 
   size_t te_hash(float d) {
-    int32_t* n = reinterpret_cast<int32_t*>(&d);
-    return te_hash(*n);
+    // memcpy as type punning. Should be optimized out.
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    int32_t n;
+    std::memcpy(&n, &d, sizeof d);
+    return te_hash(n);
   }
 
   size_t te_hash(at::Half d) {
-    int16_t* n = reinterpret_cast<int16_t*>(&d);
-    return te_hash(*n);
+    // memcpy as type punning. Should be optimized out.
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    int16_t n;
+    std::memcpy(&n, &d, sizeof d);
+    return te_hash(n);
   }
 
   size_t te_hash(at::BFloat16 d) {
-    int16_t* n = reinterpret_cast<int16_t*>(&d);
-    return te_hash(*n);
+    // memcpy as type punning. Should be optimized out.
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    int16_t n;
+    std::memcpy(&n, &d, sizeof d);
+    return te_hash(n);
   }
 };
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

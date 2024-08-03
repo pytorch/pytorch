@@ -32,7 +32,6 @@ from torch._C._profiler import (
 from torch._utils import _element_size
 from torch.profiler import _utils
 
-
 KeyAndID = Tuple["Key", int]
 TensorAndID = Tuple["TensorKey", int]
 

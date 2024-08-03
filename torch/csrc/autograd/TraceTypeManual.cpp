@@ -120,7 +120,7 @@ Tensor& detach_(Tensor& self) {
     self.detach_();
   }
 
-  if (jit::tracer::isTracing() && node) {
+  if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, self);
   }
   return self;

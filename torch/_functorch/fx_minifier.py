@@ -13,9 +13,7 @@ import torch.fx as fx
 from torch.hub import tqdm
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._content_store import ContentStoreWriter
-
 from .compile_utils import get_outputs, get_placeholders
-
 
 is_tuple = object()
 

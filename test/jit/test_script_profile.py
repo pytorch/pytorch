@@ -6,12 +6,10 @@ import sys
 import torch
 from torch import nn
 
-
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
-
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -22,7 +20,7 @@ if __name__ == "__main__":
 
 
 class Sequence(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.lstm1 = nn.LSTMCell(1, 51)
         self.lstm2 = nn.LSTMCell(51, 51)
