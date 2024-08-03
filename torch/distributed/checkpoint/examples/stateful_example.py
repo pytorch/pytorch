@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
 # Owner(s): ["oncall: distributed"]
 
+# pyre-unsafe
+
 
 import os
 import shutil

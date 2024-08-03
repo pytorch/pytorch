@@ -2053,7 +2053,7 @@ def optimize_onnx_ctx(
     test_data_dumped = False
 
     def run_n_iterations_onnx(model, inputs, n=2):
-        from torch.onnx._internal import exporter
+        from torch.onnx._internal import _exporter_legacy
         from torch.onnx._internal.fx import diagnostics
 
         # NOTE(bowbao): Capture all export & ort errors and diagnostics.
@@ -2087,7 +2087,7 @@ def optimize_onnx_ctx(
                 else:
                     outputs = onnx_model.run(inputs)
             return outputs
-        except exporter.OnnxExporterError as e:
+        except _exporter_legacy.OnnxExporterError as e:
             # `torch.onnx.dynamo_export` raises error that encloses diagnostics.
             diagnostic_context = e.onnx_program.diagnostic_context
             for parsed_error in parser.parse_diagnostic_context(diagnostic_context):

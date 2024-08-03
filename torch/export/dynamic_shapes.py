@@ -206,6 +206,7 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     _min = 0 if min is None else min
     _max = int_oo if max is None else max
     assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
+    assert name.isidentifier(), f"Dim name must be a valid identifier, got {name}"
     dim = _Dim(name, (int,), {"min": _min, "max": _max})
     dim.__module__ = getattr(
         inspect.getmodule(inspect.stack()[1][0]), "__name__", "__main__"
