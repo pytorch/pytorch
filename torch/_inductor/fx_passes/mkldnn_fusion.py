@@ -607,7 +607,7 @@ if torch._C._has_mkldnn:
             op_name: str,
             scalars_attr: Any = None,
             algorithm_attr: Any = None,
-        ):
+        ) -> None:
             self.op_name = op_name
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
@@ -1273,7 +1273,7 @@ if torch._C._has_mkldnn:
         Combine packed weight nodes with the same inputs to reduce memory usage.
         for example:
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(32, 32, bias=True)
 

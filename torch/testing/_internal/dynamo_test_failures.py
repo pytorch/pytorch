@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 
+
 # NOTE: [dynamo_test_failures.py]
 #
 # We generate xFailIfTorchDynamo* for all tests in `dynamo_expected_failures`
@@ -68,6 +69,17 @@ FIXME_inductor_non_strict = {
     "test_ops",
     "test_ops_gradients",
     "test_torch",
+}
+
+# Tests that run without resetting dynamo in PYTORCH_TEST_WITH_INDUCTOR=1.
+# Please don't add anything to this list.
+#
+# Instead we will gradually remove items from this list. Once the list is empty,
+# we will remove the list.
+FIXME_inductor_dont_reset_dynamo = {
+    "test_modules",
+    "test_ops",
+    "test_ops_gradients",
 }
 
 # We generate unittest.expectedFailure for all of the following tests

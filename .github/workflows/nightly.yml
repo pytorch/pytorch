@@ -21,6 +21,7 @@ jobs:
     name: docs build
     uses: ./.github/workflows/_linux-build.yml
     with:
+      runner: "amz2023.linux.2xlarge"
       build-environment: linux-jammy-py3.8-gcc11
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
 
@@ -29,6 +30,7 @@ jobs:
     uses: ./.github/workflows/_docs.yml
     needs: docs-build
     with:
+      runner_prefix: "amz2023."
       build-environment: linux-jammy-py3.8-gcc11
       docker-image: ${{ needs.docs-build.outputs.docker-image }}
       push: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.event.ref, 'refs/tags/v') }}

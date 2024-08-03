@@ -29,7 +29,7 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 class SimpleModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = nn.Linear(5, 8)
         self.relu = nn.ReLU()
@@ -47,7 +47,7 @@ class SimpleModel(torch.nn.Module):
 
 
 class SimpleModelUneven(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = nn.Linear(5, 10)
         self.relu = nn.ReLU()
