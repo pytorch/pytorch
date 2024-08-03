@@ -42,13 +42,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-#include <functional>
-#include <type_traits>
 #include <utility>
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <assert.h>
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <float.h>
 
 namespace {
 /*
@@ -88,23 +82,19 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
   at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
   if (lambda >= 10) {
     // transformed rejection method, (Hoermann, 1993)
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t k;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    double U, V, a, b, invalpha, vr, us;
 
     double slam = std::sqrt(lambda);
     double loglam = std::log(lambda);
-    b = 0.931 + 2.53 * slam;
-    a = -0.059 + 0.02483 * b;
-    invalpha = 1.1239 + 1.1328 / (b - 3.4);
-    vr = 0.9277 - 3.6224 / (b - 2);
+    double b = 0.931 + 2.53 * slam;
+    double a = -0.059 + 0.02483 * b;
+    double invalpha = 1.1239 + 1.1328 / (b - 3.4);
+    double vr = 0.9277 - 3.6224 / (b - 2);
 
     while (true) {
-      U = standard_uniform(generator) - 0.5;
-      V = standard_uniform(generator);
-      us = 0.5 - std::fabs(U);
-      k = (int64_t)std::floor((2 * a / us + b) * U + lambda + 0.43);
+      double U = standard_uniform(generator) - 0.5;
+      double V = standard_uniform(generator);
+      double us = 0.5 - std::fabs(U);
+      int64_t k = (int64_t)std::floor((2 * a / us + b) * U + lambda + 0.43);
       if ((us >= 0.07) && (V <= vr)) {
         return k;
       }
