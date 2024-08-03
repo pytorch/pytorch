@@ -17,6 +17,10 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
+from torch._export.db.logging import (
+    exportdb_error_message,
+    get_class_if_classified_error,
+)
 from torch._export.non_strict_utils import (
     _fakify_script_objects,
     _gather_constant_attrs,
@@ -1026,20 +1030,6 @@ _EXPORT_FLAGS: Optional[Set[str]] = None
 _EXPORT_MODULE_HIERARCHY: Optional[Dict[str, str]] = None
 
 
-def _get_class_if_classified_error(e):
-    from torch._dynamo.exc import TorchRuntimeError, Unsupported, UserError
-
-    _ALLOW_LIST = {
-        Unsupported,
-        UserError,
-        TorchRuntimeError,
-    }
-    case_name = getattr(e, "case_name", None)
-    if type(e) in _ALLOW_LIST and case_name is not None:
-        return case_name
-    return None
-
-
 def _log_export_wrapper(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
@@ -1057,10 +1047,9 @@ def _log_export_wrapper(fn):
         except Exception as e:
             t = type(e)
             error_type = t.__module__ + "." + t.__qualname__
-            case_name = _get_class_if_classified_error(e)
+            case_name = get_class_if_classified_error(e)
             if case_name is not None:
-                # TODO (shangdiy): detect whether case_name is really registered in exportdb after we set up exportdb registration.
-                log.error("See %s in exportdb for unsupported case.", case_name)
+                log.error(exportdb_error_message(case_name))
                 log_export_usage(
                     event="export.error.classified",
                     type=error_type,
