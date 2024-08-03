@@ -3,13 +3,13 @@ import contextlib
 import copy
 import functools
 import math
+import sys
 from collections import namedtuple
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from unittest.mock import patch
 
 import sympy
 
-import sys
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -220,7 +220,9 @@ class CppCSEVariable(CSEVariable):
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
-        return f"{int(expr)}LL" if sys.platform in ["darwin", "win32"] else f"{int(expr)}L"
+        return (
+            f"{int(expr)}LL" if sys.platform in ["darwin", "win32"] else f"{int(expr)}L"
+        )
 
     def _print_Where(self, expr):
         c = self.paren(self.doprint(expr.args[0]))
