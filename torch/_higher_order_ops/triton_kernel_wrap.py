@@ -582,7 +582,8 @@ def trace_triton_kernel_wrapper(proxy_mode, func_overload, node_args):
         proxy_args,
         name=func_overload.__name__ + "_proxy",
     )
-    return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
+    ret = track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
+    return ret
 
 
 @triton_kernel_wrapper_mutation.py_impl(ProxyTorchDispatchMode)

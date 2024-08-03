@@ -27,7 +27,6 @@ from ..source import (
     GetItemSource,
     ODictGetItemSource,
     RandomValueSource,
-    UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
 from ..utils import (
@@ -353,8 +352,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is collections.deque and not kwargs:
             if len(args) == 0:
                 items = []
-            elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
-                items = args[0].force_unpack_var_sequence(tx)
+            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+                items = args[0].unpack_var_sequence(tx)
             else:
                 unimplemented("deque() with more than 1 arg not supported")
             return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
@@ -656,7 +655,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert not (args or kwargs)
                 items = []
                 keys = self.call_method(tx, "keys", [], {})
-                for key in keys.force_unpack_var_sequence(tx):
+                for key in keys.unpack_var_sequence(tx):
                     items.append(
                         TupleVariable(
                             [key, self.odict_getitem(tx, key)],
@@ -1023,12 +1022,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
                 else:
                     return trace_rules.lookup(func)(func)
-
-        if source and isinstance(self, variables.UnspecializedNNModuleVariable):
-            # Recalculate source for params/buffers
-            if name in ("_buffers", "_parameters"):
-                source = UnspecializedParamBufferSource(self.source, name)
-            source = self._wrap_source(source)
 
         if subobj is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(subobj):
             if source:
