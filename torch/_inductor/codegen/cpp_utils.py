@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import sympy
 
+import sys
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -80,7 +81,7 @@ LAYOUT_TO_ATEN = {
     torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
 }
 
-INDEX_TYPE = "long"
+INDEX_TYPE = "int64_t"
 
 GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
@@ -219,7 +220,7 @@ class CppCSEVariable(CSEVariable):
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
-        return f"{int(expr)}L"
+        return f"{int(expr)}LL" if sys.platform in ["darwin", "win32"] else f"{int(expr)}L"
 
     def _print_Where(self, expr):
         c = self.paren(self.doprint(expr.args[0]))
