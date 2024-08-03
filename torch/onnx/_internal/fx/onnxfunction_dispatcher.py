@@ -11,12 +11,12 @@ from typing import Any, Callable, Sequence, TYPE_CHECKING
 import torch
 import torch._ops
 import torch.fx
-
 from torch.onnx._internal.fx import (
     diagnostics,
     registration,
     type_utils as fx_type_utils,
 )
+
 
 if TYPE_CHECKING:
     import onnxscript  # type: ignore[import]

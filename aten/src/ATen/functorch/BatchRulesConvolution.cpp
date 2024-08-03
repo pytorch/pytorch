@@ -16,7 +16,7 @@ namespace at::functorch {
 // PyTorch's convolution is different from JAX's conv_general_dilated:
 // we do not support batch_group_count (which is needed for convolution backwards).
 // Instead, there's a convolution_backward op that needs a batching rule.
-static std::tuple<Tensor,optional<int64_t>>
+static std::tuple<Tensor, std::optional<int64_t>>
 convolution_batch_rule(const Tensor& lhs, std::optional<int64_t> lhs_bdim, const Tensor& rhs, std::optional<int64_t> rhs_bdim, const std::optional<Tensor>& bias, std::optional<int64_t> bias_bdim, c10::SymIntArrayRef stride, c10::SymIntArrayRef padding, c10::SymIntArrayRef dilation, bool transposed, c10::SymIntArrayRef output_padding, c10::SymInt groups) {
   DimVector lhs_spec(stride.size() + 2);
   std::iota(lhs_spec.begin(), lhs_spec.end(), 0);
@@ -33,7 +33,7 @@ convolution_batch_rule(const Tensor& lhs, std::optional<int64_t> lhs_bdim, const
   if ((rhs_bdim && bias && bias->defined()) || bias_bdim) {
     TORCH_INTERNAL_ASSERT(bias.has_value());
     TORCH_INTERNAL_ASSERT(bias->defined());
-    unbatched_bias = nullopt;
+    unbatched_bias = std::nullopt;
     separate_bias = true;
   } else {
     unbatched_bias = bias;
@@ -239,7 +239,7 @@ static Tensor make_dummy(
   return tensor_.new_empty({}).expand(expand_shape);
 }
 
-static std::tuple<Tensor,optional<int64_t>>
+static std::tuple<Tensor, std::optional<int64_t>>
 convolution_backward_input_batch_rule(
     const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
     const Tensor& input, std::optional<int64_t> input_bdim,
@@ -320,7 +320,7 @@ convolution_backward_input_batch_rule(
     return std::make_tuple(std::get<0>(result), nullopt);
   }
 }
-static std::tuple<Tensor,optional<int64_t>>
+static std::tuple<Tensor, std::optional<int64_t>>
 convolution_backward_weight_batch_rule(
     const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
     const Tensor& input, std::optional<int64_t> input_bdim,

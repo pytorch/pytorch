@@ -24,7 +24,7 @@ class TestModuleTracker(TestCase):
                 return {"a": torch.mm(x, x)}
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = Foo()
                 self.b = torch.nn.ModuleDict({"nest": Foo()})

@@ -17,6 +17,14 @@ def fx_graph_remote_cache_default() -> Optional[bool]:
     return None
 
 
+def autotune_remote_cache_default() -> Optional[bool]:
+    if os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1":
+        return True
+    if os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "0":
+        return False
+    return None
+
+
 # add some debug printouts
 debug = False
 
@@ -41,7 +49,10 @@ fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
 autotune_local_cache = True
 
 # enable autotune remote cache
-autotune_remote_cache = os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1"
+# False: Disables the cache
+# True: Enables the cache
+# None: Not set -- Off for OSS, JustKnobs based for internal
+autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 
 # Force disabled all inductor level caching -- This will override any other caching flag
 force_disable_caches = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
@@ -337,7 +348,7 @@ coordinate_descent_search_radius = int(
 # Specify a list of comma separated optimizations to collect data for
 autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
 # Specify a list of comma separated optimizations to use learned heuristics for
-autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "")
+autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm")
 
 
 def run_autoheuristic(name: str) -> bool:
@@ -635,6 +646,12 @@ decompose_mem_bound_mm: bool = False
 # code using this assumption, and clone tensors before use if they aren't aligned.
 # In the common case, most inputs will be aligned.
 assume_aligned_inputs: bool = False
+
+# For the user-written Triton kernels compiled with the model, ignore the unsupported
+# arguments passed to the @triton.autotune in the user's code; this is unsafe, as
+# ignoring the unsupported args may lead to unexpected autotuning behavior: don't
+# set unless you know what you're doing.
+unsafe_ignore_unsupported_triton_autotune_args: bool = False
 
 
 # config specific to codegen/cpp.py
