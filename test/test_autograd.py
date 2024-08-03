@@ -24,7 +24,7 @@ from copy import deepcopy
 from functools import partial, reduce
 from itertools import product
 from operator import mul
-from typing import List, Tuple
+from typing import List, Tuple, TYPE_CHECKING
 
 import torch
 import torch.autograd._functions
@@ -87,7 +87,10 @@ from torch.utils.checkpoint import (
 )
 from torch.utils.cpp_extension import load_inline
 from torch.utils.flop_counter import FlopCounterMode
-from torch.utils.hooks import RemovableHandle  # noqa: TCH001
+
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 
 def graph_desc(fn):
