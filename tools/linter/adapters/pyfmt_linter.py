@@ -203,7 +203,7 @@ def check_file(filename: str) -> list[LintMessage]:
     try:
         replacement = run_isort(replacement, path=path)
         replacement = run_usort(replacement, path=path)
-        if USE_BLACK_FILELIST.match(path.as_posix()):
+        if USE_BLACK_FILELIST.match(path.absolute().relative_to(REPO_ROOT).as_posix()):
             replacement = run_black(replacement, path=path)
         else:
             replacement = run_ruff_format(replacement, path=path)
