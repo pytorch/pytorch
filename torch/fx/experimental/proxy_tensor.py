@@ -947,6 +947,14 @@ def dispatch_trace(
         concrete_args: Optional[Tuple[Any, ...]] = None,
 ) -> GraphModule:
     graph = tracer.trace(root, concrete_args)
+
+    # TODO: I guess hypothetically you could have an impure node that returns
+    # a SymInt only, but between this and the catch all impure test this
+    # should be pretty obscure
+    def impure_pred(n: fx.Node) -> bool:
+        return 'val' not in n.meta or not isinstance(n.meta['val'], py_sym_types) or n.is_impure()
+
+    graph.eliminate_dead_code(impure_pred)
     from torch._inductor.fx_passes.dedupe_symint_uses import dedupe_symints
     dedupe_symints(graph)
     name = root.__class__.__name__ if isinstance(root, Module) else root.__name__
@@ -1436,6 +1444,7 @@ class _ModuleStackTracer(PythonKeyTracer):
             concrete_args: Optional[Dict[str, object]]
     ) -> fx.Graph:
         res = super().trace(root, concrete_args)
+
         # Since we are making _AttrProxy mimic the original
         # submodule, when someone registers a module directly
         # to the tracer while tracing, the proxy object gets registered

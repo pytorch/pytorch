@@ -138,10 +138,7 @@ class OperatorBase:
     # Special registrar for ProxyTensorMode that handles basic stuff that
     # every proxy tensor mode implementation needs to handle
     def py_proxy_impl(self, fn):
-        from torch.fx.experimental.proxy_tensor import (
-            ProxyTorchDispatchMode,
-            set_original_aten_op,
-        )
+        from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
         def wrapped_proxy_fn(mode, *args, **kwargs):
             # TODO: set_original_aten_op(self) could be useful but

@@ -2463,17 +2463,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             """\
 def forward(self, x_1):
     sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
-    eq = sym_size_int == 0
-    sub = sym_size_int - 1
-    sym_stride_int = torch.ops.aten.sym_stride.int(x_1, 0)
-    mul = sym_stride_int * sub;  sym_stride_int = sub = None
-    add = 1 + mul;  mul = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1);  x_1 = None
-    eq_1 = sym_size_int_1 == 0
-    sub_1 = sym_size_int_1 - 1
-    add_1 = add + sub_1;  add = sub_1 = None
-    add_2 = 0 + add_1;  add_1 = None
-    mul_1 = 4 * add_2;  add_2 = None
     return ((sym_size_int, sym_size_int_1), (sym_size_int, sym_size_int_1))""",
         )
 
