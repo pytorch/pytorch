@@ -410,7 +410,6 @@ class TestConverter(TestCase):
                 M()(torch.tensor(False), torch.tensor(4)),
             )
 
-    @unittest.skip("Wrong fx subgraph for cond, need to fix")
     def test_convert_if_multiple_out(self):
         class M(torch.nn.Module):
             def true_fn(self, y, z):
