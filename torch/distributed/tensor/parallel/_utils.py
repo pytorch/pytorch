@@ -2,20 +2,18 @@
 import warnings
 from typing import Tuple, Union
 
+import torch
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.device_mesh import _mesh_resources
 
 
-try:
-    from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
-except Exception:
-
-    def is_torchdynamo_compiling():  # type: ignore[misc]
-        return False
-
-
 LayoutsType = Union[Placement, Tuple[Placement, ...]]
+
+
+def is_torchdynamo_compiling() -> bool:
+    # Use local function to avoid circular imports
+    return torch.compiler.is_compiling()
 
 
 def _deprecate_warnings(func_name: str, extra_msg: str) -> None:

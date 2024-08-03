@@ -423,7 +423,7 @@ def adafactor(
 
     See :class:`~torch.optim.Adafactor` for details.
     """
-    if not torch._utils.is_compiling() and not all(
+    if not torch.compiler.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
         raise RuntimeError(
