@@ -1803,7 +1803,7 @@ class CudaKernelParamCache:
         return cls.cache.get(key, None)
 
     @classmethod
-    def get_keys(cls) -> KeysView[str, Dict[str, str]]:
+    def get_keys(cls) -> KeysView[str]:
         return cls.cache.keys()
 
 
