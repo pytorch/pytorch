@@ -1,6 +1,8 @@
-from typing import Optional, Callable, Generic, TypeVar
+from typing import Callable, Generic, Optional, TypeVar
+
 
 R = TypeVar("R")
+
 
 class Thunk(Generic[R]):
     """
@@ -8,10 +10,11 @@ class Thunk(Generic[R]):
     execution of a function.  It properly handles releasing the
     function once it is forced.
     """
+
     f: Optional[Callable[[], R]]
     r: Optional[R]
 
-    __slots__ = ['f', 'r']
+    __slots__ = ["f", "r"]
 
     def __init__(self, f: Callable[[], R]):
         self.f = f
@@ -23,5 +26,3 @@ class Thunk(Generic[R]):
         self.r = self.f()
         self.f = None
         return self.r
-
-
