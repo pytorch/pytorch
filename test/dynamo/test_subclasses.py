@@ -357,9 +357,11 @@ class CtxSubclassTensor(torch.Tensor):
         if kwargs is None:
             kwargs = {}
         biggest_constant = max(
-            x.constant
-            for x in pytree.tree_flatten(args)[0]
-            if isinstance(x, CtxSubclassTensor)
+            [
+                x.constant
+                for x in pytree.tree_flatten(args)[0]
+                if isinstance(x, CtxSubclassTensor)
+            ]
         )
         args_a = pytree.tree_map(
             lambda x: x.a if isinstance(x, CtxSubclassTensor) else x, args
@@ -620,7 +622,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 return HANDLED_FUNCTIONS[func](*args, **kwargs)
 
         def _stack(input, dim=0, *, out=None):
-            return MyClass(sum(x.foo for x in input))
+            return MyClass(sum([x.foo for x in input]))
 
         HANDLED_FUNCTIONS[torch.stack] = _stack
 
