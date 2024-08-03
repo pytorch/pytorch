@@ -3492,6 +3492,15 @@ class TestSparseCSR(TestCase):
 
         if (device == 'meta') or (device == 'cpu'):
             self.skipTest("Skipped!")
+        try:
+            spd = torch.rand(4, 3)
+            A = spd.T @ spd
+            b = torch.rand(3).cuda()
+            A = A.to_sparse_csr().cuda()
+            x = torch.sparse.spsolve(A, b)
+        except RuntimeError as e:
+            if "Calling torch.linalg.solve with sparse tensors requires" in str(e):
+                self.skipTest("PyTorch was not built with cuDSS support")
 
         samples = sample_inputs_linalg_solve(None, device, dtype)
 
