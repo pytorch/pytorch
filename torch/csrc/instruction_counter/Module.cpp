@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <sys/syscall.h>
 #include <torch/csrc/instruction_counter/Module.h>
 #include <torch/csrc/utils/pybind.h>
@@ -11,8 +10,7 @@
 
 #if defined(__linux__)
 #include <linux/perf_event.h>
-#elif defined(__APPLE__)
-#include <apple_arm_events.h>
+#include <sys/ioctl.h>
 #endif
 
 namespace torch::instruction_counter {
@@ -30,7 +28,7 @@ int start() {
 #if !defined(__linux__)
   printf("This systems seems not to be Linux");
   return -1;
-#endif
+#else
 
   // Construct base perf_event_attr struct
   struct perf_event_attr attr;
@@ -55,12 +53,13 @@ int start() {
   ioctl(fd, PERF_EVENT_IOC_RESET, 0); // Reset the counter
   ioctl(fd, PERF_EVENT_IOC_ENABLE, 0); // Enable the counter
   return fd;
+#endif
 }
 
 uint64_t end(int fd) {
 #if !defined(__linux__)
   "This systems seems not to be neither Linux" return -1;
-#endif
+#else
   // Disable the event group
   if (ioctl(fd, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP) == -1) {
     fprintf(
@@ -82,6 +81,7 @@ uint64_t end(int fd) {
 
   close(fd);
   return total_instructions;
+#endif
 }
 
 void initModule(PyObject* module) {
