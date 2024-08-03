@@ -8,12 +8,9 @@
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/TensorFactory.h>
-#include <optional>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
-#include <exception>
 #include <unordered_map>
-#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
