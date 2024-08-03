@@ -112,6 +112,7 @@ def check_file(filename: str) -> list[LintMessage]:
     original = replacement = path.read_text(encoding="utf-8")
 
     try:
+        # NB: run isort first to enforce style for blank lines
         replacement = run_isort(replacement, path=path)
         replacement = run_usort(replacement, path=path)
         replacement = run_black(replacement, path=path)
