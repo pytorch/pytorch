@@ -107,7 +107,7 @@ Attribute.__doc__ = """
         from typing import Dict
 
         class AttributeModule(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.jit.Attribute(0.1, float)
 
@@ -138,7 +138,7 @@ Attribute.__doc__ = """
         class AttributeModule(torch.nn.Module):
             names: Dict[str, int]
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.names = {}
 
@@ -522,7 +522,7 @@ if _enabled:
             "original_name",
         ]
 
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
 
         forward: Callable[..., Any] = _CachedForward()  # type: ignore[assignment]
@@ -1351,7 +1351,7 @@ def script(
             import torch.nn.functional as F
 
             class MyModule(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     # torch.jit.trace produces a ScriptModule's conv1 and conv2
                     self.conv1 = torch.jit.trace(nn.Conv2d(1, 20, 5), torch.rand(1, 1, 16, 16))
@@ -1374,7 +1374,7 @@ def script(
             import torch.nn as nn
 
             class MyModule(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
 
                 @torch.jit.export
@@ -1547,7 +1547,7 @@ def interface(obj):
                 return x.relu()
 
         class Impl2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.val = torch.rand(())
 
@@ -1671,7 +1671,7 @@ class _ScriptProfileTable:
 
 
 class _ScriptProfile:
-    def __init__(self):
+    def __init__(self) -> None:
         self.profile = classes.profiling._ScriptProfile()
 
     def enable(self):

@@ -81,7 +81,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
 
     def test_static_linear(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -103,7 +103,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
 
     def test_dynamic_linear(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -128,7 +128,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
 
     def test_conv2d(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv2d = torch.nn.Conv2d(3, 3, 3)
 
@@ -150,7 +150,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
 
     def test_add(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):
@@ -176,7 +176,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
 
     def test_add_relu(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):
@@ -224,7 +224,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
         """Test representation for quantize_per_channel and dequantize_per_channel op"""
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -275,7 +275,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
         """Test representation for quantize and dequantize op"""
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):

@@ -1,7 +1,5 @@
 # mypy: ignore-errors
 
-import argparse
-import sys
 import warnings
 
 import numpy as np
@@ -9,8 +7,8 @@ import pandas as pd  # type: ignore[import-untyped]
 from scipy.stats import gmean  # type: ignore[import-untyped]
 from sklearn.model_selection import train_test_split  # type: ignore[import-untyped]
 from sklearn.tree import DecisionTreeRegressor  # type: ignore[import-untyped]
+from train import AHTrain
 
-from torch._inductor.autoheuristic.autoheuristic import deserialize_data
 from torch._inductor.autoheuristic.autoheuristic_utils import CHOICE_COL, FEEDBACK_COL
 
 
@@ -25,7 +23,7 @@ warnings.filterwarnings(
 )
 
 
-class AHTrain:
+class AHTrainRegressionTree(AHTrain):
     """
     This class is responsible for generating a heuristic by using data collected with AutoHeuristic. It will learn a
     regression tree that predicts a score that represents how well a specific choice will perform given an input.
@@ -34,46 +32,12 @@ class AHTrain:
     """
 
     def __init__(self):
-        self.parser = argparse.ArgumentParser()
-        self.add_base_arguments()
-        self.args = None
-
-    def add_base_arguments(self):
-        self.parser.add_argument(
-            "dataset",
-            type=str,
-            help="Path to text file containing data collected with AutoHeuristic.",
-        )
-        self.parser.add_argument(
-            "--nrows",
-            type=int,
-            default=None,
-            help="Only read first n rows of the dataset.",
-        )
-        self.parser.add_argument(
-            "--heuristic-name",
-            type=str,
-            default="learned_heuristic",
-            help="Name of the heuristic to be generated.",
-        )
-        self.parser.add_argument(
-            "--data",
-            nargs=2,
-            action="append",
-            metavar=("TYPE", "PATH"),
-            help="Specify name of datasets and file paths to be evaluated.",
-        )
-
-    def parse_args(self):
-        return self.parser.parse_args()
-
-    def generate_heuristic(self):
-        self.args = self.parse_args()
-        self.main(
-            self.args.dataset, self.args.data, self.args.nrows, self.args.heuristic_name
-        )
+        super().__init__()
 
     def main(self, log_path, other_datasets, nrows, heuristic_name):
+        """
+        Main function that trains a decision tree and generates a heuristic.
+        """
         (df, choices, cat_feature2cats, dummy_col_2_col_val, metadata) = self.get_df(
             log_path, nrows=nrows, apply_filters=True
         )
@@ -108,21 +72,13 @@ class AHTrain:
             threshold,
         )
 
-    def filter_df(self, df):
-        return df
-
     def get_df(self, log_path, cat_feature2cats=None, nrows=None, apply_filters=False):
-        (df, metadata) = deserialize_data(log_path)
-        numerical_features = metadata["numerical_features"]
-        categorical_features = metadata["categorical_features"]
-        choices = df[CHOICE_COL].unique().tolist()
-        features = numerical_features + categorical_features
-        if nrows is not None:
-            df = df.head(nrows)
-
-        df = self.filter_df(df)
-
-        feature_columns = features
+        """
+        Parses the log file and processes the data into a dataframe that can be used for training.
+        """
+        (df, metadata, feature_columns, categorical_features, choices) = self.parse_log(
+            log_path, nrows
+        )
 
         def process_data(
             df,
@@ -193,34 +149,28 @@ class AHTrain:
         categorical_features += added_categorical_features
         categorical_features += [CHOICE_COL]
 
-        # Doing this here because if we create another df for testing purposes
-        # and that other df does not contain all categories for a categorical feature,
-        # pd.dummies will not create columns for the missing categories
-        if not cat_feature2cats:
-            cat_feature2cats = {}
-        for cat_feature in categorical_features:
-            if cat_feature in cat_feature2cats:
-                categories = cat_feature2cats[cat_feature]
-            else:
-                categories = results[cat_feature].unique()
-                cat_feature2cats[cat_feature] = categories
-            results[cat_feature] = pd.Categorical(
-                results[cat_feature], categories=categories
-            )
-
-        dummy_col_2_col_val = {}
-        for col in categorical_features:
-            unique_vals = results[col].unique()
-            for val in unique_vals:
-                dummy_col_2_col_val[f"{col}_{val}"] = (col, val)
-
-        # one-hot encode categorical features
-        results = pd.get_dummies(results, columns=categorical_features)
+        (
+            results,
+            cat_feature2cats,
+            dummy_col_2_col_val,
+        ) = self.handle_categorical_features(
+            cat_feature2cats, categorical_features, results
+        )
         return (results, choices, cat_feature2cats, dummy_col_2_col_val, metadata)
 
     def custom_train_test_split(
         self, df, test_size=0.2, val_size=0.25, random_state=42
     ):
+        """
+        Splits the dataframe into train, val, and test sets.
+        Also adds other datasets, specified by the user, to the train set.
+        We need to be careful, because we want to make sure that rows with the same input but different choice are
+        kept in the same set, e.g.
+        Rows that looks like this
+        input_1,choice1,...
+        input_1,choice2,...
+        should be in the same set.
+        """
         # We want to make sure that rows with the same input but different choice are kept in the same set
         exclude_columns = ["speedup", "winner", "target"]
         feature_columns = [
@@ -269,6 +219,10 @@ class AHTrain:
         min_samples_leafs,
         threshold=0.99,
     ):
+        """
+        Does a grid search over max_depths, min_samples_leafs, and returns the best model.
+        """
+
         results = []
         df_train = datasets["train"]
         df_val = datasets["val"]
@@ -326,6 +280,10 @@ class AHTrain:
         return (pd.DataFrame(results), best_model, best_model_threshold)
 
     def evaluate_model(self, model, df, feature_columns, choice_columns, threshold):
+        """
+        Custom evaluation function that evaluates a learned decision tree.
+        """
+
         def predict_winner(group):
             predictions = model.predict(group[feature_columns + choice_columns])
 
@@ -397,112 +355,50 @@ class AHTrain:
             "wrong_max_ratio": wrong_max_ratio,
         }
 
-    def add_new_features(self, results):
-        return (results, [])
+    def handle_leaf(self, tree_, node, indent, unsafe_leaves):
+        """
+        Generates the code for a leaf node. This is just the value predicted by the regression tree.
+        """
+        value = tree_.value[node][0][0]
+        return f"{indent}return {str(value)}"
+
+    def gen_predict_fn_def(self):
+        return "def predict(self, context: AHContext) -> float:"
 
     def codegen_boilerplate(
-        self, heuristic_name, opt_name, threshold, shared_memory, device_capa
+        self, heuristic_name, opt_name, threshold, shared_memory, device_capa, dt
     ):
-        boiler_plate = f"""# flake8: noqa: B950
+        """
+        Generates the boilerplate code for the generated heuristic. This includes things like imports, class definition,
+        etc.
+        """
 
+        boiler_plate = f"""# flake8: noqa: B950
+# fmt: off
+# This file was generated by AutoHeuristic. Do not modify it manually!
+# To regenerate this file, take a look at the steps in the README.md file inside torchgen/_autoheuristic/{opt_name}/
 from torch._inductor.autoheuristic.autoheuristic_utils import AHContext, AHMetadata, Choice, CHOICE_COL
 from torch._inductor.autoheuristic.learnedheuristic_interface import (
-    LearnedHeuristic,
+    LearnedHeuristicRegression,
 )
 
-class {heuristic_name}(LearnedHeuristic):
+class {heuristic_name}(LearnedHeuristicRegression):
 
     def __init__(self) -> None:
         pass
 
-    def check_precondition(self, metadata: AHMetadata, context: AHContext,) -> bool:
-        return (
-            metadata.name == self.get_name()
-            and metadata.shared_memory == {shared_memory}
-            and str(metadata.device_capa) == "{device_capa}"
-        )
+{self.gen_precondition(opt_name, shared_memory, device_capa)}
 
     def get_feedback(self, context: AHContext, choice: Choice) -> float:
         context.context_dict[CHOICE_COL] = choice
         return self.predict(context)
 
-    def get_speedup_threshold(self) -> float:
+    def get_confidence_threshold(self) -> float:
         return {threshold}
 
     def get_name(self) -> str:
         return '{opt_name}'"""
         return boiler_plate
-
-    def dt_to_python(
-        self,
-        dt,
-        metadata,
-        feature_names,
-        dummy_col_2_col_val,
-        heuristic_name,
-        threshold,
-    ):
-        tree_ = dt.tree_
-        feature_name = [
-            feature_names[i] if i != -1 else "undefined!" for i in tree_.feature
-        ]
-
-        lines = []
-        device_capa = metadata["device_capa"]
-        device_capa_str = f"({device_capa[0]}, {device_capa[1]})"
-        opt_name = metadata["name"]
-        lines.append(
-            self.codegen_boilerplate(
-                heuristic_name,
-                opt_name,
-                threshold,
-                metadata["shared_memory"],
-                device_capa_str,
-            )
-        )
-        fn_def = "\n    def predict(self, context: AHContext) -> float:"
-        lines.append(fn_def)
-
-        def dt_to_python(node, depth):
-            indent = "    " * (depth + 1)
-            false_predicate = ""
-            if tree_.feature[node] != -2:
-                name = feature_name[node]
-                threshold = tree_.threshold[node]
-                if name in dummy_col_2_col_val:
-                    (orig_name, value) = dummy_col_2_col_val[name]
-                    predicate = f"{indent}if str(context.get_value('{orig_name}')) != '{value}':"
-                    if threshold != 0.5:
-                        print(f"expected threshold to be 0.5 but is {threshold}")
-                        sys.exit(1)
-                else:
-                    predicate = (
-                        f"{indent}if context.get_value('{name}') <= {threshold}:"
-                    )
-                lines.append(predicate)
-                dt_to_python(tree_.children_left[node], depth + 1)
-                lines.append(f"{indent}else:")
-                dt_to_python(tree_.children_right[node], depth + 1)
-            else:
-                value = tree_.value[node][0][0]
-                lines.append(f"{indent}return {str(value)}")
-
-        dt_to_python(0, 1)
-
-        output_file = (
-            f"../../torch/_inductor/autoheuristic/artifacts/_{heuristic_name}.py"
-        )
-        path = f"{output_file}"
-        with open(path, "w") as f:
-            f.write("\n".join(lines) + "\n")
-
-    def add_real_datasets(self, datasets, other_datasets, cat_feature2cats):
-        if other_datasets:
-            for name, path in other_datasets:
-                (df_other, choices, _, _, _) = self.get_df(
-                    path, cat_feature2cats=cat_feature2cats, apply_filters=False
-                )
-                datasets[name] = df_other
 
 
 if __name__ == "__main__":
