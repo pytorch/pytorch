@@ -151,6 +151,7 @@ def set_proxy_slot(
         tracer: _ProxyTracer,
         proxy: object
 ) -> None:
+    log.debug("set_proxy_slot %s (%s) %s", obj, id(obj), proxy)
     if isinstance(obj, Tensor):
         # We DO want to clobber proxies whenever we run an inplace operation
         # on a tensor, and it affects the metadata on the proxy.
@@ -168,6 +169,7 @@ def set_proxy_slot(
         assert isinstance(obj, py_sym_types), type(obj)
         if obj not in tracer.symnode_tracker:
             tracer.symnode_tracker[obj] = typing.cast(_PySymProxyType, proxy)
+            tracer.sympy_expr_tracker[obj.node.expr] = proxy
 
 def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
     assert isinstance(obj, (Tensor, SymNode)), type(obj)
@@ -288,10 +290,15 @@ def get_proxy_slot(
         tracker = tracer.symnode_tracker
 
     if obj not in tracker:
-        if isinstance(default, _NoDefault):
-            raise RuntimeError(f"{obj} is not tracked with proxy for {tracer}")
-        return default
-    value = tracker[obj]
+        # Last ditch
+        if isinstance(obj, py_sym_types) and obj.node.expr in tracer.sympy_expr_tracker:
+            value = tracer.sympy_expr_tracker[obj.node.expr]
+        else:
+            if isinstance(default, _NoDefault):
+                raise RuntimeError(f"{obj} ({id(obj)})is not tracked with proxy for {tracer}")
+            return default
+    else:
+        value = tracker[obj]
     res = transform(value)
     return res
 
@@ -840,6 +847,7 @@ class PythonKeyTracer(Tracer):
         super().__init__(autowrap_modules=())
         self.tensor_tracker = WeakTensorKeyDictionary()
         self.symnode_tracker = _SymNodeDict()
+        self.sympy_expr_tracker = dict()
         self.script_object_tracker = WeakIdKeyDictionary(dict=None, ref_type=_WeakHashRef)
 
         # Stores the torch function that was called during tracing
