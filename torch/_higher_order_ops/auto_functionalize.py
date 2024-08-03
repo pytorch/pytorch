@@ -69,6 +69,7 @@ class AutoFunctionalized(HigherOrderOperator):
 
 
 auto_functionalized = AutoFunctionalized()
+auto_functionalized.__module__ = "torch.ops.higher_order"
 
 
 def can_auto_functionalize(op: OperatorBase) -> bool:

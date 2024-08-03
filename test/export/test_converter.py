@@ -2,7 +2,7 @@
 
 import unittest
 from collections import OrderedDict
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -20,10 +20,10 @@ class TestConverter(TestCase):
         self,
         M,
         inp,
-        option: Union[List[str]] = None,
+        option: Optional[List[str]] = None,
         check_persistent=False,
         lifted_tensor_constants=None,
-    ) -> ExportedProgram:
+    ) -> List[ExportedProgram]:
         # By default, it tests both jit.trace and jit.script.
         if option is None:
             option = ["trace", "script"]
@@ -57,7 +57,11 @@ class TestConverter(TestCase):
             else:
                 raise RuntimeError(f"Unrecognized mode for torch.jit: {opt}")
 
-            ep = TS2EPConverter(ts_model, inp).convert()
+            converter = TS2EPConverter(ts_model, inp)
+            print(opt, converter.ts_graph)
+
+            ep = converter.convert()
+            print(ep)
             ep_list.append(ep)
 
             for _ in range(num_iterations):
@@ -203,6 +207,30 @@ class TestConverter(TestCase):
         # self._check_equal_ts_ep_converter(Module(), inp)
         # inp = ({"a": 1, "b": 2},)
         # self._check_equal_ts_ep_converter(Module(), inp)
+
+    def test_aten_add_t(self):
+        # python list append
+        class Module(torch.nn.Module):
+            def forward(self, x: List[torch.Tensor]):
+                out = []
+                out = out + x
+                a = torch.cat(out)
+                out = out + x
+                b = torch.cat(out)
+                return a, b
+
+        inp = ([torch.ones(2, 3), torch.ones(2, 3)],)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+    def test_aten_to_dtype_with_mutating_storage(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                x = x.to(y.dtype)
+                torch.ops.aten.index_put_(x, [torch.tensor([0])], y)
+                return x
+
+        inp = (torch.ones(2, 3), torch.tensor([0, 0, 0]))
+        self._check_equal_ts_ep_converter(Module(), inp)
 
     def test_prim_min(self):
         class Module(torch.nn.Module):
@@ -1225,6 +1253,21 @@ class TestConverter(TestCase):
 
         inp = (torch.randn([4, 4]), torch.randn([1, 1, 10, 10]))
         self._check_equal_ts_ep_converter(M(), inp)
+
+    def test_aten_append_t(self):
+        class M(torch.nn.Module):
+            def forward(self, x: List[torch.Tensor]):
+                out = []
+                out.append(x[0] + x[1])
+                out.append(x[0] - x[1])
+                out1 = torch.cat(out)
+                out.append(x[0] * x[1])
+                out2 = torch.cat(out)
+                return out, out1, out2
+
+        inp = ([torch.ones(2, 3), torch.ones(2, 3)],)
+        # Trace already unrolls the list.
+        self._check_equal_ts_ep_converter(M(), inp, ["script"])
 
 
 if __name__ == "__main__":
