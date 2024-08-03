@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Sequence
 
 import torch
+
 from torch.onnx._internal.fx import _pass, diagnostics
 
 

@@ -13,7 +13,6 @@ from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch._logging import trace_structured
 from torch.fx.node import Node
 
-
 # Regular log messages should go through 'log'.
 # ddp_graph_log is a separate artifact logger reserved for dumping graphs.
 # See docs/source/logging.rst for more info.
@@ -131,7 +130,7 @@ def has_higher_order_op(gm):
 
 # compile each of the partitioned submodules using the user-provided compiler
 class SubmodCompiler(torch.fx.interpreter.Interpreter):
-    def __init__(self, module, compiler, fake_mode) -> None:
+    def __init__(self, module, compiler, fake_mode):
         super().__init__(module)
         self.compiler = compiler
         self.fake_mode = fake_mode
@@ -145,7 +144,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
         assert len(kwargs) == 0, "We assume only args for these modules"
 
         class WrapperModule(torch.nn.Module):
-            def __init__(self, submod, unwrap_singleton_tuple) -> None:
+            def __init__(self, submod, unwrap_singleton_tuple):
                 super().__init__()
                 self.submod = submod
                 self.unwrap_singleton_tuple = unwrap_singleton_tuple
@@ -247,12 +246,12 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # This gives us the appropriately strided outputs here which will reflect runtime strides.
 
             class FakeifyFirstAOTInvocationGuard:
-                def __init__(self) -> None:
+                def __init__(self):
                     self.tc = torch._guards.TracingContext.try_get()
                     assert self.tc
                     torch._guards.TracingContext.try_get().fakify_first_call = True
 
-                def __del__(self) -> None:
+                def __del__(self):
                     self.tc.fakify_first_call = False
 
             # For aot_eager and other backends, tracing context is not set
@@ -362,7 +361,7 @@ class DDPOptimizer:
         bucket_bytes_cap: int,
         backend_compile_fn,
         first_bucket_cap: Optional[int] = None,
-    ) -> None:
+    ):
         if first_bucket_cap is not None:
             self.first_bucket_cap = first_bucket_cap
         elif torch.distributed.is_available():

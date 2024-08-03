@@ -4,7 +4,6 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
-
 from .optimizer import (
     _disable_dynamo_if_unsupported,
     _get_scalar_dtype,
@@ -12,7 +11,6 @@ from .optimizer import (
     Optimizer,
     ParamsT,
 )
-
 
 __all__ = ["Adafactor", "adafactor"]
 

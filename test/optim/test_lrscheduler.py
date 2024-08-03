@@ -39,7 +39,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -47,7 +46,7 @@ load_tests = load_tests
 
 class TestLRScheduler(TestCase):
     class SchedulerTestNet(torch.nn.Module):
-        def __init__(self) -> None:
+        def __init__(self):
             super().__init__()
             self.conv1 = torch.nn.Conv2d(1, 1, 1)
             self.conv2 = torch.nn.Conv2d(1, 1, 1)
@@ -1572,7 +1571,7 @@ class TestLRScheduler(TestCase):
 
         # Case 3: Custom `scale_fn`, a callable class
         class ScaleFn:
-            def __init__(self) -> None:
+            def __init__(self):
                 self.x = 0.5
 
             def __call__(self, _):

@@ -19,6 +19,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Union,
 )
@@ -27,7 +28,6 @@ import sympy
 
 import torch
 import torch._logging
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
@@ -91,7 +91,7 @@ class IterationRanges:
         divisor=sympy.Integer(1),
         length=sympy.Integer(1),
         root: IterationRangesRoot,
-    ) -> None:
+    ):
         super().__init__()
         self.name = name
         self.var_list = var_list
@@ -122,7 +122,7 @@ class IterationRangesRoot(IterationRanges):
         tensor_dim: Optional[int],
         grid_dim: Optional[int],
         has_zdim: bool,
-    ) -> None:
+    ):
         if pid_cache is None:
             pid_cache = {}
         super().__init__(
@@ -151,7 +151,7 @@ class IterationRangesRoot(IterationRanges):
         self.grid_dim = grid_dim
         self.has_zdim = has_zdim
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return f"IterationRangesRoot({self.name!r}, {self.numel}, ...)"
 
     def cache_clear(self):
@@ -235,7 +235,7 @@ class IterationRangesEntry(IterationRanges):
         length: sympy.Expr,
         expr: sympy.Expr,
         parent: IterationRanges,
-    ) -> None:
+    ):
         super().__init__(
             name=name,
             numel=parent.numel / length,
@@ -251,7 +251,7 @@ class IterationRangesEntry(IterationRanges):
         self.codegen = functools.lru_cache(None)(self._codegen)
         self.expr = expr
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return f"IterationRangesEntry({self.name}, {self.divisor}, {self.length}, {self.expr}, {self.var_ranges})"
 
     def set_name(self, name):
@@ -311,27 +311,25 @@ class SIMDKernel(Kernel):
         self,
         *groups,
         index_dtype: str,
-        mutations: Optional[OrderedSet[str]] = None,
+        mutations: Optional[Set[str]] = None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
         override_persistent_reduction=None,
-    ) -> None:
+    ):
         if pid_cache is None:
             pid_cache = {}
         super().__init__()
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
-        self.mutations: OrderedSet[str] = (
-            mutations if mutations is not None else OrderedSet()
-        )
+        self.mutations: Set[str] = mutations if mutations is not None else set()
         self.range_trees: List[IterationRangesRoot] = []
         self.range_tree_nodes: Dict[sympy.Symbol, IterationRangesEntry] = {}
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
         self.reduction_hint = reduction_hint
         self.index_dtype: str = index_dtype
-        self.last_usage: OrderedSet[str] = OrderedSet()
+        self.last_usage: Set[str] = set()
         self.buf_accesses: DefaultDict[str, List[Dep]] = collections.defaultdict(list)
         self.persistent_reduction: bool = (
             override_persistent_reduction
@@ -485,7 +483,7 @@ class SIMDKernel(Kernel):
     def set_last_usage(self, nodes):
         if not self.inside_reduction or self.persistent_reduction:
             return
-        self.last_usage = OrderedSet(
+        self.last_usage = set(
             itertools.chain.from_iterable(
                 n.last_usage for n in nodes if n is not EnableReduction
             )
@@ -834,7 +832,7 @@ class SIMDKernel(Kernel):
                 # This arg points to a buf that has been sliced.
                 # We need to count each individual slice to have
                 # a better estimation.
-                indices: OrderedSet[Any] = OrderedSet()
+                indices: Set[Any] = set()
                 no_index_dep_count = 0
                 for dep in self.buf_accesses[arg]:
                     if isinstance(dep, (StarDep, WeakDep)):
@@ -942,7 +940,7 @@ class SIMDScheduling(BaseScheduling):
     int32_type = "torch.int32"
     int64_type = "torch.int64"
 
-    def __init__(self, scheduler) -> None:
+    def __init__(self, scheduler):
         super().__init__()
         self.scheduler = scheduler
 
@@ -1065,13 +1063,13 @@ class SIMDScheduling(BaseScheduling):
 
     def generate_node_schedule(self, nodes, numel, rnumel):
         node_schedule: List[Any] = []
-        current_loop_writes: OrderedSet[str] = OrderedSet()
+        current_loop_writes: Set[str] = set()
 
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
-        current_loop_reduced_writes: OrderedSet[str] = OrderedSet()
+        current_loop_reduced_writes = set()
         current_loop_has_writes = False
-        done: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
+        done = set()
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
@@ -1223,7 +1221,7 @@ class SIMDScheduling(BaseScheduling):
     @classmethod
     def select_index_dtype(cls, node_schedule, numel, reduction_numel):
         # Gather all used buffer names
-        buffer_names: OrderedSet[str] = OrderedSet()
+        buffer_names = set()
         for node in node_schedule:
             if not isinstance(node, scheduler.BaseSchedulerNode):
                 continue
@@ -1298,7 +1296,7 @@ class SIMDScheduling(BaseScheduling):
         else:
             reduction_hint_val = ReductionHint.DEFAULT
 
-        mutations: OrderedSet[str] = OrderedSet()
+        mutations = set()
         for node in node_schedule:
             if node in (DisableReduction, EnableReduction):
                 continue
@@ -1655,7 +1653,7 @@ class SIMDScheduling(BaseScheduling):
                         break
             return (numel, reduction_numel)
 
-        seen_names: OrderedSet[str] = OrderedSet()
+        seen_names = set()
         candidate_tiles: Counter[Any] = collections.Counter()
         for node in EnableReduction.filter(node_schedule):
             for tiling in cls.candidate_tilings(node):
@@ -1715,14 +1713,14 @@ class SIMDScheduling(BaseScheduling):
             n: Any
             last_usage: Any
 
-            def __del__(self) -> None:
+            def __del__(self):
                 self.n.last_usage = self.last_usage
 
         last_usage_holders = [LastUsageHolder(n, n.last_usage) for n in nodes]
 
         # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
         for n in nodes:
-            n.last_usage = OrderedSet()
+            n.last_usage = set()
 
         if not nodes[0].is_template():
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group

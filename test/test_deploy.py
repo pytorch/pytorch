@@ -15,7 +15,7 @@ class TestFreezer(TestCase):
         code_str = textwrap.dedent(
             """
             class MyCls:
-                def __init__(self) -> None:
+                def __init__(self):
                     pass
             """
         )

@@ -22,10 +22,11 @@ DistributedRandomSampler::DistributedRandomSampler(
       end_index_(0),
       sample_index_(0) {
   // shuffle first time.
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset(size_);
 }
 
-std::optional<std::vector<size_t>> DistributedRandomSampler::next(
+optional<std::vector<size_t>> DistributedRandomSampler::next(
     size_t batch_size) {
   if (sample_index_ == end_index_) {
     return nullopt;
@@ -42,7 +43,7 @@ std::optional<std::vector<size_t>> DistributedRandomSampler::next(
   return res;
 }
 
-void DistributedRandomSampler::reset(std::optional<size_t> new_size) {
+void DistributedRandomSampler::reset(optional<size_t> new_size) {
   size_ = new_size.value_or(size_);
   populate_indices();
 
@@ -106,7 +107,7 @@ DistributedSequentialSampler::DistributedSequentialSampler(
   populate_indices();
 }
 
-std::optional<std::vector<size_t>> DistributedSequentialSampler::next(
+optional<std::vector<size_t>> DistributedSequentialSampler::next(
     size_t batch_size) {
   if (sample_index_ == end_index_) {
     return nullopt;
@@ -128,7 +129,7 @@ std::optional<std::vector<size_t>> DistributedSequentialSampler::next(
   return res;
 }
 
-void DistributedSequentialSampler::reset(std::optional<size_t> new_size) {
+void DistributedSequentialSampler::reset(optional<size_t> new_size) {
   size_t size = new_size.value_or(size_);
   if (size != size_) {
     size_ = size;

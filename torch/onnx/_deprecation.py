@@ -6,7 +6,6 @@ import warnings
 from typing import Callable, TypeVar
 from typing_extensions import ParamSpec
 
-
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 

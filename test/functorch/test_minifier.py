@@ -86,7 +86,7 @@ class TestMinifier(TestCase):
 
     def test_module(self):
         class MockModule(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.relu = torch.nn.ReLU()
 

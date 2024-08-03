@@ -11,7 +11,6 @@ from torch.package._mangling import (
 )
 from torch.testing._internal.common_utils import run_tests
 
-
 try:
     from .common import PackageTestCase
 except ImportError:

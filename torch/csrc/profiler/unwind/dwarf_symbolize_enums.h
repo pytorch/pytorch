@@ -88,7 +88,9 @@ enum {
   DW_RLE_start_length = 0x7
 };
 
-static std::optional<size_t> formSize(uint64_t form, uint8_t sec_offset_size) {
+static torch::unwind::optional<size_t> formSize(
+    uint64_t form,
+    uint8_t sec_offset_size) {
   switch (form) {
     case DW_FORM_addr:
       return sizeof(void*);

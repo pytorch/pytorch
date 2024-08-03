@@ -6,7 +6,9 @@ These functions should NOT be directly invoked outside of `passes` package.
 from __future__ import annotations
 
 import collections
+
 import re
+
 from typing import Callable
 
 import torch.fx

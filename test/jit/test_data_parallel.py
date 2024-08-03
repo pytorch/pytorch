@@ -8,12 +8,10 @@ import torch
 import torch.nn as nn
 import torch.nn.parallel as dp
 
-
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA_MULTI_GPU
-
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -25,7 +23,7 @@ if __name__ == "__main__":
 
 class TestDataParallel(JitTestCase):
     class Mpy(torch.nn.Module):
-        def __init__(self) -> None:
+        def __init__(self):
             super(TestDataParallel.Mpy, self).__init__()
             self.m = nn.Sequential(
                 nn.Linear(2, 2), nn.BatchNorm1d(2), nn.ReLU(), nn.Linear(2, 2)
@@ -58,7 +56,7 @@ class TestDataParallel(JitTestCase):
     class Msm(torch.jit.ScriptModule):
         __constants__ = ["m"]
 
-        def __init__(self) -> None:
+        def __init__(self):
             super(TestDataParallel.Msm, self).__init__()
             self.m = nn.Sequential(
                 nn.Linear(2, 2), nn.BatchNorm1d(2), nn.ReLU(), nn.Linear(2, 2)

@@ -10,7 +10,6 @@ from typing import Optional
 import torch
 from torch.testing._internal.common_utils import skipIfTorchDynamo
 
-
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
@@ -23,7 +22,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
 )
 from torch.testing._internal.jit_utils import JitTestCase
-
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -272,7 +270,7 @@ class TestTorchbind(JitTestCase):
 
     def test_torchbind_class_attribute(self):
         class FooBar1234(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.f = torch.classes._TorchScriptTesting._StackString(["3", "4"])
 
@@ -288,7 +286,7 @@ class TestTorchbind(JitTestCase):
 
     def test_torchbind_getstate(self):
         class FooBar4321(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
@@ -309,7 +307,7 @@ class TestTorchbind(JitTestCase):
 
     def test_torchbind_deepcopy(self):
         class FooBar4321(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
@@ -325,7 +323,7 @@ class TestTorchbind(JitTestCase):
 
     def test_torchbind_python_deepcopy(self):
         class FooBar4321(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
@@ -340,7 +338,7 @@ class TestTorchbind(JitTestCase):
 
     def test_torchbind_tracing(self):
         class TryTracing(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
@@ -356,12 +354,12 @@ class TestTorchbind(JitTestCase):
 
     def test_torchbind_tracing_nested(self):
         class TryTracingNest(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
         class TryTracing123(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.nest = TryTracingNest()
 
@@ -391,7 +389,7 @@ class TestTorchbind(JitTestCase):
         class TorchBindOptionalExplicitAttr(torch.nn.Module):
             foo: Optional[torch.classes._TorchScriptTesting._StackString]
 
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.foo = torch.classes._TorchScriptTesting._StackString(["test"])
 

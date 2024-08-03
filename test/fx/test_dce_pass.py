@@ -89,7 +89,7 @@ class TestDCE(TestCase):
         """
 
         class TestModule(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.attr_1 = torch.nn.Parameter(torch.tensor([-0.9]))
 
@@ -105,7 +105,7 @@ class TestDCE(TestCase):
         """
 
         class TestModule(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.attr_1 = torch.nn.Parameter(torch.tensor([-0.9]))
 
@@ -122,7 +122,7 @@ class TestDCE(TestCase):
         """
 
         class TestModule(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.attr_1 = torch.nn.Parameter(torch.tensor([-0.9]))
 
@@ -169,7 +169,7 @@ class TestDCE(TestCase):
             _is_impure = True
 
         class TestModule(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.relu = ReLUImpure()
 

@@ -38,7 +38,7 @@ class Scope:
                 return x.transpose(1, 2)
 
         class M(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 self.sub = Sub()
 
             def forward(self, x):

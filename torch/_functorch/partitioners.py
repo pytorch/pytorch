@@ -26,11 +26,9 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.passes import graph_drawer
 from torch.utils.checkpoint import CheckpointPolicy
-
 from . import config
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from .compile_utils import fx_graph_cse, get_aten_target
-
 
 if TYPE_CHECKING:
     import sympy
@@ -478,12 +476,10 @@ def _size_of(node: fx.Node) -> int:
         elif isinstance(val, torch.Tensor):
             return _tensor_nbytes(hint_int(val.numel(), fallback=4096), val.dtype)
 
-        raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
+        raise RuntimeError(f"Unknown metadata type {type(val)}")
     if node.op == "get_attr":
         return 0
-    raise RuntimeError(
-        f"Node {node} didn't have `val` metadata; we should always have `val` metadata on the nodes."
-    )
+    raise RuntimeError("We should always have `val` metadata on the nodes")
 
 
 # Used for some investigative purposes

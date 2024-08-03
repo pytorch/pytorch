@@ -8,8 +8,8 @@ from typing import Any, cast, NoReturn, Optional, Tuple, TYPE_CHECKING
 import torch._guards
 
 from . import config
-from .utils import counters
 
+from .utils import counters
 
 if TYPE_CHECKING:
     from torch._guards import CompileId
@@ -24,7 +24,6 @@ def exportdb_error_message(case_name):
 
 
 import logging
-
 
 log = logging.getLogger(__name__)
 graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
@@ -41,7 +40,7 @@ class InternalTorchDynamoError(TorchDynamoException):
 class RestartAnalysis(TorchDynamoException):
     restart_reason: str
 
-    def __init__(self, *args, restart_reason=None) -> None:
+    def __init__(self, *args, restart_reason=None):
         self.restart_reason = restart_reason
         super().__init__(*args)
 
@@ -67,14 +66,14 @@ class TorchRuntimeError(TorchDynamoException):
 
 
 class InvalidBackend(TorchDynamoException):
-    def __init__(self, name) -> None:
+    def __init__(self, name):
         super().__init__(
             f"Invalid backend: {name!r}, see `torch._dynamo.list_backends()` for available backends."
         )
 
 
 class ResetRequired(TorchDynamoException):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__(
             textwrap.dedent(
                 """
@@ -86,7 +85,7 @@ class ResetRequired(TorchDynamoException):
 
 
 class BackendCompilerFailed(TorchDynamoException):
-    def __init__(self, backend_fn, inner_exception) -> None:
+    def __init__(self, backend_fn, inner_exception):
         self.backend_name = getattr(backend_fn, "__name__", "?")
         self.inner_exception = inner_exception
         msg = f"backend={self.backend_name!r} raised:\n{type(inner_exception).__name__}: {inner_exception}"
@@ -94,7 +93,7 @@ class BackendCompilerFailed(TorchDynamoException):
 
 
 class Unsupported(TorchDynamoException):
-    def __init__(self, msg, *, case_name=None) -> None:
+    def __init__(self, msg, *, case_name=None):
         super().__init__(msg)
         self.real_stack = torch._guards.TracingContext.extract_stack()
         self.msg = msg
@@ -118,12 +117,12 @@ class RecompileError(TorchDynamoException):
 
 
 class ArgsMismatchError(Unsupported):
-    def __init__(self, msg) -> None:
+    def __init__(self, msg):
         super().__init__(msg)
 
 
 class AttributeMutationError(Unsupported):
-    def __init__(self, msg) -> None:
+    def __init__(self, msg):
         super().__init__(msg)
 
 
@@ -132,7 +131,7 @@ class CondOpArgsMismatchError(ArgsMismatchError):
     Internal error from cond() due to arguments mismatch.
     """
 
-    def __init__(self, msg) -> None:
+    def __init__(self, msg):
         super().__init__(msg)
 
 
@@ -147,7 +146,7 @@ class UserErrorType(Enum):
 
 
 class UserError(Unsupported):
-    def __init__(self, error_type: UserErrorType, msg, case_name=None) -> None:
+    def __init__(self, error_type: UserErrorType, msg, case_name=None):
         """
         Type of errors that would be valid in Eager, but not supported in TorchDynamo.
         The error message should tell user about next actions.
@@ -191,7 +190,7 @@ class ObservedUserStopIteration(ObservedException):
 
     # Reference `StopIteration_init` in CPython
     # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, **kwargs):
         super().__init__("unhandled `raise StopIteration`")
         if len(args) > 0:
             self.value = args[0]
@@ -199,28 +198,17 @@ class ObservedUserStopIteration(ObservedException):
             self.value = None
 
 
-class ObservedKeyError(ObservedException):
-    # A KeyError exception to be raised from inside Dynamo tracing. This can happen on dict __getitem__
-    pass
-
-
-observed_exception_map = {
-    StopIteration: ObservedUserStopIteration,
-    KeyError: ObservedKeyError,
-}
-
-
-def raise_observed_exception(e, tx, vt):
+def raise_observed_user_stop_iteration(vt, tx):
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    exception_vt = BuiltinVariable(e).call_function(vt, [], {})
+    exception_vt = BuiltinVariable(StopIteration).call_function(vt, [], {})
     tx.exn_vt_stack.append(exception_vt)
-    raise observed_exception_map[e]
+    raise ObservedUserStopIteration
 
 
-def handle_observed_exception(tx):
+def handle_observed_user_stop_iteration(tx):
     # This is essentially exception handling code, equivalent of this pseudo code
     #
     # try:
@@ -291,10 +279,10 @@ def warning(msg: str) -> None:
 # KeyError has special handling for its args
 # see https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L2534 for details
 class KeyErrorMsg:
-    def __init__(self, value) -> None:
+    def __init__(self, value):
         self.value = value
 
-    def __str__(self) -> str:
+    def __str__(self):
         return str(self.value)
 
     def __repr__(self) -> str:

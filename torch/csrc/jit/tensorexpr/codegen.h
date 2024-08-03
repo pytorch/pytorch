@@ -6,7 +6,9 @@
 
 #include <utility>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 template <typename T>
 class PaddedBuffer;
@@ -114,7 +116,7 @@ class TORCH_API ExtCallMemoryReuse : public IRMutator {
   explicit ExtCallMemoryReuse(
       const std::vector<CodeGen::BufferArg>& bufferArgs);
   ~ExtCallMemoryReuse() override = default;
-  StmtPtr mutate(const ExternalCallPtr& v) override;
+  StmtPtr mutate(ExternalCallPtr v) override;
 
  private:
   std::unordered_set<BufPtr> bufferArgs_;
@@ -155,9 +157,12 @@ class CodeGen::CallArg {
   CallArg(const PaddedBuffer<T>& buffer);
 
   template <typename T>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-pro-type-const-cast)
   CallArg(const std::vector<T>& buffer)
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       : data_(const_cast<T*>(buffer.data())) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CallArg(void* ptr) : data_(ptr) {}
 
 #define ARG_TYPE_CTOR(Type, Name)      \
@@ -165,6 +170,7 @@ class CodeGen::CallArg {
     memcpy(buffer_, &v, sizeof(Type)); \
     data_ = (void*)buffer_;            \
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ARG_TYPE_CTOR);
 #undef ARG_TYPE_CTOR
 
@@ -199,6 +205,7 @@ class CodeGen::CallArg {
     TORCH_INTERNAL_ASSERT(data_ == (void*)buffer_); \
     return (Type*)data_;                            \
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ARG_PTR_DEFINE);
 #undef ARG_PTR_DEFINE
 
@@ -267,7 +274,9 @@ TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(
 
 class TORCH_API GenericIntrinsicsExpander : public IRMutator {
  protected:
-  ExprPtr mutate(const IntrinsicsPtr& v) override;
+  ExprPtr mutate(IntrinsicsPtr v) override;
 };
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

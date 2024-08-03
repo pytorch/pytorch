@@ -19,20 +19,17 @@ from typing import (
     Dict,
     Iterable,
     List,
-    Literal,
     Optional,
-    overload,
     Sequence,
+    Set,
     Tuple,
     TYPE_CHECKING,
-    TypeVar,
     Union,
 )
-from typing_extensions import TypeAlias
 from unittest.mock import patch
 
 import sympy
-from sympy import Expr, Integer, Symbol
+from sympy import Expr, Integer
 
 import torch._export.serde.schema as export_schema
 import torch._logging
@@ -43,7 +40,6 @@ from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
-from torch._ops import OpOverload
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -61,7 +57,6 @@ from torch.fx.experimental.symbolic_shapes import (
     resolve_unbacked_bindings,
     SymTypes,
 )
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import SymT
 
@@ -92,17 +87,11 @@ from .utils import (
     sympy_product,
     sympy_subs,
 )
-from .virtualized import ops, OpsValue, V
+from .virtualized import ops, V
 
 
 if TYPE_CHECKING:
     from .graph import GraphLowering
-
-_T = TypeVar("_T")
-_U = TypeVar("_U")
-_V = TypeVar("_V")
-
-_IntLike: TypeAlias = Union[int, Expr]
 
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
@@ -150,20 +139,8 @@ e.g. it may be a graph input or compile time constant.
 """
 
 
-_NodeOrNodes: TypeAlias = Union[
-    int,
-    "TensorBox",
-    Dict[str, "TensorBox"],
-    "Symbol",
-    "IRNode",
-    Sequence[
-        Optional[Union[int, Dict[str, "TensorBox"], "TensorBox", "Symbol", "IRNode"]]
-    ],
-]
-
-
-def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
-    def _check_tensorbox(nodes: Optional[_NodeOrNodes]) -> None:
+def validate_ir(node_or_nodes):
+    def _check_tensorbox(nodes):
         # Could expand this to check deeper properties
         # (e.g. TensorBox points to View or StorageBox)
         if nodes is None:
@@ -193,38 +170,35 @@ def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
     _check_tensorbox(node_or_nodes)
 
 
-def ops_wrapper(name: str) -> Callable[..., OpsValue]:
+def ops_wrapper(name):
     assert isinstance(name, str)
 
-    def fn(*args: object, **kwargs: object) -> OpsValue:
+    def fn(*args, **kwargs):
         return getattr(ops, name)(*args, **kwargs)
 
     return fn
 
 
-def inverse_reorder(order: Sequence[int]) -> Callable[[Sequence[_T]], Sequence[_T]]:
+def inverse_reorder(order):
     inv_order = dict(zip(order, range(len(order))))
 
-    def reindex(index: Sequence[_T]) -> Sequence[_T]:
+    def reindex(index):
         assert len(index) == len(inv_order)
         return [index[inv_order[i]] for i in range(len(index))]
 
     return reindex
 
 
-def same_reorder(order: Sequence[int]) -> Callable[[Sequence[_T]], Sequence[_T]]:
-    def reindex(index: Sequence[_T]) -> Sequence[_T]:
+def same_reorder(order):
+    def reindex(index):
         assert len(index) == len(order)
         return [index[order[i]] for i in range(len(index))]
 
     return reindex
 
 
-def fuse_reindexing(
-    reindex1: Callable[[Sequence[_U]], Sequence[_V]],
-    reindex2: Callable[[Sequence[_T]], Sequence[_U]],
-) -> Callable[[Sequence[_T]], Sequence[_V]]:
-    def reindex(index: Sequence[_T]) -> Sequence[_V]:
+def fuse_reindexing(reindex1, reindex2):
+    def reindex(index):
         return reindex1(reindex2(index))
 
     return reindex
@@ -234,9 +208,7 @@ NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
 
-def stride_order2fill_order(
-    order: Sequence[Union[int, Integer]]
-) -> Sequence[Union[int, Integer]]:
+def stride_order2fill_order(order):
     """
     Convert stride order to fill order
     For channel last format,
@@ -248,7 +220,7 @@ def stride_order2fill_order(
     return fill_order
 
 
-def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[int]:
+def get_stride_order(seq: Sequence[int]) -> List[int]:
     """
     Convert strides to stride order
     """
@@ -259,23 +231,11 @@ def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[
     return out
 
 
-@overload
-def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None:
-    ...
-
-
-@overload
-def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor:
-    ...
-
-
-def ir_node_to_tensor(
-    x: Optional[IRNode], guard_shape: bool = True
-) -> Optional[torch.Tensor]:
+def ir_node_to_tensor(x, guard_shape=True):
     if x is None:
         return None
 
-    shape_fn: Callable[[Union[int, Expr]], Union[int, Expr]]
+    shape_fn: Callable[[Expr], Union[int, Expr]]
     if not guard_shape:
         shape_fn = V.graph.sizevars.size_hint
     else:
@@ -283,9 +243,9 @@ def ir_node_to_tensor(
     size = [shape_fn(s) for s in x.get_size()]
     stride: StrideType
     if is_storage_and_layout(x):
-        stride = [shape_fn(s) for s in x.get_layout().stride]  # type: ignore[misc, union-attr]
+        stride = [shape_fn(s) for s in x.get_layout().stride]  # type: ignore[misc]
     else:
-        stride = FlexibleLayout.contiguous_strides(size)  # type: ignore[assignment]
+        stride = FlexibleLayout.contiguous_strides(size)  # type: ignore[arg-type]
     dtype = x.get_dtype()
     device = x.get_device()
     size = convert_shape_to_symint(size)
@@ -297,9 +257,7 @@ def ir_node_to_tensor(
     return t
 
 
-def may_convert_to_optional(
-    value: Optional[Sequence[_T]],
-) -> Optional[Sequence[Optional[_T]]]:
+def may_convert_to_optional(value):
     if isinstance(value, list) and not value:
         # [None] makes sure the cpp wrapper codegen will generate something like
         # {std::nullopt} instead of {}
@@ -307,29 +265,28 @@ def may_convert_to_optional(
     return value
 
 
-def get_device_type(x: object) -> Optional[str]:
-    if get_device := getattr(x, "get_device", None):
-        return get_device_type(get_device())
+def get_device_type(x):
+    if getattr(x, "get_device", None):
+        return get_device_type(x.get_device())
     if isinstance(x, torch.device):
         return x.type
     return None
 
 
-def is_triton(x: object) -> bool:
-    dtype = get_device_type(x)
-    return bool(dtype and is_gpu(dtype))
+def is_triton(x):
+    return is_gpu(get_device_type(x))
 
 
-def is_cpu(x: object) -> bool:
+def is_cpu(x):
     return get_device_type(x) == "cpu"
 
 
 class IRNode:
-    _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
+    _current_origins: ClassVar[Set[Any]] = set()
 
     @staticmethod
     @contextlib.contextmanager
-    def current_origins(origins: OrderedSet[torch.fx.Node]):
+    def current_origins(origins: Set[torch.fx.Node]):
         old = IRNode._current_origins
         IRNode._current_origins = old | origins
         try:
@@ -338,10 +295,10 @@ class IRNode:
             IRNode._current_origins = old
 
     def __post_init__(self):
-        self.origins = OrderedSet(self._current_origins)
+        self.origins = set(self._current_origins)
         self.traceback = traceback.format_stack() if config.debug_ir_traceback else None
 
-    def get_read_names(self) -> OrderedSet[str]:
+    def get_read_names(self) -> Set[str]:
         raise NotImplementedError(f"NYI on {type(self)}")
 
     def get_traceback(self):
@@ -420,7 +377,7 @@ class IRNode:
     make_indexer: Callable[[], Callable[[Any], Any]]
     mark_reuse: Callable[[int], None]
     realize_hint: Callable[[], None]
-    get_unbacked_symbol_uses: Callable[[], OrderedSet[sympy.Symbol]]
+    get_unbacked_symbol_uses: Callable[[], Set[sympy.Symbol]]
 
 
 @dataclasses.dataclass
@@ -455,8 +412,8 @@ class Operation:
     def is_user_of(self, name):
         return name in self.get_read_names()
 
-    def get_read_names(self) -> OrderedSet[str]:
-        return OrderedSet(dep.name for dep in self.get_reads())
+    def get_read_names(self) -> Set[str]:
+        return {dep.name for dep in self.get_reads()}
 
     def get_reads(self):
         return self.get_read_writes().reads
@@ -464,10 +421,10 @@ class Operation:
     def get_outputs(self) -> List[Buffer]:
         raise NotImplementedError
 
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         """
         Returns the unbacked symbols which are required to be in scope in
         order to successfully perform codegen for this buffer.  For example,
@@ -482,7 +439,7 @@ class Operation:
         on that buffer, which will eventually have a dependency on i0 if
         necessary.
         """
-        return OrderedSet()
+        return set()
 
     def get_workspace_size(self):
         """
@@ -499,8 +456,8 @@ class Loops(IRNode):
     inner_fn: Callable[..., Any]
     ranges: List[Expr]
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet().union(
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return set().union(
             *(free_unbacked_symbols(e) for e in self.ranges),
             self.inner_fn_free_unbacked_symbols(),
         )
@@ -594,8 +551,8 @@ class Loops(IRNode):
                     self.get_size(),
                 ).reads
 
-    def get_read_names(self) -> OrderedSet[str]:
-        return OrderedSet(dep.name for dep in self.get_reads())
+    def get_read_names(self) -> Set[str]:
+        return {dep.name for dep in self.get_reads()}
 
     def get_reduction_size(self):
         raise NotImplementedError(
@@ -613,7 +570,7 @@ class Loops(IRNode):
         )
 
 
-def nop_loader_fn(idx: Union[Expr, Sequence[Expr]], *, dtype: torch.dtype) -> OpsValue:
+def nop_loader_fn(idx, *, dtype):
     if dtype.is_floating_point:
         return ops.constant(float("nan"), dtype)
     else:
@@ -673,7 +630,7 @@ class Scatter(Pointwise):
         )
 
 
-REDUCTION_COMBINE_FN: Dict[str, Callable[..., OpsValue]] = {
+REDUCTION_COMBINE_FN = {
     "any": ops_wrapper("logical_or"),
     "max": ops_wrapper("maximum"),
     "min": ops_wrapper("minimum"),
@@ -683,17 +640,12 @@ REDUCTION_COMBINE_FN: Dict[str, Callable[..., OpsValue]] = {
 }
 
 
-def get_reduction_combine_fn(
-    reduction_type: str, dtype: torch.dtype, arg_break_ties_left: bool = True
-) -> Callable[..., object]:
+def get_reduction_combine_fn(reduction_type, dtype, arg_break_ties_left=True):
     if reduction_type in REDUCTION_COMBINE_FN:
-        return REDUCTION_COMBINE_FN[reduction_type]
+        combine_fn = REDUCTION_COMBINE_FN[reduction_type]
+    elif reduction_type in {"argmax", "argmin"}:
 
-    elif reduction_type in ("argmax", "argmin"):
-
-        def argmax_combine_fn(
-            a: Tuple[object, object], b: Tuple[object, object]
-        ) -> Tuple[OpsValue, OpsValue]:
+        def combine_fn(a, b):
             a_value, a_index = a
             b_value, b_index = b
 
@@ -720,14 +672,9 @@ def get_reduction_combine_fn(
                 ops.where(mask, a_index, b_index),
             )
 
-        return argmax_combine_fn
-
     elif reduction_type == "welford_combine":
 
-        def welford_combine_fn(
-            a: Tuple[OpsValue, OpsValue, OpsValue],
-            b: Tuple[OpsValue, OpsValue, OpsValue],
-        ) -> Tuple[OpsValue, OpsValue, OpsValue]:
+        def combine_fn(a, b):
             a_mean, a_m2, a_weight = a
             b_mean, b_m2, b_weight = b
 
@@ -740,10 +687,10 @@ def get_reduction_combine_fn(
                 new_weight,
             )
 
-        return welford_combine_fn
-
     else:
         raise NotImplementedError(f"unknown reduction_type={reduction_type}")
+
+    return combine_fn
 
 
 @dataclasses.dataclass
@@ -754,16 +701,16 @@ class Reduction(Loops):
     src_dtype: torch.dtype
     reduction_hint: ReductionHint
 
-    def __str__(self) -> str:  # type: ignore[override]
+    def __str__(self):
         return Loops.__str__(  # type: ignore[call-arg]
             self, names=("ranges", "reduction_ranges", "reduction_type")
         )
 
-    def __repr__(self) -> str:  # type: ignore[override]
+    def __repr__(self):
         return self.__str__()
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
-        return super().get_unbacked_symbol_uses() | OrderedSet().union(
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return super().get_unbacked_symbol_uses() | set().union(
             *(free_unbacked_symbols(e) for e in self.reduction_ranges)
         )
 
@@ -831,10 +778,10 @@ class Reduction(Loops):
         should_split = (
             not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
             and reduction_type
-            not in (
+            not in {
                 "argmax",
                 "argmin",
-            )
+            }
             and config.split_reductions
             # We don't support unbacked symints
             and _is_static(reduction_numel_hint)
@@ -843,7 +790,7 @@ class Reduction(Loops):
         if not should_split:
             return ReductionHint.DEFAULT, 1
 
-        device_interface = get_interface_for_device(get_device_type(device))  # type: ignore[arg-type] # next PR
+        device_interface = get_interface_for_device(get_device_type(device))
         device_properties = device_interface.Worker.get_device_properties(device)
         if get_device_type(device) == "xpu":
             num_sm = device_properties.gpu_subslice_count
@@ -1221,14 +1168,14 @@ class Reduction(Loops):
 
     @staticmethod
     def default_accumulator(reduction_type, dtype):
-        if reduction_type in ("max", "argmax"):
+        if reduction_type in {"max", "argmax"}:
             if is_float_dtype(dtype):
                 return float("-inf")
             elif is_boolean_dtype(dtype):
                 return 0
             else:
                 return torch.iinfo(dtype).min
-        if reduction_type in ("min", "argmin"):
+        if reduction_type in {"min", "argmin"}:
             if is_float_dtype(dtype):
                 return float("inf")
             elif is_boolean_dtype(dtype):
@@ -1472,6 +1419,10 @@ class Reduction(Loops):
         )
 
 
+def num_reduction_outputs(reduction_type):
+    return 3 if "welford" in reduction_type else 1
+
+
 class WelfordReduction(Reduction):
     output_index: int
 
@@ -1526,7 +1477,7 @@ class WelfordReduction(Reduction):
         reduction_type: str,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ):
-        assert reduction_type in ("welford_reduce", "welford_combine")
+        assert reduction_type in {"welford_reduce", "welford_combine"}
 
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
@@ -1741,14 +1692,14 @@ class Scan(Loops):
 
     # HACK we mimick reduction
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         # TODO: Can combine_fn/reindex close over unbacked symbols? If so, we
         # need to explicitly represent the closure so we can pull out unbacked
         # symbols here
         return (
             super().get_unbacked_symbol_uses()
-            | OrderedSet().union(*(free_unbacked_symbols(e) for e in self.scan_ranges))
-            | OrderedSet().union(*(free_unbacked_symbols(e) for e in self.size))
+            | set().union(*(free_unbacked_symbols(e) for e in self.scan_ranges))
+            | set().union(*(free_unbacked_symbols(e) for e in self.size))
         )
 
     def __post_init__(self):
@@ -1936,11 +1887,11 @@ class Sort(Loops):
 
     # HACK we mimick reduction
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return (
             super().get_unbacked_symbol_uses()
-            | OrderedSet().union(*(free_unbacked_symbols(e) for e in self.sort_ranges))
-            | OrderedSet().union(*(free_unbacked_symbols(e) for e in self.size))
+            | set().union(*(free_unbacked_symbols(e) for e in self.sort_ranges))
+            | set().union(*(free_unbacked_symbols(e) for e in self.size))
         )
 
     def __post_init__(self):
@@ -2060,7 +2011,7 @@ class Sort(Loops):
         return results
 
 
-def is_storage_and_layout(x: IRNode) -> bool:
+def is_storage_and_layout(x):
     try:
         as_storage_and_layout(x, freeze=False)
         return True
@@ -2068,7 +2019,7 @@ def is_storage_and_layout(x: IRNode) -> bool:
         return False
 
 
-def is_contiguous_storage_and_layout(x: IRNode) -> bool:
+def is_contiguous_storage_and_layout(x):
     try:
         buffer, layout = as_storage_and_layout(x, freeze=False)
         # pad the stride here so we will NOT claim an tensor as contiguous
@@ -2081,12 +2032,8 @@ def is_contiguous_storage_and_layout(x: IRNode) -> bool:
 
 
 def as_storage_and_layout(
-    x: IRNode,
-    freeze: bool = True,
-    want_contiguous: bool = False,
-    stride_order: Optional[Sequence[Union[int, Integer]]] = None,
-    allow_padding: bool = False,
-) -> Tuple[StorageBox, Layout]:
+    x, freeze=True, want_contiguous=False, stride_order=None, allow_padding=False
+):
     """
     Try to simplify x into a StorageBox and a Layout.
 
@@ -2129,9 +2076,7 @@ as_contiguous_storage_and_layout = functools.partial(
 )
 
 
-def is_stride_order_storage_and_layout(
-    x: IRNode, stride_order: Sequence[Union[int, Integer]]
-) -> bool:
+def is_stride_order_storage_and_layout(x, stride_order):
     try:
         buffer, layout = as_storage_and_layout(x, freeze=False)
         return layout.is_stride_ordered(stride_order)
@@ -2207,7 +2152,7 @@ class BaseView(IRNode):
     def is_module_buffer(self):
         return self.data.is_module_buffer()  # type: ignore[attr-defined]
 
-    def get_read_names(self) -> OrderedSet[str]:
+    def get_read_names(self) -> Set[str]:
         return self.data.get_read_names()
 
     def get_reads(self):
@@ -2308,7 +2253,7 @@ class PermuteView(BaseView):
     @classmethod
     def create(cls, x, dims):
         dims = cls._map_neg_dims(dims)
-        assert OrderedSet(dims) == OrderedSet(range(len(dims)))
+        assert set(dims) == set(range(len(dims)))
 
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
@@ -2328,16 +2273,14 @@ class PermuteView(BaseView):
         return [dim if dim >= 0 else len(dims) + dim for dim in dims]
 
     def get_size(self):
-        assert OrderedSet(self._map_neg_dims(self.dims)) == OrderedSet(
-            range(len(self.dims))
-        )
+        assert set(self._map_neg_dims(self.dims)) == set(range(len(self.dims)))
         size = self.data.get_size()
         return [size[i] for i in self.dims]
 
     def make_reindexer(self):
         inv = {j: i for i, j in enumerate(self.dims)}
         inv = [inv[i] for i in range(len(self.dims))]  # type: ignore[index]
-        assert OrderedSet(inv) == OrderedSet(range(len(self.dims)))
+        assert set(inv) == set(range(len(self.dims)))
 
         def reindex(index):
             return [index[i] for i in inv]
@@ -2418,7 +2361,7 @@ class GenericView(BaseView):
         index_new = list(self.reindex(index_old))
         return f"lambda {', '.join(map(str, index_old))}: {index_new}"
 
-    def __str__(self) -> str:
+    def __str__(self):
         return self.str_helper(
             [self.data, f"size={self.size}", f"reindex={self.reindex_str()}"]
         )
@@ -2592,7 +2535,7 @@ class ReinterpretView(BaseView):
         if isinstance(self.data, BaseView):
             self.data = self.data.unwrap_view()
 
-    def __str__(self) -> str:
+    def __str__(self):
         return self.str_helper(
             [
                 self.data,
@@ -2641,7 +2584,7 @@ class ReinterpretView(BaseView):
     def freeze_layout(self):
         pass
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return (
             free_unbacked_symbols(self.layout.size)
             | free_unbacked_symbols(self.layout.stride)
@@ -2682,7 +2625,7 @@ class DtypeView(BaseView):
             return ReinterpretView(storage, new_layout)
         return DtypeView(x, new_dtype)
 
-    def __str__(self) -> str:
+    def __str__(self):
         return self.str_helper([self.data, self.target_dtype])
 
     __repr__ = __str__
@@ -2839,9 +2782,7 @@ class IndexingConstant(BaseConstant):
         return IndexingConstant(self.index, self.dtype, device)
 
 
-def is_contiguous_strides_for_shape(
-    stride: Sequence[_IntLike], shape: Sequence[_IntLike]
-) -> bool:
+def is_contiguous_strides_for_shape(stride, shape):
     return all(
         size == 1 or left == right
         for left, right, size in zip(
@@ -2850,7 +2791,7 @@ def is_contiguous_strides_for_shape(
     )
 
 
-def get_align_for_dtype(dtype: torch.dtype) -> int:
+def get_align_for_dtype(dtype):
     """
     CUDA max memory transaction size is 128 bytes for a warp.
     We pick `128 // dtype.itemsize` as alighment so GPU can do coalesced
@@ -2883,7 +2824,7 @@ class Layout(IRNode):
     def stride(self):
         return self._stride
 
-    def __str__(self) -> str:
+    def __str__(self):
         offset = ""
         if self.offset != 0:
             offset = f", offset={self.offset}"
@@ -3131,7 +3072,7 @@ class FlexibleLayout(Layout):
         In this format, channels last would be:
             [1, 3, 2, 0]
         """
-        assert OrderedSet(range(len(sizes))) == OrderedSet(order), (sizes, order)
+        assert set(range(len(sizes))) == set(order), (sizes, order)
         next_stride = sympy.Integer(1)
         strides = [None] * len(order)
 
@@ -3148,7 +3089,7 @@ class FlexibleLayout(Layout):
         In this format, channels last would be:
             [3, 0, 2, 1]
         """
-        assert OrderedSet(range(len(sizes))) == OrderedSet(order)
+        assert set(range(len(sizes))) == set(order)
         fill_order = stride_order2fill_order(order)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
@@ -3255,7 +3196,7 @@ class NonOwningLayout(Layout):
         offset = self.view.get_layout().offset
         if offset == 0:
             return True
-        from .utils import ALIGNMENT
+        from .compile_fx import ALIGNMENT
 
         return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)  # type: ignore[arg-type]
 
@@ -3459,14 +3400,14 @@ class Buffer(IRNode):
             return [self.layout.target.get_name()]
         return ()
 
-    def get_read_names(self) -> OrderedSet[str]:
-        return OrderedSet([self.get_name()])
+    def get_read_names(self) -> Set[str]:
+        return {self.get_name()}
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return set()
 
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     def realize(self):
         pass
@@ -3514,8 +3455,8 @@ class ConstantBuffer(InputBuffer):
 
 
 class NoneAsConstantBuffer(IRNode):
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return set()
 
     def codegen_reference(self, writer=None):
         return V.graph.wrapper_code.none_str
@@ -3530,7 +3471,7 @@ class ShapeAsConstantBuffer(IRNode):
     def shape(self):
         return self._shape
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return free_unbacked_symbols(self.shape)
 
     def codegen_reference(self, writer=None):
@@ -3570,7 +3511,7 @@ class ComputedBuffer(OperationBuffer):
                     self.data.get_size(),
                 )
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         # Ordinarily, we'd like to just peek at the arguments list,
         # but ComputedBuffers have no argument list.
         #
@@ -3859,7 +3800,7 @@ class TemplateBuffer(OperationBuffer):
         deps = dependencies.extract_read_writes(
             dummy, self.get_size(), (), normalize=True
         )
-        deps.reads = OrderedSet(dependencies.StarDep(x.get_name()) for x in self.inputs)
+        deps.reads = {dependencies.StarDep(x.get_name()) for x in self.inputs}
         return deps
 
     def get_reduction_size(self):
@@ -3911,10 +3852,10 @@ class TritonTemplateBuffer(TemplateBuffer):
         self.outputs: List[Buffer] = [self]
         if mutated_inputs is not None:
             # Ensure that the mutated inputs are only allowed for certain nodes
-            allowed_set = (
+            allowed_set = {
                 torch.ops.higher_order.flex_attention,
                 torch.ops.higher_order.flex_attention_backward,
-            )
+            }
             current_node = V.graph.current_node.target
             assert (
                 current_node in allowed_set
@@ -3927,7 +3868,7 @@ class TritonTemplateBuffer(TemplateBuffer):
     def get_outputs(self) -> List[Buffer]:
         return self.outputs
 
-    def __str__(self) -> str:
+    def __str__(self):
         out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
         return out
 
@@ -4058,7 +3999,7 @@ class InputsKernel(OperationBuffer):
     inputs: List[Buffer]
 
     def get_read_writes(self):
-        reads: OrderedSet[dependencies.Dep] = OrderedSet()
+        reads: Set[dependencies.Dep] = set()
         StarDep = dependencies.StarDep
         for input in self.inputs:
             if isinstance(input, list):
@@ -4066,14 +4007,14 @@ class InputsKernel(OperationBuffer):
             else:
                 reads.add(StarDep(input.get_name()))
 
-        writes: OrderedSet[dependencies.Dep] = OrderedSet(
+        writes: Set[dependencies.Dep] = {
             StarDep(buf.get_name()) for buf in self.get_outputs()
-        )
+        }
 
         return dependencies.ReadWrites(
             reads=reads,
             writes=writes,
-            index_exprs=OrderedSet(),
+            index_exprs=set(),
         )
 
     @classmethod
@@ -4258,12 +4199,12 @@ class ConcatKernel(NopKernel):
         return True
 
 
-def get_aten_cpp_kernel_name(kernel: object) -> Optional[str]:
+def get_aten_cpp_kernel_name(kernel):
     # Calling with the default kernel name can lead to ambiguous behavior like the following example.
     # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=std::nullopt)
     # repeat_interleave(const at::Tensor & self, int64_t repeats,
     #       c10::optional<int64_t> dim=std::nullopt, c10::optional<int64_t> output_size=std::nullopt)
-    if not isinstance(kernel, OpOverload) or kernel.namespace != "aten":
+    if not isinstance(kernel, torch._ops.OpOverload) or kernel.namespace != "aten":
         return None
     opname = (
         kernel.__name__.split(".")[0]
@@ -4329,8 +4270,8 @@ class ExternKernel(InputsKernel):
     def get_outputs(self) -> List[Buffer]:
         return [self, *self.mutation_outputs]
 
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     def collect_arg_kwarg_properties(self):
         # if self.op_overload is torch._ops.OpOverload, we can use its schema to collect additional
@@ -4369,7 +4310,7 @@ class ExternKernel(InputsKernel):
     def fill_non_provided_args(self, args, kwargs, convert_val_to_str=False):
         # Previously, we want to maintain forward-compatibility by skipping
         # default args in the serialized artifacts in fbcode. However,
-        # some of our shim interfaces require default values being OrderedSet.
+        # some of our shim interfaces require default values being set.
         # Discussed with Sherlock offline and we decided to allow serializing
         # default args into the C++ wrapper code for now. We will refine this
         # part if we see real FC requirement. More details related to FC
@@ -4736,7 +4677,7 @@ class ExternKernel(InputsKernel):
             for i, x in enumerate(self.constant_args):
                 idx = len(self.inputs) + i
                 type_ = (
-                    self.arg_properties[idx].get("type")
+                    self.arg_properties[i].get("type")
                     if self.arg_properties and idx < len(self.arg_properties)
                     else None
                 )
@@ -4858,17 +4799,17 @@ class ExternKernel(InputsKernel):
         index = sympy_subs(sympy.expand(index), replacement)  # type: ignore[arg-type]
         return index, tuple(new_sizes)
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         # NB: It's not necessary to check regular inputs as we automatically
         # have dependencies on them
-        r: OrderedSet[sympy.Symbol] = OrderedSet()
+        r = set()
         for arg in self.constant_args:
             r |= maybe_free_unbacked_symbols(arg)
         for arg in self.kwargs.values():
             r |= maybe_free_unbacked_symbols(arg)
         return r
 
-    def __str__(self) -> str:
+    def __str__(self):
         kernel_name = getattr(self, "python_kernel_name", None)
         lines = [
             f"python_kernel_name={kernel_name!r}",
@@ -5054,13 +4995,13 @@ class UserDefinedTritonKernel(ExternKernel):
             new_name, raw_args, self.grid, configs, triton_meta, kernel.constexprs
         )
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         # add unbacked symbols used in the grid to the ones used
         # in the kwargs (the latter is generated by ExternKernel)
         return super().get_unbacked_symbol_uses() | free_unbacked_symbols(self.grid)
 
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     def __init__(self, *, kernel_idx, grid, kernel_args):
         inputs = []
@@ -5142,8 +5083,8 @@ class InplaceBernoulliFallback(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     def __init__(self, op_overload, x, *constant_args):
         super().__init__(
@@ -5180,8 +5121,8 @@ class InplaceCopyFallback(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     def __init__(
         self,
@@ -5235,8 +5176,8 @@ class MutatingFirstArgExternKernel(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     def has_side_effects(self):
         return True
@@ -5317,8 +5258,8 @@ class ScatterFallback(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     def __init__(
         self,
@@ -5382,8 +5323,8 @@ class IndexPutFallback(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     def __init__(self, op_overload, x, indices, values, accumulate):
         self.indices = indices
@@ -5455,8 +5396,8 @@ class DynamicScalar(ExternKernel):
         self.sym = sym
         self.keypath = keypath
 
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet([self.sym])
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return {self.sym}
 
     def codegen(self, wrapper):
         wrapper.codegen_dynamic_scalar(self)
@@ -5516,24 +5457,22 @@ class ExternKernelNode:
     node: export_schema.Node
 
 
-has_c_shim = OrderedSet(
-    [
-        aten._embedding_bag.default,
-        aten._fft_c2c.default,
-        aten._scaled_dot_product_efficient_attention.default,
-        aten._scaled_dot_product_flash_attention.default,
-        aten._scaled_dot_product_cudnn_attention.default,
-        aten._scaled_mm.default,
-        aten.addmm.out,
-        aten.bmm.out,
-        aten.copy_.default,
-        aten.mm.out,
-        aten.repeat_interleave.Tensor,
-        aten.nonzero.default,
-        aten.view.dtype,
-        aten.view_as_real.default,
-    ]
-)
+has_c_shim = {
+    aten._embedding_bag.default,
+    aten._fft_c2c.default,
+    aten._scaled_dot_product_efficient_attention.default,
+    aten._scaled_dot_product_flash_attention.default,
+    aten._scaled_dot_product_cudnn_attention.default,
+    aten._scaled_mm.default,
+    aten.addmm.out,
+    aten.bmm.out,
+    aten.copy_.default,
+    aten.mm.out,
+    aten.repeat_interleave.Tensor,
+    aten.nonzero.default,
+    aten.view.dtype,
+    aten.view_as_real.default,
+}
 
 
 class FallbackKernel(ExternKernelAlloc):
@@ -5719,13 +5658,13 @@ class FallbackKernel(ExternKernelAlloc):
                 f"{wrapper.codegen_unbacked_symbol_decl(s)} = {go_outer()}{wrapper.ending}"
             )
 
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         if unbacked_bindings := getattr(self, "unbacked_bindings", None):
             return resolve_unbacked_bindings(
                 V.graph.sizevars.shape_env, unbacked_bindings
             ).keys()
         else:
-            return OrderedSet()
+            return set()
 
     def set_cpp_kernel(self, kernel):
         from .codegen.wrapper import get_cpp_op_schema
@@ -5758,7 +5697,7 @@ class FallbackKernel(ExternKernelAlloc):
         class Shim:
             ref: Any
 
-            def __repr__(self) -> str:
+            def __repr__(self):
                 return self.ref
 
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
@@ -5784,9 +5723,7 @@ class FallbackKernel(ExternKernelAlloc):
         if isinstance(example_output, torch.Tensor):
             return example_output.device
         if isinstance(example_output, (list, tuple)):
-            device_set = OrderedSet(
-                FallbackKernel.find_device(None, x) for x in example_output
-            )
+            device_set = {FallbackKernel.find_device(None, x) for x in example_output}
             # Remove None
             devices = [device for device in device_set if device]
             if len(devices) == 1:
@@ -6110,7 +6047,7 @@ class MultiOutput(ExternKernel):
         V.graph.register_operation(self)
         self.indices = indices
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return self.inputs[0].get_unbacked_symbol_uses()
 
     def should_allocate(self):
@@ -6142,10 +6079,10 @@ class MutableBox(IRNode):
     def realize(self):
         return self.data.realize()
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return self.data.get_unbacked_symbol_uses()
 
-    def get_read_names(self) -> OrderedSet[str]:
+    def get_read_names(self) -> Set[str]:
         return self.data.get_read_names()
 
     def get_defining_op(self):
@@ -6168,7 +6105,7 @@ class MutableBox(IRNode):
     def dtype(self):
         return self.data.dtype
 
-    def __str__(self) -> str:
+    def __str__(self):
         if isinstance(self.data, MutableBox):
             line0 = f"{type(self).__name__}({type(self.data).__name__}("
             endl = "))"
@@ -6322,13 +6259,13 @@ class Subgraph(IRNode):
     graph: Optional[GraphLowering] = None
 
 
-def _has_aliased_buffers(buffers: Sequence[IRNode]) -> bool:
+def _has_aliased_buffers(buffers):
     buffers = [
         buffer.unwrap_view() if isinstance(buffer, ReinterpretView) else buffer
         for buffer in buffers
     ]
     # assuming the same buffer is represented by the same IRNode object
-    return len(OrderedSet(id(buffer) for buffer in buffers)) < len(buffers)
+    return len({id(buffer) for buffer in buffers}) < len(buffers)
 
 
 @dataclasses.dataclass
@@ -7145,12 +7082,12 @@ class _WaitKernel(_CollectiveKernel):
 # NB: recursive structure here reflects val_to_arg_str, avoid
 # calling free_unbacked_symbols on "exotic" types that don't get pexpr
 # treatment
-def maybe_free_unbacked_symbols(s: object) -> OrderedSet[Symbol]:
-    if isinstance(s, (SymTypes, Expr)):
+def maybe_free_unbacked_symbols(s):
+    if isinstance(s, (SymTypes, sympy.Expr)):
         # This branch should be impossible in return position
         return free_unbacked_symbols(s)
     elif isinstance(s, (tuple, list)):
-        r: OrderedSet[sympy.Symbol] = OrderedSet()
+        r = set()
         for t in s:
             r |= maybe_free_unbacked_symbols(t)
         return r
@@ -7158,4 +7095,4 @@ def maybe_free_unbacked_symbols(s: object) -> OrderedSet[Symbol]:
         # This branch is impossible in constant-args position
         return free_unbacked_symbols(s)
     else:
-        return OrderedSet()
+        return set()

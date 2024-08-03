@@ -434,7 +434,7 @@ class _reduce_op:
     :class:`~torch.distributed.ReduceOp` is recommended to use instead.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         # __members__ is a dict storing key-value pairs for enum classes
         for k, v in ReduceOp.RedOpType.__members__.items():
             setattr(self, k, v)
@@ -568,7 +568,7 @@ class _World:
        of c10d and is subject to change..
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         self._default_pg = None
         self._pg_coalesce_state: Dict[ProcessGroup, List[_CollOp]] = {}
         self._pg_default_device: Dict[ProcessGroup, torch.device] = {}
@@ -1190,7 +1190,10 @@ def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
         The backend configuration of the given process group as a lower case string.
 
     """
-    pg = group or _get_default_group()
+    if group is None:
+        pg = _get_default_group()
+    else:
+        pg = group
     if _rank_not_in_group(pg):
         raise ValueError("Invalid process group specified")
     backend_config = _world.pg_backend_config.get(pg)
@@ -1210,7 +1213,10 @@ def get_backend(group: Optional[ProcessGroup] = None) -> Backend:
         The backend of the given process group as a lower case string.
 
     """
-    pg = group or _get_default_group()
+    if group is None:
+        pg = _get_default_group()
+    else:
+        pg = group
     if _rank_not_in_group(pg):
         raise ValueError("Invalid process group specified")
     pg_store = _world.pg_map[pg] if pg in _world.pg_map else None
@@ -1233,7 +1239,10 @@ def _get_pg_config(group: Optional[ProcessGroup] = None) -> Dict[str, Any]:
     Return the pg configuration of the given process group.
 
     """
-    pg = group or _get_default_group()
+    if group is None:
+        pg = _get_default_group()
+    else:
+        pg = group
     return {
         "pg_name": _get_process_group_name(pg),
         "pg_desc": pg.group_desc,
@@ -2160,7 +2169,10 @@ def recv(
     if tensor.is_complex():
         tensor = torch.view_as_real(tensor)
 
-    pg = group or _get_default_group()
+    if group is None:
+        pg = _get_default_group()
+    else:
+        pg = group
 
     if src is None:
         work = pg.recv_anysource([tensor], tag)
@@ -2194,7 +2206,7 @@ class _IllegalWork(Work):
 
 
 class _CoalescingManager:
-    def __init__(self) -> None:
+    def __init__(self):
         self.works: List[Work] = []
 
     def append(self, work: Work):
@@ -2537,8 +2549,11 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
 
     opts = AllreduceCoalescedOptions()
     opts.reduceOp = op
-    group = group or _get_default_group()
-    work = group.allreduce_coalesced(tensors, opts)
+    if group is None:
+        default_pg = _get_default_group()
+        work = default_pg.allreduce_coalesced(tensors, opts)
+    else:
+        work = group.allreduce_coalesced(tensors, opts)
 
     if async_op:
         return work.get_future()
@@ -3312,8 +3327,11 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
     ]
     tensor = tensor if not tensor.is_complex() else torch.view_as_real(tensor)
 
-    group = group or _get_default_group()
-    work = group.allgather([tensor_list], [tensor])
+    if group is None:
+        default_pg = _get_default_group()
+        work = default_pg.allgather([tensor_list], [tensor])
+    else:
+        work = group.allgather([tensor_list], [tensor])
 
     if async_op:
         return work
@@ -3521,8 +3539,11 @@ def all_gather_coalesced(
         t if not t.is_complex() else torch.view_as_real(t) for t in input_tensor_list
     ]
 
-    group = group or _get_default_group()
-    work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
+    if group is None:
+        default_pg = _get_default_group()
+        work = default_pg.allgather_coalesced(output_tensor_lists, input_tensor_list)
+    else:
+        work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
 
     if async_op:
         return work.get_future()
@@ -3728,8 +3749,11 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=Fal
     opts = ReduceScatterOptions()
     opts.reduceOp = op
 
-    group = group or _get_default_group()
-    work = group.reduce_scatter([output], [input_list], opts)
+    if group is None:
+        default_pg = _get_default_group()
+        work = default_pg.reduce_scatter([output], [input_list], opts)
+    else:
+        work = group.reduce_scatter([output], [input_list], opts)
 
     if async_op:
         return work
@@ -3967,10 +3991,15 @@ def all_to_all_single(
     output_split_sizes = [] if output_split_sizes is None else output_split_sizes
     input_split_sizes = [] if input_split_sizes is None else input_split_sizes
 
-    group = group or _get_default_group()
-    work = group.alltoall_base(
-        output, input, output_split_sizes, input_split_sizes, opts
-    )
+    if group is None:
+        default_pg = _get_default_group()
+        work = default_pg.alltoall_base(
+            output, input, output_split_sizes, input_split_sizes, opts
+        )
+    else:
+        work = group.alltoall_base(
+            output, input, output_split_sizes, input_split_sizes, opts
+        )
 
     if async_op:
         return work
@@ -4085,8 +4114,11 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
         t if not t.is_complex() else torch.view_as_real(t) for t in output_tensor_list
     ]
 
-    group = group or _get_default_group()
-    work = group.alltoall(output_tensor_list, input_tensor_list, opts)
+    if group is None:
+        default_pg = _get_default_group()
+        work = default_pg.alltoall(output_tensor_list, input_tensor_list, opts)
+    else:
+        work = group.alltoall(output_tensor_list, input_tensor_list, opts)
 
     if async_op:
         return work
@@ -4130,8 +4162,11 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
                 "Invalid function argument: device_ids type should be List[int]"
             )
 
-    group = group or _get_default_group()
-    work = group.barrier(opts=opts)
+    if group is None:
+        default_pg = _get_default_group()
+        work = default_pg.barrier(opts=opts)
+    else:
+        work = group.barrier(opts=opts)
 
     if async_op:
         return work

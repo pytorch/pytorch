@@ -10,7 +10,6 @@ from sympy.core.numbers import equal_valued
 
 from .numbers import int_oo
 
-
 __all__ = [
     "FloorDiv",
     "ModularIndexing",

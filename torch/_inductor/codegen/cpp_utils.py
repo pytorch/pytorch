@@ -11,11 +11,12 @@ import sympy
 
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import ValueRanges
 
+from torch.utils._sympy.value_ranges import ValueRanges
 from .. import ir
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import ops, OpsValue, V
+
 from .common import (
     CSEVariable,
     deduce_output_dtype_by_name,
@@ -166,13 +167,13 @@ def deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs):
 
 
 class CppCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
+    def __init__(self, name, bounds: ValueRanges[Any]):
         super().__init__(name, bounds)
         self.is_vec = False
         self.dtype: Optional[torch.dtype] = None
         self.dependent_itervars: Set[sympy.Symbol] = set()
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return (
             f"CppCSEVariable(name: {self.name}, bounds: {self.bounds}, is_vec: {self.is_vec}, dtype: {self.dtype}, "
             f"dependent_itervars: {self.dependent_itervars})"
@@ -492,7 +493,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         inner,
         global_to_local: Dict[str, ir.Buffer],
         rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr],
-    ) -> None:
+    ):
         super().__init__(inner)
         self.global_to_local = global_to_local
         self.rewrite_index = rewrite_index
@@ -534,7 +535,7 @@ class LocalBufferContext:
     these buffers without exposure to the outside world.
     """
 
-    def __init__(self, kernel_args: KernelArgs) -> None:
+    def __init__(self, kernel_args: KernelArgs):
         self.kernel_args = kernel_args
         self.exit_stack = contextlib.ExitStack()
         # map local buffer name to local buffer

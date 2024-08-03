@@ -15,7 +15,6 @@ from .semi_structured import (
     to_sparse_semi_structured,
 )
 
-
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
 

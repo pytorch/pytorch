@@ -120,8 +120,6 @@ Memory management
      get_allocator_backend
      CUDAPluggableAllocator
      change_current_allocator
-     MemPool
-     MemPoolContext
 .. FIXME The following doesn't seem to exist. Is it supposed to?
    https://github.com/pytorch/pytorch/issues/27785
    .. autofunction:: reset_max_memory_reserved

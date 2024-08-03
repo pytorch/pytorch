@@ -43,8 +43,8 @@ static BufHandle makeQBufHandleChannelsLast(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
-    const ExprPtr& qscale,
-    const ExprPtr& qzero) {
+    const ExprPtr qscale,
+    const ExprPtr qzero) {
   BufHandle ResultBuf(name, dims, dtype);
   ResultBuf.node()->set_qscale(qscale);
   ResultBuf.node()->set_qzero(qzero);
@@ -70,8 +70,8 @@ static BufHandle makeQBufHandleContiguous(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
-    const ExprPtr& qscale,
-    const ExprPtr& qzero) {
+    const ExprPtr qscale,
+    const ExprPtr qzero) {
   BufHandle ResultBuf(name, dims, dtype);
   ResultBuf.node()->set_qscale(qscale);
   ResultBuf.node()->set_qzero(qzero);
@@ -109,7 +109,7 @@ static bool isChannelsLast(const BufHandle& buf) {
 }
 
 static ExprHandle quant(
-    const ExprHandle& x,
+    ExprHandle x,
     Dtype out_dtype,
     ExprHandle qscale,
     ExprHandle qzero) {
@@ -224,6 +224,7 @@ Tensor computeQuantizePerTensorExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
+    // NOLINTNEXTLINE
     const std::optional<ScalarType>& outputType,
     at::Device) {
   const BufHandle& x = std::get<BufHandle>(inputs[0]);
@@ -294,7 +295,7 @@ Tensor computeQuantizedConv2dPrepack(
   auto strides = _pair_int(inputs[2]);
   auto padding = _pair_int(inputs[3]);
   auto dilation = _pair_int(inputs[4]);
-  auto groups = std::get<int64_t>(inputs[5]);
+  int groups = std::get<int64_t>(inputs[5]);
   TORCH_INTERNAL_ASSERT(
       qw.node()->qscale(),
       buildErrorMessage(
@@ -307,11 +308,17 @@ Tensor computeQuantizedConv2dPrepack(
       ResultBuf,
       "nnc_aten_quantized_conv2d_prepack",
       {qw, b},
+      // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
       {strides[0],
+       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
        strides[1],
+       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
        padding[0],
+       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
        padding[1],
+       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
        dilation[0],
+       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
        dilation[1],
        groups,
        immQScale(qw),
@@ -324,7 +331,9 @@ Tensor computeQuantizedConv1d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
+    // NOLINTNEXTLINE
     const std::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
     at::Device device) {
   const BufHandle& qx = std::get<BufHandle>(inputs[0]);
   const BufHandle& prepacked = std::get<BufHandle>(inputs[1]);
@@ -354,7 +363,9 @@ Tensor computeQuantizedConv2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
+    // NOLINTNEXTLINE
     const std::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
     at::Device device) {
   const BufHandle& qx = std::get<BufHandle>(inputs[0]);
   const BufHandle& prepacked = std::get<BufHandle>(inputs[1]);
@@ -384,7 +395,9 @@ Tensor computeQuantizedConv2dRelu(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
+    // NOLINTNEXTLINE
     const std::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
     at::Device device) {
   const BufHandle& qx = std::get<BufHandle>(inputs[0]);
   const BufHandle& prepacked = std::get<BufHandle>(inputs[1]);
@@ -414,7 +427,9 @@ Tensor computeQuantizedLinear(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
+    // NOLINTNEXTLINE
     const std::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
     at::Device device) {
   const BufHandle& qx = std::get<BufHandle>(inputs[0]);
   const BufHandle& prepacked = std::get<BufHandle>(inputs[1]);
@@ -444,7 +459,9 @@ Tensor computeQuantizedLinearRelu(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
+    // NOLINTNEXTLINE
     const std::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
     at::Device device) {
   const BufHandle& qx = std::get<BufHandle>(inputs[0]);
   const BufHandle& prepacked = std::get<BufHandle>(inputs[1]);
@@ -474,7 +491,9 @@ Tensor computeQuantizedAddExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
+    // NOLINTNEXTLINE
     const std::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
     at::Device device) {
   const BufHandle& qa = std::get<BufHandle>(inputs[0]);
   const BufHandle& qb = std::get<BufHandle>(inputs[1]);
@@ -516,7 +535,9 @@ Tensor computeQuantizedMul(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
+    // NOLINTNEXTLINE
     const std::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
     at::Device device) {
   const BufHandle& qa = std::get<BufHandle>(inputs[0]);
   const BufHandle& qb = std::get<BufHandle>(inputs[1]);
@@ -547,6 +568,7 @@ Tensor computeQuantizedMulScalar(
     const std::vector<ExprHandle>& outputStrides,
     // NOLINTNEXTLINE
     const std::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
     at::Device device) {
   const BufHandle& qa = std::get<BufHandle>(inputs[0]);
   const auto scalar = std::get<double>(inputs[1]);
@@ -571,7 +593,9 @@ Tensor computeQuantizedRelu(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
+    // NOLINTNEXTLINE
     const std::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
     at::Device device) {
   const BufHandle& qa = std::get<BufHandle>(inputs[0]);
   const auto out_qdtype = immQDType(qa);
@@ -686,7 +710,7 @@ Tensor computeUpsampleNearest2d(
       promoteToDtype(input_height, ScalarType::Double) / output_height;
   auto scale_w = promoteToDtype(input_width, ScalarType::Double) / output_width;
   // TODO: will repetitive if in idx calculation will be taken out of the loop?
-  auto compute_nearest_idx = [](const ExprHandle& scale,
+  auto compute_nearest_idx = [](ExprHandle scale,
                                 const ExprHandle& dst_index,
                                 const ExprHandle& input_size) {
     return Min::make(
@@ -708,7 +732,7 @@ Tensor computeUpsampleNearest2d(
       outputShape,
       Dtype(*outputType),
       std::nullopt, // initializer
-      fmap(strides, [&](const ExprPtr& stride) { return ExprHandle(stride); }),
+      fmap(strides, [&](ExprPtr stride) { return ExprHandle(stride); }),
       ExprHandle(A.node()->qscale()),
       ExprHandle(A.node()->qzero()));
   return Tensor(buf, args, e);
@@ -777,6 +801,7 @@ Tensor computeQuantizedSigmoidExternalCall(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
+    // NOLINTNEXTLINE
     const std::optional<ScalarType>& outputType,
     at::Device) {
   const BufHandle& qx = std::get<BufHandle>(inputs[0]);

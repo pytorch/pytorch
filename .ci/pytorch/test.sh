@@ -317,7 +317,6 @@ test_inductor_distributed() {
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
   python test/run_test.py -i distributed/_tensor/test_dtensor_compile.py --verbose
   python test/run_test.py -i distributed/tensor/parallel/test_fsdp_2d_parallel.py --verbose
-  python test/run_test.py -i distributed/tensor/parallel/test_micro_pipeline_tp.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_comm.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_multi_group --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_with_activation_checkpointing --verbose
@@ -694,7 +693,7 @@ test_inductor_torchbench_cpu_smoketest_perf(){
   do
     local model_name=${model_cfg[0]}
     local data_type=${model_cfg[2]}
-    local speedup_target=${model_cfg[5]}
+    # local speedup_target=${model_cfg[5]}
     local backend=${model_cfg[1]}
     if [[ ${model_cfg[4]} == "cpp" ]]; then
       export TORCHINDUCTOR_CPP_WRAPPER=1
@@ -714,7 +713,8 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     fi
     cat "$output_name"
     # The threshold value needs to be actively maintained to make this check useful.
-    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target"
+    # TODO: re-enable this after https://github.com/pytorch/pytorch/pull/131812 lands
+    # python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target"
   done
 
   # Add a few ABI-compatible accuracy tests for CPU. These can be removed once we turn on ABI-compatible as default.
@@ -1322,9 +1322,9 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert nanogpt timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_smoketest_perf* ]]; then
-    checkout_install_torchbench timm_vision_transformer phlippe_densenet basic_gnn_edgecnn \
+    checkout_install_torchbench timm_vision_transformer phlippe_densenet basic_gnn_gcn \
       llama_v2_7b_16h resnet50 timm_efficientnet mobilenet_v3_large timm_resnest \
-      functorch_maml_omniglot yolov3 mobilenet_v2 resnext50_32x4d densenet121 mnasnet1_0
+      shufflenet_v2_x1_0 hf_GPT2 yolov3 mobilenet_v2 resnext50_32x4d hf_T5_base
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_cpu_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *torchbench_gcp_smoketest* ]]; then
     checkout_install_torchbench

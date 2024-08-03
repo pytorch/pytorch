@@ -8,6 +8,7 @@ import sys
 import warnings
 
 import numpy
+
 import pytest
 
 
@@ -31,7 +32,6 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
     xpassIfTorchDynamo,
 )
-
 
 # If we are going to trace through these, we should use NumPy
 # If testing on eager mode, we use torch._numpy

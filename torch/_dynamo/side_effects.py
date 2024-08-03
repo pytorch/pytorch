@@ -224,11 +224,9 @@ class SideEffects:
 
         if id(item) in self.id_to_variable:
             raise AssertionError(
-                f"{variable} is already tracked for mutation. This could be "
+                "Variable is already tracked for mutation. This could be "
                 "because you are not using VariableBuilder to construct "
-                "the variable tracker. "
-                f"Source of new object: {variable.source}. "
-                f"Source of previously tracked object: {self.id_to_variable[id(item)].source}."
+                "the variable tracker."
             )
 
         variable.mutable_local = mutable_cls(variable.source)

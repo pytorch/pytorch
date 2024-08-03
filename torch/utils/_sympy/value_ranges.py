@@ -24,8 +24,8 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
 from torch._logging import LazyString
-from torch._prims_common import dtype_to_type
 
+from torch._prims_common import dtype_to_type
 from .functions import (
     _keep_float,
     FloatTrueDiv,
@@ -44,7 +44,6 @@ from .functions import (
 )
 from .interp import sympy_interp
 from .numbers import int_oo, IntInfinity, NegativeIntInfinity
-
 
 log = logging.getLogger(__name__)
 
@@ -937,7 +936,7 @@ class SymPyValueRangeAnalysis:
 
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
-    def __init__(self) -> None:
+    def __init__(self):
         self.name = "ValueRangeAnalysis"
         boolean_operators = (
             "xor",

@@ -2292,7 +2292,7 @@ class LoopOrderHelper : public IRVisitor {
     return ordering.str();
   }
 
-  void visit(const ForPtr& v) final {
+  void visit(ForPtr v) final {
     ordering << v->var()->name_hint() << ",";
     IRVisitor::visit(v);
   }

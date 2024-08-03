@@ -1,8 +1,6 @@
 #include <ATen/SavedTensorHooks.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 
-#include <c10/core/SafePyObject.h>
-#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
 
 namespace py = pybind11;
@@ -62,28 +60,27 @@ void PyDefaultSavedVariableHooks::push_hooks(
     py::function& unpack_hook) {
   at::SavedTensorDefaultHooks::lazy_initialize();
   at::SavedTensorDefaultHooks::push_hooks(
-      c10::SafePyObject(pack_hook.release().ptr(), getPyInterpreter()),
-      c10::SafePyObject(unpack_hook.release().ptr(), getPyInterpreter()));
+      pack_hook.release().ptr(), unpack_hook.release().ptr());
 }
 
 void PyDefaultSavedVariableHooks::pop_hooks() {
   auto [pack_hook, unpack_hook] = at::SavedTensorDefaultHooks::pop_hooks();
-  TORCH_INTERNAL_ASSERT(
-      pack_hook.ptr(getPyInterpreter()) != nullptr &&
-      unpack_hook.ptr(getPyInterpreter()) != nullptr);
+  TORCH_INTERNAL_ASSERT(pack_hook != nullptr && unpack_hook != nullptr);
+  if (Py_IsInitialized()) {
+    py::gil_scoped_acquire gil;
+    Py_XDECREF(pack_hook);
+    Py_XDECREF(unpack_hook);
+  }
 }
 
 std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
-  auto out = at::SavedTensorDefaultHooks::get_hooks();
-  if (!out.has_value()) {
+  auto [pack_hook, unpack_hook] = at::SavedTensorDefaultHooks::get_hooks();
+  if (!pack_hook || !unpack_hook) {
     return nullptr;
   }
-  auto [pack_hook, unpack_hook] = *out;
   py::gil_scoped_acquire gil;
-  py::function pack_hook_ =
-      py::reinterpret_steal<py::function>(pack_hook.release());
-  py::function unpack_hook_ =
-      py::reinterpret_steal<py::function>(unpack_hook.release());
+  py::function pack_hook_ = py::reinterpret_borrow<py::function>(pack_hook);
+  py::function unpack_hook_ = py::reinterpret_borrow<py::function>(unpack_hook);
   return std::make_unique<PySavedVariableHooks>(pack_hook_, unpack_hook_);
 }
 

@@ -2,6 +2,7 @@
 
 
 import functools
+
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 from pytest import raises as assert_raises

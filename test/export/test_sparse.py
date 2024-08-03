@@ -60,7 +60,7 @@ class SumNet(torch.nn.Module):
 
 
 class EltwiseNet(torch.nn.Module):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.relu = torch.nn.ReLU()
 

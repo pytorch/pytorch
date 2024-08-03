@@ -4,7 +4,6 @@ import io
 import itertools
 
 import onnx
-
 import pytorch_test_common
 
 import torch
@@ -300,7 +299,7 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
 
     def test_dropout(self):
         class MyModule(Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
                 self.dropout = torch.nn.Dropout(0.5)
 

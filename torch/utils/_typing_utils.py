@@ -2,7 +2,6 @@
 
 from typing import Optional, TypeVar
 
-
 # Helper to turn Optional[T] into T when we know None either isn't
 # possible or should trigger an exception.
 T = TypeVar("T")
