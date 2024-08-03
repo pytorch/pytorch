@@ -32,6 +32,7 @@ from ..utils import (
     check_numpy_ndarray_args,
     check_unspec_or_constant_args,
     check_unspec_python_args,
+    does_not_override_dict_iter_methods,
     extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
@@ -1356,9 +1357,8 @@ class BuiltinVariable(VariableTracker):
                 # This is applicable for user defined objects which seem like dict, but are not really dicts. For
                 # example, TensorDict derives from MutableMapping. For such cases, we can directly inline the .items
                 # method and create a new dict.
-                if type(arg.value).items in (
-                    dict.items,
-                    OrderedDict.items,
+                if does_not_override_dict_iter_methods(
+                    type(arg.value)
                 ) and not tx.output.side_effects.has_pending_mutation(arg):
                     # These are implemeted in C, so we will have to manually construct the items
                     new_dict = dict(arg.value.items())
