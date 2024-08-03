@@ -3,10 +3,7 @@ from functools import lru_cache as _lru_cache
 from typing import Optional, TYPE_CHECKING
 
 import torch
-
-
-if TYPE_CHECKING:
-    from torch.library import Library
+from torch.library import Library as _Library
 
 
 __all__ = ["is_built", "is_available", "is_macos13_or_newer", "is_macos_or_newer"]
@@ -40,7 +37,7 @@ def is_macos13_or_newer(minor: int = 0) -> bool:
     return torch._C._mps_is_on_macos_or_newer(13, minor)
 
 
-_lib: Optional["Library"] = None
+_lib: Optional[_Library] = None
 
 
 def _init():
