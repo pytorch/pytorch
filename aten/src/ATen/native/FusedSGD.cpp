@@ -83,4 +83,3 @@ void _fused_sgd_kernel_cpu_(
 DEFINE_DISPATCH(fused_sgd_stub);
 
 }
-

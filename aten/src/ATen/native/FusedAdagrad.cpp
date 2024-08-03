@@ -56,4 +56,3 @@ void _fused_adagrad_kernel_cpu_(
 DEFINE_DISPATCH(fused_adagrad_stub);
 
 }
-
