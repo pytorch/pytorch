@@ -47,7 +47,6 @@ src = ["caffe2", "torch", "torchgen", "functorch", "test"]
 [tool.ruff.format]
 docstring-code-format = true
 quote-style = "double"
-skip-magic-trailing-comma = true
 
 [tool.ruff.lint]
 # NOTE: Synchoronize the ignores with .flake8
