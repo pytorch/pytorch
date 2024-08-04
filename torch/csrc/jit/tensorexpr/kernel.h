@@ -9,9 +9,9 @@
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+#include <utility>
+
+namespace torch::jit::tensorexpr {
 
 struct SmallSizeTPairHash {
  public:
@@ -122,7 +122,7 @@ class TORCH_API TensorExprKernel {
   //      - a flag to control pre-allocation of buffers.
   explicit TensorExprKernel(
       const std::shared_ptr<Graph>& subgraph,
-      const std::string& kernel_func_name,
+      std::string kernel_func_name,
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
           {},
       std::vector<int64_t> symbolic_shape_inputs = {},
@@ -143,10 +143,10 @@ class TORCH_API TensorExprKernel {
       : TensorExprKernel(
             subgraph,
             SubgraphUtils::generateNameForGraph(subgraph),
-            custom_lowerings,
-            symbolic_shape_inputs,
+            std::move(custom_lowerings),
+            std::move(symbolic_shape_inputs),
             pre_alloc,
-            symbolic_strides) {}
+            std::move(symbolic_strides)) {}
 
   void run(Stack& stack) const;
   void runFast(
@@ -377,6 +377,4 @@ bool isContiguous(
     const torch::jit::Value* v,
     at::MemoryFormat memory_format = at::MemoryFormat::Contiguous);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
