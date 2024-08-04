@@ -15,6 +15,7 @@ exclude_patterns = [
     'functorch/examples/**',
     'functorch/notebooks/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
+    'torch/_inductor/autoheuristic/artifacts/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
     # Tests from the NumPy test suite
@@ -196,6 +197,8 @@ include_patterns = [
     'aten/src/ATen/*.cpp',
     'aten/src/ATen/core/*.h',
     'aten/src/ATen/core/*.cpp',
+    'aten/src/ATen/cudnn/*.h',
+    'aten/src/ATen/cudnn/*.cpp',
     'aten/src/ATen/detail/*',
     'aten/src/ATen/functorch/*.h',
     'aten/src/ATen/functorch/*.cpp',
@@ -233,7 +236,7 @@ exclude_patterns = [
     'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*',
     'torch/csrc/dynamo/eval_frame.h',
-    'torch/csrc/inductor/**/*',
+    'torch/csrc/inductor/aoti_torch/c/shim.h',
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/lazy/**/*',
@@ -417,6 +420,7 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
+    '.ci/docker/common/install_rocm_drm.sh',
     '.lintrunner.toml',
 ]
 command = [
@@ -940,6 +944,25 @@ command = [
 ]
 
 [[linter]]
+code = 'CONTEXT_DECORATOR'
+include_patterns = [
+    'torch/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=@.*(dynamo_timed)',
+    '--linter-name=CONTEXT_DECORATOR',
+    '--error-name=avoid context decorator',
+    """--error-description=\
+        Do not use context manager as decorator as it breaks cProfile traces.  Use it as \
+        a context manager instead\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'ONCE_FLAG'
 include_patterns = [
     'c10/**',
@@ -985,16 +1008,16 @@ init_command = [
     'PyYAML==6.0.1',
 ]
 
-# Black + usort
+# usort + black
 [[linter]]
-code = 'UFMT'
+code = 'PYFMT'
 include_patterns = [
     '**/*.py',
     '**/*.pyi',
 ]
 command = [
     'python3',
-    'tools/linter/adapters/ufmt_linter.py',
+    'tools/linter/adapters/pyfmt_linter.py',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -1009,6 +1032,7 @@ exclude_patterns = [
     'third_party/**/*.py',
     'third_party/**/*.pyi',
     'torch/_inductor/fx_passes/serialized_patterns/**',
+    'torch/_inductor/autoheuristic/artifacts/**',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
     'test/_nvfuser/__init__.py',
@@ -1191,20 +1215,6 @@ exclude_patterns = [
     'torch/_export/trace.py',
     'torch/_export/verifier.py',
     'torch/_vendor/**',
-    'torch/ao/__init__.py',
-    'torch/ao/ns/__init__.py',
-    'torch/ao/ns/_numeric_suite.py',
-    'torch/ao/ns/_numeric_suite_fx.py',
-    'torch/ao/ns/fx/__init__.py',
-    'torch/ao/ns/fx/graph_matcher.py',
-    'torch/ao/ns/fx/graph_passes.py',
-    'torch/ao/ns/fx/mappings.py',
-    'torch/ao/ns/fx/n_shadows_utils.py',
-    'torch/ao/ns/fx/ns_types.py',
-    'torch/ao/ns/fx/pattern_utils.py',
-    'torch/ao/ns/fx/qconfig_multi_mapping.py',
-    'torch/ao/ns/fx/utils.py',
-    'torch/ao/ns/fx/weight_utils.py',
     'torch/compiler/__init__.py',
     'torch/contrib/__init__.py',
     'torch/contrib/_tensorboard_vis.py',
@@ -1465,7 +1475,6 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     '--no-black-binary',
     'black==23.12.1',
-    'ufmt==2.7.0',
     'usort==1.0.8.post1',
     'isort==5.13.2',
 ]
@@ -1534,6 +1543,7 @@ exclude_patterns = [
     'functorch/docs/**',
     'functorch/notebooks/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
+    'torch/_inductor/autoheuristic/artifacts/**',
     'scripts/**',
     'third_party/**',
     'fb/**',
@@ -1551,7 +1561,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.5.2',
+    'ruff==0.5.5',
 ]
 is_formatter = true
 

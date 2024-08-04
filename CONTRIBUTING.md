@@ -77,7 +77,7 @@ Then clone the PyTorch project and setup the development environment:
 ```bash
 git clone git@github.com:<USERNAME>/pytorch.git
 cd pytorch
-git remote add origin git@github.com:pytorch/pytorch.git
+git remote add upstream git@github.com:pytorch/pytorch.git
 
 make setup-env  # or make setup-env-cuda for pre-built CUDA binaries
 conda activate pytorch-deps

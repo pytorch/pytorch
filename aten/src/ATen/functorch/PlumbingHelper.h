@@ -47,7 +47,7 @@ TORCH_API bool isBatchedAtLevel(const Tensor& tensor, int64_t level);
 TORCH_API bool isBatchedAtLevel(const std::optional<Tensor>& maybe_tensor, int64_t level);
 
 // Convenience helper. Returns true if any tensor is batched at level
-TORCH_API bool areAnyBatchedAtLevel(ArrayRef<optional<Tensor>> maybe_tensors, int64_t level);
+TORCH_API bool areAnyBatchedAtLevel(ArrayRef<std::optional<Tensor>> maybe_tensors, int64_t level);
 
 inline bool ivalueParticipatesInCurrentLevel(const IValue& ivalue) {
   if (ivalue.isTensor()) {

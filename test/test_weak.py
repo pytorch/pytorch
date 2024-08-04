@@ -444,7 +444,7 @@ class WeakKeyDictionaryTestCase(TestCase):
         outerself = self
 
         class SimpleUserDict:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.d = outerself.reference
 
             def keys(self):
@@ -475,7 +475,7 @@ class WeakKeyDictionaryTestCase(TestCase):
         class FailingUserDict:
             def keys(self):
                 class BogonIter:
-                    def __init__(self):
+                    def __init__(self) -> None:
                         self.i = 1
 
                     def __iter__(self):
@@ -497,7 +497,7 @@ class WeakKeyDictionaryTestCase(TestCase):
         class FailingUserDict:
             def keys(self):
                 class BogonIter:
-                    def __init__(self):
+                    def __init__(self) -> None:
                         self.i = ord("a")
 
                     def __iter__(self):
@@ -785,7 +785,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         outerself = self
 
         class SimpleUserDict:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.d = outerself.reference
 
             def keys(self):
@@ -816,7 +816,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         class FailingUserDict:
             def keys(self):
                 class BogonIter:
-                    def __init__(self):
+                    def __init__(self) -> None:
                         self.i = 1
 
                     def __iter__(self):
@@ -838,7 +838,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         class FailingUserDict:
             def keys(self):
                 class BogonIter:
-                    def __init__(self):
+                    def __init__(self) -> None:
                         self.i = ord("a")
 
                     def __iter__(self):
