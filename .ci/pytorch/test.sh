@@ -1372,6 +1372,7 @@ test_linux_aarch64(){
 
 test_operator_benchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
   TEST_DIR=$(pwd)
   CORES=$(lscpu | grep Core | awk '{print $4}')
   end_core=$(( CORES-1 ))
