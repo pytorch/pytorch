@@ -30,7 +30,6 @@ USE_BLACK_FILELIST = re.compile(
                 fnmatch.translate,
                 [
                     # **
-                    "**",
                     # .ci/**
                     ".ci/**",
                     # .github/**
@@ -44,7 +43,6 @@ USE_BLACK_FILELIST = re.compile(
                     # torchgen/**
                     "torchgen/**",
                     # test/**
-                    "test/**",
                     # test/[a-h]*/**
                     "test/[a-h]*/**",
                     # test/[i-j]*/**
@@ -52,7 +50,6 @@ USE_BLACK_FILELIST = re.compile(
                     # test/[k-z]*/**
                     "test/[k-z]*/**",
                     # torch/**
-                    "torch/**",
                     # torch/_[a-h]*/**
                     "torch/_[a-h]*/**",
                     # torch/_i*/**
