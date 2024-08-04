@@ -43,7 +43,7 @@ logger = logging.getLogger("torch.distributed._composable.fsdp")
 class FSDPStateContext:
     """This has state shared across FSDP states."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         # All FSDP states in the root state's module tree
         self.all_states: List[FSDPState] = []
         # Iteration's forward root runs the once-per-forward logic; this root
@@ -71,7 +71,7 @@ def disable_if_config_true(func):
 
 
 class FSDPState(_State):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._fsdp_param_group: Optional[FSDPParamGroup] = None
         self._is_root: Optional[bool] = None  # root set during lazy init

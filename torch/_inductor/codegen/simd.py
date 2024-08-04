@@ -91,7 +91,7 @@ class IterationRanges:
         divisor=sympy.Integer(1),
         length=sympy.Integer(1),
         root: IterationRangesRoot,
-    ):
+    ) -> None:
         super().__init__()
         self.name = name
         self.var_list = var_list
@@ -122,7 +122,7 @@ class IterationRangesRoot(IterationRanges):
         tensor_dim: Optional[int],
         grid_dim: Optional[int],
         has_zdim: bool,
-    ):
+    ) -> None:
         if pid_cache is None:
             pid_cache = {}
         super().__init__(
@@ -151,7 +151,7 @@ class IterationRangesRoot(IterationRanges):
         self.grid_dim = grid_dim
         self.has_zdim = has_zdim
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"IterationRangesRoot({self.name!r}, {self.numel}, ...)"
 
     def cache_clear(self):
@@ -235,7 +235,7 @@ class IterationRangesEntry(IterationRanges):
         length: sympy.Expr,
         expr: sympy.Expr,
         parent: IterationRanges,
-    ):
+    ) -> None:
         super().__init__(
             name=name,
             numel=parent.numel / length,
@@ -251,7 +251,7 @@ class IterationRangesEntry(IterationRanges):
         self.codegen = functools.lru_cache(None)(self._codegen)
         self.expr = expr
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"IterationRangesEntry({self.name}, {self.divisor}, {self.length}, {self.expr}, {self.var_ranges})"
 
     def set_name(self, name):
@@ -315,7 +315,7 @@ class SIMDKernel(Kernel):
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
         override_persistent_reduction=None,
-    ):
+    ) -> None:
         if pid_cache is None:
             pid_cache = {}
         super().__init__()
@@ -942,7 +942,7 @@ class SIMDScheduling(BaseScheduling):
     int32_type = "torch.int32"
     int64_type = "torch.int64"
 
-    def __init__(self, scheduler):
+    def __init__(self, scheduler) -> None:
         super().__init__()
         self.scheduler = scheduler
 
@@ -1715,7 +1715,7 @@ class SIMDScheduling(BaseScheduling):
             n: Any
             last_usage: Any
 
-            def __del__(self):
+            def __del__(self) -> None:
                 self.n.last_usage = self.last_usage
 
         last_usage_holders = [LastUsageHolder(n, n.last_usage) for n in nodes]

@@ -19,7 +19,7 @@ import torch
 import torch.onnx
 from torch import nn
 from torch._subclasses import fake_tensor
-from torch.onnx._internal import exporter
+from torch.onnx._internal import _exporter_legacy
 from torch.onnx._internal.fx import (
     diagnostics,
     fx_symbolic_graph_extractor,
@@ -99,7 +99,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
 
     @pytorch_test_common.xfail(
-        error_message="Unexpectedly found a <class 'torch.Tensor'> in the inputs.",
+        error_message="Tracing through optional input is not supported yet",
         reason="https://github.com/pytorch/pytorch/issues/96379",
     )
     def test_func_with_args_and_tensor_kwargs(self):
@@ -273,7 +273,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def test_mnist(self):
         class MNISTModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=True)
                 self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=True)
@@ -302,7 +302,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         # This produces op as `torch.ops.aten.log_sigmoid_forward`, instead of the more
         # conventional `torch.ops.aten.log_sigmoid`.
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.m = torch.nn.LogSigmoid()
 
@@ -419,7 +419,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def test_transpose_infer_shape(self):
         class TransposeModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 1, 3, stride=2)
 
@@ -781,7 +781,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     dynamic_shapes=self.dynamic_shapes,
                     op_level_debug=self.op_level_debug,
                 )
-                export_options = exporter.ResolvedExportOptions(options)
+                export_options = _exporter_legacy.ResolvedExportOptions(options)
                 export_options.fx_tracer = (
                     fx_symbolic_graph_extractor.FXSymbolicTracer()
                 )
@@ -845,7 +845,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     )
     def test_fx_symbolic_tracer_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc0 = nn.Linear(8, 8, bias=True)
                 self.fc1 = nn.Linear(8, 4, bias=True)
@@ -1178,7 +1178,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     )
     def test_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc0 = nn.Linear(8, 8, bias=True)
                 self.fc1 = nn.Linear(8, 4, bias=True)
