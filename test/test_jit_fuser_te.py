@@ -1088,7 +1088,7 @@ class TestTEFuser(JitTestCase):
         class M(torch.jit.ScriptModule):
             __constants__ = ["d"]
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.d = torch.device("cuda")
 
