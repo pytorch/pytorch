@@ -34,13 +34,13 @@ class TORCH_API Reducer {
   }
 
   ExprHandle operator()(
-      BufHandle result_buf,
+      const BufHandle& result_buf,
       ExprHandle body,
       const std::vector<ExprHandle>& output,
       const std::vector<VarHandle>& inner) const;
 
   ReduceOpPtr operator()(
-      BufPtr result_buf,
+      const BufPtr& result_buf,
       ExprPtr body,
       const std::vector<ExprPtr>& output,
       const std::vector<VarPtr>& inner) const;
