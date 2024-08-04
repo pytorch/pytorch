@@ -775,9 +775,6 @@ def _export_to_aten_ir(
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
     if pre_dispatch:
-        from torch._export.passes.replace_autocast_with_hop_pass import (
-            replace_autocast_with_hop_pass,
-        )
         from torch._export.passes.replace_set_grad_with_hop_pass import (
             replace_set_grad_with_hop_pass,
         )
@@ -788,10 +785,6 @@ def _export_to_aten_ir(
         # and the constant_tensor is passed as input of the set grad hop, the placeholder's
         # meta["val"] will be None and fails our verifier for placeholder.
         gm, export_graph_signature = replace_set_grad_with_hop_pass(
-            gm, export_graph_signature
-        )
-
-        gm, export_graph_signature = replace_autocast_with_hop_pass(
             gm, export_graph_signature
         )
 
