@@ -15,6 +15,7 @@ from torch.ao.quantization.fx.pattern_utils import (
     QuantizeHandler,
 )
 
+
 # QuantizeHandler.__module__ = _NAMESPACE
 _register_fusion_pattern.__module__ = "torch.ao.quantization.fx.pattern_utils"
 get_default_fusion_patterns.__module__ = "torch.ao.quantization.fx.pattern_utils"

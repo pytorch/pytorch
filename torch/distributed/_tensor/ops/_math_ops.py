@@ -415,10 +415,21 @@ def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrateg
     return TupleStrategy(output_tuple_strategy_childs)
 
 
-@register_op_strategy([aten._linalg_svd.default], schema_info=RuntimeSchemaInfo(1))
-def linalg_svd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
-    # Since we do not have a simple way to compute a sharded SVD, always fall
-    # back to replicate
+@register_op_strategy(
+    [
+        aten._linalg_svd.default,
+        aten.linalg_qr.default,
+        # TODO: `diagonal_copy` can have an improved sharding strategy for
+        # shard placements that does not require redistributing to replicate.
+        aten.diagonal_copy.default,
+    ],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def linalg_replicate_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    """
+    Since we do not have a simple way to compute some linear algebra operations
+    like SVD or QR decomposition, always fall back to replicate.
+    """
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
     assert isinstance(input_strategy, OpStrategy), f"{input_strategy}"
