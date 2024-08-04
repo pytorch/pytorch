@@ -124,14 +124,14 @@ else:
             """
             Returns the index of the mesh dim in the root mesh.
             The device_mesh passed in needs to be sliced out from the root mesh
-            or children of the root mesh.
+            or submesh of the root mesh.
             """
             root_mesh = self.get_root_mesh(device_mesh)
             child_mesh_dim_names = device_mesh.mesh_dim_names
             if root_mesh and child_mesh_dim_names:
                 assert (
                     len(child_mesh_dim_names) == 1
-                ), "The child mesh can only be a 1D mesh."
+                ), "The submesh can only be a 1D mesh."
                 child_mesh_dim_name = child_mesh_dim_names[0]
                 return self.get_mesh_dim_by_name(root_mesh, child_mesh_dim_name)
             return None
@@ -422,11 +422,7 @@ else:
 
             Args:
                 mesh_dim_names (Union[str, Tuple[str]]): the name or the tuple of names of the
-<<<<<<< HEAD
                 mesh dimension of the DeviceMesh to create the submesh for.
-=======
-                mesh dimension of the DeviceMesh to create the child DeviceMesh for.
->>>>>>> 1231a3acd59 (remove parent mesh concept from _MeshEnv)
             Returns:
                 A :class:`DeviceMesh` object
 
