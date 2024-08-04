@@ -87,12 +87,12 @@ def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
 
 class ModelsWithScriptObjectAttr:
     class Simple(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
     class SimpleWithAttrInContainer(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
             self.pytree_attr2 = [
@@ -104,7 +104,7 @@ class ModelsWithScriptObjectAttr:
             ]
 
     class NestedWithAttrInContainer(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
             self.pytree_attr2 = [
@@ -118,7 +118,7 @@ class ModelsWithScriptObjectAttr:
             self.sub_mod2 = ModelsWithScriptObjectAttr.SimpleWithAttrInContainer()
 
     class MoreNestedWithAttrInContainer(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
             self.pytree_attr2 = [
@@ -267,7 +267,7 @@ class TestPasses(TestCase):
 
     def test_runtime_assert_one_dim(self) -> None:
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -290,7 +290,7 @@ class TestPasses(TestCase):
 
     def test_runtime_assert_multiple_dims(self) -> None:
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):
@@ -320,7 +320,7 @@ class TestPasses(TestCase):
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):
@@ -357,7 +357,7 @@ class TestPasses(TestCase):
 
     def test_runtime_assert_some_inps_not_used(self) -> None:
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):
@@ -389,7 +389,7 @@ class TestPasses(TestCase):
 
     def test_view_to_view_copy(self) -> None:
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -444,7 +444,7 @@ class TestPasses(TestCase):
 
     def test_custom_obj_tuple_out(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -471,7 +471,7 @@ class TestPasses(TestCase):
 
     def test_remove_effect_token_kwargs(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -546,7 +546,7 @@ def forward(self, token, obj_attr, x):
 
     def test_runtime_assert_inline_constraints_for_item(self) -> None:
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -569,7 +569,7 @@ def forward(self, token, obj_attr, x):
 
     def test_runtime_assert_inline_constraints_for_nonzero(self) -> None:
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -613,7 +613,7 @@ def forward(self, token, obj_attr, x):
     # TODO(pianpwk): add back runtime asserts to subgraphs
     def test_runtime_assert_inline_constraints_for_cond(self) -> None:
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, pred, x, y):
@@ -870,7 +870,7 @@ def forward(self, sin, cos):
                 return x + y.add_(1)
 
             class M(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.state = torch.nn.Buffer(torch.zeros(1))
 
@@ -911,7 +911,7 @@ def forward(self, sin, cos):
                 return (x, x + y.add_(1))
 
             class M(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.state = torch.nn.Buffer(torch.zeros(1))
 

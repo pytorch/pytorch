@@ -1,11 +1,13 @@
 from torch._parameter import (
     is_lazy as is_lazy,
     Parameter as _Parameter,
+    Buffer as _Buffer,
     UninitializedBuffer as _UninitializedBuffer,
     UninitializedParameter as _UninitializedParameter,
 )
 
 # workaround for setting the __module__ attribute in stub file
 class Parameter(_Parameter): ...
+class Buffer(_Buffer): ...
 class UninitializedParameter(_UninitializedParameter): ...
 class UninitializedBuffer(_UninitializedBuffer): ...

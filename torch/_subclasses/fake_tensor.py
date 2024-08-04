@@ -1079,6 +1079,7 @@ class FakeTensorMode(TorchDispatchMode):
         export: bool = False,
     ) -> None:
         log.debug("create_mode 0x%x", id(self))
+        super().__init__()
         self.allow_fallback_kernels = allow_fallback_kernels
 
         import torch._dynamo.config
@@ -1232,6 +1233,10 @@ class FakeTensorMode(TorchDispatchMode):
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
             if maybe_prev_only_lift_cpu_tensors is not None:
                 torch._C._set_only_lift_cpu_tensors(maybe_prev_only_lift_cpu_tensors)
+
+    @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
 
     @classmethod
     def cache_info(cls) -> DispatchCacheInfo:
