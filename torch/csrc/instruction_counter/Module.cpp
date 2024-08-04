@@ -49,7 +49,8 @@ long start() {
 
 uint64_t end(int fd) {
 #if !defined(__linux__)
-  "This systems seems not to be neither Linux" return -1;
+  printf("This systems seems not to be Linux");
+  return -1;
 #else
   // Disable the event group
   if (ioctl(fd, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP) == -1) {
