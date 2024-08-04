@@ -8,7 +8,8 @@ See https://developer.apple.com/documentation/metalperformanceshaders for more d
 from typing import Union
 
 import torch
-from .. import Tensor
+from torch import Tensor
+
 
 _is_in_bad_fork = getattr(torch._C, "_mps_is_in_bad_fork", lambda: False)
 _default_mps_generator: torch._C.Generator = None  # type: ignore[assignment]
@@ -145,6 +146,7 @@ def is_available() -> bool:
 
 from . import profiler
 from .event import Event
+
 
 __all__ = [
     "device_count",
