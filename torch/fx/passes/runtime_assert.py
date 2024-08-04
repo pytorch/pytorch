@@ -4,6 +4,7 @@ import logging
 import operator
 from typing import Any, Dict, Optional, Set, TYPE_CHECKING
 
+
 # Import sympy and ShapeEnv during TYPE_CHECKING since importing sympy is slow
 if TYPE_CHECKING:
     import sympy
