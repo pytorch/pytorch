@@ -220,7 +220,7 @@ static inline Device ensure_has_index(Device device) {
   return impl->getDevice();
 }
 
-static inline std::optional<Device> ensure_has_index(optional<Device> device) {
+static inline std::optional<Device> ensure_has_index(std::optional<Device> device) {
   if (!device.has_value()) {
     return std::nullopt;
   }
