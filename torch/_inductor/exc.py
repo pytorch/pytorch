@@ -32,13 +32,13 @@ class OperatorIssue(RuntimeError):
 
 
 class MissingOperatorWithoutDecomp(OperatorIssue):
-    def __init__(self, target, args, kwargs) -> None:
+    def __init__(self, target, args, kwargs):
         _record_missing_op(target)
         super().__init__(f"missing lowering\n{self.operator_str(target, args, kwargs)}")
 
 
 class MissingOperatorWithDecomp(OperatorIssue):
-    def __init__(self, target, args, kwargs) -> None:
+    def __init__(self, target, args, kwargs):
         _record_missing_op(target)
         super().__init__(
             f"missing decomposition\n{self.operator_str(target, args, kwargs)}"
@@ -54,7 +54,7 @@ class MissingOperatorWithDecomp(OperatorIssue):
 
 
 class LoweringException(OperatorIssue):
-    def __init__(self, exc: Exception, target, args, kwargs) -> None:
+    def __init__(self, exc: Exception, target, args, kwargs):
         super().__init__(
             f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
         )
@@ -74,12 +74,12 @@ class InvalidCxxCompiler(RuntimeError):
 
 
 class CppWrapperCodeGenError(RuntimeError):
-    def __init__(self, msg: str) -> None:
+    def __init__(self, msg: str):
         super().__init__(f"C++ wrapper codegen error: {msg}")
 
 
 class CppCompileError(RuntimeError):
-    def __init__(self, cmd: list[str], output: str) -> None:
+    def __init__(self, cmd: list[str], output: str):
         if isinstance(output, bytes):
             output = output.decode("utf-8")
 
