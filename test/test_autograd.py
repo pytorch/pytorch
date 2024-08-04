@@ -1373,6 +1373,86 @@ class TestAutograd(TestCase):
         # so that would be ((1 - 2) / 5 + 0.5) * 10 = 3
         self.assertEqual(torch.tensor([3.0, 3.0, 3.0]), tensor.grad)
 
+    def test_register_multi_post_accumulate_grad_hook_requires_grad_false(self):
+        t1 = torch.rand(3, requires_grad=True)
+        t2 = torch.rand(3, requires_grad=False)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "cannot register a hook on a tensor that doesn't require gradient",
+        ):
+            torch.autograd.graph.register_multi_post_accumulate_grad_hook(
+                [t1, t2], lambda _: None
+            )
+
+    def test_register_multi_post_accumulate_grad_hook_non_leaf(self):
+        t1 = torch.rand(3, requires_grad=True)
+        t2 = t1 * 2
+        t3 = torch.rand(3, requires_grad=True)
+
+        with self.assertRaisesRegex(
+            ValueError, "requires all tensors to be leaf tensors"
+        ):
+            torch.autograd.graph.register_multi_post_accumulate_grad_hook(
+                [t2, t3], lambda _: None
+            )
+
+    def test_register_multi_post_accumulate_grad_hook_ordering(self):
+        hook_order: List[int] = []
+        hook_count = 0
+
+        def hook(hook_id: int, *unused):
+            nonlocal hook_count
+            nonlocal hook_order
+            hook_count += 1
+            hook_order.append(hook_id)
+
+        module = torch.nn.Sequential(torch.nn.Linear(3, 3), torch.nn.Linear(3, 3))
+
+        module[0].weight.register_post_accumulate_grad_hook(partial(hook, 0))
+        module[0].bias.register_post_accumulate_grad_hook(partial(hook, 1))
+        handle_0 = torch.autograd.graph.register_multi_post_accumulate_grad_hook(
+            [module[0].weight, module[0].bias], partial(hook, 2)
+        )
+        module[1].weight.register_post_accumulate_grad_hook(partial(hook, 3))
+        module[1].bias.register_post_accumulate_grad_hook(partial(hook, 4))
+        handle_1 = torch.autograd.graph.register_multi_post_accumulate_grad_hook(
+            [module[1].weight, module[1].bias], partial(hook, 5)
+        )
+
+        inp = torch.randn((1, 3))
+        module(inp).sum().backward()
+
+        # Check that the multi-post-accumulate grad hook runs after the
+        # individual post-accumulate grad hooks
+        self.assertEqual(hook_count, 6)
+        # Module 1 runs backward before module 0, and bias accumulates before
+        # weight accumulates
+        self.assertEqual(hook_order, [4, 3, 5, 1, 0, 2])
+
+        hook_order.clear()
+        hook_count = 0
+        handle_0.remove()
+        handle_1.remove()
+        module(inp).sum().backward()
+
+        # Check that the multi-post-accumulate grad hooks do not run if removed
+        self.assertEqual(hook_count, 4)
+        self.assertEqual(hook_order, [4, 3, 1, 0])
+
+        hook_order.clear()
+        hook_count = 0
+        handle = torch.autograd.graph.register_multi_post_accumulate_grad_hook(
+            [module[0].weight, module[0].bias, module[1].weight, module[1].bias],
+            partial(hook, 6),
+        )
+        module[0](inp).sum().backward()
+
+        # Check that the multi-post-accumulate grad hook ignores `module[1]`
+        # parameters since they are not part of this backward
+        self.assertEqual(hook_count, 3)
+        self.assertEqual(hook_order, [1, 0, 6])
+
     def test_hook_with_no_name(self):
         # Create a hook that do not have a __name__ attribute
         class MyHookClass:
@@ -12871,8 +12951,82 @@ class TestMultithreadAutograd(TestCase):
         self._run_py_multithread_fn(backward_retain_graph, (out, t2, t3), num_threads=5)
 
         # Expect all 5 threads to increment count since the hook runs before
-        # the custom backward
+        # the custom backward that raises the error
         self.assertEqual(count[0], 5)
+        self.assertEqual(err_count[0], 1)
+        self.assertEqual(res, "foo")
+
+    def test_multi_post_accumulate_grad_hooks(self):
+        # Multihooks should behave independently per execution of backward
+        # Test that the hook fired the number of times we ran backward
+        # even if those executions occur concurrently on different threads
+        t1 = torch.rand(2, requires_grad=True)
+        t2 = torch.rand(2, requires_grad=True)
+        t3 = torch.rand(2, requires_grad=True)
+        t4 = torch.rand(2, requires_grad=True)
+
+        res = None
+        count = [0]
+        hook_lock = threading.Lock()
+
+        def hook(grad):
+            nonlocal res
+            with hook_lock:
+                count[0] += 1
+                if res is None:
+                    res = "foo"
+                else:
+                    self.assertEqual(res, "foo")
+
+        torch.autograd.graph.register_multi_post_accumulate_grad_hook(
+            (t1, t2, t3, t4), hook
+        )
+
+        out = (t2 * t3).sum()
+
+        def backward_retain_graph(out, t2, t3):
+            out.backward(inputs=(t2, t3), retain_graph=True)
+
+        self._run_py_multithread_fn(backward_retain_graph, (out, t2, t3), num_threads=5)
+        self.assertEqual(count[0], 5)
+        self.assertEqual(res, "foo")
+
+        # Raise an error in one thread's backward
+        res = None
+        count = [0]
+        err_count = [0]
+        bw_count = [0]
+        bw_count_lock = threading.Lock()
+        err_count_lock = threading.Lock()
+
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                with bw_count_lock:
+                    bw_count[0] += 1
+                    if bw_count[0] == 1:
+                        raise RuntimeError("error message")
+                    else:
+                        return gO
+
+        out = (Func.apply(t2) * t3).sum()
+
+        def backward_retain_graph(out, t2, t3):
+            try:
+                out.backward(inputs=(t2, t3), retain_graph=True)
+            except RuntimeError:
+                with err_count_lock:
+                    err_count[0] += 1
+
+        self._run_py_multithread_fn(backward_retain_graph, (out, t2, t3), num_threads=5)
+
+        # Expect only 4 threads to increment count since the hook runs after
+        # the custom backward that raises the error
+        self.assertEqual(count[0], 4)
         self.assertEqual(err_count[0], 1)
         self.assertEqual(res, "foo")
 

@@ -1,12 +1,14 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
+
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
 import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
+from torch.autograd.graph import register_multi_post_accumulate_grad_hook
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_unflatten
@@ -135,6 +137,15 @@ class FSDPParamGroup:
         # - Hook state
         self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
+        # When a module's forward inputs do not require grad, we cannot use
+        # `RegisterPostBackwardFunction` to run post-backward. The queued final
+        # callback may run post-backward too late if there is non-FSDP compute
+        # after this module's backward compute. We register a multi-grad hook
+        # on the unsharded parameters to run the post-backward earlier.
+        self._multi_grad_hook_handle: Optional[RemovableHandle] = None
+        # Guard whether to run the multi-grad hook based on whether the current
+        # forward's inputs require gradient or not
+        self._run_multi_grad_hook: bool = False
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
@@ -394,6 +405,10 @@ class FSDPParamGroup:
                 reduce_scatter_input, reduce_scatter_event
             )
 
+    def _multi_grad_post_backward(self, *args: Any, **kwargs: Any):
+        if self._run_multi_grad_hook:
+            return self.post_backward(*args, **kwargs)
+
     def finalize_backward(self):
         if self._post_reduce_event is not None:
             torch.cuda.current_stream().wait_event(self._post_reduce_event)
@@ -494,7 +509,25 @@ class FSDPParamGroup:
                 inp_tensor_indices.append(i)
                 inp_tensors.append(obj)
         if len(inp_tensors) == 0:
+            unsharded_params = [
+                fsdp_param.unsharded_param for fsdp_param in self.fsdp_params
+            ]
+            # Guard using this flag in case that whether the module inputs
+            # require grad or not is dynamic from iteration to iteration or if
+            # any unsharded parameters are frozen (where we conservatively do
+            # not run this hook in case the trainability is changing)
+            self._run_multi_grad_hook = (
+                all(t.requires_grad for t in unsharded_params)
+                and len(unsharded_params) > 0
+            )
+            # Only need to register once since the unsharded parameter objects
+            # are preserved from iteration to iteration in eager
+            if self._run_multi_grad_hook and self._multi_grad_hook_handle is None:
+                self._multi_grad_hook_handle = register_multi_post_accumulate_grad_hook(
+                    unsharded_params, self._multi_grad_post_backward
+                )
             return args, kwargs  # no tensors that require gradients
+        self._run_multi_grad_hook = False
         inp_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
         for inp_tensor_idx, inp_tensor in zip(inp_tensor_indices, inp_tensors):
             args_kwargs_list[inp_tensor_idx] = inp_tensor

@@ -358,6 +358,8 @@ Also see :ref:`saved-tensors-hooks-doc`.
 
 .. autoclass:: torch.autograd.graph.register_multi_grad_hook
 
+.. autoclass:: torch.autograd.graph.register_multi_post_accumulate_grad_hook
+
 .. autoclass:: torch.autograd.graph.allow_mutation_on_saved_tensors
 
 .. autoclass:: torch.autograd.graph.GradientEdge

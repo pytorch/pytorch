@@ -2286,6 +2286,10 @@ known_failing_tests = {
     "test_inplace_on_view_backward",  # RuntimeError: compiled_autograd does not support create_graph
     "test_multi_grad_any_hooks",  # register_multi_grad_hook NYI
     "test_multi_grad_all_hooks",  # retains_grad_hooks NYI
+    "test_register_multi_post_accumulate_grad_hook_requires_grad_false",  # register_multi_post_accumulate_grad_hook NYI
+    "test_register_multi_post_accumulate_grad_hook_non_leaf",  # register_multi_post_accumulate_grad_hook NYI
+    "test_register_multi_post_accumulate_grad_hook_ordering",  # register_multi_post_accumulate_grad_hook NYI
+    "test_multi_post_accumulate_grad_hooks",  # register_multi_post_accumulate_grad_hook NYI
     "test_nested_anomaly_detect_nan",  # RuntimeError: compiled_autograd does not support create_graph
     "test_nested_anomaly_printstack_cleanup",  # RuntimeError: compiled_autograd does not support create_graph
     "test_once_differentiable",  # RuntimeError: compiled_autograd does not support create_graph

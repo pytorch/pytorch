@@ -547,6 +547,63 @@ def register_multi_grad_hook(
     return _MultiHandle(handles)  # type: ignore[possibly-undefined]
 
 
+def register_multi_post_accumulate_grad_hook(
+    tensors: Sequence[torch.Tensor], fn: Callable[[Tuple[torch.Tensor, ...]], None]
+) -> RemovableHandle:
+    r"""Register a multi-post-accumulate-grad backward hook.
+
+    The hook ``fn`` will run after all gradients of all tensors in
+    :attr:`tensors` have been accumulated, where all tensors must be leaf
+    tensors. If a tensor is in :attr:`tensors` but is not part of the graph or
+    not needed to compute the gradients for any ``inputs`` specified for the
+    current ``.backward()`` or ``.grad()`` call, this tensor will be ignored,
+    and the hook will not wait for its gradient to be accumulated.
+
+    The hook ``fn`` should have the following signature::
+
+        fn(tensors: Tuple[torch.Tensor, ...]) -> None
+
+    The hook ``fn`` will get the ``tensors`` passed as :attr:`tensors`. The
+    hook is like an "all" multi-hook version of
+    :meth:`torch.Tensor.register_post_accumulate_grad_hook`, where the hook
+    only runs after each tensor's post-accumulate-grad hook has run.
+    """
+    if any(not t.requires_grad for t in tensors):
+        raise ValueError(
+            "cannot register a hook on a tensor that doesn't require gradient"
+        )
+    if not all(t.is_leaf for t in tensors):
+        raise ValueError("requires all tensors to be leaf tensors")
+    if len(tensors) == 0:
+        return _MultiHandle(tuple())
+
+    acc_grads = [_get_grad_fn_or_grad_acc(t) for t in tensors]
+    count: Dict[int, int] = dict()
+    nb_calls = None
+    lock = threading.Lock()
+
+    @functools.wraps(fn)
+    def wrapped_fn(tensor: torch.Tensor) -> None:
+        nonlocal count, nb_calls
+        id = torch._C._current_graph_task_id()
+        assert id != -1, "expected this hook to be called inside a backward call"
+        count[id] = count.get(id, 0)
+
+        with lock:
+            curr_count, count[id] = count[id], count[id] + 1
+            if curr_count == 0:
+                # On the first call, compute the actual nb_calls
+                nb_calls = sum(map(torch._C._will_engine_execute_node, acc_grads))
+
+        assert nb_calls is not None
+        if curr_count == nb_calls - 1:
+            fn(tuple(tensors))
+            del count[id]
+
+    handles = tuple(t.register_post_accumulate_grad_hook(wrapped_fn) for t in tensors)
+    return _MultiHandle(handles)
+
+
 # NOTE [Allow mutation on tensors saved for backward]
 #
 # 1. Tensor gets saved for backward

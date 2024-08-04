@@ -42,6 +42,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPTest,
     FSDPTestMultiThread,
     MLP,
+    patch_all_reduce,
     patch_post_backward,
     patch_reshard,
     patch_unshard,
@@ -910,6 +911,95 @@ class TestFullyShardPrefetch(FSDPTest):
                 optim.step()
                 optim.zero_grad()
 
+    @skip_if_lt_x_gpu(2)
+    def test_multi_grad_post_backward(self):
+        class Model(nn.Module):
+            def __init__(self, dim: int):
+                super().__init__()
+                self.lin1 = nn.Linear(dim, dim)
+                self.lin2 = nn.Linear(dim, dim)
+                self.mlp = MLP(dim)
+                for param in self.lin2.parameters():
+                    param.requires_grad_(False)
+
+            def forward(self, x: torch.Tensor, train_mlp_inp: bool) -> torch.Tensor:
+                y1 = self.lin1(x)  # grad flows through z
+                y2 = self.lin2(x)  # no grad (frozen)
+                if not train_mlp_inp:
+                    y2.requires_grad_(False)
+                else:
+                    y2.requires_grad_(True)
+                z = self.mlp(y2) + y1
+                return z
+
+        dim = 8
+        torch.manual_seed(42)
+        model = Model(dim).cuda()
+        ref_model = copy.deepcopy(model)
+        for param in ref_model.parameters():
+            if param.requires_grad:
+                param.register_post_accumulate_grad_hook(
+                    lambda g: dist.all_reduce(g, op=dist.ReduceOp.AVG)
+                )
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+
+        fully_shard(model.mlp.out_proj)
+        fully_shard(model.mlp)  # root owns `in_proj`
+        # Manually register all-reduce hooks instead of using `replicate` or
+        # DPP since we cannot patch the C++ all-reduce easily from Python
+        for param in model.lin1.parameters():
+            param.register_post_accumulate_grad_hook(
+                lambda g: dist.all_reduce(g, op=dist.ReduceOp.AVG)
+            )
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(42)
+        inp = torch.randn(2, dim, device="cuda")
+
+        # Check event ordering
+        events: List[Union[EventType, str]] = []
+        post_backward_with_record = self._get_post_backward_with_record(
+            FSDPParamGroup.post_backward, events
+        )
+        all_reduce_with_record = self._get_all_reduce_with_record(
+            dist.all_reduce, events
+        )
+        with patch_post_backward(post_backward_with_record), patch_all_reduce(
+            all_reduce_with_record
+        ):
+            # Run multiple iterations to ensure hook runs once per backward
+            # and to alternate whether the module input requires grad
+            for iter_idx in range(5):
+                loss = model(inp, train_mlp_inp=(iter_idx % 2 == 1)).sum()
+                self.assertEqual(events, [])
+                loss.backward()
+                expected_events = [
+                    ("post_backward", "out_proj", TrainingState.POST_BACKWARD),
+                    # Importantly, check that the root `mlp`'s backward runs
+                    # *before* the `lin1` all-reduces rather than at the end of
+                    # the entire backward pass
+                    ("post_backward", "", TrainingState.POST_BACKWARD),
+                    "all_reduce",
+                    "all_reduce",
+                ]
+                self.assertEqual(events, expected_events)
+                events.clear()
+
+        # Check correctness
+        optim.zero_grad()
+        for iter_idx in range(5):
+            train_mlp_inp = iter_idx % 2 == 1
+            ref_loss = ref_model(inp, train_mlp_inp=train_mlp_inp).sum()
+            ref_loss.backward()
+            loss = model(inp, train_mlp_inp=train_mlp_inp).sum()
+            loss.backward()
+            ref_optim.step()
+            with implicit_replication():
+                optim.step()
+            ref_optim.zero_grad()
+            optim.zero_grad()
+            self.assertEqual(ref_loss, loss)
+
     def _init_transformer(
         self,
         n_layers: int,
@@ -973,6 +1063,17 @@ class TestFullyShardPrefetch(FSDPTest):
             return ret
 
         return post_backward_with_record
+
+    def _get_all_reduce_with_record(
+        self, orig_all_reduce: Callable, events: List[EventType]
+    ) -> Callable:
+        def all_reduce_with_record(*args, **kwargs):
+            nonlocal events
+            ret = orig_all_reduce(*args, **kwargs)
+            events.append("all_reduce")
+            return ret
+
+        return all_reduce_with_record
 
 
 class TestFullyShardUnshardMultiProcess(FSDPTest):
