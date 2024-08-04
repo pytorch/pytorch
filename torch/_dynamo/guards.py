@@ -37,6 +37,16 @@ from weakref import ReferenceType
 
 import torch
 import torch.utils._device
+from torch._C._dynamo.guards import (
+    check_obj_id,
+    check_type_id,
+    dict_version,
+    DictGuardManager,
+    install_no_tensor_aliasing_guard,
+    install_object_aliasing_guard,
+    RootGuardManager,
+    TensorGuards,
+)
 from torch._dynamo.source import (
     is_from_flatten_script_object_source,
     is_from_local_source,
@@ -89,6 +99,7 @@ from .source import (
     TypeSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
+    UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
@@ -126,18 +137,6 @@ recompiles_verbose_log = torch._logging.getArtifactLogger(
     __name__, "recompiles_verbose"
 )
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
-
-TensorGuards = torch._C._dynamo.guards.TensorGuards
-check_obj_id = torch._C._dynamo.guards.check_obj_id
-check_type_id = torch._C._dynamo.guards.check_type_id
-dict_version = torch._C._dynamo.guards.dict_version
-
-RootGuardManager = torch._C._dynamo.guards.RootGuardManager
-DictGuardManager = torch._C._dynamo.guards.DictGuardManager
-install_object_aliasing_guard = torch._C._dynamo.guards.install_object_aliasing_guard
-install_no_tensor_aliasing_guard = (
-    torch._C._dynamo.guards.install_no_tensor_aliasing_guard
-)
 
 
 class GuardManager:
@@ -877,7 +876,7 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif istype(source, AttrSource):
+        elif istype(source, (AttrSource, UnspecializedParamBufferSource)):
             assert base_guard_manager  # to make mypy happy
 
             if (
@@ -1916,7 +1915,7 @@ class GuardBuilder(GuardBuilderBase):
             #
             assert guard.source is not None
             static, reason = tensor_always_has_static_shape(
-                value, is_tensor=True, guard_source=guard.source
+                value, is_tensor=True, tensor_source=guard.originating_source
             )
 
             if not static:

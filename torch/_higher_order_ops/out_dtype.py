@@ -45,7 +45,7 @@ class OutDtypeOperator(HigherOrderOperator):
         3. Cast the output to `out_dtype`
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("out_dtype")
         # TODO(ydwu4): Subclassing HigherOrderOperator causes __module__ to
         # become different (torch._higher_order_ops.out_dtype) which will result

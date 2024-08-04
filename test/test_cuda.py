@@ -1176,7 +1176,7 @@ except RuntimeError as e:
         MultiplyInStream = self._make_multiply_in_stream()
 
         class StreamModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.event = torch.cuda.Event()
                 self.stream0 = torch.cuda.Stream()
@@ -1846,9 +1846,7 @@ torch.cuda.synchronize()
             },
         )
 
-        with torch.autocast(
-            "cuda",
-        ):
+        with torch.autocast("cuda"):
             output = mymm(x, y, torch.float32)
             self.assertTrue(output.dtype is torch.float32)
             loss = output.sum()
@@ -1991,9 +1989,7 @@ torch.cuda.synchronize()
                     )
                     h = (h, c)
 
-                with torch.autocast(
-                    "cuda",
-                ):
+                with torch.autocast("cuda"):
                     out, h_out = rnn(x, h)
                 out = out.data if input_layout == "packed" else out
                 self.assertEqual(out.dtype, torch.float16)
@@ -2048,9 +2044,7 @@ torch.cuda.synchronize()
         linear = torch.nn.Linear(10, 10).to("cuda")
         data = torch.randn(1, 10, device="cuda")
 
-        with torch.autocast(
-            "cuda",
-        ):
+        with torch.autocast("cuda"):
             with torch.no_grad():
                 out = linear(data)
                 first_iter_mem = torch.cuda.memory_allocated()
@@ -3475,22 +3469,10 @@ exit(2)
                     },
                 )
                 for optimizer_ctor, foreach, decoupled_weight_decay, weight_decay in product(
-                    (
-                        torch.optim.NAdam,
-                        torch.optim.RAdam,
-                    ),
-                    (
-                        False,
-                        True,
-                    ),
-                    (
-                        False,
-                        True,
-                    ),
-                    (
-                        0.0,
-                        0.1,
-                    ),
+                    (torch.optim.NAdam, torch.optim.RAdam),
+                    (False, True),
+                    (False, True),
+                    (0.0, 0.1),
                 )
             ]
             + [
@@ -3499,14 +3481,8 @@ exit(2)
                     {"lr": 0.1, "foreach": foreach, "maximize": maximize},
                 )
                 for foreach, maximize in product(
-                    (
-                        False,
-                        True,
-                    ),
-                    (
-                        False,
-                        True,
-                    ),
+                    (False, True),
+                    (False, True),
                 )
             ]
             + [
@@ -3901,7 +3877,7 @@ exit(2)
                 return grad_output * ctx.constant, None
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.nn.Parameter(torch.randn(()))
 
