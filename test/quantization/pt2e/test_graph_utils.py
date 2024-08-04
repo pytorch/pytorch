@@ -4,7 +4,6 @@ import unittest
 
 import torch
 import torch._dynamo as torchdynamo
-
 from torch.ao.quantization.pt2e.graph_utils import (
     find_sequential_partitions,
     get_equivalent_types,
@@ -17,7 +16,7 @@ class TestGraphUtils(TestCase):
     @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on Windows")
     def test_conv_bn_conv_relu(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = torch.nn.Conv2d(3, 3, 3)
                 self.bn1 = torch.nn.BatchNorm2d(3)
@@ -63,7 +62,7 @@ class TestGraphUtils(TestCase):
     @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on Windows")
     def test_conv_bn_relu(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bn1 = torch.nn.BatchNorm2d(3)
                 self.conv2 = torch.nn.Conv2d(3, 3, 3)
@@ -98,7 +97,7 @@ class TestGraphUtils(TestCase):
     @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on Windows")
     def test_customized_equivalet_types_dict(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
 

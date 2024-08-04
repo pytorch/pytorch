@@ -11,7 +11,6 @@ import os
 import traceback
 import typing
 import weakref
-
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import (
@@ -36,7 +35,6 @@ from typing_extensions import Self, TypeGuard
 from weakref import ReferenceType
 
 import torch
-
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._prims_common import suggest_memory_format
@@ -62,7 +60,9 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
+
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -152,17 +152,19 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
 
 def get_plain_tensors(subclass: Tensor) -> List[Tensor]:
     assert is_traceable_wrapper_subclass(subclass)
-    plain_tensors = []
+    plain_tensors: List[Tensor] = []
     todo = [subclass]
     while todo:
         curr = todo.pop()
+        if not is_traceable_wrapper_subclass(curr):
+            assert isinstance(curr, Tensor)
+            plain_tensors.append(curr)
+            continue
+
         inner_keys, _ = curr.__tensor_flatten__()
-        for key in inner_keys:
-            val = getattr(curr, key)
-            if not is_traceable_wrapper_subclass(val):
-                plain_tensors.append(val)
-            else:
-                todo.append(val)
+        for key in reversed(inner_keys):
+            todo.append(getattr(curr, key))
+
     return plain_tensors
 
 
@@ -1077,6 +1079,7 @@ class FakeTensorMode(TorchDispatchMode):
         export: bool = False,
     ) -> None:
         log.debug("create_mode 0x%x", id(self))
+        super().__init__()
         self.allow_fallback_kernels = allow_fallback_kernels
 
         import torch._dynamo.config
@@ -1230,6 +1233,10 @@ class FakeTensorMode(TorchDispatchMode):
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
             if maybe_prev_only_lift_cpu_tensors is not None:
                 torch._C._set_only_lift_cpu_tensors(maybe_prev_only_lift_cpu_tensors)
+
+    @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
 
     @classmethod
     def cache_info(cls) -> DispatchCacheInfo:
@@ -2338,10 +2345,10 @@ _DISPATCH_HANDLE_DIRECTLY = ordered_set(
 )
 
 from torch._subclasses.fake_impls import (  # noqa: F401
-    _device_not_kwarg_ops,  # noqa: F401
-    _is_tensor_constructor,  # noqa: F401
-    _like_tensor_constructors,  # noqa: F401
-    contains_tensor_types,  # noqa: F401
+    _device_not_kwarg_ops,
+    _is_tensor_constructor,
+    _like_tensor_constructors,
+    contains_tensor_types,
     get_fast_op_impls,
     has_meta,
     op_implementations_checks,
