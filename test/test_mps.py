@@ -975,7 +975,7 @@ def mps_ops_modifier(ops):
         'nn.functional.scaled_dot_product_attention': [torch.float32, torch.float16],
 
         # Failures due to casting negative float to uint8 is undefined
-        'byte': [torch.float16, torch.float32],
+        # 'byte': [torch.float16, torch.float32],
         # float output for float16 input on MPS
         'logit': [torch.float16],
     }
