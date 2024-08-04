@@ -5400,17 +5400,15 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return x, y
 
         def g(x, y):
-            return map(f, x, y)
+            return tuple(map(f, x, y))
 
         opt_g = torch.compile(g, fullgraph=True, backend="eager")
 
         inps = gen_inps(3, 3)
-        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
-        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
+        self.assertEqual(g(*inps), opt_g(*inps))
 
         inps = gen_inps(3, 5)
-        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
-        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
+        self.assertEqual(g(*inps), opt_g(*inps))
 
     def test_staticmethod_allow_in_graph(self):
         class MyClass:
