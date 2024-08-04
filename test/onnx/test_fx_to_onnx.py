@@ -620,7 +620,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(onnx_program.model_proto)
 
     def test_exported_program_input_with_custom_fx_tracer(self):
-        from torch.onnx._internal import exporter
+        from torch.onnx._internal import _exporter_legacy
         from torch.onnx._internal.fx import dynamo_graph_extractor
 
         class Model(torch.nn.Module):
@@ -631,7 +631,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         exported_program = torch.export.export(Model(), args=(x,))
 
         export_options = torch.onnx.ExportOptions()
-        export_options = exporter.ResolvedExportOptions(
+        export_options = _exporter_legacy.ResolvedExportOptions(
             export_options, model=exported_program
         )
         export_options.fx_tracer = (
