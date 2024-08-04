@@ -644,9 +644,6 @@
   "torch.nn.parallel.scatter_gather": [
     "is_namedtuple"
   ],
-  "torch.nn.parameter": [
-    "OrderedDict"
-  ],
   "torch.nn.utils.rnn": [
     "bind",
     "PackedSequence_"

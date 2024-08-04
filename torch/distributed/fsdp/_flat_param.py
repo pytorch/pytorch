@@ -28,6 +28,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from torch._parameter import _ParameterMeta
 from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
     _named_parameters_with_duplicates,
@@ -41,7 +42,6 @@ from torch.distributed.utils import (
     _free_storage,
     _p_assert,
 )
-from torch.nn.parameter import _ParameterMeta
 from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
 
 from ._fsdp_extensions import (
@@ -1903,6 +1903,7 @@ class FlatParamHandle:
                         nn.Parameter(view, requires_grad=flat_param.requires_grad),
                     )
                     continue
+                assert self.flat_param._params is not None
                 param = self.flat_param._params[i]
                 self._setattr_param(module, param_name, param)
                 param.data = view
@@ -1917,12 +1918,15 @@ class FlatParamHandle:
                 if self._use_orig_params:
                     if self._training_state == HandleTrainingState.FORWARD:
                         # Save the `Tensor` for the pre-backward
-                        self.flat_param._tensors[i] = view  # save for pre-backward
+                        assert self.flat_param._tensors is not None
+                        self.flat_param._tensors[i] = view
                     elif self._training_state == HandleTrainingState.BACKWARD_PRE:
                         # Use the saved `Tensor` variable from the forward to
                         # preserve the autograd graph so that the post-backward
                         # hook fires (e.g. for reentrant AC)
+                        assert self.flat_param._tensors is not None
                         tensor = self.flat_param._tensors[i]
+                        assert tensor is not None
                         tensor.data = view
                         param_var = tensor
                 self._setattr_tensor(module, param_name, param_var)
