@@ -3430,7 +3430,7 @@ class DLLWrapper:
     def __init__(
         self,
         lib_path: str,
-    ) -> None:
+    ):
         self.lib_path = lib_path
         self.is_open = False
         self.DLL = cdll.LoadLibrary(lib_path)
@@ -3677,7 +3677,7 @@ class TritonFuture(CodeCacheFuture):
         self,
         kernel: Any,
         future: Optional[Future[Any]],
-    ) -> None:
+    ):
         self.kernel = kernel
         self.future = future
 

@@ -64,7 +64,7 @@ class MemoryDep(Dep):
     size: Tuple[sympy.Expr, ...]
     mode: Optional[str] = None
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return f"MemoryDep({self.name!r}, {self.index}, {self.ranges}, {self.mode})"
 
     def get_offset(self):
@@ -352,7 +352,7 @@ class ReadWrites:
 
 
 class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
-    def __init__(self, var_ranges: VarRanges, normalize: bool) -> None:
+    def __init__(self, var_ranges: VarRanges, normalize: bool):
         super().__init__()
         self._reads: OrderedSet[Dep] = OrderedSet()
         self._writes: OrderedSet[MemoryDep] = OrderedSet()
@@ -439,7 +439,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 class _OpCounter:
     """Shim to count how many times each op is used"""
 
-    def __init__(self, inner) -> None:
+    def __init__(self, inner):
         super().__init__()
         self.parent_handler = inner
         self._op_counts: typing.Counter[Any] = collections.Counter()
@@ -450,7 +450,7 @@ class _OpCounter:
 
 
 class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
-    def __init__(self, var_ranges: VarRanges, normalize: bool) -> None:
+    def __init__(self, var_ranges: VarRanges, normalize: bool):
         parent_handler = _RecordLoadStoreInner(
             var_ranges=var_ranges, normalize=normalize
         )

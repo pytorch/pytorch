@@ -701,7 +701,7 @@ class WhyNoFuse:
     reason: str
     args: Tuple[Any, ...]
 
-    def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
+    def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         self.node1 = node1
         self.node2 = node2
 
