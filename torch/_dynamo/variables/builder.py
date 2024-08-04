@@ -193,6 +193,8 @@ from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariabl
 from .user_defined import (
     KeyedJaggedTensorVariable,
     SourcelessGraphModuleVariable,
+    UnsupportedRemovableHandleVariable,
+    UnsupportedRemovableMultiHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
     WeakRefVariable,
@@ -402,6 +404,7 @@ class VariableBuilder:
             (re.Pattern, cls.wrap_regex_pattern),
             (weakref.ReferenceType, cls.wrap_weakref),
             (torch.utils.hooks.RemovableHandle, cls.wrap_removable_handle),
+            (torch.autograd.graph._MultiHandle, cls.wrap_removable_multi_handle),
             (torch.jit.ScriptFunction, cls.wrap_jit_function),
         ]
 
@@ -426,11 +429,12 @@ class VariableBuilder:
         return WeakRefVariable(value, source=self.source)
 
     def wrap_removable_handle(self, value):
-        # This means that the removable handle was created in some other frame.
-        # Our current infra requires the hook to be registered and removed in
-        # the same frame. So graph break.
-        # Related test - PYTORCH_TEST_WITH_DYNAMO=1 python test/test_autograd.py -k TestAutograd.test_hooks
-        unimplemented("unregistered hook removable handle")
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        return UnsupportedRemovableHandleVariable(value)
+
+    def wrap_removable_multi_handle(self, value):
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        return UnsupportedRemovableMultiHandleVariable(value)
 
     def wrap_jit_function(self, value):
         self.install_guards(GuardBuilder.TYPE_MATCH)

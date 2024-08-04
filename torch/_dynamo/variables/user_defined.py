@@ -1146,3 +1146,55 @@ class RemovableHandleVariable(VariableTracker):
 
     def python_type(self):
         return RemovableHandleClass
+
+
+class UnsupportedRemovableHandleVariable(VariableTracker):
+    """
+    This variable class is only for removable handles that are registered and removed
+    in two different frames.
+    Our current infra requires the hook to be registered and removed in the same frame.
+    So for these invalid hooks, we only support its `.remove()` method and graph break
+    on all other methods.
+
+    Related test - PYTORCH_TEST_WITH_DYNAMO=1 python test/test_autograd.py -k TestAutograd.test_hooks
+    """
+
+    def __init__(
+        self,
+        value,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def call_method(self, tx, method_name, args, kwargs):
+        if method_name == "remove":
+            self.value.remove()
+            return variables.ConstantVariable.create(None)
+        else:
+            unimplemented("unregistered hook removable handle")
+
+
+class UnsupportedRemovableMultiHandleVariable(VariableTracker):
+    """
+    This variable class is only for removable multi-handles that are registered and removed
+    in two different frames.
+    Our current infra requires the hook to be registered and removed in the same frame.
+    So for these invalid hooks, we only support its `.remove()` method and graph break
+    on all other methods.
+    """
+
+    def __init__(
+        self,
+        value,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def call_method(self, tx, method_name, args, kwargs):
+        if method_name == "remove":
+            self.value.remove()
+            return variables.ConstantVariable.create(None)
+        else:
+            unimplemented("unregistered hook removable multi-handle")
