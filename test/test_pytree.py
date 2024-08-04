@@ -2,7 +2,10 @@
 
 import collections
 import inspect
+import os
 import re
+import subprocess
+import sys
 import unittest
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass
@@ -737,6 +740,35 @@ class TestPythonPytree(TestCase):
                 DummyType,
                 lambda dummy: ([dummy.x, dummy.y], None),
                 lambda xs, _: DummyType(*xs),
+            )
+
+    def test_import_pytree_doesnt_import_optree(self):
+        # importing torch.utils._pytree shouldn't import optree.
+        # only importing torch.utils._cxx_pytree should.
+        script = """
+import sys
+import torch
+import torch.utils._pytree
+assert "torch.utils._pytree" in sys.modules
+if "torch.utils._cxx_pytree" in sys.modules:
+    raise RuntimeError("importing torch.utils._pytree should not import torch.utils._cxx_pytree")
+if "optree" in sys.modules:
+    raise RuntimeError("importing torch.utils._pytree should not import optree")
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(
+                msg=(
+                    "Subprocess exception while attempting to run test: "
+                    + e.output.decode("utf-8")
+                )
             )
 
     def test_treespec_equality(self):

@@ -471,6 +471,7 @@ inductor_core_resources = [
     "torch/csrc/inductor/aoti_torch/shim_common.cpp",
     "torch/csrc/inductor/aoti_torch/tensor_converter.cpp",
     "torch/csrc/inductor/aoti_torch/mkldnn_tensor.cpp",
+    "torch/csrc/inductor/aoti_torch/oss_proxy_executor.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
 ]
 
@@ -691,7 +692,6 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/Utils.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
-    "torch/csrc/monitor/instrumentation.cpp",
 ]
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
@@ -770,6 +770,7 @@ libtorch_python_cuda_core_sources = [
     "torch/csrc/cuda/python_comm.cpp",
     "torch/csrc/cuda/Stream.cpp",
     "torch/csrc/cuda/Graph.cpp",
+    "torch/csrc/cuda/MemPool.cpp",
     "torch/csrc/cuda/shared/cudart.cpp",
     "torch/csrc/cuda/shared/nvtx.cpp",
     "torch/csrc/cuda/utils.cpp",

@@ -76,13 +76,13 @@ def forward(self, arg1_1):
     add = torch.ops.aten.add.Tensor(arg1_1, arg1_1);  arg1_1 = None
     with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops.aten._print.default, 'moo');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
-    _sink_tokens_default = torch.ops.prims._sink_tokens.default((getitem_2,));  getitem_2 = None
+    _sink_tokens_default = torch.ops.prims._sink_tokens.default((getitem_2,));  getitem_2 = _sink_tokens_default = None
     return (add,)""",  # noqa: B950
             )
 
     def test_torchbind_custom_op(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -108,9 +108,9 @@ def forward(self, arg0_1, arg1_1):
 
     def test_print_with_buffer_mutations(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buf", torch.ones(3))
+                self.buf = torch.nn.Buffer(torch.ones(3))
 
             def forward(self, x):
                 torch.ops.aten._print("moo")
@@ -143,7 +143,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
     def test_print_with_input_mutations(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -304,7 +304,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                     return torch.nn.functional.linear(x, self.weight, self.bias)
 
             class MockModule(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.linear = MyLinear(10, 10)
                     self.register_buffer(

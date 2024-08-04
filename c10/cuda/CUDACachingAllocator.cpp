@@ -798,14 +798,15 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
   }
 }
 
-class TraceEntryRingBuffer {
+template <class T>
+class RingBuffer {
  public:
-  TraceEntryRingBuffer() {
+  RingBuffer() {
     // alloc_trace is a pointer because we need to intentionally
     // leak this on deallocation it can hold references to Python
     // state which will already be destroyed when we are in exit handlers
     // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
-    alloc_trace = new std::vector<TraceEntry>();
+    alloc_trace = new std::vector<T>();
   }
 
   void setMaxEntries(size_t size) {
@@ -813,32 +814,32 @@ class TraceEntryRingBuffer {
     alloc_trace_max_entries_ = std::max(size_t(1), size);
   }
 
-  void insertTraceEntries(const TraceEntry& te) {
+  void insertEntries(const T& entry) {
     std::lock_guard<std::mutex> lk(alloc_trace_lock);
     if (alloc_trace->size() < alloc_trace_max_entries_) {
-      alloc_trace->emplace_back(te);
+      alloc_trace->emplace_back(entry);
     } else {
-      (*alloc_trace)[alloc_trace_next++] = te;
+      (*alloc_trace)[alloc_trace_next++] = entry;
       if (alloc_trace_next == alloc_trace_max_entries_) {
         alloc_trace_next = 0;
       }
     }
   }
 
-  void getTraceEntries(std::vector<TraceEntry>& result) {
+  void getEntries(std::vector<T>& result) {
     std::lock_guard<std::mutex> lk(alloc_trace_lock);
     result.reserve(alloc_trace->size());
     result.insert(
         result.end(),
         alloc_trace->begin() +
-            static_cast<std::vector<TraceEntry>::difference_type>(
+            static_cast<typename std::vector<T>::difference_type>(
                 alloc_trace_next),
         alloc_trace->end());
     result.insert(
         result.end(),
         alloc_trace->begin(),
         alloc_trace->begin() +
-            static_cast<std::vector<TraceEntry>::difference_type>(
+            static_cast<typename std::vector<T>::difference_type>(
                 alloc_trace_next));
   }
 
@@ -855,7 +856,7 @@ class TraceEntryRingBuffer {
   // under alloc_trace_lock.
   std::mutex alloc_trace_lock;
   size_t alloc_trace_next = 0;
-  std::vector<TraceEntry>*
+  std::vector<T>*
       alloc_trace; // pointer because we need to intentionally leak this on
                    // deallocation it can hold references to Python state which
                    // will already be destroyed when we are in exit handlers
@@ -973,7 +974,7 @@ class DeviceCachingAllocator {
   RecordContext record_context_ = RecordContext::NEVER;
 
   // Ring buffer for memory snapshot TraceEntry's
-  TraceEntryRingBuffer alloc_buffer;
+  RingBuffer<TraceEntry> alloc_buffer;
 
   // Members specific to CUDA graphs
 
@@ -1019,10 +1020,6 @@ class DeviceCachingAllocator {
     if (!enabled) {
       alloc_buffer.clear();
     }
-  }
-
-  void recordAnnotation(const std::shared_ptr<GatheredContext>& name) {
-    record_trace(TraceEntry::USER_DEFINED, 0, 0, nullptr, 0, name);
   }
 
   bool isHistoryEnabled() {
@@ -1633,12 +1630,12 @@ class DeviceCachingAllocator {
       params.stat_types = get_stat_types_for_pool(pool);
 
       // splitting a block depends on `max_split_size`, which may have changed
-      // between whe checkpoint was taken and now, so we make sure to recreate
+      // between when checkpoint was taken and now, so we make sure to recreate
       // the behavior from the checkpoint. Keep splitting as long as there is
       // space left in the block because the block is already the size of how it
       // appears in the segment, so any leftover space belongs to the next
       // block.
-      bool split = curr_block->size - block_state.size > 0;
+      bool split = curr_block->size > block_state.size;
 
       // curr_block will become next pointer if it is split, so reassign with
       // the returned value
@@ -1859,7 +1856,7 @@ class DeviceCachingAllocator {
       const std::function<time_t(approx_time_t)>& tsc_to_us) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     std::vector<TraceEntry> result;
-    alloc_buffer.getTraceEntries(result);
+    alloc_buffer.getEntries(result);
 
     // Convert all the timestamps from tsc to epoch time in microseconds.
     for (auto& te : result) {
@@ -2507,12 +2504,20 @@ class DeviceCachingAllocator {
     if (isRetry) {
       stats.num_alloc_retries += 1;
     }
+#ifdef FBCODE_CAFFE2
+    bool in_fbcode = true;
+#else
+    bool in_fbcode = false;
+#endif
 
     if (set_fraction &&
         total_allocated_memory + size > allowed_memory_maximum) {
       p.err = cudaErrorMemoryAllocation;
       return false;
-    } else if (CUDAAllocatorConfig::expandable_segments()) {
+      // Temporarily disable checkpointing & cudagraphs internally
+    } else if (
+        CUDAAllocatorConfig::expandable_segments() &&
+        !(in_fbcode && p.pool->owner_PrivatePool)) {
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
       if (p.block) {
@@ -2972,7 +2977,7 @@ class DeviceCachingAllocator {
     }
 
     if (record_history) {
-      alloc_buffer.insertTraceEntries(te);
+      alloc_buffer.insertEntries(te);
     }
   }
 };
@@ -3028,7 +3033,10 @@ class NativeCachingAllocator : public CUDAAllocator {
     allocated_blocks[mutex_shard_id][block->ptr] = block;
   }
 
+  // Variables by memory snapshot
   c10::ApproximateClockToUnixTimeConverter clock_converter;
+  bool record_history = false;
+  RingBuffer<AnnotationEntry> annotation_buffer;
 
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
@@ -3118,16 +3126,29 @@ class NativeCachingAllocator : public CUDAAllocator {
       CreateContextFn context_recorder,
       size_t alloc_buffer_max_entries,
       RecordContext when) override {
+    record_history = enabled;
+    annotation_buffer.setMaxEntries(alloc_buffer_max_entries);
+    annotation_buffer.clear();
     for (auto& allocator : device_allocator) {
       allocator->recordHistory(
           enabled, context_recorder, alloc_buffer_max_entries, when);
     }
   }
 
-  void recordAnnotation(const std::shared_ptr<GatheredContext>& name) override {
+  void recordAnnotation(
+      const std::vector<std::pair<std::string, std::string>>& md) override {
+    if (!record_history) {
+      return;
+    }
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    device_allocator[device]->recordAnnotation(name);
+    auto ae = AnnotationEntry(
+        /*device=*/device,
+        /*time=*/getApproximateTime());
+    for (const auto& md_pair : md) {
+      ae.recordUserMetadata(md_pair.first, md_pair.second);
+    }
+    annotation_buffer.insertEntries(ae);
   }
 
   bool isHistoryEnabled() override {
@@ -3206,6 +3227,14 @@ class NativeCachingAllocator : public CUDAAllocator {
     };
 
     SnapshotInfo result;
+
+    // Get AnnotationEntry list and convert the timestamps.
+    annotation_buffer.getEntries(result.external_annotations);
+    for (auto& ae : result.external_annotations) {
+      ae.time_.t_ = tsc_to_us(ae.time_.approx_t_);
+    }
+
+    // Get the device_traces' TraceEntry lists.
     for (auto& da : device_allocator) {
       result.device_traces.emplace_back(da->trace(tsc_to_us));
       auto snap = da->snapshot();
@@ -3567,3 +3596,58 @@ BackendStaticInitializer backend_static_initializer;
 } // namespace cuda::CUDACachingAllocator
 
 } // namespace c10
+
+namespace c10::cuda {
+
+// uid_ is incremented when a user creates a MemPool,
+// for example: using graph_pool_handle() or c10::cuda::MemPool().
+//
+// uuid_ is incremented when CUDAGraph creates a MemPool
+// as a result of a user not providing a pool.
+//
+// MempoolId_t of {0, 0} is used to denote when no MemPool has been
+// passed to a function, either by user or CUDAGraphs. For example,
+// default value of MempoolId_t for capture_begin function is {0, 0}.
+// That's why uid_ and uuid_ start at 1.
+std::atomic<CaptureId_t> MemPool::uid_{1};
+std::atomic<CaptureId_t> MemPool::uuid_{1};
+
+MemPool::MemPool(
+    CUDACachingAllocator::CUDAAllocator* allocator,
+    bool is_user_created)
+    : allocator_(allocator), is_user_created_(is_user_created) {
+  if (is_user_created_) {
+    id_ = {0, uid_++};
+  } else {
+    id_ = {uuid_++, 0};
+  }
+}
+
+MempoolId_t MemPool::id() {
+  return id_;
+}
+
+CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {
+  return allocator_;
+}
+
+// Note that active_mempool_ is a global variable here
+// and not inside MemPoolContext class, because in windows we
+// can't use __declspec(dllexport) and __declspec(thread)
+// together: https://stackoverflow.com/a/50967977
+static thread_local MemPool* active_mempool_ = nullptr;
+
+MemPoolContext::MemPoolContext(MemPool* mempool)
+    : prev_mempool_(active_mempool_) {
+  active_mempool_ = mempool;
+}
+
+MemPoolContext::~MemPoolContext() {
+  active_mempool_ = prev_mempool_;
+}
+
+MemPool* MemPoolContext::getActiveMemPool() {
+  return active_mempool_;
+}
+
+} // namespace c10::cuda

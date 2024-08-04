@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict
 from torch._inductor import config
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 
+
 log = logging.getLogger(__name__)
 
 
@@ -68,7 +69,7 @@ class _SubprocExceptionInfo:
     use it for the message in the exception thrown in the main process.
     """
 
-    def __init__(self, details):
+    def __init__(self, details) -> None:
         self.details = details
 
 
@@ -77,7 +78,7 @@ class SubprocException(Exception):
     Thrown when a job in a subprocess raises an Exception.
     """
 
-    def __init__(self, details):
+    def __init__(self, details) -> None:
         super().__init__(f"An exception occurred in a subprocess:\n\n{details}")
 
 
@@ -87,7 +88,7 @@ class SubprocPool:
     a subprocess.Popen() to try to avoid issues with forking/spawning
     """
 
-    def __init__(self, nprocs: int):
+    def __init__(self, nprocs: int) -> None:
         entry = os.path.join(os.path.dirname(__file__), "__main__.py")
 
         subproc_read_fd, write_fd = os.pipe()
@@ -195,7 +196,7 @@ class SubprocPool:
 class SubprocMain:
     """Communicates with a SubprocPool in the parent process, called by __main__.py"""
 
-    def __init__(self, nprocs, read_pipe, write_pipe):
+    def __init__(self, nprocs, read_pipe, write_pipe) -> None:
         self.read_pipe = read_pipe
         self.write_pipe = write_pipe
         self.write_lock = threading.Lock()

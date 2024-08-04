@@ -164,7 +164,7 @@ class TestAutograd(TestCase):
 
             @torch.no_grad()
             class Foo:
-                def __init__(self):
+                def __init__(self) -> None:
                     assert not torch.is_grad_enabled()
 
                 def foo(self):
@@ -186,7 +186,7 @@ class TestAutograd(TestCase):
 
             class Foo2:
                 @torch.no_grad()
-                def __init__(self):
+                def __init__(self) -> None:
                     assert not torch.is_grad_enabled()
 
                 @torch.no_grad()
@@ -554,6 +554,49 @@ class TestAutograd(TestCase):
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
                 # if forward AD ends up being implemented for torch.igamma, choose a different op
                 torch.igamma(dual_x, dual_x)
+
+    def test_saved_tensor_hooks_extra_exit_during_bw_no_crash(self):
+        # This usage of saved tensor is not supported, but should not crash
+        def unpack(x):
+            ctx_1.__exit__()
+            return x
+
+        ctx_1 = torch.autograd.graph.saved_tensors_hooks(lambda x: x, unpack)
+        ctx_2 = torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x)
+
+        for i in range(10):
+            with ctx_2:
+                ctx_1.__enter__()
+                x = torch.randn(3, 3, requires_grad=True)
+                x.sin().sum().backward()
+
+        # Clean up
+        for i in range(10):
+            ctx_1.__exit__()
+
+        # Validate there are no more hooks on the stack
+        a = torch.tensor(1.0, requires_grad=True)
+        y = a.exp()
+        y.grad_fn._raw_saved_result.register_hooks(lambda x: x, lambda x: x)
+
+    def test_saved_tensor_hooks_extra_enter_during_bw_no_leak(self):
+        # This usage of saved tensor is not supported, but should not leak
+        def scope():
+            def unpack(x):
+                weak_ctx_1().__enter__()
+                return x
+
+            ctx_1 = torch.autograd.graph.saved_tensors_hooks(lambda x: x, unpack)
+            weak_ctx_1 = weakref.ref(ctx_1)
+
+            x = torch.randn(3, 3, requires_grad=True)
+            with ctx_1:
+                x.sin().sum().backward()
+            return weakref.ref(unpack)
+
+        with disable_gc():
+            unpack_hook_ref = scope()
+            self.assertIsNone(unpack_hook_ref())
 
     def test_will_engine_execute_node(self):
         counter = [0]
@@ -6816,7 +6859,7 @@ for shape in [(1,), ()]:
 
     def test_checkpointing_without_reentrant_with_context_fn(self):
         class VerboseTorchDispatchMode(TorchDispatchMode):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.operators = []
 
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -7074,7 +7117,7 @@ for shape in [(1,), ()]:
     @parametrize("use_reentrant", [True, False])
     def test_checkpointing_without_reentrant_detached_tensor(self, use_reentrant):
         class NoGradModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(2, 2, bias=False)
                 self.lin2 = nn.Linear(2, 2, bias=False)
@@ -7160,7 +7203,7 @@ for shape in [(1,), ()]:
         """
 
         class LinearModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(2, 2, bias=False)
 
@@ -7219,7 +7262,7 @@ for shape in [(1,), ()]:
         """
 
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer = torch.nn.Linear(5, 5, bias=False)
 
@@ -9443,14 +9486,14 @@ for shape in [(1,), ()]:
             pass
 
         class error_on_pack_hook(torch.autograd.graph.saved_tensors_hooks):
-            def __init__(self):
+            def __init__(self) -> None:
                 def pack_hook(x):
                     raise CustomError("pack")
 
                 super().__init__(pack_hook, lambda x: x)
 
         class error_on_unpack_hook(torch.autograd.graph.saved_tensors_hooks):
-            def __init__(self):
+            def __init__(self) -> None:
                 def unpack_hook(x):
                     raise CustomError("unpack")
 
@@ -9847,7 +9890,7 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
         any_hook_handles: List[RemovableHandle] = []
 
         class MultiOutputModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = nn.Linear(3, 3)
 
@@ -9866,7 +9909,7 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
                 return out
 
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod1 = MultiOutputModule()
                 self.mod2 = MultiOutputModule()
@@ -13341,7 +13384,7 @@ class TestNestedCheckpoint(TestCase):
         counter = [0]
 
         class SinCounterMode(TorchDispatchMode):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.count = 0
 
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -13615,7 +13658,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
         counters = []
 
         class Policy:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.counter = [0]
                 self.recompute_counter = [0]
 
@@ -14012,6 +14055,31 @@ class TestAutogradMultipleDispatch(TestCase):
 
         TestFn.apply(inp, None).sum().backward()
         self.assertEqual(local.my_obj[10], 5)
+
+    def test_is_retain_graph(self):
+        retain_graph_set = False
+
+        class TestFn(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                nonlocal retain_graph_set
+                retain_graph_set = (
+                    torch._C._autograd._get_current_graph_task_keep_graph()
+                )
+                return gO, None
+
+        inp = torch.rand(10, requires_grad=True)
+
+        out = TestFn.apply(inp)
+        self.assertFalse(retain_graph_set)
+        out.sum().backward(retain_graph=True)
+        self.assertTrue(retain_graph_set)
+        out.sum().backward(retain_graph=False)
+        self.assertFalse(retain_graph_set)
 
     def test_set_sequence_nr(self):
         x = torch.randn((10,), dtype=torch.float32, requires_grad=True)

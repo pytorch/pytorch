@@ -139,6 +139,10 @@ def recommended_max_memory() -> int:
     return torch._C._mps_recommendedMaxMemory()
 
 
+def is_available() -> bool:
+    return device_count() > 0
+
+
 from . import profiler
 from .event import Event
 
@@ -156,4 +160,5 @@ __all__ = [
     "Event",
     "profiler",
     "recommended_max_memory",
+    "is_available",
 ]

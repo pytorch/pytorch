@@ -21,7 +21,7 @@ class TestBench(TestCase):
         cls._bench_fn = functools.partial(torch.nn.functional.linear, x, w)
 
     def test_do_bench(self):
-        res = do_bench(self._bench_fn)
+        res = do_bench(self._bench_fn, (), {})
         log.warning("do_bench result: %s", res)
         self.assertGreater(res, 0)
 
