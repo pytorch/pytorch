@@ -35,7 +35,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     def create(proxy, value, **options):
         return TorchScriptObjectVariable(proxy, value, **options)
 
-    def __init__(self, proxy, value, source, **kwargs) -> None:
+    def __init__(self, proxy, value, source, **kwargs):
         super().__init__(value, **kwargs)
         self.proxy = proxy
         self.proxy.node.meta["example_value"] = value

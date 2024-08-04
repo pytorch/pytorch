@@ -629,7 +629,7 @@ def repro_analyze(options, mod, load_args):
             assert not new_args
 
     class WriterInterp(fx.Interpreter):
-        def __init__(self, mod, subdir) -> None:
+        def __init__(self, mod, subdir):
             super().__init__(mod)
             self.subdir = subdir
 
