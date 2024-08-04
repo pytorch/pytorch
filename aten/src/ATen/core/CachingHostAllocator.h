@@ -7,6 +7,7 @@
 #include <mutex>
 #include <set>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
 /**
@@ -233,7 +234,7 @@ struct CachingHostAllocatorImpl {
     }
   }
 
-  virtual void copy_data(void* dest, const void* src, std::size_t count) const {
+  virtual void copy_data(void* dest [[maybe_unused]], const void* src [[maybe_unused]], std::size_t count [[maybe_unused]]) const {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for copy_data");
   }
 
@@ -377,3 +378,4 @@ struct CachingHostAllocatorInterface : public at::Allocator {
 };
 
 } // namespace at
+C10_DIAGNOSTIC_POP()

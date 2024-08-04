@@ -1,5 +1,6 @@
 import argparse
 
+
 parser = argparse.ArgumentParser(
     description="comm_mode_feature examples",
     formatter_class=argparse.RawTextHelpFormatter,
@@ -14,6 +15,7 @@ example_prompt = (
     "\t6. transformer_operation_tracing\n"
     "\t7. MLP_json_dump\n"
     "\t8. transformer_json_dump\n"
+    "\t9. activation_checkpointing\n"
     "e.g. you want to try the MLPModule sharding display example, please input 'MLP_distributed_sharding_display'\n"
 )
 parser.add_argument("-e", "--example", help=example_prompt, required=True)

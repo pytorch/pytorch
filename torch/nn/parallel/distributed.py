@@ -19,10 +19,9 @@ import torch.distributed as dist
 from torch._utils import _get_device_index
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
+from torch.nn.modules import Module
+from torch.nn.parallel.scatter_gather import gather, scatter_kwargs
 from torch.utils._pytree import tree_flatten, tree_unflatten
-
-from ..modules import Module
-from .scatter_gather import gather, scatter_kwargs
 
 
 RPC_AVAILABLE = False
@@ -46,6 +45,7 @@ if dist.rpc.is_available():
 
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
+
 
 __all__ = ["DistributedDataParallel"]
 
@@ -1484,7 +1484,7 @@ class DistributedDataParallel(Module, Joinable):
 
     def _should_disable_cpp_reducer(self) -> bool:
         return self._use_python_reducer and (
-            torch._utils.is_compiling() or self._force_to_disable_cpp_reducer
+            torch.compiler.is_compiling() or self._force_to_disable_cpp_reducer
         )
 
     def _pre_forward(self, *inputs, **kwargs):
@@ -1497,7 +1497,7 @@ class DistributedDataParallel(Module, Joinable):
                 h.remove()
             self._accum_grad_hooks.clear()
 
-        if not self._lazy_init_ran and not torch._utils.is_compiling():
+        if not self._lazy_init_ran and not torch.compiler.is_compiling():
             self._lazy_init()
 
         if self._delay_all_reduce_all_params:
