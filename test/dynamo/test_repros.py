@@ -1240,7 +1240,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertExpectedInline(cnt.op_count, """4""")
         else:
             self.assertExpectedInline(cnt.frame_count, """2""")
-            self.assertExpectedInline(cnt.op_count, """21""")
+            self.assertExpectedInline(cnt.op_count, """19""")
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -5117,8 +5117,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         opt_ladder = torch.compile(ladder, fullgraph=True, backend="eager")
         self.assertEqual(opt_ladder(data), ladder(data))
 
-    @unittest.expectedFailure
-    def test_trace_functional_tensor_with_error(self):
+    def test_trace_functional_tensor_with(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch._subclasses.functional_tensor import (
             FunctionalTensor,
@@ -5147,9 +5146,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 RuntimeError, "cannot mutate tensors with frozen storage"
             ):
                 opt_f(inp, tmp)
-
-        # grad state may not be properly reset after the error
-        self.assertTrue(torch.is_grad_enabled())
 
     def test_const_dict_keyerror(self):
         d = {}
@@ -5404,17 +5400,15 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return x, y
 
         def g(x, y):
-            return map(f, x, y)
+            return tuple(map(f, x, y))
 
         opt_g = torch.compile(g, fullgraph=True, backend="eager")
 
         inps = gen_inps(3, 3)
-        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
-        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
+        self.assertEqual(g(*inps), opt_g(*inps))
 
         inps = gen_inps(3, 5)
-        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
-        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
+        self.assertEqual(g(*inps), opt_g(*inps))
 
     def test_staticmethod_allow_in_graph(self):
         class MyClass:

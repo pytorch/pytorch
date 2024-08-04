@@ -26,6 +26,4 @@ struct UnwindError : public std::runtime_error {
 // #define PRINT_LINE_TABLE(...) LOG_INFO(__VA_ARGS__)
 #define PRINT_LINE_TABLE(...)
 
-using std::optional; // NOLINT
-
 } // namespace torch::unwind
