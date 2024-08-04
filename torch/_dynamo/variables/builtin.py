@@ -637,11 +637,11 @@ class BuiltinVariable(VariableTracker):
     def can_insert_in_graph(self):
         return self.fn in self._fx_graph_functions()
 
-    def __init__(self, fn, **kwargs) -> None:
+    def __init__(self, fn, **kwargs):
         super().__init__(**kwargs)
         self.fn = fn
 
-    def __str__(self) -> str:
+    def __str__(self):
         if self.fn is None:
             name = "None"
         else:

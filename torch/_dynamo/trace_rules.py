@@ -2929,9 +2929,7 @@ class FunctionIdSet:
     function_ids: Optional[Set[int]] = None
     function_names: Optional[Dict[int, str]] = None
 
-    def __init__(
-        self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]
-    ) -> None:
+    def __init__(self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]):
         self.lazy_initializer = lazy_initializer
 
     def __call__(self):
@@ -2959,7 +2957,7 @@ class FunctionIdSet:
         if idx in function_ids:
             function_ids.remove(idx)
 
-    def __contains__(self, idx: int) -> bool:
+    def __contains__(self, idx: int):
         return idx in self()
 
 

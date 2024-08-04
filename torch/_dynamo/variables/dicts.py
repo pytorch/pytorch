@@ -72,7 +72,7 @@ class ConstDictVariable(VariableTracker):
         Note that it's also fine to put VTs into dictionaries and sets, but doing so does not take into account aliasing
         """
 
-        def __init__(self, vt) -> None:
+        def __init__(self, vt):
             # We specialize SymNodes
             vt = specialize_symnode(vt)
             # TODO Temorarily remove to figure out what keys are we breaking on
@@ -129,7 +129,7 @@ class ConstDictVariable(VariableTracker):
 
     def __init__(
         self, items: Dict[VariableTracker, VariableTracker], user_cls=dict, **kwargs
-    ) -> None:
+    ):
         super().__init__(**kwargs)
 
         Hashable = ConstDictVariable._HashableTracker
@@ -171,7 +171,7 @@ class ConstDictVariable(VariableTracker):
     def python_type(self):
         return self.user_cls
 
-    def __contains__(self, vt) -> bool:
+    def __contains__(self, vt):
         assert isinstance(vt, VariableTracker)
         Hashable = ConstDictVariable._HashableTracker
         return (
@@ -344,7 +344,7 @@ class ConstDictVariable(VariableTracker):
 
 
 class DefaultDictVariable(ConstDictVariable):
-    def __init__(self, items, user_cls, default_factory=None, **kwargs) -> None:
+    def __init__(self, items, user_cls, default_factory=None, **kwargs):
         super().__init__(items, user_cls, **kwargs)
         assert user_cls is collections.defaultdict
         self.default_factory = default_factory
@@ -400,7 +400,7 @@ class SetVariable(ConstDictVariable):
         self,
         items: List[VariableTracker],
         **kwargs,
-    ) -> None:
+    ):
         items = dict.fromkeys(items, SetVariable._default_value())
         super().__init__(items, **kwargs)
 
@@ -511,7 +511,7 @@ class DictView(VariableTracker):
 
     kv: Optional[str] = None
 
-    def __init__(self, dv_dict: ConstDictVariable, **kwargs) -> None:
+    def __init__(self, dv_dict: ConstDictVariable, **kwargs):
         super().__init__(**kwargs)
         assert self.kv in ("keys", "values")
         assert isinstance(dv_dict, ConstDictVariable)
@@ -745,7 +745,7 @@ class CustomizedDictVariable(ConstDictVariable):
                     items[key] = var
         return cls(items, user_cls)
 
-    def __init__(self, items, user_cls, **options) -> None:
+    def __init__(self, items, user_cls, **options):
         super().__init__(items, user_cls, **options)
         assert self.is_matching_cls(user_cls)
 
@@ -872,7 +872,7 @@ class HFPretrainedConfigVariable(VariableTracker):
     def is_matching_object(cls, obj):
         return cls.is_matching_cls(type(obj))
 
-    def __init__(self, obj, **kwargs) -> None:
+    def __init__(self, obj, **kwargs):
         super().__init__(**kwargs)
         self.obj = obj
         assert self.is_matching_cls(type(obj))
