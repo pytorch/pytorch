@@ -4,6 +4,7 @@ import logging
 import operator
 from typing import Any, Dict, Optional, Set, TYPE_CHECKING
 
+
 # Import sympy and ShapeEnv during TYPE_CHECKING since importing sympy is slow
 if TYPE_CHECKING:
     import sympy
@@ -20,6 +21,7 @@ from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.proxy_tensor import py_sym_types
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.graph_module import GraphModule
+
 
 log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
