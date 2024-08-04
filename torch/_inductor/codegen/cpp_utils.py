@@ -27,6 +27,13 @@ from .common import (
 )
 
 
+_IS_WINDOWS = sys.platform == "win32"
+
+
+def get_export_declaration():
+    return "__declspec(dllexport)" if _IS_WINDOWS else ""
+
+
 DTYPE_TO_CPP = {
     torch.float32: "float",
     torch.float64: "double",
