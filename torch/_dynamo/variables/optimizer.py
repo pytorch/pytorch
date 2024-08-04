@@ -51,7 +51,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         static_tensor_names=None,
         tensor_to_source=None,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(value, **kwargs)
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
