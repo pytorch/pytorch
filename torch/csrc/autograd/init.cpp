@@ -122,7 +122,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   auto m = _C_m.def_submodule("_autograd", "autograd bindings");
 
   auto parameter_module =
-      THPObjectPtr(PyImport_ImportModule("torch.nn.parameter"));
+      THPObjectPtr(PyImport_ImportModule("torch._parameter"));
   if (!parameter_module)
     return nullptr;
 

@@ -16,6 +16,7 @@ from typing import Any, Callable, List, Optional, Tuple, Type, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
+import torch.distributed.rpc as dist_rpc
 from torch._utils import _get_device_index
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
@@ -39,7 +40,7 @@ if dist.is_available():
         _to_kwargs,
         _verify_param_shape_across_processes,
     )
-if dist.rpc.is_available():
+if dist_rpc.is_available():
     RPC_AVAILABLE = True
     from torch.distributed.rpc import RRef
 

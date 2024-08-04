@@ -4,7 +4,6 @@ import operator
 from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
 
 import torch
-import torch.nn.functional as F
 from torch import _VF, Tensor
 from torch._C import _add_docstr
 from torch._jit_internal import _overload as overload, boolean_dispatch
@@ -699,7 +698,9 @@ def stft(
         signal_dim = input.dim()
         extended_shape = [1] * (3 - signal_dim) + list(input.size())
         pad = int(n_fft // 2)
-        input = F.pad(input.view(extended_shape), [pad, pad], pad_mode)
+        input = torch.nn.functional.pad(
+            input.view(extended_shape), [pad, pad], pad_mode
+        )
         input = input.view(input.shape[-signal_dim:])
     return _VF.stft(  # type: ignore[attr-defined]
         input,
