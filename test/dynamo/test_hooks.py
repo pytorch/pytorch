@@ -136,6 +136,39 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(h, RemovableHandle)
         self.assertIs(h2, h)
 
+    def test_remove_eager_multi_handle(self):
+        # TODO(yf225): add test for remove single handle as well
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        class _State:
+            def __init__(self, multi_handle):
+                self.multi_handle = multi_handle
+
+        a = torch.rand(2, 3, requires_grad=True)
+        b = torch.rand(2, 3, requires_grad=True)
+        multi_handle = torch.autograd.graph.register_multi_grad_hook(
+            (a, b), lambda grads: None
+        )
+        self.assertIsInstance(multi_handle, torch.autograd.graph._MultiHandle)
+        state = _State(multi_handle)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            state.multi_handle.remove()
+            return a * b
+
+        def is_multi_handle_removed(multi_handle):
+            for handle in multi_handle.handles:
+                hooks_dict = handle.hooks_dict_ref()
+                if handle.id in hooks_dict:
+                    return False
+            return True
+
+        self.assertFalse(is_multi_handle_removed(state.multi_handle))
+        out = fn(a, b)
+        self.assertTrue(is_multi_handle_removed(state.multi_handle))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_tensor_register_hook_repeated_handle_not_local(self):
         def fn(x, y, z, mod):
             mod.handle = x.register_hook(lambda grad: grad * 2)
