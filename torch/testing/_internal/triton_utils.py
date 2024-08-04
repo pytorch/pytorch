@@ -5,6 +5,7 @@ import unittest
 from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_GPU
 from torch.utils._triton import has_triton
 
+
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
 
@@ -117,6 +118,9 @@ if has_triton():
         tmp2 = tmp0 + tmp1
         tl.store(out_ptr + (x1 + (x_elements * y0)), tmp2, xmask & ymask)
 
+    def _dummy_early_config_prune(configs, *_, **__):
+        return configs
+
     @triton.autotune(
         configs=[
             triton.Config({"BLOCK_SIZE": 128}, num_stages=3, num_warps=8),
@@ -125,7 +129,7 @@ if has_triton():
         key=[],
         warmup=10,
         rep=20,
-        prune_configs_by={"early_config_prune": lambda configs, *_, **__: configs},
+        prune_configs_by={"early_config_prune": _dummy_early_config_prune},
     )
     @triton.jit
     def add_kernel_autotuned_with_unsupported_args(

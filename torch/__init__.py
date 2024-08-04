@@ -36,6 +36,7 @@ from typing import (
 )
 from typing_extensions import ParamSpec as _ParamSpec, TypeGuard as _TypeGuard
 
+
 if TYPE_CHECKING:
     from .types import IntLikeType
 
@@ -58,6 +59,7 @@ from torch._utils_internal import (
     USE_GLOBAL_DEPS,
     USE_RTLD_GLOBAL_WITH_LIBTORCH,
 )
+
 
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if _running_with_deploy():
@@ -915,6 +917,7 @@ except ImportError:
 # Make an explicit reference to the _C submodule to appease linters
 from torch import _C as _C
 
+
 __name, __obj = "", None
 for __name in dir(_C):
     if __name[0] != "_" and not __name.endswith("Base"):
@@ -940,15 +943,16 @@ if not TYPE_CHECKING:
     # non-standard, and attributes of those submodules cannot be pickled since
     # pickle expect to be able to import them as "from _C.sub import attr"
     # which fails with "_C is not a package
-    __name, __candidate = "", None
-    for __name in dir(_C):
-        __candidate = getattr(_C, __name)
-        if inspect.ismodule(__candidate):
-            # submodule
-            sys.modules.setdefault(f"{__name__}._C.{__name}", __candidate)
+    def _import_extension_to_sys_modules(module, module_name):
+        for name in dir(module):
+            member = getattr(module, name)
+            if inspect.ismodule(member):
+                sys.modules.setdefault(f"{module_name}.{name}", member)
+                # Recurse for submodules (e.g., `_C._dynamo.eval_frame`)
+                _import_extension_to_sys_modules(member, f"{module_name}.{name}")
 
-    del __name, __candidate
-
+    _import_extension_to_sys_modules(_C, f"{__name__}._C")
+    del _import_extension_to_sys_modules
 
 ################################################################################
 # Define basic utilities
@@ -1680,6 +1684,7 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
 from math import e, inf, nan, pi
 
+
 newaxis: None = None
 
 __all__.extend(["e", "pi", "nan", "inf", "newaxis"])
@@ -1922,6 +1927,7 @@ from torch.amp import autocast, GradScaler
 from torch.random import get_rng_state, initial_seed, manual_seed, seed, set_rng_state
 from torch.serialization import load, save
 
+
 ################################################################################
 # Initialize extension
 ################################################################################
@@ -1982,6 +1988,7 @@ del __name, __obj
 ################################################################################
 
 import torch
+
 
 __all__.extend(
     name for name in dir(torch) if isinstance(getattr(torch, name), torch.dtype)
@@ -2074,6 +2081,7 @@ from torch import (
 )
 from torch.signal import windows as windows
 
+
 # Quantized, sparse, AO, etc. should be last to get imported, as nothing
 # is expected to depend on them.
 from torch import ao as ao  # usort: skip
@@ -2084,10 +2092,12 @@ import torch.nn.qat
 import torch.nn.quantizable
 import torch.nn.quantized
 
+
 _C._init_names(list(_storage_classes))
 
 # attach docstrings to torch and tensor functions
 from torch import _size_docs, _storage_docs, _tensor_docs, _torch_docs
+
 
 del _torch_docs, _tensor_docs, _storage_docs, _size_docs
 
@@ -2099,9 +2109,13 @@ def compiled_with_cxx11_abi() -> builtins.bool:
 
 from torch import _library as _library, _ops as _ops
 
-# Import the ops "namespace"
-from torch._classes import classes as classes
+
+# Import the ops and classes "namespace"
 from torch._ops import ops as ops  # usort: skip
+from torch._classes import classes as classes  # usort: skip
+
+sys.modules.setdefault(f"{__name__}.ops", ops)
+sys.modules.setdefault(f"{__name__}.classes", classes)
 
 # quantization depends on torch.fx and torch.ops
 # Import quantization
@@ -2118,12 +2132,14 @@ legacy_contiguous_format = contiguous_format  # defined by _C._initExtension()
 # Register fork handler to initialize OpenMP in child processes (see gh-28389)
 from torch.multiprocessing._atfork import register_after_fork
 
+
 register_after_fork(torch.get_num_threads)
 del register_after_fork
 
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
 from torch._lobpcg import lobpcg as lobpcg
+
 
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
@@ -2144,7 +2160,6 @@ from torch._linalg_utils import (  # type: ignore[misc]
     matrix_rank,
     solve,
 )
-
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
 
@@ -2348,7 +2363,7 @@ def compile(
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
 
         - To register an out-of-tree custom backend:
-       https://pytorch.org/docs/main/torch.compiler_custom_backends.html#registering-custom-backends
+          https://pytorch.org/docs/main/torch.compiler_custom_backends.html#registering-custom-backends
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
 
         - "default" is the default mode, which is a good balance between performance and overhead
@@ -2466,6 +2481,7 @@ from torch import (
 from torch._higher_order_ops import cond as cond, while_loop as while_loop
 from torch.func import vmap as vmap
 
+
 if not TYPE_CHECKING:
     from torch import _meta_registrations
 
@@ -2477,6 +2493,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
+
 
 # Register MPS specific decomps
 torch.backends.mps._init()
@@ -2510,7 +2527,12 @@ if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
     # imported in user code.
-    from torch import _dynamo as _dynamo, _inductor as _inductor, onnx as onnx
+    from torch import (
+        _dynamo as _dynamo,
+        _inductor as _inductor,
+        _subclasses as _subclasses,
+        onnx as onnx,
+    )
 
 else:
     _lazy_modules = {
@@ -2591,6 +2613,7 @@ def _constrain_as_size(
 
 
 from torch import _logging
+
 
 _logging._init_logs()
 

@@ -226,17 +226,6 @@ private:
     int64_t data_;
 };
 
-std::ostream& operator<<(std::ostream& ss, DimEntry entry) {
-    if (entry.is_none()) {
-        ss << "None";
-    } else if (entry.is_positional()) {
-        ss << entry.position();
-    } else {
-        ss << entry.dim();
-    }
-    return ss;
-}
-
 // Dim wrapper methods
 DimEntry _wrap_dim(mpy::handle d, size_t N, bool keepdim) {
     if (Dim::check(d)) {
@@ -751,8 +740,6 @@ public:
     static mpy::obj<Tensor> create() {
         if (!TensorType) {
             TensorType = (PyTypeObject*) mpy::import("functorch.dim").attr("Tensor").ptr();
-            // NB: leak
-            Py_INCREF(TensorType);
         }
         return Tensor::alloc(TensorType);
     }
