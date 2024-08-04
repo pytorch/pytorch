@@ -1347,6 +1347,7 @@ class CppVecOverrides(CppOverrides):
     def to_dtype(x, dtype, src_dtype=None, use_compute_dtypes=True):
         assert dtype in [
             torch.bool,
+            torch.float64,
             torch.float,
             torch.bfloat16,
             torch.float16,
@@ -2309,7 +2310,7 @@ class CppVecKernel(CppKernel):
             "welford_combine",
         }
         assert dtype == src_dtype
-        assert dtype in [torch.float, torch.int64]
+        assert dtype in [torch.float64, torch.float, torch.int64]
         assert isinstance(value, CppCSEVariable), value
 
         if not value.is_vec:
@@ -2373,9 +2374,10 @@ class CppVecKernel(CppKernel):
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
             if is_welford_reduction(reduction_type):
-                assert (
-                    self._get_num_vectors(dtype) == 1
-                ), "Welford reduction does not support VectorizedN (N>1)"
+                assert self._get_num_vectors(dtype) in [
+                    1,
+                    2,
+                ], "Welford reduction does not support VectorizedN (N>2)"
                 next_value = f"welford_vec_reduce_all({acc_vec})"
             else:
                 reduce_all_body = (
@@ -2402,7 +2404,11 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         var = self.args.output(name)
         out_dtype = V.graph.get_dtype(name)
-        dtype = torch.float if out_dtype.is_floating_point else torch.int64
+        dtype = (
+            (out_dtype if out_dtype == torch.double else torch.float)
+            if out_dtype.is_floating_point
+            else torch.int64
+        )
         code = IndentedBuffer()
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
@@ -2741,6 +2747,7 @@ class CppVecKernelChecker(CppVecKernel):
 
         # Cache all the load result
         self.supported_dtypes: List[torch.dtype] = [
+            torch.float64,
             torch.float,
             torch.bfloat16,
             torch.float16,
@@ -2806,6 +2813,7 @@ class CppVecKernelChecker(CppVecKernel):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         if not (
             (dtype == torch.float and src_dtype == torch.float)
+            or (dtype == torch.double and src_dtype == torch.double)
             or (dtype == torch.int64 and src_dtype == torch.int64)
             and reduction_type in VECTORIZABLE_RTYPES
         ):
@@ -2880,15 +2888,6 @@ class CppVecKernelChecker(CppVecKernel):
                 with RecordOptimizationContext(__name__) as node_ctx:
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
-                    f32_iinfo = torch.finfo(torch.float32)
-                    if dtype == torch.double:
-                        if (
-                            (val <= f32_iinfo.max and val >= f32_iinfo.min)
-                            or (val == torch.inf)
-                            or (val == -torch.inf)
-                        ):
-                            opt_ctx.dtype = torch.float32
-
                     if opt_ctx.dtype not in self.supported_dtypes:
                         self.disable_vec(f"constant dtype: {opt_ctx.dtype}")
                     return val
@@ -3734,10 +3733,12 @@ class CppScheduling(BaseScheduling):
         split_number = None
         divide_index_name = None
         for node in nodes:
+            # No reduce
             if len(node.group[1][1]) != 0:
                 can_split = False
                 break
 
+            # No modular index
             def has_modular_index(expr):
                 if isinstance(expr, ModularIndexing):
                     return True
@@ -3756,6 +3757,7 @@ class CppScheduling(BaseScheduling):
                 _,
             ) = node.node.get_default_sizes_body()
 
+            # 4D tensor and 2 dims have been fused, which we will do split.
             if not (
                 len(original_index_size) == 4
                 and len(original_reduce_size) == 0
