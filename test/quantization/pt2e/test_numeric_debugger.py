@@ -8,8 +8,11 @@ from typing import Dict
 import torch
 from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
+    compare_results,
+    extract_results_from_loggers,
     generate_numeric_debug_handle,
     NUMERIC_DEBUG_HANDLE_KEY,
+    prepare_for_propagation_comparison,
 )
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
@@ -107,9 +110,7 @@ class TestNumericDebugger(TestCase):
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
 
-    @unittest.skip(
-        "reexport is not fully supported yet, need to add support for output node"
-    )
+    @unittest.skip("All nodes' meta are preserved but get_attr nodes' meta are wrong.")
     def test_re_export_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
@@ -121,3 +122,43 @@ class TestNumericDebugger(TestCase):
         debug_handle_map = _extract_debug_handles(m_export)
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
+
+    def test_prepare_for_propagation_comparison(self):
+        m = TestHelperModules.Conv2dThenConv1d()
+        example_inputs = m.example_inputs()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        generate_numeric_debug_handle(m)
+        m_logger = prepare_for_propagation_comparison(m)
+        ref = m(*example_inputs)
+        res = m_logger(*example_inputs)
+
+        from torch.ao.quantization.pt2e._numeric_debugger import OutputLogger
+
+        loggers = [m for m in m_logger.modules() if isinstance(m, OutputLogger)]
+        self.assertEqual(len(loggers), 8)
+        self.assertTrue("conv2d" in [logger.node_name for logger in loggers])
+        self.assertEqual(res, ref)
+
+    def test_extract_results_from_loggers(self):
+        m = TestHelperModules.Conv2dThenConv1d()
+        example_inputs = m.example_inputs()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        generate_numeric_debug_handle(m)
+        m_ref_logger = prepare_for_propagation_comparison(m)
+
+        quantizer = XNNPACKQuantizer().set_global(
+            get_symmetric_quantization_config(is_per_channel=False)
+        )
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m)
+        m_quant_logger = prepare_for_propagation_comparison(m)
+
+        m_ref_logger(*example_inputs)
+        m_quant_logger(*example_inputs)
+        ref_results = extract_results_from_loggers(m_ref_logger)
+        quant_results = extract_results_from_loggers(m_quant_logger)
+        comparison_results = compare_results(ref_results, quant_results)
+        for node_summary in comparison_results.values():
+            if len(node_summary.results) > 0:
+                self.assertGreaterEqual(node_summary.results[0].sqnr, 35)

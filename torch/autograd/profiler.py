@@ -6,11 +6,9 @@ from typing import Any, Dict, List, Optional
 from warnings import warn
 
 import torch
-
 import torch.cuda
 from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import _ExperimentalConfig
-
 from torch.autograd import (
     _disable_profiler,
     _enable_profiler,
@@ -35,6 +33,7 @@ from torch.autograd.profiler_util import (
     OUT_OF_MEMORY_EVENT_NAME,
 )
 from torch.futures import Future
+
 
 __all__ = [
     "profile",
@@ -547,6 +546,7 @@ class profile:
                 device_index=kineto_event.device_index(),
                 device_resource_id=kineto_event.device_resource_id(),
                 flops=kineto_event.flops(),
+                is_user_annotation=kineto_event.is_user_annotation(),
             )
             max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:
