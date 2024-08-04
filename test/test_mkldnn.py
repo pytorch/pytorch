@@ -1469,12 +1469,13 @@ class TestMkldnn(TestCase):
         params_list = list(params_dict.values())
         return params_list
 
-    def _cast_dtype(self, input, bf16):
+    def _cast_dtype(self, input, bf16, fp16):
         if bf16:
             input = input.to(torch.bfloat16)
+        elif fp16:
+            input = input.to(torch.half)
         return input
 
-    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_lstm(self):
         seed = 2023
         torch.manual_seed(seed)
@@ -1482,11 +1483,19 @@ class TestMkldnn(TestCase):
         params_list = self._lstm_params_list()
         for dtype in types:
             bf16 = True if dtype == torch.bfloat16 and torch.ops.mkldnn._is_mkldnn_bf16_supported() else False
+            fp16 = True if dtype == torch.half and torch.ops.mkldnn._is_mkldnn_fp16_supported() else False
             rtol = 1.3e-6
             atol = 1e-5
+            lowp_dtype = torch.bfloat16
+            if fp16:
+                lowp_dtype = torch.half
+
             if bf16:
                 rtol = 0.02
                 atol = 0.02
+            if fp16:
+                rtol = 1e-3
+                atol = 1e-3
             for input_size, hidden_size, num_layers, bidirectional, bias, batch_first, dropout, batch_size, seq_len, training \
                     in itertools.product(*params_list):
                 num_directions = 2 if bidirectional else 1
@@ -1496,7 +1505,8 @@ class TestMkldnn(TestCase):
                     input = torch.randn(seq_len, batch_size, input_size, dtype=torch.float32)
                 h = torch.randn(num_layers * num_directions, batch_size, hidden_size, dtype=torch.float32)
                 c = torch.randn(num_layers * num_directions, batch_size, hidden_size, dtype=torch.float32)
-
+                if fp16:
+                    training = False
                 model = torch.nn.LSTM(input_size, hidden_size, num_layers, bidirectional=bidirectional,
                                       bias=bias, dropout=dropout, batch_first=batch_first).float()
                 model.train() if training else model.eval()
@@ -1510,12 +1520,18 @@ class TestMkldnn(TestCase):
 
                 model1 = copy.deepcopy(model)
                 model2 = copy.deepcopy(model)
-                with torch.cpu.amp.autocast(enabled=bf16, dtype=torch.bfloat16), torch.no_grad() if not training else nullcontext():
+                with torch.amp.autocast(
+                    "cpu", enabled=bf16 or fp16, dtype=lowp_dtype
+                ), (torch.no_grad() if not training else nullcontext()):
                     with torch.backends.mkldnn.flags(enabled=False):
                         torch.manual_seed(seed)
-                        output1, (hn1, cn1) = self._cast_dtype(model1, bf16)(self._cast_dtype(input1, bf16),
-                                                                             (self._cast_dtype(h1, bf16),
-                                                                             self._cast_dtype(c1, bf16)))
+                        output1, (hn1, cn1) = self._cast_dtype(model1, bf16, fp16)(
+                            self._cast_dtype(input1, bf16, fp16),
+                            (
+                                self._cast_dtype(h1, bf16, fp16),
+                                self._cast_dtype(c1, bf16, fp16),
+                            ),
+                        )
 
                     torch.manual_seed(seed)
                     output2, (hn2, cn2) = model2(input2, (h2, c2))
@@ -1533,8 +1549,15 @@ class TestMkldnn(TestCase):
 
                         self.assertEqual(input1.grad, input2.grad, rtol=rtol, atol=atol)
                         for name, para in model1.named_parameters():
-                            self.assertEqual(para, self._cast_dtype(getattr(model2, name), bf16))
-                            self.assertEqual(para.grad, self._cast_dtype(getattr(model2, name).grad, bf16), rtol=rtol, atol=atol)
+                            self.assertEqual(para, self._cast_dtype(getattr(model2, name), bf16, fp16))
+                            self.assertEqual(
+                                para.grad,
+                                self._cast_dtype(
+                                    getattr(model2, name).grad, bf16, fp16
+                                ),
+                                rtol=rtol,
+                                atol=atol,
+                            )
 
                         with torch.backends.mkldnn.flags(enabled=False):
                             torch.manual_seed(seed)
