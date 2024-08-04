@@ -54,7 +54,7 @@ def evaluate_expr(
         if simplified is not None:
             return bool(simplified)
     except Exception:
-        log.debug("Could not simplify  %s", expr)
+        log.debug("Could not simplify  %s", expr, exc_info=True)
 
     return False
 
