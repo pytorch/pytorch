@@ -1,8 +1,10 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from typing import List, Optional
 
 import torch
 from torch.backends._nnapi.serializer import _NnapiSerializer
+
 
 ANEURALNETWORKS_PREFER_LOW_POWER = 0
 ANEURALNETWORKS_PREFER_FAST_SINGLE_ANSWER = 1

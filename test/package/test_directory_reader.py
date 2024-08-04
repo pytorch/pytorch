@@ -2,6 +2,7 @@
 
 import os
 import zipfile
+from pathlib import Path
 from sys import version_info
 from tempfile import TemporaryDirectory
 from textwrap import dedent
@@ -15,6 +16,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
 )
+
 
 try:
     from torchvision.models import resnet18
@@ -31,7 +33,6 @@ except ImportError:
     # Support the case where we run this file directly.
     from common import PackageTestCase
 
-from pathlib import Path
 
 packaging_directory = Path(__file__).absolute().parent
 

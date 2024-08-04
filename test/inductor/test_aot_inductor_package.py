@@ -11,6 +11,7 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import IS_FBCODE
 from torch.testing._internal.triton_utils import HAS_CUDA
 
+
 try:
     try:
         from .test_torchinductor import copy_tests
@@ -85,7 +86,7 @@ class AOTInductorTestsTemplate:
 
     def test_linear(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
 

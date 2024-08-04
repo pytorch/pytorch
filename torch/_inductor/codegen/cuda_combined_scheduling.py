@@ -10,7 +10,6 @@ from ..scheduler import (
 )
 from .cuda.cuda_cpp_scheduling import CUDACPPScheduling
 from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
-
 from .triton import TritonScheduling
 
 
@@ -24,7 +23,7 @@ class CUDACombinedScheduling(BaseScheduling):
     this would also be the place to do it.
     """
 
-    def __init__(self, scheduler: Scheduler):
+    def __init__(self, scheduler: Scheduler) -> None:
         super().__init__()
         self._scheduler = scheduler
         self._triton_scheduling = TritonScheduling(scheduler)

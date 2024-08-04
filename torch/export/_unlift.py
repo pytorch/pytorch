@@ -8,8 +8,8 @@ import torch.utils._pytree as pytree
 from torch._export.utils import _check_input_constraints_for_graph
 from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from ._remove_effect_tokens_pass import _is_impure_node, _remove_effect_tokens
 
+from ._remove_effect_tokens_pass import _is_impure_node, _remove_effect_tokens
 from .exported_program import (
     ExportedProgram,
     ExportGraphSignature,
@@ -114,6 +114,7 @@ def _insert_copy_for_mutations(
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
         new_output = gm.graph.output(tuple(output_args))
+        new_output.meta.update(output_node.meta)
         output_node.replace_all_uses_with(new_output)
         gm.graph.erase_node(output_node)
 

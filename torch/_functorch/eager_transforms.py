@@ -12,7 +12,6 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.autograd.forward_ad as fwAD
-
 from torch._C._functorch import (
     _assert_wrapped_functional,
     _func_decrement_nesting,
@@ -42,8 +41,8 @@ from torch.utils._pytree import (
     tree_unflatten,
     treespec_pprint,
 )
-from .apis import vmap
 
+from .apis import vmap
 from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
 
 
@@ -765,7 +764,7 @@ def jacrev(
     # Dynamo does not support HOP composition if their inner function is
     # annotated with @functools.wraps(...). We circumvent this issue by applying
     # wraps only if we're not tracing with dynamo.
-    if not torch._dynamo.is_compiling():
+    if not torch.compiler.is_compiling():
         wrapper_fn = wraps(func)(wrapper_fn)
 
     return wrapper_fn
@@ -1086,7 +1085,6 @@ def jvp(
     )
 
 
-@doesnt_support_saved_tensors_hooks
 def _jvp_with_argnums(
     func: Callable,
     primals: Any,
@@ -1346,7 +1344,7 @@ def jacfwd(
     # Dynamo does not support HOP composition if their inner function is
     # annotated with @functools.wraps(...). We circumvent this issue by applying
     # wraps only if we're not tracing with dynamo.
-    if not torch._dynamo.is_compiling():
+    if not torch.compiler.is_compiling():
         wrapper_fn = wraps(func)(wrapper_fn)
 
     return wrapper_fn
@@ -1675,7 +1673,6 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
             " replaced with their non-aliasing counterparts, {view}_copy.\n"
         )
 
-    @doesnt_support_saved_tensors_hooks
     @wraps(func)
     def wrapped(*args, **kwargs):
         try:
