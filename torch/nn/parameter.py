@@ -1,11 +1,11 @@
 from collections import OrderedDict
 
 import torch
-from torch._C import _disabled_torch_function_impl
+from torch._C import _disabled_torch_function_impl, _TensorMeta
 
 
 # Metaclass to combine _TensorMeta and the instance check override for Parameter.
-class _ParameterMeta(torch._C._TensorMeta):
+class _ParameterMeta(_TensorMeta):
     # Make `isinstance(t, Parameter)` return True for custom tensor instances that have the _is_param flag.
     def __instancecheck__(self, instance):
         if self is Parameter:
@@ -37,7 +37,7 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
             details. Default: `True`
     """
 
-    def __new__(cls, data=None, requires_grad=True):
+    def __new__(cls, data=None, *, requires_grad=True):
         if data is None:
             data = torch.empty(0)
         if type(data) is torch.Tensor or type(data) is Parameter:
@@ -211,7 +211,7 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
 
 
 # Metaclass to combine _TensorMeta and the instance check override for Buffer.
-class _BufferMeta(torch._C._TensorMeta):
+class _BufferMeta(_TensorMeta):
     # Make `isinstance(t, Buffer)` return True for custom tensor instances that have the _is_buffer flag.
     def __instancecheck__(self, instance):
         if self is Buffer:

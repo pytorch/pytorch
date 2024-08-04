@@ -9,7 +9,7 @@ from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
-import torch._C as _C
+from torch import _C
 from torch._namedtensor_internals import (
     check_serializing_named_tensor,
     is_ellipsis,
@@ -77,7 +77,7 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 # NB: If you add a new method to Tensor, you must update
 # torch/_C/__init__.pyi.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
-class Tensor(torch._C.TensorBase):
+class Tensor(_C.TensorBase):
     def __deepcopy__(self, memo):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__deepcopy__, (self,), self, memo)
@@ -102,8 +102,8 @@ class Tensor(torch._C.TensorBase):
                 or self.device.type
                 in ["lazy", "xla", "mtia", "mps", "maia", "meta", "ipu"]
                 or (
-                    not torch._C._has_storage(self)
-                    and self.device.type == torch._C._get_privateuse1_backend_name()
+                    not _C._has_storage(self)
+                    and self.device.type == _C._get_privateuse1_backend_name()
                 )
                 or (type(self) is not Tensor and self.data_ptr() == 0)
             ):
@@ -262,8 +262,8 @@ class Tensor(torch._C.TensorBase):
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
         if self.device.type in ["xla", "mtia", "maia"] or (
-            not torch._C._has_storage(self)
-            and self.device.type == torch._C._get_privateuse1_backend_name()
+            not _C._has_storage(self)
+            and self.device.type == _C._get_privateuse1_backend_name()
         ):
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
             # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
@@ -1026,7 +1026,7 @@ class Tensor(torch._C.TensorBase):
             return handle_torch_function(Tensor.__len__, (self,), self)
         if self.dim() == 0:
             raise TypeError("len() of a 0-d tensor")
-        if torch._C._get_tracing_state():
+        if _C._get_tracing_state():
             warnings.warn(
                 "Using len to get tensor shape might cause the trace to be incorrect. "
                 "Recommended usage would be tensor.shape[0]. "
@@ -1048,7 +1048,7 @@ class Tensor(torch._C.TensorBase):
         # See gh-54457
         if self.dim() == 0:
             raise TypeError("iteration over a 0-d tensor")
-        if torch._C._get_tracing_state():
+        if _C._get_tracing_state():
             warnings.warn(
                 "Iterating over a tensor might cause the trace to be incorrect. "
                 "Passing a tensor of different shape won't change the number of "
