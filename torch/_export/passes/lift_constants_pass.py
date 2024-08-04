@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Union
 import torch
 from torch._export.verifier import SpecViolationError
 from torch._guards import detect_fake_mode
-
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.export.exported_program import (
     ArgumentSpec,
@@ -25,7 +24,7 @@ class ConstantAttrMap(collections.abc.MutableMapping):
     if that's the case).
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Underlying dict that we use to implement this mapping.
         self._constant_attrs: Dict[
             Union[int, torch.Tensor, FakeScriptObject], List[Any]
@@ -90,6 +89,8 @@ def get_constant_fqn(node: torch.fx.Node, constant_name: str) -> str:
     # The FQN of the constant tensor in the state dict should
     # correspond to the module where the constant tensor was
     # originally used.
+    if len(node.meta["nn_module_stack"]) == 0:
+        return constant_name
     parent_fqn = list(node.meta["nn_module_stack"].values())[-1][0]
     if len(parent_fqn) > 0:
         return f"{parent_fqn}.{constant_name}"

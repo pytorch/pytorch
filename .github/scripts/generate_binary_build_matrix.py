@@ -215,7 +215,7 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     ("cpu", CXX11_ABI): f"pytorch/libtorch-cxx11-builder:cpu-{DEFAULT_TAG}",
 }
 
-FULL_PYTHON_VERSIONS = ["3.8", "3.9", "3.10", "3.11", "3.12"]
+FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12"]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
