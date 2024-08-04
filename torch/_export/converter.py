@@ -1041,7 +1041,16 @@ class TS2FXGraphConverter:
         for graph_output in self.ts_graph.outputs():
             output_name = graph_output.debugName()
             if output_name in self.name_to_node:
-                args.append(self.name_to_node[output_name])
+                fx_node = self.name_to_node[output_name]
+                # TODO: Revisit this later after HigherOrderOp design changes.
+                # Currently, we cannot directly return input as output.
+                if (
+                    not self.is_top_level_graph()
+                    and isinstance(fx_node, torch.fx.Node)
+                    and fx_node.op == "placeholder"
+                ):
+                    fx_node = self.fx_graph.call_function(torch.clone, (fx_node,))
+                args.append(fx_node)
                 self.output_specs.append(
                     OutputSpec(
                         OutputKind.USER_OUTPUT,
@@ -1067,6 +1076,10 @@ class TS2FXGraphConverter:
             self.fx_graph.output(
                 args[0]
             )  # Get rid of an extra list wrapped around final output.
+        elif len(args) > 1:
+            self.fx_graph.output(
+                args
+            )  # For prim::Loop and prim::If with multiple outputs.
         else:
             # Sub-block of prim::If can have zero output.
             self.fx_graph.output([])
