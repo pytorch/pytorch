@@ -239,7 +239,10 @@ def get_shard_idx_on_dim(
     shard_idx_on_tensor_dim = 0
     for i, mesh_dim in enumerate(shard_mesh_dims):
         if i != len(shard_mesh_dims) - 1:
-            # For a given coordinate, the stride equals to the product of the mesh dim size
+            # For a given coordinate, the stride equals to the product of the mesh dim
+            # of all the mesh dimensions sharded on the same tensor dimension
+            # For a given coordinate i, the stride equals to the product of the mesh dim size
+            # of all the mesh dimensions sharded on the same tensor dimension
             # when the same tensor dimenstion is further sharded on additional mesh dimensions.
             # For example, with 3D 2*2*2 mesh with all placements on Shard(0), the stride of
             # coordinate 0 is mesh.size(1) * mesh.size(2) = 4, and the stride of coordinate 1 is
@@ -247,10 +250,10 @@ def get_shard_idx_on_dim(
             stride = reduce(
                 lambda a, b: a * b, [mesh.size(j) for j in shard_mesh_dims[i + 1 :]]
             )
-            shard_idx_on_tensor_dim += coordinate[mesh_dim] * stride  # type: ignore[indiex]
+            shard_idx_on_tensor_dim += coordinate[mesh_dim] * stride  # type: ignore[index]
         else:
             # For the last mesh dimension, the stride is simply 1.
-            shard_idx_on_tensor_dim += coordinate[mesh_dim]  # type: ignore[indiex]
+            shard_idx_on_tensor_dim += coordinate[mesh_dim]  # type: ignore[index]
 
     return shard_idx_on_tensor_dim
 
