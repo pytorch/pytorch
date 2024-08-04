@@ -690,29 +690,29 @@ class CachingAutotuner(KernelInterface):
 
         return cloned_args, cloned_kwargs
 
-    @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
-        timings = {
-            launcher: self.bench(launcher, *args, **kwargs)
-            for launcher in self.launchers
-        }
+        with dynamo_timed("CachingAutotuner.benchmark_all_configs"):
+            timings = {
+                launcher: self.bench(launcher, *args, **kwargs)
+                for launcher in self.launchers
+            }
 
-        for k, v in timings.items():
-            self.coordesc_tuner.cache_benchmark_result(k.config, v)
-
-        if log.isEnabledFor(logging.DEBUG):
-            log.debug("Benchmark all input configs for %s, get:", self.fn.__name__)
             for k, v in timings.items():
-                log.debug(
-                    "%s: %f, nreg %d, nspill %d, #shared-mem %s",
-                    k.config,
-                    v,
-                    k.n_regs,
-                    k.n_spills,
-                    k.shared,
-                )
+                self.coordesc_tuner.cache_benchmark_result(k.config, v)
 
-        return timings
+            if log.isEnabledFor(logging.DEBUG):
+                log.debug("Benchmark all input configs for %s, get:", self.fn.__name__)
+                for k, v in timings.items():
+                    log.debug(
+                        "%s: %f, nreg %d, nspill %d, #shared-mem %s",
+                        k.config,
+                        v,
+                        k.n_regs,
+                        k.n_spills,
+                        k.shared,
+                    )
+
+            return timings
 
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
