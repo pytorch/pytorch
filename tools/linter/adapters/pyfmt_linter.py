@@ -11,10 +11,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, NamedTuple
 
+import black
 import isort
-from ufmt.core import ufmt_string
-from ufmt.util import make_black_config
-from usort import Config as UsortConfig
+import usort
 
 
 IS_WINDOWS: bool = os.name == "nt"
@@ -53,7 +52,7 @@ def format_error_message(filename: str, err: Exception) -> LintMessage:
         path=filename,
         line=None,
         char=None,
-        code="UFMT",
+        code="PYFMT",
         severity=LintSeverity.ADVICE,
         name="command-failed",
         original=None,
@@ -62,39 +61,53 @@ def format_error_message(filename: str, err: Exception) -> LintMessage:
     )
 
 
+def run_isort(content: str, path: Path) -> str:
+    isort_config = isort.Config(settings_path=str(REPO_ROOT))
+
+    is_this_file = path.samefile(__file__)
+    if not is_this_file:
+        content = re.sub(r"(#.*\b)usort:\s*skip\b", r"\g<1>isort: split", content)
+
+    content = isort.code(content, config=isort_config, file_path=path)
+
+    if not is_this_file:
+        content = re.sub(r"(#.*\b)isort: split\b", r"\g<1>usort: skip", content)
+
+    return content
+
+
+def run_usort(content: str, path: Path) -> str:
+    usort_config = usort.Config.find(path)
+
+    return usort.usort_string(content, path=path, config=usort_config)
+
+
+def run_black(content: str, path: Path) -> str:
+    black_config = black.parse_pyproject_toml(black.find_pyproject_toml((str(path),)))  # type: ignore[attr-defined,arg-type]
+    # manually patch options that do not have a 1-to-1 match in Mode arguments
+    black_config["target_versions"] = {
+        black.TargetVersion[ver.upper()]  # type: ignore[attr-defined]
+        for ver in black_config.pop("target_version", [])
+    }
+    black_config["string_normalization"] = not black_config.pop(
+        "skip_string_normalization", False
+    )
+    black_mode = black.Mode(**black_config)
+    black_mode.is_pyi = path.suffix.lower() == ".pyi"
+    black_mode.is_ipynb = path.suffix.lower() == ".ipynb"
+
+    return black.format_str(content, mode=black_mode)
+
+
 def check_file(filename: str) -> list[LintMessage]:
     path = Path(filename).absolute()
-    original = path.read_text(encoding="utf-8")
+    original = replacement = path.read_text(encoding="utf-8")
 
     try:
-        isort_config = isort.Config(settings_path=str(REPO_ROOT))
-        usort_config = UsortConfig.find(path)
-        black_config = make_black_config(path)
-
-        if not path.samefile(__file__):
-            isorted_replacement = re.sub(
-                r"(#.*\b)isort: split\b",
-                r"\g<1>usort: skip",
-                isort.code(
-                    re.sub(r"(#.*\b)usort:\s*skip\b", r"\g<1>isort: split", original),
-                    config=isort_config,
-                    file_path=path,
-                ),
-            )
-        else:
-            isorted_replacement = isort.code(
-                original,
-                config=isort_config,
-                file_path=path,
-            )
-
-        # Use UFMT API to call both usort and black
-        replacement = ufmt_string(
-            path=path,
-            content=isorted_replacement,
-            usort_config=usort_config,
-            black_config=black_config,
-        )
+        # NB: run isort first to enforce style for blank lines
+        replacement = run_isort(replacement, path=path)
+        replacement = run_usort(replacement, path=path)
+        replacement = run_black(replacement, path=path)
 
         if original == replacement:
             return []
@@ -104,7 +117,7 @@ def check_file(filename: str) -> list[LintMessage]:
                 path=filename,
                 line=None,
                 char=None,
-                code="UFMT",
+                code="PYFMT",
                 severity=LintSeverity.WARNING,
                 name="format",
                 original=original,
@@ -118,7 +131,7 @@ def check_file(filename: str) -> list[LintMessage]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Format files with ufmt (black + usort).",
+        description="Format files with usort + black.",
         fromfile_prefix_chars="@",
     )
     parser.add_argument(
