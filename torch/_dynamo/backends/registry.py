@@ -8,6 +8,7 @@ from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple
 import torch
 from torch import fx
 
+
 log = logging.getLogger(__name__)
 
 
@@ -114,5 +115,5 @@ def _register_entrypoint_backends():
             compiler_fn = eps[backend_name].load()
             if compiler_fn is not None and backend_name not in _BACKENDS:
                 register_backend(compiler_fn=compiler_fn, name=backend_name)
-        except:
-            log.warning("Failed to load compiler plugin" + backend_name, exc_info=True)
+        except Exception:
+            log.warning("Failed to load compiler plugin %s", backend_name, exc_info=True)

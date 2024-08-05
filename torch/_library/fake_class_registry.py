@@ -159,7 +159,9 @@ def maybe_to_fake_obj(
                 FakeScriptMethod(fake_x_wrapped, name, method_schema),
             )
         else:
-            log.warning("fake object of %s doesn't implement method %s.", x, name)
+            override_skip_list = {"__obj_flatten__", "__get_state__", "__set_state__"}
+            if name not in override_skip_list:
+                log.warning("fake object of %s doesn't implement method %s.", x, name)
     return fake_x_wrapped
 
 

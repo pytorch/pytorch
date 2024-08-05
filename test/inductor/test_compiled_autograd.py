@@ -2195,7 +2195,7 @@ def wrap_test_class(orig_cls):
     dct = orig_cls.__dict__.copy()
     for name in list(dct.keys()):
         fn = dct[name]
-        if not callable(fn):
+        if not callable(fn) or name in skipped_tests:
             continue
         elif known_failures_re.match(name) or name in known_failing_tests:
             dct[name] = unittest.expectedFailure
@@ -2231,6 +2231,13 @@ known_failures_re = re.compile(
 )
 
 # Bugs needing investigation:
+skipped_tests = {
+    # These test unconventional usage of saved tensor hooks do not leak or crash
+    # Running these tests succeed, but somehow cause other tests to fail
+    "test_saved_tensor_hooks_extra_exit_during_bw_no_crash",
+    "test_saved_tensor_hooks_extra_enter_during_bw_no_leak",
+}
+
 known_failing_tests = {
     "test_current_graph_task_execution_order",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function <
     "test_input_buffer_accum",  # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage

@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
+import sys
 import unittest
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch._dynamo
@@ -296,9 +298,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         self.assertTrue(backend_run)
 
     def test_lookup_custom_backend(self):
-        from torch._dynamo import list_backends, lookup_backend
-        from unittest.mock import patch, MagicMock
-        import sys
+        from torch._dynamo import list_backends
 
         backends_group = "torch_dynamo_backends"
         name = "mycustombackend"
