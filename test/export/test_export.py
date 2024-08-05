@@ -2140,12 +2140,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
-    @testing.expectedFailureSerDer  # sympify on deserialization doesn't preserve sympy functions: T197567691
     def test_solver_unsupported_sympy_function(self):
         # repro of https://github.com/pytorch/pytorch/issues/131897
-
-        # NOTE: Dynamo errors with unsupported functions in `add_runtime_asserts`:
-        # "symbolically traced variables cannot be used as inputs to control flow"
 
         class MyModule(torch.nn.Module):
             def __init__(self):
