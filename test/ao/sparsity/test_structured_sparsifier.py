@@ -912,7 +912,7 @@ class TestFPGMPruner(TestCase):
     """
 
     class SimpleConvFPGM(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.conv2d1 = nn.Conv2d(
                 in_channels=1, out_channels=3, kernel_size=3, padding=1, bias=False

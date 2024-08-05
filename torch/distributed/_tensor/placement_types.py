@@ -800,6 +800,29 @@ class DTensorSpec:
         return r
 
     @property
+    def num_shards_map(self) -> List[int]:
+        """
+        dim_map is a property we derive from `placements` of
+        the distributed tensor. Unlike `dim_map`, `num_shards_map`
+        denotes how many shards each tensor dim has. Like `dim_map`:
+            len(num_shards_map) == dist_tensor.ndim
+            num_shards_map[i] = 1: means tensor dim i is not sharded
+            num_shards_map[i] = j: means tensor dim i has j shards in total
+
+        For example, we have a dist tensor of shape [18, 20, 30],
+        a device_mesh ([[0, 1, 2, 3], [4, 5, 6, 7]]), and placements
+        ([Shard(1), Shard(0)]), the num_shards_map of this distributed tensor
+        would be: [4, 2, 1].
+        """
+        r = [1] * self.ndim
+        for i, placement in enumerate(self.placements):
+            if placement.is_shard():
+                shard_dim = cast(Shard, placement).dim
+                r[shard_dim] *= self.mesh.size(i)
+
+        return r
+
+    @property
     def sums(self) -> List[int]:
         """
         sums is a property we derive from `placements` of the
