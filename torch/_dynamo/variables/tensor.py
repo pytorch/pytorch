@@ -249,7 +249,6 @@ class TensorVariable(VariableTracker):
 
         # For local source, we associate the real value. We use this real value
         # for implementing getattr fallthrough on the variable tracker base class.
-
         # Note - this scope construction is mirrored in guards
         # A subsequent PR will introduce a util.
         scope = {
