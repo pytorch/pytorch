@@ -447,7 +447,9 @@ class FSDPParam:
             unsharded_param = _from_local_no_grad(unsharded_param, self._tp_spec)
         if hasattr(self, "_unsharded_param"):
             assert ca.compiled_autograd_enabled
-            with torch.no_grad():
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
+                self._unsharded_param
+            ):
                 torch.ops.fsdp.set_.default(self._unsharded_param, unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(
@@ -690,6 +692,9 @@ class FSDPParam:
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
         self.sharded_param._local_tensor = local_tensor[: self.sharded_size[0]]
+
+    def __repr__(self):
+        return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
 
 
 def alloc_storage(tensor: torch.Tensor) -> None:

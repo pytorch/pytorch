@@ -5,6 +5,7 @@ import pathlib
 from typing import Any, List
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..codecache import get_path, TritonFuture
@@ -219,11 +220,11 @@ class MultiKernel:
 
     @property
     def removed_buffers(self):
-        return set.intersection(*[k.removed_buffers for k in self.kernels])
+        return OrderedSet.intersection(*[k.removed_buffers for k in self.kernels])
 
     @property
     def inplaced_to_remove(self):
-        return set.intersection(*[k.inplaced_to_remove for k in self.kernels])
+        return OrderedSet.intersection(*[k.inplaced_to_remove for k in self.kernels])
 
     @property
     @cache_on_self

@@ -9,6 +9,7 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.utils import InputType
 
+
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 
@@ -51,7 +52,6 @@ class WrappedFunction:
     constants: Tuple[torch.Tensor, ...]
     placeholders: Sequence[PlaceholderInfo]
     mutated_input_idxs: Sequence[int]
-    placeholders: List[PlaceholderInfo]
 
 
 def get_mutating_use_stack_trace_from_node(
@@ -240,7 +240,7 @@ class CheckInvariantStatus(Enum):
     # Expected dead indices before graph are live
     ExpectedDeadIndicesBeforeGraphMismatch = 4
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.name == "CudagraphManagedIdxMismatch":
             return "cudagraph managed tensor data pointer changed"
         elif self.name == "StaticInputIdxMismatch":
@@ -280,3 +280,40 @@ def log_data_ptr_mismatch(
                 f"input stack trace: {get_placeholder_stack_trace(placeholder)}\n"
             )
     return error_msg
+
+
+def maybe_warning_due_to_dynamic_shape(
+    fn_cache: Dict[Tuple[int, ...], Callable[..., Any]],
+    new_int_key: Any,
+):
+    num_cudagraphs = len(fn_cache.keys()) + 1
+
+    def warn_msg():
+        return (
+            "CUDAGraph supports dynamic shapes by recording a new graph for each "
+            "distinct input size. Recording too many CUDAGraphs may lead to "
+            f"extra overhead. We have observed {num_cudagraphs} distinct sizes. "
+            "Please consider the following options for better performance: "
+            "a) padding inputs to a few fixed number of shapes; or b) set "
+            "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
+            "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
+            "to silence this warning."
+        )
+
+    if (
+        torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit
+        and num_cudagraphs
+        > torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit
+    ):
+        perf_hint_log.warning(warn_msg())
+
+
+@dataclasses.dataclass(frozen=True)
+class CudagraphCachedInfo:
+    """
+    Info needed to realign inputs
+    """
+
+    placeholders: Sequence[PlaceholderInfo]
+    stack_traces: List[Optional[str]]
+    cudagraph_fail_reasons: List[str]
