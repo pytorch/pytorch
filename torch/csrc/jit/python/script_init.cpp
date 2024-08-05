@@ -66,7 +66,6 @@
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
 #include <torch/csrc/jit/mobile/train/export_data.h>
-#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <sstream>
@@ -269,11 +268,12 @@ void checkMutableFunctionDefault(
     const Argument& arg,
     const py::object& def_arg) {
   if (checkMutableFunctionDefault(def_arg) || arg.type()->cast<ClassType>()) {
-    throw ErrorReport(range)
+    throw(
+        ErrorReport(range)
         << "Mutable default parameters are not supported because Python binds them to the function"
         << " and they persist across function calls.\n As a workaround, make the default None and instantiate"
         << " the default parameter within the body of the function. Found "
-        << def_arg.get_type() << " on parameter " << arg.name();
+        << def_arg.get_type() << " on parameter " << arg.name());
   }
 }
 
@@ -297,7 +297,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
                 << "\" was not annotated with an explicit type "
                 << "it is assumed to be type 'Tensor'.";
         }
-        throw error;
+        throw ErrorReport(error);
       }
       new_args.emplace_back(
           arg.name(), arg.type(), arg.N(), *value, arg.kwarg_only());
@@ -338,24 +338,27 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     auto overload_name = overload_params[i].ident().name();
     auto impl_name = impl_params[i].ident().name();
     if (overload_name != impl_name) {
-      throw ErrorReport(overload_decl.range())
+      throw(
+          ErrorReport(overload_decl.range())
           << "Overload parameters must have the same names. "
           << "Found " << overload_name << " and " << impl_name
-          << " on argument " << i;
+          << " on argument " << i);
     }
     adjusted_params.push_back(overload_params[i]);
   }
   for (size_t i = overload_params.size(); i < impl_params.size(); ++i) {
     if (!defaults.count(impl_params[i].ident().name())) {
-      throw ErrorReport(impl_decl.range())
+      throw(
+          ErrorReport(impl_decl.range())
           << "Expected to find default parameter on argument"
           << impl_params[i].ident().name()
-          << " because it is not defined on the overloaded declaration";
+          << " because it is not defined on the overloaded declaration");
     }
     if (!impl_params[i].type().present()) {
-      throw ErrorReport(impl_decl.range())
+      throw(
+          ErrorReport(impl_decl.range())
           << "Parameters not specified on the overloaded declaration must have a type annotation in the implementation function."
-          << " Did not find type for param " << impl_params[i].ident().name();
+          << " Did not find type for param " << impl_params[i].ident().name());
     }
     adjusted_params.push_back(impl_params[i]);
   }
@@ -373,8 +376,9 @@ static StrongFunctionPtr script_compile_overloaded_function(
     const FunctionDefaults& implementation_defaults,
     const py::object& signature) {
   if (signature.is_none()) {
-    throw ErrorReport(overload_decl.range())
-        << "Must explicitly add type annotations to overloaded functions";
+    throw(
+        ErrorReport(overload_decl.range())
+        << "Must explicitly add type annotations to overloaded functions");
   }
 
   auto adjusted_decl = mergeDefaultsAndExtraParametersToOverloadDecl(
@@ -935,34 +939,28 @@ void initJitScriptBindings(PyObject* module) {
   std::unordered_map<std::string, MagicMethodImplType> special_magic_methods;
   special_magic_methods.emplace(
       "__str__",
-      [](const Object& self, py::args args, py::kwargs kwargs) -> py::object {
+      [](const Object& self,
+         py::args args,
+         const py::kwargs& kwargs) -> py::object {
         auto method = self.find_method("__str__");
         if (!method) {
           return py::str("ScriptObject <" + self.type()->str() + ">");
         }
-        return invokeScriptMethodFromPython(
-            *method,
-            // NOLINTNEXTLINE(performance-move-const-arg)
-            std::move(args),
-            // NOLINTNEXTLINE(performance-move-const-arg)
-            std::move(kwargs));
+        return invokeScriptMethodFromPython(*method, std::move(args), kwargs);
       });
 
   special_magic_methods.emplace(
       "__repr__",
-      [](const Object& self, py::args args, py::kwargs kwargs) -> py::object {
+      [](const Object& self,
+         py::args args,
+         const py::kwargs& kwargs) -> py::object {
         auto method = self.find_method("__repr__");
         if (!method) {
           std::stringstream ss;
           ss << std::hex << static_cast<const void*>(&self);
           return py::str("<torch.ScriptObject object at " + ss.str() + ">");
         }
-        return invokeScriptMethodFromPython(
-            *method,
-            // NOLINTNEXTLINE(performance-move-const-arg)
-            std::move(args),
-            // NOLINTNEXTLINE(performance-move-const-arg)
-            std::move(kwargs));
+        return invokeScriptMethodFromPython(*method, std::move(args), kwargs);
       });
 
   for (const char* mm_name : magic_method_names) {
@@ -971,7 +969,8 @@ void initJitScriptBindings(PyObject* module) {
     } else {
       object_class.def(
           mm_name,
-          [mm_name](const Object& self, py::args args, py::kwargs kwargs) {
+          [mm_name](
+              const Object& self, py::args args, const py::kwargs& kwargs) {
             auto method = self.find_method(mm_name);
             if (!method) {
               std::string msg = fmt::format(
@@ -981,11 +980,7 @@ void initJitScriptBindings(PyObject* module) {
               throw c10::NotImplementedError(msg);
             }
             return invokeScriptMethodFromPython(
-                *method,
-                // NOLINTNEXTLINE(performance-move-const-arg)
-                std::move(args),
-                // NOLINTNEXTLINE(performance-move-const-arg)
-                std::move(kwargs));
+                *method, std::move(args), kwargs);
           });
     }
   }
@@ -1137,7 +1132,7 @@ void initJitScriptBindings(PyObject* module) {
              const ResolutionCallback& rcb) {
             const auto self = ModuleSelf(std::move(concreteType));
             m._ivalue()->compilation_unit()->define(
-                *m.type()->name(), script, pythonResolver(rcb), &self);
+                m.type()->name(), script, pythonResolver(rcb), &self);
             didFinishEmitModule(m);
           })
       .def(
@@ -1436,17 +1431,13 @@ void initJitScriptBindings(PyObject* module) {
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
           "__call__",
-          [](py::args args, py::kwargs kwargs) {
+          [](py::args args, const py::kwargs& kwargs) {
             HANDLE_TH_ERRORS
             // see: [pybind11 varargs]
             auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
             Function& callee = *strongPtr.function_;
             py::object result = invokeScriptFunctionFromPython(
-                callee,
-                // NOLINTNEXTLINE(performance-move-const-arg)
-                tuple_slice(std::move(args), 1),
-                // NOLINTNEXTLINE(performance-move-const-arg)
-                std::move(kwargs));
+                callee, tuple_slice(std::move(args), 1), kwargs);
             return result;
             END_HANDLE_TH_ERRORS_PYBIND
           })
@@ -1546,17 +1537,13 @@ void initJitScriptBindings(PyObject* module) {
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(
           "__call__",
-          [](py::args args, py::kwargs kwargs) {
+          [](py::args args, const py::kwargs& kwargs) {
             // see: [pybind11 varargs]
             HANDLE_TH_ERRORS
             Method& method = py::cast<Method&>(args[0]);
 
             return invokeScriptMethodFromPython(
-                method,
-                // NOLINTNEXTLINE(performance-move-const-arg)
-                tuple_slice(std::move(args), 1),
-                // NOLINTNEXTLINE(performance-move-const-arg)
-                std::move(kwargs));
+                method, tuple_slice(std::move(args), 1), kwargs);
             END_HANDLE_TH_ERRORS_PYBIND
           })
       .def_property_readonly("graph", &Method::graph)
@@ -1732,8 +1719,9 @@ void initJitScriptBindings(PyObject* module) {
          const ResolutionCallback& rcb) {
         C10_LOG_API_USAGE_ONCE("torch.script.class");
         if (classDef.superclass().present()) {
-          throw ErrorReport(classDef.range())
-              << "Torchscript does not support class inheritance.";
+          throw(
+              ErrorReport(classDef.range())
+              << "Torchscript does not support class inheritance.");
         }
         auto cu = get_python_cu();
         auto classname = c10::QualifiedName(qualifiedName);
@@ -1754,10 +1742,11 @@ void initJitScriptBindings(PyObject* module) {
 
         for (const auto& def : classDef.body()) {
           if (def.kind() != TK_DEF) {
-            throw ErrorReport(def.range())
+            throw(
+                ErrorReport(def.range())
                 << "Currently class bodies can only contain method "
                    "definitions. File an issue on GitHub if you want "
-                   "something else!";
+                   "something else!");
           }
           methodDefs.emplace_back(def);
           methodRcbs.push_back(
@@ -1876,7 +1865,7 @@ void initJitScriptBindings(PyObject* module) {
          std::shared_ptr<torch::jit::DeserializationStorageContext>
              storage_context,
          py::object map_location,
-         std::string ts_id) {
+         const std::string& ts_id) {
         std::optional<at::Device> optional_device;
         if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
@@ -1888,7 +1877,7 @@ void initJitScriptBindings(PyObject* module) {
             std::move(reader),
             std::move(storage_context),
             optional_device,
-            std::move(ts_id));
+            ts_id);
       });
   m.def(
       "import_ir_module_from_buffer",
@@ -2448,8 +2437,8 @@ void initJitScriptBindings(PyObject* module) {
     return result;
   });
 
-  m.def("_pickle_save", [](IValue v) {
-    auto bytes = torch::jit::pickle_save(std::move(v));
+  m.def("_pickle_save", [](const IValue& v) {
+    auto bytes = torch::jit::pickle_save(v);
     return py::bytes(bytes.data(), bytes.size());
   });
 
