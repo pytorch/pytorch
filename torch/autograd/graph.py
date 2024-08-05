@@ -223,19 +223,16 @@ def increment_version(tensor: Union[torch.Tensor, List[torch.Tensor]]) -> None:
     when mark_dirty() is called appropriately so you only need to call this explicitly
     if you are doing inplace operation on the Tensor data in a way that Pytorch doesn't
     know about. For example a custom kernel that reads the Tensor data_ptr and modifies
-    the memory inplace based on this pointer.
+    the memory inplace based on this pointer.Can accept either a tensor, or a list of tensors.
 
     Note that incrementing the version counter multiple times for a single inplace operation
     is not problematic.
 
     Note that if you pass in tensor constructed under torch.inference_mode(),
     we will not bump its version counter (because your tensor does not have one).
-
-    Can accept either a tensor, or a list of tensors.
-    If you pass in a list of tensors, we will separately
     """
-    if isinstance(tensor, list):
-        torch._C._increment_versions(tensor)
+    if isinstance(tensor, torch.Tensor):
+        torch._C._increment_version([tensor])
     else:
         torch._C._increment_version(tensor)
 
