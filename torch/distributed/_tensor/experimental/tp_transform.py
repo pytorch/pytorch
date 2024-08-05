@@ -472,7 +472,7 @@ def _insert_reshard_gm(
                 input_node: input_arg,
             },
         )
-    node.replace_input_with(input_arg, output_node)  # type: ignore[arg-type]
+    node.replace_input_with(input_arg, output_node)
 
 
 def _clean_up_graph_metadata(gm: torch.fx.GraphModule) -> None:

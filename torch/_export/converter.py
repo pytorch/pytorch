@@ -2,13 +2,14 @@
 import builtins
 import logging
 import operator
+import typing
 import warnings
-
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from contextlib import contextmanager
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import torch
 import torch.export._trace
-
+from torch import _C
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     ConstantArgument,
@@ -19,9 +20,107 @@ from torch.export.graph_signature import (
     TensorArgument,
 )
 from torch.fx import subgraph_rewriter
-from torch.onnx.utils import _create_jit_graph
+
 
 log = logging.getLogger(__name__)
+
+
+def _get_param_count_list(method_graph, args_params):
+    param_count_list = []
+    for input_, arg_params_ in zip(method_graph.inputs(), args_params):
+        if "PackedParams" in str(input_.type()):
+            in_vars, _ = torch.jit._flatten(arg_params_)
+            param_count_list.append(len(in_vars))
+        else:
+            param_count_list.append(arg_params_ is not None)
+
+    return param_count_list
+
+
+def _trace_and_get_graph_from_model(model, args):
+    # A basic sanity check: make sure the state_dict keys are the same
+    # before and after running the model.  Fail fast!
+    orig_state_dict_keys = torch.jit._unique_state_dict(model).keys()
+
+    # Disable Autocast cache because it replaces kernel's weight and bias
+    # by (undesired) constants.
+    # No perf impact for when there are reused weights since https://github.com/pytorch/pytorch/pull/85665
+    prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
+    torch.set_autocast_cache_enabled(False)
+    trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
+        model,
+        args,
+        strict=False,
+        _force_outplace=False,
+        _return_inputs_states=True,
+    )
+    torch.set_autocast_cache_enabled(prev_autocast_cache_enabled)
+
+    if orig_state_dict_keys != torch.jit._unique_state_dict(model).keys():
+        raise RuntimeError(
+            "state_dict changed after running the tracer; "
+            "something weird is happening in your model!"
+        )
+
+    return trace_graph, torch_out
+
+
+def _create_jit_graph(
+    model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
+) -> Tuple[torch.Graph, List["_C.IValue"], Any, Optional[torch.ScriptModule]]:
+    if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
+        flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
+        torch_out = None
+
+        if isinstance(model, torch.jit.ScriptModule):
+            try:
+                graph = model.forward.graph  # type: ignore[attr-defined]
+            except AttributeError as e:
+                raise RuntimeError("'forward' method must be a script method") from e
+            _C._jit_pass_onnx_function_substitution(graph)
+            freezed_module = _C._freeze_module(
+                typing.cast(_C.ScriptModule, model._c), preserveParameters=True
+            )
+            module, params = _C._jit_onnx_list_model_parameters(freezed_module)
+            method_graph = module._get_method("forward").graph
+            args_params = tuple(args) + tuple(params)
+            param_count_list = _get_param_count_list(method_graph, args_params)
+            in_vars, _ = torch.jit._flatten(args_params)
+            graph = _C._propagate_and_assign_input_shapes(
+                method_graph, tuple(in_vars), param_count_list, False, False
+            )
+            return graph, params, torch_out, module
+
+        # torch.jit.ScriptFunction
+        params = []
+        graph = model.graph
+        _C._jit_pass_onnx_function_substitution(graph)
+        param_count_list = _get_param_count_list(graph, args)
+        graph = _C._propagate_and_assign_input_shapes(
+            graph, flattened_args, param_count_list, False, False
+        )
+        return graph, params, torch_out, None
+
+    graph, torch_out = _trace_and_get_graph_from_model(model, args)
+    _C._jit_pass_onnx_lint(graph)
+    state_dict = torch.jit._unique_state_dict(model)
+    params = list(state_dict.values())
+    graph_inputs = list(graph.inputs())
+    user_input_num = len(graph_inputs) - len(state_dict)
+    param_names = list(state_dict.keys())
+    for i, inp in enumerate(graph_inputs):
+        if i >= user_input_num:
+            inp.setDebugName(param_names[i - user_input_num])
+    _C._jit_pass_onnx_function_substitution(graph)
+    return graph, params, torch_out, None
+
+
+def list_add(a, b):
+    return a + b
+
+
+def list_append(container, element):
+    return container + [element]
 
 
 def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
@@ -239,6 +338,7 @@ def get_attribute_fqn_from_ts_node(
 
 def get_op_overload(node: torch._C.Node):
     schema_str = node.schema()
+    assert schema_str != "(no schema)", f"got empty schema for {node}"
     schema: torch._C.FunctionSchema = torch._C.parse_schema(schema_str)
     ns, op_name = str(schema.name).split("::")
     override = schema.overload_name
@@ -252,7 +352,7 @@ def get_op_overload(node: torch._C.Node):
             op_overload = op_overload_packet.default
     except Exception as e:
         raise RuntimeError(
-            f"Unable to find operator {node.kind()} with schema {node.schema}"
+            f"Unable to find operator {node.kind()} with schema {node.schema()}"
         ) from e
 
     return op_overload
@@ -440,6 +540,24 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         fx_node = self.fx_graph.call_function(target, args, kwargs)
         self.name_to_node[output_name] = fx_node
+
+    def convert_aten_append(self, node: torch._C.Node):
+        # special handle python list append: "aten::append.t(t[](a!) self, t(c -> *) el) -> t[](a!)"
+
+        # inplace append to the list!! This is kinda crazy, as we are inplace mutating the list
+        # This makes the converter "non-functional", and the result depends on the order of the nodes being converter
+        # In a sense, the converter now becomes an stateful interpreter
+        warnings.warn(
+            "Converting aten::append.t, which is a inplace mutation of the list. "
+            "This makes the converter non-functional: the result depends on the order of the append nodes being converter!"
+        )
+
+        args = tuple(self.get_fx_value(inp) for inp in node.inputs())
+        fx_node = self.fx_graph.call_function(list_append, args)
+        self.name_to_node[node.output().debugName()] = fx_node
+
+        # inplace mutate arg[0], which is the python list
+        self.name_to_node[node.inputsAt(0).debugName()] = fx_node
 
     def convert_prim_Constant(self, node: torch._C.Node):
         name = node.output().debugName()
@@ -677,6 +795,64 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
+    def convert_aten_to(self, node: torch._C.Node):
+        target = get_op_overload(node)
+        args, kwargs = self.get_args_kwargs(node, target._schema)
+
+        # special handle aten.to.dtype and aten.to.prim_dtype followed by inplace_mutation_op
+        # coz aten.to + inplace_mutation_op pattern would trigger
+        # "cannot mutate tensors with frozen storage" functionalization error.
+        # To work around the issue, we override the copy to be True, so that the output
+        # is for sure not an alias of input
+        if target == torch.ops.aten.to.dtype or target == torch.ops.aten.to.prim_dtype:
+            user_nodes = [use.user for use in node.output().uses()]
+            user_targets = [
+                get_op_overload(user_node)
+                for user_node in user_nodes
+                if user_node.schema() != "(no schema)"
+            ]
+            has_mutable_target = any(
+                target._schema.is_mutable for target in user_targets
+            )
+
+            if has_mutable_target:
+                assert len(args) >= 4
+                new_args = list(args)
+                new_args[3] = True  # copy, override to True
+                fx_node = self.fx_graph.call_function(
+                    torch.ops.aten.to.dtype, tuple(new_args)
+                )
+                # temp hack to work around the issue https://github.com/pytorch/pytorch/issues/131679
+                # When this issue is fixed, the clone node would be no longer needed
+                clone_node = self.fx_graph.call_function(
+                    torch.ops.aten.clone.default, (fx_node,)
+                )
+                output_name = node.output().debugName()
+                self.name_to_node[output_name] = clone_node
+                return
+
+        self.convert_call_function_op(node)
+
+    def convert_aten_add(self, node: torch._C.Node):
+        if node.schema() == "(no schema)":
+            if isinstance(node.inputsAt(0).type(), torch.ListType) and isinstance(
+                node.inputsAt(1).type(), torch.ListType
+            ):
+                target = torch.ops.aten.add.t
+            else:
+                raise RuntimeError(f"unable to determind the target for {node}")
+        else:
+            target = get_op_overload(node)
+
+        if target == torch.ops.aten.add.t:
+            # special handle python list/tuple add: "aten::add.t(t[] a, t[] b) -> t[]" for
+            # RuntimeError: aten::add() Expected a value of type 'List[t]' for argument 'a' but instead found type 'immutable_list'.
+            args, kwargs = self.get_args_kwargs(node, target._schema)
+            output_name = node.output().debugName()
+            self.name_to_node[output_name] = self.fx_graph.call_function(list_add, args)
+        else:
+            self.convert_call_function_op(node)
+
     def _check_set_attr_in_if_block(self, if_node: torch._C.Node):
         for block in if_node.blocks():
             for node in block.nodes():
@@ -865,7 +1041,16 @@ class TS2FXGraphConverter:
         for graph_output in self.ts_graph.outputs():
             output_name = graph_output.debugName()
             if output_name in self.name_to_node:
-                args.append(self.name_to_node[output_name])
+                fx_node = self.name_to_node[output_name]
+                # TODO: Revisit this later after HigherOrderOp design changes.
+                # Currently, we cannot directly return input as output.
+                if (
+                    not self.is_top_level_graph()
+                    and isinstance(fx_node, torch.fx.Node)
+                    and fx_node.op == "placeholder"
+                ):
+                    fx_node = self.fx_graph.call_function(torch.clone, (fx_node,))
+                args.append(fx_node)
                 self.output_specs.append(
                     OutputSpec(
                         OutputKind.USER_OUTPUT,
@@ -891,6 +1076,10 @@ class TS2FXGraphConverter:
             self.fx_graph.output(
                 args[0]
             )  # Get rid of an extra list wrapped around final output.
+        elif len(args) > 1:
+            self.fx_graph.output(
+                args
+            )  # For prim::Loop and prim::If with multiple outputs.
         else:
             # Sub-block of prim::If can have zero output.
             self.fx_graph.output([])
@@ -942,7 +1131,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
             self.name_to_node,
             # Dummy node.
             torch.fx.Node(
-                None,  # type: ignore[arg-type]
+                None,
                 "mock",
                 "call_function",
                 lambda: None,
@@ -960,8 +1149,18 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
     def convert_node(self, node):
         try:
             super().convert_node(node)
-        except Exception:
+        except Exception as e:
             self.unsupported_node_list.append(node)
+
+
+@contextmanager
+def disable_logging(log):
+    disabled = log.disabled
+    log.disabled = True
+    try:
+        yield
+    finally:
+        log.disabled = disabled
 
 
 class TS2EPConverter:
@@ -972,21 +1171,8 @@ class TS2EPConverter:
         sample_args: Tuple[Any, ...],
         sample_kwargs: Optional[Dict[str, Any]] = None,
     ):
-        log.info(
-            """
-TS2EPConverter logging starts from here.
-
-INFO: (TORCH_LOGS="export" <cmd>)
-    * Log TorchScript IR.
-
-DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
-    * Log conversion IR by IR in a format of [<conversion handler name>] converts [<IR>].
-        """
-        )
-
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
-        log.info("TorchScript graph\n\n%s\n", self.ts_graph)
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
@@ -1015,6 +1201,19 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         self.lift_tensor_constants_to_buffer()
 
     def convert(self) -> ExportedProgram:
+        log.info(
+            """
+TS2EPConverter logging starts from here.
+
+INFO: (TORCH_LOGS="export" <cmd>)
+    * Log TorchScript IR.
+
+DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
+    * Log conversion IR by IR in a format of [<conversion handler name>] converts [<IR>].
+        """
+        )
+        log.info("TorchScript graph\n\n%s\n", self.ts_graph)
+
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
 
         graph_converter = TS2FXGraphConverter(
@@ -1045,6 +1244,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
 
         return ep
 
+    @disable_logging(log)
     def explain(self, print_output=True):
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
 

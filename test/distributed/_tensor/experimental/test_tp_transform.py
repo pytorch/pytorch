@@ -43,7 +43,7 @@ class MLPListModule(torch.nn.Module):
 
 
 class DummyModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc = torch.nn.Linear(3, 5)
         self.bn = torch.nn.BatchNorm1d(5)

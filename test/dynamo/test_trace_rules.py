@@ -23,6 +23,7 @@ from torch._dynamo.trace_rules import (
 from torch._dynamo.utils import hashable, is_safe_constant, istype
 from torch._dynamo.variables import TorchInGraphFunctionVariable, UserFunctionVariable
 
+
 try:
     from .utils import create_dummy_module_and_function
 except ImportError:

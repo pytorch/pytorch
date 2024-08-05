@@ -206,7 +206,7 @@ class set_grad_enabled(_DecoratorContextManager):
 class inference_mode(_DecoratorContextManager):
     r"""Context-manager that enables or disables inference mode.
 
-    InferenceMode is a new context manager analogous to :class:`~no_grad`
+    InferenceMode is a context manager analogous to :class:`~no_grad`
     to be used when you are certain your operations will have no interactions
     with autograd (e.g., model training). Code run under this mode gets better
     performance by disabling view tracking and version counter bumps. Note that

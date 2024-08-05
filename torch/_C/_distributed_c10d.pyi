@@ -524,7 +524,12 @@ def _round_robin_process_groups(
 
 class ProcessGroupGloo(Backend):
     class Device: ...
-    class Options: ...
+
+    class Options(ProcessGroup.Options):
+        devices: list[ProcessGroupGloo.Device]
+        threads: int
+
+        def __init__(self): ...
 
     def __init__(
         self,
@@ -544,34 +549,21 @@ class _ProcessGroupWrapper(Backend):
     wrapped_pg: Backend
 
 class ProcessGroupNCCL(Backend):
-    class Options:
-        def __init__(self, timeout: timedelta | None = None) -> None: ...
-        @property
-        def backend(self) -> str: ...
-        @property
-        def _timeout(self) -> timedelta: ...
-        @_timeout.setter
-        def _timeout(self, val: timedelta) -> None: ...
-        @property
-        def is_high_priority_stream(self) -> bool: ...
-        @is_high_priority_stream.setter
-        def is_high_priority_stream(self, val: bool) -> None: ...
-        @property
-        def split_from(self) -> ProcessGroupNCCL: ...
-        @split_from.setter
-        def split_from(self, pg: ProcessGroupNCCL) -> None: ...
-        @property
-        def split_color(self) -> int: ...
-        @split_color.setter
-        def split_color(self, color: int) -> None: ...
-        @property
-        def global_ranks_in_group(self) -> list[int]: ...
-        @global_ranks_in_group.setter
-        def global_ranks_in_group(self, ranks: list[int]) -> None: ...
-        @property
-        def group_name(self) -> str: ...
-        @group_name.setter
-        def group_name(self, name: str) -> None: ...
+    class NCCLConfig:
+        blocking: int
+        cga_cluster_size: int
+        min_ctas: int
+        max_ctas: int
+
+    class Options(ProcessGroup.Options):
+        config: ProcessGroupNCCL.NCCLConfig
+        is_high_priority_stream: bool
+        split_from: ProcessGroupNCCL
+        split_color: int
+        global_ranks_in_group: list[int]
+        group_name: str
+
+        def __init__(self, is_high_priority_stream: bool = False): ...
 
     def __init__(
         self,
