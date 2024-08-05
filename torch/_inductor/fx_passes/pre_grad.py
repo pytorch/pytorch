@@ -510,7 +510,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                     gm.graph.erase_node(bn_node)
     gm.graph.lint()
 
-    for pattern in function_patterns:
+    for pattern in function_patterns:  # type: ignore[assignment]
         for node in gm.graph.nodes:
             if matches_function_pattern(pattern, node):
                 # TODO: support kwargs.
@@ -529,15 +529,18 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                     for n in conv_node.args[1:3]
                 )
                 bn_args_is_constant = all(
-                    n.op == "get_attr" and len(n.users) == 1 for n in node.args[1:5]
+                    n is None or (n.op == "get_attr" and len(n.users) == 1)
+                    for n in node.args[1:5]
                 )
 
                 if not conv_args_is_constant or not bn_args_is_constant:
                     continue
                 bn_running_mean = fetch_attr(node.args[1].target, gm)
                 bn_running_var = fetch_attr(node.args[2].target, gm)
-                bn_weight = fetch_attr(node.args[3].target, gm)
-                bn_bias = fetch_attr(node.args[4].target, gm)
+                bn_weight = (
+                    fetch_attr(node.args[3].target, gm) if node.args[3] else None
+                )
+                bn_bias = fetch_attr(node.args[4].target, gm) if node.args[4] else None
                 if bn_running_mean is None or bn_running_var is None:
                     continue
 
