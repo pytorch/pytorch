@@ -292,6 +292,10 @@ class FunctionalTensorMode(TorchDispatchMode):
         # track of the ordering between side effectful operations.
         self._tokens: Dict[Any, torch.Tensor] = {}
 
+        # Filled after forward tracing is done, see on_forward_tracing_end
+        self._tokens_forward_output: Dict[Any, torch.Tensor] = {}
+        self._tokens_backward_input: Dict[Any, torch.Tensor] = {}
+
         # Functionalization runs twice in AOTAutograd, once in
         # `run_functionalized_fw_and_collect_metadata` to collect metadata to
         # see which tensors need to be functionalized and discover how many
@@ -323,6 +327,12 @@ class FunctionalTensorMode(TorchDispatchMode):
         is_on_stack = self.enter_stack.pop()
         if is_on_stack:
             super().__exit__(a, b, c)
+
+    # Called after forward tracing is done, before backward tracing started.
+    def on_forward_tracing_end(self):
+        # Effect tokens (for _EffectType.ORDERED) forward and backward are independent.
+        self._tokens_forward_output = self._tokens.copy()
+        self._tokens = self._tokens_backward_input
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:

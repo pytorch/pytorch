@@ -660,7 +660,7 @@ class EffectTokensWrapper(CompilerWrapper):
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
             if num_tokens > 0:
-                # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
+                # Pass in forward effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
                 old_args = args
                 args = [[None] * num_tokens, *args]
                 old_args.clear()
@@ -670,7 +670,7 @@ class EffectTokensWrapper(CompilerWrapper):
             # Inductor cache DummyModule can return None
             if outs is None:
                 return None
-            # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
+            # Toss out the forward effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
             return outs[num_tokens:]
 
         # box it
@@ -1868,6 +1868,10 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
                     for i, t in enumerate(all_args)
                 ]
+                num_tokens = len(CompiledFunction.metadata.tokens)
+                if num_tokens > 0:
+                    # Adding runtime backward input tokens
+                    all_args = [*([None] * num_tokens), *all_args]
 
                 def call_compiled_backward():
                     if ctx._is_compiled_autograd_tracing():
@@ -1968,6 +1972,10 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         steal_args=True,
                         disable_amp=disable_amp,
                     )
+
+                    # Toss out the backward tokens
+                    out = out[len(CompiledFunction.metadata.tokens) :]
+
                     # TODO: replace this with FunctionalizedRngRuntimeWrapper.post_compile
                     out = FunctionalizedRngRuntimeWrapper()._functionalized_rng_runtime_epilogue(
                         CompiledFunction.metadata, out, offset_index=len(out) - 1
