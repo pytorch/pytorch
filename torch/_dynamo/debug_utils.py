@@ -170,7 +170,7 @@ class NNModuleToString:
             """
             from torch.nn import *
             class Repro(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
             """
         )
@@ -491,7 +491,7 @@ _is_leaf_or_default = _mk_defaulter(False)
 
 
 class NopInputReader:
-    def __init__(self):
+    def __init__(self) -> None:
         self.total = 0
 
     def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
