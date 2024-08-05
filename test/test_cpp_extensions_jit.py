@@ -17,7 +17,7 @@ import torch.multiprocessing as mp
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
-from torch.testing._internal.common_utils import gradcheck
+from torch.testing._internal.common_utils import gradcheck, TEST_XPU
 from torch.utils.cpp_extension import (
     _TORCH_PATH,
     check_compiler_is_gcc,
@@ -110,6 +110,26 @@ class TestCppExtensionJIT(common.TestCase):
 
         x = torch.zeros(100, device="cuda", dtype=torch.float32)
         y = torch.zeros(100, device="cuda", dtype=torch.float32)
+
+        z = module.sigmoid_add(x, y).cpu()
+
+        # 2 * sigmoid(0) = 2 * 0.5 = 1
+        self.assertEqual(z, torch.ones_like(z))
+
+    @unittest.skipIf(not (TEST_XPU), "XPU not found")
+    def test_jit_xpu_extension(self):
+        # NOTE: The name of the extension must equal the name of the module.
+        module = torch.utils.cpp_extension.load(
+            name="torch_test_xpu_extension",
+            sources=[
+                "cpp_extensions/xpu_extension.sycl",
+            ],
+            verbose=True,
+            keep_intermediates=False,
+        )
+
+        x = torch.zeros(100, device="xpu", dtype=torch.float32)
+        y = torch.zeros(100, device="xpu", dtype=torch.float32)
 
         z = module.sigmoid_add(x, y).cpu()
 
