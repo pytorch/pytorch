@@ -1,13 +1,15 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional
-import torch
-from collections import defaultdict
-from torch import nn
 import copy
-from ...sparsifier.utils import fqn_to_module, module_to_fqn
 import warnings
+from collections import defaultdict
+from typing import Any, Dict, List, Optional
 
-__all__ = ['ActivationSparsifier']
+import torch
+from torch import nn
+from torch.ao.pruning.sparsifier.utils import fqn_to_module, module_to_fqn
+
+
+__all__ = ["ActivationSparsifier"]
 
 
 class ActivationSparsifier:
@@ -84,84 +86,112 @@ class ActivationSparsifier:
         >>> # end training process
         >>> sparsifier.squash_mask()
     """
-    def __init__(self, model: nn.Module, aggregate_fn=None, reduce_fn=None, mask_fn=None,
-                 features=None, feature_dim=None, **sparse_config):
+
+    def __init__(
+        self,
+        model: nn.Module,
+        aggregate_fn=None,
+        reduce_fn=None,
+        mask_fn=None,
+        features=None,
+        feature_dim=None,
+        **sparse_config,
+    ):
         self.model = model
         self.defaults: Dict[str, Any] = defaultdict()
-        self.defaults['sparse_config'] = sparse_config
+        self.defaults["sparse_config"] = sparse_config
 
         # functions
-        self.defaults['aggregate_fn'] = aggregate_fn
-        self.defaults['reduce_fn'] = reduce_fn
-        self.defaults['mask_fn'] = mask_fn
+        self.defaults["aggregate_fn"] = aggregate_fn
+        self.defaults["reduce_fn"] = reduce_fn
+        self.defaults["mask_fn"] = mask_fn
 
         # default feature and feature_dim
-        self.defaults['features'] = features
-        self.defaults['feature_dim'] = feature_dim
+        self.defaults["features"] = features
+        self.defaults["feature_dim"] = feature_dim
 
-        self.data_groups: Dict[str, Dict] = defaultdict(dict)  # contains all relevant info w.r.t each registered layer
+        self.data_groups: Dict[str, Dict] = defaultdict(
+            dict
+        )  # contains all relevant info w.r.t each registered layer
 
         self.state: Dict[str, Any] = defaultdict(dict)  # layer name -> mask
 
     @staticmethod
     def _safe_rail_checks(args):
-        """Makes sure that some of the functions and attributes are not passed incorrectly
-        """
+        """Makes sure that some of the functions and attributes are not passed incorrectly"""
 
         # if features are not None, then feature_dim must not be None
-        features, feature_dim = args['features'], args['feature_dim']
+        features, feature_dim = args["features"], args["feature_dim"]
         if features is not None:
             assert feature_dim is not None, "need feature dim to select features"
 
         # all the *_fns should be callable
-        fn_keys = ['aggregate_fn', 'reduce_fn', 'mask_fn']
+        fn_keys = ["aggregate_fn", "reduce_fn", "mask_fn"]
         for key in fn_keys:
             fn = args[key]
-            assert callable(fn), 'function should be callable'
+            assert callable(fn), "function should be callable"
 
     def _aggregate_hook(self, name):
-        """Returns hook that computes aggregate of activations passing through.
-        """
+        """Returns hook that computes aggregate of activations passing through."""
 
         # gather some data
-        feature_dim = self.data_groups[name]['feature_dim']
-        features = self.data_groups[name]['features']
-        agg_fn = self.data_groups[name]['aggregate_fn']
+        feature_dim = self.data_groups[name]["feature_dim"]
+        features = self.data_groups[name]["features"]
+        agg_fn = self.data_groups[name]["aggregate_fn"]
 
         def hook(module, input) -> None:
             input_data = input[0]
 
-            data = self.data_groups[name].get('data')  # aggregated data
+            data = self.data_groups[name].get("data")  # aggregated data
             if features is None:
                 # no features associated, data should not be a list
                 if data is None:
                     data = torch.zeros_like(input_data)
-                    self.state[name]['mask'] = torch.ones_like(input_data)
+                    self.state[name]["mask"] = torch.ones_like(input_data)
                 out_data = agg_fn(data, input_data)
             else:
                 # data should be a list [aggregated over each feature only]
                 if data is None:
-                    out_data = [0 for _ in range(0, len(features))]  # create one incase of 1st forward
-                    self.state[name]['mask'] = [0 for _ in range(0, len(features))]
+                    out_data = [
+                        0 for _ in range(0, len(features))
+                    ]  # create one incase of 1st forward
+                    self.state[name]["mask"] = [0 for _ in range(0, len(features))]
                 else:
                     out_data = data  # a list
 
                 # compute aggregate over each feature
                 for feature_idx in range(len(features)):
                     # each feature is either a list or scalar, convert it to torch tensor
-                    feature_tensor = torch.Tensor([features[feature_idx]]).long().to(input_data.device)
-                    data_feature = torch.index_select(input_data, feature_dim, feature_tensor)
+                    feature_tensor = (
+                        torch.Tensor([features[feature_idx]])
+                        .long()
+                        .to(input_data.device)
+                    )
+                    data_feature = torch.index_select(
+                        input_data, feature_dim, feature_tensor
+                    )
                     if data is None:
                         curr_data = torch.zeros_like(data_feature)
-                        self.state[name]['mask'][feature_idx] = torch.ones_like(data_feature)
+                        self.state[name]["mask"][feature_idx] = torch.ones_like(
+                            data_feature
+                        )
                     else:
                         curr_data = data[feature_idx]
                     out_data[feature_idx] = agg_fn(curr_data, data_feature)
-            self.data_groups[name]['data'] = out_data
+            self.data_groups[name]["data"] = out_data
+
         return hook
 
-    def register_layer(self, layer: nn.Module, aggregate_fn=None, reduce_fn=None,
-                       mask_fn=None, features=None, feature_dim=None, **sparse_config):
+    def register_layer(
+        self,
+        layer: nn.Module,
+        aggregate_fn=None,
+        reduce_fn=None,
+        mask_fn=None,
+        features=None,
+        feature_dim=None,
+        **sparse_config,
+    ):
         r"""
         Registers a layer for sparsification. The layer should be part of self.model.
         Specifically, registers a pre-forward hook to the layer. The hook will apply the aggregate_fn
@@ -177,34 +207,40 @@ class ActivationSparsifier:
         assert name is not None, "layer not found in the model"  # satisfy mypy
 
         if name in self.data_groups:  # unregister layer if already present
-            warnings.warn("layer already attached to the sparsifier, deregistering the layer and registering with new config")
+            warnings.warn(
+                "layer already attached to the sparsifier, deregistering the layer and registering with new config"
+            )
             self.unregister_layer(name=name)
 
         local_args = copy.deepcopy(self.defaults)
         update_dict = {
-            'aggregate_fn': aggregate_fn,
-            'reduce_fn': reduce_fn,
-            'mask_fn': mask_fn,
-            'features': features,
-            'feature_dim': feature_dim,
-            'layer': layer
+            "aggregate_fn": aggregate_fn,
+            "reduce_fn": reduce_fn,
+            "mask_fn": mask_fn,
+            "features": features,
+            "feature_dim": feature_dim,
+            "layer": layer,
         }
-        local_args.update((arg, val) for arg, val in update_dict.items() if val is not None)
-        local_args['sparse_config'].update(sparse_config)
+        local_args.update(
+            (arg, val) for arg, val in update_dict.items() if val is not None
+        )
+        local_args["sparse_config"].update(sparse_config)
 
         self._safe_rail_checks(local_args)
 
         self.data_groups[name] = local_args
         agg_hook = layer.register_forward_pre_hook(self._aggregate_hook(name=name))
 
-        self.state[name]['mask'] = None  # mask will be created when model forward is called.
+        self.state[name][
+            "mask"
+        ] = None  # mask will be created when model forward is called.
 
         # attach agg hook
-        self.data_groups[name]['hook'] = agg_hook
+        self.data_groups[name]["hook"] = agg_hook
 
         # for serialization purposes, we know whether aggregate_hook is attached
         # or sparsify_hook()
-        self.data_groups[name]['hook_state'] = "aggregate"  # aggregate hook is attached
+        self.data_groups[name]["hook_state"] = "aggregate"  # aggregate hook is attached
 
     def get_mask(self, name: Optional[str] = None, layer: Optional[nn.Module] = None):
         """
@@ -219,7 +255,9 @@ class ActivationSparsifier:
             Hence, if get_mask() is called before model.forward(), an
             error will be raised.
         """
-        assert name is not None or layer is not None, "Need at least name or layer obj to retrieve mask"
+        assert (
+            name is not None or layer is not None
+        ), "Need at least name or layer obj to retrieve mask"
 
         if name is None:
             assert layer is not None
@@ -229,18 +267,19 @@ class ActivationSparsifier:
         if name not in self.state:
             raise ValueError("Error: layer with the given name not found")
 
-        mask = self.state[name].get('mask', None)
+        mask = self.state[name].get("mask", None)
 
         if mask is None:
-            raise ValueError("Error: shape unknown, call layer() routine at least once to infer mask")
+            raise ValueError(
+                "Error: shape unknown, call layer() routine at least once to infer mask"
+            )
         return mask
 
     def unregister_layer(self, name):
-        """Detaches the sparsifier from the layer
-        """
+        """Detaches the sparsifier from the layer"""
 
         # detach any hooks attached
-        self.data_groups[name]['hook'].remove()
+        self.data_groups[name]["hook"].remove()
 
         # pop from the state dict
         self.state.pop(name)
@@ -249,14 +288,13 @@ class ActivationSparsifier:
         self.data_groups.pop(name)
 
     def step(self):
-        """Internally calls the update_mask() function for each layer
-        """
+        """Internally calls the update_mask() function for each layer"""
         with torch.no_grad():
             for name, configs in self.data_groups.items():
-                data = configs['data']
+                data = configs["data"]
                 self.update_mask(name, data, configs)
 
-                self.data_groups[name].pop('data')  # reset the accumulated data
+                self.data_groups[name].pop("data")  # reset the accumulated data
 
     def update_mask(self, name, data, configs):
         """
@@ -268,10 +306,10 @@ class ActivationSparsifier:
             the reduce_fn and mask_fn is called for each feature, dim over the data
         """
         mask = self.get_mask(name)
-        sparse_config = configs['sparse_config']
-        features = configs['features']
-        reduce_fn = configs['reduce_fn']
-        mask_fn = configs['mask_fn']
+        sparse_config = configs["sparse_config"]
+        features = configs["features"]
+        reduce_fn = configs["reduce_fn"]
+        mask_fn = configs["mask_fn"]
         if features is None:
             data = reduce_fn(data)
             mask.data = mask_fn(data, **sparse_config)
@@ -281,11 +319,10 @@ class ActivationSparsifier:
                 mask[feature_idx].data = mask_fn(data_feature, **sparse_config)
 
     def _sparsify_hook(self, name):
-        """Returns hook that applies sparsification mask to input entering the attached layer
-        """
+        """Returns hook that applies sparsification mask to input entering the attached layer"""
         mask = self.get_mask(name)
-        features = self.data_groups[name]['features']
-        feature_dim = self.data_groups[name]['feature_dim']
+        features = self.data_groups[name]["features"]
+        feature_dim = self.data_groups[name]["feature_dim"]
 
         def hook(module, input):
             input_data = input[0]
@@ -295,10 +332,18 @@ class ActivationSparsifier:
             else:
                 # apply per feature, feature_dim
                 for feature_idx in range(0, len(features)):
-                    feature = torch.Tensor([features[feature_idx]]).long().to(input_data.device)
-                    sparsified = torch.index_select(input_data, feature_dim, feature) * mask[feature_idx]
+                    feature = (
+                        torch.Tensor([features[feature_idx]])
+                        .long()
+                        .to(input_data.device)
+                    )
+                    sparsified = (
+                        torch.index_select(input_data, feature_dim, feature)
+                        * mask[feature_idx]
+                    )
                     input_data.index_copy_(feature_dim, feature, sparsified)
                 return input_data
+
         return hook
 
     def squash_mask(self, attach_sparsify_hook=True, **kwargs):
@@ -308,12 +353,16 @@ class ActivationSparsifier:
         """
         for name, configs in self.data_groups.items():
             # unhook agg hook
-            configs['hook'].remove()
-            configs.pop('hook')
-            self.data_groups[name]['hook_state'] = "None"
+            configs["hook"].remove()
+            configs.pop("hook")
+            self.data_groups[name]["hook_state"] = "None"
             if attach_sparsify_hook:
-                configs['hook'] = configs['layer'].register_forward_pre_hook(self._sparsify_hook(name))
-            configs['hook_state'] = "sparsify"  # signals that sparsify hook is now attached
+                configs["hook"] = configs["layer"].register_forward_pre_hook(
+                    self._sparsify_hook(name)
+                )
+            configs[
+                "hook_state"
+            ] = "sparsify"  # signals that sparsify hook is now attached
 
     def _get_serializable_data_groups(self):
         """Exclude hook and layer from the config keys before serializing
@@ -323,7 +372,11 @@ class ActivationSparsifier:
         """
         data_groups: Dict[str, Any] = defaultdict()
         for name, config in self.data_groups.items():
-            new_config = {key: value for key, value in config.items() if key not in ['hook', 'layer']}
+            new_config = {
+                key: value
+                for key, value in config.items()
+                if key not in ["hook", "layer"]
+            }
             data_groups[name] = new_config
         return data_groups
 
@@ -333,18 +386,18 @@ class ActivationSparsifier:
         """
         states = copy.deepcopy(states_dict)
         for state in states.values():
-            if state['mask'] is not None:
-                if isinstance(state['mask'], List):
-                    for idx in range(len(state['mask'])):
+            if state["mask"] is not None:
+                if isinstance(state["mask"], List):
+                    for idx in range(len(state["mask"])):
                         if sparse_coo:
-                            state['mask'][idx] = state['mask'][idx].to_sparse_coo()
+                            state["mask"][idx] = state["mask"][idx].to_sparse_coo()
                         else:
-                            state['mask'][idx] = state['mask'][idx].to_dense()
+                            state["mask"][idx] = state["mask"][idx].to_dense()
                 else:
                     if sparse_coo:
-                        state['mask'] = state['mask'].to_sparse_coo()
+                        state["mask"] = state["mask"].to_sparse_coo()
                     else:
-                        state['mask'] = state['mask'].to_dense()
+                        state["mask"] = state["mask"].to_dense()
         return states
 
     def state_dict(self) -> Dict[str, Any]:
@@ -358,11 +411,7 @@ class ActivationSparsifier:
         """
         data_groups = self._get_serializable_data_groups()
         state = self._convert_mask(self.state)
-        return {
-            'state': state,
-            'data_groups': data_groups,
-            'defaults': self.defaults
-        }
+        return {"state": state, "data_groups": data_groups, "defaults": self.defaults}
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         r"""The load_state_dict() restores the state of the sparsifier based on the state_dict
@@ -370,23 +419,26 @@ class ActivationSparsifier:
         Args:
         * state_dict - the dictionary that to which the current sparsifier needs to be restored to
         """
-        state = state_dict['state']
-        data_groups, defaults = state_dict['data_groups'], state_dict['defaults']
+        state = state_dict["state"]
+        data_groups, defaults = state_dict["data_groups"], state_dict["defaults"]
 
-        self.__set_state__({'state': state, 'data_groups': data_groups, 'defaults': defaults})
+        self.__set_state__(
+            {"state": state, "data_groups": data_groups, "defaults": defaults}
+        )
 
     def __get_state__(self) -> Dict[str, Any]:
-
         data_groups = self._get_serializable_data_groups()
         state = self._convert_mask(self.state)
         return {
-            'defaults': self.defaults,
-            'state': state,
-            'data_groups': data_groups,
+            "defaults": self.defaults,
+            "state": state,
+            "data_groups": data_groups,
         }
 
     def __set_state__(self, state: Dict[str, Any]) -> None:
-        state['state'] = self._convert_mask(state['state'], sparse_coo=False)  # convert mask to dense tensor
+        state["state"] = self._convert_mask(
+            state["state"], sparse_coo=False
+        )  # convert mask to dense tensor
         self.__dict__.update(state)
 
         # need to attach layer and hook info into the data_groups
@@ -396,24 +448,24 @@ class ActivationSparsifier:
             assert layer is not None  # satisfy mypy
 
             # if agg_mode is True, then layer in aggregate mode
-            if "hook_state" in config and config['hook_state'] == "aggregate":
+            if "hook_state" in config and config["hook_state"] == "aggregate":
                 hook = layer.register_forward_pre_hook(self._aggregate_hook(name))
 
             elif "hook_state" in config and config["hook_state"] == "sparsify":
                 hook = layer.register_forward_pre_hook(self._sparsify_hook(name))
 
-            config['layer'] = layer
-            config['hook'] = hook  # type: ignore[possibly-undefined]
+            config["layer"] = layer
+            config["hook"] = hook  # type: ignore[possibly-undefined]
 
     def __repr__(self):
-        format_string = self.__class__.__name__ + ' ('
+        format_string = self.__class__.__name__ + " ("
         for name, config in self.data_groups.items():
-            format_string += '\n'
-            format_string += '\tData Group\n'
-            format_string += f'\t    name: {name}\n'
+            format_string += "\n"
+            format_string += "\tData Group\n"
+            format_string += f"\t    name: {name}\n"
             for key in sorted(config.keys()):
-                if key in ['data', 'hook', 'reduce_fn', 'mask_fn', 'aggregate_fn']:
+                if key in ["data", "hook", "reduce_fn", "mask_fn", "aggregate_fn"]:
                     continue
-                format_string += f'\t    {key}: {config[key]}\n'
-        format_string += ')'
+                format_string += f"\t    {key}: {config[key]}\n"
+        format_string += ")"
         return format_string

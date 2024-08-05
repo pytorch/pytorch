@@ -18,10 +18,10 @@ from ...ir import (
     ReinterpretView,
 )
 from ..common import IndentedBuffer
-
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
 from .cuda_template import CUTLASSTemplate
+
 
 log = logging.getLogger(__name__)
 
@@ -387,7 +387,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         alpha: float,
         beta: float,
         input_reorder: Optional[List[int]] = None,
-    ):
+    ) -> None:
         """
         Args:
             input_nodes (List[Buffer]): List of input nodes of the GEMM kernel.
