@@ -722,59 +722,38 @@ void _apply_sparse_csr_linear_solve(
   TORCH_CHECK(A.dtype() == b.dtype(), "A and b must have the same dtype");
   TORCH_CHECK(left == true, "only left == true is supported by the Sparse CSR backend")
 
-  // Device pointers and scalar shape parameters, matrix properties
-
   Tensor crow = A.crow_indices();
   Tensor col = A.col_indices();
   if (crow.scalar_type() != ScalarType::Int) {
-      crow = crow.to(crow.options().dtype(ScalarType::Int));
-      col = col.to(col.options().dtype(ScalarType::Int));
+    crow = crow.to(crow.options().dtype(ScalarType::Int));
+    col = col.to(col.options().dtype(ScalarType::Int));
   }
-  int*    rowOffsets = crow.data<int>();
-  int*    colIndices = col.data<int>();
-  Tensor values     = A.values();
-  //---------------------------------------------------------------------------------
+  int* rowOffsets = crow.data<int>();
+  int* colIndices = col.data<int>();
+  Tensor values = A.values();
   // cuDSS data structures and handle initialization
-  cudssConfig_t             config;
-  cudssMatrix_t             b_mt;
-  cudssMatrix_t             A_mt;
-  cudssMatrix_t             x_mt;
+  cudssConfig_t config;
+  cudssMatrix_t b_mt;
+  cudssMatrix_t A_mt;
+  cudssMatrix_t x_mt;
   cudssData_t cudss_data;
-  cudssHandle_t             handle = at::cuda::getCurrentCudssHandle();
+  cudssHandle_t handle = at::cuda::getCurrentCudssHandle();
 
   cudssConfigCreate(&config);
-  // cudssAlgType_t reorder_alg = CUDSS_ALG_3;
-  // cudssConfigSet(config, CUDSS_CONFIG_REORDERING_ALG, &reorder_alg, sizeof(cudssAlgType_t));
-
   cudssDataCreate(handle, &cudss_data);
 
   AT_DISPATCH_FLOATING_TYPES(values.type(), "create_matrix", ([&] {
     scalar_t* values_ptr = values.data<scalar_t>();
     scalar_t* b_ptr = b.data<scalar_t>();
     scalar_t* x_ptr = x.data<scalar_t>();
-    auto CUDA_R_TYP = std::is_same<scalar_t, double>::value ? CUDA_R_64F : CUDA_R_32F;  // TODO: better conversion
+    auto CUDA_R_TYP = std::is_same<scalar_t, double>::value ? CUDA_R_64F : CUDA_R_32F;
     cudssMatrixCreateDn(&b_mt, b.size(0), 1, b.size(0), b_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR);
     cudssMatrixCreateDn(&x_mt, x.size(0), 1, x.size(0), x_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR);
     cudssMatrixCreateCsr(&A_mt, A.size(0), A.size(1),  A._nnz(), rowOffsets, rowOffsets + crow.size(0), colIndices, values_ptr, CUDA_R_32I, CUDA_R_TYP, CUDSS_MTYPE_GENERAL, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO);
   }));
-  //---------------------------------------------------------------------------------
-
-  // Reordering & symbolic factorization
   cudssExecute(handle, CUDSS_PHASE_ANALYSIS, config, cudss_data, A_mt, x_mt, b_mt);
-  // https://docs.nvidia.com/cuda/cudss/types.html?highlight=cudss_data_perm_row
-  //---------------------------------------------------------------------------------
-  // Numerical factorization
   cudssExecute(handle, CUDSS_PHASE_FACTORIZATION, config, cudss_data, A_mt, x_mt, b_mt);
-
-  //---------------------------------------------------------------------------------
-  // Solving the system
   cudssExecute(handle, CUDSS_PHASE_SOLVE, config, cudss_data, A_mt, x_mt, b_mt);
-
-  //---------------------------------------------------------------------------------
-  // (optional) Extra data can be retrieved from the cudssData_t object
-  // For example, diagonal of the factorized matrix or the reordering permutation
-
-  //---------------------------------------------------------------------------------
   // Destroy the opaque objects
   cudssConfigDestroy(config);
   cudssDataDestroy(handle, cudss_data);
@@ -783,7 +762,6 @@ void _apply_sparse_csr_linear_solve(
   cudssMatrixDestroy(b_mt);
 #endif
 }
-
 } // namespace
 
 Tensor _sparse_csr_sum_cuda(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, std::optional<ScalarType> dtype) {
@@ -814,12 +792,16 @@ Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bo
   return result;
 }
 
-Tensor _sparse_csr_linear_solve(  const Tensor& A,
-  const Tensor& b,
-  const bool left) {
-    Tensor out = b.new_empty(b.sizes());
-    _apply_sparse_csr_linear_solve(A, b, left, out);
-    return out;
+Tensor _sparse_csr_linear_solve(const Tensor& A, const Tensor& b, const bool left) {
+  Tensor b_copy;
+  if (!b.stride(0) == 1) {
+    b_copy = b.clone(c10::MemoryFormat::Contiguous);
+  } else {
+    b_copy = b;
+  }
+  Tensor out = b_copy.new_empty(b_copy.sizes());
+  _apply_sparse_csr_linear_solve(A, b_copy, left, out);
+  return out;
 }
 
 
