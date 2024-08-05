@@ -686,8 +686,7 @@ def create_block_mask(
     Q_LEN: int,
     KV_LEN: int,
     device: str = "cuda",
-    KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
-    Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
+    BLOCK_SIZE: Union[int, Tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
     r"""This function creates a block mask tuple from a mask_mod function.
@@ -730,6 +729,12 @@ def create_block_mask(
         mod_type == _ModificationType.MASK_MOD
     ), f"create-block_mask requires a mask_mod function! Got {mask_mod}"
     inner_func = _create_block_mask_inner
+    if isinstance(BLOCK_SIZE, int):
+        Q_BLOCK_SIZE = BLOCK_SIZE
+        KV_BLOCK_SIZE = BLOCK_SIZE
+    else:
+        Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
+
     if Q_LEN < 128:
         Q_BLOCK_SIZE = Q_LEN
     else:
