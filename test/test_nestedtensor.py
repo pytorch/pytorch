@@ -5758,13 +5758,19 @@ class TestNestedTensorSubclass(TestCase):
 
     def test_copy_(self, device):
         offsets = torch.tensor([0, 2, 4], device=device)
-        a = torch.nested.nested_tensor_from_jagged(torch.zeros(4, 3), offsets)
-        b = torch.nested.nested_tensor_from_jagged(torch.ones(4, 3), offsets)
+        a = torch.nested.nested_tensor_from_jagged(
+            torch.zeros(4, 3, device=device), offsets
+        )
+        b = torch.nested.nested_tensor_from_jagged(
+            torch.ones(4, 3, device=device), offsets
+        )
         a.copy_(b)
-        self.assertEqual(a, b)
+        torch._dynamo.disable(self.assertEqual)(a, b)
 
         offsets_2 = torch.tensor([0, 2, 4], device=device)
-        c = torch.nested.nested_tensor_from_jagged(torch.ones(4, 3), offsets_2)
+        c = torch.nested.nested_tensor_from_jagged(
+            torch.ones(4, 3, device=device), offsets_2
+        )
         with self.assertRaisesRegex(
             RuntimeError,
             "NestedTensor copy_.default: expected self and src to have the same exact offsets tensor.",
