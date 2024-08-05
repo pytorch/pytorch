@@ -14,7 +14,11 @@ from torch.distributed._composable.fsdp.fully_shard import FSDPModule
 from torch.fx.node import map_aggregate
 from torch.nn.parallel import DistributedDataParallel
 
-from ._backward import stage_backward
+from ._backward import (
+    stage_backward,
+    stage_backward_input,
+    stage_backward_weight
+)
 from ._debug import map_debug_info
 from ._utils import flatten_args, PipeInfo, validate_tensors_metadata
 
@@ -123,6 +127,9 @@ class _PipelineStageBase(ABC):
         self.group = group
 
         self.dw_builder = dw_builder
+        
+        # backward state
+        self.backward_state: Dict[int, []] = {}
 
         # store dw_runner per microbatch_id
         self.dw_runner: Dict[int, Callable[[], None]] = {}
@@ -575,8 +582,8 @@ class _PipelineStageBase(ABC):
         and a subsequent call to `backward_weight_one_chunk` is required to invoke dw_runner and complete the backward.
         """
 
-        if not full_backward:
-            assert self.dw_builder, "Must provide dw_builder to run partial backward"
+        # if not full_backward:
+        #     assert self.dw_builder, "Must provide dw_builder to run partial backward"
 
         self._check_chunk_id(bwd_chunk_id)
 
@@ -606,26 +613,42 @@ class _PipelineStageBase(ABC):
                 "input_values": input_values,
             }
 
-        self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs)
-        logger.debug(f"{self.log_prefix} Backwarded chunk {bwd_chunk_id}")  # noqa: G004
+        # self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs)
+        # logger.debug(f"{self.log_prefix} Backwarded chunk {bwd_chunk_id}")  # noqa: G004
 
         if not full_backward:
-            assert self.dw_builder, "Must provide dw_builder to run partial backward"
-            assert bwd_chunk_id not in self.dw_runner, (
-                f"{self.log_prefix} Attempted to run partial backward for chunk {bwd_chunk_id}"
-                " repeatedly without calling `backward_weight_one_chunk`"
-            )
-            dw_runner = self.dw_builder()
-            self.dw_runner[bwd_chunk_id] = dw_runner
+            if not self.dw_builder:
+                logger.info("IN LOGGGSS")
+                # print(f"{bwd_kwargs['stage_output']}, {bwd_kwargs['input_values']}")
+                # if "stage_ouput" is a loss, then it is a tensor, otherwise it is a tuple of tensors
+                if isinstance(bwd_kwargs['stage_output'], torch.Tensor):
+                    bwd_kwargs['stage_output'] = (bwd_kwargs['stage_output'],)
+
+                # print(f"{bwd_kwargs['stage_output']}, {bwd_kwargs['input_values']}")
+                dinputs, param_groups = stage_backward_input(bwd_kwargs["stage_output"], bwd_kwargs["input_values"], self.submod.parameters())
+                self.backward_state[bwd_chunk_id] = (dinputs, input_values, param_groups)
+                self.grads_input = dinputs
+            else:
+                assert bwd_chunk_id not in self.dw_runner, (
+                    f"{self.log_prefix} Attempted to run partial backward for chunk {bwd_chunk_id}"
+                    " repeatedly without calling `backward_weight_one_chunk`"
+                )
+                dw_runner = self.dw_builder()
+                self.dw_runner[bwd_chunk_id] = dw_runner
         elif self.dw_builder:
             self.dw_builder()()
 
     def backward_weight_one_chunk(self, bwd_chunk_id: int):
-        assert bwd_chunk_id in self.dw_runner, (
-            f"{self.log_prefix} Attempted to run backward_weight_one_chunk for chunk {bwd_chunk_id}"
-            " without first calling `backward_one_chunk(full_backward=False)`"
-        )
-        self.dw_runner.pop(bwd_chunk_id)()
+        if self.dw_builder is not None:
+            assert bwd_chunk_id in self.dw_runner, (
+                f"{self.log_prefix} Attempted to run backward_weight_one_chunk for chunk {bwd_chunk_id}"
+                " without first calling `backward_one_chunk(full_backward=False)`"
+            )
+            self.dw_runner.pop(bwd_chunk_id)()
+        else:
+            print("Doing native backward_weight_one_chunk")
+            dinputs, input_values, param_groups = self.backward_state.pop(bwd_chunk_id)
+            stage_backward_weight(self.submod.parameters(), param_groups)
 
     def _validate_fwd_input(self, args, kwargs):
         """Raises a RuntimeError if shapes of input args/kwargs do not match the shapes configured for this stage."""

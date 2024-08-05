@@ -1,16 +1,10 @@
-# mypy: allow-untyped-defs
-# Copyright (c) Meta Platforms, Inc. and affiliates
-import logging
+# Usage of GradientEdge for splitting input and weights grads from https://github.com/pytorch/pytorch/pull/127766
+import torch
+import torch.nn as nn
 import collections
 import weakref
 from torch.autograd.graph import GradientEdge
-from typing import List, Optional
-
-import torch
-
-from ._debug import map_debug_info
-
-logger = logging.getLogger(__name__)
+import torch.nn.functional as F
 
 
 def _get_grad_fn_or_grad_acc(t):
@@ -19,6 +13,7 @@ def _get_grad_fn_or_grad_acc(t):
         return t.view_as(t).grad_fn.next_functions[0][0]
     else:
         return t.grad_fn
+
 
 def reverse_closure(roots, target_nodes):
     # Recurse until we reach a target node
@@ -35,8 +30,6 @@ def reverse_closure(roots, target_nodes):
         for holder_ref, idx in reverse_edges:
             ref = holder_ref()
             if ref is None:
-                # this reverse graph is no longer alive
-                # raise RuntimeError("Reverse graph is no longer alive")
                 continue
             fn = ref.node
             if fn in closure or fn is None:
@@ -79,6 +72,7 @@ def construct_reverse_graph(roots):
                 fn.metadata["reverse_edges"] = reverse_edges
     return reverse_graph_refs
 
+
 def get_param_groups(inputs, params):
     inputs_closure, _ = reverse_closure(inputs, set())
     param_groups = dict()  # keyed on intermediates
@@ -106,10 +100,55 @@ def get_param_groups(inputs, params):
             seen_ids.add(id(param_group))
             unique_param_groups.append(param_group)
             union_params = union_params.union(param_group["params"])
-    # assert union_params == set(params)
+    assert union_params == set(params)
 
     return unique_param_groups
 
+
+def compute_grads_only_inputs2(roots, inps, weights):
+    root_grad_fns = list(map(_get_grad_fn_or_grad_acc, roots))
+    inp_grad_fns = list(map(_get_grad_fn_or_grad_acc, inps))
+    weight_grad_fns = list(map(_get_grad_fn_or_grad_acc, weights))
+
+    reverse_graph_refs = construct_reverse_graph(root_grad_fns)
+    param_groups = get_param_groups(inp_grad_fns, weight_grad_fns)
+    del reverse_graph_refs
+
+    for param_group in param_groups:
+        for i, intermediate in enumerate(param_group["intermediates"]):
+            def get_hook(param_group, i):
+                def hook(grad_inputs):
+                    if param_group.get("grads", None) is None:
+                        param_group["grads"] = [None] * len(param_group["intermediates"])
+                    param_group["grads"][i] = grad_inputs
+                return hook
+            # These are always "split" nodes that we need to recompute, so
+            # save their inputs.
+            intermediate.register_prehook(get_hook(param_group, i))
+
+    dinputs = torch.autograd.grad((out,), inputs=tuple(inps), grad_outputs=(torch.ones_like(out),), retain_graph=True)
+    return dinputs, param_groups
+
+def compute_grads_only_weights2(user_weights, param_groups):
+    all_dweights = dict()
+    for param_group in param_groups:
+        # TODO: Handle case where intermediate can have multiple outputs
+        intermediate_edges = tuple(GradientEdge(i, 0) for i in param_group["intermediates"])
+        weights_edges = tuple(GradientEdge(w, 0) for w in param_group["params"])
+
+        assert all(len(g) == 1 for g in param_group["grads"])
+        # [NEW!] Able to pass a GradientEdge to autograd.grad as output
+        # We do not need to retain_graph because... guarantee no overlap?
+        print("trying to execute: ", intermediate_edges, weights_edges)
+        dweights = torch.autograd.grad(intermediate_edges, weights_edges, grad_outputs=sum(param_group["grads"], tuple()))
+        for w, dw in zip(param_group["params"], dweights):
+            all_dweights[w] = dw
+    # return grads in the original order weights were provided in
+    out = []
+    for w in user_weights:
+        grad_acc = _get_grad_fn_or_grad_acc(w)
+        out.append(all_dweights[grad_acc])
+    return tuple(out)
 
 def stage_backward_input(
     stage_outputs,
@@ -144,25 +183,20 @@ def stage_backward_input(
             # save their inputs.
             intermediate.register_prehook(get_hook(param_group, i))
 
-    # print(f"{stage_outputs=}, {stage_inputs=}")
-    # Stage 0 inputs do not require grads? Should we skip in that case?
-    if all(tensor.requires_grad for tensor in stage_inputs):
-        dinputs = torch.autograd.grad(
-            stage_outputs,
-            inputs=stage_inputs,
-            grad_outputs=(torch.ones_like(stage_outputs[0]),),
-            retain_graph=True,
-        )
+    dinputs = torch.autograd.grad(
+        stage_outputs,
+        inputs=stage_inputs,
+        grad_outputs=(torch.ones_like(stage_outputs[0]),),
+        retain_graph=True,
+    )
 
-        # update the gradients for inputs
-        for i, inp in enumerate(stage_inputs):
-            if inp.grad is None:
-                inp.grad = dinputs[i]
-            else:
-                inp.grad += dinputs[i]
-    else:
-        dinputs = None
-    # print(f"{dinputs=}")
+    # update the gradients for inputs
+    for i, inp in enumerate(stage_inputs):
+        if inp.grad is None:
+            inp.grad = dinputs[i]
+        else:
+            inp.grad += dinputs[i]
+
     return dinputs, param_groups
 
 
@@ -176,7 +210,7 @@ def stage_backward_weight(weights, param_groups):
         assert all(len(g) == 1 for g in param_group["grads"])
         # [NEW!] Able to pass a GradientEdge to autograd.grad as output
         # We do not need to retain_graph because... guarantee no overlap?
-        # print("trying to execute: ", intermediate_edges, weights_edges)
+        print("trying to execute: ", intermediate_edges, weights_edges)
         dweights = torch.autograd.grad(intermediate_edges, weights_edges, grad_outputs=sum(param_group["grads"], tuple()))
         for w, dw in zip(param_group["params"], dweights):
             all_dweights[w] = dw
@@ -184,119 +218,70 @@ def stage_backward_weight(weights, param_groups):
     out = []
     for w in weights:
         grad_acc = _get_grad_fn_or_grad_acc(w)
-        if grad_acc in all_dweights:
-            if w.grad is None:
-                w.grad = all_dweights[grad_acc]
-            else:
-                w.grad += all_dweights[grad_acc]
+        out.append(all_dweights[grad_acc])
+    return tuple(out)
 
 
-def stage_backward(
-    stage_output,
-    output_grads,
-    input_values,
-    outputs_with_grads_idxs: Optional[List[int]] = None,  # deprecated, not used
-):
-    """
-    This is a helper function to:
-    1. compute the gradients for the stage inputs, and
-    2. accumulate gradients for the stage module's parameters.
+class Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(10, 10)
+        self.fc2 = nn.Linear(10, 10)
 
-    Given the input value(s) and the corresponding gradient for the output
-    value(s), compute and accumulate gradients for all parameter values (leaves
-    in the autograd trace) as well as return a list of the gradients for the
-    input values
-    """
-    if outputs_with_grads_idxs is not None:
-        # Deprecated, not used in runtime calls, only exists in compiler
-        stage_output = [stage_output[i] for i in outputs_with_grads_idxs]
-        output_grads = [output_grads[i] for i in outputs_with_grads_idxs]
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.fc2(x)
+        return x
 
-    try:
-        # stage_output may be a composite datatype like dict. Extract all individual
-        # tensor values here
-        stage_output_tensors = []
-        output_grad_tensors = []
+if __name__ == "__main__":
+    # Setup
+    mod = Model()
+    a = torch.rand(10, requires_grad=True)
+    weights = tuple(mod.parameters())
+    inps = (a,)
+    out = mod(a)
 
-        def extract_tensors_with_grads(output_val, grad_val):
-            if isinstance(output_val, torch.Tensor):
-                if not output_val.requires_grad and output_val.grad_fn is None:
-                    return
-                assert isinstance(
-                    grad_val, (torch.Tensor, type(None))
-                ), f"Expected Tensor or None gradient but got {type(grad_val)}"
-                stage_output_tensors.append(output_val)
-                output_grad_tensors.append(grad_val)
-            elif isinstance(output_val, (tuple, list)):
-                if grad_val is None:
-                    return
-                assert isinstance(
-                    grad_val, (tuple, list)
-                ), f"grad_value expected to have type {type(output_val)} but got {type(grad_val)}"
-                assert len(output_val) == len(grad_val)
-                for ov, gv in zip(output_val, grad_val):
-                    extract_tensors_with_grads(ov, gv)
-            elif isinstance(output_val, dict):
-                if grad_val is None:
-                    return
-                assert isinstance(grad_val, dict)
-                assert set(output_val.keys()) == set(grad_val.keys())
-                for k in output_val.keys():
-                    extract_tensors_with_grads(output_val[k], grad_val[k])
-            else:
-                # Output is a non-tensor type; just ignore it
-                pass
+    # Compute loss (assuming regression task)
+    target = torch.rand(1)  # Target must be the same shape as model output
+    loss = F.mse_loss(out, target)
 
-        extract_tensors_with_grads(stage_output, output_grads)
+    class LoggingTensorMode(torch.utils._python_dispatch.TorchDispatchMode):
+        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+            if kwargs is None:
+                kwargs = {}
+            rs = func(*args, **kwargs)
+            print(f"{func.__module__}.{func.__name__}")
+            return rs
 
-        torch.autograd.backward(
-            stage_output_tensors, grad_tensors=output_grad_tensors  # type: ignore[arg-type]
-        )
+    print(" -- SPLIT -- ")
+    # Compute gradients in two parts
+    with LoggingTensorMode():
+        print("PART 1")
+        dinputs, state = stage_backward_input((loss,), inps, weights)
+        print("PART 2")
+        dweights = stage_backward_weight(weights, state)
 
-        # Extract gradients wrt the input values
-        grad_inputs = []
-        for val in input_values:
-            if isinstance(val, torch.Tensor):
-                grad_inputs.append(val.grad)
-            else:
-                grad_inputs.append(None)
+    a1 = torch.rand(10, requires_grad=True)
+    inps = (a,)
+    out = mod(a)
 
-        # Alternative impl: `torch.autograd.grad`.
-        # Note that `torch.autograd.grad` will not accumulate gradients into the
-        # model's parameters.
-        """
-        inputs_with_grad = []
-        for val in input_values:
-            if isinstance(val, torch.Tensor) and val.requires_grad:
-                inputs_with_grad.append(val)
-
-        grad_inputs = torch.autograd.grad(
-            stage_output_tensors, inputs_with_grad, output_grad_tensors,  # type: ignore[arg-type]
-        )
-        """
-
-    except Exception as e:
-        exc_msg = f"""
-        Failed to run stage backward:
-        Stage output: {map_debug_info(stage_output)}
-        Output gradient: {map_debug_info(output_grads)}
-        Input: {map_debug_info(input_values)}
-        """
-        raise RuntimeError(exc_msg) from e
-
-    return grad_inputs
+    # Compute loss (assuming regression task)
+    target = torch.rand(1)  # Target must be the same shape as model output
+    loss = F.mse_loss(out, target)
+    print("PART 1")
+    dinputs, state = stage_backward_input((loss,), inps, weights)
+    print("PART 2")
+    dweights = stage_backward_weight(weights, state)
 
 
-# TODO: handling requires_grad=False dynamically. Can we analyze this during initial
-# IR emission?
-def _null_coalesce_accumulate(lhs, rhs):
-    """
-    Coalesce two values, even if one of them is null, returning the non-null
-    value.
-    """
-    if lhs is None:
-        return rhs
-    elif rhs is None:
-        return lhs
-    else:
-        return torch.add(lhs, rhs)
+    out = mod(a)
+    loss2 = F.mse_loss(out, target)
+
+    print(" -- REF -- ")
+
+    # Compare with reference
+    with LoggingTensorMode():
+        ref_all_gradients = torch.autograd.grad(loss2, inputs=tuple(inps) + weights, grad_outputs=(torch.ones_like(loss2),))
+
+    for actual, ref in zip(dinputs + dweights, ref_all_gradients):
+        print(torch.allclose(actual, ref))

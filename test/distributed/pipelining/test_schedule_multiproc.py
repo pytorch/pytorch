@@ -7,7 +7,7 @@ import sys
 import tempfile
 
 from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw
-from schedule_registry import ScheduleUnbalanced, ScheduleVShaped
+from schedule_registry import ScheduleUnbalanced, ScheduleVShaped, ScheduleWithW
 
 import torch
 import torch.distributed as dist
@@ -382,6 +382,70 @@ class ScheduleTest(MultiProcContinousTest):
                 except AssertionError:
                     print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                     raise
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("ScheduleClass", [ScheduleWithW])
+    def test_schedule_with_native_zero_bubble(self, ScheduleClass):
+        n_stages = ScheduleClass.n_stages
+        full_mod = MultiMLP(d_hid, n_layers=n_stages)
+        full_mod.to(self.device)
+
+        ref_mod = copy.deepcopy(full_mod)
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        with torch.no_grad():
+            y = ref_mod(x)
+            # Add a small perturbation
+            target = y + torch.randn(batch_size, d_hid, device=self.device)
+
+        loss_fn = torch.nn.MSELoss(reduction="sum")
+
+        # Run reference
+        for _ in range(2):
+            ref_mod.zero_grad()
+            ref_out = ref_mod(x)
+            ref_loss = loss_fn(ref_out, target)
+            ref_loss.backward()
+
+        # Create a pipeline stage to wrap that submodule
+        num_microbatches = ScheduleClass.num_microbatches
+        input_args = x.chunk(num_microbatches)[0]
+        rank_stages = ScheduleClass.rank_stages
+        stage_indices = rank_stages[self.rank]
+        print(f"Rank {self.rank} stages: {stage_indices}")
+        submod_names = [f"layers.{i}" for i in stage_indices]
+        stage_modules = [
+            full_mod.get_submodule(submod_name) for submod_name in submod_names
+        ]
+        stages = [
+            PipelineStage(
+                stage_module,
+                stage_idx,
+                n_stages,
+                self.device,
+                input_args=input_args,
+            )
+            for stage_module, stage_idx in zip(stage_modules, rank_stages[self.rank])
+        ]
+
+        schedule = ScheduleClass(
+            stages, num_microbatches, loss_fn=loss_fn
+        )
+
+        # Run
+        # TODO how to better specify .step() when first and last stage are on rank 0...
+        for _ in range(2):
+            # Zero gradients
+            for stage_module in stage_modules:
+                stage_module.zero_grad()
+            if self.rank == 0:
+                schedule.step(x)
+            elif self.rank == self.world_size - 1:
+                losses = []
+                out = schedule.step(target=target, losses=losses)
+            else:
+                schedule.step()
+
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
