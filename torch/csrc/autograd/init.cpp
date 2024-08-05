@@ -1258,7 +1258,37 @@ PyObject* THPModule_increment_version(PyObject* _unused, PyObject* tensor) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPVariable_Check(tensor), "increment_version expect a Tensor as input");
-  torch::autograd::increment_version((THPVariable_Unpack(tensor)));
+  auto t = THPVariable_Unpack(tensor);
+  torch::autograd::increment_version(std::move(t));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_increment_versions(
+    PyObject* _unused,
+    PyObject* tensor_or_list) {
+  HANDLE_TH_ERRORS
+  if (PyList_Check(tensor_or_list)) {
+    auto list_size = PyList_Size(tensor_or_list);
+    for (Py_ssize_t i = 0; i < list_size; ++i) {
+      PyObject* item = PyList_GetItem(tensor_or_list, i);
+      TORCH_CHECK(
+          THPVariable_Check(item),
+          "increment_versions expect a Tensor or List[Tensor] as input");
+      auto t = THPVariable_Unpack(item);
+      if (!t.is_inference()) {
+        torch::autograd::increment_version(std::move(t));
+      }
+    }
+  } else {
+    TORCH_CHECK(
+        THPVariable_Check(tensor_or_list),
+        "increment_versions expect a Tensor or List[Tensor] as input");
+    auto t = THPVariable_Unpack(tensor_or_list);
+    if (!t.is_inference()) {
+      torch::autograd::increment_version(std::move(t));
+    }
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1326,6 +1356,7 @@ static PyMethodDef methods[] = { // NOLINT
      nullptr},
     {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
     {"_increment_version", THPModule_increment_version, METH_O, nullptr},
+    {"_increment_versions", THPModule_increment_versions, METH_O, nullptr},
     {"set_anomaly_enabled",
      castPyCFunctionWithKeywords(set_anomaly_mode_enabled),
      METH_VARARGS | METH_KEYWORDS,

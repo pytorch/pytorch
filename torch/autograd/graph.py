@@ -215,7 +215,7 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
     return GradientEdge(grad_fn, tensor.output_nr)
 
 
-def increment_version(tensor: torch.Tensor) -> None:
+def increment_version(tensor: Union[torch.Tensor, List[torch.Tensor]]) -> None:
     """Update autograd metadata tracking whether the given Tensor was modified in place.
 
     This is to enable more accurate error checking within the autograd engine.
@@ -227,8 +227,17 @@ def increment_version(tensor: torch.Tensor) -> None:
 
     Note that incrementing the version counter multiple times for a single inplace operation
     is not problematic.
+
+    Note that if you pass in tensor constructed under torch.inference_mode(),
+    we will not bump its version counter (because your tensor does not have one).
+
+    Can accept either a tensor, or a list of tensors.
+    If you pass in a list of tensors, we will separately
     """
-    torch._C._increment_version(tensor)
+    if isinstance(tensor, list):
+        torch._C._increment_versions(tensor)
+    else:
+        torch._C._increment_version(tensor)
 
 
 class saved_tensors_hooks:
