@@ -39,11 +39,12 @@ def signature_of(
             else:
                 return new_tye
         elif zero_dim_cpu_tensor_list and (arg.buffer in zero_dim_cpu_tensor_list):
-            new_tye = tye.lstrip("*")
-            if new_tye.startswith("fp"):
+            if arg.dtype.is_floating_point:
                 return "fp64"
+            elif arg.dtype.is_signed:
+                return "int64"
             else:
-                return "int"
+                return "uint64"
         else:
             return tye
     if isinstance(arg, SizeArg):
