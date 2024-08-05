@@ -64,6 +64,7 @@ jobs:
 
         git clone https://github.com/pytorch/pytorch.git %home_dir%\pytorch
         cd %home_dir%\pytorch
+        git checkout 47cbc58452e74f70afb5e7f108ff8d7ecc329f21
         echo ${{ inputs.working_commit }} > third_party/xpu.txt
         python -u setup.py bdist_wheel > build.log
 
