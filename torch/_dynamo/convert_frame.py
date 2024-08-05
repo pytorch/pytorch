@@ -25,6 +25,7 @@ from weakref import ReferenceType
 
 import torch
 import torch._logging
+import torch.fx.experimental._sym_dispatch_mode
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
 from torch._guards import compile_context, CompileContext, CompileId, tracing
@@ -651,10 +652,18 @@ def _compile(
             check_inst_exn_tab_entries_valid(instructions)
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-    @dynamo_timed(phase_name="entire_frame_compile")
+    def compile_inner(
+        code: CodeType,
+        one_graph: bool,
+        hooks: Hooks,
+        transform: Callable[[List[Instruction], Dict[str, Any]], Any],
+    ) -> Optional[GuardedCode]:
+        with dynamo_timed("_compile.compile_inner", phase_name="entire_frame_compile"):
+            return _compile_inner(code, one_graph, hooks, transform)
+
     @compile_time_strobelight_meta(phase_name="compile_inner")
     @maybe_cprofile
-    def compile_inner(
+    def _compile_inner(
         code: CodeType,
         one_graph: bool,
         hooks: Hooks,
@@ -710,6 +719,10 @@ def _compile(
                 if one_graph:
                     log.debug("No graph captured with one_graph=True")
                 return None
+
+        assert (
+            distributed_state is None or distributed_state.all_states is not None
+        ), "compiler collective wasn't run before compilation completed"
 
         assert out_code is not None
         log_bytecode(
@@ -1204,7 +1217,9 @@ class CatchErrorsWrapper:
                         frame, cache_entry, self.hooks, frame_state
                     )
 
-        with compile_lock, _disable_current_modes():
+        with (
+            compile_lock
+        ), _disable_current_modes(), torch.fx.experimental._sym_dispatch_mode.disable_sym_dispatch():
             # skip=1: skip this frame
             return self._torchdynamo_orig_callable(
                 frame, cache_entry, self.hooks, frame_state, skip=1
