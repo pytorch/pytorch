@@ -1061,7 +1061,7 @@ class TestOperators(common_utils.TestCase):
         c0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
 
         class LSTMModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.rnn = torch.nn.LSTM(
                     RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False
@@ -1157,7 +1157,7 @@ class TestOperators(common_utils.TestCase):
         )
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(4, 8)
 
@@ -1207,7 +1207,7 @@ class TestOperators(common_utils.TestCase):
         )
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(4, 8)
 
