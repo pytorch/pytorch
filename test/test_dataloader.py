@@ -3032,9 +3032,7 @@ class DictDataset(Dataset):
     def __getitem__(self, ndx):
         return {
             "a_tensor": torch.empty(4, 2).fill_(ndx),
-            "another_dict": {
-                "a_number": ndx,
-            },
+            "another_dict": {"a_number": ndx},
         }
 
 
