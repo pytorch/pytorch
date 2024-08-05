@@ -72,7 +72,7 @@ else:
                 raise RuntimeError("No device mesh is currently active!")
             return self.mesh_stack[-1]
 
-        def create_child_mesh(
+        def create_sub_mesh(
             self, device_mesh: "DeviceMesh", submesh_dim_names: Tuple[str, ...]
         ) -> "DeviceMesh":
             # submesh_dims are the mesh dimension of the submesh in the device mesh.
@@ -475,7 +475,7 @@ else:
                     f"mesh_dim_names from {self.mesh_dim_names}."
                 )
 
-            submesh = _mesh_resources.create_child_mesh(self, mesh_dim_names)
+            submesh = _mesh_resources.create_sub_mesh(self, mesh_dim_names)
             return submesh
 
         def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
@@ -651,6 +651,7 @@ else:
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
             return self._coordinate_on_dim if self._coordinate_on_dim else None
+                    
 
     def init_device_mesh(
         device_type: str,
