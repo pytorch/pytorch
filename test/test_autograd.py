@@ -3995,6 +3995,9 @@ class TestAutograd(TestCase):
             # does not error
             torch.autograd.graph.increment_version(a)
 
+        # does not error
+        torch.autograd.graph.increment_version(a)
+
     def test_no_grad_input(self):
         class MyFunction(Function):
             @staticmethod
