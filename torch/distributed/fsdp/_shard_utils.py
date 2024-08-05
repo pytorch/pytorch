@@ -117,12 +117,14 @@ def _create_chunk_dtensor(
 
 def _all_gather_dtensor(
     tensor: DTensor,
-    parent_mesh: Optional[DeviceMesh],
+    root_mesh: Optional[DeviceMesh],
 ) -> torch.Tensor:
     """
     All gather a DTensor in its sharded dimension and return the local tensor.
     """
-    assert parent_mesh is None
+    assert (
+        root_mesh == tensor.device_mesh
+    ), "The device mesh of a tensor should be a root mesh."
 
     placements = list(copy.deepcopy(tensor.placements))
     # FSDP placements: [Shard(0)] -> [Replicate()]
