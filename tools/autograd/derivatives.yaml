@@ -403,7 +403,7 @@
       # the default case will use the CompositeImplicitAutograd
       self: not_implemented("chunk")
     AutogradNestedTensor:
-      self: chunk_backward(grads, self, chunks, dim)
+      self: chunk_backward_nested(grads, self, chunks, dim)
 
 - name: linalg_cholesky_ex(Tensor self, *, bool upper=False, bool check_errors=False) -> (Tensor L, Tensor info)
   self: cholesky_backward(grad, upper, L)

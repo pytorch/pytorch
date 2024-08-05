@@ -2085,6 +2085,27 @@ Tensor pinv_backward(const Tensor& grad, const Tensor& pinvA, const Tensor& A) {
   }
 }
 
+Tensor chunk_backward_nested(
+    const std::vector<torch::autograd::Variable>& grads,
+    const Tensor& self,
+    int64_t chunks,
+    int64_t dim) {
+  TORCH_INTERNAL_ASSERT(
+      self.layout() == c10::kJagged,
+      "Nested Strided Tensor doesn't support chunk backward.")
+  dim = at::maybe_wrap_dim(dim, self.dim());
+  TORCH_INTERNAL_ASSERT(
+      dim != 0, "Nested Tensor doesn't support chunk backward on dim=0 yet.")
+  Tensor ret = at::zeros_like(self);
+  std::vector<Tensor> rets = at::chunk(ret, chunks, dim);
+  for (const auto j : c10::irange(grads.size())) {
+    if (grads[j].defined()) {
+      rets[j].copy_(grads[j]);
+    }
+  }
+  return ret;
+}
+
 Tensor split_with_sizes_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymIntArrayRef split_sizes,

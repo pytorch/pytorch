@@ -465,6 +465,24 @@ def to_copy_default(func, *args, **kwargs):
     return NestedTensor(new_values, **inp_kwargs)
 
 
+@register_jagged_func(
+    torch.ops.aten.copy_.default, "self: jt_all, src: jt_all, non_blocking: any?"
+)
+def copy_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+    src = new_kwargs.pop("src")
+    check_ragged_dim_same(func, inp, "self", src, "src")
+    if inp._ragged_idx != src._ragged_idx:
+        raise RuntimeError(
+            "copy_ only supports tensors that are the same size for Nested Tensor"
+        )
+    inp.values().copy_(src.values())
+    return inp
+
+
 register_jagged_func(torch.ops.aten.detach.default, "self: jt_all")(
     jagged_unary_pointwise
 )
@@ -722,51 +740,6 @@ def chunk_default(func, *args, **kwargs):
             NestedTensor(values=x, **extract_kwargs(inp))
             for x in func(inp._values, **new_kwargs)
         ]
-
-
-@register_jagged_func(
-    torch.ops.aten.chunk_backward.default,
-    "grads: any, input: jt, chunks: any, dim: any",
-)
-def chunk_backward(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-    grads = new_kwargs.pop("grads")
-    inp = new_kwargs.pop("input")
-    offsets = inp.offsets()
-    chunks = new_kwargs.pop("chunks")
-    # Only support the simple case when dim != 0 and dim !=1 for now
-    # To support chunk_backward dim=0, need to support cat(dim=0) first
-    dim = _wrap_jagged_dim(
-        inp.dim(), new_kwargs["dim"], "chunk_backward", convert_to_inner_dim=False
-    )
-
-    need_to_fill_grad = False
-    for grad in grads:
-        if grad is None:
-            need_to_fill_grad = True
-            break
-
-    if need_to_fill_grad:
-        dim_size = inp._size[dim]
-        split_size = int((dim_size + chunks - 1) / chunks)
-        grad_values_shape = list(inp.values().shape)
-        grad_values_shape[dim - 1] = split_size
-        last_grad_values_shape = grad_values_shape.copy()
-        residue = dim_size - split_size * (dim_size // split_size)
-        if residue != 0:
-            last_grad_values_shape[dim - 1] = residue
-        last_idx = len(grads) - 1
-        for idx, grad in enumerate(grads):
-            if grad is None:
-                if idx == last_idx:
-                    value = torch.zeros(last_grad_values_shape, device=inp.device)
-                else:
-                    value = torch.zeros(grad_values_shape, device=inp.device)
-                grads[idx] = NestedTensor(values=value, offsets=offsets)
-
-    return torch.cat(tensors=grads, dim=dim)
 
 
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt_all, dim: any?")

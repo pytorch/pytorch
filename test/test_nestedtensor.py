@@ -1314,7 +1314,7 @@ class TestNestedTensorDeviceType(TestCase):
         chunked = torch.chunk(nt_grad, 2, dim=-1)
         self.assertRaisesRegex(
             RuntimeError,
-            "chunk_backward is not implemented explicitly",
+            "Nested Strided Tensor doesn't support chunk backward.",
             lambda: chunked[0].backward(chunked[0].clone()),
         )
 
@@ -3973,7 +3973,8 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt._values, torch.cat([x._values for x in chunks], dim=0))
 
         with self.assertRaisesRegex(
-            RuntimeError, "chunk_backward.* not supported for NestedTensor on dim=0"
+            RuntimeError,
+            "dim != 0 INTERNAL ASSERT FAILED .* Nested Tensor doesn't support chunk backward on dim=0 yet.",
         ):
             # doesn't support backward for chunk (dim=0) yet
             loss = (
@@ -5754,6 +5755,28 @@ class TestNestedTensorSubclass(TestCase):
         nt_t = nt.transpose(1, 2)
         nt_t_copy_dtype = torch.ops.aten._to_copy(nt_t, dtype=torch.float16)
         self.assertEqual(torch.float16, nt_t_copy_dtype.dtype)
+
+    def test_copy_(self, device):
+        offsets = torch.tensor([0, 2, 4], device=device)
+        a = torch.nested.nested_tensor_from_jagged(torch.zeros(4, 3), offsets)
+        b = torch.nested.nested_tensor_from_jagged(torch.ones(4, 3), offsets)
+        a.copy_(b)
+        self.assertEqual(a, b)
+
+        offsets_2 = torch.tensor([0, 2, 4], device=device)
+        c = torch.nested.nested_tensor_from_jagged(torch.ones(4, 3), offsets_2)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "NestedTensor copy_.default: expected self and src to have the same exact offsets tensor.",
+        ):
+            a.copy_(c)
+
+        a = a.transpose(1, 2)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "copy_ only supports tensors that are the same size for Nested Tensor",
+        ):
+            a.copy_(b)
 
     @skipIfTorchDynamo("Dynamo doesn't know how to trace prof.events()")
     def test_profiler_sequence_nr(self):
