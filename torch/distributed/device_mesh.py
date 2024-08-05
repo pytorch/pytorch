@@ -115,15 +115,15 @@ else:
 
         def create_flatten_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
             root_mesh = _mesh_resources.get_root_mesh(device_mesh)
-            flatten_mesh_dim_names = device_mesh.mesh_dim_names
             flatten_dims_in_root = [
                 root_mesh.mesh_dim_names.index(flattened_mesh_dim_name)
-                for flattened_mesh_dim_name in flatten_mesh_dim_names
+                for flattened_mesh_dim_name in device_mesh.mesh_dim_names
             ]
-            # sort mesh_dim_names based on the order of the mesh_dim_names in the root mesh
-            flatten_mesh_dim_names = [
-                root_mesh.mesh_dim_names[dim] for dim in sorted(flatten_dims_in_root)
-            ]
+            # sort dims to flatten based on the order of the dims in the root mesh.
+            flatten_dims_in_root.sort()
+            flatten_mesh_dim_names = "_".join(
+                [root_mesh.mesh_dim_names[dim] for dim in flatten_dims_in_root]
+            )
             flattened_mesh_dim_size = math.prod(device_mesh.mesh.size())
 
             remained_dims_in_root = list(range(root_mesh.mesh.ndim))
@@ -136,13 +136,11 @@ else:
 
             cur_rank = root_mesh.get_rank()
             for mesh_nd in pg_ranks_by_dim:
-                # sort mesh_nd so that the ranks in mesh_nd is in ascending order
-                sorted_mesh_nd = mesh_nd.sort().values
                 # need to init backend here since the flattened pg doesn't exist in root mesh.
                 flattened_mesh = DeviceMesh(
                     root_mesh.device_type,
-                    sorted_mesh_nd,
-                    mesh_dim_names=("_".join(flatten_mesh_dim_names),),
+                    mesh_nd,
+                    mesh_dim_names=(flatten_mesh_dim_names,),
                 )
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
