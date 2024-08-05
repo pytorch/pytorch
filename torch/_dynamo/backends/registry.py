@@ -117,4 +117,6 @@ def _register_entrypoint_backends():
             if compiler_fn is not None and backend_name not in _BACKENDS:
                 register_backend(compiler_fn=compiler_fn, name=backend_name)
         except Exception:
-            log.warning("Failed to load compiler plugin %s", backend_name, exc_info=True)
+            log.warning(
+                "Failed to load compiler plugin %s", backend_name, exc_info=True
+            )
