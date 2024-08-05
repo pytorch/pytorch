@@ -395,11 +395,53 @@ pr_time_benchmarks() {
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
+
+  # run the benchmarks on the current commit
   source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on current PR: "
   cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
 
+  # build torch at the base commit
+  if [[ "${BASE_SHA}" == "${SHA1}" ]]; then
+    echo "On trunk, we should compare schemas with torch built from the parent commit"
+    SHA_TO_COMPARE=$(git rev-parse "${SHA1}"^)
+  else
+    echo "On pull, we should compare schemas with torch built from the merge base"
+    SHA_TO_COMPARE=$(git merge-base "${SHA1}" "${BASE_SHA}")
+  fi
+  export SHA_TO_COMPARE
+
+  python -m venv venv
+  # shellcheck disable=SC1091
+  . venv/bin/activate
+
+  git reset --hard "${SHA_TO_COMPARE}"
+  git submodule sync && git submodule update --init --recursive
+  echo "::group::Installing Torch From Base Commit"
+  pip install -r requirements.txt
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+  python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist" &> "$TEST_REPORTS_DIR/base_build_logs"
+  python -mpip install base_dist/*.whl
+  echo "::endgroup::"
+
+  pip show torch
+
+  source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
+  echo "benchmark results on main: "
+  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
+
+  # resetting the original code
+  git reset --hard "${SHA1}"
+  git submodule sync && git submodule update --init --recursive
+  deactivate
+  pip show torch
+
+  echo "looking for regressions:"
+  python  benchmarks/dynamo/pr_time_benchmarks/compare_results.py "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt" "$TEST_REPORTS_DIR/pr_time_compare_results.txt"
+
 }
+
 
 if [[ "${TEST_CONFIG}" == *pr_time_benchmarks* ]]; then
   pr_time_benchmarks
