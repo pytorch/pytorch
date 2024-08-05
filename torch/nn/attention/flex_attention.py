@@ -681,8 +681,8 @@ def _create_block_mask_inner(
 
 def create_block_mask(
     mask_mod: _mask_mod_signature,
-    B: int,
-    H: int,
+    B: Optional[int],
+    H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
     device: str = "cuda",
@@ -729,6 +729,10 @@ def create_block_mask(
         mod_type == _ModificationType.MASK_MOD
     ), f"create-block_mask requires a mask_mod function! Got {mask_mod}"
     inner_func = _create_block_mask_inner
+    if B is None:
+        B = 1
+    if H is None:
+        H = 1
     if isinstance(BLOCK_SIZE, int):
         Q_BLOCK_SIZE = BLOCK_SIZE
         KV_BLOCK_SIZE = BLOCK_SIZE
