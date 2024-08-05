@@ -309,6 +309,7 @@ else:
                 dim_group = (
                     new_group(backend="cpu:gloo,cuda:nccl", ranks=ranks)
                     if self.device_type == "cuda"
+                    and torch.cuda.is_available()
                     and get_backend(default_group) == "gloo"
                     else default_group
                 )
