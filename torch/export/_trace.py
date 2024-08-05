@@ -690,11 +690,18 @@ def _export_to_aten_ir(
             )
 
     if pre_dispatch:
+        from torch._export.passes.replace_autocast_with_hop_pass import (
+            replace_autocast_with_hop_pass,
+        )
         from torch._export.passes.replace_set_grad_with_hop_pass import (
             replace_set_grad_with_hop_pass,
         )
 
         gm = replace_set_grad_with_hop_pass(gm, export_graph_signature)
+
+        gm, export_graph_signature = replace_autocast_with_hop_pass(
+            gm, export_graph_signature
+        )
 
     # Remove nn_module_stack, stack_trace metadata from all placeholders/inputs nodes.
     for _mod in gm.modules():

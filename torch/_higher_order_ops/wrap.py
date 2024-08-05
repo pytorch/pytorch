@@ -1,11 +1,14 @@
 # mypy: allow-untyped-defs
 import inspect
 import logging
+from typing import Optional
 
 import torch
 from torch._ops import HigherOrderOperator
-from torch.utils.checkpoint import checkpoint, uid
 import torch._dynamo.config
+from torch.types import _dtype
+from torch.utils.checkpoint import checkpoint, uid
+
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +51,37 @@ class WrapWithSetGradEnabled(HigherOrderOperator):
         return wrapper()
 
 wrap_with_set_grad_enabled = WrapWithSetGradEnabled()
+
+
+class WrapWithAutocast(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("wrap_with_autocast")
+
+    def __call__(
+        self,
+        device_type: str,
+        dtype: Optional[_dtype],
+        enabled: bool,
+        cache_enabled: Optional[bool],
+        wrapped_func,
+        *args,
+        **kwargs,
+    ):
+        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # so no need to trace into it.
+        import torch._dynamo  # noqa: F401
+        from torch._dynamo import disable
+
+        @disable
+        def wrapper():
+            with torch.autocast(device_type, dtype, enabled, cache_enabled):
+                return wrapped_func(*args, **kwargs)
+
+        return wrapper()
+
+
+wrap_with_autocast = WrapWithAutocast()
+
 
 class WrapActivationCheckpoint(HigherOrderOperator):
     """
