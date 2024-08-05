@@ -4,6 +4,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
 import requests
 import rockset  # type: ignore[import]
@@ -87,15 +88,94 @@ ORDER BY
     test_name
 """
 
-if __name__ == "__main__":
-    if (
-        "ROCKSET_API_KEY" not in os.environ
-        or "PYTORCHBOT_TOKEN" not in os.environ
-        or "UPDATEBOT_TOKEN" not in os.environ
-    ):
-        print("env keys are not set")
-        sys.exit(1)
 
+UPDATEBOT_TOKEN = os.environ["UPDATEBOT_TOKEN"]
+PYTORCHBOT_TOKEN = os.environ["PYTORCHBOT_TOKEN"]
+
+
+def git_api(
+    url: str, params: Dict[str, str], type: str = "get", token: str = UPDATEBOT_TOKEN
+) -> Any:
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": f"token {token}",
+    }
+    if type == "post":
+        return requests.post(
+            f"https://api.github.com{url}",
+            data=json.dumps(params),
+            headers=headers,
+        ).json()
+    elif type == "patch":
+        return requests.patch(
+            f"https://api.github.com{url}",
+            data=json.dumps(params),
+            headers=headers,
+        ).json()
+    else:
+        return requests.get(
+            f"https://api.github.com{url}",
+            params=params,
+            headers=headers,
+        ).json()
+
+
+def make_pr(source_repo: str, params: Dict[str, Any]) -> Any:
+    response = git_api(f"/repos/{source_repo}/pulls", params, type="post")
+    print(f"made pr {response['html_url']}")
+    return response["number"]
+
+
+def approve_pr(source_repo: str, pr_number: str) -> None:
+    params = {"event": "APPROVE"}
+    # use pytorchbot to approve the pr
+    git_api(
+        f"/repos/{source_repo}/pulls/{pr_number}/reviews",
+        params,
+        type="post",
+        token=PYTORCHBOT_TOKEN,
+    )
+
+
+def make_comment(source_repo: str, pr_number: str, msg: str) -> None:
+    params = {"body": msg}
+    # comment with pytorchbot because pytorchmergebot gets ignored
+    git_api(
+        f"/repos/{source_repo}/issues/{pr_number}/comments",
+        params,
+        type="post",
+        token=PYTORCHBOT_TOKEN,
+    )
+
+
+def close_pr(source_repo: str, pr_number: str) -> None:
+    params = {"state": "closed"}
+    git_api(
+        f"/repos/{source_repo}/pulls/{pr_number}",
+        params,
+        type="patch",
+    )
+
+
+def search_for_open_pr(source_repo: str, search_string: str) -> Optional[Tuple[int, str]]:
+    params = {
+        "q": f"is:pr is:open in:title author:pytorchupdatebot repo:{source_repo} {search_string}",
+        "sort": "created",
+    }
+    response = git_api("/search/issues", params)
+    if response["total_count"] != 0:
+        # pr does exist
+        pr_num = response["items"][0]["number"]
+        link = response["items"][0]["html_url"]
+        response = git_api(f"/repos/{source_repo}/pulls/{pr_num}", {})
+        branch_name = response["head"]["ref"]
+        print(
+            f"pr does exist, number is {pr_num}, branch name is {branch_name}, link is {link}"
+        )
+        return pr_num, branch_name
+    return None
+
+if __name__ == "__main__":
     rs_client = rockset.RocksetClient(
         host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
     )
@@ -108,10 +188,14 @@ if __name__ == "__main__":
 
     branch_name = f"update_slow_tests_{int(time.time())}"
 
+    open_pr = search_for_open_pr("pytorch/pytorch", "Update slow tests")
+    if open_pr is not None:
+        pr_num, branch_name = open_pr
+
     subprocess.run(["git", "checkout", "-b", branch_name], cwd=REPO_ROOT)
     subprocess.run(["git", "add", "test/slow_tests.json"], cwd=REPO_ROOT)
     subprocess.run(["git", "commit", "-m", "Update slow tests"], cwd=REPO_ROOT)
-    subprocess.run(["git", "push", "origin", branch_name], cwd=REPO_ROOT)
+    subprocess.run(f"git push --set-upstream origin {branch_name} -f".split(), cwd=REPO_ROOT)
 
     params = {
         "title": "Update slow tests",
@@ -120,29 +204,9 @@ if __name__ == "__main__":
         "body": "This PR is auto-generated weekly by [this action](https://github.com/pytorch/pytorch/blob/main/"
         + ".github/workflows/weeekly.yml).\nUpdate the list of slow tests.",
     }
-    result = requests.post(
-        "https://api.github.com/repos/pytorch/pytorch/pulls",
-        data=json.dumps(params),
-        headers={
-            "Authorization": f"token {os.environ['UPDATEBOT_TOKEN']}",
-            "Accept": "application/vnd.github.v3+json",
-        },
-    ).json()
-    print(result)
-    requests.post(
-        f"https://api.github.com/repos/pytorch/pytorch/pulls/{result['number']}/reviews",
-        data=json.dumps({"event": "APPROVE"}),
-        headers={
-            "Authorization": f"token {os.environ['PYTORCHBOT_TOKEN']}",
-            "Accept": "application/vnd.github.v3+json",
-        },
-    )
-    time.sleep(5)
-    requests.post(
-        f"https://api.github.com/repos/pytorch/pytorch/issues/{result['number']}/comments",
-        data=json.dumps({"body": "@pytorchbot merge"}),
-        headers={
-            "Authorization": f"token {os.environ['PYTORCHBOT_TOKEN']}",
-            "Accept": "application/vnd.github.v3+json",
-        },
-    )
+    if pr_num is None:
+        # no existing pr, so make a new one and approve it
+        pr_num = make_pr("pytorch/pytorch", params)
+        time.sleep(5)
+        approve_pr("pytorch/pytorch", pr_num)
+    make_comment("pytorch/pytorch", pr_num, "@pytorchbot merge")
