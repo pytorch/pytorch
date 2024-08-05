@@ -9,6 +9,7 @@ from torch._inductor.compile_worker.subproc_pool import SubprocMain
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import _set_triton_ptxas_path
 
+
 log = logging.getLogger(__name__)
 
 _set_triton_ptxas_path()

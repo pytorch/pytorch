@@ -24,7 +24,7 @@ class TORCH_API UniqueNameManager {
  public:
   const std::string& get_unique_name(const VarHandle& v);
 
-  const std::string& get_unique_name(VarPtr v);
+  const std::string& get_unique_name(const VarPtr& v);
 
  private:
   friend class ScopedVarName;

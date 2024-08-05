@@ -151,7 +151,10 @@ def _sequential_split_and_maybe_inline_subgraphs(
     replace_ctx = contextlib.nullcontext()
     new_signature = None
     if graph_signature is not None:
-        new_signature = copy.deepcopy(graph_signature)
+        # Cannot deep copy a real ScriptObject, which is referenced
+        # in the FakeScriptObject. Copy should be good enough to guard
+        # against accidental mutation to original graph_signature.
+        new_signature = copy.copy(graph_signature)
         new_gm_out_node = next(reversed(new_gm.graph.find_nodes(op="output")))
         assert new_gm_out_node.op == "output" and len(new_gm_out_node.args[0]) == len(
             new_signature.output_specs
@@ -159,7 +162,9 @@ def _sequential_split_and_maybe_inline_subgraphs(
         for arg_node, out_spec in zip(
             new_gm_out_node.args[0], new_signature.output_specs
         ):
-            if out_spec.arg.name != arg_node.name:
+            if arg_node is None:
+                assert out_spec.arg.value is None
+            elif out_spec.arg.name != arg_node.name:
                 out_spec.arg.name = arg_node.name
 
         replace_ctx = new_gm._set_replace_hook(new_signature.get_replace_hook())  # type: ignore[assignment]
@@ -182,8 +187,6 @@ def _sequential_split_and_maybe_inline_subgraphs(
         )
     new_gm.recompile()
     return new_gm, new_signature
-
-    return gm, graph_signature
 
 
 def replace_set_grad_with_hop_pass(gm: torch.fx.GraphModule, graph_signature):
