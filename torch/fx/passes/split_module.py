@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
 from typing import Any, Callable, Dict, List, Optional, Set
@@ -82,7 +83,7 @@ def split_module(
             from torch.fx.passes.split_module import split_module
 
             class MyModule(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.param = torch.nn.Parameter(torch.rand(3, 4))
                     self.linear = torch.nn.Linear(4, 5)

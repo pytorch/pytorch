@@ -106,9 +106,8 @@ else:
                 if cur_rank in mesh_nd:
                     res_submesh = submesh
 
-            res_submesh._parent_mesh = parent_mesh  # type: ignore[possibly-undefined]
-            res_submesh._dim_group_infos = [
-                parent_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims  # type: ignore[possibly-undefined]
+            res_submesh._dim_group_infos = [  # type: ignore[possibly-undefined]
+                parent_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims
             ]
             self.child_to_parent_mapping[res_submesh] = parent_mesh
 
@@ -242,7 +241,6 @@ else:
 
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
-            self._parent_mesh: Optional[DeviceMesh] = None
             self._thread_id = None
 
             # Skip process group initialization if xla device or init backend is False
@@ -390,7 +388,6 @@ else:
                         self.mesh.shape,
                         self.device_type,
                         self.mesh_dim_names,
-                        self._parent_mesh,
                         self._thread_id,
                     )
                 )
@@ -407,7 +404,6 @@ else:
                     and self.mesh.shape == other.mesh.shape
                     and self.device_type == other.device_type
                     and self.mesh_dim_names == other.mesh_dim_names
-                    and self._parent_mesh == other._parent_mesh
                     and self._thread_id == other._thread_id
                 )
 
@@ -448,28 +444,16 @@ else:
                 (mesh_dim_names,) if isinstance(mesh_dim_names, str) else mesh_dim_names
             )
 
-            error_msg = (
-                f"Invalid mesh_dim_name {mesh_dim_names} specified. "
-                f"Valid mesh_dim_names should be a contiguous subsequence of {self.mesh_dim_names}."
-            )
-
             if mesh_dim_names == self.mesh_dim_names:
                 return self
             elif len(mesh_dim_names) > len(self.mesh_dim_names) or not all(
                 mesh_dim_name in self.mesh_dim_names for mesh_dim_name in mesh_dim_names
             ):
-                raise KeyError(error_msg)
-            # Check if the user-provided slicing is a valid contiguous subsequence of the mesh_dim_names
-            # of the current DeviceMesh.
-            else:
-                outermost_dim_name = mesh_dim_names[0]
-                outermost_dim_idx = self.mesh_dim_names.index(outermost_dim_name)
-                for i, j in zip(
-                    mesh_dim_names,
-                    self.mesh_dim_names[outermost_dim_idx : len(mesh_dim_names)],
-                ):
-                    if i != j:
-                        raise KeyError(error_msg)
+                raise KeyError(
+                    f"Invalid mesh_dim_name {mesh_dim_names} specified. "
+                    "Valid mesh_dim_names should be a subsequence of valid"
+                    f"mesh_dim_names from {self.mesh_dim_names}."
+                )
 
             submesh = _mesh_resources.create_child_mesh(self, mesh_dim_names)
             return submesh
