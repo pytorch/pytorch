@@ -1843,7 +1843,7 @@ class TestDistributions(DistributionsTestCase):
 
     def test_multinomial_sequential_draw(self):
         # Adapted after script mentioned in https://github.com/pytorch/pytorch/issues/132395
-        torch.manual_seed(0xde0b6b3a764007e8)
+        torch.manual_seed(0xDE0B6B3A764007E8)
         prob = torch.ones(26)
         dups_mult = 0
         perm_counts_mult = {}
